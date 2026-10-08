@@ -1,6 +1,6 @@
 import { newId } from "../primitives/ids.js";
 import type { UserRow } from "../schema.js";
-import type { StorageAdapter } from "../storage/port.js";
+import { type StorageAdapter, StorageError } from "../storage/port.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 
@@ -12,6 +12,28 @@ export function normalizeEmail(raw: string): string | null {
 }
 
 export async function findOrCreateUserByEmail(
+  storage: StorageAdapter,
+  email: string,
+  now: Date,
+): Promise<{ user: UserRow; created: boolean }> {
+  try {
+    return await createOrFindInTransaction(storage, email, now);
+  } catch (err) {
+    // A concurrent call created the user between our read and our create.
+    // Return that row. Any other failure, or a missing row, is a real error.
+    if (
+      err instanceof StorageError &&
+      err.code === "unique_violation" &&
+      (err.model === "user" || err.model === "identity")
+    ) {
+      const winner = await storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      if (winner) return { user: winner, created: false };
+    }
+    throw err;
+  }
+}
+
+function createOrFindInTransaction(
   storage: StorageAdapter,
   email: string,
   now: Date,

@@ -1,6 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { findOrCreateUserByEmail, normalizeEmail } from "../src/engine/users.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import type { StorageAdapter } from "../src/storage/port.js";
+
+/**
+ * A wrapper whose first user read inside a transaction misses, as a stale
+ * read does under a concurrent create. Every other call delegates unchanged.
+ */
+function staleFirstUserRead(inner: StorageAdapter): StorageAdapter {
+  let missed = false;
+  const wrap = (a: StorageAdapter): StorageAdapter => ({
+    create: (m, d) => a.create(m, d),
+    findOne: (m, w) => {
+      if (m === "user" && !missed) {
+        missed = true;
+        return Promise.resolve(null);
+      }
+      return a.findOne(m, w);
+    },
+    findMany: (m, w, o) => a.findMany(m, w, o),
+    update: (m, w, d) => a.update(m, w, d),
+    delete: (m, w) => a.delete(m, w),
+    transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+  });
+  return wrap(inner);
+}
 
 describe("normalizeEmail", () => {
   it("trims and lowercases", () => {
@@ -55,5 +79,29 @@ describe("findOrCreateUserByEmail", () => {
     expect(created).toBe(false);
     expect(user.emailVerified).toBe(true);
     expect(user.name).toBe("Ada");
+  });
+
+  it("returns the winning user when a concurrent create wins the race", async () => {
+    const real = createMemoryAdapter();
+    const now = new Date("2026-01-01T00:00:00Z");
+    // The concurrent call commits before our transaction starts. Our first
+    // read still misses, so our create fails with unique_violation.
+    await real.create("user", {
+      id: "u-winner",
+      email: "ada@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { user, created } = await findOrCreateUserByEmail(
+      staleFirstUserRead(real),
+      "ada@example.com",
+      now,
+    );
+    expect(created).toBe(false);
+    expect(user.id).toBe("u-winner");
+    expect(await real.findMany("user", [])).toHaveLength(1);
   });
 });
