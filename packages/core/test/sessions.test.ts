@@ -47,6 +47,46 @@ describe("sessions engine", () => {
     expect(await storage.findMany("session", [])).toHaveLength(0);
   });
 
+  it("expires at exactly the ttl", async () => {
+    const { config, storage, clock, seedUser } = makeAuth();
+    const user = await seedUser("a@example.com");
+    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    clock.advance(30 * DAY);
+    expect(await resolveSession(config, token)).toBeNull();
+    expect(await storage.findMany("session", [])).toHaveLength(0);
+  });
+
+  it("still resolves one millisecond before the ttl", async () => {
+    const { config, clock, seedUser } = makeAuth();
+    const user = await seedUser("a@example.com");
+    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    clock.advance(30 * DAY - 1);
+    expect(await resolveSession(config, token)).not.toBeNull();
+  });
+
+  it("refreshes at exactly slidingRefreshDays and not one millisecond before", async () => {
+    const { config, storage, clock, seedUser } = makeAuth();
+    const user = await seedUser("a@example.com");
+    const { token, session } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const where = [{ field: "id", op: "eq" as const, value: session.id }];
+    clock.advance(7 * DAY - 1);
+    const before = await resolveSession(config, token);
+    expect(before?.session.expiresAt.getTime()).toBe(session.expiresAt.getTime());
+    const storedBefore = await storage.findOne("session", where);
+    expect(storedBefore?.lastSeenAt.getTime()).toBe(session.lastSeenAt.getTime());
+    clock.advance(1);
+    const at = await resolveSession(config, token);
+    expect(at?.session.expiresAt.getTime()).toBe(clock.now().getTime() + 30 * DAY);
+    const stored = await storage.findOne("session", where);
+    expect(stored?.expiresAt.getTime()).toBe(at?.session.expiresAt.getTime());
+    expect(stored?.lastSeenAt.getTime()).toBe(at?.session.lastSeenAt.getTime());
+    expect(stored?.lastSeenAt.getTime()).toBe(clock.now().getTime());
+  });
+
   it("slides the expiry after slidingRefreshDays", async () => {
     const { config, clock, seedUser } = makeAuth();
     const user = await seedUser("a@example.com");
