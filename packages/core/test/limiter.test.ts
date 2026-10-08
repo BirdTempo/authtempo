@@ -36,3 +36,18 @@ it("sweeps each bucket by its own window, not the window of the caller", async (
   expect(await limiter.allow("B", minute)).toBe(true);
   expect(await limiter.allow("A", hour)).toBe(false);
 });
+
+it("treats one key under two windows as two independent limits", async () => {
+  let t = new Date("2026-01-01T00:00:00Z");
+  const t0 = t.getTime();
+  const limiter = createMemoryLimiter({ now: () => t });
+  const short = { seconds: 60, max: 1 };
+  const long = { seconds: 3600, max: 2 };
+  expect(await limiter.allow("K", short)).toBe(true);
+  t = new Date(t0 + 30_000);
+  expect(await limiter.allow("K", long)).toBe(true);
+  t = new Date(t0 + 61_000);
+  expect(await limiter.allow("K", long)).toBe(true);
+  t = new Date(t0 + 62_000);
+  expect(await limiter.allow("K", long)).toBe(false);
+});
