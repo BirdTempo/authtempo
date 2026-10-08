@@ -72,6 +72,18 @@ describe("magic link engine", () => {
     ).toMatchObject({ ok: false, code: "rate_limited" });
   });
 
+  it("counts a request with no ip against one shared budget", async () => {
+    const { config } = makeAuth();
+    for (let i = 0; i < 20; i++)
+      expect((await requestMagicLink(config, { email: `n${i}@example.com`, ip: null })).ok).toBe(
+        true,
+      );
+    expect(await requestMagicLink(config, { email: "n20@example.com", ip: null })).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
+  });
+
   it("verifies once, creates the user and a session, then rejects the same link (Review Focus 2)", async () => {
     const { config, storage, mail } = makeAuth();
     await requestMagicLink(config, { email: "ada@example.com", next: "/home", ip: null });

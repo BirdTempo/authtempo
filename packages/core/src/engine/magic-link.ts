@@ -27,6 +27,8 @@ export interface MagicLinkVerify {
 /**
  * Always `ok` for a well-formed call, so a caller cannot learn whether an
  * address has an account. `rate_limited` is the one visible failure.
+ * On a host that sets no client ip, every caller shares one ip budget,
+ * which fails closed.
  */
 export async function requestMagicLink(
   config: ResolvedConfig,
@@ -34,7 +36,7 @@ export async function requestMagicLink(
 ): Promise<Result<{ sent: true }>> {
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (input.ip !== null && !(await config.limiter.allow(`magic-link:ip:${input.ip}`, PER_IP)))
+  if (!(await config.limiter.allow(`magic-link:ip:${input.ip ?? "unknown"}`, PER_IP)))
     return fail("rate_limited");
   if (!(await config.limiter.allow(`magic-link:email:${email}`, PER_EMAIL)))
     return fail("rate_limited");
