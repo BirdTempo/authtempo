@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tempo-auth-example",
+  "main": "src/index.ts",
+  // Checked against the consumera research of 2026-09-30: workerd supports
+  // 2026-09-30. No compatibility_flags on purpose: the core must run
+  // without nodejs_compat, and this Worker proves it.
+  "compatibility_date": "2026-09-30",
+  "vars": {
+    "BASE_URL": "https://example.test",
+    "TEST_MODE": "0"
+  }
+  // AUTH_SECRET is a secret: `wrangler secret put AUTH_SECRET` in a real
+  // deployment. The test config sets it in vitest.config.ts.
+}
