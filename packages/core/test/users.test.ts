@@ -1,20 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { findOrCreateUserByEmail, normalizeEmail } from "../src/engine/users.js";
+import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 
 /**
- * A wrapper whose first user read inside a transaction misses, as a stale
- * read does under a concurrent create. Every other call delegates unchanged.
+ * A wrapper whose first user read inside a transaction misses. On that miss
+ * it commits the winner through the outer adapter, as a concurrent request on
+ * another connection would. The transaction's create then fails with
+ * unique_violation, and the winner row stays because a rollback reverses only
+ * the transaction's own writes.
  */
-function staleFirstUserRead(inner: StorageAdapter): StorageAdapter {
+function concurrentWinner(inner: StorageAdapter, winner: UserRow): StorageAdapter {
   let missed = false;
   const wrap = (a: StorageAdapter): StorageAdapter => ({
     create: (m, d) => a.create(m, d),
-    findOne: (m, w) => {
+    findOne: async (m, w) => {
       if (m === "user" && !missed) {
         missed = true;
-        return Promise.resolve(null);
+        await inner.create("user", winner);
+        return null;
       }
       return a.findOne(m, w);
     },
@@ -81,12 +86,23 @@ describe("findOrCreateUserByEmail", () => {
     expect(user.name).toBe("Ada");
   });
 
-  it("returns the winning user when a concurrent create wins the race", async () => {
+  it("two concurrent calls for one new address both resolve to one user", async () => {
+    const db = createMemoryAdapter();
+    const now = new Date("2026-01-01T00:00:00Z");
+    const [a, b] = await Promise.all([
+      findOrCreateUserByEmail(db, "ada@example.com", now),
+      findOrCreateUserByEmail(db, "ada@example.com", now),
+    ]);
+    expect(a.user.id).toBe(b.user.id);
+    expect([a.created, b.created].sort()).toEqual([false, true]);
+    expect(await db.findMany("user", [])).toHaveLength(1);
+    expect(await db.findMany("identity", [])).toHaveLength(1);
+  });
+
+  it("returns the winner when a create fails with unique_violation", async () => {
     const real = createMemoryAdapter();
     const now = new Date("2026-01-01T00:00:00Z");
-    // The concurrent call commits before our transaction starts. Our first
-    // read still misses, so our create fails with unique_violation.
-    await real.create("user", {
+    const winner: UserRow = {
       id: "u-winner",
       email: "ada@example.com",
       emailVerified: true,
@@ -94,9 +110,9 @@ describe("findOrCreateUserByEmail", () => {
       image: null,
       createdAt: now,
       updatedAt: now,
-    });
+    };
     const { user, created } = await findOrCreateUserByEmail(
-      staleFirstUserRead(real),
+      concurrentWinner(real, winner),
       "ada@example.com",
       now,
     );

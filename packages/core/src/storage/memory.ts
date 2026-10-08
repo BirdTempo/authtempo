@@ -67,7 +67,25 @@ function checkUnique(
   }
 }
 
-function adapterOn(store: Store): StorageAdapter {
+/**
+ * Reverses one write. A transaction keeps a list of these for its own writes.
+ * If an outside caller changes the same row during the transaction, the
+ * rollback puts back the prior row. The memory adapter does not detect that
+ * write conflict.
+ */
+type Undo = () => void;
+
+/** The tail of the transaction queue. One per store. */
+interface Lock {
+  tail: Promise<void>;
+}
+
+/**
+ * `log` is null outside a transaction. Inside one, every write pushes the
+ * step that reverses it, so a rollback touches only this transaction's rows
+ * and keeps rows that other callers wrote in the meantime.
+ */
+function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter {
   const table = (model: ModelName) => {
     if (!Object.hasOwn(schema, model)) throw new StorageError("unknown_model", model);
     let t = store.get(model);
@@ -96,6 +114,7 @@ function adapterOn(store: Store): StorageAdapter {
       if (t.has(row.id as string)) throw new StorageError("unique_violation", model, ["id"]);
       checkUnique(model, t.values(), row);
       t.set(row.id as string, row);
+      log?.push(() => t.delete(row.id as string));
       return clone(row) as unknown as Models[M];
     },
     async findOne<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M] | null> {
@@ -144,29 +163,48 @@ function adapterOn(store: Store): StorageAdapter {
         nexts.push(next);
       }
       for (const next of nexts) t.set(next.id as string, next);
+      // A write replaces the row object and never mutates it, so `r` is the prior row.
+      for (const r of rows) log?.push(() => t.set(r.id as string, r));
       return rows.length;
     },
     async delete<M extends ModelName>(model: M, where: Where<M>[]): Promise<number> {
       const t = table(model);
       const rows = select(model, where);
-      for (const r of rows) t.delete(r.id as string);
+      for (const r of rows) {
+        t.delete(r.id as string);
+        log?.push(() => t.set(r.id as string, r));
+      }
       return rows.length;
     },
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
-      const snapshot: Store = new Map();
-      for (const [m, t] of store) snapshot.set(m, new Map([...t].map(([k, v]) => [k, clone(v)])));
-      try {
-        return await fn(adapterOn(store));
-      } catch (e) {
-        store.clear();
-        for (const [m, t] of snapshot) store.set(m, t);
-        throw e;
-      }
+      const run = async (): Promise<T> => {
+        const own: Undo[] = [];
+        try {
+          const value = await fn(adapterOn(store, lock, own));
+          // A nested transaction hands its steps to the outer one, so an
+          // outer rollback also reverses them.
+          log?.push(...own);
+          return value;
+        } catch (e) {
+          for (let i = own.length - 1; i >= 0; i--) own[i]?.();
+          throw e;
+        }
+      };
+      // A nested call already holds the lock. Waiting for it would deadlock.
+      if (log) return run();
+      // Transactions run one at a time, like SERIALIZABLE in SQL. A write
+      // outside a transaction does not wait.
+      const result = lock.tail.then(run);
+      lock.tail = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
     },
   };
 }
 
 /** An adapter that keeps rows in memory. For tests and the example Worker only. */
 export function createMemoryAdapter(): StorageAdapter {
-  return adapterOn(new Map());
+  return adapterOn(new Map(), { tail: Promise.resolve() }, null);
 }

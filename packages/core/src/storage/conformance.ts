@@ -182,6 +182,58 @@ export function runAdapterConformance(
       expect((await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }]))?.id).toBe("u1");
     });
 
+    it("keeps a write made outside a failing transaction", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      let started!: () => void;
+      const inside = new Promise<void>((r) => {
+        started = r;
+      });
+      const failing = db.transaction(async (tx) => {
+        await tx.create("user", user("u1", "a@example.com", t0));
+        started();
+        await gate;
+        throw new Error("boom");
+      });
+      await inside;
+      await db.create("user", user("u2", "b@example.com", t0));
+      release();
+      await expect(failing).rejects.toThrow("boom");
+      const rows = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+      expect(rows.map((r) => r.id)).toEqual(["u2"]);
+    });
+
+    it("leaves one row when two transactions read then create the same email", async () => {
+      const findOrCreate = (id: string) =>
+        db.transaction(async (tx) => {
+          const found = await tx.findOne("user", [
+            { field: "email", op: "eq", value: "a@example.com" },
+          ]);
+          return found ?? (await tx.create("user", user(id, "a@example.com", t0)));
+        });
+      const results = await Promise.allSettled([findOrCreate("u1"), findOrCreate("u2")]);
+      const rejected = results.filter((r) => r.status === "rejected");
+      // A SQL adapter may reject the loser with unique_violation. It must never lose the winner.
+      expect(rejected.length).toBeLessThanOrEqual(1);
+      for (const r of rejected) expect(r.reason).toMatchObject({ code: "unique_violation" });
+      const rows = await db.findMany("user", []);
+      expect(rows).toHaveLength(1);
+      for (const r of results) {
+        if (r.status === "fulfilled") expect(r.value.id).toBe(rows[0]?.id);
+      }
+    });
+
+    it("shows a transaction its own writes", async () => {
+      const seen = await db.transaction(async (tx) => {
+        await tx.create("user", user("u1", "a@example.com", t0));
+        await tx.update("user", [{ field: "id", op: "eq", value: "u1" }], { name: "Ada" });
+        return tx.findOne("user", [{ field: "email", op: "eq", value: "a@example.com" }]);
+      });
+      expect(seen?.name).toBe("Ada");
+    });
+
     it("rejects an unknown field", async () => {
       await expect(
         db.findOne("user", [{ field: "nope" as "id", op: "eq", value: 1 }]),
