@@ -28,6 +28,7 @@ describe("sessions engine", () => {
     expect(session.expiresAt.getTime() - session.createdAt.getTime()).toBe(30 * DAY);
     const resolved = await resolveSession(config, token);
     expect(resolved?.user.email).toBe("a@example.com");
+    expect(resolved?.refreshed).toBe(false);
     expect(resolved?.session.id).toBe(session.id);
   });
 
@@ -75,11 +76,13 @@ describe("sessions engine", () => {
     const where = [{ field: "id", op: "eq" as const, value: session.id }];
     clock.advance(7 * DAY - 1);
     const before = await resolveSession(config, token);
+    expect(before?.refreshed).toBe(false);
     expect(before?.session.expiresAt.getTime()).toBe(session.expiresAt.getTime());
     const storedBefore = await storage.findOne("session", where);
     expect(storedBefore?.lastSeenAt.getTime()).toBe(session.lastSeenAt.getTime());
     clock.advance(1);
     const at = await resolveSession(config, token);
+    expect(at?.refreshed).toBe(true);
     expect(at?.session.expiresAt.getTime()).toBe(clock.now().getTime() + 30 * DAY);
     const stored = await storage.findOne("session", where);
     expect(stored?.expiresAt.getTime()).toBe(at?.session.expiresAt.getTime());
@@ -161,5 +164,51 @@ describe("session routes", () => {
     expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(await resolveSession(config, token)).toBeNull();
     expect((await handle(post("/auth/sign-out", {}))).status).toBe(200);
+  });
+
+  it("GET /session renews the cookie after a sliding refresh and not before", async () => {
+    const { config, clock, seedUser } = makeAuth();
+    const handle = createRouter(config, sessionRoutes(config));
+    const user = await seedUser("a@example.com");
+    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const cookie = `tempo_session=${token}`;
+    clock.advance(7 * DAY - 1);
+    const before = await handle(get("/auth/session", { cookie }));
+    expect(before.status).toBe(200);
+    expect(before.headers.get("set-cookie")).toBeNull();
+    clock.advance(1);
+    const at = await handle(get("/auth/session", { cookie }));
+    expect(at.status).toBe(200);
+    const set = at.headers.get("set-cookie") ?? "";
+    expect(set).toContain(`tempo_session=${token};`);
+    expect(set).toContain(`Max-Age=${30 * 86_400};`);
+    expect(set).toContain("HttpOnly");
+  });
+
+  it("GET /session never sets a cookie for a bearer request, even after a refresh", async () => {
+    const { config, clock, seedUser } = makeAuth();
+    const handle = createRouter(config, sessionRoutes(config));
+    const user = await seedUser("a@example.com");
+    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    clock.advance(7 * DAY);
+    const res = await handle(get("/auth/session", { authorization: `Bearer ${token}` }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("GET /session clears a dead cookie on 401, and sets nothing without one", async () => {
+    const { config } = makeAuth();
+    const handle = createRouter(config, sessionRoutes(config));
+    const dead = await handle(
+      get("/auth/session", { cookie: `tempo_session=ts_${"A".repeat(43)}` }),
+    );
+    expect(dead.status).toBe(401);
+    expect(dead.headers.get("set-cookie")).toContain("tempo_session=; ");
+    expect(dead.headers.get("set-cookie")).toContain("Max-Age=0");
+    const none = await handle(
+      get("/auth/session", { authorization: `Bearer ts_${"A".repeat(43)}` }),
+    );
+    expect(none.status).toBe(401);
+    expect(none.headers.get("set-cookie")).toBeNull();
   });
 });

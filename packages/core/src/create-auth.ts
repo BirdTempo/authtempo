@@ -9,6 +9,7 @@ import {
   destroySession,
   type ResolvedSession,
   readSessionToken,
+  renewedSessionCookie,
   resolveSession,
 } from "./engine/sessions.js";
 import { ERRORS } from "./errors.js";
@@ -32,6 +33,13 @@ export interface Auth {
   handle(request: Request): Promise<Response>;
   /** The caller's session from the cookie or the bearer header, or null. */
   session(request: Request): Promise<ResolvedSession | null>;
+  /**
+   * The Set-Cookie value to send after `session(request)` when it moved the
+   * expiry forward, else null. Send it on the response, or a browser drops
+   * the cookie at its old Max-Age while the session row is still valid.
+   * Null for a bearer request.
+   */
+  sessionCookie(request: Request, resolved: ResolvedSession): string | null;
   /** The same operations, in-process. */
   api: AuthApi;
   errors: typeof ERRORS;
@@ -46,6 +54,7 @@ export function createAuth(input: AuthConfig): Auth {
       const token = readSessionToken(config, request);
       return token ? resolveSession(config, token) : null;
     },
+    sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     api: {
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),

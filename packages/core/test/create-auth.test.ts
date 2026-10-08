@@ -4,7 +4,15 @@ import { APP_ORIGIN, BASE_URL, get, post, tokenFromMail } from "./helpers.js";
 
 function setup() {
   const sent: { to: string; text: string }[] = [];
+  let current = new Date("2026-01-01T00:00:00.000Z");
+  const clock = {
+    now: () => current,
+    advance(ms: number) {
+      current = new Date(current.getTime() + ms);
+    },
+  };
   const auth = createAuth({
+    clock,
     baseURL: BASE_URL,
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [APP_ORIGIN],
@@ -15,7 +23,7 @@ function setup() {
       },
     },
   });
-  return { auth, sent };
+  return { auth, sent, clock };
 }
 
 describe("createAuth", () => {
@@ -66,5 +74,26 @@ describe("createAuth", () => {
   it("session returns null with no credentials", async () => {
     const { auth } = setup();
     expect(await auth.session(get("/anything"))).toBeNull();
+  });
+
+  it("sessionCookie renews the cookie after a sliding refresh, for a cookie request only", async () => {
+    const { auth, sent, clock } = setup();
+    await auth.handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const token = tokenFromMail(sent[0]?.text ?? "");
+    const verify = await auth.handle(
+      get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`),
+    );
+    const cookie = verify.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const withCookie = get("/anything", { cookie });
+    const fresh = await auth.session(withCookie);
+    expect(fresh && auth.sessionCookie(withCookie, fresh)).toBeNull();
+    clock.advance(7 * 86_400_000);
+    const refreshed = await auth.session(withCookie);
+    expect(refreshed?.refreshed).toBe(true);
+    const set = refreshed ? auth.sessionCookie(withCookie, refreshed) : null;
+    expect(set).toContain(`${cookie};`);
+    expect(set).toContain(`Max-Age=${30 * 86_400};`);
+    const bearer = get("/anything", { authorization: `Bearer ${cookie.split("=")[1]}` });
+    expect(refreshed && auth.sessionCookie(bearer, refreshed)).toBeNull();
   });
 });

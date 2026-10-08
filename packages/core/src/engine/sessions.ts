@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
-import { readCookie } from "../http/cookies.js";
+import { readCookie, sessionCookie } from "../http/cookies.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
@@ -17,6 +17,8 @@ export interface SessionInput {
 export interface ResolvedSession {
   user: UserRow;
   session: SessionRow;
+  /** True when this call moved the expiry forward. A cookie must then be set again, or it expires at its old Max-Age. */
+  refreshed: boolean;
 }
 
 export async function createSession(
@@ -72,9 +74,13 @@ export async function resolveSession(
       lastSeenAt: now,
       updatedAt: now,
     });
-    return { user, session: { ...session, expiresAt, lastSeenAt: now, updatedAt: now } };
+    return {
+      user,
+      session: { ...session, expiresAt, lastSeenAt: now, updatedAt: now },
+      refreshed: true,
+    };
   }
-  return { user, session };
+  return { user, session, refreshed: false };
 }
 
 export async function destroySession(config: ResolvedConfig, token: string): Promise<void> {
@@ -90,6 +96,25 @@ export function readSessionToken(config: ResolvedConfig, request: Request): stri
   if (cookie) return cookie;
   const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");
   return m?.[1] ?? null;
+}
+
+/**
+ * The Set-Cookie value that renews the session cookie after a sliding
+ * refresh, or null. Null when nothing was refreshed, and null when the
+ * request carries no session cookie, so a bearer client never gets a cookie.
+ * The cookie wins in `readSessionToken`, so a present cookie is the
+ * credential that resolved.
+ */
+export function renewedSessionCookie(
+  config: ResolvedConfig,
+  request: Request,
+  resolved: ResolvedSession,
+): string | null {
+  if (!resolved.refreshed) return null;
+  const token = readCookie(request, config.cookieName);
+  if (!token) return null;
+  const msLeft = resolved.session.expiresAt.getTime() - config.clock.now().getTime();
+  return sessionCookie(config.cookieName, token, Math.max(0, Math.floor(msLeft / 1000)));
 }
 
 /** The public shape of a session. Never the hash, never internal ids a client does not need. */
