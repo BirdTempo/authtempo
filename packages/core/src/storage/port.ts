@@ -61,7 +61,7 @@ export interface StorageAdapter {
   update<M extends ModelName>(
     model: M,
     where: Where<M>[],
-    data: Partial<Models[M]>,
+    data: Partial<Omit<Models[M], "id">>,
   ): Promise<number>;
   delete<M extends ModelName>(model: M, where: Where<M>[]): Promise<number>;
   transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T>;
