@@ -5,3 +5,5 @@ dist
 coverage
 .omc/
 .superpowers/
+# Turbo writes AGENTS.md at the root on each run. It is generated, not a source file.
+/AGENTS.md
