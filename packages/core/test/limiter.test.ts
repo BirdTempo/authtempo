@@ -23,3 +23,16 @@ it("drops expired buckets so memory does not grow without bound", async () => {
   await limiter.allow("d", w);
   expect(limiter.size()).toBe(1);
 });
+
+it("sweeps each bucket by its own window, not the window of the caller", async () => {
+  let t = new Date("2026-01-01T00:00:00Z");
+  const limiter = createMemoryLimiter({ now: () => t });
+  const hour = { seconds: 3600, max: 2 };
+  const minute = { seconds: 60, max: 1 };
+  expect(await limiter.allow("A", hour)).toBe(true);
+  expect(await limiter.allow("A", hour)).toBe(true);
+  expect(await limiter.allow("B", minute)).toBe(true);
+  t = new Date(t.getTime() + 61_000);
+  expect(await limiter.allow("B", minute)).toBe(true);
+  expect(await limiter.allow("A", hour)).toBe(false);
+});
