@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runAdapterConformance } from "../src/storage/conformance.js";
-import { createMemoryAdapter } from "../src/storage/memory.js";
+import { createMemoryAdapter, sameUniqueKey } from "../src/storage/memory.js";
 
 runAdapterConformance("memory", async () => ({
   adapter: createMemoryAdapter(),
@@ -31,5 +31,20 @@ describe("memory adapter transactions", () => {
     const [a, b] = await Promise.all([findOrCreate("u1"), findOrCreate("u2")]);
     expect(a.id).toBe("u1");
     expect(b.id).toBe("u1");
+  });
+});
+
+/**
+ * No unique key in the schema has a nullable field today, so the conformance
+ * suite cannot pin this rule without a row the product cannot write. This
+ * pins the memory adapter's key compare directly.
+ */
+describe("memory adapter unique keys", () => {
+  it("never treats null as a conflict, in a single or a composite key", () => {
+    expect(sameUniqueKey(["a"], { a: null }, { a: null })).toBe(false);
+    expect(sameUniqueKey(["a"], { a: undefined }, { a: null })).toBe(false);
+    expect(sameUniqueKey(["a", "b"], { a: 1, b: null }, { a: 1, b: null })).toBe(false);
+    expect(sameUniqueKey(["a", "b"], { a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
+    expect(sameUniqueKey(["a"], { a: "x" }, { a: "y" })).toBe(false);
   });
 });

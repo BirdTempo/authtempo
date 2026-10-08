@@ -53,6 +53,18 @@ function clone<T>(v: T): T {
   return structuredClone(v);
 }
 
+/** True when two rows hold the same values for a unique key. Null in any field never conflicts, as in SQL. */
+export function sameUniqueKey(
+  key: readonly string[],
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  return key.every((f) => {
+    const x = norm(a[f]);
+    return x !== null && x === norm(b[f]);
+  });
+}
+
 function checkUnique(
   model: ModelName,
   others: Iterable<Record<string, unknown>>,
@@ -60,7 +72,7 @@ function checkUnique(
 ): void {
   for (const key of schema[model].unique as readonly (readonly string[])[]) {
     for (const other of others) {
-      if (key.every((f) => norm(other[f]) === norm(row[f]))) {
+      if (sameUniqueKey(key, other, row)) {
         throw new StorageError("unique_violation", model, key);
       }
     }
@@ -127,6 +139,10 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       opts?: FindManyOptions<M>,
     ): Promise<Models[M][]> {
       let rows = select(model, where);
+      const limit = opts?.limit;
+      if (limit !== undefined && !(Number.isInteger(limit) && limit >= 0)) {
+        throw new StorageError("invalid_argument", model, ["limit"]);
+      }
       if (opts?.sort) {
         const { field, dir } = opts.sort;
         assertFields(model, [field]);
@@ -138,7 +154,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
           return dir === "asc" ? c : -c;
         });
       }
-      if (opts?.limit !== undefined) rows = rows.slice(0, opts.limit);
+      if (limit !== undefined) rows = rows.slice(0, limit);
       return rows.map((r) => clone(r) as unknown as Models[M]);
     },
     async update<M extends ModelName>(
@@ -149,6 +165,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       const t = table(model);
       assertFields(model, Object.keys(data));
       if (Object.hasOwn(data, "id")) throw new StorageError("unknown_field", model, ["id"]);
+      if (where.length === 0) throw new StorageError("invalid_argument", model, ["where"]);
       const rows = select(model, where);
       // All or nothing: build every next row, check each against the table
       // with the batch applied, and only then write.
@@ -169,6 +186,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
     },
     async delete<M extends ModelName>(model: M, where: Where<M>[]): Promise<number> {
       const t = table(model);
+      if (where.length === 0) throw new StorageError("invalid_argument", model, ["where"]);
       const rows = select(model, where);
       for (const r of rows) {
         t.delete(r.id as string);

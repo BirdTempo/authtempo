@@ -18,7 +18,11 @@ export interface FindManyOptions<M extends ModelName> {
   limit?: number;
 }
 
-export type StorageErrorCode = "unique_violation" | "unknown_model" | "unknown_field";
+export type StorageErrorCode =
+  | "unique_violation"
+  | "unknown_model"
+  | "unknown_field"
+  | "invalid_argument";
 
 export class StorageError extends Error {
   constructor(
@@ -41,6 +45,10 @@ export class StorageError extends Error {
  * - `ne x` with a non-null x does not match a row where the field is null.
  * - `in` never matches a row where the field is null, even if the list holds null.
  * - `lt`, `lte`, `gt` and `gte` are false when the field is null.
+ * - An empty `in` list matches nothing. SQL rejects `IN ()`, so an adapter
+ *   must answer it without sending that SQL.
+ * - A unique key with null in any of its fields never conflicts, so two rows
+ *   may both hold null there.
  *
  * Sort rules. Nulls come last in ascending order and first in descending order.
  *
@@ -49,6 +57,17 @@ export class StorageError extends Error {
  * row changes. `update` data must not hold `id`; that is `unknown_field`.
  * An unknown model is `unknown_model` on every method, and an unknown field
  * in data, where, or sort is `unknown_field`.
+ *
+ * Argument rules. `update` and `delete` with an empty `where` throw
+ * `invalid_argument`, so a bug cannot change or remove every row. A `limit`
+ * that is not a non-negative integer throws `invalid_argument`. A `limit` of
+ * 0 returns an empty list.
+ *
+ * Transaction rules. Reads inside a transaction see its own writes; the
+ * engine relies on this. If the function throws, only the transaction's own
+ * writes are reversed. Rows that other callers wrote in the meantime stay.
+ * Two concurrent transactions that read and then create the same unique
+ * value leave one row. The loser may fail with `unique_violation`.
  */
 export interface StorageAdapter {
   create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]>;

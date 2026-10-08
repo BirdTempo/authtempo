@@ -234,6 +234,42 @@ export function runAdapterConformance(
       expect(seen?.name).toBe("Ada");
     });
 
+    it("an empty in list matches nothing on every method", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      const none = [{ field: "id" as const, op: "in" as const, value: [] }];
+      expect(await db.findMany("user", none)).toEqual([]);
+      expect(await db.findOne("user", none)).toBeNull();
+      expect(await db.update("user", none, { name: "x" })).toBe(0);
+      expect(await db.delete("user", none)).toBe(0);
+      const row = await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }]);
+      expect(row?.name).toBeNull();
+    });
+
+    it("update and delete with an empty where throw invalid_argument and change nothing", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await expect(db.update("user", [], { name: "x" })).rejects.toMatchObject({
+        name: "StorageError",
+        code: "invalid_argument",
+      });
+      await expect(db.delete("user", [])).rejects.toMatchObject({
+        name: "StorageError",
+        code: "invalid_argument",
+      });
+      const rows = await db.findMany("user", []);
+      expect(rows.map((r) => [r.id, r.name])).toEqual([["u1", null]]);
+    });
+
+    it("limit 0 returns nothing, and a limit that is not a non-negative integer throws", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      expect(await db.findMany("user", [], { limit: 0 })).toEqual([]);
+      for (const limit of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+        await expect(db.findMany("user", [], { limit })).rejects.toMatchObject({
+          name: "StorageError",
+          code: "invalid_argument",
+        });
+      }
+    });
+
     it("rejects an unknown field", async () => {
       await expect(
         db.findOne("user", [{ field: "nope" as "id", op: "eq", value: 1 }]),
