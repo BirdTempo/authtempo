@@ -20,6 +20,9 @@ describe("resolveConfig", () => {
     expect(c.magicLink.linkBuilder("tok", "/x")).toBe(
       "https://api.example.com/auth/magic-link/verify?token=tok",
     );
+    expect(c.magicLink.linkBuilder("a+b/c=&d", "/x")).toBe(
+      "https://api.example.com/auth/magic-link/verify?token=a%2Bb%2Fc%3D%26d",
+    );
   });
   it("rejects a short secret", () => {
     expect(() => resolveConfig({ ...base, secret: "short" })).toThrow(/secret/);
