@@ -104,10 +104,10 @@ describe("magic link engine", () => {
     const { config, clock, mail } = makeAuth();
     await requestMagicLink(config, { email: "ada@example.com", ip: null });
     const token = tokenFromMail(mail[0]?.text ?? "");
-    clock.advance(16 * 60_000);
+    clock.advance(15 * 60_000);
     expect(await verifyMagicLink(config, { token, ip: null, userAgent: null })).toMatchObject({
       ok: false,
-      code: "invalid_token",
+      code: "token_expired",
     });
     expect(
       await verifyMagicLink(config, { token: "nope", ip: null, userAgent: null }),
@@ -153,6 +153,29 @@ describe("magic link routes", () => {
       /^tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
     );
     expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("GET verify with an expired token redirects with auth_error=token_expired", async () => {
+    const { config, mail, clock } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const token = tokenFromMail(mail[0]?.text ?? "");
+    clock.advance(15 * 60_000);
+    const res = await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://api.example.com/?auth_error=token_expired");
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("GET verify with a spent token reports invalid_token even after it expires", async () => {
+    const { config, mail, clock } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const token = tokenFromMail(mail[0]?.text ?? "");
+    await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
+    clock.advance(15 * 60_000);
+    const res = await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
+    expect(res.headers.get("location")).toBe("https://api.example.com/?auth_error=invalid_token");
   });
 
   it("GET verify with a spent or missing token redirects to / with auth_error", async () => {

@@ -89,7 +89,14 @@ export async function verifyMagicLink(
     ],
     { consumedAt: now, updatedAt: now },
   );
-  if (consumed !== 1) return fail("invalid_token");
+  if (consumed !== 1) {
+    // An unconsumed row past its expiry is expired. A consumed row, or one a
+    // concurrent click consumed after our read, is invalid.
+    const expired = row.consumedAt === null && row.expiresAt.getTime() <= now.getTime();
+    return fail(expired ? "token_expired" : "invalid_token");
+  }
+  // A failure after this point burns the link by design. The person
+  // requests a new one.
   const { user } = await findOrCreateUserByEmail(config.storage, row.identifier, now);
   const { token } = await createSession(config, {
     userId: user.id,
