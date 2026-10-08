@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+  - examples/*
+
+# A version younger than one day is the common window for a malicious publish.
+minimumReleaseAge: 1440
