@@ -32,7 +32,11 @@ export default {
     if (url.pathname === "/me") {
       const s = await a.session(request);
       if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
-      return Response.json({ id: s.user.id, email: s.user.email });
+      const res = Response.json({ id: s.user.id, email: s.user.email });
+      // After a sliding refresh, renew the cookie or the browser drops it early.
+      const renewed = a.sessionCookie(request, s);
+      if (renewed) res.headers.set("set-cookie", renewed);
+      return res;
     }
     if (url.pathname === "/__test/last-link") {
       if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
