@@ -16,16 +16,12 @@ export interface Route {
 }
 
 /**
- * Read the client IP from `cf-connecting-ip` only. On Cloudflare Workers the
- * platform sets this header and a caller cannot forge it. `x-forwarded-for`
- * is not read, because a caller sets it freely and could rotate it to bypass
- * a limit keyed on the ip. On another host the ip is null, and ip-keyed
- * limits do not apply until a trusted-proxy option exists.
+ * The client IP comes from `config.clientIp`. On Workers the platform sets
+ * `cf-connecting-ip`, and the default reads it. On any other host a caller
+ * can set that header, so a deployment there must pass its own `clientIp`
+ * that reads the trusted proxy header. A null IP counts against one shared
+ * IP bucket in the magic link limit, which fails closed.
  */
-export function clientIp(request: Request): string | null {
-  return request.headers.get("cf-connecting-ip") || null;
-}
-
 function originTrusted(config: ResolvedConfig, origin: string): boolean {
   if (origin === config.baseURL) return true;
   return config.trustedOrigins.has(origin);
@@ -56,7 +52,7 @@ export function createRouter(
         request,
         url,
         config,
-        ip: clientIp(request),
+        ip: config.clientIp(request),
         now: config.clock.now(),
       });
     } catch (e) {

@@ -90,6 +90,25 @@ describe("router", () => {
     );
     expect(await cf.json()).toEqual({ ip: "1.2.3.4", path: "/auth/ping" });
   });
+  it("reads the ip from a custom clientIp", async () => {
+    const custom = createRouter(
+      resolveConfig({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [],
+        storage: createMemoryAdapter(),
+        mail: { send: async () => {} },
+        clientIp: (r) => r.headers.get("x-real-ip"),
+      }),
+      routes,
+    );
+    const res = await custom(
+      new Request("https://api.example.com/auth/ping", {
+        headers: { "x-real-ip": "9.9.9.9", "cf-connecting-ip": "1.2.3.4" },
+      }),
+    );
+    expect(await res.json()).toEqual({ ip: "9.9.9.9", path: "/auth/ping" });
+  });
   it("403s a POST with the literal Origin null", async () => {
     const res = await handle(
       new Request("https://api.example.com/auth/echo", {

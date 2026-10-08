@@ -26,6 +26,13 @@ export interface AuthConfig {
   storage: StorageAdapter;
   mail: MailPort;
   limiter?: LimiterPort;
+  /**
+   * Reads the client IP for the per-IP limit. The default reads
+   * `cf-connecting-ip`, which only Cloudflare sets on Workers. On any other
+   * host a caller sets that header freely and can rotate it past the limit,
+   * so pass a function that reads the header your trusted proxy sets.
+   */
+  clientIp?: (request: Request) => string | null;
   clock?: Clock;
   cookieName?: string;
   session?: { ttlDays?: number; slidingRefreshDays?: number };
@@ -40,10 +47,20 @@ export interface ResolvedConfig {
   storage: StorageAdapter;
   mail: MailPort;
   limiter: LimiterPort;
+  clientIp: (request: Request) => string | null;
   clock: Clock;
   cookieName: string;
   session: { ttlDays: number; slidingRefreshDays: number };
   magicLink: { ttlMinutes: number; linkBuilder: (token: string, next: string) => string };
+}
+
+/**
+ * The default client IP. On Workers the platform sets `cf-connecting-ip` and
+ * a caller cannot forge it. `x-forwarded-for` is not read, because a caller
+ * sets it freely. Null when the header is absent.
+ */
+export function workersClientIp(request: Request): string | null {
+  return request.headers.get("cf-connecting-ip") || null;
 }
 
 export class ConfigError extends Error {
@@ -81,6 +98,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     storage: input.storage,
     mail: input.mail,
     limiter: input.limiter ?? createMemoryLimiter(clock),
+    clientIp: input.clientIp ?? workersClientIp,
     clock,
     cookieName: input.cookieName ?? "tempo_session",
     session: {

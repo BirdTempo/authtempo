@@ -34,6 +34,9 @@ const s = await auth.session(request);     // { user, session } or null
   isolate.
 - A request with no client IP counts against one shared IP bucket. A host
   that sets no `cf-connecting-ip` shares one budget across all callers.
+- Off Workers, a caller can set `cf-connecting-ip` and rotate it past the
+  per-IP limit. Pass a `clientIp` function that reads the header your
+  trusted proxy sets.
 
 ## The storage port
 
