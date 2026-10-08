@@ -32,7 +32,7 @@ const s = await auth.session(request);     // { user, session } or null
   a shared `limiter` for a real limit.
 - The memory adapter is for tests and examples. It keeps rows in the
   isolate.
-- A request with no client ip counts against one shared ip bucket. A host
+- A request with no client IP counts against one shared IP bucket. A host
   that sets no `cf-connecting-ip` shares one budget across all callers.
 
 ## The storage port

@@ -14,7 +14,11 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@tempo-auth/core` | The engine: `createAuth(config)` returns `handle`, `session`, and `api`. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
-The example pins vitest 4.1.11 and `@cloudflare/vitest-plugin` 1.3.7. The 1.4.0 plugin and the newest workers-types were younger than the one-day release age on 2026-10-09. The core uses vitest 5.0.3. The earliest day to move the example to plugin 1.4.0 and vitest 5 is 2026-10-10.
+The example pins `@cloudflare/vitest-plugin` 1.3.7, which needs vitest 4, so
+it runs vitest 4.1.11 while core runs vitest 5.0.3. Plugin 1.4.0 is the
+first with vitest 5 support, and on 2026-10-09 it was younger than the
+one-day release age; move the example to plugin 1.4.0 and vitest 5 on
+2026-10-10 or later.
 
 Adapters for D1 and Postgres, social sign-in, passkeys, the native handoff,
 and organizations arrive in the later plans.
