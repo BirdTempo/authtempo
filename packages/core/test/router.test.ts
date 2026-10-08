@@ -76,6 +76,30 @@ describe("router", () => {
     );
     expect(self.status).toBe(200);
   });
+  it("reads the ip from cf-connecting-ip only", async () => {
+    const xff = await handle(
+      new Request("https://api.example.com/auth/ping", {
+        headers: { "x-forwarded-for": "5.5.5.5" },
+      }),
+    );
+    expect(await xff.json()).toEqual({ ip: null, path: "/auth/ping" });
+    const cf = await handle(
+      new Request("https://api.example.com/auth/ping", {
+        headers: { "cf-connecting-ip": "1.2.3.4" },
+      }),
+    );
+    expect(await cf.json()).toEqual({ ip: "1.2.3.4", path: "/auth/ping" });
+  });
+  it("403s a POST with the literal Origin null", async () => {
+    const res = await handle(
+      new Request("https://api.example.com/auth/echo", {
+        method: "POST",
+        headers: { origin: "null" },
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "origin_not_trusted" });
+  });
   it("turns a thrown error into a 500 without the message", async () => {
     const boom = createRouter(config, [
       {

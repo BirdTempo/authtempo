@@ -15,12 +15,15 @@ export interface Route {
   handler(ctx: RouteContext): Promise<Response>;
 }
 
+/**
+ * Read the client IP from `cf-connecting-ip` only. On Cloudflare Workers the
+ * platform sets this header and a caller cannot forge it. `x-forwarded-for`
+ * is not read, because a caller sets it freely and could rotate it to bypass
+ * a limit keyed on the ip. On another host the ip is null, and ip-keyed
+ * limits do not apply until a trusted-proxy option exists.
+ */
 export function clientIp(request: Request): string | null {
-  const cf = request.headers.get("cf-connecting-ip");
-  if (cf) return cf;
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]?.trim() || null;
-  return null;
+  return request.headers.get("cf-connecting-ip") || null;
 }
 
 function originTrusted(config: ResolvedConfig, origin: string): boolean {
