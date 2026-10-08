@@ -59,6 +59,9 @@ describe("safeNext", () => {
     expect(safeNext("https://evil.example")).toBe("/");
     expect(safeNext("javascript:alert(1)")).toBe("/");
     expect(safeNext("/\\evil.example")).toBe("/");
+    expect(safeNext("/\t/evil.example")).toBe("/");
+    expect(safeNext("/\n/x")).toBe("/");
+    expect(safeNext("/a\\b")).toBe("/");
     expect(safeNext("")).toBe("/");
     expect(safeNext(undefined)).toBe("/");
     expect(safeNext("/".padEnd(2049, "a"))).toBe("/");
