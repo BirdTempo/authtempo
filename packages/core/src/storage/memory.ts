@@ -23,10 +23,14 @@ function matches<M extends ModelName>(row: Record<string, unknown>, where: Where
     switch (w.op) {
       case "eq":
         return v === norm(w.value);
-      case "ne":
-        return v !== norm(w.value);
+      case "ne": {
+        // SQL: "<> x" excludes NULL rows; "ne null" is IS NOT NULL.
+        const t = norm(w.value);
+        return t === null ? v !== null : v !== null && v !== t;
+      }
       case "in":
-        return (w.value as unknown[]).some((x) => norm(x) === v);
+        // SQL: IN never matches a NULL row, even if the list holds null.
+        return v !== null && (w.value as unknown[]).some((x) => norm(x) === v);
       case "lt":
       case "lte":
       case "gt":
@@ -51,12 +55,11 @@ function clone<T>(v: T): T {
 
 function checkUnique(
   model: ModelName,
-  table: Map<string, Record<string, unknown>>,
+  others: Iterable<Record<string, unknown>>,
   row: Record<string, unknown>,
 ): void {
-  for (const key of schema[model].unique) {
-    for (const other of table.values()) {
-      if (other.id === row.id) continue;
+  for (const key of schema[model].unique as readonly (readonly string[])[]) {
+    for (const other of others) {
       if (key.every((f) => norm(other[f]) === norm(row[f]))) {
         throw new StorageError("unique_violation", model, key);
       }
@@ -66,7 +69,7 @@ function checkUnique(
 
 function adapterOn(store: Store): StorageAdapter {
   const table = (model: ModelName) => {
-    if (!(model in schema)) throw new StorageError("unknown_model", model);
+    if (!Object.hasOwn(schema, model)) throw new StorageError("unknown_model", model);
     let t = store.get(model);
     if (!t) {
       t = new Map();
@@ -76,11 +79,13 @@ function adapterOn(store: Store): StorageAdapter {
   };
 
   const select = <M extends ModelName>(model: M, where: Where<M>[]) => {
+    // Check the model first. assertFields reads schema[model].
+    const t = table(model);
     assertFields(
       model,
       where.map((w) => w.field),
     );
-    return [...table(model).values()].filter((r) => matches(r, where));
+    return [...t.values()].filter((r) => matches(r, where));
   };
 
   return {
@@ -88,7 +93,8 @@ function adapterOn(store: Store): StorageAdapter {
       const t = table(model);
       assertFields(model, Object.keys(data));
       const row = clone(data as unknown as Record<string, unknown>);
-      checkUnique(model, t, row);
+      if (t.has(row.id as string)) throw new StorageError("unique_violation", model, ["id"]);
+      checkUnique(model, t.values(), row);
       t.set(row.id as string, row);
       return clone(row) as unknown as Models[M];
     },
@@ -108,7 +114,8 @@ function adapterOn(store: Store): StorageAdapter {
         rows = rows.sort((a, b) => {
           const x = norm(a[field]);
           const y = norm(b[field]);
-          const c = x === y ? 0 : x === null ? -1 : y === null ? 1 : x < y ? -1 : 1;
+          // Nulls sort highest: last ascending, first descending.
+          const c = x === y ? 0 : x === null ? 1 : y === null ? -1 : x < y ? -1 : 1;
           return dir === "asc" ? c : -c;
         });
       }
@@ -118,16 +125,25 @@ function adapterOn(store: Store): StorageAdapter {
     async update<M extends ModelName>(
       model: M,
       where: Where<M>[],
-      data: Partial<Models[M]>,
+      data: Partial<Omit<Models[M], "id">>,
     ): Promise<number> {
       const t = table(model);
       assertFields(model, Object.keys(data));
+      if (Object.hasOwn(data, "id")) throw new StorageError("unknown_field", model, ["id"]);
       const rows = select(model, where);
+      // All or nothing: build every next row, check each against the table
+      // with the batch applied, and only then write.
+      const patch = clone(data as unknown as Record<string, unknown>);
+      const touched = new Set(rows.map((r) => r.id as string));
+      const applied = [...t.values()].filter((r) => !touched.has(r.id as string));
+      const nexts: Record<string, unknown>[] = [];
       for (const r of rows) {
-        const next = { ...r, ...clone(data as unknown as Record<string, unknown>) };
-        checkUnique(model, t, next);
-        t.set(r.id as string, next);
+        const next = { ...r, ...clone(patch) };
+        checkUnique(model, applied, next);
+        applied.push(next);
+        nexts.push(next);
       }
+      for (const next of nexts) t.set(next.id as string, next);
       return rows.length;
     },
     async delete<M extends ModelName>(model: M, where: Where<M>[]): Promise<number> {

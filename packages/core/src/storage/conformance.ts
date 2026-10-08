@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { UserRow, VerificationRow } from "../schema.js";
+import type { IdentityRow, PasskeyRow, UserRow, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "./port.js";
 
 export interface ConformanceTarget {
@@ -20,6 +20,26 @@ function verification(id: string, at: Date, consumedAt: Date | null): Verificati
     expiresAt: new Date(at.getTime() + 60_000),
     consumedAt,
     data: { next: "/home", n: 1 },
+    createdAt: at,
+    updatedAt: at,
+  };
+}
+
+function identity(id: string, provider: string, subject: string, at: Date): IdentityRow {
+  return { id, userId: "u1", provider, subject, linkedAt: at, createdAt: at, updatedAt: at };
+}
+
+function passkey(id: string, counter: number, at: Date): PasskeyRow {
+  return {
+    id,
+    userId: "u1",
+    credentialId: `cred-${id}`,
+    publicKey: "pk",
+    counter,
+    transports: null,
+    deviceType: "singleDevice",
+    backedUp: false,
+    name: null,
     createdAt: at,
     updatedAt: at,
   };
@@ -166,6 +186,219 @@ export function runAdapterConformance(
       await expect(
         db.findOne("user", [{ field: "nope" as "id", op: "eq", value: 1 }]),
       ).rejects.toMatchObject({ code: "unknown_field" });
+    });
+
+    it("create rejects an existing id and keeps the first row", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await expect(db.create("user", user("u1", "b@example.com", t0))).rejects.toMatchObject({
+        code: "unique_violation",
+        model: "user",
+        fields: ["id"],
+      });
+      const row = await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }]);
+      expect(row?.email).toBe("a@example.com");
+    });
+
+    it("rejects an unknown model on every method", async () => {
+      for (const bad of ["nope", "toString"] as unknown as "user"[]) {
+        const w = [{ field: "id" as const, op: "eq" as const, value: "x" }];
+        const calls = [
+          db.create(bad, user("u1", "a@example.com", t0)),
+          db.findOne(bad, w),
+          db.findMany(bad, w),
+          db.update(bad, w, { name: "x" }),
+          db.delete(bad, w),
+        ];
+        for (const call of calls) {
+          await expect(call).rejects.toMatchObject({ name: "StorageError", code: "unknown_model" });
+        }
+      }
+    });
+
+    it("update is all or nothing when a new row breaks a unique key", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await db.create("user", user("u2", "b@example.com", t0));
+      await expect(
+        db.update("user", [{ field: "id", op: "in", value: ["u1", "u2"] }], {
+          email: "same@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "unique_violation", fields: ["email"] });
+      const rows = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+      expect(rows.map((r) => r.email)).toEqual(["a@example.com", "b@example.com"]);
+    });
+
+    it("update rejects a unique violation against another row", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await db.create("user", user("u2", "b@example.com", t0));
+      await expect(
+        db.update("user", [{ field: "id", op: "eq", value: "u2" }], { email: "a@example.com" }),
+      ).rejects.toMatchObject({ code: "unique_violation" });
+      const u2 = await db.findOne("user", [{ field: "id", op: "eq", value: "u2" }]);
+      expect(u2?.email).toBe("b@example.com");
+    });
+
+    it("update rejects an id in data", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await expect(
+        db.update("user", [{ field: "id", op: "eq", value: "u1" }], { id: "u9" } as never),
+      ).rejects.toMatchObject({ code: "unknown_field", fields: ["id"] });
+      expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }])).not.toBeNull();
+    });
+
+    it("null rules: ne x skips null rows, in skips null rows, eq and ne null are IS NULL", async () => {
+      await db.create("user", { ...user("u1", "1@example.com", t0), name: null });
+      await db.create("user", { ...user("u2", "2@example.com", t0), name: "x" });
+      await db.create("user", { ...user("u3", "3@example.com", t0), name: "y" });
+      const ids = async (op: "eq" | "ne" | "in", value: unknown) =>
+        (
+          await db.findMany("user", [{ field: "name", op, value }], {
+            sort: { field: "id", dir: "asc" },
+          })
+        ).map((r) => r.id);
+      expect(await ids("eq", null)).toEqual(["u1"]);
+      expect(await ids("ne", null)).toEqual(["u2", "u3"]);
+      expect(await ids("ne", "x")).toEqual(["u3"]);
+      expect(await ids("in", ["x", null])).toEqual(["u2"]);
+      expect(await ids("in", [null])).toEqual([]);
+    });
+
+    it("null rules: lt, lte, gt, gte are false against a null field", async () => {
+      await db.create("verification", verification("v1", t0, null));
+      await db.create("verification", verification("v2", t0, t0));
+      const ids = async (op: "lt" | "lte" | "gt" | "gte", value: unknown) =>
+        (await db.findMany("verification", [{ field: "consumedAt", op, value }])).map((r) => r.id);
+      const later = new Date(t0.getTime() + 1000);
+      const earlier = new Date(t0.getTime() - 1000);
+      expect(await ids("lt", later)).toEqual(["v2"]);
+      expect(await ids("lte", t0)).toEqual(["v2"]);
+      expect(await ids("gt", earlier)).toEqual(["v2"]);
+      expect(await ids("gte", t0)).toEqual(["v2"]);
+      expect(await ids("gt", null)).toEqual([]);
+    });
+
+    it("findMany supports lt, lte, and gte at the boundary", async () => {
+      for (let i = 1; i <= 3; i++) {
+        await db.create(
+          "user",
+          user(`u${i}`, `${i}@example.com`, new Date(t0.getTime() + i * 1000)),
+        );
+      }
+      const mid = new Date(t0.getTime() + 2000);
+      const ids = async (op: "lt" | "lte" | "gte") =>
+        (
+          await db.findMany("user", [{ field: "createdAt", op, value: mid }], {
+            sort: { field: "createdAt", dir: "asc" },
+          })
+        ).map((r) => r.id);
+      expect(await ids("lt")).toEqual(["u1"]);
+      expect(await ids("lte")).toEqual(["u1", "u2"]);
+      expect(await ids("gte")).toEqual(["u2", "u3"]);
+    });
+
+    it("sorts ascending, with nulls last ascending and first descending", async () => {
+      await db.create("verification", verification("v1", t0, null));
+      await db.create("verification", verification("v2", t0, new Date(t0.getTime() + 1000)));
+      await db.create("verification", verification("v3", t0, t0));
+      const order = async (dir: "asc" | "desc") =>
+        (await db.findMany("verification", [], { sort: { field: "consumedAt", dir } })).map(
+          (r) => r.id,
+        );
+      expect(await order("asc")).toEqual(["v3", "v2", "v1"]);
+      expect(await order("desc")).toEqual(["v1", "v2", "v3"]);
+    });
+
+    it("enforces a composite unique key on identity", async () => {
+      await db.create("identity", identity("i1", "github", "42", t0));
+      await db.create("identity", identity("i2", "github", "43", t0));
+      await db.create("identity", identity("i3", "google", "42", t0));
+      await expect(db.create("identity", identity("i4", "github", "42", t0))).rejects.toMatchObject(
+        {
+          code: "unique_violation",
+          model: "identity",
+          fields: ["provider", "subject"],
+        },
+      );
+    });
+
+    it("round-trips an integer column", async () => {
+      await db.create("passkey", passkey("p1", 7, t0));
+      const row = await db.findOne("passkey", [{ field: "id", op: "eq", value: "p1" }]);
+      expect(row?.counter).toBe(7);
+      expect(row?.backedUp).toBe(false);
+      await db.update("passkey", [{ field: "id", op: "eq", value: "p1" }], {
+        counter: 8,
+        backedUp: true,
+      });
+      const next = await db.findOne("passkey", [{ field: "id", op: "eq", value: "p1" }]);
+      expect(next?.counter).toBe(8);
+      expect(next?.backedUp).toBe(true);
+    });
+
+    it("rolls back an update when the function throws", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.update("user", [{ field: "id", op: "eq", value: "u1" }], { name: "changed" });
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      const row = await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }]);
+      expect(row?.name).toBeNull();
+    });
+
+    it("rolls back a delete when the function throws", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.delete("user", [{ field: "id", op: "eq", value: "u1" }]);
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }])).not.toBeNull();
+    });
+
+    it("rolls back earlier writes after a unique violation inside a transaction", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.create("user", user("u2", "b@example.com", t0));
+          await tx.create("user", user("u3", "a@example.com", t0));
+        }),
+      ).rejects.toMatchObject({ code: "unique_violation" });
+      const rows = await db.findMany("user", []);
+      expect(rows.map((r) => r.id)).toEqual(["u1"]);
+    });
+
+    it("consumes a verification once when two conditional updates run together", async () => {
+      await db.create("verification", verification("v1", t0, null));
+      const consume = () =>
+        db.update(
+          "verification",
+          [
+            { field: "valueHash", op: "eq", value: "hash-v1" },
+            { field: "consumedAt", op: "eq", value: null },
+          ],
+          { consumedAt: t0 },
+        );
+      const counts = await Promise.all([consume(), consume()]);
+      expect(counts.sort()).toEqual([0, 1]);
+    });
+
+    it("rejects an unknown field in create data, update data, and sort", async () => {
+      await expect(
+        db.create("user", { ...user("u1", "a@example.com", t0), nope: 1 } as never),
+      ).rejects.toMatchObject({
+        code: "unknown_field",
+      });
+      await db.create("user", user("u1", "a@example.com", t0));
+      await expect(
+        db.update("user", [{ field: "id", op: "eq", value: "u1" }], { nope: 1 } as never),
+      ).rejects.toMatchObject({ code: "unknown_field" });
+      await expect(
+        db.findMany("user", [], { sort: { field: "nope" as "id", dir: "asc" } }),
+      ).rejects.toMatchObject({
+        code: "unknown_field",
+      });
     });
   });
 }

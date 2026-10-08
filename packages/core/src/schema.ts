@@ -73,10 +73,14 @@ export interface FieldDef {
   nullable?: boolean;
 }
 
-export interface ModelDef {
-  fields: Record<string, FieldDef>;
-  unique: readonly (readonly string[])[];
-  indexes: readonly (readonly string[])[];
+/**
+ * The field list derives from the row interface. A field missing here, or one
+ * the row does not have, fails the compile. This ties the two lists together.
+ */
+export interface ModelDef<M extends ModelName = ModelName> {
+  fields: { [K in keyof Models[M] & string]: FieldDef };
+  unique: readonly (readonly (keyof Models[M] & string)[])[];
+  indexes: readonly (readonly (keyof Models[M] & string)[])[];
 }
 
 const base = {
@@ -86,7 +90,7 @@ const base = {
 } as const satisfies Record<string, FieldDef>;
 
 /** The one source for model and field metadata. Adapters map this to SQL. */
-export const schema: Record<ModelName, ModelDef> = {
+export const schema: { [M in ModelName]: ModelDef<M> } = {
   user: {
     fields: {
       ...base,
