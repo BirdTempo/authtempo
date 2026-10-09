@@ -92,8 +92,37 @@ export function buildBundle(outDir) {
   return { app, exe: join(app, "Contents", "MacOS", "Electron") };
 }
 
+/**
+ * Removes the bundle from LaunchServices. It answers null, or the error text. It never throws:
+ * `lsregister -u` exits 1 for a path that is not registered (a stale or empty folder), so only
+ * the caller knows if an error matters.
+ */
 export function unregisterBundle(app) {
   try {
     execFileSync(LSREGISTER, ["-u", app], { stdio: "pipe", timeout: QUICK });
-  } catch {}
+    return null;
+  } catch (e) {
+    return `lsregister -u ended with ${e.status ?? e.code ?? e.signal}: ${String(e.stderr ?? "").trim()}`;
+  }
+}
+
+/**
+ * The bundle ids of the LaunchServices handler preference for a URL scheme, or null when there
+ * is none. Unregistering the bundle does not remove this preference (macOS 27.0, 2026-10-10), so
+ * `open example-app://...` fails with -10814 until the next run sets it again. The dump is about
+ * 20 MB and takes about 2 s; 30 s allows a loaded machine.
+ */
+export function handlerPreference(scheme) {
+  const dump = execFileSync(LSREGISTER, ["-dump"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 30_000,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  for (const block of dump.split(/\n-{20,}\n/)) {
+    if (!/^handlerpref id:/m.test(block)) continue;
+    if (!new RegExp(`^URL scheme:\\s+${scheme}$`, "m").test(block)) continue;
+    return /^all roles:\s+(.+)$/m.exec(block)?.[1]?.trim() ?? "(no roles line)";
+  }
+  return null;
 }

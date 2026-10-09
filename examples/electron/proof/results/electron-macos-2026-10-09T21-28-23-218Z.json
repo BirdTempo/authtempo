@@ -1,0 +1,1 @@
+{"proof":"electron-open-url-second-instance","result":"pass","date":"2026-10-09T21:28:23.218Z","macOS":"27.0","electron":"44.7.0","failures":[],"notes":["LaunchServices keeps a handler preference for example-app after the cleanup: dev.tempo-auth.example-electron"],"events":"/var/folders/3c/y7zkvv957xs7pny270dvdysw0000gn/T/tempo-auth-electron-proof-79k88R/events.jsonl"}

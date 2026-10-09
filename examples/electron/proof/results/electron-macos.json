@@ -1,0 +1,19 @@
+{
+  "proof": "electron-open-url-second-instance",
+  "recorded": "2026-10-10",
+  "source": "Task 4 report of plan 6c, fix round 1 (commit 7de90f3). The pass line is copied as printed.",
+  "passLine": "{\"proof\":\"electron-open-url-second-instance\",\"result\":\"pass\",\"date\":\"2026-10-09T21:11:30.246Z\",\"macOS\":\"27.0\",\"electron\":\"44.7.0\",\"failures\":[],\"events\":\"/var/folders/3c/y7zkvv957xs7pny270dvdysw0000gn/T/tempo-auth-electron-proof-pOQfk9/events.jsonl\"}",
+  "conditions": "2026-10-10 05:11 CST; load averages 6.34 4.95 4.47 with other sessions running; build turbo run build --force: 4 successful, 0 cached",
+  "versions": {
+    "macOS": "27.0 (build 26A425)",
+    "electron": "44.7.0",
+    "machine": "arm64 Mac Studio"
+  },
+  "registrationPath": "A copy of Electron.app in examples/electron/.proof-bundle-XXXXXX (not a temporary folder: LaunchServices marks an app there launch-disabled in-temp-dir and open fails with -10814), with CFBundleURLTypes for example-app and the bundle id dev.tempo-auth.example-electron in Info.plist, an ad hoc signature (codesign --force --deep --sign -), and lsregister -f.",
+  "breakProofs": [
+    "examples/electron/src/main.ts: opener.receive(url) became void url (script of commit 17a558a). Result fail: timed out: signed-in round 2. Restored; git diff empty; the next run passed.",
+    "packages/handoff/src/redirect.ts: no prefix check, query from the first ?. Result fail: no round 1 outcome came before the right URL arrived; round 1 signed in, not sign-in-failed (invalid_token); round 1 did not sign in; stop the run. Restored; git diff empty.",
+    "packages/handoff/src/electron.ts: the open-url listener commented out. Result fail: timed out: round 1 outcome. Restored; git diff empty.",
+    "run.mjs copy: the wrong URL on example-nope://. Result fail: open of example-nope://other (code length 46) failed: No application knows how to open URL (-10814). Restored from a copy; cmp equal."
+  ]
+}

@@ -2,14 +2,27 @@
 // (a) `open` of the app URL, which macOS sends to the running app as open-url;
 // (b) a second launch of the binary with the URL in argv, which reaches the first app as second-instance.
 // It also delivers a URL off the redirect, which the opener must drop.
+// Each pass writes its JSON line to results/electron-macos-<date>.json, a new file each time. It
+// never overwrites a file: results/electron-macos.json is the committed record of the first pass.
+// After the cleanup, the result notes whether LaunchServices still keeps a handler preference for
+// example-app. Unregistering the bundle does not remove it (macOS 27.0, 2026-10-10).
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BASE, playBrowser, startWorker } from "../../worker/proof/dev.mjs";
-import { buildBundle, deleteKeychainItem, unregisterBundle } from "./bundle.mjs";
+import { buildBundle, deleteKeychainItem, handlerPreference, unregisterBundle } from "./bundle.mjs";
 
 const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT = resolve(PKG_DIR, "..", "..");
@@ -19,6 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A run that ended on a signal can leave a registered bundle. Two registered bundles claim
 // example-app, and `open` can then start the stale copy. So remove every old one first.
+// The unregister error is ignored here: a stale folder may never have been registered.
 for (const name of readdirSync(PKG_DIR)) {
   if (!name.startsWith(BUNDLE_PREFIX)) continue;
   unregisterBundle(join(PKG_DIR, name, "TempoAuthExample.app"));
@@ -71,6 +85,7 @@ function openUrl(url) {
   }
 }
 const failures = [];
+const notes = [];
 const check = (name, ok) => {
   if (!ok) failures.push(name);
 };
@@ -93,14 +108,41 @@ async function stopApp(child) {
     await Promise.race([exited, timer(2_000)]);
   }
 }
-// The sync part of the cleanup, safe to call twice. A signal handler can run only sync code.
-function cleanupSync() {
-  for (const child of [first, second]) {
-    if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+// Runs one cleanup step. A step error goes into `failures` and never skips the steps after it.
+async function cleanupStep(label, fn) {
+  try {
+    await fn();
+  } catch (e) {
+    failures.push(`cleanup, ${label}: ${scrub(String(e))}`);
   }
-  if (bundle) unregisterBundle(bundle.app);
-  rmSync(bundleDir, { recursive: true, force: true });
-  deleteKeychainItem();
+}
+function cleanupStepSync(label, fn) {
+  try {
+    fn();
+  } catch (e) {
+    failures.push(`cleanup, ${label}: ${scrub(String(e))}`);
+  }
+}
+// The sync part of the cleanup, safe to call twice. A signal handler can run only sync code.
+// The bundle is unregistered before its folder is removed, so LaunchServices keeps no record of
+// a bundle that is gone.
+let cleanedUp = false;
+function cleanupSync() {
+  if (cleanedUp) return;
+  cleanedUp = true;
+  cleanupStepSync("kill the app", () => {
+    for (const child of [first, second]) {
+      if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+  });
+  cleanupStepSync("unregister the bundle", () => {
+    const error = bundle ? unregisterBundle(bundle.app) : null;
+    if (error) throw new Error(error);
+  });
+  cleanupStepSync("remove the bundle", () =>
+    rmSync(bundleDir, { recursive: true, force: true, maxRetries: 3 }),
+  );
+  cleanupStepSync("delete the Keychain items", deleteKeychainItem);
 }
 // Ctrl-C or SIGTERM skips `finally`. This handler is added before startWorker adds the kit's
 // handler, so it runs first. process.exit then runs the kit's exit handler, which stops the Worker.
@@ -227,24 +269,43 @@ try {
 } catch (e) {
   failures.push(scrub(String(e)));
 } finally {
+  // Each step in its own try: a Worker stop error must not skip the bundle and Keychain cleanup.
+  await cleanupStep("stop the first app", () => stopApp(first));
+  await cleanupStep("stop the second app", () => stopApp(second));
+  await cleanupStep("stop the Worker", () => worker?.stop());
+  cleanupSync();
+  // A note, not a failure: the preference stays after the bundle is gone (see the header).
   try {
-    await stopApp(first);
-    await stopApp(second);
-    await worker?.stop();
-    cleanupSync();
+    const roles = handlerPreference("example-app");
+    notes.push(
+      roles
+        ? `LaunchServices keeps a handler preference for example-app after the cleanup: ${roles}`
+        : "LaunchServices keeps no handler preference for example-app after the cleanup",
+    );
   } catch (e) {
-    failures.push(`cleanup: ${scrub(String(e))}`);
+    notes.push(`the handler preference check failed: ${String(e)}`);
   }
 }
-console.log(
-  JSON.stringify({
-    proof: "electron-open-url-second-instance",
-    result: failures.length === 0 ? "pass" : "fail",
-    date: new Date().toISOString(),
-    macOS,
-    electron,
-    failures,
-    events: eventsFile,
-  }),
-);
+const record = {
+  proof: "electron-open-url-second-instance",
+  result: failures.length === 0 ? "pass" : "fail",
+  date: new Date().toISOString(),
+  macOS,
+  electron,
+  failures,
+  notes,
+  events: eventsFile,
+};
+const line = JSON.stringify(record);
+if (record.result === "pass") {
+  const resultsDir = join(PKG_DIR, "proof", "results");
+  mkdirSync(resultsDir, { recursive: true });
+  // "wx" refuses an existing file, so a record is never overwritten.
+  writeFileSync(
+    join(resultsDir, `electron-macos-${record.date.replace(/[:.]/g, "-")}.json`),
+    `${line}\n`,
+    { flag: "wx" },
+  );
+}
+console.log(line);
 process.exit(failures.length === 0 ? 0 : 1);
