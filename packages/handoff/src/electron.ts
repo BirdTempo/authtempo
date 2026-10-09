@@ -108,16 +108,66 @@ export interface TokenStore {
   clear(): Promise<void>;
 }
 
+export interface TokenCipher {
+  available(): boolean | Promise<boolean>;
+  encrypt(plain: string): Promise<Uint8Array>;
+  /** `reEncrypt` is true when the platform asks the app to store the token again. */
+  decrypt(bytes: Uint8Array): Promise<{ plain: string; reEncrypt: boolean }>;
+}
+
 /**
- * The bearer token at rest, encrypted by the OS keychain through
- * `safeStorage`. It stays in the main process; a renderer asks the main
+ * On Linux with no secret store, Electron selects `basic_text`. That backend uses a fixed, public password, so the file is plaintext in effect.
+ * The promise that the store never writes a plaintext token must not rest on what the availability call answers in that state, which depends on the Electron version.
+ * Checked against the Electron 44.7.0 docs on 2026-10-09.
+ */
+function isWeakBackend(backend: string | undefined): boolean {
+  return backend === "basic_text" || backend === "unknown";
+}
+
+/** Wraps the sync `safeStorage` API. Use `asyncSafeStorageCipher` in a new app. */
+export function safeStorageCipher(safeStorage: SafeStorageLike): TokenCipher {
+  return {
+    available: () =>
+      safeStorage.isEncryptionAvailable() &&
+      !isWeakBackend(safeStorage.getSelectedStorageBackend?.()),
+    encrypt: async (plain) => safeStorage.encryptString(plain),
+    decrypt: async (bytes) => ({ plain: safeStorage.decryptString(bytes), reEncrypt: false }),
+  };
+}
+
+/** The async `safeStorage` functions. Electron 44 adds them; Electron 45 deprecates the sync ones. */
+export interface AsyncSafeStorageLike {
+  isAsyncEncryptionAvailable(): Promise<boolean>;
+  encryptStringAsync(plain: string): Promise<Uint8Array>;
+  decryptStringAsync(bytes: Uint8Array): Promise<{ result: string; shouldReEncrypt: boolean }>;
+  /** Linux only. The other platforms have no such function. */
+  getSelectedStorageBackend?(): string;
+}
+
+/** Wraps the async `safeStorage` API, and asks the store to write again when Electron says so. */
+export function asyncSafeStorageCipher(safeStorage: AsyncSafeStorageLike): TokenCipher {
+  return {
+    available: async () =>
+      (await safeStorage.isAsyncEncryptionAvailable()) &&
+      !isWeakBackend(safeStorage.getSelectedStorageBackend?.()),
+    encrypt: (plain) => safeStorage.encryptStringAsync(plain),
+    decrypt: async (bytes) => {
+      const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(bytes);
+      return { plain: result, reEncrypt: shouldReEncrypt };
+    },
+  };
+}
+
+/**
+ * The bearer token at rest, encrypted by the OS keychain through a
+ * `TokenCipher`. It stays in the main process; a renderer asks the main
  * process to make requests, it never holds the token. With no encryption
  * available the store refuses to write: a plaintext token on disk is worse
  * than a sign-in prompt.
  */
 export function createTokenStore(input: {
-  safeStorage: SafeStorageLike;
-  /** Reads the bytes `write` last stored, or null. Node's fs returns a Buffer, which `decryptString` accepts. */
+  cipher: TokenCipher;
+  /** Reads the bytes `write` last stored, or null. Node's fs returns a Buffer, which is a Uint8Array. */
   read(): Promise<Uint8Array | null>;
   write(bytes: Uint8Array): Promise<void>;
   remove(): Promise<void>;
@@ -126,25 +176,26 @@ export function createTokenStore(input: {
     async get() {
       const bytes = await input.read();
       if (!bytes) return null;
+      let decrypted: { plain: string; reEncrypt: boolean };
       try {
-        return input.safeStorage.decryptString(bytes);
+        decrypted = await input.cipher.decrypt(bytes);
       } catch {
         // The keychain entry changed, or the file is damaged. Drop it; the person signs in again.
         // The contract is that unreadable bytes never throw, even when the remove fails.
         await input.remove().catch(() => {});
         return null;
       }
+      if (decrypted.reEncrypt) {
+        // The platform asked for a fresh encryption. A failure here keeps the old bytes, which still decrypt, so the person stays signed in.
+        try {
+          await input.write(await input.cipher.encrypt(decrypted.plain));
+        } catch {}
+      }
+      return decrypted.plain;
     },
     async set(token) {
-      if (!input.safeStorage.isEncryptionAvailable())
-        throw new TokenStoreError("encryption_unavailable");
-      // On Linux with no secret store, Electron selects `basic_text`. That backend uses a fixed, public password, so the file is plaintext in effect.
-      // The promise that the store never writes a plaintext token must not rest on what isEncryptionAvailable answers in that state, which depends on the Electron version.
-      // Checked against the Electron 44.7.0 docs on 2026-10-09.
-      const backend = input.safeStorage.getSelectedStorageBackend?.();
-      if (backend === "basic_text" || backend === "unknown")
-        throw new TokenStoreError("encryption_unavailable");
-      await input.write(input.safeStorage.encryptString(token));
+      if (!(await input.cipher.available())) throw new TokenStoreError("encryption_unavailable");
+      await input.write(await input.cipher.encrypt(token));
     },
     clear: () => input.remove(),
   };

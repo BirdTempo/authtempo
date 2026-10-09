@@ -97,7 +97,7 @@ import { join } from "node:path";
 import { app, safeStorage, shell } from "electron";
 import { createClient } from "@tempo-auth/client";
 import { createHandoff } from "@tempo-auth/handoff";
-import { createTokenStore, electronOpener } from "@tempo-auth/handoff/electron";
+import { asyncSafeStorageCipher, createTokenStore, electronOpener } from "@tempo-auth/handoff/electron";
 
 // Without the lock, Windows and Linux start a second app, and the sign-in waits until the timeout.
 // `app.quit()` does not stop this script, so the losing instance must return here.
@@ -117,7 +117,7 @@ async function main() {
 
   const file = join(app.getPath("userData"), "token.bin");
   const store = createTokenStore({
-    safeStorage,
+    cipher: asyncSafeStorageCipher(safeStorage),
     // The bytes of the file, or null when there is no file.
     read: () =>
       readFile(file).catch((e: NodeJS.ErrnoException) =>
@@ -152,10 +152,12 @@ async function main() {
   it.
 - Windows and Linux start a second instance with the URL in `argv`.
   Forward it from the `second-instance` handler to `opener.receive`.
-- `createTokenStore({ safeStorage, read, write, remove })` keeps the token
+- `createTokenStore({ cipher, read, write, remove })` keeps the token
   encrypted at rest. `read` returns the stored bytes, or `null` when there
   are none. `write` stores the bytes. `remove` deletes them and ignores a
-  missing file.
+  missing file. Electron 45 deprecates the sync functions; use the async
+  cipher in a new app. `safeStorageCipher(safeStorage)` wraps the sync
+  functions for an older app.
 - If `safeStorage` has no encryption, `set` throws `TokenStoreError` and
   writes nothing. On Linux the `basic_text` backend counts as no
   encryption, because its password is public. A plaintext token on disk is
