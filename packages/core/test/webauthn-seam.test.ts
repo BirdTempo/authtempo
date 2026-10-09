@@ -156,4 +156,41 @@ describe("simplewebauthn seam", () => {
     ).rejects.toThrow(/authentication not verified/);
     expect(fromBase64Url(stored.id)).toHaveLength(16);
   });
+
+  it("rejects a registration and an authentication without user verification", async () => {
+    const auth = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origin });
+    auth.userVerified = false;
+    const regChallenge = toBase64Url(challenge());
+    await expect(
+      seam.verifyRegistration({
+        response: await auth.register(regChallenge),
+        expectedChallenge: regChallenge,
+        expectedOrigin: [RP.origin],
+        expectedRPID: RP.rpID,
+      }),
+    ).rejects.toThrow(/user verification/i);
+    auth.userVerified = true;
+    const stored = await seam.verifyRegistration({
+      response: await auth.register(regChallenge),
+      expectedChallenge: regChallenge,
+      expectedOrigin: [RP.origin],
+      expectedRPID: RP.rpID,
+    });
+    auth.userVerified = false;
+    const c = toBase64Url(challenge());
+    await expect(
+      seam.verifyAuthentication({
+        response: await auth.authenticate(c),
+        expectedChallenge: c,
+        expectedOrigin: [RP.origin],
+        expectedRPID: RP.rpID,
+        credential: {
+          id: stored.id,
+          publicKey: stored.publicKey,
+          counter: stored.counter,
+          transports: stored.transports,
+        },
+      }),
+    ).rejects.toThrow(/user verification/i);
+  });
 });

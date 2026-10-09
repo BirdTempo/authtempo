@@ -28,12 +28,14 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401 |
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
-| POST | `/passkey/register/options` | session | the creation options JSON for `navigator.credentials.create`; 403 `email_unverified` for an unverified user |
-| POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `passkey_failed`, `invalid_token`, or `token_expired`; a credential id that is already registered answers `passkey_failed` |
-| POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 when limited |
-| POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `passkey_failed` for an unknown credential or a bad signature |
-| GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }` |
-| POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }` or 404 |
+| POST | `/passkey/register/options` | session | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified` |
+| POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed` |
+| POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 `rate_limited` |
+| POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
+| GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
+| POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
+
+Without a `passkey` config none of these routes exist, and the router answers 404.
 
 The confirm page is `defaultConfirmPage`. Replace it with
 `magicLink.confirmPage` in the config. The function returns the markup
@@ -78,7 +80,7 @@ domain the credentials bind to, and every origin in `origins` must be on
 it (the host equals it or ends with `.<rpID>`). Registration needs a
 session and a verified email. Sign-in uses a discoverable credential, so
 the options carry no credential list, and both ceremonies require user
-verification.
+verification. Every origin in `origins` must also be `baseURL` or in `trustedOrigins`, or the router refuses its posts; `resolveConfig` checks this.
 
 The browser side is `navigator.credentials.create(options)` and
 `navigator.credentials.get(options)` with the options JSON from the
@@ -131,9 +133,7 @@ tests prove the whole flow without a browser.
   address that was unverified. Registration already needs a verified
   email, so this only matters for a path that creates passkeys another
   way.
-- A passkey sign-in moves the counter in one conditional write. Two
-  sign-ins with the same assertion at the same time let one through and
-  answer `passkey_failed` to the other.
+- Replay protection is the challenge: a second use of the same assertion answers `invalid_token`. The counter write is conditional on the counter read, which separates two different assertions; an authenticator that always reports 0 is accepted after 0, as WebAuthn allows.
 - On Node, loading @simplewebauthn/server prints one ExperimentalWarning
   about ML-DSA. It is the library's post-quantum probe, not a tempo-auth
   setting, and workerd prints nothing.

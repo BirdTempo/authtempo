@@ -164,6 +164,13 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       if (host !== rp && !host.endsWith(`.${rp}`)) {
         throw new ConfigError(`passkey.origins host ${host} is not on rpID ${rp}`);
       }
+      // The router answers 403 to a post from an origin that is not trusted, so an
+      // origin the passkey config accepts but the router refuses is a silent break.
+      if (o !== input.baseURL && !input.trustedOrigins.includes(o)) {
+        throw new ConfigError(
+          `passkey.origins has ${o}, which is neither baseURL nor in trustedOrigins; add it to trustedOrigins or the router answers 403 to its posts`,
+        );
+      }
     }
     passkey = {
       rpID: input.passkey.rpID,

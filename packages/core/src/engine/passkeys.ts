@@ -110,7 +110,9 @@ async function consumeChallenge(
     return fail(expired ? "token_expired" : "invalid_token");
   }
   // The row is spent whatever comes next, so a challenge issued for one
-  // user or one ceremony cannot be retried for another.
+  // user or one ceremony cannot be retried for another. The identifier alone
+  // separates the two ceremonies (a user id against "sign-in"); the kind
+  // clause is a second guard that no test can isolate.
   const data = row.data as { kind?: unknown } | null;
   if (row.identifier !== identifier || data?.kind !== kind) return fail("invalid_token");
   return ok(true);
@@ -253,8 +255,7 @@ export async function verifyPasskeyAuthentication(
   ]);
   if (!user) return fail("passkey_failed");
   const now = config.clock.now();
-  // Conditional on the counter we read, so a concurrent replay of the same
-  // assertion cannot also pass: only one request moves the counter.
+  // Conditional on the counter we read: two different assertions that read the same stored counter cannot both pass. A replay of one assertion is stopped earlier, by the challenge consume.
   const moved = await config.storage.update(
     "passkey",
     [

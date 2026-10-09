@@ -8,7 +8,7 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../../engine/passkeys.js";
-import { publicSession, readSessionToken, resolveSession } from "../../engine/sessions.js";
+import { publicSession, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { sessionCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
@@ -30,10 +30,15 @@ const deleteBody = z.object({ id: z.string().min(1).max(64) });
 
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];
-  const withUser = async (ctx: RouteContext) => {
-    const token = readSessionToken(config, ctx.request);
-    const resolved = token ? await resolveSession(config, token) : null;
-    return resolved?.user ?? null;
+  /** The session, plus the renewed cookie when the read moved the expiry. Every session route sends that cookie. */
+  const withSession = async (ctx: RouteContext) => {
+    const resolved = await sessionFromRequest(config, ctx.request);
+    if (!resolved) return null;
+    return { user: resolved.user, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+  };
+  const send = (res: Response, renewed: string | null) => {
+    if (renewed) res.headers.append("set-cookie", renewed);
+    return res;
   };
   const unauthorized = () => json({ error: "unauthorized" }, 401);
   return [
@@ -41,25 +46,25 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       method: "POST",
       path: "/passkey/register/options",
       async handler(ctx) {
-        const user = await withUser(ctx);
-        if (!user) return unauthorized();
-        return respond(await passkeyRegistrationOptions(config, { user }));
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        return send(respond(await passkeyRegistrationOptions(config, { user: s.user })), s.renewed);
       },
     },
     {
       method: "POST",
       path: "/passkey/register/verify",
       async handler(ctx) {
-        const user = await withUser(ctx);
-        if (!user) return unauthorized();
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
         const body = await readJson(ctx.request, registerVerifyBody);
-        if (!body.ok) return respond(body);
+        if (!body.ok) return send(respond(body), s.renewed);
         const r = await verifyPasskeyRegistration(config, {
-          user,
+          user: s.user,
           response: body.value.response,
           name: body.value.name,
         });
-        return r.ok ? json({ passkey: r.value }) : respond(r);
+        return send(r.ok ? json({ passkey: r.value }) : respond(r), s.renewed);
       },
     },
     {
@@ -95,21 +100,24 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       method: "GET",
       path: "/passkeys",
       async handler(ctx) {
-        const user = await withUser(ctx);
-        if (!user) return unauthorized();
-        const r = await listPasskeys(config, { user });
-        return r.ok ? json({ passkeys: r.value }) : respond(r);
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const r = await listPasskeys(config, { user: s.user });
+        return send(r.ok ? json({ passkeys: r.value }) : respond(r), s.renewed);
       },
     },
     {
       method: "POST",
       path: "/passkeys/delete",
       async handler(ctx) {
-        const user = await withUser(ctx);
-        if (!user) return unauthorized();
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
         const body = await readJson(ctx.request, deleteBody);
-        if (!body.ok) return respond(body);
-        return respond(await deletePasskey(config, { user, id: body.value.id }));
+        if (!body.ok) return send(respond(body), s.renewed);
+        return send(
+          respond(await deletePasskey(config, { user: s.user, id: body.value.id })),
+          s.renewed,
+        );
       },
     },
   ];

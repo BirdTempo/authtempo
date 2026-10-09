@@ -12,6 +12,8 @@ export interface SoftAuthenticatorOptions {
   origin: string;
   /** Sets the BE and BS flags, as a synced passkey does. Default false. */
   backedUp?: boolean;
+  /** Clears the UV flag when false, to test that a server requires it. Default true. */
+  userVerified?: boolean;
 }
 
 export interface SoftRegistrationResponse {
@@ -50,6 +52,8 @@ export class SoftAuthenticator {
   readonly credentialId: string;
   /** The last counter sent. `authenticate` sends counter + 1 unless told otherwise. */
   counter = 0;
+  /** Read at ceremony time. Set it to false to send a response without the UV flag. */
+  userVerified: boolean;
   private userHandle: Uint8Array | null = null;
 
   private constructor(
@@ -58,6 +62,7 @@ export class SoftAuthenticator {
     private readonly credentialIdBytes: Uint8Array,
   ) {
     this.credentialId = toBase64Url(credentialIdBytes);
+    this.userVerified = opts.userVerified !== false;
   }
 
   static async create(opts: SoftAuthenticatorOptions): Promise<SoftAuthenticator> {
@@ -78,7 +83,7 @@ export class SoftAuthenticator {
     const clientDataJSON = this.clientData("webauthn.create", challenge, this.opts.origin);
     const authData = concat(
       await sha256(utf8(this.opts.rpID)),
-      new Uint8Array([FLAG_UP | FLAG_UV | FLAG_AT | this.backupFlags()]),
+      new Uint8Array([FLAG_UP | this.uvFlag() | FLAG_AT | this.backupFlags()]),
       counterBytes(0),
       new Uint8Array(16), // aaguid, zero for a software authenticator
       new Uint8Array([this.credentialIdBytes.length >> 8, this.credentialIdBytes.length & 0xff]),
@@ -117,7 +122,7 @@ export class SoftAuthenticator {
     );
     const authData = concat(
       await sha256(utf8(this.opts.rpID)),
-      new Uint8Array([FLAG_UP | FLAG_UV | this.backupFlags()]),
+      new Uint8Array([FLAG_UP | this.uvFlag() | this.backupFlags()]),
       counterBytes(counter),
     );
     const signed = concat(authData, await sha256(clientDataJSON));
@@ -137,6 +142,10 @@ export class SoftAuthenticator {
         ...(this.userHandle ? { userHandle: toBase64Url(this.userHandle) } : {}),
       },
     };
+  }
+
+  private uvFlag(): number {
+    return this.userVerified ? FLAG_UV : 0;
   }
 
   private backupFlags(): number {

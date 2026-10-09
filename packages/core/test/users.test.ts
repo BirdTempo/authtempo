@@ -167,6 +167,7 @@ describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input
 
 describe("claimEmail covers passkeys (plan 4 input)", () => {
   it("deletes the user's passkeys and pending passkey challenges", async () => {
+    // Registration refuses an unverified user, so the product never creates these rows for U1. The deletes are a second guard; this test pins that guard only.
     const storage = createMemoryAdapter();
     const now = new Date("2026-01-01T00:00:00.000Z");
     const row = { createdAt: now, updatedAt: now };
@@ -190,6 +191,14 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       name: null,
       ...row,
     });
+    await storage.create("user", {
+      id: "U2",
+      email: "b@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      ...row,
+    });
     await storage.create("passkey", {
       id: "P2",
       userId: "U2",
@@ -209,7 +218,7 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       valueHash: "h1",
       expiresAt: now,
       consumedAt: null,
-      data: null,
+      data: { kind: "registration" },
       ...row,
     });
     await storage.create("verification", {
@@ -219,7 +228,7 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       valueHash: "h2",
       expiresAt: now,
       consumedAt: null,
-      data: null,
+      data: { kind: "authentication" },
       ...row,
     });
     await storage.transaction((tx) => claimEmail(tx, "U1", null, now));

@@ -17,9 +17,9 @@ import {
 import {
   destroySession,
   type ResolvedSession,
-  readSessionToken,
   renewedSessionCookie,
   resolveSession,
+  sessionFromRequest,
 } from "./engine/sessions.js";
 import {
   completeSocial,
@@ -99,10 +99,7 @@ export function createAuth(input: AuthConfig): Auth {
   ]);
   return {
     handle,
-    async session(request) {
-      const token = readSessionToken(config, request);
-      return token ? resolveSession(config, token) : null;
-    },
+    session: (request) => sessionFromRequest(config, request),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     api: {
       requestMagicLink: (i) => requestMagicLink(config, i),

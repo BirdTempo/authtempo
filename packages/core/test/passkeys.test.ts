@@ -115,6 +115,20 @@ describe("passkey registration", () => {
     });
   });
 
+  it("rejects an authentication challenge presented to registration and stores nothing", async () => {
+    const auth = passkeyAuth();
+    const user = await auth.seedUser("ada@example.com");
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: ORIGIN });
+    const options = await passkeyAuthenticationOptions(auth.config, { ip: null });
+    if (!options.ok) throw new Error(options.code);
+    const r = await verifyPasskeyRegistration(auth.config, {
+      user,
+      response: await soft.register(options.value.challenge),
+    });
+    expect(r).toMatchObject({ ok: false, code: "invalid_token" });
+    expect(await auth.storage.findMany("passkey", [])).toHaveLength(0);
+  });
+
   it("rejects a response from another origin and stores nothing (Review Focus 1)", async () => {
     const auth = passkeyAuth();
     const user = await auth.seedUser("ada@example.com");
@@ -229,6 +243,24 @@ describe("passkey authentication", () => {
     expect(r.value.token).toMatch(/^ts_/);
     expect((await resolveSession(auth.config, r.value.token))?.user.id).toBe(user.id);
     expect((await auth.storage.findMany("passkey", []))[0]?.counter).toBe(1);
+  });
+
+  it("signs in twice with an authenticator that always reports counter 0", async () => {
+    const auth = passkeyAuth();
+    const user = await auth.seedUser("ada@example.com");
+    const { soft } = await registered(auth, user);
+    for (let i = 0; i < 2; i++) {
+      const options = await passkeyAuthenticationOptions(auth.config, { ip: null });
+      if (!options.ok) throw new Error(options.code);
+      const r = await verifyPasskeyAuthentication(auth.config, {
+        response: await soft.authenticate(options.value.challenge, { counter: 0 }),
+        ip: null,
+        userAgent: null,
+      });
+      expect(r.ok).toBe(true);
+    }
+    expect((await auth.storage.findMany("passkey", []))[0]?.counter).toBe(0);
+    expect(await auth.storage.findMany("session", [])).toHaveLength(2);
   });
 
   it("rejects a replayed response and keeps one session (Review Focus 2)", async () => {
@@ -435,6 +467,21 @@ describe("passkey routes", () => {
       /^tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
     );
     expect(await auth.storage.findMany("session", [])).toHaveLength(2);
+  });
+
+  it("renews the sliding-refresh cookie on a session route, once", async () => {
+    const auth = passkeyAuth();
+    const handle = createRouter(auth.config, passkeyRoutes(auth.config));
+    const { cookie } = await signedIn(auth);
+    auth.clock.advance(8 * 86_400_000);
+    const first = await handle(get("/auth/passkeys", { cookie }));
+    expect(first.status).toBe(200);
+    expect(first.headers.get("set-cookie")).toMatch(
+      /^tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
+    );
+    const second = await handle(get("/auth/passkeys", { cookie }));
+    expect(second.status).toBe(200);
+    expect(second.headers.get("set-cookie")).toBeNull();
   });
 
   it("answers 401 without a session on the registration and management routes", async () => {
