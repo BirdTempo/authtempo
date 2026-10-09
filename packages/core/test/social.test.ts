@@ -5,6 +5,7 @@ import {
   resolveSocialUser,
   startSocial,
 } from "../src/engine/social.js";
+import { findOrCreateUserByEmail } from "../src/engine/users.js";
 import { sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -272,6 +273,33 @@ describe("completeSocial", () => {
     expect(r2.ok && r2.value.user.name).toBe("Ada Lovelace");
     expect(await auth.storage.findMany("user", [])).toHaveLength(1);
   });
+
+  it("fails oauth_failed without a fetch call when the callback has no code (review M2)", async () => {
+    const auth = socialAuth();
+    const s = await started(auth);
+    expect(await complete(auth, s, { code: null })).toMatchObject({
+      ok: false,
+      code: "oauth_failed",
+    });
+    expect(auth.calls).toHaveLength(0);
+  });
+
+  it("fails oauth_failed when the fetch rejects or answers 200 with a body that is not JSON (review M1)", async () => {
+    const down = fakeFetch(() => {
+      throw new Error("net");
+    });
+    const a1 = socialAuth({ social: { google: GOOGLE, fetch: down.fetchFn } });
+    expect(await complete(a1, await started(a1))).toMatchObject({
+      ok: false,
+      code: "oauth_failed",
+    });
+    const html = fakeFetch(() => new Response("<html>", { status: 200 }));
+    const a2 = socialAuth({ social: { google: GOOGLE, fetch: html.fetchFn } });
+    expect(await complete(a2, await started(a2))).toMatchObject({
+      ok: false,
+      code: "oauth_failed",
+    });
+  });
 });
 
 describe("resolveSocialUser", () => {
@@ -377,6 +405,73 @@ describe("resolveSocialUser", () => {
     expect(r.ok && r.value.id).toBe("01WINNER");
     expect(await inner.findMany("user", [])).toHaveLength(1);
     expect((await inner.findMany("identity", [])).map((i) => i.provider).sort()).toEqual([
+      "email",
+      "google",
+    ]);
+  });
+
+  it("revokes an unverified claimant when the real owner signs in by a verified provider (review I1)", async () => {
+    const auth = socialAuth();
+    // The attacker signs in through a provider that does not verify the address.
+    const claim = await resolveSocialUser(
+      auth.storage,
+      "google",
+      { ...profile, subject: "attacker", emailVerified: false, name: null },
+      now,
+    );
+    expect(claim.ok && claim.value.emailVerified).toBe(false);
+    const claimant = claim.ok ? claim.value : null;
+    if (!claimant) throw new Error("no claimant");
+    await auth.storage.create("session", {
+      id: "S1",
+      userId: claimant.id,
+      tokenHash: "h",
+      expiresAt: new Date(now.getTime() + 1000),
+      lastSeenAt: now,
+      ip: null,
+      userAgent: null,
+      activeOrganizationId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // The real owner proves the address through Apple.
+    const owner = await resolveSocialUser(
+      auth.storage,
+      "apple",
+      { ...profile, subject: "owner" },
+      now,
+    );
+    expect(owner.ok && owner.value.id).toBe(claimant.id);
+    expect(owner.ok && owner.value.emailVerified).toBe(true);
+    const identities = await auth.storage.findMany("identity", [], {
+      sort: { field: "provider", dir: "asc" },
+    });
+    expect(identities.map((i) => [i.provider, i.subject])).toEqual([
+      ["apple", "owner"],
+      ["email", "ada@example.com"],
+    ]);
+    expect(await auth.storage.findMany("session", [])).toHaveLength(0);
+  });
+
+  it("revokes an unverified claimant when the real owner signs in by magic link", async () => {
+    const auth = socialAuth();
+    await resolveSocialUser(
+      auth.storage,
+      "google",
+      { ...profile, subject: "attacker", emailVerified: false },
+      now,
+    );
+    const { user } = await findOrCreateUserByEmail(auth.storage, "ada@example.com", now);
+    expect(user.emailVerified).toBe(true);
+    expect((await auth.storage.findMany("identity", [])).map((i) => i.provider)).toEqual(["email"]);
+  });
+
+  it("keeps the identity that carries the proof when the same identity returns verified", async () => {
+    const auth = socialAuth();
+    await resolveSocialUser(auth.storage, "google", { ...profile, emailVerified: false }, now);
+    const r = await resolveSocialUser(auth.storage, "google", profile, now);
+    expect(r.ok && r.value.emailVerified).toBe(true);
+    expect((await auth.storage.findMany("identity", [])).map((i) => i.provider).sort()).toEqual([
       "email",
       "google",
     ]);

@@ -132,6 +132,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     ]);
     providers.push(appleProvider(input.social.apple));
   }
+  // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
   const fetchFn = input.social?.fetch ?? globalThis.fetch.bind(globalThis);
   return {
     basePath,

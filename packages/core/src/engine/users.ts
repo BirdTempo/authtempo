@@ -1,6 +1,6 @@
 import { newId } from "../primitives/ids.js";
 import type { UserRow } from "../schema.js";
-import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 
@@ -17,6 +17,32 @@ export function normalizeEmail(raw: string): string | null {
     if (code <= 0x1f || code === 0x7f) return null;
   }
   return email;
+}
+
+/**
+ * A user created through an unverified email is a claim, not proof. When a
+ * sign-in proves the address, every identity that came in before (except
+ * the one that carries the proof, and the `email` identity) and every
+ * session are deleted, so a claimant cannot keep access to the account.
+ * Runs inside the caller's transaction.
+ */
+export async function claimEmail(
+  tx: StorageAdapter,
+  userId: string,
+  keepIdentityId: string | null,
+  now: Date,
+): Promise<void> {
+  const where: Where<"identity">[] = [
+    { field: "userId", op: "eq", value: userId },
+    { field: "provider", op: "ne", value: "email" },
+  ];
+  if (keepIdentityId) where.push({ field: "id", op: "ne", value: keepIdentityId });
+  await tx.delete("identity", where);
+  await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
+  await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
+    emailVerified: true,
+    updatedAt: now,
+  });
 }
 
 export async function findOrCreateUserByEmail(
@@ -69,10 +95,7 @@ function createOrFindInTransaction(
         });
       }
       if (!existing.emailVerified) {
-        await tx.update("user", [{ field: "id", op: "eq", value: existing.id }], {
-          emailVerified: true,
-          updatedAt: now,
-        });
+        await claimEmail(tx, existing.id, null, now);
         return { user: { ...existing, emailVerified: true, updatedAt: now }, created: false };
       }
       return { user: existing, created: false };

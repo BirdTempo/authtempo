@@ -13,7 +13,7 @@ import type { UserRow } from "../schema.js";
 import { buildQuery, type Provider, type SocialProfile } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { createSession } from "./sessions.js";
-import { normalizeEmail } from "./users.js";
+import { claimEmail, normalizeEmail } from "./users.js";
 
 export const OAUTH_STATE_PREFIX = "os_";
 const STATE_RE = /^os_[A-Za-z0-9_-]{43}$/;
@@ -272,6 +272,13 @@ function linkInTransaction(
     if (identity) {
       const user = await tx.findOne("user", [{ field: "id", op: "eq", value: identity.userId }]);
       if (!user) throw new Error("tempo-auth: identity without a user");
+      if (!user.emailVerified && profile.emailVerified) {
+        await claimEmail(tx, user.id, identity.id, now);
+        await ensureEmailIdentity(tx, user.id, user.email, now);
+        return ok(
+          await fillUser(tx, { ...user, emailVerified: true, updatedAt: now }, profile, now),
+        );
+      }
       return ok(await fillUser(tx, user, profile, now));
     }
     const email = profile.email ? normalizeEmail(profile.email) : null;
@@ -279,14 +286,16 @@ function linkInTransaction(
     const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
     if (existing) {
       if (!profile.emailVerified) return fail("email_taken_unverified");
+      // An unverified account is a claim. The proof revokes earlier claimants
+      // before the new identity is linked.
+      let current = existing;
+      if (!existing.emailVerified) {
+        await claimEmail(tx, existing.id, null, now);
+        current = { ...existing, emailVerified: true, updatedAt: now };
+      }
       await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
-      const emailIdentity = await tx.findOne("identity", [
-        { field: "provider", op: "eq", value: "email" },
-        { field: "subject", op: "eq", value: email },
-      ]);
-      if (!emailIdentity)
-        await tx.create("identity", identityRow(existing.id, "email", email, now));
-      return ok(await fillUser(tx, existing, profile, now));
+      await ensureEmailIdentity(tx, existing.id, email, now);
+      return ok(await fillUser(tx, current, profile, now));
     }
     const user = await tx.create("user", {
       id: newId(now),
@@ -306,6 +315,20 @@ function linkInTransaction(
   });
 }
 
+/** The email identity means "this address signs in by magic link". It exists once the address is proved. */
+async function ensureEmailIdentity(
+  tx: StorageAdapter,
+  userId: string,
+  email: string,
+  now: Date,
+): Promise<void> {
+  const found = await tx.findOne("identity", [
+    { field: "provider", op: "eq", value: "email" },
+    { field: "subject", op: "eq", value: email },
+  ]);
+  if (!found) await tx.create("identity", identityRow(userId, "email", email, now));
+}
+
 function identityRow(userId: string, provider: string, subject: string, now: Date) {
   return {
     id: newId(now),
@@ -318,17 +341,16 @@ function identityRow(userId: string, provider: string, subject: string, now: Dat
   };
 }
 
-/** Fills a null name or image, and marks the email verified when the provider verifies it. */
+/** Fills a null name or image. The caller has already marked the email verified through `claimEmail`. */
 async function fillUser(
   tx: StorageAdapter,
   user: UserRow,
   profile: SocialProfile,
   now: Date,
 ): Promise<UserRow> {
-  const patch: Partial<Pick<UserRow, "name" | "image" | "emailVerified">> = {};
+  const patch: Partial<Pick<UserRow, "name" | "image">> = {};
   if (user.name === null && profile.name) patch.name = profile.name;
   if (user.image === null && profile.image) patch.image = profile.image;
-  if (!user.emailVerified && profile.emailVerified) patch.emailVerified = true;
   if (Object.keys(patch).length === 0) return user;
   await tx.update("user", [{ field: "id", op: "eq", value: user.id }], {
     ...patch,
