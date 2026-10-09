@@ -28,6 +28,12 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401 |
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
+| POST | `/passkey/register/options` | session | the creation options JSON for `navigator.credentials.create`; 403 `email_unverified` for an unverified user |
+| POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `passkey_failed`, `invalid_token`, or `token_expired`; a credential id that is already registered answers `passkey_failed` |
+| POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 when limited |
+| POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `passkey_failed` for an unknown credential or a bad signature |
+| GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }` |
+| POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }` or 404 |
 
 The confirm page is `defaultConfirmPage`. Replace it with
 `magicLink.confirmPage` in the config. The function returns the markup
@@ -65,6 +71,29 @@ the account.
 `social.fetch` and `jwt` exist for tests: inject a fetch for the token
 endpoint and a fake verifier, so no test reaches a provider.
 
+## Passkeys
+
+Set `passkey: { rpID, rpName, origins }`. `rpID` is the registrable
+domain the credentials bind to, and every origin in `origins` must be on
+it (the host equals it or ends with `.<rpID>`). Registration needs a
+session and a verified email. Sign-in uses a discoverable credential, so
+the options carry no credential list, and both ceremonies require user
+verification.
+
+The browser side is `navigator.credentials.create(options)` and
+`navigator.credentials.get(options)` with the options JSON from the
+routes (through `PublicKeyCredential.parseCreationOptionsFromJSON` and
+`parseRequestOptionsFromJSON`), and the credential's `toJSON()` goes back
+as `response`. Plan 5's client package wraps this.
+
+`@tempo-auth/core/testing` exports `SoftAuthenticator`, a software
+authenticator on Web Crypto that produces both responses, so an app's
+tests prove the whole flow without a browser.
+
+`webauthn` in the config replaces the seam. The default is
+@simplewebauthn/server 14.0.3, which runs on Workers without
+`nodejs_compat` (proved by the example Worker's spike test).
+
 ## Limits in version 1
 
 - The default limiter counts in memory. On Workers every isolate has its
@@ -95,6 +124,19 @@ endpoint and a fake verifier, so no test reaches a provider.
   host on a sibling subdomain of the API can set a cookie with the same
   name for the parent domain. Keep the API on its own registrable domain,
   or wait for the `__Host-` decision in plan 5.
+- A passkey challenge is valid for five minutes and for one use. Passkey
+  sign-in options are limited to 30 per IP, and verifies to 20 per IP,
+  per 15 minutes, in the same per-isolate limiter.
+- `claimEmail` deletes a user's passkeys when a proof arrives for an
+  address that was unverified. Registration already needs a verified
+  email, so this only matters for a path that creates passkeys another
+  way.
+- A passkey sign-in moves the counter in one conditional write. Two
+  sign-ins with the same assertion at the same time let one through and
+  answer `passkey_failed` to the other.
+- On Node, loading @simplewebauthn/server prints one ExperimentalWarning
+  about ML-DSA. It is the library's post-quantum probe, not a tempo-auth
+  setting, and workerd prints nothing.
 
 ## The storage port
 

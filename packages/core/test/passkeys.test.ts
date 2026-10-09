@@ -7,12 +7,15 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
-import { resolveSession } from "../src/engine/sessions.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
+import { createRouter } from "../src/http/router.js";
+import { passkeyRoutes } from "../src/http/routes/passkeys.js";
+import { sessionRoutes } from "../src/http/routes/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { makeAuth } from "./helpers.js";
+import { get, makeAuth, post } from "./helpers.js";
 
 const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
 const ORIGIN = "https://app.example.com";
@@ -380,5 +383,105 @@ describe("passkey list and delete", () => {
       value: { ok: true },
     });
     expect(await auth.storage.findMany("passkey", [])).toHaveLength(1);
+  });
+});
+
+describe("passkey routes", () => {
+  async function signedIn(auth: ReturnType<typeof makeAuth>, email = "ada@example.com") {
+    const user = await auth.seedUser(email);
+    const { token } = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    return { user, cookie: `tempo_session=${token}` };
+  }
+
+  it("registers and signs in through the routes, with the cookie on sign-in", async () => {
+    const auth = passkeyAuth();
+    const handle = createRouter(auth.config, [
+      ...sessionRoutes(auth.config),
+      ...passkeyRoutes(auth.config),
+    ]);
+    const { cookie } = await signedIn(auth);
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: ORIGIN });
+    const options = await handle(post("/auth/passkey/register/options", {}, { cookie }));
+    expect(options.status).toBe(200);
+    const creation = (await options.json()) as { challenge: string };
+    const verify = await handle(
+      post(
+        "/auth/passkey/register/verify",
+        { response: await soft.register(creation.challenge), name: "Laptop" },
+        { cookie },
+      ),
+    );
+    expect(verify.status).toBe(200);
+    expect(await verify.json()).toMatchObject({
+      passkey: { name: "Laptop", deviceType: "singleDevice" },
+    });
+    const list = await handle(get("/auth/passkeys", { cookie }));
+    expect(((await list.json()) as { passkeys: unknown[] }).passkeys).toHaveLength(1);
+    const request = await handle(post("/auth/passkey/authenticate/options", {}));
+    expect(request.status).toBe(200);
+    const req = (await request.json()) as { challenge: string };
+    const signIn = await handle(
+      post("/auth/passkey/authenticate/verify", {
+        response: await soft.authenticate(req.challenge),
+      }),
+    );
+    expect(signIn.status).toBe(200);
+    expect(await signIn.json()).toMatchObject({ user: { email: "ada@example.com" } });
+    expect(signIn.headers.get("set-cookie")).toMatch(
+      /^tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
+    );
+    expect(await auth.storage.findMany("session", [])).toHaveLength(2);
+  });
+
+  it("answers 401 without a session on the registration and management routes", async () => {
+    const auth = passkeyAuth();
+    const handle = createRouter(auth.config, passkeyRoutes(auth.config));
+    expect((await handle(post("/auth/passkey/register/options", {}))).status).toBe(401);
+    expect((await handle(post("/auth/passkey/register/verify", { response: {} }))).status).toBe(
+      401,
+    );
+    expect((await handle(get("/auth/passkeys"))).status).toBe(401);
+    expect((await handle(post("/auth/passkeys/delete", { id: "x" }))).status).toBe(401);
+  });
+
+  it("answers 400 on a bad body, 404 on a foreign delete, and 403 for an unverified user", async () => {
+    const auth = passkeyAuth();
+    const handle = createRouter(auth.config, passkeyRoutes(auth.config));
+    const { cookie } = await signedIn(auth);
+    expect(
+      (await handle(post("/auth/passkey/register/verify", { nope: 1 }, { cookie }))).status,
+    ).toBe(400);
+    expect(
+      (await handle(post("/auth/passkey/authenticate/verify", { response: "x" }))).status,
+    ).toBe(400);
+    expect((await handle(post("/auth/passkeys/delete", { id: "nope" }, { cookie }))).status).toBe(
+      404,
+    );
+    const now = auth.clock.now();
+    const u = await auth.storage.create("user", {
+      id: "U9",
+      email: "u@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { token } = await createSession(auth.config, { userId: u.id, ip: null, userAgent: null });
+    const res = await handle(
+      post("/auth/passkey/register/options", {}, { cookie: `tempo_session=${token}` }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "email_unverified" });
+  });
+
+  it("registers no passkey route when passkeys are off", async () => {
+    const auth = makeAuth();
+    const handle = createRouter(auth.config, passkeyRoutes(auth.config));
+    expect((await handle(post("/auth/passkey/authenticate/options", {}))).status).toBe(404);
   });
 });
