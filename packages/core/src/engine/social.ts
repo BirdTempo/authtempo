@@ -183,14 +183,19 @@ export async function completeSocial(
   const profile = provider.profile(claims, { user: input.user ?? undefined });
   if (!profile.subject) return fail("oauth_failed");
 
-  const resolved = await resolveSocialUser(config.storage, provider.name, profile, now);
+  // The session commits with the claim in one transaction, so a claimant's
+  // in-flight callback cannot keep a session the claim deleted.
+  const resolved = await resolveSocialUser(
+    config.storage,
+    provider.name,
+    profile,
+    now,
+    (tx, user) =>
+      createSession(config, { userId: user.id, ip: input.ip, userAgent: input.userAgent }, tx),
+  );
   if (!resolved.ok) return resolved;
-  const { token } = await createSession(config, {
-    userId: resolved.value.id,
-    ip: input.ip,
-    userAgent: input.userAgent,
-  });
-  return ok({ token, next: safeNext(data.next), user: resolved.value });
+  const { user, after } = resolved.value;
+  return ok({ token: after.token, next: safeNext(data.next), user });
 }
 
 /** The ID token from the token endpoint, or null on any failure. Logs the status only. */
@@ -254,16 +259,36 @@ async function exchangeCode(
  * Links the identity to a user by the spec's rules. One transaction per
  * attempt. A `unique_violation` is caught here, outside the transaction,
  * and the whole resolution runs once more against the winner's rows.
+ * `after` runs inside the same transaction once the user is resolved, so
+ * the sign-in's session commits with the claim.
  */
-export async function resolveSocialUser(
+export function resolveSocialUser(
   storage: StorageAdapter,
   provider: string,
   profile: SocialProfile,
   now: Date,
-): Promise<Result<UserRow>> {
+): Promise<Result<UserRow>>;
+export function resolveSocialUser<T>(
+  storage: StorageAdapter,
+  provider: string,
+  profile: SocialProfile,
+  now: Date,
+  after: (tx: StorageAdapter, user: UserRow) => Promise<T>,
+): Promise<Result<{ user: UserRow; after: T }>>;
+export async function resolveSocialUser<T>(
+  storage: StorageAdapter,
+  provider: string,
+  profile: SocialProfile,
+  now: Date,
+  after?: (tx: StorageAdapter, user: UserRow) => Promise<T>,
+): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await linkInTransaction(storage, provider, profile, now);
+      return await storage.transaction(async (tx) => {
+        const linked = await linkInTransaction(tx, provider, profile, now);
+        if (!after || !linked.ok) return linked;
+        return ok({ user: linked.value, after: await after(tx, linked.value) });
+      });
     } catch (err) {
       if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
       throw err;
@@ -271,68 +296,64 @@ export async function resolveSocialUser(
   }
 }
 
-function linkInTransaction(
-  storage: StorageAdapter,
+/** Runs inside the caller's transaction. */
+async function linkInTransaction(
+  tx: StorageAdapter,
   provider: string,
   profile: SocialProfile,
   now: Date,
 ): Promise<Result<UserRow>> {
-  return storage.transaction(async (tx) => {
-    const identity = await tx.findOne("identity", [
-      { field: "provider", op: "eq", value: provider },
-      { field: "subject", op: "eq", value: profile.subject },
-    ]);
-    if (identity) {
-      const user = await tx.findOne("user", [{ field: "id", op: "eq", value: identity.userId }]);
-      if (!user) throw new Error("tempo-auth: identity without a user");
-      // The provider's address is proof for this user only when it is this
-      // user's address. A claimant who changes the provider address to one
-      // they own must not verify the address they claimed.
-      const proved =
-        profile.emailVerified &&
-        profile.email !== null &&
-        normalizeEmail(profile.email) === user.email;
-      if (!user.emailVerified && proved) {
-        await claimEmail(tx, user.id, identity.id, now);
-        await ensureEmailIdentity(tx, user.id, user.email, now);
-        return ok(
-          await fillUser(tx, { ...user, emailVerified: true, updatedAt: now }, profile, now),
-        );
-      }
-      return ok(await fillUser(tx, user, profile, now));
+  const identity = await tx.findOne("identity", [
+    { field: "provider", op: "eq", value: provider },
+    { field: "subject", op: "eq", value: profile.subject },
+  ]);
+  if (identity) {
+    const user = await tx.findOne("user", [{ field: "id", op: "eq", value: identity.userId }]);
+    if (!user) throw new Error("tempo-auth: identity without a user");
+    // The provider's address is proof for this user only when it is this
+    // user's address. A claimant who changes the provider address to one
+    // they own must not verify the address they claimed.
+    const proved =
+      profile.emailVerified &&
+      profile.email !== null &&
+      normalizeEmail(profile.email) === user.email;
+    if (!user.emailVerified && proved) {
+      await claimEmail(tx, user.id, identity.id, now);
+      await ensureEmailIdentity(tx, user.id, user.email, now);
+      return ok(await fillUser(tx, { ...user, emailVerified: true, updatedAt: now }, profile, now));
     }
-    const email = profile.email ? normalizeEmail(profile.email) : null;
-    if (!email) return fail("email_required");
-    const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
-    if (existing) {
-      if (!profile.emailVerified) return fail("email_taken_unverified");
-      // An unverified account is a claim. The proof revokes earlier claimants
-      // before the new identity is linked.
-      let current = existing;
-      if (!existing.emailVerified) {
-        await claimEmail(tx, existing.id, null, now);
-        current = { ...existing, emailVerified: true, updatedAt: now };
-      }
-      await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
-      await ensureEmailIdentity(tx, existing.id, email, now);
-      return ok(await fillUser(tx, current, profile, now));
+    return ok(await fillUser(tx, user, profile, now));
+  }
+  const email = profile.email ? normalizeEmail(profile.email) : null;
+  if (!email) return fail("email_required");
+  const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (existing) {
+    if (!profile.emailVerified) return fail("email_taken_unverified");
+    // An unverified account is a claim. The proof revokes earlier claimants
+    // before the new identity is linked.
+    let current = existing;
+    if (!existing.emailVerified) {
+      await claimEmail(tx, existing.id, null, now);
+      current = { ...existing, emailVerified: true, updatedAt: now };
     }
-    const user = await tx.create("user", {
-      id: newId(now),
-      email,
-      emailVerified: profile.emailVerified,
-      name: profile.name,
-      image: profile.image,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await tx.create("identity", identityRow(user.id, provider, profile.subject, now));
-    // The email identity means "this address signs in by magic link". It
-    // exists only once the address is verified.
-    if (profile.emailVerified)
-      await tx.create("identity", identityRow(user.id, "email", email, now));
-    return ok(user);
+    await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
+    await ensureEmailIdentity(tx, existing.id, email, now);
+    return ok(await fillUser(tx, current, profile, now));
+  }
+  const user = await tx.create("user", {
+    id: newId(now),
+    email,
+    emailVerified: profile.emailVerified,
+    name: profile.name,
+    image: profile.image,
+    createdAt: now,
+    updatedAt: now,
   });
+  await tx.create("identity", identityRow(user.id, provider, profile.subject, now));
+  // The email identity means "this address signs in by magic link". It
+  // exists only once the address is verified.
+  if (profile.emailVerified) await tx.create("identity", identityRow(user.id, "email", email, now));
+  return ok(user);
 }
 
 /** The email identity means "this address signs in by magic link". It exists once the address is proved. */

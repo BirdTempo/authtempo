@@ -3,6 +3,7 @@ import { readCookie, sessionCookie } from "../http/cookies.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
+import type { StorageAdapter } from "../storage/port.js";
 
 const DAY_MS = 86_400_000;
 export const SESSION_TOKEN_PREFIX = "ts_";
@@ -21,13 +22,19 @@ export interface ResolvedSession {
   refreshed: boolean;
 }
 
+/**
+ * `storage` is the adapter to write through. A sign-in that resolves the
+ * user in a transaction passes its `tx`, so the session commits with the
+ * claim that deletes a claimant's sessions (plan 7 input).
+ */
 export async function createSession(
   config: ResolvedConfig,
   input: SessionInput,
+  storage: StorageAdapter = config.storage,
 ): Promise<{ token: string; session: SessionRow }> {
   const now = config.clock.now();
   const token = randomToken(SESSION_TOKEN_PREFIX);
-  const session = await config.storage.create("session", {
+  const session = await storage.create("session", {
     id: newId(now),
     userId: input.userId,
     tokenHash: await sha256Hex(token),

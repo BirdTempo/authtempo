@@ -58,79 +58,113 @@ export async function claimEmail(
   });
 }
 
-export async function findOrCreateUserByEmail(
+/**
+ * Work that runs inside the resolution transaction after the user is
+ * resolved, such as the sign-in's session. It commits with the claim, so a
+ * claimant's write cannot land between the claim and this work.
+ */
+export type AfterResolve<T> = (tx: StorageAdapter, user: UserRow, created: boolean) => Promise<T>;
+
+export function findOrCreateUserByEmail(
   storage: StorageAdapter,
   email: string,
   now: Date,
-): Promise<{ user: UserRow; created: boolean }> {
-  try {
-    return await createOrFindInTransaction(storage, email, now);
-  } catch (err) {
-    // A concurrent call created the user between our read and our create.
-    // Return that row. Any other failure, or a missing row, is a real error.
-    if (
-      err instanceof StorageError &&
-      err.code === "unique_violation" &&
-      (err.model === "user" || err.model === "identity")
-    ) {
-      const winner = await storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
-      if (winner) return { user: winner, created: false };
+): Promise<{ user: UserRow; created: boolean }>;
+export function findOrCreateUserByEmail<T>(
+  storage: StorageAdapter,
+  email: string,
+  now: Date,
+  after: AfterResolve<T>,
+): Promise<{ user: UserRow; created: boolean; after: T }>;
+export async function findOrCreateUserByEmail<T>(
+  storage: StorageAdapter,
+  email: string,
+  now: Date,
+  after?: AfterResolve<T>,
+): Promise<{ user: UserRow; created: boolean; after?: T }> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await createOrFindInTransaction(storage, email, now, after);
+    } catch (err) {
+      // A concurrent call created the user between our read and our create.
+      // Run the resolution once more, outside the failed transaction, so it
+      // finds the winner's row, claims it when it is unverified, and runs
+      // `after` inside a transaction. Any other failure is a real error.
+      if (
+        attempt === 0 &&
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        (err.model === "user" || err.model === "identity")
+      ) {
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
 }
 
-function createOrFindInTransaction(
+function createOrFindInTransaction<T>(
   storage: StorageAdapter,
   email: string,
   now: Date,
-): Promise<{ user: UserRow; created: boolean }> {
+  after: AfterResolve<T> | undefined,
+): Promise<{ user: UserRow; created: boolean; after?: T }> {
   return storage.transaction(async (tx) => {
-    const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
-    if (existing) {
-      // An isolate that died between the user create and the identity
-      // create left a user with no email identity. Repair it here. A
-      // concurrent repair fails unique_violation, which the caller catches
-      // outside this transaction.
-      const identity = await tx.findOne("identity", [
-        { field: "provider", op: "eq", value: "email" },
-        { field: "subject", op: "eq", value: email },
-      ]);
-      if (!identity) {
-        await tx.create("identity", {
-          id: newId(now),
-          userId: existing.id,
-          provider: "email",
-          subject: email,
-          linkedAt: now,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-      if (!existing.emailVerified) {
-        await claimEmail(tx, existing.id, null, now);
-        return { user: { ...existing, emailVerified: true, updatedAt: now }, created: false };
-      }
-      return { user: existing, created: false };
-    }
-    const user = await tx.create("user", {
-      id: newId(now),
-      email,
-      emailVerified: true,
-      name: null,
-      image: null,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await tx.create("identity", {
-      id: newId(now),
-      userId: user.id,
-      provider: "email",
-      subject: email,
-      linkedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-    return { user, created: true };
+    const { user, created } = await resolveInTransaction(tx, email, now);
+    if (!after) return { user, created };
+    return { user, created, after: await after(tx, user, created) };
   });
+}
+
+async function resolveInTransaction(
+  tx: StorageAdapter,
+  email: string,
+  now: Date,
+): Promise<{ user: UserRow; created: boolean }> {
+  const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (existing) {
+    // An isolate that died between the user create and the identity
+    // create left a user with no email identity. Repair it here. A
+    // concurrent repair fails unique_violation, which the caller catches
+    // outside this transaction.
+    const identity = await tx.findOne("identity", [
+      { field: "provider", op: "eq", value: "email" },
+      { field: "subject", op: "eq", value: email },
+    ]);
+    if (!identity) {
+      await tx.create("identity", {
+        id: newId(now),
+        userId: existing.id,
+        provider: "email",
+        subject: email,
+        linkedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    if (!existing.emailVerified) {
+      await claimEmail(tx, existing.id, null, now);
+      return { user: { ...existing, emailVerified: true, updatedAt: now }, created: false };
+    }
+    return { user: existing, created: false };
+  }
+  const user = await tx.create("user", {
+    id: newId(now),
+    email,
+    emailVerified: true,
+    name: null,
+    image: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await tx.create("identity", {
+    id: newId(now),
+    userId: user.id,
+    provider: "email",
+    subject: email,
+    linkedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { user, created: true };
 }
