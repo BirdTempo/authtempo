@@ -25,6 +25,8 @@ it("deletes an expired verification row when the cron trigger fires", async () =
   const ctx = createExecutionContext();
   await worker.scheduled(
     createScheduledController({ cron: "*/15 * * * *" }),
+    // The plugin 1.3.7 types `env` as `Cloudflare.Env` and never reads a
+    // `ProvidedEnv` declaration (checked 2026-10-10), so the cast stays.
     env as unknown as Env,
     ctx,
   );

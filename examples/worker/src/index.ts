@@ -67,7 +67,7 @@ export default {
     }
     return new Response("not found", { status: 404 });
   },
-  // The cron trigger in wrangler.jsonc calls this. It deletes expired tokens and invitations.
+  // The cron trigger in wrangler.jsonc calls this. It deletes expired tokens, invitations, and sessions.
   async scheduled(
     _controller: ScheduledController,
     env: Env,
