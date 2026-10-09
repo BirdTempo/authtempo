@@ -8,12 +8,13 @@ export type {
   PasswordConfig,
 } from "./config.js";
 export { ConfigError } from "./config.js";
-export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
+export { type Auth, type AuthApi, createAuth, type PasswordApi } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
+export type { PasswordSession, PasswordSignUp } from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";

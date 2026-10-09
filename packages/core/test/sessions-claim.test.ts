@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ResolvedConfig } from "../src/config.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
+import { passwordSignUp } from "../src/engine/password.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, resolveSocialUser, startSocial } from "../src/engine/social.js";
 import { findOrCreateUserByEmail } from "../src/engine/users.js";
@@ -9,6 +10,7 @@ import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/c
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
+import { FAST } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, socialAuth } from "./social-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -721,5 +723,139 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(
       await auth.storage.findOne("session", [{ field: "id", op: "eq", value: browser.session.id }]),
     ).toBeNull();
+  });
+
+  it("leaves no password on the owner's account when the claim lands between the sign-up's user create and password create (plan 8, Review Focus 4)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await magicLinkToken(auth);
+
+    // On D1 the owner's whole claim runs inside the claimant's open sign-up
+    // transaction, just after its user create: the claim finds the new user,
+    // adds the email identity, and verifies the user before the claimant's
+    // password row exists. A throw would undo the user create and delete the
+    // owner's user row by id.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveAfterUserCreate(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const userId = proved.value.user.id;
+    expect(
+      await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
+    ).toMatchObject({ email: EMAIL, emailVerified: true });
+    const identities = await auth.storage.findMany("identity", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(identities.map((x) => [x.provider, x.subject])).toEqual([["email", EMAIL]]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await resolveSession(auth.config, proved.value.token)).not.toBeNull();
+    // The claimant got no verify mail: the magic link mail is the only one.
+    expect(auth.mail).toHaveLength(1);
+    expect(
+      await auth.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "password-verify" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("answers the loser of two sign-ups for one new address with email_taken and keeps one user (plan 8, unique_violation retry)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const inner = auth.storage;
+    // The loser's first user read misses. On that miss the winner's whole
+    // sign-up commits through the outer adapter, as a second isolate would.
+    // The loser's user create then fails with unique_violation.
+    let winner: Awaited<ReturnType<typeof passwordSignUp>> | null = null;
+    let missed = false;
+    const wrap = (a: StorageAdapter): StorageAdapter => ({
+      create: (m, d) => a.create(m, d),
+      findOne: async (m, w) => {
+        if (m === "user" && !missed) {
+          missed = true;
+          winner = await passwordSignUp(d1Like(auth.config), {
+            email: EMAIL,
+            password: "winner password",
+            ip: null,
+            userAgent: null,
+          });
+          return null;
+        }
+        return a.findOne(m, w);
+      },
+      findMany: (m, w, o) => a.findMany(m, w, o),
+      update: (m, w, d) => a.update(m, w, d),
+      delete: (m, w) => a.delete(m, w),
+      transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+    });
+    const loser = await passwordSignUp(
+      { ...auth.config, storage: wrap(inner) },
+      { email: EMAIL, password: "loser password", ip: null, userAgent: null },
+    );
+    expect(missed).toBe(true);
+    const won = winner as Awaited<ReturnType<typeof passwordSignUp>> | null;
+    if (!won?.ok) throw new Error("the winner's sign-up failed");
+    expect(loser).toMatchObject({ ok: false, code: "email_taken", status: 409 });
+    const users = await inner.findMany("user", []);
+    expect(users.map((u) => u.id)).toEqual([won.value.user.id]);
+    const passwords = await inner.findMany("password", []);
+    expect(passwords.map((p) => p.userId)).toEqual([won.value.user.id]);
+    const sessions = await inner.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(won.value.token)]);
+    expect(auth.mail).toHaveLength(1);
+  });
+
+  it("answers email_taken_unverified on the unique_violation retry when the winner is an unverified social user (plan 8)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const inner = auth.storage;
+    // The winner is a social sign-in whose provider does not verify the
+    // address. It commits on the loser's first user read. The retry reads
+    // the winner's rows and answers by the sign-up's own rules.
+    let missed = false;
+    const wrap = (a: StorageAdapter): StorageAdapter => ({
+      create: (m, d) => a.create(m, d),
+      findOne: async (m, w) => {
+        if (m === "user" && !missed) {
+          missed = true;
+          const social = await resolveSocialUser(
+            d1Like(auth.config).storage,
+            "google",
+            { subject: "g-1", email: EMAIL, emailVerified: false, name: null, image: null },
+            auth.clock.now(),
+          );
+          if (!social.ok) throw new Error(social.code);
+          return null;
+        }
+        return a.findOne(m, w);
+      },
+      findMany: (m, w, o) => a.findMany(m, w, o),
+      update: (m, w, d) => a.update(m, w, d),
+      delete: (m, w) => a.delete(m, w),
+      transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+    });
+    const loser = await passwordSignUp(
+      { ...auth.config, storage: wrap(inner) },
+      { email: EMAIL, password: "loser password", ip: null, userAgent: null },
+    );
+    expect(missed).toBe(true);
+    expect(loser).toMatchObject({ ok: false, code: "email_taken_unverified", status: 409 });
+    expect(await inner.findMany("user", [])).toHaveLength(1);
+    expect(await inner.findMany("password", [])).toEqual([]);
+    expect(await inner.findMany("session", [])).toEqual([]);
+    expect(auth.mail).toEqual([]);
   });
 });
