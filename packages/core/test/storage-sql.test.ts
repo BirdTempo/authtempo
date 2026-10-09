@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { schema } from "../src/schema.js";
 import {
   assertFields,
   assertModel,
@@ -239,5 +240,79 @@ describe("statements", () => {
       { field: "consumedAt", op: "gt", value: null },
     ]);
     expect(s).toBeNull();
+  });
+});
+
+describe("review fixes", () => {
+  it("validates every clause before it reports a where that never matches", () => {
+    const bad = { field: "createdAt", op: "eq", value: "str" } as const;
+    const empty = { field: "id", op: "in", value: [] } as const;
+    expect(() => selectStatement(SQLITE, "user", [empty, bad])).toThrow(/invalid_argument/);
+    expect(() => selectStatement(SQLITE, "user", [bad, empty])).toThrow(/invalid_argument/);
+    const nullCmp = { field: "createdAt", op: "gt", value: null } as const;
+    expect(() => deleteStatement(SQLITE, "user", [nullCmp, bad])).toThrow(/invalid_argument/);
+    expect(() =>
+      selectStatement(SQLITE, "user", [empty, { field: "id", op: "in", value: "a" }]),
+    ).toThrow(/invalid_argument/);
+  });
+  it("decodes by dialect: jsonb stays as the driver gives it", () => {
+    const row = {
+      id: "v1",
+      created_at: t0,
+      updated_at: t0,
+      purpose: "p",
+      identifier: "i",
+      value_hash: "h",
+      expires_at: t0,
+      consumed_at: null,
+      data: "abc",
+    };
+    expect(decodeRow(POSTGRES, "verification", row).data).toBe("abc");
+    expect(decodeRow(SQLITE, "verification", { ...row, data: '"abc"' }).data).toBe("abc");
+  });
+  it("decodes a postgres integer string and an ISO date string", () => {
+    const pk = decodeRow(POSTGRES, "passkey", {
+      id: "k1",
+      created_at: t0,
+      updated_at: t0,
+      user_id: "u",
+      credential_id: "c",
+      public_key: "k",
+      counter: "7",
+      transports: null,
+      device_type: "d",
+      backed_up: false,
+      name: null,
+    });
+    expect(pk.counter).toBe(7);
+    const v = decodeRow(POSTGRES, "verification", {
+      id: "v1",
+      created_at: t0.toISOString(),
+      updated_at: t0,
+      purpose: "p",
+      identifier: "i",
+      value_hash: "h",
+      expires_at: t0,
+      consumed_at: null,
+      data: null,
+    });
+    expect(v.createdAt.getTime()).toBe(t0.getTime());
+  });
+  it("round-trips names and unique index names for the real schema", () => {
+    for (const model of Object.keys(schema) as (keyof typeof schema)[]) {
+      for (const field of Object.keys(schema[model].fields)) {
+        expect(fieldName(columnName(field))).toBe(field);
+      }
+      for (const key of schema[model].unique) {
+        const name = uniqueIndexName(model, key);
+        expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(63);
+        expect(fieldsFromUniqueIndex(model, name)).toEqual([...key]);
+      }
+    }
+  });
+  it("rejects a json value whose text holds a NUL escape", () => {
+    expect(() => encodeValue(POSTGRES, "json", { a: "x\u0000y" })).toThrow(/invalid_argument/);
+    expect(() => encodeValue(SQLITE, "json", { a: "x\u0000y" })).toThrow(/invalid_argument/);
+    expect(encodeValue(POSTGRES, "json", { a: "x\\u0000y" })).toBe('{"a":"x\\\\u0000y"}');
   });
 });

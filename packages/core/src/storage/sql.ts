@@ -91,6 +91,8 @@ function invalid(model: ModelName, field: string, why: string): StorageError {
   return e;
 }
 
+const NUL_ESCAPE = /(?<!\\)(?:\\\\)*\\u0000/;
+
 /** Encodes one value for the dialect, or throws invalid_argument when the type does not fit the column. */
 export function encodeValue(
   d: Dialect,
@@ -115,23 +117,27 @@ export function encodeValue(
       if (!(value instanceof Date) || Number.isNaN(value.getTime()))
         throw invalid(model, field, "expected a valid Date");
       return d.name === "sqlite" ? value.getTime() : value;
-    case "json":
+    case "json": {
       if (typeof value !== "object") throw invalid(model, field, "expected an object");
-      return JSON.stringify(value);
+      const text = JSON.stringify(value);
+      // Postgres jsonb rejects the NUL escape, so refuse it on every dialect for the same behavior.
+      // The pattern needs an odd run of backslashes, so a literal backslash before "u0000" passes.
+      if (NUL_ESCAPE.test(text)) throw invalid(model, field, "json text holds a NUL character");
+      return text;
+    }
   }
 }
 
-function decodeValue(_d: Dialect, type: FieldType, value: unknown): unknown {
+function decodeValue(d: Dialect, type: FieldType, value: unknown): unknown {
   if (value === null || value === undefined) return null;
   switch (type) {
     case "boolean":
       return typeof value === "number" ? value !== 0 : Boolean(value);
     case "date":
-      return value instanceof Date
-        ? value
-        : new Date(typeof value === "string" ? value : Number(value));
+      return value instanceof Date ? value : new Date(value as string | number);
     case "json":
-      return typeof value === "string" ? JSON.parse(value) : value;
+      // Text columns hold serialized JSON. A jsonb driver already parsed it, so a string is a real value.
+      return d.json === "text" && typeof value === "string" ? JSON.parse(value) : value;
     case "integer":
       return typeof value === "string" ? Number(value) : value;
     default:
@@ -181,6 +187,8 @@ function compileWhere<M extends ModelName>(
     where.map((w) => w.field),
   );
   const parts: string[] = [];
+  // Validate every clause before we report "never matches", so a bad later clause still throws.
+  let impossible = false;
   for (const w of where) {
     const col = columnName(w.field);
     const type = fieldType(model, w.field);
@@ -203,7 +211,11 @@ function compileWhere<M extends ModelName>(
       case "in": {
         if (!Array.isArray(w.value)) throw invalid(model, w.field, "in expects an array");
         const vals = w.value.filter((v) => v !== null && v !== undefined);
-        if (vals.length === 0) return { clause: "", impossible: true };
+        for (const v of vals) enc(v);
+        if (vals.length === 0) {
+          impossible = true;
+          break;
+        }
         parts.push(`${col} IN (${vals.map((v) => p.add(enc(v))).join(", ")})`);
         break;
       }
@@ -211,13 +223,17 @@ function compileWhere<M extends ModelName>(
       case "lte":
       case "gt":
       case "gte": {
-        if (w.value === null || w.value === undefined) return { clause: "", impossible: true };
+        if (w.value === null || w.value === undefined) {
+          impossible = true;
+          break;
+        }
         const op = { lt: "<", lte: "<=", gt: ">", gte: ">=" }[w.op];
         parts.push(`${col} ${op} ${p.add(enc(w.value))}`);
         break;
       }
     }
   }
+  if (impossible) return { clause: "", impossible: true };
   return { clause: parts.length ? ` WHERE ${parts.join(" AND ")}` : "", impossible: false };
 }
 
