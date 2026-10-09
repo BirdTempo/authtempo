@@ -6,10 +6,12 @@ import {
   startSocial,
 } from "../src/engine/social.js";
 import { findOrCreateUserByEmail } from "../src/engine/users.js";
+import { createRouter } from "../src/http/router.js";
+import { socialRoutes } from "../src/http/routes/social.js";
 import { sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { BASE_URL } from "./helpers.js";
+import { BASE_URL, get } from "./helpers.js";
 import {
   type FakeIdToken,
   fakeFetch,
@@ -475,5 +477,120 @@ describe("resolveSocialUser", () => {
       "email",
       "google",
     ]);
+  });
+});
+
+describe("social routes", () => {
+  const BIND = "tempo_session_oauth";
+
+  it("GET start redirects to the provider and sets the binding cookie", async () => {
+    const auth = socialAuth();
+    const handle = createRouter(auth.config, socialRoutes(auth.config));
+    const res = await handle(get("/auth/social/google/start?next=%2Fhome"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toMatch(
+      /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/,
+    );
+    expect(res.headers.get("set-cookie")).toMatch(
+      new RegExp(
+        `^${BIND}=[A-Za-z0-9_-]{43}; Path=/auth/social; Max-Age=600; HttpOnly; Secure; SameSite=None$`,
+      ),
+    );
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect((await handle(get("/auth/social/github/start"))).status).toBe(404);
+  });
+
+  it("GET start redirects with auth_error when limited", async () => {
+    const auth = socialAuth();
+    const handle = createRouter(auth.config, socialRoutes(auth.config));
+    for (let i = 0; i < 30; i++) await handle(get("/auth/social/google/start"));
+    const res = await handle(get("/auth/social/google/start"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${BASE_URL}/?auth_error=rate_limited`);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("Google callback by GET signs in, sets the session cookie, clears the binding cookie, and redirects to next", async () => {
+    const jwtTokens: Record<string, ReturnType<typeof googleToken>> = {};
+    const auth = socialAuth({}, fakeJwt(jwtTokens));
+    const handle = createRouter(auth.config, socialRoutes(auth.config));
+    const start = await handle(get("/auth/social/google/start?next=%2Fhome"));
+    const bind = start.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const state = new URL(start.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    const nonce = new URL(start.headers.get("location") ?? "").searchParams.get("nonce") ?? "";
+    jwtTokens["idtok-default"] = googleToken(nonce, {});
+    const res = await handle(
+      get(`/auth/social/google/callback?code=c1&state=${encodeURIComponent(state)}`, {
+        cookie: bind,
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${BASE_URL}/home`);
+    const cookies = res.headers.getSetCookie();
+    expect(cookies.some((c) => /^tempo_session=ts_/.test(c))).toBe(true);
+    expect(cookies).toContain(
+      `${BIND}=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None`,
+    );
+  });
+
+  it("Apple callback by POST from Apple's origin passes the router and reads the form", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const auth = socialAuth({}, fakeJwt(tokens));
+    const handle = createRouter(auth.config, socialRoutes(auth.config));
+    const start = await handle(get("/auth/social/apple/start"));
+    const bind = start.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const url = new URL(start.headers.get("location") ?? "");
+    const state = url.searchParams.get("state") ?? "";
+    const nonce = url.searchParams.get("nonce") ?? "";
+    tokens["idtok-default"] = {
+      audience: "com.example.web",
+      issuer: APPLE_ISS,
+      claims: { sub: "001.a", email: "a@x.io", email_verified: true, nonce },
+    };
+    const res = await handle(
+      new Request(`${BASE_URL}/auth/social/apple/callback`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://appleid.apple.com",
+          cookie: bind,
+        },
+        body: new URLSearchParams({
+          code: "c1",
+          state,
+          user: JSON.stringify({ name: { firstName: "Ada", lastName: "L" } }),
+        }).toString(),
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${BASE_URL}/`);
+    expect((await auth.storage.findMany("user", []))[0]?.name).toBe("Ada L");
+    // A GET on the Apple callback is not a route.
+    expect((await handle(get("/auth/social/apple/callback?code=x&state=y"))).status).toBe(404);
+  });
+
+  it("callback failures redirect with the code, clear the binding cookie, and set no session cookie", async () => {
+    const auth = socialAuth();
+    const handle = createRouter(auth.config, socialRoutes(auth.config));
+    const start = await handle(get("/auth/social/google/start"));
+    const state = new URL(start.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    const noCookie = await handle(
+      get(`/auth/social/google/callback?code=c1&state=${encodeURIComponent(state)}`),
+    );
+    expect(noCookie.status).toBe(302);
+    expect(noCookie.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    expect(noCookie.headers.getSetCookie()).toEqual([
+      `${BIND}=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None`,
+    ]);
+    const denied = await handle(get("/auth/social/google/callback?error=access_denied&state=x"));
+    expect(denied.headers.get("location")).toBe(`${BASE_URL}/?auth_error=oauth_denied`);
+    const empty = await handle(
+      new Request(`${BASE_URL}/auth/social/apple/callback`, {
+        method: "POST",
+        headers: { origin: "https://appleid.apple.com" },
+      }),
+    );
+    expect(empty.status).toBe(302);
+    expect(empty.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
   });
 });

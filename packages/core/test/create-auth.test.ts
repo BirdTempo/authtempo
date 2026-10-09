@@ -92,4 +92,23 @@ describe("createAuth", () => {
     const bearer = get("/anything", { authorization: `Bearer ${cookie.split("=")[1]}` });
     expect(refreshed && auth.sessionCookie(bearer, refreshed)).toBeNull();
   });
+
+  it("mounts the social routes and exposes the social api", async () => {
+    const { auth } = setup();
+    expect((await auth.handle(get("/auth/social/google/start"))).status).toBe(404);
+    expect(typeof auth.api.startSocial).toBe("function");
+    expect(await auth.api.startSocial({ provider: "google", ip: null })).toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
+    const withGoogle = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      social: { google: { clientId: "g", clientSecret: "s" } },
+    });
+    expect((await withGoogle.handle(get("/auth/social/google/start"))).status).toBe(302);
+  });
 });

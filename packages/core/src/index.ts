@@ -5,6 +5,7 @@ export { ConfigError } from "./config.js";
 export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { ResolvedSession } from "./engine/sessions.js";
+export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { createMemoryLimiter } from "./limiter/memory.js";
@@ -22,6 +23,15 @@ export {
   type UserRow,
   type VerificationRow,
 } from "./schema.js";
+export {
+  createJoseJwtSeam,
+  type JwtSeam,
+  type SignES256Input,
+  type VerifyIdTokenInput,
+} from "./seams/jwt.js";
+export type { AppleConfig } from "./social/apple.js";
+export type { GoogleConfig } from "./social/google.js";
+export type { SocialProfile, SocialProviderName } from "./social/provider.js";
 export { createMemoryAdapter } from "./storage/memory.js";
 export {
   type FindManyOptions,
