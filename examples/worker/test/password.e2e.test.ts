@@ -24,12 +24,15 @@ it("signs up, confirms by the mailed link, signs in, resets, and signs in again 
     json({ email: EMAIL, password: "correct horse battery" }),
   );
   expect(up.status).toBe(200);
-  expect(await up.json()).toMatchObject({
+  const created = (await up.json()) as { user: { id: string } };
+  expect(created).toMatchObject({
     token: expect.stringMatching(/^ts_/),
     user: { emailVerified: false },
   });
   // The example uses 1000 iterations in TEST_MODE. The stored hash shows the seam ran in workerd.
-  const stored = await env.DB.prepare("SELECT hash FROM ta_password").first<{ hash: string }>();
+  const stored = await env.DB.prepare("SELECT hash FROM ta_password WHERE user_id = ?")
+    .bind(created.user.id)
+    .first<{ hash: string }>();
   expect(stored?.hash).toMatch(/^pbkdf2-sha256\$1000\$/);
 
   const verifyLink = await lastLink();
