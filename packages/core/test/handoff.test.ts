@@ -226,6 +226,20 @@ describe("continueHandoff and redeemHandoff", () => {
     expect((await rows(auth))[1]?.consumedAt).not.toBeNull();
   });
 
+  it("refuses a live session of one user passed with the user id of another, and mints no code (final review M-6)", async () => {
+    const auth = handoffAuth();
+    const ada = await auth.seedUser("ada@example.com");
+    const bob = await auth.seedUser("bob@example.com");
+    const { handoffId } = await started(auth);
+    const adaSession = await sessionId(auth, ada.id);
+    const r = await continueHandoff(auth.config, {
+      handoffId,
+      userId: bob.id,
+      sessionId: adaSession,
+    });
+    expect(r).toMatchObject({ ok: false, code: "invalid_token" });
+    expect((await rows(auth)).filter((x) => x.identifier === bob.id)).toEqual([]);
+  });
   it("redeems a verifier that holds . and ~, as RFC 7636 allows", async () => {
     const auth = handoffAuth();
     const user = await auth.seedUser("ada@example.com");

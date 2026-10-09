@@ -206,9 +206,16 @@ export async function continueHandoff(
         updatedAt: now,
       });
       // The session was checked before this transaction. A claim in between deleted it and verified the user; the conditional update sees the deletion and undoes the code, which would otherwise skip the redeem guard.
-      const n = await tx.update("session", [{ field: "id", op: "eq", value: input.sessionId }], {
-        updatedAt: now,
-      });
+      // The user id is in the where too: an api caller passes the two
+      // values apart, and a live session of another user must not pass.
+      const n = await tx.update(
+        "session",
+        [
+          { field: "id", op: "eq", value: input.sessionId },
+          { field: "userId", op: "eq", value: input.userId },
+        ],
+        { updatedAt: now },
+      );
       if (n === 0) throw new ClaimRacedError();
       // The handoff package matches this string byte for byte; URL serialization would rewrite the redirect. The code is base64url with the hc_ prefix, so it needs no escape.
       const separator = data.redirect.includes("?") ? "&" : "?";
