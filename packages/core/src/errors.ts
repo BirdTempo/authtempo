@@ -20,6 +20,8 @@ export const ERRORS = {
   last_owner: 409,
   already_member: 409,
   email_mismatch: 403,
+  // plan 6: a concurrent write changed the row; the caller retries
+  conflict: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

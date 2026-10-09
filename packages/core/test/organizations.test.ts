@@ -9,6 +9,7 @@ import {
   updateMemberRole,
   updateOrganization,
 } from "../src/engine/organizations.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
 
 function orgAuth() {
@@ -414,6 +415,48 @@ describe("members", () => {
     expect(await auth.storage.findMany("member", [])).toHaveLength(1);
   });
 
+  it("an owner removal that races a concurrent write answers conflict and changes nothing; a retry succeeds (Review Focus 2)", async () => {
+    const auth = orgAuth();
+    const { user: owner, org } = await owned(auth);
+    const second = await auth.seedUser("o2@example.com");
+    expect(
+      (
+        await addMember(auth.config, {
+          user: owner,
+          organizationId: org.id,
+          userId: second.id,
+          role: "owner",
+        })
+      ).ok,
+    ).toBe(true);
+    const original = auth.storage.transaction.bind(auth.storage);
+    let bumped = false;
+    // A concurrent owner write commits after this caller's standing read and before its transaction.
+    auth.storage.transaction = async <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+      if (!bumped) {
+        bumped = true;
+        auth.clock.advance(1000);
+        await auth.storage.update("organization", [{ field: "id", op: "eq", value: org.id }], {
+          updatedAt: auth.clock.now(),
+        });
+      }
+      return original(fn);
+    };
+    expect(
+      await removeMember(auth.config, { user: owner, organizationId: org.id, userId: owner.id }),
+    ).toMatchObject({ ok: false, code: "conflict", status: 409 });
+    expect(bumped).toBe(true);
+    const inOrg = [{ field: "organizationId" as const, op: "eq" as const, value: org.id }];
+    expect(await auth.storage.findMany("member", inOrg)).toHaveLength(2);
+    expect(
+      (await removeMember(auth.config, { user: owner, organizationId: org.id, userId: owner.id }))
+        .ok,
+    ).toBe(true);
+    expect((await auth.storage.findMany("member", inOrg)).map((m) => m.userId)).toEqual([
+      second.id,
+    ]);
+  });
+
   it("the platform role is valid in the platform organization only", async () => {
     const auth = makeAuth({
       organizations: {
@@ -423,32 +466,39 @@ describe("members", () => {
       },
     });
     const root = await auth.seedUser("root@example.com");
-    const platform = await createOrganization(auth.config, {
-      user: root,
+    // The platform slug is reserved, so the app seeds that organization and root's membership through storage, as a migration would.
+    const now = auth.clock.now();
+    const platformOrg = await auth.storage.create("organization", {
+      id: "org-platform",
       slug: "platform-co",
       name: "Platform",
+      metadata: null,
+      createdAt: now,
+      updatedAt: now,
     });
+    await auth.storage.create("member", {
+      id: "m-root",
+      organizationId: platformOrg.id,
+      userId: root.id,
+      role: "owner,operator",
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(
+      await createOrganization(auth.config, { user: root, slug: "platform-co", name: "Squat" }),
+    ).toMatchObject({ ok: false, code: "slug_reserved" });
     const other = await createOrganization(auth.config, {
       user: root,
       slug: "other",
       name: "Other",
     });
     const op = await auth.seedUser("op@example.com");
-    if (!platform.ok || !other.ok) throw new Error("setup");
-    // The creator is owner (4), so granting operator (5) is above their rank: forbidden_rank. Raise root first through storage, as an app's seed would.
-    await auth.storage.update(
-      "member",
-      [
-        { field: "userId", op: "eq", value: root.id },
-        { field: "organizationId", op: "eq", value: platform.value.organization.id },
-      ],
-      { role: "owner,operator" },
-    );
+    if (!other.ok) throw new Error("setup");
     expect(
       (
         await addMember(auth.config, {
           user: root,
-          organizationId: platform.value.organization.id,
+          organizationId: platformOrg.id,
           userId: op.id,
           role: "operator",
         })

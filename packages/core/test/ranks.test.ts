@@ -72,6 +72,7 @@ describe("organizations config", () => {
       },
     }).config.organizations;
     expect(ok?.platformOrganization).toBe("platform-co");
+    expect(ok?.reservedSlugs.has("platform-co")).toBe(true);
   });
   it("needs() reads the rule table against the rank table", () => {
     const c = makeAuth({ organizations: {} }).config.organizations;

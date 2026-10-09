@@ -262,6 +262,9 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       platformOrganization = normalizeSlug(o.platformOrganization);
       if (platformOrganization === null)
         throw new ConfigError("organizations.platformOrganization is not a slug");
+      // The app seeds the platform organization through storage or a migration. Nobody creates
+      // it or renames into it through the engine, so no user can own a slug the platform role trusts.
+      reserved.add(platformOrganization);
     }
     let platformRole: string | null = null;
     if (o.platformRole !== undefined) {
