@@ -1,5 +1,5 @@
-import { SoftAuthenticator } from "@tempo-auth/core/testing";
 import { env, SELF } from "cloudflare:test";
+import { SoftAuthenticator } from "@tempo-auth/core/testing";
 import { expect, it } from "vitest";
 
 const BASE = "https://example.test";
