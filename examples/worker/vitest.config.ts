@@ -16,6 +16,8 @@ export default defineConfig(async () => {
             TEST_MODE: "1",
             AUTH_SECRET: "0123456789abcdef0123456789abcdef",
             TEST_MIGRATIONS: migrations,
+            GOOGLE_CLIENT_ID: "example-client",
+            GOOGLE_CLIENT_SECRET: "example-secret",
           },
         },
       }),

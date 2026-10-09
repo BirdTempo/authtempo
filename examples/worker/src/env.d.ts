@@ -2,6 +2,8 @@ interface Env {
   BASE_URL: string;
   AUTH_SECRET: string;
   TEST_MODE: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
   DB: D1Database;
 }
 
