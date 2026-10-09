@@ -161,11 +161,31 @@ describe("magic link routes", () => {
     const handle = createRouter(config, magicLinkRoutes(config));
     await handle(post("/auth/magic-link/request", { email: "ada@example.com", next: "/home" }));
     const token = tokenFromMail(mail[0]?.text ?? "");
+    // Count every call to storage and the limiter while GET runs. Zero is the rule.
+    const calls: string[] = [];
+    const counting = <T extends object>(name: string, target: T): T =>
+      new Proxy(target, {
+        get(obj, prop, receiver) {
+          const value = Reflect.get(obj, prop, receiver);
+          if (typeof value !== "function") return value;
+          return (...args: unknown[]) => {
+            calls.push(`${name}.${String(prop)}`);
+            return Reflect.apply(value, obj, args);
+          };
+        },
+      });
+    const spied = {
+      ...config,
+      storage: counting("storage", config.storage),
+      limiter: counting("limiter", config.limiter),
+    };
+    const spiedHandle = createRouter(spied, magicLinkRoutes(spied));
     let page: Response | undefined;
     for (let i = 0; i < 3; i++) {
-      page = await handle(get(`${VERIFY}?token=${encodeURIComponent(token)}`));
+      page = await spiedHandle(get(`${VERIFY}?token=${encodeURIComponent(token)}`));
       expect(page.status).toBe(200);
     }
+    expect(calls).toEqual([]);
     if (!page) throw new Error("no page");
     expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(page.headers.get("cache-control")).toBe("no-store");

@@ -45,6 +45,12 @@ needs its own route in the app, because the policy header is fixed.
 - Off Workers, a caller can set `cf-connecting-ip` and rotate it past the
   per-IP limit. Pass a `clientIp` function that reads the header your
   trusted proxy sets.
+- The confirm page has no script, so a double click on its button sends
+  two posts. The first consumes the token and sets the cookie. If the
+  browser drops the first answer, the second answers `invalid_token`, and
+  the person asks for a new link. A page from `magicLink.confirmPage` may
+  disable the button after the first press, but core's content security
+  policy permits no script, so such a page needs its own route in the app.
 
 ## The storage port
 

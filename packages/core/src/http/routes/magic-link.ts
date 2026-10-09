@@ -16,6 +16,10 @@ const verifyBody = z.object({ token: z.string().max(64) });
 /**
  * Locks the page down: no script, no remote resource, the form may post
  * to this origin only, no framing. The inline style is the page's own.
+ * Chromium applies `form-action` to the redirect that follows the form
+ * post as well. Today the redirect goes to `baseURL`, which is 'self'.
+ * Plan 5 redirects to the app origin or an app scheme, so it must widen
+ * `form-action` to those `trustedOrigins` and prove it in a real browser.
  */
 const PAGE_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
