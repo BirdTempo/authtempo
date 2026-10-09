@@ -42,4 +42,23 @@ describe("d1 schema version", () => {
     await setVersion("0");
     await expect(db.findMany("user", [])).resolves.toEqual([]);
   });
+
+  it("retries the check on the next call after a failed check", async () => {
+    await setVersion("0");
+    const db = createD1Adapter(env.DB);
+    await expect(db.findMany("user", [])).rejects.toMatchObject({ code: "schema_mismatch" });
+    await setVersion("1");
+    await expect(db.findMany("user", [])).resolves.toEqual([]);
+  });
+
+  it("rejects two concurrent first calls, then recovers on the same adapter", async () => {
+    await setVersion("0");
+    const db = createD1Adapter(env.DB);
+    const results = await Promise.allSettled([db.findMany("user", []), db.findMany("user", [])]);
+    for (const r of results) {
+      expect(r).toMatchObject({ status: "rejected", reason: { code: "schema_mismatch" } });
+    }
+    await setVersion("1");
+    await expect(db.findMany("user", [])).resolves.toEqual([]);
+  });
 });
