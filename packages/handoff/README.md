@@ -171,6 +171,17 @@ async function main() {
   report no encryption, and `set` throws.
 - The token stays in the main process. A renderer asks the main process
   to make requests. The renderer never holds the token.
+- Proven 2026-10-10 on macOS 27.0 with Electron 44.7.0 (rerun at
+  2026-10-09T21:11:30Z UTC): `open-url` and `second-instance` both
+  delivered the code, the token store kept the token encrypted, and the
+  opener dropped a URL off the redirect. The proof used a copy of the
+  Electron bundle with the scheme in `Info.plist` and `lsregister -f`.
+  `second-instance` is proven on macOS only. The path for Windows and
+  Linux is not proven.
+- Observation on 2026-10-10: the plain unpackaged app also received
+  `open-url` on macOS 27.0. The Electron 44.7.0 docs say it should fail.
+  Every Electron development binary shares one bundle id, so do not rely on
+  this path. Declare the scheme in the bundle.
 
 ## Development
 
