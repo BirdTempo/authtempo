@@ -11,7 +11,7 @@ import { socialRoutes } from "../src/http/routes/social.js";
 import { sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { BASE_URL, get } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get } from "./helpers.js";
 import {
   type FakeIdToken,
   fakeFetch,
@@ -539,6 +539,27 @@ describe("resolveSocialUser", () => {
 });
 
 describe("social routes", () => {
+  it("redirects to appURL after a callback and on an error", async () => {
+    const jwtTokens: Record<string, ReturnType<typeof googleToken>> = {};
+    const auth = socialAuth({ appURL: APP_ORIGIN }, fakeJwt(jwtTokens));
+    const handle = createRouter(auth.config, socialRoutes(auth.config));
+    const start = await handle(get("/auth/social/google/start?next=%2Fhome"));
+    const bind = start.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const url = new URL(start.headers.get("location") ?? "");
+    jwtTokens["idtok-default"] = googleToken(url.searchParams.get("nonce") ?? "", {});
+    const ok = await handle(
+      get(
+        `/auth/social/google/callback?code=c1&state=${encodeURIComponent(url.searchParams.get("state") ?? "")}`,
+        { cookie: bind },
+      ),
+    );
+    expect(ok.headers.get("location")).toBe(`${APP_ORIGIN}/home`);
+    const bad = await handle(get("/auth/social/google/callback?code=c1&state=nope"));
+    expect(bad.headers.get("location")).toBe(`${APP_ORIGIN}/?auth_error=invalid_token`);
+    const limited = await handle(get("/auth/social/github/start"));
+    expect(limited.status).toBe(404);
+  });
+
   const BIND = "tempo_session_oauth";
 
   it("GET start redirects to the provider and sets the binding cookie", async () => {

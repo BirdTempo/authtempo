@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { resolveConfig } from "../src/config.js";
-import { readBody } from "../src/http/body.js";
+import { isJsonRequest, readBody } from "../src/http/body.js";
 import { defaultConfirmPage, escapeHtml } from "../src/http/confirm-page.js";
 import {
   clearOauthCookie,
@@ -12,7 +12,7 @@ import {
 } from "../src/http/cookies.js";
 import { formAction, pageHeaders } from "../src/http/csp.js";
 import { json, readJson, respond } from "../src/http/json.js";
-import { redirect } from "../src/http/redirect.js";
+import { authErrorUrl, redirect, resolveNext } from "../src/http/redirect.js";
 import { safeNext } from "../src/http/safe-next.js";
 import { fail, ok } from "../src/result.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -208,5 +208,39 @@ describe("csp", () => {
       "x-robots-tag": "noindex",
       "content-security-policy": "default-src 'none'",
     });
+  });
+});
+
+describe("resolveNext and authErrorUrl", () => {
+  const cfg = resolveConfig({
+    baseURL: "https://api.example.com",
+    appURL: "https://app.example.com",
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: ["https://app.example.com"],
+    storage: createMemoryAdapter(),
+    mail: { send: async () => {} },
+  });
+  it("sends an app path to appURL and an auth path to baseURL (Review Focus 2)", () => {
+    expect(resolveNext(cfg, "/dashboard")).toBe("https://app.example.com/dashboard");
+    expect(resolveNext(cfg, "/")).toBe("https://app.example.com/");
+    expect(resolveNext(cfg, "/auth/handoff/continue?h=hs_x")).toBe(
+      "https://api.example.com/auth/handoff/continue?h=hs_x",
+    );
+    expect(resolveNext(cfg, "/authx")).toBe("https://app.example.com/authx");
+  });
+  it("sends an error to appURL", () => {
+    expect(authErrorUrl(cfg, "invalid_token")).toBe(
+      "https://app.example.com/?auth_error=invalid_token",
+    );
+  });
+});
+
+describe("isJsonRequest", () => {
+  it("is true for application/json with or without a charset", () => {
+    const req = (headers: Record<string, string>) =>
+      new Request("https://x/", { method: "POST", headers });
+    expect(isJsonRequest(req({ "content-type": "application/json; charset=utf-8" }))).toBe(true);
+    expect(isJsonRequest(req({ "content-type": "application/x-www-form-urlencoded" }))).toBe(false);
+    expect(isJsonRequest(req({}))).toBe(false);
   });
 });

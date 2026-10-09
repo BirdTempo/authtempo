@@ -3,7 +3,7 @@ import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { magicLinkRoutes } from "../src/http/routes/magic-link.js";
-import { BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 
 describe("magic link engine", () => {
   it("sends a link whose token is stored only as a hash", async () => {
@@ -192,7 +192,7 @@ describe("magic link routes", () => {
     expect(page.headers.get("referrer-policy")).toBe("no-referrer");
     expect(page.headers.get("x-robots-tag")).toBe("noindex");
     expect(page.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://app.example.com; base-uri 'none'; frame-ancestors 'none'",
     );
     expect(page.headers.get("set-cookie")).toBeNull();
     const html = await page.text();
@@ -246,15 +246,52 @@ describe("magic link routes", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("POST verify accepts a JSON body from a script", async () => {
+  it("POST verify with a JSON body answers the session as JSON with the cookie, and errors as JSON", async () => {
     const { config, mail } = makeAuth();
     const handle = createRouter(config, magicLinkRoutes(config));
     await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
     const token = tokenFromMail(mail[0]?.text ?? "");
     const res = await handle(post(VERIFY, { token }));
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("https://api.example.com/");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      user: { email: "ada@example.com" },
+      session: { id: expect.any(String) },
+    });
     expect(res.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    const again = await handle(post(VERIFY, { token }));
+    expect(again.status).toBe(400);
+    expect(await again.json()).toEqual({ error: "invalid_token" });
+    expect(again.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("redirects to appURL after a form verify, and keeps an auth path on baseURL (Review Focus 2)", async () => {
+    const { config, mail } = makeAuth({ appURL: APP_ORIGIN });
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com", next: "/home" }));
+    const r1 = await handle(verifyForm(tokenFromMail(mail[0]?.text ?? "")));
+    expect(r1.headers.get("location")).toBe(`${APP_ORIGIN}/home`);
+    await handle(
+      post("/auth/magic-link/request", {
+        email: "ada@example.com",
+        next: "/auth/handoff/continue?h=hs_1",
+      }),
+    );
+    const r2 = await handle(verifyForm(tokenFromMail(mail[1]?.text ?? "")));
+    expect(r2.headers.get("location")).toBe(`${BASE_URL}/auth/handoff/continue?h=hs_1`);
+    const bad = await handle(verifyForm("ml_nope"));
+    expect(bad.headers.get("location")).toBe(`${APP_ORIGIN}/?auth_error=invalid_token`);
+  });
+
+  it("widens form-action to the trusted web origins and the handoff schemes", async () => {
+    const { config, mail } = makeAuth({ handoff: { schemes: ["consumera://"] } });
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const page = await handle(
+      get(`${VERIFY}?token=${encodeURIComponent(tokenFromMail(mail[0]?.text ?? ""))}`),
+    );
+    expect(page.headers.get("content-security-policy")).toBe(
+      `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${APP_ORIGIN} consumera:; base-uri 'none'; frame-ancestors 'none'`,
+    );
   });
 
   it("POST verify twice signs in once (Review Focus 3)", async () => {

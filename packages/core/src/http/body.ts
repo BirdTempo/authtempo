@@ -26,3 +26,9 @@ export async function readBody<T>(request: Request, schema: z.ZodType<T>): Promi
   const parsed = schema.safeParse(raw);
   return parsed.success ? ok(parsed.data) : fail("invalid_body");
 }
+
+/** True when the body is JSON. A form post and a missing type are false. */
+export function isJsonRequest(request: Request): boolean {
+  const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
+  return type === "application/json";
+}
