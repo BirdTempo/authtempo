@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { systemClock } from "../src/primitives/clock.js";
-import { constantTimeEqual, randomToken, sha256Hex } from "../src/primitives/crypto.js";
+import {
+  constantTimeEqual,
+  randomBase64Url,
+  randomToken,
+  sha256Base64Url,
+  sha256Hex,
+} from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
 
 describe("randomToken", () => {
@@ -44,5 +50,20 @@ describe("newId", () => {
 describe("systemClock", () => {
   it("returns a Date near now", () => {
     expect(Math.abs(systemClock.now().getTime() - Date.now())).toBeLessThan(1000);
+  });
+});
+
+describe("base64url helpers", () => {
+  it("randomBase64Url is 43 chars of the base64url alphabet for 32 bytes", () => {
+    const a = randomBase64Url();
+    const b = randomBase64Url();
+    expect(a).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(a).not.toBe(b);
+    expect(randomBase64Url(16)).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  });
+  it("sha256Base64Url matches the PKCE S256 example from RFC 7636 appendix B", async () => {
+    expect(await sha256Base64Url("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).toBe(
+      "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+    );
   });
 });

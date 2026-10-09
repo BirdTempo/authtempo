@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { readBody } from "../src/http/body.js";
 import { defaultConfirmPage, escapeHtml } from "../src/http/confirm-page.js";
-import { clearSessionCookie, readCookie, sessionCookie } from "../src/http/cookies.js";
+import {
+  clearOauthCookie,
+  clearSessionCookie,
+  oauthCookie,
+  readCookie,
+  sessionCookie,
+} from "../src/http/cookies.js";
 import { json, readJson, respond } from "../src/http/json.js";
+import { redirect } from "../src/http/redirect.js";
 import { safeNext } from "../src/http/safe-next.js";
 import { fail, ok } from "../src/result.js";
 
@@ -147,5 +154,25 @@ describe("confirm page", () => {
   it("escapes the action too", () => {
     const html = defaultConfirmPage({ action: `/a"b`, token: "ml_x" });
     expect(html).toContain(`action="/a&quot;b"`);
+  });
+});
+
+describe("oauth binding cookie", () => {
+  it("is HttpOnly, Secure, SameSite=None on the social path", () => {
+    expect(oauthCookie("tempo_session_oauth", "abc", "/auth/social", 600)).toBe(
+      "tempo_session_oauth=abc; Path=/auth/social; Max-Age=600; HttpOnly; Secure; SameSite=None",
+    );
+    expect(clearOauthCookie("tempo_session_oauth", "/auth/social")).toBe(
+      "tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
+    );
+  });
+});
+
+describe("redirect", () => {
+  it("answers 302 with no-store", () => {
+    const res = redirect("https://api.example.com/x");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://api.example.com/x");
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });

@@ -12,10 +12,18 @@ import {
   renewedSessionCookie,
   resolveSession,
 } from "./engine/sessions.js";
+import {
+  completeSocial,
+  type SocialComplete,
+  type SocialStart,
+  type SocialStarted,
+  startSocial,
+} from "./engine/social.js";
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
+import { socialRoutes } from "./http/routes/social.js";
 import type { Result } from "./result.js";
 import type { UserRow } from "./schema.js";
 
@@ -23,6 +31,10 @@ export interface AuthApi {
   requestMagicLink(input: MagicLinkRequest): Promise<Result<{ sent: true }>>;
   verifyMagicLink(
     input: MagicLinkVerify,
+  ): Promise<Result<{ token: string; next: string; user: UserRow }>>;
+  startSocial(input: SocialStart): Promise<Result<SocialStarted>>;
+  completeSocial(
+    input: SocialComplete,
   ): Promise<Result<{ token: string; next: string; user: UserRow }>>;
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
@@ -47,7 +59,11 @@ export interface Auth {
 
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
-  const handle = createRouter(config, [...sessionRoutes(config), ...magicLinkRoutes(config)]);
+  const handle = createRouter(config, [
+    ...sessionRoutes(config),
+    ...magicLinkRoutes(config),
+    ...socialRoutes(config),
+  ]);
   return {
     handle,
     async session(request) {
@@ -58,6 +74,8 @@ export function createAuth(input: AuthConfig): Auth {
     api: {
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),
+      startSocial: (i) => startSocial(config, i),
+      completeSocial: (i) => completeSocial(config, i),
       getSession: (token) => resolveSession(config, token),
       signOut: (token) => destroySession(config, token),
     },

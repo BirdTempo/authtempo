@@ -26,6 +26,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "jose": "6.2.12",
     "zod": "4.6.5"
   },
   "devDependencies": {

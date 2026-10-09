@@ -52,3 +52,34 @@ describe("magicLink.confirmPage", () => {
     expect(custom.magicLink.ttlMinutes).toBe(15);
   });
 });
+
+describe("social config", () => {
+  it("has no providers and the global fetch by default, and the jose seam", () => {
+    const c = resolveConfig(base);
+    expect(c.social.providers).toEqual([]);
+    expect(typeof c.social.fetch).toBe("function");
+    expect(typeof c.jwt.verifyIdToken).toBe("function");
+    expect(typeof c.jwt.signES256).toBe("function");
+  });
+  it("builds the configured providers in order google, apple", () => {
+    const c = resolveConfig({
+      ...base,
+      social: {
+        apple: { clientId: "com.x.web", teamId: "T", keyId: "K", privateKey: "pem" },
+        google: { clientId: "g", clientSecret: "s" },
+      },
+    });
+    expect(c.social.providers.map((p) => p.name)).toEqual(["google", "apple"]);
+  });
+  it("refuses a provider with an empty field", () => {
+    expect(() =>
+      resolveConfig({ ...base, social: { google: { clientId: "", clientSecret: "s" } } }),
+    ).toThrow(/social.google.clientId/);
+    expect(() =>
+      resolveConfig({
+        ...base,
+        social: { apple: { clientId: "c", teamId: "T", keyId: "", privateKey: "pem" } },
+      }),
+    ).toThrow(/social.apple.keyId/);
+  });
+});

@@ -20,6 +20,15 @@ function getAuth(env: Env): Auth {
         lastLink = m?.[0] ?? null;
       },
     },
+    // Google sign-in is on only when both vars are set. The example has no
+    // real client; the test sets fake values to prove the start route.
+    ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+      ? {
+          social: {
+            google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET },
+          },
+        }
+      : {}),
   });
   return auth;
 }

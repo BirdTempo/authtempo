@@ -133,4 +133,19 @@ describe("router", () => {
     expect(res.status).toBe(500);
     expect(await res.text()).not.toContain("secret detail");
   });
+
+  it("skips the Origin check only on a route that allows a cross-site form", async () => {
+    const r = createRouter(config, [
+      {
+        method: "POST",
+        path: "/apple",
+        allowCrossSiteForm: true,
+        handler: async () => json({ ok: 1 }),
+      },
+      { method: "POST", path: "/plain", handler: async () => json({ ok: 1 }) },
+    ]);
+    const foreign = { method: "POST", headers: { origin: "https://appleid.apple.com" } };
+    expect((await r(new Request("https://api.example.com/auth/apple", foreign))).status).toBe(200);
+    expect((await r(new Request("https://api.example.com/auth/plain", foreign))).status).toBe(403);
+  });
 });

@@ -2,6 +2,10 @@ import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.j
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
+import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
+import { type AppleConfig, appleProvider } from "./social/apple.js";
+import { type GoogleConfig, googleProvider } from "./social/google.js";
+import type { Provider } from "./social/provider.js";
 import type { StorageAdapter } from "./storage/port.js";
 
 export interface MailMessage {
@@ -47,6 +51,14 @@ export interface AuthConfig {
      */
     confirmPage?: (input: ConfirmPageInput) => string;
   };
+  social?: {
+    google?: GoogleConfig;
+    apple?: AppleConfig;
+    /** The fetch for the token exchange and the JWKS. Default: the global fetch. Tests inject one. */
+    fetch?: typeof fetch;
+  };
+  /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
+  jwt?: JwtSeam;
 }
 
 export interface ResolvedConfig {
@@ -66,6 +78,8 @@ export interface ResolvedConfig {
     linkBuilder: (token: string, next: string) => string;
     confirmPage: (input: ConfirmPageInput) => string;
   };
+  social: { providers: Provider[]; fetch: typeof fetch };
+  jwt: JwtSeam;
 }
 
 /**
@@ -104,6 +118,22 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("basePath must start with / and not end with /");
   }
   const clock = input.clock ?? systemClock;
+  const providers: Provider[] = [];
+  if (input.social?.google) {
+    requireFields("social.google", input.social.google, ["clientId", "clientSecret"]);
+    providers.push(googleProvider(input.social.google));
+  }
+  if (input.social?.apple) {
+    requireFields("social.apple", input.social.apple, [
+      "clientId",
+      "teamId",
+      "keyId",
+      "privateKey",
+    ]);
+    providers.push(appleProvider(input.social.apple));
+  }
+  // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
+  const fetchFn = input.social?.fetch ?? globalThis.fetch.bind(globalThis);
   return {
     basePath,
     baseURL: input.baseURL,
@@ -127,5 +157,15 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
           `${input.baseURL}${basePath}/magic-link/verify?token=${encodeURIComponent(token)}`),
       confirmPage: input.magicLink?.confirmPage ?? defaultConfirmPage,
     },
+    social: { providers, fetch: fetchFn },
+    jwt: input.jwt ?? createJoseJwtSeam(fetchFn),
   };
+}
+
+function requireFields<T extends object>(path: string, obj: T, keys: (keyof T & string)[]): void {
+  for (const key of keys) {
+    const v = obj[key];
+    if (typeof v !== "string" || v.length === 0)
+      throw new ConfigError(`${path}.${key} must be a non-empty string`);
+  }
 }

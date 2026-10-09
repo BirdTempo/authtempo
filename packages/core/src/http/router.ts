@@ -12,6 +12,13 @@ export interface RouteContext {
 export interface Route {
   method: "GET" | "POST";
   path: string;
+  /**
+   * Skip the Origin check on this POST. Only for a callback that a provider
+   * posts cross-site, such as Apple's `response_mode=form_post`. The route
+   * must bind the request to the browser another way; the social routes use
+   * the binding cookie and the state row.
+   */
+  allowCrossSiteForm?: boolean;
   handler(ctx: RouteContext): Promise<Response>;
 }
 
@@ -41,7 +48,7 @@ export function createRouter(
     const url = new URL(request.url);
     const route = table.get(`${request.method} ${url.pathname}`);
     if (!route) return json({ error: "not_found" }, 404);
-    if (request.method === "POST") {
+    if (request.method === "POST" && !route.allowCrossSiteForm) {
       const origin = request.headers.get("origin");
       if (origin !== null && !originTrusted(config, origin)) {
         return json({ error: "origin_not_trusted" }, 403);
