@@ -52,11 +52,25 @@ export async function pbkdf2Sha256(
   return new Uint8Array(bits);
 }
 
-/** The default seam. Tests pass a low `iterations` so each hash is fast. */
-export function createPbkdf2PasswordHash(options: { iterations?: number } = {}): PasswordHashSeam {
-  const iterations = options.iterations ?? PBKDF2_ITERATIONS;
-  if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > MAX_ITERATIONS) {
-    throw new Error(`tempo-auth: iterations must be an integer from 1 to ${MAX_ITERATIONS}`);
+/**
+ * The default seam. Tests pass a low `iterations` so each hash is fast.
+ * `maxIterations` is the highest cost this seam hashes or verifies. It
+ * defaults to the Workers cap (see PBKDF2_ITERATIONS): above it a deployed
+ * Worker refuses the derive, and a stored row with a huge cost would ask for
+ * a long derive. A stored cost above it fails closed, before any derive.
+ */
+export function createPbkdf2PasswordHash(
+  options: { iterations?: number; maxIterations?: number } = {},
+): PasswordHashSeam {
+  const maxIterations = options.maxIterations ?? PBKDF2_ITERATIONS;
+  const iterations = options.iterations ?? Math.min(PBKDF2_ITERATIONS, maxIterations);
+  if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > MAX_ITERATIONS) {
+    throw new Error(`tempo-auth: maxIterations must be an integer from 1 to ${MAX_ITERATIONS}`);
+  }
+  if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > maxIterations) {
+    throw new Error(
+      `tempo-auth: iterations must be an integer from 1 to maxIterations (${maxIterations})`,
+    );
   }
   return {
     async hash(plain) {
@@ -69,9 +83,15 @@ export function createPbkdf2PasswordHash(options: { iterations?: number } = {}):
       const m = STORED_RE.exec(stored);
       if (!m) return { ok: false, rehash: false };
       const cost = Number(m[1] ?? "0");
-      const out = await pbkdf2Sha256(plain, fromBase64Url(m[2] ?? ""), cost);
-      const ok = constantTimeEqual(toBase64Url(out), m[3] ?? "");
-      return { ok, rehash: ok && cost < iterations };
+      if (cost > maxIterations) return { ok: false, rehash: false };
+      try {
+        const out = await pbkdf2Sha256(plain, fromBase64Url(m[2] ?? ""), cost);
+        const ok = constantTimeEqual(toBase64Url(out), m[3] ?? "");
+        return { ok, rehash: ok && cost < iterations };
+      } catch {
+        // A refused derive is a failed sign-in, not a server error.
+        return { ok: false, rehash: false };
+      }
     },
   };
 }

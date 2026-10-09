@@ -53,6 +53,7 @@ describe("createPbkdf2PasswordHash", () => {
     const stored = await seam.hash("correct horse");
     const stronger = createPbkdf2PasswordHash({ iterations: 2000 });
     expect(await stronger.verify("correct horse", stored)).toEqual({ ok: true, rehash: true });
+    expect(await seam.verify("correct horse", stored)).toEqual({ ok: true, rehash: false });
     expect(await stronger.verify("wrong", stored)).toEqual({ ok: false, rehash: false });
     const higher = await stronger.hash("correct horse");
     expect(await seam.verify("correct horse", higher)).toEqual({ ok: true, rehash: false });
@@ -61,6 +62,7 @@ describe("createPbkdf2PasswordHash", () => {
   it("answers ok false for an unknown or malformed header, and never throws", async () => {
     const good = await seam.hash("pw");
     const parts = good.split("$");
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
     for (const stored of [
       "",
       "argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA",
@@ -69,9 +71,36 @@ describe("createPbkdf2PasswordHash", () => {
       `pbkdf2-sha256$12345678$${parts[2]}$${parts[3]}`,
       `pbkdf2-sha256$1000$${parts[2]}$${parts[3]}=`,
       `pbkdf2-sha256$1000$${parts[2]}`,
+      `pbkdf2-sha256$10000000$${parts[2]}$${parts[3]}`,
+      `pbkdf2-sha256$1000$${(parts[2] ?? "").slice(0, 21)}+$${parts[3]}`,
     ]) {
       expect(await seam.verify("pw", stored)).toEqual({ ok: false, rehash: false });
     }
+    expect(derive).not.toHaveBeenCalled();
+    derive.mockRestore();
+  });
+
+  it("refuses a stored cost above maxIterations before any derive", async () => {
+    const good = await seam.hash("pw");
+    const parts = good.split("$");
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    const defaults = createPbkdf2PasswordHash();
+    for (const cost of ["100001", "9999999"]) {
+      const stored = `pbkdf2-sha256$${cost}$${parts[2]}$${parts[3]}`;
+      expect(await defaults.verify("pw", stored)).toEqual({ ok: false, rehash: false });
+    }
+    expect(derive).not.toHaveBeenCalled();
+    derive.mockRestore();
+  });
+
+  it("answers ok false when the derive rejects", async () => {
+    const stored = await seam.hash("pw");
+    const derive = vi
+      .spyOn(crypto.subtle, "deriveBits")
+      .mockRejectedValueOnce(new Error("refused"));
+    expect(await seam.verify("pw", stored)).toEqual({ ok: false, rehash: false });
+    derive.mockRestore();
+    expect(await seam.verify("pw", stored)).toEqual({ ok: true, rehash: false });
   });
 
   it("compares through constantTimeEqual", async () => {
@@ -83,9 +112,12 @@ describe("createPbkdf2PasswordHash", () => {
     expect(spy.mock.calls[0]?.[1]).toBe(stored.split("$")[3]);
   });
 
-  it("refuses an iteration option that is not an integer from 1 to 9999999", () => {
-    for (const iterations of [0, 1.5, 10_000_000]) {
+  it("refuses an iteration option that is not an integer from 1 to maxIterations", () => {
+    for (const iterations of [0, 1.5, 10_000_000, 600_000, 100_001]) {
       expect(() => createPbkdf2PasswordHash({ iterations })).toThrow(/iterations/);
     }
+    expect(() =>
+      createPbkdf2PasswordHash({ iterations: 600_000, maxIterations: 600_000 }),
+    ).not.toThrow();
   });
 });
