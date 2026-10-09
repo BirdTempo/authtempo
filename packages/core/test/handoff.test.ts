@@ -541,7 +541,11 @@ describe("handoff routes", () => {
     const cookie = await signedIn(auth);
     const confirm = await handle(get(`/auth/handoff/continue?h=${h}`, { cookie }));
     expect(confirm.status).toBe(200);
-    expect(confirm.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    // The whole header: the confirm page shares the no-script policy constant
+    // with three other pages (plan 8 final review T3).
+    expect(confirm.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://app.example.com consumera:; base-uri 'none'; frame-ancestors 'none'",
+    );
     expect(confirm.headers.get("referrer-policy")).toBe("strict-origin");
     const html = await confirm.text();
     expect(html).toContain("Signed in as <strong>ada@example.com</strong>");

@@ -340,4 +340,43 @@ describe("claimEmail and the password row (plan 8)", () => {
     expect(order.indexOf("password")).toBeGreaterThanOrEqual(0);
     expect(order.indexOf("password")).toBeLessThan(order.indexOf("session"));
   });
+
+  it("flips emailVerified in its first statement and deletes the password rows before the sessions (plan 8 final review T3)", async () => {
+    // Every sign-up and sign-in guard depends on this order. The
+    // interleave tests run whole claims, so a reorder inside claimEmail
+    // passes them; this test records each statement.
+    const { storage, now } = await unverifiedWithPassword();
+    const order: string[] = [];
+    await storage.transaction((tx) => {
+      const recording: StorageAdapter = {
+        ...tx,
+        findOne: async (m, w) => {
+          order.push(`findOne:${m}`);
+          return tx.findOne(m, w);
+        },
+        findMany: async (m, w, o) => {
+          order.push(`findMany:${m}`);
+          return tx.findMany(m, w, o);
+        },
+        create: async (m, d) => {
+          order.push(`create:${m}`);
+          return tx.create(m, d);
+        },
+        update: async (m, w, d) => {
+          order.push(`update:${m}:${JSON.stringify(Object.keys(d))}`);
+          return tx.update(m, w, d);
+        },
+        delete: async (m, w) => {
+          order.push(`delete:${m}`);
+          return tx.delete(m, w);
+        },
+      };
+      return claimEmail(recording, "u1", null, now);
+    });
+    expect(order[0]).toBe(`update:user:["emailVerified","updatedAt"]`);
+    expect(order.filter((x) => x.startsWith("update:"))).toHaveLength(1);
+    const password = order.indexOf("delete:password");
+    expect(password).toBeGreaterThan(0);
+    expect(password).toBeLessThan(order.indexOf("delete:session"));
+  });
 });

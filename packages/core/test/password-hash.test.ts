@@ -93,6 +93,14 @@ describe("createPbkdf2PasswordHash", () => {
     derive.mockRestore();
   });
 
+  it("verifies a stored cost of exactly maxIterations on a seam with a lower cost (plan 8 final review T2)", async () => {
+    // The boundary: a seam built with `iterations: 1000` keeps the default
+    // `maxIterations` of 100000, so a row at 100000 is in range.
+    const stored = await createPbkdf2PasswordHash().hash("pw");
+    expect(stored).toMatch(/^pbkdf2-sha256\$100000\$/);
+    expect(await seam.verify("pw", stored)).toEqual({ ok: true, rehash: false });
+  });
+
   it("answers ok false when the derive rejects", async () => {
     const stored = await seam.hash("pw");
     const derive = vi
