@@ -116,7 +116,9 @@ pattern with the `g` or `y` flag, and refuses any admitted `http` or
 `https` URL that is not on a loopback host. `signInPage`
 replaces the page; the function gets the base path, the continue path,
 the enabled methods, and the script nonce, and must put the nonce on its
-script tag. `@tempo-auth/handoff` (plan 5b) does the app side.
+script tag. The `methods` input has the flags `magicLink`, `google`,
+`apple`, `passkey`, and `password`. `password` is true when the config
+has a `password` section. `@tempo-auth/handoff` (plan 5b) does the app side.
 
 ## Social sign-in
 

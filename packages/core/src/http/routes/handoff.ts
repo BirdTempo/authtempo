@@ -26,6 +26,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     google: config.social.providers.some((p) => p.name === "google"),
     apple: config.social.providers.some((p) => p.name === "apple"),
     passkey: config.passkey !== null,
+    password: config.password !== null,
   };
   const page = (handoffId: string): Response => {
     const nonce = randomBase64Url(16);

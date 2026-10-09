@@ -8,7 +8,9 @@ import {
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { handoffRoutes } from "../src/http/routes/handoff.js";
+import { passwordRoutes } from "../src/http/routes/password.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
+import { createPbkdf2PasswordHash } from "../src/seams/password-hash.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
 
 const SCHEMES = ["consumera://"];
@@ -447,6 +449,55 @@ describe("handoff routes", () => {
       )?.[1] ?? ""
     );
   }
+
+  it("signs in by password on the sign-in page and continues the handoff to a redeem (plan 8)", async () => {
+    const auth = handoffAuth({
+      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) },
+    });
+    const handle = createRouter(auth.config, [
+      ...handoffRoutes(auth.config),
+      ...passwordRoutes(auth.config),
+    ]);
+    const { verifier, q } = await challenge();
+    const h = await startedId(handle, q);
+    const pageHtml = await (await handle(get(`/auth/handoff/continue?h=${h}`))).text();
+    expect(pageHtml).toContain(`id="password"`);
+    expect(
+      (
+        await handle(
+          post("/auth/password/sign-up", {
+            email: "ada@example.com",
+            password: "correct horse battery",
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    const signIn = await handle(
+      post("/auth/password/sign-in", {
+        email: "ada@example.com",
+        password: "correct horse battery",
+      }),
+    );
+    expect(signIn.status).toBe(200);
+    const cookie = (signIn.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    const confirm = await handle(get(`/auth/handoff/continue?h=${h}`, { cookie }));
+    expect(await confirm.text()).toContain("Signed in as <strong>ada@example.com</strong>");
+    const res = await handle(formPost(h, { origin: BASE_URL, cookie }));
+    const code = new URL(res.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    const redeem = await handle(post("/auth/handoff/redeem", { code, verifier }));
+    expect(redeem.status).toBe(200);
+    expect(await redeem.json()).toMatchObject({ user: { email: "ada@example.com" } });
+  });
+
+  it("shows no password form without a password config", async () => {
+    const auth = handoffAuth();
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    const { q } = await challenge();
+    const h = await startedId(handle, q);
+    expect(await (await handle(get(`/auth/handoff/continue?h=${h}`))).text()).not.toContain(
+      `id="password"`,
+    );
+  });
 
   it("GET start with a session redirects to the confirm page and mints nothing", async () => {
     const auth = handoffAuth();
