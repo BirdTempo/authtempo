@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { resolveConfig } from "../src/config.js";
 import { readBody } from "../src/http/body.js";
 import { defaultConfirmPage, escapeHtml } from "../src/http/confirm-page.js";
 import {
@@ -9,18 +10,23 @@ import {
   readCookie,
   sessionCookie,
 } from "../src/http/cookies.js";
+import { formAction, pageHeaders } from "../src/http/csp.js";
 import { json, readJson, respond } from "../src/http/json.js";
 import { redirect } from "../src/http/redirect.js";
 import { safeNext } from "../src/http/safe-next.js";
 import { fail, ok } from "../src/result.js";
+import { createMemoryAdapter } from "../src/storage/memory.js";
 
 describe("cookies", () => {
   it("sets an HttpOnly Secure SameSite=Lax cookie on /", () => {
-    const c = sessionCookie("tempo_session", "ts_abc", 60);
+    const c = sessionCookie("tempo_session", "ts_abc", 60, "Lax");
+    expect(sessionCookie("tempo_session", "ts_abc", 60, "None")).toBe(
+      "tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=None",
+    );
     expect(c).toBe("tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax");
   });
   it("clears with Max-Age=0", () => {
-    expect(clearSessionCookie("tempo_session")).toBe(
+    expect(clearSessionCookie("tempo_session", "Lax")).toBe(
       "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
     );
   });
@@ -174,5 +180,33 @@ describe("redirect", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://api.example.com/x");
     expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("csp", () => {
+  const cfg = (over = {}) =>
+    resolveConfig({
+      baseURL: "https://api.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: ["https://app.example.com", "consumera://", "http://localhost:5173"],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      ...over,
+    });
+  it("lists self, the http(s) trusted origins, and the handoff schemes", () => {
+    expect(formAction(cfg())).toBe("'self' https://app.example.com http://localhost:5173");
+    expect(formAction(cfg({ handoff: { schemes: ["consumera://", "com.example.app://"] } }))).toBe(
+      "'self' https://app.example.com http://localhost:5173 consumera: com.example.app:",
+    );
+  });
+  it("builds the page headers with the policy and no-store", () => {
+    const h = pageHeaders(cfg(), "default-src 'none'");
+    expect(h).toEqual({
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "x-robots-tag": "noindex",
+      "content-security-policy": "default-src 'none'",
+    });
   });
 });

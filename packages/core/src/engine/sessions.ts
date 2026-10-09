@@ -123,7 +123,12 @@ export function renewedSessionCookie(
   const token = readCookie(request, config.cookieName);
   if (!token) return null;
   const msLeft = resolved.session.expiresAt.getTime() - config.clock.now().getTime();
-  return sessionCookie(config.cookieName, token, Math.max(0, Math.floor(msLeft / 1000)));
+  return sessionCookie(
+    config.cookieName,
+    token,
+    Math.max(0, Math.floor(msLeft / 1000)),
+    config.cookie.sameSite,
+  );
 }
 
 /** The public shape of a session. Never the hash, never internal ids a client does not need. */

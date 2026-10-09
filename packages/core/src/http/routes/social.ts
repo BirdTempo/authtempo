@@ -74,7 +74,12 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
         const res = redirect(`${config.baseURL}${r.value.next}`);
         res.headers.append(
           "set-cookie",
-          sessionCookie(config.cookieName, r.value.token, config.session.ttlDays * 86_400),
+          sessionCookie(
+            config.cookieName,
+            r.value.token,
+            config.session.ttlDays * 86_400,
+            config.cookie.sameSite,
+          ),
         );
         res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
         return res;

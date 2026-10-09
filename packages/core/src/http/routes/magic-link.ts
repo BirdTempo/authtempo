@@ -82,7 +82,10 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         if (!result.ok) return failed(result.code);
         const maxAge = config.session.ttlDays * 86_400;
         const res = redirect(`${config.baseURL}${result.value.next}`);
-        res.headers.set("set-cookie", sessionCookie(config.cookieName, result.value.token, maxAge));
+        res.headers.set(
+          "set-cookie",
+          sessionCookie(config.cookieName, result.value.token, maxAge, config.cookie.sameSite),
+        );
         return res;
       },
     },
