@@ -1,3 +1,4 @@
+import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
@@ -36,7 +37,16 @@ export interface AuthConfig {
   clock?: Clock;
   cookieName?: string;
   session?: { ttlDays?: number; slidingRefreshDays?: number };
-  magicLink?: { ttlMinutes?: number; linkBuilder?: (token: string, next: string) => string };
+  magicLink?: {
+    ttlMinutes?: number;
+    linkBuilder?: (token: string, next: string) => string;
+    /**
+     * The HTML of the page a magic link opens. The page must contain a form
+     * that posts `token` to `action` by `method="post"`. The default is
+     * `defaultConfirmPage`. Core sets the headers, so return markup only.
+     */
+    confirmPage?: (input: ConfirmPageInput) => string;
+  };
 }
 
 export interface ResolvedConfig {
@@ -51,7 +61,11 @@ export interface ResolvedConfig {
   clock: Clock;
   cookieName: string;
   session: { ttlDays: number; slidingRefreshDays: number };
-  magicLink: { ttlMinutes: number; linkBuilder: (token: string, next: string) => string };
+  magicLink: {
+    ttlMinutes: number;
+    linkBuilder: (token: string, next: string) => string;
+    confirmPage: (input: ConfirmPageInput) => string;
+  };
 }
 
 /**
@@ -111,6 +125,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         input.magicLink?.linkBuilder ??
         ((token) =>
           `${input.baseURL}${basePath}/magic-link/verify?token=${encodeURIComponent(token)}`),
+      confirmPage: input.magicLink?.confirmPage ?? defaultConfirmPage,
     },
   };
 }

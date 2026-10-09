@@ -6,6 +6,7 @@ export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { ResolvedSession } from "./engine/sessions.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
+export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { createMemoryLimiter } from "./limiter/memory.js";
 export type { LimiterPort, LimitWindow } from "./limiter/port.js";
 export type { Clock } from "./primitives/clock.js";
