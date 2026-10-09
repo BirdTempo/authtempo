@@ -6,7 +6,7 @@ export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
-export type { ResolvedSession } from "./engine/sessions.js";
+export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";

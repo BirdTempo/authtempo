@@ -158,3 +158,6 @@ export function publicSession(resolved: ResolvedSession): {
     },
   };
 }
+
+/** The JSON shape of a session answer: `GET /session`, the verify routes, and the redeem. */
+export type PublicSession = ReturnType<typeof publicSession>;
