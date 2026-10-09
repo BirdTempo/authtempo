@@ -6,6 +6,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import { createSession } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
+import { consumeVerification } from "./verification.js";
 
 export const MAGIC_LINK_PREFIX = "ml_";
 export const MAGIC_LINK_TOKEN_RE = /^ml_[A-Za-z0-9_-]{43}$/;
@@ -74,27 +75,13 @@ export async function verifyMagicLink(
 ): Promise<Result<{ token: string; next: string; user: UserRow }>> {
   if (!MAGIC_LINK_TOKEN_RE.test(input.token)) return fail("invalid_token");
   const now = config.clock.now();
-  const valueHash = await sha256Hex(input.token);
-  const row = await config.storage.findOne("verification", [
-    { field: "valueHash", op: "eq", value: valueHash },
-    { field: "purpose", op: "eq", value: "magic-link" },
-  ]);
-  if (!row) return fail("invalid_token");
-  const consumed = await config.storage.update(
-    "verification",
-    [
-      { field: "id", op: "eq", value: row.id },
-      { field: "consumedAt", op: "eq", value: null },
-      { field: "expiresAt", op: "gt", value: now },
-    ],
-    { consumedAt: now, updatedAt: now },
-  );
-  if (consumed !== 1) {
-    // An unconsumed row past its expiry is expired. A consumed row, or one a
-    // concurrent click consumed after our read, is invalid.
-    const expired = row.consumedAt === null && row.expiresAt.getTime() <= now.getTime();
-    return fail(expired ? "token_expired" : "invalid_token");
-  }
+  const consumed = await consumeVerification(config.storage, {
+    purpose: "magic-link",
+    valueHash: await sha256Hex(input.token),
+    now,
+  });
+  if (!consumed.ok) return consumed;
+  const row = consumed.value;
   // A failure after this point burns the link by design. The person
   // requests a new one.
   // The session commits with the claim in one transaction, so a claimant's
