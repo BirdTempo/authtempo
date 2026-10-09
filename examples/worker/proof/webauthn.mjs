@@ -1,32 +1,53 @@
 // STATUS 2026-10-10: this script was written and linted in a sandboxed session. It was NOT run
 // there. The sandbox refuses the Firefox profile folder ("Could not find profile folder", exit 1).
-// The owner runs the proof and the two break proofs in their own shell:
+// The owner runs the proof and the break proofs in their own shell:
 //   pnpm --filter tempo-auth-example-worker proof:webauthn firefox
 //   PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn firefox
-// Each run writes its result record to proof/results/webauthn-<browser>[-stub].json: the path
-// taken, the versions, the date, and pass or the exact failure. Keep those files as the evidence.
+//   PROOF_FORCE_WEAK=1 PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn firefox
+// The first run is the proof. The second must fail on the strong path. The third must fail on
+// the weak path. PROOF_FORCE_WEAK=1 skips the virtual authenticator. FIREFOX_BINARY sets the
+// Firefox binary.
+// Each run writes its record to proof/results/webauthn-<browser>[-weak][-stub].json (latest) and
+// to the same name with the date added (kept). The record has the path taken, the versions, the
+// date, and pass or the exact failure. Keep these files as the evidence.
+//
+// Xray risk, and how this script avoids it: an execute/async script in Firefox runs in the
+// Marionette sandbox over the window. Writes to PublicKeyCredential from there may land on an
+// Xray wrapper and not reach the page. So the script injects a <script> element. The whole
+// ceremony (the patches, the client calls, the counters) runs in the page world and stores its
+// report on window.__tempoAuthProof. The WebDriver script only polls that property. This needs a
+// page without a content security policy. The Worker's own 404 page has none, and the script
+// checks the headers first and stops if one appears. If you see "parsers not exercised" on
+// Firefox, read it with this design in mind: the injection is the part that no run has tested.
+//
 // The plan 6c WebAuthn proof for Firefox and Safari. WebDriver over plain fetch, no Selenium.
-// It injects the client's built webauthn.js into a page on the Worker origin and runs the passkey
+// It runs the client's built webauthn.js in a page on the Worker origin and runs the passkey
 // ceremonies through browserWebAuthn, once with the browser's JSON parsers and once with the
 // client's own conversions. Each step counts which conversion code ran. A pass needs that count,
 // because a step that never reached the parsers proves nothing about them.
+// This proof covers the client package. The sign-in page script of core does not use the client.
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BASE, bearerFor, startWorker } from "./dev.mjs";
+
+// Firefox binary: FIREFOX_BINARY, else the standard app path when the file exists, else none.
+// The binary was set after a Homebrew wrapper at /opt/homebrew/bin/firefox was suspected. Setting
+// it did not change the sandbox failure of 2026-10-10 ("Could not find profile folder").
+const firefoxBinary =
+  process.env.FIREFOX_BINARY ??
+  ["/Applications/Firefox.app/Contents/MacOS/firefox"].find((p) => existsSync(p));
 
 const BROWSERS = {
   firefox: {
     command: "geckodriver",
     args: ["--port", "4445"],
     port: 4445,
-    // The binary is set by path. geckodriver 0.37.1 otherwise finds a Homebrew wrapper script
-    // at /opt/homebrew/bin/firefox, and that wrapper loses the -profile argument (checked 2026-10-10).
     capabilities: {
       browserName: "firefox",
       "moz:firefoxOptions": {
-        binary: "/Applications/Firefox.app/Contents/MacOS/firefox",
+        ...(firefoxBinary ? { binary: firefoxBinary } : {}),
         args: ["-headless"],
       },
     },
@@ -49,6 +70,8 @@ const EMAIL = `webauthn-${name}@example.com`;
 // Break proof only: PROOF_STUB_TYPEERROR=1 makes navigator.credentials.create throw a TypeError.
 // The script must then fail on both paths.
 const STUB = process.env.PROOF_STUB_TYPEERROR === "1";
+// Break proof only: PROOF_FORCE_WEAK=1 skips the virtual authenticator, so the weak path runs.
+const FORCE_WEAK = process.env.PROOF_FORCE_WEAK === "1";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const WEBAUTHN_JS = join(
@@ -88,6 +111,16 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
     // Calls of the browser's functions, and of the client's own conversions.
     ran: { nativeParse: 0, nativeToJSON: 0, ownOptions: 0, ownToJSON: 0 },
   };
+  // A native step needs the browser's parser for its operation and toJSON. Without them the step
+  // has nothing to test, and the fallback steps carry the proof.
+  const nativeMissing =
+    !(op === "create"
+      ? report.native.parseCreationOptionsFromJSON
+      : report.native.parseRequestOptionsFromJSON) || !report.native.toJSON;
+  if (mode === "native" && nativeMissing) {
+    done({ ...report, skipped: "native parsers absent" });
+    return;
+  }
   const count = (key, fn) =>
     function (...args) {
       report.ran[key]++;
@@ -144,6 +177,7 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
   const run = async () => {
     if (op === "create") {
       const options = await post("/passkey/register/options", {}, true);
+      report.optionsStatus = options.status;
       if (options.status !== 200) return { ...report, options };
       const response = await webauthn.create(options.body);
       return {
@@ -152,6 +186,7 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
       };
     }
     const options = await post("/passkey/authenticate/options", {}, false);
+    report.optionsStatus = options.status;
     if (options.status !== 200) return { ...report, options };
     const response = await webauthn.get(options.body);
     return { ...report, verify: await post("/passkey/authenticate/verify", { response }, false) };
@@ -160,10 +195,16 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
     done({ ...report, error: { name: e?.name ?? "unknown", message: String(e?.message ?? e) } }),
   );
 }
-const SCRIPT = `${source}\nreturn (${pageCeremony.toString()})(browserWebAuthn, ...arguments);`;
+// The page-world text. The source declares its functions inside the arrow function, so the
+// assignments in pageCeremony reach them. A throw is stored on the window, so the poll sees it.
+const pageText = (op, mode, bearer) =>
+  `(() => { try { ${source}\n(${pageCeremony.toString()})(browserWebAuthn, ${JSON.stringify(BASE)}, ${JSON.stringify(bearer)}, ${JSON.stringify(op)}, ${JSON.stringify(mode)}, ${JSON.stringify(STUB)}, (r) => { window.__tempoAuthProof = r; }); } catch (e) { window.__tempoAuthProof = { pageError: String(e) }; } })();`;
+const INJECT = `const el = document.createElement("script"); el.textContent = arguments[0]; document.documentElement.appendChild(el); return null;`;
 
+// Every driver call has a timeout: 60 s for a new session, 40 s for the rest.
 async function wd(method, path, body) {
   const r = await fetch(`${DRIVER}${path}`, {
+    signal: AbortSignal.timeout(method === "POST" && path === "/session" ? 60_000 : 40_000),
     method,
     headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -194,33 +235,60 @@ function exercised(s, hasCredential) {
   );
 }
 
+// The weak path accepts only a cancel or the abort of the script itself. Any other name fails.
+const WEAK_OK = new Set(["WebAuthnCancelled", "NotAllowedError", "TimeoutError", "AbortError"]);
+const weakStepOk = (s) => s.optionsStatus === 200 && s.error && WEAK_OK.has(s.error.name);
+
 const result = {
   proof: `webauthn-${name}`,
   result: "fail",
   date: new Date().toISOString(),
   macOS: execFileSync("sw_vers", ["-productVersion"], { encoding: "utf8" }).trim(),
   ...(STUB ? { stub: "navigator.credentials.create throws TypeError" } : {}),
+  ...(FORCE_WEAK ? { forceWeak: true } : {}),
 };
 let driver = null;
+let driverSpawnError = null;
 let worker = null;
 let session = null;
+const killDriver = () => driver?.kill();
+process.on("exit", killDriver);
+const probe = (url) => fetch(url, { signal: AbortSignal.timeout(2_000) });
 try {
-  try {
-    await fetch(`${DRIVER}/status`);
-    throw new Error(`port ${browser.port} answers already; stop the other driver first`);
-  } catch (e) {
-    if (String(e).includes("answers already")) throw e;
-  }
+  const busy = await probe(`${DRIVER}/status`).then(
+    () => true,
+    () => false,
+  );
+  if (busy) throw new Error(`port ${browser.port} answers already; stop the other driver first`);
   result.driver = browser.driverVersion();
   driver = spawn(browser.command, browser.args, { stdio: "ignore" });
-  for (let i = 0; i < 50; i++) {
+  driver.on("error", (e) => {
+    driverSpawnError = String(e);
+    result.driverSpawnError = driverSpawnError;
+  });
+  let ready = false;
+  for (let i = 0; i < 50 && !ready && !driverSpawnError; i++) {
     try {
-      if ((await fetch(`${DRIVER}/status`)).ok) break;
+      ready = (await probe(`${DRIVER}/status`)).ok;
     } catch {}
-    await sleep(200);
+    if (!ready) await sleep(200);
+  }
+  if (!ready) {
+    throw new Error(
+      `${browser.command} did not answer in 10 s${driverSpawnError ? `: ${driverSpawnError}` : ""}`,
+    );
   }
   worker = await startWorker();
   const bearer = await bearerFor(EMAIL);
+
+  // The ceremony runs in a script element, so the Worker page must carry no content security policy.
+  const pageHeaders = (await fetch(`${BASE}/__proof`, { signal: AbortSignal.timeout(10_000) }))
+    .headers;
+  if (pageHeaders.get("content-security-policy")) {
+    throw new Error(
+      "the page has a content security policy; add a TEST_MODE route /__test/webauthn that serves a harness page",
+    );
+  }
 
   // Ask for virtual authenticators first; a driver that refuses the capability gets a plain session.
   let created = await wd("POST", "/session", {
@@ -251,18 +319,31 @@ try {
     return r.status === 200 ? { id: r.value } : { error: r.value?.message ?? `HTTP ${r.status}` };
   };
   const ceremony = async (op, mode) => {
-    // A 404 text page on the Worker origin: same origin as the passkey routes, no content security policy.
-    await wd("POST", `/session/${session}/url`, { url: `${BASE}/__proof` });
-    const r = await wd("POST", `/session/${session}/execute/async`, {
-      script: SCRIPT,
-      args: [BASE, bearer, op, mode, STUB],
+    const fail = (driverError) => ({ op, mode, driverError });
+    // A 404 text page on the Worker origin: same origin as the passkey routes.
+    const nav = await wd("POST", `/session/${session}/url`, { url: `${BASE}/__proof` });
+    if (nav.status !== 200) return fail(nav.value);
+    const inject = await wd("POST", `/session/${session}/execute/sync`, {
+      script: INJECT,
+      args: [pageText(op, mode, bearer)],
     });
-    return r.value;
+    if (inject.status !== 200) return fail(inject.value);
+    for (let i = 0; i < 150; i++) {
+      const r = await wd("POST", `/session/${session}/execute/sync`, {
+        script: "return window.__tempoAuthProof ?? null;",
+        args: [],
+      });
+      if (r.status !== 200) return fail(r.value);
+      if (r.value) return r.value.ran ? r.value : fail(r.value);
+      await sleep(200);
+    }
+    return fail("no report in 30 s");
   };
 
-  const first = await addAuthenticator();
+  const first = FORCE_WEAK ? { error: "PROOF_FORCE_WEAK=1" } : await addAuthenticator();
   result.virtualAuthenticator = first.id ? "added" : first.error;
   const steps = [];
+  const ran = (s) => !s.skipped;
   if (first.id) {
     result.path = "strong";
     steps.push(await ceremony("create", "native"));
@@ -274,13 +355,15 @@ try {
     steps.push(await ceremony("create", "fallback"));
     steps.push(await ceremony("get", "fallback"));
     steps.push(await ceremony("get", "native"));
-    const ceremoniesOk = steps.every(
+    const active = steps.filter(ran);
+    const ceremoniesOk = active.every(
       (s) =>
+        !s.driverError &&
         !s.error &&
         s.verify?.status === 200 &&
         (s.op === "create" || s.verify.body?.user?.email === EMAIL),
     );
-    const parsersRan = steps.every((s) => s.ran && exercised(s, true));
+    const parsersRan = active.every((s) => s.ran && exercised(s, true));
     result.parsersExercised = parsersRan;
     // A pass without the evidence is "parsers not exercised", and that is a failure.
     result.result = ceremoniesOk && parsersRan ? "pass" : "fail";
@@ -295,23 +378,41 @@ try {
     ]) {
       steps.push(await ceremony(op, mode));
     }
-    const rejected = steps.every((s) => s.error && s.error.name !== "TypeError");
-    const parsersRan = steps.every((s) => s.ran && exercised(s, false));
+    const active = steps.filter(ran);
+    const rejected = active.every((s) => !s.driverError && weakStepOk(s));
+    const parsersRan = active.every((s) => s.ran && exercised(s, false));
     result.parsersExercised = parsersRan;
     result.result = rejected && parsersRan ? "pass" : "fail";
     if (rejected && !parsersRan) result.reason = "parsers not exercised";
   }
+  result.skipped = steps.filter((s) => s.skipped).map((s) => `${s.op}/${s.mode}: ${s.skipped}`);
   result.steps = steps;
 } catch (e) {
   result.error = String(e);
 } finally {
-  if (session) await wd("DELETE", `/session/${session}`).catch(() => {});
-  driver?.kill();
-  await worker?.stop();
+  // The record must be written whatever the cleanup does.
+  try {
+    if (session) await wd("DELETE", `/session/${session}`);
+  } catch (e) {
+    result.sessionStopError = String(e);
+  }
+  try {
+    killDriver();
+  } catch (e) {
+    result.driverStopError = String(e);
+  }
+  try {
+    await worker?.stop();
+  } catch (e) {
+    result.stopError = String(e);
+  }
 }
 const line = JSON.stringify(result);
 const resultsDir = join(dirname(fileURLToPath(import.meta.url)), "results");
 mkdirSync(resultsDir, { recursive: true });
-writeFileSync(join(resultsDir, `webauthn-${name}${STUB ? "-stub" : ""}.json`), `${line}\n`);
+// The latest record, and a dated copy that a later run never overwrites.
+const base = `webauthn-${name}${FORCE_WEAK ? "-weak" : ""}${STUB ? "-stub" : ""}`;
+writeFileSync(join(resultsDir, `${base}.json`), `${line}\n`);
+writeFileSync(join(resultsDir, `${base}-${result.date.replace(/[:.]/g, "-")}.json`), `${line}\n`);
 console.log(line);
 process.exit(result.result === "pass" ? 0 : 1);
