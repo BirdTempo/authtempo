@@ -191,6 +191,12 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
+      '@tempo-auth/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@tempo-auth/handoff':
+        specifier: workspace:*
+        version: link:../../packages/handoff
       typescript:
         specifier: 7.0.2
         version: 7.0.2

@@ -1,0 +1,135 @@
+# @tempo-auth/handoff
+
+This package signs in a native or desktop app through the system
+browser. It does the app side of the handoff of `@tempo-auth/core`. It
+has two adapters, one for Expo and one for Electron. It does not depend
+on Expo or Electron. It has no third-party dependency.
+
+## The flow
+
+1. The app makes a PKCE verifier and its S256 challenge.
+2. The app opens the system browser at the start URL, with the challenge
+   and the redirect.
+3. The person signs in. The API redirects to the redirect with a one-time
+   code.
+4. The app redeems the code with the verifier and receives a bearer
+   token.
+
+The opener does steps 2 and 3. The package does steps 1 and 4. The
+verifier leaves the process once, in the redeem body.
+
+## createHandoff
+
+```ts
+import { createHandoff } from "@tempo-auth/handoff";
+
+const handoff = createHandoff({
+  baseURL: "https://api.example.com",
+  redirect: "consumera://auth",
+  opener,
+});
+const result = await handoff.signIn();
+```
+
+| Option | Meaning |
+| --- | --- |
+| `baseURL` | The API origin. |
+| `basePath` | The mount path of the auth routes. Default `/auth`. |
+| `redirect` | `<scheme>auth` for a scheme in the API's `handoff.schemes`, or a development URL that `devRedirectPattern` admits. |
+| `opener` | The browser side. See the next section. |
+| `fetch` | The fetch to use. Default `globalThis.fetch`. |
+| `crypto` | The crypto seam. Default Web Crypto. Hermes needs `expoCrypto`. |
+
+`signIn()` returns `{ ok: true, value: { token, user, session } }` or a
+failure. `startUrl(challenge)` returns the start URL for apps that open
+the browser themselves.
+
+## The opener contract
+
+An opener has one method: `open(url, redirect)`.
+
+- It opens `url` in the system browser.
+- It resolves with the full URL that the app received on `redirect`.
+- It resolves with `null` when the person cancels or the wait ends. The
+  handoff then returns the code `cancelled`.
+- It never resolves with a URL from another flow. One handoff waits at a
+  time.
+
+The returned URL must sit on the configured `redirect`, byte for byte.
+If it does not, no redeem happens and the code is `redirect_mismatch`.
+
+## Expo
+
+```ts
+import * as WebBrowser from "expo-web-browser";
+import * as Crypto from "expo-crypto";
+import { createHandoff } from "@tempo-auth/handoff";
+import { expoCrypto, expoOpener } from "@tempo-auth/handoff/expo";
+
+const handoff = createHandoff({
+  baseURL: "https://api.example.com",
+  redirect: "consumera://auth",
+  opener: expoOpener(WebBrowser),
+  crypto: expoCrypto(Crypto),
+});
+```
+
+- Add the app scheme to `app.json`, in the `scheme` entry. Without it,
+  the system does not return the code to the app.
+- `expoOpener` passes `preferEphemeralSession: false`. An ephemeral
+  session keeps no cookies. The social binding cookie then dies between
+  the provider start and its callback, and the flow fails with
+  `invalid_token`. Do not change this option.
+- `expoCrypto` is required on Hermes. Hermes has no `crypto.subtle`.
+
+## Electron
+
+Run all of this in the main process.
+
+```ts
+import { app, safeStorage, shell } from "electron";
+import { createHandoff } from "@tempo-auth/handoff";
+import { createTokenStore, electronOpener } from "@tempo-auth/handoff/electron";
+
+app.setAsDefaultProtocolClient("consumera");
+
+const opener = electronOpener({ shell, app });
+app.on("second-instance", (_event, argv) => {
+  opener.receive(argv.find((a) => a.startsWith("consumera://")) ?? "");
+});
+```
+
+- Call `app.setAsDefaultProtocolClient` so the system routes the scheme
+  to the app.
+- macOS delivers the URL as an `open-url` event. The opener listens for
+  it.
+- Windows and Linux start a second instance with the URL in `argv`.
+  Forward it from the `second-instance` handler to `opener.receive`.
+- `createTokenStore({ safeStorage, read, write, remove })` keeps the token
+  encrypted at rest. If `safeStorage` has no encryption, `set` throws
+  `TokenStoreError` and writes nothing. A plaintext token on disk is worse
+  than a new sign-in.
+- The token stays in the main process. A renderer asks the main process
+  to make requests. The renderer never holds the token.
+
+## Development
+
+Core admits a development redirect only when the API sets
+`devRedirectPattern`. For Expo Go the redirect is an `exp://` URL. For
+a web or desktop test it is a loopback URL, for example
+`http://127.0.0.1:8081/auth`. Core refuses any `http` or `https` URL
+that is not on a loopback host.
+
+## Failure codes
+
+| Code | Meaning |
+| --- | --- |
+| `cancelled` | The person closed the browser, or the wait ended. |
+| `redirect_mismatch` | The returned URL is not on the configured `redirect`. No redeem happened. |
+| Core codes | The server's codes pass through, for example `invalid_token`, `token_expired`, `rate_limited`. |
+| `network`, `unexpected` | The same as in `@tempo-auth/client`. |
+
+## Show the signed-in email
+
+After any sign-in, show `user.email` to the person. A crafted link can
+sign a person into another account. The email is how the person notices.
