@@ -321,6 +321,54 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     ).toBe(true);
   });
 
+  it("keeps the owner's user row when the claim lands inside the claimant's new-user transaction (final review I-1)", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const auth = socialAuth({}, fakeJwt(tokens));
+    // No account exists for the address. The claimant's callback creates the
+    // user, an unverified identity, and a session in one transaction.
+    const s = await started(auth);
+    tokens["idtok-default"] = googleToken(s.nonce, { sub: "attacker", email_verified: false });
+    const link = await magicLinkToken(auth);
+
+    // On D1 the owner's whole claim runs inside the claimant's open
+    // transaction, just before its session insert: it finds the new user,
+    // adds the email identity, verifies the user, and deletes the claimant's
+    // identity. A throw would undo the user create and delete the owner's
+    // user row by id.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveBeforeSessionInsert(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await complete(auth, s);
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const userId = proved.value.user.id;
+    expect(
+      await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
+    ).toMatchObject({ email: EMAIL, emailVerified: true });
+    expect(
+      await auth.storage.findOne("identity", [
+        { field: "provider", op: "eq", value: "email" },
+        { field: "subject", op: "eq", value: EMAIL },
+      ]),
+    ).toMatchObject({ userId });
+    expect(
+      await auth.storage.findMany("identity", [{ field: "subject", op: "eq", value: "attacker" }]),
+    ).toEqual([]);
+    const sessions = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await resolveSession(auth.config, proved.value.token)).not.toBeNull();
+  });
+
   it("undoes the handoff redeem session of an unverified user when the claim lands inside the redeem (review finding 1)", async () => {
     const auth = makeAuth({ handoff: { schemes: ["consumera://"] } });
     const now = auth.clock.now();

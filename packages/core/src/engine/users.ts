@@ -111,10 +111,23 @@ export async function undoSessionIfIdentityGone(
   identityId: string,
   now: Date,
 ): Promise<void> {
+  if (!(await identityStillLinked(tx, identityId, now))) throw new ClaimRacedError();
+}
+
+/**
+ * Runs inside the caller's transaction. False when a claim deleted the
+ * identity row since the identity read. A conditional update, not a read,
+ * so that it sees the claim's first statement on D1.
+ */
+export async function identityStillLinked(
+  tx: StorageAdapter,
+  identityId: string,
+  now: Date,
+): Promise<boolean> {
   const n = await tx.update("identity", [{ field: "id", op: "eq", value: identityId }], {
     updatedAt: now,
   });
-  if (n === 0) throw new ClaimRacedError();
+  return n > 0;
 }
 
 export function findOrCreateUserByEmail(

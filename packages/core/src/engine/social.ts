@@ -13,7 +13,13 @@ import type { UserRow } from "../schema.js";
 import { buildQuery, type Provider, type SocialProfile } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { createSession } from "./sessions.js";
-import { ClaimRacedError, claimEmail, normalizeEmail, undoSessionIfIdentityGone } from "./users.js";
+import {
+  ClaimRacedError,
+  claimEmail,
+  identityStillLinked,
+  normalizeEmail,
+  undoSessionIfIdentityGone,
+} from "./users.js";
 
 export const OAUTH_STATE_PREFIX = "os_";
 const STATE_RE = /^os_[A-Za-z0-9_-]{43}$/;
@@ -271,14 +277,14 @@ export function resolveSocialUser(
   profile: SocialProfile,
   now: Date,
 ): Promise<Result<UserRow>>;
-export function resolveSocialUser<T>(
+export function resolveSocialUser<T extends AfterSession>(
   storage: StorageAdapter,
   provider: string,
   profile: SocialProfile,
   now: Date,
   after: (tx: StorageAdapter, user: UserRow) => Promise<T>,
 ): Promise<Result<{ user: UserRow; after: T }>>;
-export async function resolveSocialUser<T>(
+export async function resolveSocialUser<T extends AfterSession>(
   storage: StorageAdapter,
   provider: string,
   profile: SocialProfile,
@@ -291,10 +297,21 @@ export async function resolveSocialUser<T>(
         async (tx): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> => {
           const linked = await linkInTransaction(tx, provider, profile, now);
           if (!linked.ok) return linked;
-          const { user, trustedIdentityId } = linked.value;
+          const { user, trustedIdentityId, created } = linked.value;
           if (!after) return ok(user);
           const value = await after(tx, user);
-          if (trustedIdentityId) {
+          if (trustedIdentityId && created) {
+            // On D1 a claim can find the user that this transaction created
+            // before the commit. A throw would undo the user create, and the
+            // undo deletes the user row by id. That row is the owner's now:
+            // the owner's email identity and session would point to no user,
+            // and the owner could not sign in again. So delete only the own
+            // session, and commit (final review I-1, 2026-10-10).
+            if (!(await identityStillLinked(tx, trustedIdentityId, now))) {
+              await tx.delete("session", [{ field: "id", op: "eq", value: value.session.id }]);
+              return fail<never>("email_taken_unverified");
+            }
+          } else if (trustedIdentityId) {
             // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
             await undoSessionIfIdentityGone(tx, trustedIdentityId, now);
           }
@@ -317,6 +334,13 @@ export async function resolveSocialUser<T>(
 interface Linked {
   user: UserRow;
   trustedIdentityId: string | null;
+  /** True when this transaction created the user row. */
+  created: boolean;
+}
+
+/** The part of the `after` result that the new-user guard deletes. */
+interface AfterSession {
+  session: { id: string };
 }
 
 /** Runs inside the caller's transaction. */
@@ -349,17 +373,18 @@ async function linkInTransaction(
         profile,
         now,
       );
-      return ok({ user: filled, trustedIdentityId: null });
+      return ok({ user: filled, trustedIdentityId: null, created: false });
     }
     if (!user.emailVerified) {
       // No user-row write here. On D1 the undo of a user-row write restores
       // the full row and would revert a claim's emailVerified flip. The
       // verified sign-in later fills name and image.
-      return ok({ user, trustedIdentityId: identity.id });
+      return ok({ user, trustedIdentityId: identity.id, created: false });
     }
     return ok({
       user: await fillUser(tx, user, profile, now),
       trustedIdentityId: proved ? null : identity.id,
+      created: false,
     });
   }
   const email = profile.email ? normalizeEmail(profile.email) : null;
@@ -376,7 +401,11 @@ async function linkInTransaction(
     }
     await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
     await ensureEmailIdentity(tx, existing.id, email, now);
-    return ok({ user: await fillUser(tx, current, profile, now), trustedIdentityId: null });
+    return ok({
+      user: await fillUser(tx, current, profile, now),
+      trustedIdentityId: null,
+      created: false,
+    });
   }
   const user = await tx.create("user", {
     id: newId(now),
@@ -394,7 +423,7 @@ async function linkInTransaction(
   // exists only once the address is verified.
   if (profile.emailVerified) await tx.create("identity", identityRow(user.id, "email", email, now));
   // A claim can find this unverified user before the commit on D1.
-  return ok({ user, trustedIdentityId: profile.emailVerified ? null : identityId });
+  return ok({ user, trustedIdentityId: profile.emailVerified ? null : identityId, created: true });
 }
 
 /** The email identity means "this address signs in by magic link". It exists once the address is proved. */
