@@ -14,7 +14,11 @@ export interface Sort<M extends ModelName> {
 }
 
 export interface FindManyOptions<M extends ModelName> {
-  sort?: Sort<M>;
+  /**
+   * A list sorts by each key in order. Lists that a person reads must end
+   * with `id`, because the port has no tie-break and collation differs by dialect.
+   */
+  sort?: Sort<M> | Sort<M>[];
   limit?: number;
 }
 

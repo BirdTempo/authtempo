@@ -64,12 +64,20 @@ describe("SoftAuthenticator", () => {
       ["verify"],
     );
     const clientDataHash = new Uint8Array(
-      await crypto.subtle.digest("SHA-256", fromBase64Url(a1.response.clientDataJSON)),
+      await crypto.subtle.digest(
+        "SHA-256",
+        fromBase64Url(a1.response.clientDataJSON) as BufferSource,
+      ),
     );
     const signed = new Uint8Array([...authData, ...clientDataHash]);
-    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, raw, signed)).toBe(
-      true,
-    );
+    expect(
+      await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        key,
+        raw as BufferSource,
+        signed,
+      ),
+    ).toBe(true);
   });
 
   it("sets the backup flags when asked", async () => {

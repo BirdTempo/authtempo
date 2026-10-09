@@ -24,8 +24,7 @@ first with vitest 5 support, and on 2026-10-09 it was younger than the
 one-day release age; move the example to plugin 1.4.0 and vitest 5 on
 2026-10-10 or later.
 
-Social sign-in, passkeys, the native handoff, and organizations arrive in the
-later plans.
+Organizations are in core behind `organizations: {}`.
 
 ## Commands
 

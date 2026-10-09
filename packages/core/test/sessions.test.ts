@@ -73,7 +73,7 @@ describe("sessions engine", () => {
       ip: null,
       userAgent: null,
     });
-    const where = [{ field: "id", op: "eq" as const, value: session.id }];
+    const where = [{ field: "id" as const, op: "eq" as const, value: session.id }];
     clock.advance(7 * DAY - 1);
     const before = await resolveSession(config, token);
     expect(before?.refreshed).toBe(false);

@@ -5,6 +5,7 @@ import {
   base64UrlEncode,
   browserWebAuthn,
   credentialToJSON,
+  type PublicKeyCredentialLike,
   supportsPasskeys,
   toBinaryCreationOptions,
   toBinaryRequestOptions,
@@ -35,7 +36,7 @@ function binaryCredential(json: {
     rawId: base64UrlDecode(json.rawId),
     type: json.type,
     authenticatorAttachment: json.authenticatorAttachment,
-    response,
+    response: response as unknown as PublicKeyCredentialLike["response"],
     getClientExtensionResults: () => json.clientExtensionResults,
   };
 }

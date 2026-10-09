@@ -24,7 +24,11 @@ type Row = Record<string, unknown>;
  * row this transaction saw, not a row another request changed in between.
  * The engine's guards are unique keys and conditional updates, not this log.
  */
-type Undo = Statement;
+interface Undo extends Statement {
+  model: ModelName;
+  /** The write this entry reverses. A failed entry reports it as `<model>:<op>`. */
+  op: "create" | "update" | "delete";
+}
 
 interface Ctx {
   undo: Undo[] | null;
@@ -70,6 +74,8 @@ function reinsertRowStatement(model: ModelName, row: Row): Statement {
  * entry fails, throws one rollback_failed error with `{ original, failures }`
  * as its cause, so a broken rollback never looks like the original error
  * (for example a benign unique_violation race). The original is never changed.
+ * `fields` names each undo entry that failed as `<model>:<op>`, so a log line
+ * says what is left behind.
  * No db.batch here: a batch that fails midway applies nothing.
  */
 async function rethrowAfterUndo(
@@ -78,16 +84,18 @@ async function rethrowAfterUndo(
   original: unknown,
 ): Promise<never> {
   const failures: unknown[] = [];
+  const fields: string[] = [];
   for (const u of [...entries].reverse()) {
     try {
       await run(db, u);
     } catch (f) {
       failures.push(f);
+      fields.push(`${u.model}:${u.op}`);
     }
   }
   if (failures.length === 0) throw original;
   const model = original instanceof StorageError ? original.model : "meta";
-  throw new StorageError("rollback_failed", model, [], { cause: { original, failures } });
+  throw new StorageError("rollback_failed", model, fields, { cause: { original, failures } });
 }
 
 function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
@@ -102,6 +110,8 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
         throw toStorageError(model, e) ?? e;
       }
       ctx.undo?.push({
+        model,
+        op: "create",
         sql: `DELETE FROM ${TABLES[model]} WHERE id = ?`,
         params: [(data as { id: string }).id],
       });
@@ -145,7 +155,8 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       } catch (e) {
         throw toStorageError(model, e) ?? e;
       }
-      for (const row of results[0]?.results ?? []) ctx.undo.push(restoreRowStatement(model, row));
+      for (const row of results[0]?.results ?? [])
+        ctx.undo.push({ model, op: "update", ...restoreRowStatement(model, row) });
       return results[1]?.meta.changes ?? 0;
     },
     async delete(model, where) {
@@ -159,7 +170,8 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
         params: s.params,
       };
       const rows = await all(db, returning);
-      for (const row of rows) ctx.undo.push(reinsertRowStatement(model, row));
+      for (const row of rows)
+        ctx.undo.push({ model, op: "delete", ...reinsertRowStatement(model, row) });
       return rows.length;
     },
     async transaction(fn) {

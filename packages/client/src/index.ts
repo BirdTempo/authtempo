@@ -3,6 +3,9 @@ export {
   type Client,
   type ClientOptions,
   createClient,
+  type InvitationJSON,
+  type MemberJSON,
+  type OrganizationJSON,
   type PasskeySummaryJSON,
 } from "./client.js";
 export type { ClientCode, ClientFailure, ClientResult } from "./result.js";

@@ -1,3 +1,4 @@
+import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import {
   defaultHandoffConfirmPage,
@@ -99,6 +100,18 @@ export interface AuthConfig {
     signInPage?: (input: SignInPageInput) => string;
     confirmPage?: (input: HandoffConfirmPageInput) => string;
   };
+  /** Off when absent or `false`. `{}` turns it on with the defaults. */
+  organizations?: OrganizationsConfig | false;
+}
+
+export interface OrganizationsConfig {
+  ranks?: Record<string, number>;
+  reservedSlugs?: string[];
+  platformOrganization?: string;
+  platformRole?: string;
+  invitationTtlDays?: number;
+  /** The link in the invitation mail. Default `${appURL}/?invitation=<token>`. */
+  invitationLinkBuilder?: (token: string, organization: { slug: string; name: string }) => string;
 }
 
 export interface ResolvedConfig {
@@ -130,6 +143,14 @@ export interface ResolvedConfig {
     signInPage: (input: SignInPageInput) => string;
     confirmPage: (input: HandoffConfirmPageInput) => string;
   } | null;
+  organizations: {
+    ranks: Readonly<Record<string, number>>;
+    reservedSlugs: ReadonlySet<string>;
+    platformOrganization: string | null;
+    platformRole: string | null;
+    invitationTtlDays: number;
+    invitationLinkBuilder: (token: string, organization: { slug: string; name: string }) => string;
+  } | null;
 }
 
 /**
@@ -140,6 +161,19 @@ export interface ResolvedConfig {
 export function workersClientIp(request: Request): string | null {
   return request.headers.get("cf-connecting-ip") || null;
 }
+
+const DEFAULT_RANKS = { viewer: 1, member: 2, admin: 3, owner: 4 };
+const DEFAULT_RESERVED_SLUGS = [
+  "admin",
+  "api",
+  "auth",
+  "internal",
+  "operator",
+  "ops",
+  "platform",
+  "system",
+  "www",
+];
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\/$/;
 
@@ -201,6 +235,59 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       devRedirectPattern: input.handoff.devRedirectPattern ?? null,
       signInPage: input.handoff.signInPage ?? defaultSignInPage,
       confirmPage: input.handoff.confirmPage ?? defaultHandoffConfirmPage,
+    };
+  }
+  let organizations: ResolvedConfig["organizations"] = null;
+  if (input.organizations) {
+    const o = input.organizations;
+    const ranks = o.ranks ?? DEFAULT_RANKS;
+    for (const [role, rank] of Object.entries(ranks)) {
+      if (!ROLE_RE.test(role) || role.includes(","))
+        throw new ConfigError(`organizations.ranks has a bad role name: ${role}`);
+      if (!Number.isSafeInteger(rank) || rank < 1)
+        throw new ConfigError(`organizations.ranks.${role} must be a positive integer`);
+    }
+    // The create path makes the creator owner, and the last-owner rule reads that rank.
+    if (!Object.hasOwn(ranks, "owner"))
+      throw new ConfigError("organizations.ranks must name owner");
+    const reserved = new Set<string>();
+    for (const s of o.reservedSlugs ?? DEFAULT_RESERVED_SLUGS) {
+      const n = normalizeSlug(s);
+      if (n === null)
+        throw new ConfigError(`organizations.reservedSlugs entry is not a slug: ${s}`);
+      reserved.add(n);
+    }
+    let platformOrganization: string | null = null;
+    if (o.platformOrganization !== undefined) {
+      platformOrganization = normalizeSlug(o.platformOrganization);
+      if (platformOrganization === null)
+        throw new ConfigError("organizations.platformOrganization is not a slug");
+      // The app seeds the platform organization through storage or a migration. Nobody creates
+      // it or renames into it through the engine, so no user can own a slug the platform role trusts.
+      reserved.add(platformOrganization);
+    }
+    let platformRole: string | null = null;
+    if (o.platformRole !== undefined) {
+      if (!Object.hasOwn(ranks, o.platformRole))
+        throw new ConfigError("organizations.platformRole must be in ranks");
+      if (platformOrganization === null)
+        throw new ConfigError(
+          "organizations.platformRole needs organizations.platformOrganization",
+        );
+      platformRole = o.platformRole;
+    }
+    const ttl = o.invitationTtlDays ?? 7;
+    if (!Number.isSafeInteger(ttl) || ttl < 1)
+      throw new ConfigError("organizations.invitationTtlDays must be a positive integer");
+    organizations = {
+      ranks: { ...ranks },
+      reservedSlugs: reserved,
+      platformOrganization,
+      platformRole,
+      invitationTtlDays: ttl,
+      invitationLinkBuilder:
+        o.invitationLinkBuilder ??
+        ((token) => `${appURL}/?invitation=${encodeURIComponent(token)}`),
     };
   }
   const basePath = input.basePath ?? "/auth";
@@ -287,6 +374,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     passkey,
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
     handoff,
+    organizations,
   };
 }
 

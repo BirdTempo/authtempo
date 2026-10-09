@@ -65,6 +65,21 @@ describe("d1 migration matches the core schema", () => {
     }
   });
 
+  it("declares every unique key as a named index, never inline", async () => {
+    // An inline UNIQUE makes SQLite name the index itself, so the adapter's
+    // error mapping (which reads core's index names) cannot map it to fields.
+    const rows = await env.DB.prepare(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name LIKE 'ta_%'",
+    ).all<{ name: string; sql: string }>();
+    expect(rows.results.length).toBeGreaterThan(0);
+    for (const row of rows.results) {
+      expect({ table: row.name, inlineUnique: /\bUNIQUE\b/i.test(row.sql) }).toEqual({
+        table: row.name,
+        inlineUnique: false,
+      });
+    }
+  });
+
   it("marks NOT NULL exactly on the fields that schema does not mark nullable", async () => {
     for (const model of Object.keys(schema) as ModelName[]) {
       const info = await env.DB.prepare(`PRAGMA table_info(${TABLES[model]})`).all<{

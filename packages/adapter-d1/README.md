@@ -33,6 +33,8 @@ with code `schema_mismatch` until the migrations run. Only a missing
 `ta_meta` table counts as a missing version. Any other read error passes
 through unchanged, and the next operation reads again.
 
+Version 2 (plan 6, 2026-10-09) adds `ta_organization`, `ta_member`, and `ta_invitation`. Apply `0002_schema_v2` before you deploy a core at version 2; the adapter refuses a database at version 1.
+
 ## Transactions
 
 D1 has no interactive transaction. The adapter keeps an undo log in

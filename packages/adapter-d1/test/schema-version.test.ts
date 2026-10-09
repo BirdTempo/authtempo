@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { SCHEMA_VERSION } from "@tempo-auth/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 
@@ -12,7 +13,7 @@ async function setVersion(value: string | null): Promise<void> {
 }
 
 describe("d1 schema version", () => {
-  afterEach(() => setVersion("1"));
+  afterEach(() => setVersion(String(SCHEMA_VERSION)));
 
   it("throws schema_mismatch on the first operation when the version is older (Review Focus 5)", async () => {
     await setVersion("0");
@@ -36,7 +37,7 @@ describe("d1 schema version", () => {
   });
 
   it("accepts a newer version and checks only once", async () => {
-    await setVersion("2");
+    await setVersion(String(SCHEMA_VERSION + 1));
     const db = createD1Adapter(env.DB);
     await expect(db.findMany("user", [])).resolves.toEqual([]);
     await setVersion("0");
@@ -47,7 +48,7 @@ describe("d1 schema version", () => {
     await setVersion("0");
     const db = createD1Adapter(env.DB);
     await expect(db.findMany("user", [])).rejects.toMatchObject({ code: "schema_mismatch" });
-    await setVersion("1");
+    await setVersion(String(SCHEMA_VERSION));
     await expect(db.findMany("user", [])).resolves.toEqual([]);
   });
 
@@ -58,7 +59,7 @@ describe("d1 schema version", () => {
     for (const r of results) {
       expect(r).toMatchObject({ status: "rejected", reason: { code: "schema_mismatch" } });
     }
-    await setVersion("1");
+    await setVersion(String(SCHEMA_VERSION));
     await expect(db.findMany("user", [])).resolves.toEqual([]);
   });
 

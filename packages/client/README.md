@@ -82,6 +82,44 @@ client can see:
 | `unexpected` | The answer is not JSON, or its error code is not in the core table. |
 | `cancelled` | The person dismissed the passkey prompt, or no authenticator matched. |
 
+## Organizations
+
+The server must set `organizations: {}` in `createAuth`. Without it, each
+operation below answers `not_found`.
+
+Every operation needs a session. The exception is `invitations.decline`,
+which needs only the token. All dates in the answers are ISO strings.
+Each `member` in an answer has the type `MemberJSON`: `id`, `userId`,
+`role`, `email`, `name`, and `createdAt`. The `create` answer uses the
+same type.
+
+| Operation | Route | Answer |
+| --- | --- | --- |
+| `organizations.create({ slug, name, metadata? })` | `POST /organizations/create` | `{ organization, member }` |
+| `organizations.list()` | `GET /organizations` | list of `{ organization, role }` |
+| `organizations.update({ organizationId, name?, slug?, metadata? })` | `POST /organizations/update` | the organization |
+| `organizations.delete({ organizationId })` | `POST /organizations/delete` | `{ ok: true }` |
+| `organizations.members.list({ organizationId })` | `GET /organizations/members` | list of members |
+| `organizations.members.add({ organizationId, userId, role })` | `POST /organizations/members/add` | the member |
+| `organizations.members.role({ organizationId, userId, role })` | `POST /organizations/members/role` | the member |
+| `organizations.members.remove({ organizationId, userId })` | `POST /organizations/members/remove` | `{ ok: true }` |
+| `organizations.invitations.invite({ organizationId, email, role })` | `POST /organizations/invite` | the invitation |
+| `organizations.invitations.list({ organizationId })` | `GET /organizations/invitations` | list of invitations |
+| `organizations.invitations.revoke({ organizationId, invitationId })` | `POST /organizations/invitations/revoke` | `{ ok: true }` |
+| `organizations.invitations.accept({ token })` | `POST /organizations/invitations/accept` | `{ organization, member }` |
+| `organizations.invitations.decline({ token })` | `POST /organizations/invitations/decline` | `{ ok: true }` |
+| `organizations.setActive({ organizationId })` | `POST /organizations/active` | the session |
+
+The server sends each invitation by mail. The token is only in the mail.
+The answer to `invite` has no token, and the inviter never sees it. The
+person who gets the mail passes the token to `accept` or `decline`.
+
+`setActive` answers the session. Read `session.activeOrganizationId` in
+the answer. Pass `organizationId: null` to clear the active organization.
+
+If you omit `metadata`, the client does not send the key. Pass `null` to
+`update` to clear the metadata of an organization.
+
 ## Passkeys
 
 The client reaches WebAuthn through a seam, `BrowserWebAuthn`. The

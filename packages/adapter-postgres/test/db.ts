@@ -1,8 +1,11 @@
 import postgres, { type Sql } from "postgres";
 import { applyPostgresMigrations } from "../src/migrations.js";
 
-export const PG_URL =
-  process.env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
+// The package has no @types/node, so type the one global this file reads.
+const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } })
+  .process.env;
+
+export const PG_URL = env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
 
 async function createSchema(): Promise<string> {
   const name = `t_${crypto.randomUUID().replaceAll("-", "")}`;

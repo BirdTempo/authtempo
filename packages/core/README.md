@@ -41,6 +41,27 @@ const s = await auth.session(request);     // { user, session } or null
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
+The organization routes follow.
+
+| Method | Path | Body or query | Answer |
+| --- | --- | --- | --- |
+| POST | `/organizations/create` | session, `{ slug, name, metadata? }` | `{ organization, member }`; 400 `invalid_body`, `slug_reserved`; 401; 403 `email_unverified`; 409 `slug_taken` |
+| GET | `/organizations` | session | `{ organizations: [{ organization, role }] }`; 401 |
+| POST | `/organizations/update` | session, `{ organizationId, name?, slug?, metadata? }` | `{ organization }`; 400 `invalid_body`, `slug_reserved`; 401; 403 `forbidden_rank`, `email_unverified`; 404; 409 `slug_taken` |
+| POST | `/organizations/delete` | session, `{ organizationId }` | `{ ok: true }`; 400 `slug_reserved`; 401; 403 `forbidden_rank`, `email_unverified`; 404 |
+| GET | `/organizations/members` | session, `?organizationId=` | `{ members }`; 400 `invalid_body`; 401; 403 `forbidden_rank`; 404 |
+| POST | `/organizations/members/add` | session, `{ organizationId, userId, role }` | `{ member }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404; 409 `already_member` |
+| POST | `/organizations/members/role` | session, `{ organizationId, userId, role }` | `{ member }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 `not_found`; 409 `last_owner`, `conflict` |
+| POST | `/organizations/members/remove` | session, `{ organizationId, userId }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 `not_found`; 409 `last_owner`, `conflict` |
+| POST | `/organizations/invite` | session, `{ organizationId, email, role }` | `{ invitation }` with no token; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 `not_found`; 429 `rate_limited` |
+| GET | `/organizations/invitations` | session, `?organizationId=` | `{ invitations }`; 400; 401; 403 `forbidden_rank`; 404 `not_found` |
+| POST | `/organizations/invitations/revoke` | session, `{ organizationId, invitationId }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 |
+| POST | `/organizations/invitations/accept` | session, `{ token }` | `{ organization, member }`; 400 `invalid_token`, `token_expired`; 401; 403 `email_mismatch`, `email_unverified`; 409 `already_member`; 429 `rate_limited` |
+| POST | `/organizations/invitations/decline` | `{ token }`, no session | `{ ok: true }`; 400 `invalid_token`, `token_expired` |
+| POST | `/organizations/active` | session, `{ organizationId }` (a string or `null`) | `{ user, session }` with `session.activeOrganizationId`; 401; 403 `forbidden_rank` |
+
+Without an `organizations` config none of the organization routes exist, and the router answers 404.
+
 The confirm page is `defaultConfirmPage`. Replace it with
 `magicLink.confirmPage` in the config. The function returns the markup
 only; core sets `cache-control`, `referrer-policy`, `x-robots-tag`, and a
@@ -142,6 +163,103 @@ tests prove the whole flow without a browser.
 @simplewebauthn/server 14.0.3, which runs on Workers without
 `nodejs_compat` (proved by the example Worker's spike test).
 
+## Organizations
+
+Set `organizations: {}` to turn the feature on. Without it, the organization
+routes and the `api` functions answer 404 `not_found`.
+
+**Ranks.** A role name maps to a rank. The default table is `viewer` 1,
+`member` 2, `admin` 3, `owner` 4. A member may hold more than one role,
+joined by a comma, such as `member,billing`. The rank of that member is the
+highest rank among the parts. A part that is not in the table ranks 0, so
+an unknown role never grants a right. Pass `ranks` to change the table. It
+must name `owner`.
+
+**Slugs.** A slug is lower case, up to 64 characters, with digits and
+hyphens. Core folds the slug to NFKC first, so a look-alike letter cannot
+hide a reserved word. The default reserved slugs are `admin`, `api`,
+`auth`, `internal`, `operator`, `ops`, `platform`, `system`, and `www`.
+Pass `reservedSlugs` to replace the list. A reserved slug answers
+`slug_reserved`. A slug in use answers `slug_taken`.
+
+**Platform role.** Set `platformOrganization` and `platformRole` to keep one
+role for staff. Core accepts that role in the platform organization only.
+Any other organization refuses it with `invalid_body`.
+
+The platform slug is reserved, so `createOrganization` refuses it. Seed the
+platform organization yourself, through the storage adapter or a
+migration. Write one `organization` row with that slug and one `member`
+row for the first staff user. The member role must include `owner`, and
+also the platform role if it is not `owner`, for example `owner,operator`.
+Take the fields of each row from `schema` (`organization`: `id`, `slug`,
+`name`, `metadata`, `createdAt`, `updatedAt`; `member`: `id`,
+`organizationId`, `userId`, `role`, `createdAt`, `updatedAt`). After the
+seed, the engine refuses a slug change and a delete of the platform
+organization with `slug_reserved`, because no route could create it again.
+A change of its name or metadata is allowed. Accept also checks the
+platform role again: if the organization of a pending invitation no longer
+has the platform slug, the link is dead and the answer is `invalid_token`.
+
+**Write rules.**
+
+- A creator becomes `owner` of the new organization. The creator needs a verified email.
+- An `admin` may update the organization, add members, change roles, remove other members, and manage invitations.
+- Only an `owner` may change the slug or delete the organization.
+- A caller may grant or set only a role with a rank at or below the caller's own rank. This is the no-escalation rule.
+- A caller may not change or remove a member of higher rank.
+- A member may always remove themselves, unless that member is the last owner.
+- The last owner cannot leave, be demoted, or be removed. The answer is `last_owner`.
+- Two owner writes at the same time cannot both succeed. The second answers `conflict`. This means a concurrent owner write. Retry.
+- A role change or a removal writes only if the member still holds the role that the caller read. If another request changed that role first, the answer is `conflict`. Read the member again and retry.
+
+**Invitations.** An invitation is valid for seven days. Set
+`invitationTtlDays` to change this. An organization holds one pending
+invitation for each address. A new invitation replaces the old one, and the
+old link stops working. The token is in the mail only. No route answer
+carries it. To accept, the caller must hold a verified email that equals the
+invited address, or the answer is `email_mismatch`. Accept checks the
+inviter again. If the inviter left or lost rank since the invite, the link
+is dead and the answer is `invalid_token`. The same is true when the
+invited role now ranks 0, because the app removed it from `ranks`. Decline
+needs no session, because the link is the credential. Set
+`invitationLinkBuilder` to change the link in the mail. The default is
+`<appURL>/?invitation=<token>`.
+
+Accept is limited to 20 per IP per 15 minutes. Invite is limited to 20 per
+inviting user per 15 minutes, and to 5 per invited address per hour. A
+refusal answers 429 `rate_limited` and sends no mail.
+
+If the invited person is already a member, accept keeps the current role
+when it ranks at or above the invited role. A higher invitation replaces
+the role. It does not add to it: a `member,billing` member who accepts an
+`admin` invitation becomes `admin`, and `billing` is gone.
+
+The invitations list shows each pending invitation that has not expired. It
+does not check the inviter. An invitation whose inviter left or lost rank
+stays in the list until someone tries to accept it. That accept then
+deletes it, and no record of it stays.
+
+**Active organization.** A session may name one active organization.
+`POST /organizations/active` sets it, and `null` clears it. The caller must
+be a member. The value comes back in `session.activeOrganizationId`.
+Core stores the value and does not read it for any other check.
+
+The value is a choice, not a right. Core clears it when the member leaves,
+is removed, or the organization is deleted. A demotion does not clear it.
+Check the member's rank on each request.
+
+**Error codes.** Organization routes add these codes to the existing set.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `forbidden_rank` | 403 | The caller is not a member, or the rank is too low |
+| `slug_reserved` | 400 | The slug is on the reserved list, or the organization is the platform organization |
+| `slug_taken` | 409 | Another organization uses the slug |
+| `last_owner` | 409 | The write would leave no owner |
+| `already_member` | 409 | The user is already a member |
+| `email_mismatch` | 403 | The invitation is for another address |
+| `conflict` | 409 | A concurrent write changed the organization or the member; retry |
+
 ## Limits in version 1
 
 - The default limiter counts in memory. On Workers every isolate has its
@@ -180,9 +298,23 @@ tests prove the whole flow without a browser.
   email, so this only matters for a path that creates passkeys another
   way.
 - Replay protection is the challenge: a second use of the same assertion answers `invalid_token`. The counter write is conditional on the counter read, which separates two different assertions; an authenticator that always reports 0 is accepted after 0, as WebAuthn allows.
+- Invite is limited to 20 per inviting user per 15 minutes and to 5 per
+  invited address per hour, in the same per-isolate limiter. Each invite
+  sends a mail from the app's sender, so the product owns this limit. The
+  per-address budget is shared by every inviter, so one verified user can
+  use up an address's five invites for an hour; the per-user budget bounds
+  how many addresses one user can do that to.
+- Organization `metadata` is at most 4096 bytes as JSON. A larger value
+  answers 400 `invalid_body`. Every member reads it in `GET /organizations`.
+- Two invites for the same address at the same time can leave two pending
+  invitations, because the pair of organization and address is an index,
+  not a unique key. Both links work until one is accepted, revoked, or
+  expired.
 - On Node, loading @simplewebauthn/server prints one ExperimentalWarning
   about ML-DSA. It is the library's post-quantum probe, not a tempo-auth
   setting, and workerd prints nothing.
+- Invitation accept is limited to 20 per IP per 15 minutes, in the same per-isolate limiter.
+- Core at version 2 needs the `0002_schema_v2` migration in both adapters.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

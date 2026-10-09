@@ -143,15 +143,22 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       if (limit !== undefined && !(Number.isInteger(limit) && limit >= 0)) {
         throw new StorageError("invalid_argument", model, ["limit"]);
       }
-      if (opts?.sort) {
-        const { field, dir } = opts.sort;
-        assertFields(model, [field]);
+      const sorts =
+        opts?.sort === undefined ? [] : Array.isArray(opts.sort) ? opts.sort : [opts.sort];
+      assertFields(
+        model,
+        sorts.map((x) => x.field),
+      );
+      if (sorts.length > 0) {
         rows = rows.sort((a, b) => {
-          const x = norm(a[field]);
-          const y = norm(b[field]);
-          // Nulls sort highest: last ascending, first descending.
-          const c = x === y ? 0 : x === null ? 1 : y === null ? -1 : x < y ? -1 : 1;
-          return dir === "asc" ? c : -c;
+          for (const { field, dir } of sorts) {
+            const x = norm(a[field]);
+            const y = norm(b[field]);
+            // Nulls sort highest: last ascending, first descending.
+            const c = x === y ? 0 : x === null ? 1 : y === null ? -1 : x < y ? -1 : 1;
+            if (c !== 0) return dir === "asc" ? c : -c;
+          }
+          return 0;
         });
       }
       if (limit !== undefined) rows = rows.slice(0, limit);

@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
+    "rootDir": ".",
     "lib": ["ES2023"],
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
