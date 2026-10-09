@@ -40,4 +40,16 @@ describe("parseReturnedUrl", () => {
       expect(parseReturnedUrl("consumera://auth", url)).toEqual({ ok: false });
     }
   });
+  it("refuses a bad escape, and a URL that only extends the redirect query or path", () => {
+    expect(parseReturnedUrl("a://auth", "a://auth?code=%E0%A4%A")).toEqual({ ok: false });
+    expect(
+      parseReturnedUrl(
+        "http://127.0.0.1:5000/auth?x=1",
+        "http://127.0.0.1:5000/auth?x=1x&code=hc_1",
+      ),
+    ).toEqual({ ok: false });
+    expect(parseReturnedUrl("consumera://auth", "consumera://auth&code=hc_1")).toEqual({
+      ok: false,
+    });
+  });
 });

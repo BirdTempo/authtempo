@@ -15,7 +15,8 @@ export function parseReturnedUrl(redirect: string, url: string): Returned {
   if (!url.startsWith(redirect + sep)) return { ok: false };
   // The whole query, including a dev redirect's own pairs, which come first.
   const query = q >= 0 ? url.slice(q + 1) : url.slice(redirect.length + 1);
-  const params: Record<string, string> = {};
+  // No prototype, so a key such as `constructor` cannot read an inherited value.
+  const params: Record<string, string> = Object.create(null);
   for (const pair of query.split("&")) {
     if (!pair) continue;
     const i = pair.indexOf("=");
