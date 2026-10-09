@@ -41,7 +41,13 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "./engine/passkeys.js";
-import { type PasswordSession, type PasswordSignUp, passwordSignUp } from "./engine/password.js";
+import {
+  type PasswordSession,
+  type PasswordSignIn,
+  type PasswordSignUp,
+  passwordSignIn,
+  passwordSignUp,
+} from "./engine/password.js";
 import {
   destroySession,
   type PublicSession,
@@ -77,6 +83,7 @@ import type {
 /** Present on `api` only when the config has a `password` section. */
 export interface PasswordApi {
   signUp(input: PasswordSignUp): Promise<Result<PasswordSession>>;
+  signIn(input: PasswordSignIn): Promise<Result<PasswordSession>>;
 }
 
 export interface AuthApi {
@@ -252,7 +259,14 @@ export function createAuth(input: AuthConfig): Auth {
       setActiveOrganization: (i) => setActiveOrganization(config, i),
       getSession: (token) => resolveSession(config, token),
       signOut: (token) => destroySession(config, token),
-      ...(config.password ? { password: { signUp: (i) => passwordSignUp(config, i) } } : {}),
+      ...(config.password
+        ? {
+            password: {
+              signUp: (i) => passwordSignUp(config, i),
+              signIn: (i) => passwordSignIn(config, i),
+            },
+          }
+        : {}),
     },
     errors: ERRORS,
   };

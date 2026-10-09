@@ -112,6 +112,19 @@ describe("createPbkdf2PasswordHash", () => {
     expect(spy.mock.calls[0]?.[1]).toBe(stored.split("$")[3]);
   });
 
+  it("has a dummy in the stored format at its cost, made with no derive, that runs one full derive and matches nothing", async () => {
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    const made = createPbkdf2PasswordHash({ iterations: 1000 });
+    expect(derive).not.toHaveBeenCalled();
+    expect(made.dummy).toMatch(FORMAT_1000);
+    expect(createPbkdf2PasswordHash({ iterations: 1000 }).dummy).not.toBe(made.dummy);
+    expect(await made.verify("pw", made.dummy)).toEqual({ ok: false, rehash: false });
+    expect(derive).toHaveBeenCalledTimes(1);
+    expect(derive.mock.calls[0]?.[0]).toMatchObject({ name: "PBKDF2", iterations: 1000 });
+    derive.mockRestore();
+    expect(createPbkdf2PasswordHash().dummy).toMatch(/^pbkdf2-sha256\$100000\$/);
+  });
+
   it("refuses an iteration option that is not an integer from 1 to maxIterations", () => {
     for (const iterations of [0, 1.5, 10_000_000, 600_000, 100_001]) {
       expect(() => createPbkdf2PasswordHash({ iterations })).toThrow(/iterations/);

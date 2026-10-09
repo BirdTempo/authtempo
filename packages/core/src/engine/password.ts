@@ -5,7 +5,7 @@ import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
-import { passwordPolicyError } from "./password-policy.js";
+import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import { createSession } from "./sessions.js";
 import { normalizeEmail, userStillUnverified } from "./users.js";
 
@@ -16,6 +16,10 @@ export const PASSWORD_RESET_TOKEN_RE = /^pr_[A-Za-z0-9_-]{43}$/;
 // 10 per hour per IP: a person makes one account; a script that makes many is slowed.
 const SIGN_UP_PER_IP = { seconds: 3600, max: 10 };
 const NAME_MAX = 200;
+// Per 15 minutes. The email limit stops a guess run on one account from many
+// addresses; the IP limit stops one address that tries many accounts.
+const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
+const SIGN_IN_PER_EMAIL = { seconds: 900, max: 10 };
 
 export interface PasswordSession {
   token: string;
@@ -27,6 +31,13 @@ export interface PasswordSignUp {
   email: string;
   password: string;
   name?: string | undefined;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface PasswordSignIn {
+  email: string;
+  password: string;
   ip: string | null;
   userAgent: string | null;
 }
@@ -184,5 +195,81 @@ async function sendVerifyMail(
     to: email,
     subject: `Confirm your email for ${config.appName}`,
     text: `Open this link to confirm your email address. It is valid for ${config.magicLink.ttlMinutes} minutes.\n\n${link}\n\nIf you did not create an account, ignore this message.`,
+  });
+}
+
+/**
+ * Every failure after the limits answers `invalid_credentials` after one
+ * `verify`: an unknown address, a malformed address, and a user with no
+ * password row verify against the seam's `dummy`. So the answer and its CPU
+ * are the same as for a wrong password.
+ */
+export async function passwordSignIn(
+  config: ResolvedConfig,
+  input: PasswordSignIn,
+): Promise<Result<PasswordSession>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
+    return fail("rate_limited");
+  // Before any lookup: the lookup and the email limit key trust a normalized address.
+  const email = normalizeEmail(input.email);
+  if (email !== null && !(await config.limiter.allow(`password:email:${email}`, SIGN_IN_PER_EMAIL)))
+    return fail("rate_limited");
+  // The length is the caller's own input, so this refusal tells nothing about an account. It bounds the CPU.
+  if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
+  const user =
+    email === null
+      ? null
+      : await config.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  const row = user
+    ? await config.storage.findOne("password", [{ field: "userId", op: "eq", value: user.id }])
+    : null;
+  if (!user || !row) {
+    await pw.hash.verify(input.password, pw.hash.dummy);
+    return fail("invalid_credentials");
+  }
+  const checked = await pw.hash.verify(input.password, row.hash);
+  if (!checked.ok) return fail("invalid_credentials");
+  const now = config.clock.now();
+  if (checked.rehash) {
+    // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
+    const fresh = await pw.hash.hash(input.password);
+    // Conditional on the id and the old hash. A reset that wrote a new hash
+    // since the read keeps its hash. A claim that deleted the row since the
+    // read makes this match zero rows, and an update writes no row then.
+    await config.storage.update(
+      "password",
+      [
+        { field: "id", op: "eq", value: row.id },
+        { field: "hash", op: "eq", value: row.hash },
+      ],
+      { hash: fresh, updatedAt: now },
+    );
+  }
+  return config.storage.transaction(async (tx): Promise<Result<PasswordSession>> => {
+    const s = await createSession(
+      config,
+      { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+      tx,
+    );
+    // For an unverified user, a claim (the owner's magic link) can run
+    // after the password read. claimEmail deletes the password rows before
+    // the sessions. So this conditional update of the password row is the
+    // last statement: one row means the claim's session delete has not run
+    // and still removes this session; zero rows means a claim deleted the
+    // row, so delete the own session by id, commit, and answer the failure
+    // (a throw would reach the caller as a 500). A conditional update, not a
+    // read, so that it sees the claim's statements on D1.
+    if (!user.emailVerified) {
+      const n = await tx.update("password", [{ field: "id", op: "eq", value: row.id }], {
+        updatedAt: now,
+      });
+      if (n === 0) {
+        await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+        return fail("invalid_credentials");
+      }
+    }
+    return ok({ token: s.token, user, session: s.session });
   });
 }

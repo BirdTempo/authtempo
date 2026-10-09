@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
-import { type PasswordSession, passwordSignUp } from "../../engine/password.js";
+import { type PasswordSession, passwordSignIn, passwordSignUp } from "../../engine/password.js";
 import { publicSession } from "../../engine/sessions.js";
 import { sessionCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
@@ -11,6 +11,12 @@ const signUpBody = z.object({
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
   name: z.string().max(200).optional(),
+});
+
+const signInBody = z.object({
+  email: z.string().max(320),
+  // The engine refuses more than 128 code points; this cap only bounds the body.
+  password: z.string().max(1024),
 });
 
 /** No route without a `password` config, so the router answers 404. */
@@ -41,6 +47,21 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           email: body.value.email,
           password: body.value.password,
           name: body.value.name,
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+        });
+        return r.ok ? signedIn(r.value) : respond(r);
+      },
+    },
+    {
+      method: "POST",
+      path: "/password/sign-in",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, signInBody);
+        if (!body.ok) return respond(body);
+        const r = await passwordSignIn(config, {
+          email: body.value.email,
+          password: body.value.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
         });

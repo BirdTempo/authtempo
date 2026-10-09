@@ -14,7 +14,7 @@ export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
-export type { PasswordSession, PasswordSignUp } from "./engine/password.js";
+export type { PasswordSession, PasswordSignIn, PasswordSignUp } from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";

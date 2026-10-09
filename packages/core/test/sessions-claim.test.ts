@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ResolvedConfig } from "../src/config.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
-import { passwordSignUp } from "../src/engine/password.js";
+import { passwordSignIn, passwordSignUp } from "../src/engine/password.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, resolveSocialUser, startSocial } from "../src/engine/social.js";
 import { findOrCreateUserByEmail } from "../src/engine/users.js";
@@ -772,6 +772,56 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
         { field: "purpose", op: "eq", value: "password-verify" },
       ]),
     ).toEqual([]);
+  });
+
+  it("undoes the claimant's password sign-in session when the claim lands inside it (plan 8, Review Focus 2)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    // Reachable: the claimant signs up and never uses the verify link.
+    const up = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const link = await magicLinkToken(auth);
+
+    // On D1 the owner's whole claim runs inside the claimant's open sign-in
+    // transaction, after the password verify and before the session
+    // insert: the claim verifies the user and deletes the password row and
+    // every session. The claimant's session insert comes after it.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveBeforeSessionInsert(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "invalid_credentials" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const userId = proved.value.user.id;
+    expect(userId).toBe(up.value.user.id);
+    expect(
+      await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
+    ).toMatchObject({ email: EMAIL, emailVerified: true });
+    const identities = await auth.storage.findMany("identity", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(identities.map((x) => [x.provider, x.subject])).toEqual([["email", EMAIL]]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await resolveSession(auth.config, proved.value.token)).not.toBeNull();
   });
 
   it("answers the loser of two sign-ups for one new address with email_taken and keeps one user (plan 8, unique_violation retry)", async () => {

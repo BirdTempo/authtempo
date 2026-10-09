@@ -10,6 +10,13 @@ export interface PasswordHashSeam {
   hash(plain: string): Promise<string>;
   /** `ok` is a match. `rehash` is true only on a match whose stored cost is below this seam's cost. */
   verify(plain: string, stored: string): Promise<{ ok: boolean; rehash: boolean }>;
+  /**
+   * A stored string in this seam's format, at this seam's cost, that no
+   * password matches. A sign-in with no password row runs one `verify`
+   * against it, so an unknown address costs the same CPU as a known one.
+   * Built at seam construction, so no sign-in pays a hash to make it.
+   */
+  readonly dummy: string;
 }
 
 /**
@@ -72,7 +79,14 @@ export function createPbkdf2PasswordHash(
       `tempo-auth: iterations must be an integer from 1 to maxIterations (${maxIterations})`,
     );
   }
+  // A random salt and a random digest: the same derive as a real row, and no
+  // password matches it (the chance is 2^-256). No derive runs here.
+  const dummySalt = new Uint8Array(SALT_BYTES);
+  const dummyDigest = new Uint8Array(HASH_BYTES);
+  crypto.getRandomValues(dummySalt);
+  crypto.getRandomValues(dummyDigest);
   return {
+    dummy: `${HEADER}$${iterations}$${toBase64Url(dummySalt)}$${toBase64Url(dummyDigest)}`,
     async hash(plain) {
       const salt = new Uint8Array(SALT_BYTES);
       crypto.getRandomValues(salt);
