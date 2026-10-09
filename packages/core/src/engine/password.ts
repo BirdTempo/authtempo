@@ -142,19 +142,30 @@ function insertSignUp(
       const has = await tx.findOne("password", [{ field: "userId", op: "eq", value: existing.id }]);
       return fail(has ? "email_taken" : "email_taken_unverified");
     }
-    const user = await tx.create("user", {
+    // The password row first, the user row second. Both get the user id
+    // drawn here (the schema has no foreign key). On D1 an owner's reset
+    // can run inside this open transaction. Before the user create, the
+    // reset finds no user, so it makes its own user and cannot see this
+    // password row. The user create then fails with unique_violation, and
+    // the undo deletes only this password row, by id. The retry reads the
+    // owner's verified user and answers `email_taken`. With the opposite
+    // order the reset writes a password row for this user first, the
+    // password create fails, and the undo deletes the owner's user row by
+    // id. Checked 2026-10-10.
+    const userId = newId(now);
+    const password = await tx.create("password", {
       id: newId(now),
+      userId,
+      hash: row.hash,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const user = await tx.create("user", {
+      id: userId,
       email: row.email,
       emailVerified: false,
       name: row.name,
       image: null,
-      createdAt: now,
-      updatedAt: now,
-    });
-    const password = await tx.create("password", {
-      id: newId(now),
-      userId: user.id,
-      hash: row.hash,
       createdAt: now,
       updatedAt: now,
     });
@@ -171,9 +182,15 @@ function insertSignUp(
     // own password row by id, and commit. When it matches one row it is the
     // last statement, so no undo runs after it, and a later claim deletes
     // the password row and the session. Checked 2026-10-10.
+    // The password delete also matches the hash this sign-up wrote. An
+    // owner's reset keeps this row id and writes the owner's hash into it,
+    // and that row must stay.
     if (!(await userStillUnverified(tx, user.id, now))) {
       await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
-      await tx.delete("password", [{ field: "id", op: "eq", value: password.id }]);
+      await tx.delete("password", [
+        { field: "id", op: "eq", value: password.id },
+        { field: "hash", op: "eq", value: row.hash },
+      ]);
       return fail("email_taken_unverified");
     }
     return ok({ signedIn: { token: s.token, user, session: s.session }, passwordId: password.id });
@@ -647,6 +664,14 @@ export async function changePassword(
       // The codes of the changer's own session go too. The row names the
       // user, not the session, and a lost code costs one more handoff.
       await deleteHandoffCodes(tx, user.id);
+      // The pending reset links of the address go, as in a reset. A person
+      // who changes the password after a mailbox exposure must not leave a
+      // live link there that sets a password and ends every session.
+      await tx.delete("verification", [
+        { field: "purpose", op: "eq", value: "password-reset" },
+        { field: "identifier", op: "eq", value: user.email },
+        { field: "consumedAt", op: "eq", value: null },
+      ]);
       return ok({ ok: true });
     });
   } catch (err) {

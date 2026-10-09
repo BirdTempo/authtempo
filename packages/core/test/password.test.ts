@@ -1121,7 +1121,39 @@ describe("changePassword", () => {
         })
       ).ok,
     ).toBe(true);
-    expect(writes).toEqual(["update:password", "delete:session", "delete:verification"]);
+    expect(writes).toEqual([
+      "update:password",
+      "delete:session",
+      "delete:verification",
+      "delete:verification",
+    ]);
+  });
+
+  it("ends the address's pending reset links and keeps another address's link (plan 8 final review M-3)", async () => {
+    const auth = pwAuth();
+    const session = await verifiedWithPassword(auth);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const pending = resetToken(auth);
+    await requestPasswordReset(auth.config, { email: "bob@example.com", ip: null });
+    expect(
+      await changePassword(auth.config, {
+        session,
+        currentPassword: PW,
+        newPassword: "changed password",
+      }),
+    ).toEqual({ ok: true, value: { ok: true } });
+    expect(
+      await resetPassword(auth.config, { token: pending, password: "mailbox password", ...req }),
+    ).toMatchObject({ ok: false, code: "invalid_token" });
+    const rows = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "password-reset" },
+    ]);
+    // The spent link of the first reset stays as a record; the other address keeps its live link.
+    expect(rows.map((r) => [r.identifier, r.consumedAt === null])).toEqual([
+      [EMAIL, false],
+      ["bob@example.com", true],
+    ]);
+    expect((await signIn(auth, { password: "changed password" })).ok).toBe(true);
   });
 });
 
@@ -1223,6 +1255,10 @@ describe("fix round 1: the reset POST order", () => {
       ).toMatchObject({ ok: false, code: "token_expired" });
       expect(counts.breach).toBe(0);
       expect(derive).not.toHaveBeenCalled();
+      // The positive control: one hash through the engine's own seam must
+      // hit the spy, so the spy watches the object the engine derives on.
+      await auth.config.password?.hash.hash("control password");
+      expect(derive).toHaveBeenCalledTimes(1);
     } finally {
       derive.mockRestore();
     }
