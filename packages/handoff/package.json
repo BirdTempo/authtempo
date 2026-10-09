@@ -1,0 +1,36 @@
+{
+  "name": "@tempo-auth/handoff",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./expo": {
+      "types": "./dist/expo.d.ts",
+      "default": "./dist/expo.js"
+    },
+    "./electron": {
+      "types": "./dist/electron.d.ts",
+      "default": "./dist/electron.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p typetest/tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tempo-auth/client": "workspace:*",
+    "@tempo-auth/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

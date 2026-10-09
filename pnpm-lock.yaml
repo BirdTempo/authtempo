@@ -191,6 +191,12 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
+      '@tempo-auth/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@tempo-auth/handoff':
+        specifier: workspace:*
+        version: link:../../packages/handoff
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -239,6 +245,19 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(vite@8.3.3)
 
+  packages/client:
+    dependencies:
+      '@tempo-auth/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(vite@8.3.3)
+
   packages/core:
     dependencies:
       '@simplewebauthn/server':
@@ -250,6 +269,22 @@ importers:
       zod:
         specifier: 4.6.5
         version: 4.6.5
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(vite@8.3.3)
+
+  packages/handoff:
+    dependencies:
+      '@tempo-auth/client':
+        specifier: workspace:*
+        version: link:../client
+      '@tempo-auth/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       typescript:
         specifier: 7.0.2

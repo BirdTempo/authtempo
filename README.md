@@ -14,6 +14,8 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@tempo-auth/core` | The engine: `createAuth(config)` returns `handle`, `session`, and `api`. |
 | `@tempo-auth/adapter-d1` | Storage on Cloudflare D1. Ships the migration. No compatibility flag. |
 | `@tempo-auth/adapter-postgres` | Storage on Postgres through postgres.js. `nodejs_compat` on Workers. |
+| `@tempo-auth/client` | The app side: `createClient` calls the routes and returns typed results. It runs in a browser, Expo, and Electron. |
+| `@tempo-auth/handoff` | Native and desktop sign-in through the system browser, with openers for Expo and Electron. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
 The example pins `@cloudflare/vitest-plugin` 1.3.7, which needs vitest 4, so

@@ -108,6 +108,17 @@ describe("startHandoff", () => {
       await startHandoff(off.config, { challenge, redirect: "consumera://auth", ip: null }),
     ).toMatchObject({ ok: false, code: "not_found" });
   });
+  it("refuses a redirect that contains a fragment, even when the pattern admits it", async () => {
+    const auth = makeAuth({ handoff: { schemes: SCHEMES, devRedirectPattern: /.*/ } });
+    const { challenge } = await pkce();
+    for (const redirect of ["http://127.0.0.1:5000/auth#x", "exp://192.168.1.5:8081/--/auth#"]) {
+      expect(await startHandoff(auth.config, { challenge, redirect, ip: null })).toMatchObject({
+        ok: false,
+        code: "invalid_body",
+      });
+    }
+    expect(await rows(auth)).toHaveLength(0);
+  });
   it("keeps a start row as long as the magic link, and at least 10 minutes", async () => {
     const { challenge } = await pkce();
     const input = { challenge, redirect: "consumera://auth", ip: null };

@@ -50,6 +50,8 @@ export function continuePath(config: ResolvedConfig, handoffId: string): string 
 function redirectAllowed(config: ResolvedConfig, redirect: string): boolean {
   const h = config.handoff;
   if (!h) return false;
+  // The client refuses every URL with a fragment, so the API must not admit a redirect that has one.
+  if (redirect.includes("#")) return false;
   if (h.schemes.some((s) => redirect === `${s}auth`)) return true;
   if (!h.devRedirectPattern?.test(redirect)) return false;
   // A dev pattern may admit a loopback web URL (RFC 8252 section 7.3) or a non-web scheme; never a remote web origin, which would carry the code to a server that also holds the verifier.
@@ -180,9 +182,9 @@ export async function continueHandoff(
     createdAt: now,
     updatedAt: now,
   });
-  const url = new URL(data.redirect);
-  url.searchParams.set("code", code);
-  return ok({ location: url.toString() });
+  // The handoff package matches this string byte for byte; URL serialization would rewrite the redirect. The code is base64url with the hc_ prefix, so it needs no escape.
+  const separator = data.redirect.includes("?") ? "&" : "?";
+  return ok({ location: `${data.redirect}${separator}code=${code}` });
 }
 
 /**
