@@ -201,8 +201,8 @@ async function sendVerifyMail(
 /**
  * Every failure after the limits answers `invalid_credentials` after one
  * `verify`: an unknown address, a malformed address, and a user with no
- * password row verify against the seam's `dummy`. So the answer and its CPU
- * are the same as for a wrong password.
+ * password row verify against the seam's `dummy()`. So the answer and its
+ * CPU are the same as for a wrong password.
  */
 export async function passwordSignIn(
   config: ResolvedConfig,
@@ -226,19 +226,22 @@ export async function passwordSignIn(
     ? await config.storage.findOne("password", [{ field: "userId", op: "eq", value: user.id }])
     : null;
   if (!user || !row) {
-    await pw.hash.verify(input.password, pw.hash.dummy);
+    await pw.hash.verify(input.password, await pw.hash.dummy());
     return fail("invalid_credentials");
   }
   const checked = await pw.hash.verify(input.password, row.hash);
   if (!checked.ok) return fail("invalid_credentials");
   const now = config.clock.now();
+  // The hash this sign-in proved. The session is valid only while the row still holds it.
+  let proved = row.hash;
   if (checked.rehash) {
     // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
     const fresh = await pw.hash.hash(input.password);
-    // Conditional on the id and the old hash. A reset that wrote a new hash
-    // since the read keeps its hash. A claim that deleted the row since the
-    // read makes this match zero rows, and an update writes no row then.
-    await config.storage.update(
+    // Conditional on the id and the old hash. A reset or a change that wrote
+    // a new hash since the read keeps its hash. A claim that deleted the row
+    // since the read makes this match zero rows, and an update writes no row
+    // then. Zero rows means the proved hash is gone: answer the failure now.
+    const n = await config.storage.update(
       "password",
       [
         { field: "id", op: "eq", value: row.id },
@@ -246,6 +249,8 @@ export async function passwordSignIn(
       ],
       { hash: fresh, updatedAt: now },
     );
+    if (n === 0) return fail("invalid_credentials");
+    proved = fresh;
   }
   return config.storage.transaction(async (tx): Promise<Result<PasswordSession>> => {
     const s = await createSession(
@@ -253,22 +258,28 @@ export async function passwordSignIn(
       { userId: user.id, ip: input.ip, userAgent: input.userAgent },
       tx,
     );
-    // For an unverified user, a claim (the owner's magic link) can run
-    // after the password read. claimEmail deletes the password rows before
-    // the sessions. So this conditional update of the password row is the
-    // last statement: one row means the claim's session delete has not run
-    // and still removes this session; zero rows means a claim deleted the
-    // row, so delete the own session by id, commit, and answer the failure
+    // For every user, verified or not. Between the verify and this point a
+    // reset or a change can write a new hash and delete the sessions, and a
+    // claim (the owner's magic link) can delete the row and the sessions.
+    // Each of them writes or deletes the password row before it deletes the
+    // sessions (claimEmail does; the reset and the change must keep that
+    // order). So this conditional update by id and the proved hash is the
+    // last statement: one row means that session delete has not run and
+    // still removes this session; zero rows means the row changed or is
+    // gone, so delete the own session by id, commit, and answer the failure
     // (a throw would reach the caller as a 500). A conditional update, not a
-    // read, so that it sees the claim's statements on D1.
-    if (!user.emailVerified) {
-      const n = await tx.update("password", [{ field: "id", op: "eq", value: row.id }], {
-        updatedAt: now,
-      });
-      if (n === 0) {
-        await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
-        return fail("invalid_credentials");
-      }
+    // read, so that it sees the other flow's statements on D1.
+    const n = await tx.update(
+      "password",
+      [
+        { field: "id", op: "eq", value: row.id },
+        { field: "hash", op: "eq", value: proved },
+      ],
+      { updatedAt: now },
+    );
+    if (n === 0) {
+      await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+      return fail("invalid_credentials");
     }
     return ok({ token: s.token, user, session: s.session });
   });

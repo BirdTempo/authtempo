@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ResolvedConfig } from "../src/config.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { passwordSignIn, passwordSignUp } from "../src/engine/password.js";
@@ -6,6 +6,7 @@ import { resolveSocialUser } from "../src/engine/social.js";
 import { claimEmail, ensureEmailIdentity } from "../src/engine/users.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "../src/seams/password-hash.js";
+import type { StorageAdapter, Where } from "../src/storage/port.js";
 import { makeAuth, post, tokenFromMail } from "./helpers.js";
 import { FAST, pwAuth, pwHandle } from "./password-helpers.js";
 
@@ -202,7 +203,7 @@ describe("POST /password/sign-up", () => {
 function counting(inner: PasswordHashSeam, beforeHash: () => Promise<void> = async () => {}) {
   const calls = { hash: 0, verify: [] as string[] };
   const seam: PasswordHashSeam = {
-    dummy: inner.dummy,
+    dummy: () => inner.dummy(),
     hash: async (p) => {
       calls.hash++;
       await beforeHash();
@@ -238,7 +239,8 @@ function withSeam(config: ResolvedConfig, hash: PasswordHashSeam): ResolvedConfi
 /**
  * A reachable verified user with a password: the sign-up, then what the
  * sign-up verify link does in one transaction (claim the email and keep
- * this password row, then add the email identity).
+ * this password row, then add the email identity). Task 6 owns this state:
+ * when its verify engine function lands, call it here in place of this copy.
  */
 async function signUpAndVerify(auth: ReturnType<typeof makeAuth>) {
   const up = await signUp(auth);
@@ -251,6 +253,54 @@ async function signUpAndVerify(auth: ReturnType<typeof makeAuth>) {
     await ensureEmailIdentity(tx, up.value.user.id, EMAIL, now);
   });
   return row;
+}
+
+/**
+ * What Task 7's reset (`keep` null) and change (`keep` the changer's
+ * session) do: write the new hash first, then delete the sessions. The
+ * order matters: the sign-in re-check sees the hash before the session delete.
+ */
+async function changePassword(
+  auth: ReturnType<typeof makeAuth>,
+  userId: string,
+  hash: string,
+  keep: string | null,
+): Promise<void> {
+  await auth.storage.update("password", [{ field: "userId", op: "eq", value: userId }], { hash });
+  const where: Where<"session">[] = [{ field: "userId", op: "eq", value: userId }];
+  if (keep) where.push({ field: "id", op: "ne", value: keep });
+  await auth.storage.delete("session", where);
+}
+
+/**
+ * Wraps the next `storage.transaction` call so that `before` runs inside
+ * it, just before its session insert. The work in `before` uses the outer
+ * storage, which does not wait for the transaction, as on D1.
+ */
+function beforeSessionInsert(
+  storage: StorageAdapter,
+  before: () => Promise<void>,
+): { fired: () => boolean } {
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  let fired = false;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        create: async (m, d) => {
+          if (m === "session" && !fired) {
+            fired = true;
+            await before();
+          }
+          return tx.create(m, d);
+        },
+      }),
+    );
+  };
+  return { fired: () => fired };
 }
 
 describe("passwordSignIn", () => {
@@ -311,9 +361,38 @@ describe("passwordSignIn", () => {
       expect(calls.verify.at(-1)).toMatch(/^pbkdf2-sha256\$1000\$/);
     }
     // The three cases with no row verify against the seam's dummy.
-    expect(calls.verify.slice(0, 3)).toEqual([FAST.dummy, FAST.dummy, FAST.dummy]);
-    // The dummy is made at seam construction: no sign-in runs a hash.
+    const dummy = await FAST.dummy();
+    expect(calls.verify.slice(0, 3)).toEqual([dummy, dummy, dummy]);
+    // The dummy is not a hash: no sign-in runs a hash.
     expect(calls.hash).toBe(hashes);
+  });
+
+  it("builds the dummy on the first sign-in with no row and reuses it, not at construction (Important 2)", async () => {
+    const random = vi.spyOn(crypto, "getRandomValues");
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    try {
+      const seam = createPbkdf2PasswordHash({ iterations: 1000 });
+      expect(random).not.toHaveBeenCalled();
+      expect(derive).not.toHaveBeenCalled();
+      const auth = pwAuth({ hash: seam });
+      random.mockClear();
+      expect(await signIn(auth, { email: "nobody@example.com" })).toMatchObject({
+        code: "invalid_credentials",
+      });
+      // One salt and one digest, drawn once.
+      expect(random).toHaveBeenCalledTimes(2);
+      expect(derive).toHaveBeenCalledTimes(1);
+      random.mockClear();
+      expect(await signIn(auth, { email: "nobody2@example.com" })).toMatchObject({
+        code: "invalid_credentials",
+      });
+      expect(random).not.toHaveBeenCalled();
+      expect(derive).toHaveBeenCalledTimes(2);
+      expect(derive.mock.calls[1]?.[0]).toMatchObject({ name: "PBKDF2", iterations: 1000 });
+    } finally {
+      random.mockRestore();
+      derive.mockRestore();
+    }
   });
 
   it("answers invalid_credentials for a password over 128 code points with no verify (Review Focus 5)", async () => {
@@ -332,8 +411,9 @@ describe("passwordSignIn", () => {
     expect(calls.verify.length).toBe(before + 1);
   });
 
-  it("limits to 10 per email and to 20 per ip per 15 minutes", async () => {
-    const auth = pwAuth();
+  it("limits to 10 per email and to 20 per ip per 15 minutes, with no verify on a refusal", async () => {
+    const { calls, seam } = counting(FAST);
+    const auth = pwAuth({ hash: seam });
     await signUp(auth);
     for (let i = 0; i < 10; i++)
       expect(
@@ -343,20 +423,40 @@ describe("passwordSignIn", () => {
           ip: `9.9.9.${i}`,
         }),
       ).toMatchObject({ code: "invalid_credentials" });
+    let before = calls.verify.length;
     expect(await signIn(auth, { ip: "9.9.9.99" })).toMatchObject({
       code: "rate_limited",
       status: 429,
     });
+    // A refusal runs no verify, so the limit bounds the CPU.
+    expect(calls.verify.length).toBe(before);
     auth.clock.advance(900 * 1000);
     expect((await signIn(auth, { ip: "9.9.9.99" })).ok).toBe(true);
-    const other = pwAuth();
+    const o = counting(FAST);
+    const other = pwAuth({ hash: o.seam });
     for (let i = 0; i < 20; i++)
       expect(await signIn(other, { email: `x${i}@example.com`, ip: "2.2.2.2" })).toMatchObject({
         code: "invalid_credentials",
       });
+    before = o.calls.verify.length;
     expect(await signIn(other, { email: "x20@example.com", ip: "2.2.2.2" })).toMatchObject({
       code: "rate_limited",
     });
+    expect(o.calls.verify.length).toBe(before);
+  });
+
+  it("checks the ip limit before the email limit, so an ip refusal does not spend the email budget", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    // Spend the ip budget of 3.3.3.3 on other addresses.
+    for (let i = 0; i < 20; i++) await signIn(auth, { email: `y${i}@example.com`, ip: "3.3.3.3" });
+    // Ten more for the victim's address from that ip: each is refused by the ip limit.
+    for (let i = 0; i < 10; i++)
+      expect(await signIn(auth, { password: "wrong password", ip: "3.3.3.3" })).toMatchObject({
+        code: "rate_limited",
+      });
+    // The victim's email budget is whole: a fresh ip signs in.
+    expect((await signIn(auth, { ip: "4.4.4.4" })).ok).toBe(true);
   });
 
   it("rewrites a hash with a lower cost at the current cost on a right sign-in, once", async () => {
@@ -385,26 +485,66 @@ describe("passwordSignIn", () => {
     ).toBe(after?.hash);
   });
 
-  it("keeps a hash that a concurrent write put on the row between the verify and the rehash", async () => {
+  it("keeps the hash and no session when a change lands between the verify and the rehash", async () => {
     const auth = pwAuth();
     const before = await signUpAndVerify(auth);
-    // A concurrent write (a reset, for example) sets a new hash after this sign-in read the row.
+    // A change (Task 7) writes the new hash, then deletes the sessions, after this sign-in read the row.
     const other = await FAST.hash("the new password");
     const { seam } = counting(createPbkdf2PasswordHash({ iterations: 2000 }), async () => {
-      await auth.storage.update("password", [{ field: "id", op: "eq", value: before.id }], {
-        hash: other,
-      });
+      await changePassword(auth, before.userId, other, null);
     });
+    const transactions = vi.spyOn(auth.storage, "transaction");
     const r = await passwordSignIn(withSeam(auth.config, seam), {
       email: EMAIL,
       password: PW,
       ip: null,
       userAgent: null,
     });
-    expect(r.ok).toBe(true);
+    expect(r).toMatchObject({ ok: false, code: "invalid_credentials" });
+    // The rehash matched zero rows, so the sign-in answers at once: no session transaction.
+    expect(transactions).not.toHaveBeenCalled();
+    transactions.mockRestore();
     expect(await auth.storage.findMany("password", [])).toMatchObject([
       { id: before.id, hash: other },
     ]);
+    expect(await auth.storage.findMany("session", [])).toEqual([]);
+  });
+
+  it("keeps no session for a sign-in with the old password that races a reset (Important 1)", async () => {
+    const auth = pwAuth();
+    const before = await signUpAndVerify(auth);
+    const other = await FAST.hash("the new password");
+    // A reset (Task 7): write the new hash, then delete every session. It
+    // runs inside the sign-in's transaction, after the verify and before
+    // the session insert, as on D1.
+    const gate = beforeSessionInsert(auth.storage, () =>
+      changePassword(auth, before.userId, other, null),
+    );
+    expect(await signIn(auth)).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect(gate.fired()).toBe(true);
+    expect(await auth.storage.findMany("session", [])).toEqual([]);
+    expect(await auth.storage.findMany("password", [])).toMatchObject([
+      { id: before.id, hash: other },
+    ]);
+  });
+
+  it("keeps only the changer's session for a sign-in with the old password that races a change (Important 1)", async () => {
+    const auth = pwAuth();
+    const before = await signUpAndVerify(auth);
+    const mine = await signIn(auth);
+    if (!mine.ok) throw new Error(mine.code);
+    const other = await FAST.hash("the new password");
+    // A change (Task 7): write the new hash, then delete every other session.
+    const gate = beforeSessionInsert(auth.storage, () =>
+      changePassword(auth, before.userId, other, mine.value.session.id),
+    );
+    expect(await signIn(auth, { ip: "5.5.5.5" })).toMatchObject({
+      ok: false,
+      code: "invalid_credentials",
+    });
+    expect(gate.fired()).toBe(true);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.id)).toEqual([mine.value.session.id]);
   });
 
   it("writes no password row back when a claim deleted it between the verify and the rehash", async () => {

@@ -11,12 +11,18 @@ export interface PasswordHashSeam {
   /** `ok` is a match. `rehash` is true only on a match whose stored cost is below this seam's cost. */
   verify(plain: string, stored: string): Promise<{ ok: boolean; rehash: boolean }>;
   /**
-   * A stored string in this seam's format, at this seam's cost, that no
-   * password matches. A sign-in with no password row runs one `verify`
-   * against it, so an unknown address costs the same CPU as a known one.
-   * Built at seam construction, so no sign-in pays a hash to make it.
+   * A stored string that no password matches. A sign-in with no password
+   * row runs one `verify` against it, so an unknown address costs the same
+   * CPU as a known one. A custom seam must answer a string that its own
+   * `verify` parses and runs the full derive on, at the seam's current
+   * (default) cost. A string that `verify` refuses at once breaks the flat
+   * timing, and no type check sees it.
+   *
+   * Build it on the first call and keep it, not at construction: workerd
+   * refuses random values at global scope, and a deployer can construct
+   * the seam there. The first call runs inside a request.
    */
-  readonly dummy: string;
+  dummy(): Promise<string>;
 }
 
 /**
@@ -79,14 +85,22 @@ export function createPbkdf2PasswordHash(
       `tempo-auth: iterations must be an integer from 1 to maxIterations (${maxIterations})`,
     );
   }
-  // A random salt and a random digest: the same derive as a real row, and no
-  // password matches it (the chance is 2^-256). No derive runs here.
-  const dummySalt = new Uint8Array(SALT_BYTES);
-  const dummyDigest = new Uint8Array(HASH_BYTES);
-  crypto.getRandomValues(dummySalt);
-  crypto.getRandomValues(dummyDigest);
+  let dummy: Promise<string> | null = null;
   return {
-    dummy: `${HEADER}$${iterations}$${toBase64Url(dummySalt)}$${toBase64Url(dummyDigest)}`,
+    dummy() {
+      if (!dummy) {
+        // A random salt and a random digest: the same derive as a real row,
+        // and no password matches it (the chance is 2^-256). No derive runs here.
+        const salt = new Uint8Array(SALT_BYTES);
+        const digest = new Uint8Array(HASH_BYTES);
+        crypto.getRandomValues(salt);
+        crypto.getRandomValues(digest);
+        dummy = Promise.resolve(
+          `${HEADER}$${iterations}$${toBase64Url(salt)}$${toBase64Url(digest)}`,
+        );
+      }
+      return dummy;
+    },
     async hash(plain) {
       const salt = new Uint8Array(SALT_BYTES);
       crypto.getRandomValues(salt);

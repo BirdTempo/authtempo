@@ -112,17 +112,40 @@ describe("createPbkdf2PasswordHash", () => {
     expect(spy.mock.calls[0]?.[1]).toBe(stored.split("$")[3]);
   });
 
-  it("has a dummy in the stored format at its cost, made with no derive, that runs one full derive and matches nothing", async () => {
+  it("draws no random value and runs no derive at construction (Important 2)", () => {
+    const random = vi.spyOn(crypto, "getRandomValues");
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    createPbkdf2PasswordHash();
+    createPbkdf2PasswordHash({ iterations: 1000 });
+    expect(random).not.toHaveBeenCalled();
+    expect(derive).not.toHaveBeenCalled();
+    random.mockRestore();
+    derive.mockRestore();
+  });
+
+  it("answers one dummy per seam, in the stored format at its cost, built once with no derive", async () => {
     const derive = vi.spyOn(crypto.subtle, "deriveBits");
     const made = createPbkdf2PasswordHash({ iterations: 1000 });
+    const dummy = await made.dummy();
+    expect(dummy).toMatch(FORMAT_1000);
+    expect(await made.dummy()).toBe(dummy);
+    expect(await createPbkdf2PasswordHash({ iterations: 1000 }).dummy()).not.toBe(dummy);
     expect(derive).not.toHaveBeenCalled();
-    expect(made.dummy).toMatch(FORMAT_1000);
-    expect(createPbkdf2PasswordHash({ iterations: 1000 }).dummy).not.toBe(made.dummy);
-    expect(await made.verify("pw", made.dummy)).toEqual({ ok: false, rehash: false });
-    expect(derive).toHaveBeenCalledTimes(1);
-    expect(derive.mock.calls[0]?.[0]).toMatchObject({ name: "PBKDF2", iterations: 1000 });
     derive.mockRestore();
-    expect(createPbkdf2PasswordHash().dummy).toMatch(/^pbkdf2-sha256\$100000\$/);
+  });
+
+  it("runs the full derive at the seam's cost on a verify against the dummy, and matches nothing (Minor 2)", async () => {
+    for (const [made, cost] of [
+      [createPbkdf2PasswordHash({ iterations: 1000 }), 1000],
+      [createPbkdf2PasswordHash(), PBKDF2_ITERATIONS],
+    ] as const) {
+      const dummy = await made.dummy();
+      const derive = vi.spyOn(crypto.subtle, "deriveBits");
+      expect(await made.verify("pw", dummy)).toEqual({ ok: false, rehash: false });
+      expect(derive).toHaveBeenCalledTimes(1);
+      expect(derive.mock.calls[0]?.[0]).toMatchObject({ name: "PBKDF2", iterations: cost });
+      derive.mockRestore();
+    }
   });
 
   it("refuses an iteration option that is not an integer from 1 to maxIterations", () => {
