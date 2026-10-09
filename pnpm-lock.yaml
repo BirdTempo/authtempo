@@ -271,6 +271,22 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(vite@8.3.3)
 
+  packages/handoff:
+    dependencies:
+      '@tempo-auth/client':
+        specifier: workspace:*
+        version: link:../client
+      '@tempo-auth/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(vite@8.3.3)
+
 packages:
 
   '@biomejs/biome@2.5.15':
