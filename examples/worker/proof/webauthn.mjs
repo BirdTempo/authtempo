@@ -1,22 +1,32 @@
 // STATUS 2026-10-10: this script was written and linted in a sandboxed session. It was NOT run
 // there. The sandbox refuses the Firefox profile folder ("Could not find profile folder", exit 1).
-// The owner runs the proof and the break proofs in their own shell:
+// The owner runs the proof and the break proofs in their own shell. The script builds the client
+// itself (turbo with --force) before it reads packages/client/dist, so do not build by hand.
+// Firefox:
 //   pnpm --filter tempo-auth-example-worker proof:webauthn firefox
 //   PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn firefox
 //   PROOF_FORCE_WEAK=1 PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn firefox
-// The first run is the proof. The second must fail on the strong path. The third must fail on
-// the weak path. PROOF_FORCE_WEAK=1 skips the virtual authenticator. FIREFOX_BINARY sets the
-// Firefox binary.
+// Safari (enable the driver once; it asks for the admin password):
+//   sudo safaridriver --enable
+//   pnpm --filter tempo-auth-example-worker proof:webauthn safari
+//   PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn safari
+//   PROOF_FORCE_WEAK=1 PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn safari
+// For each browser, the first run is the proof. The second must fail on the strong path. The
+// third must fail on the weak path. PROOF_FORCE_WEAK=1 skips the virtual authenticator.
+// FIREFOX_BINARY sets the Firefox binary.
 // Each run writes its record to proof/results/webauthn-<browser>[-weak][-stub].json (latest) and
 // to the same name with the date added (kept). The record has the path taken, the versions, the
 // date, and pass or the exact failure. Keep these files as the evidence.
 //
-// Xray risk, and how this script avoids it: an execute/async script in Firefox runs in the
+// Xray risk, and how this script avoids it: an execute script in Firefox runs in the
 // Marionette sandbox over the window. Writes to PublicKeyCredential from there may land on an
-// Xray wrapper and not reach the page. So the script injects a <script> element. The whole
-// ceremony (the patches, the client calls, the counters) runs in the page world and stores its
-// report on window.__tempoAuthProof. The WebDriver script only polls that property. This needs a
-// page without a content security policy. The Worker's own 404 page has none, and the script
+// Xray wrapper and not reach the page, and a page expando on window may not be visible from
+// there. So the script injects a <script> element. The whole ceremony (the patches, the client
+// calls, the counters) runs in the page world. It stores its report as JSON text in a DOM node,
+// <script type="application/json" id="tempo-auth-proof"> appended to the body. The WebDriver
+// script reads that node through the DOM (getElementById, then textContent), which an Xray
+// wrapper shows as is. This is the path used; no window expando carries the report. The page
+// must have no content security policy. The Worker's own 404 page has none, and the script
 // checks the headers first and stops if one appears. If you see "parsers not exercised" on
 // Firefox, read it with this design in mind: the injection is the part that no run has tested.
 //
@@ -28,7 +38,7 @@
 // This proof covers the client package. The sign-in page script of core does not use the client.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BASE, bearerFor, startWorker } from "./dev.mjs";
 
@@ -52,14 +62,18 @@ const BROWSERS = {
       },
     },
     driverVersion: () =>
-      execFileSync("geckodriver", ["--version"], { encoding: "utf8" }).split("\n")[0],
+      execFileSync("geckodriver", ["--version"], { encoding: "utf8", timeout: 15_000 }).split(
+        "\n",
+      )[0],
   },
   safari: {
     command: "safaridriver",
     args: ["--port", "4444"],
     port: 4444,
     capabilities: { browserName: "safari" },
-    driverVersion: () => "safaridriver of the installed Safari",
+    // The plan's constraints ask for the driver version on every record.
+    driverVersion: () =>
+      execFileSync("safaridriver", ["--version"], { encoding: "utf8", timeout: 15_000 }).trim(),
   },
 };
 const name = process.argv[2];
@@ -74,6 +88,7 @@ const STUB = process.env.PROOF_STUB_TYPEERROR === "1";
 const FORCE_WEAK = process.env.PROOF_FORCE_WEAK === "1";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const WEBAUTHN_JS = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -83,15 +98,29 @@ const WEBAUTHN_JS = join(
   "dist",
   "webauthn.js",
 );
-const source = readFileSync(WEBAUTHN_JS, "utf8").replace(/^export /gm, "");
-if (
-  /^\s*(import|export)\b/m.test(source) ||
-  !source.includes("function browserWebAuthn(") ||
-  !source.includes("function toBinaryCreationOptions(") ||
-  !source.includes("function toBinaryRequestOptions(") ||
-  !source.includes("function credentialToJSON(")
-) {
-  throw new Error(`${WEBAUTHN_JS} changed shape: it must be plain functions with no import`);
+// The client's built webauthn.js without its export keywords. loadClientSource fills it inside
+// the main try, so a failed build or a changed shape ends in a written record, not a crash.
+let source = "";
+function loadClientSource() {
+  // A check that reads build output proves nothing until the build is newer than the change. So
+  // build the client from the root with --force (never a cache replay). The build takes seconds;
+  // 5 min allows a loaded machine.
+  execFileSync("pnpm", ["-w", "turbo", "run", "build", "--filter=@tempo-auth/client", "--force"], {
+    cwd: ROOT,
+    stdio: "inherit",
+    timeout: 300_000,
+  });
+  const text = readFileSync(WEBAUTHN_JS, "utf8").replace(/^export /gm, "");
+  if (
+    /^\s*(import|export)\b/m.test(text) ||
+    !text.includes("function browserWebAuthn(") ||
+    !text.includes("function toBinaryCreationOptions(") ||
+    !text.includes("function toBinaryRequestOptions(") ||
+    !text.includes("function credentialToJSON(")
+  ) {
+    throw new Error(`${WEBAUTHN_JS} changed shape: it must be plain functions with no import`);
+  }
+  source = text;
 }
 
 // Runs in the page. It gets browserWebAuthn from the injected source, then the WebDriver arguments.
@@ -196,9 +225,13 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
   );
 }
 // The page-world text. The source declares its functions inside the arrow function, so the
-// assignments in pageCeremony reach them. A throw is stored on the window, so the poll sees it.
+// assignments in pageCeremony reach them. The report, or a throw, goes to the DOM node that the
+// poll reads (see the Xray note in the header).
+const REPORT_ID = "tempo-auth-proof";
 const pageText = (op, mode, bearer) =>
-  `(() => { try { ${source}\n(${pageCeremony.toString()})(browserWebAuthn, ${JSON.stringify(BASE)}, ${JSON.stringify(bearer)}, ${JSON.stringify(op)}, ${JSON.stringify(mode)}, ${JSON.stringify(STUB)}, (r) => { window.__tempoAuthProof = r; }); } catch (e) { window.__tempoAuthProof = { pageError: String(e) }; } })();`;
+  `(() => { const save = (r) => { const el = document.createElement("script"); el.type = "application/json"; el.id = ${JSON.stringify(REPORT_ID)}; el.textContent = JSON.stringify(r); (document.body ?? document.documentElement).appendChild(el); }; try { ${source}\n(${pageCeremony.toString()})(browserWebAuthn, ${JSON.stringify(BASE)}, ${JSON.stringify(bearer)}, ${JSON.stringify(op)}, ${JSON.stringify(mode)}, ${JSON.stringify(STUB)}, save); } catch (e) { save({ pageError: String(e) }); } })();`;
+// Reads the report through the DOM, never through a window property.
+const POLL = `const el = document.getElementById(${JSON.stringify(REPORT_ID)}); return el ? el.textContent : null;`;
 const INJECT = `const el = document.createElement("script"); el.textContent = arguments[0]; document.documentElement.appendChild(el); return null;`;
 
 // Every driver call has a timeout: 60 s for a new session, 40 s for the rest.
@@ -255,6 +288,7 @@ const killDriver = () => driver?.kill();
 process.on("exit", killDriver);
 const probe = (url) => fetch(url, { signal: AbortSignal.timeout(2_000) });
 try {
+  loadClientSource();
   const busy = await probe(`${DRIVER}/status`).then(
     () => true,
     () => false,
@@ -329,12 +363,17 @@ try {
     });
     if (inject.status !== 200) return fail(inject.value);
     for (let i = 0; i < 150; i++) {
-      const r = await wd("POST", `/session/${session}/execute/sync`, {
-        script: "return window.__tempoAuthProof ?? null;",
-        args: [],
-      });
+      const r = await wd("POST", `/session/${session}/execute/sync`, { script: POLL, args: [] });
       if (r.status !== 200) return fail(r.value);
-      if (r.value) return r.value.ran ? r.value : fail(r.value);
+      if (typeof r.value === "string") {
+        let report;
+        try {
+          report = JSON.parse(r.value);
+        } catch {
+          return fail(`the report node holds no JSON: ${r.value.slice(0, 200)}`);
+        }
+        return report?.ran ? report : fail(report);
+      }
       await sleep(200);
     }
     return fail("no report in 30 s");
