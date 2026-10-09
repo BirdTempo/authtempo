@@ -31,6 +31,7 @@ export {
   type Models,
   type OrganizationRow,
   type PasskeyRow,
+  type PasswordRow,
   SCHEMA_VERSION,
   type SessionRow,
   schema,
