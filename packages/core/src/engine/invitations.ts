@@ -183,9 +183,25 @@ export async function acceptInvitation(
   ]);
   if (!organization) return fail("invalid_token");
   const now = config.clock.now();
-  let member: MemberRow | null = null;
+  let member: MemberRow | "inviter_lost" | null = null;
   try {
     member = await config.storage.transaction(async (tx) => {
+      // An invitation carries its inviter's rank at the time of the invite. If the inviter was
+      // removed or demoted since, the grant must die with their right; the check runs here because
+      // a removal cannot find every pending invitation by rank.
+      const inviter = await tx.findOne("member", [
+        { field: "organizationId", op: "eq", value: inv.organizationId },
+        { field: "userId", op: "eq", value: inv.inviterId },
+      ]);
+      const inviterRank = inviter ? rankOf(o.ranks, inviter.role) : 0;
+      if (inviterRank < needs(o, "invite") || inviterRank < rankOf(o.ranks, inv.role)) {
+        // Only a pending row: an accepted row is a record of a grant that already happened.
+        await tx.delete("invitation", [
+          { field: "id", op: "eq", value: inv.id },
+          { field: "acceptedAt", op: "eq", value: null },
+        ]);
+        return "inviter_lost" as const;
+      }
       // One conditional update consumes the token: two accepts race for one row and only one wins.
       const n = await tx.update(
         "invitation",
@@ -227,7 +243,8 @@ export async function acceptInvitation(
       return fail("already_member");
     throw err;
   }
-  if (!member) return fail("invalid_token");
+  // Both a lost race for the token and a lost inviter answer invalid_token: the link is dead either way.
+  if (member === null || member === "inviter_lost") return fail("invalid_token");
   return ok({
     organization: publicOrganization(organization),
     member: {

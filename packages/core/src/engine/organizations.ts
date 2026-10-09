@@ -37,6 +37,14 @@ export interface MemberSummary {
 
 const NAME_MAX = 120;
 
+/** The name goes into a mail subject; a CR or LF would inject a header. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the class names the control characters it refuses.
+const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+
+function validName(name: string): boolean {
+  return name.length >= 1 && name.length <= NAME_MAX && !CONTROL_RE.test(name);
+}
+
 export function publicOrganization(row: OrganizationRow): OrganizationSummary {
   return {
     id: row.id,
@@ -161,8 +169,7 @@ export async function createOrganization(
   const v = verified(input.user);
   if (!v.ok) return v;
   const slug = normalizeSlug(input.slug);
-  if (slug === null || input.name.length < 1 || input.name.length > NAME_MAX)
-    return fail("invalid_body");
+  if (slug === null || !validName(input.name)) return fail("invalid_body");
   if (o.reservedSlugs.has(slug)) return fail("slug_reserved");
   const now = config.clock.now();
   const organization: OrganizationRow = {
@@ -240,7 +247,7 @@ export async function updateOrganization(
   if (!s.ok) return s;
   const data: Partial<OrganizationRow> = {};
   if (input.name !== undefined) {
-    if (input.name.length < 1 || input.name.length > NAME_MAX) return fail("invalid_body");
+    if (!validName(input.name)) return fail("invalid_body");
     data.name = input.name;
   }
   if (input.metadata !== undefined) data.metadata = input.metadata;

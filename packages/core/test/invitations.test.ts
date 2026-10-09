@@ -8,7 +8,13 @@ import {
   revokeInvitation,
   setActiveOrganization,
 } from "../src/engine/invitations.js";
-import { addMember, createOrganization, deleteOrganization } from "../src/engine/organizations.js";
+import {
+  addMember,
+  createOrganization,
+  deleteOrganization,
+  removeMember,
+  updateMemberRole,
+} from "../src/engine/organizations.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { makeAuth } from "./helpers.js";
 
@@ -334,5 +340,82 @@ describe("setActiveOrganization", () => {
       organizationId: null,
     });
     expect(again.ok && again.value.session.activeOrganizationId).toBeNull();
+  });
+});
+
+describe("acceptInvitation re-checks the inviter (Review I-1)", () => {
+  async function invitedByAdmin(auth: ReturnType<typeof makeAuth>) {
+    const { owner, org } = await owned(auth);
+    const admin = await auth.seedUser("admin@example.com");
+    await addMember(auth.config, {
+      user: owner,
+      organizationId: org.id,
+      userId: admin.id,
+      role: "admin",
+    });
+    const inv = await inviteMember(auth.config, {
+      user: admin,
+      organizationId: org.id,
+      email: "x@example.com",
+      role: "member",
+    });
+    if (!inv.ok) throw new Error(inv.code);
+    const x = await auth.seedUser("x@example.com");
+    return { owner, org, admin, x, token: tokenFrom(auth.mail[0]?.text ?? "") };
+  }
+
+  async function memberOf(
+    auth: ReturnType<typeof makeAuth>,
+    organizationId: string,
+    userId: string,
+  ) {
+    return auth.storage.findOne("member", [
+      { field: "organizationId", op: "eq", value: organizationId },
+      { field: "userId", op: "eq", value: userId },
+    ]);
+  }
+
+  it("accepts while the inviter still holds the rank", async () => {
+    const auth = orgAuth();
+    const { org, x, token } = await invitedByAdmin(auth);
+    const r = await acceptInvitation(auth.config, { user: x, token, ip: null });
+    expect(r.ok && r.value.member.role).toBe("member");
+    expect((await memberOf(auth, org.id, x.id))?.role).toBe("member");
+  });
+
+  it("refuses with invalid_token and deletes the invitation when the inviter was removed", async () => {
+    const auth = orgAuth();
+    const { owner, org, admin, x, token } = await invitedByAdmin(auth);
+    expect(
+      (await removeMember(auth.config, { user: owner, organizationId: org.id, userId: admin.id }))
+        .ok,
+    ).toBe(true);
+    expect(await acceptInvitation(auth.config, { user: x, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
+    expect(await memberOf(auth, org.id, x.id)).toBeNull();
+    expect(await auth.storage.findMany("invitation", [])).toEqual([]);
+  });
+
+  it("refuses with invalid_token and deletes the invitation when the inviter was demoted to viewer", async () => {
+    const auth = orgAuth();
+    const { owner, org, admin, x, token } = await invitedByAdmin(auth);
+    expect(
+      (
+        await updateMemberRole(auth.config, {
+          user: owner,
+          organizationId: org.id,
+          userId: admin.id,
+          role: "viewer",
+        })
+      ).ok,
+    ).toBe(true);
+    expect(await acceptInvitation(auth.config, { user: x, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
+    expect(await memberOf(auth, org.id, x.id)).toBeNull();
+    expect(await auth.storage.findMany("invitation", [])).toEqual([]);
   });
 });

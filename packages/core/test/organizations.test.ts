@@ -85,6 +85,28 @@ describe("createOrganization", () => {
 });
 
 describe("updateOrganization and deleteOrganization", () => {
+  it("refuses a name with a control character on create and on update (Review M-2)", async () => {
+    const auth = orgAuth();
+    const { user: owner, org } = await owned(auth);
+    for (const name of ["Acme\nBcc: x@example.com", "Acme\r", "Acme\u0000", "Acme\u007f"]) {
+      expect(
+        await createOrganization(auth.config, { user: owner, slug: "other", name }),
+      ).toMatchObject({ ok: false, code: "invalid_body" });
+      expect(
+        await updateOrganization(auth.config, { user: owner, organizationId: org.id, name }),
+      ).toMatchObject({ ok: false, code: "invalid_body" });
+    }
+    expect(
+      (
+        await updateOrganization(auth.config, {
+          user: owner,
+          organizationId: org.id,
+          name: "Acme Ünïcode",
+        })
+      ).ok,
+    ).toBe(true);
+  });
+
   it("admin updates name and metadata; only owner changes the slug; viewer gets forbidden_rank", async () => {
     const auth = orgAuth();
     const { user: owner, org } = await owned(auth);
