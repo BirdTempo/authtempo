@@ -26,7 +26,8 @@ async function answers(url) {
 }
 
 // Each running Worker registers a sync kill here. The handlers below call them on Ctrl-C,
-// on SIGTERM, and on any exit. Wrangler runs in its own process group (detached), so a signal
+// on SIGTERM, on SIGHUP, and on any exit. SIGHUP comes when the terminal closes; Node's default
+// action for it ends the process with no exit event, so without the handler the Worker stays. Wrangler runs in its own process group (detached), so a signal
 // to this process does not reach it. Without these handlers an interrupted proof leaves an
 // orphan on port 8787, and the next run stops at the "port answers already" check.
 const killers = new Set();
@@ -41,6 +42,7 @@ function installHandlers() {
   for (const [signal, code] of [
     ["SIGINT", 130],
     ["SIGTERM", 143],
+    ["SIGHUP", 129],
   ]) {
     process.on(signal, () => {
       killAll();
@@ -63,11 +65,18 @@ export async function startWorker() {
   const persist = mkdtempSync(join(tmpdir(), "tempo-auth-proof-d1-"));
   // CI=1 makes wrangler skip its confirm prompt.
   const env = { ...process.env, CI: "1" };
-  execFileSync(
-    "pnpm",
-    ["exec", "wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", persist],
-    { cwd: WORKER_DIR, env, stdio: "inherit" },
-  );
+  // Every child process in the proofs has a limit. The local apply takes a few seconds; 2 min
+  // allows a loaded machine. A stuck apply then fails the run and never hangs it.
+  try {
+    execFileSync(
+      "pnpm",
+      ["exec", "wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", persist],
+      { cwd: WORKER_DIR, env, stdio: "inherit", timeout: 120_000 },
+    );
+  } catch (e) {
+    rmSync(persist, { recursive: true, force: true, maxRetries: 3 });
+    throw e;
+  }
   const logFile = join(persist, "wrangler-dev.log");
   const log = openSync(logFile, "w");
   // wrangler 4.148.0 splits a --var on the first colon and joins the rest, so a URL value is safe
@@ -102,20 +111,26 @@ export async function startWorker() {
     } catch {}
   };
   // Sync part: ends the process group and removes the temp directory. Safe to call twice.
+  // It runs in an exit listener, where a throw stops the listeners after it. So the remove
+  // retries (workerd can still hold a file for a moment) and never throws.
   const killSync = () => {
     killGroup("SIGKILL");
     killers.delete(killSync);
-    rmSync(persist, { recursive: true, force: true });
+    try {
+      rmSync(persist, { recursive: true, force: true, maxRetries: 3 });
+    } catch {}
   };
   killers.add(killSync);
   installHandlers();
   // Waits until the port is closed, so the next startWorker does not see this Worker.
+  // When the second wait ends, it still sends SIGKILL and removes the temp directory, then
+  // throws. A caller that skips its own cleanup on this throw then leaves no Worker behind.
   const stop = async () => {
     killGroup("SIGTERM");
     if (!(await waitFor(async () => !(await answers(BASE)), 10_000))) killGroup("SIGKILL");
-    if (!(await waitFor(async () => !(await answers(BASE)) && exited, 10_000)))
-      throw new Error("wrangler dev did not stop in 20 s");
+    const stopped = await waitFor(async () => !(await answers(BASE)) && exited, 10_000);
     killSync();
+    if (!stopped) throw new Error("wrangler dev did not stop in 20 s");
   };
   for (let i = 0; i < 300 && !exited; i++) {
     try {
