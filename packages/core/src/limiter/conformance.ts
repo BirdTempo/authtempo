@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { LimiterPort } from "./port.js";
+import { KEY_SEPARATOR, type LimiterPort } from "./port.js";
 
 /** A clock the suite moves by hand. */
 export interface ManualClock {
@@ -70,11 +70,17 @@ export function runLimiterConformance(
       expect(await calls("b", w.max + 1)).toEqual([true, true, true, false]);
     });
 
-    it("rejects a key that contains the separator `|` with a thrown Error", async () => {
-      // The stored key is `${key}|${seconds}|${max}`. A key with `|` in it
-      // could then name the bucket of another key and window.
-      await expect(limiter.allow("a|60|3", w)).rejects.toThrow(Error);
-      await expect(limiter.allow("a|", w)).rejects.toThrow(/\|/);
+    it("treats a key with `|` as an ordinary key: two keys that differ by a `|` count apart", async () => {
+      expect(await calls("a|b", w.max + 1)).toEqual([true, true, true, false]);
+      expect(await calls("a|", w.max + 1)).toEqual([true, true, true, false]);
+      expect(await calls("ab", w.max + 1)).toEqual([true, true, true, false]);
+    });
+
+    it("throws on a key with U+001F, the separator of the stored key", async () => {
+      // The stored key is the key, the seconds, and the max, joined by U+001F.
+      // A key with U+001F in it could name the bucket of another key and window.
+      await expect(limiter.allow(`a${KEY_SEPARATOR}60`, w)).rejects.toThrow(Error);
+      await expect(limiter.allow(`a${KEY_SEPARATOR}`, w)).rejects.toThrow(/U\+001F/);
     });
   });
 }

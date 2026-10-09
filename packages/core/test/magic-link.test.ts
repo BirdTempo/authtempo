@@ -55,6 +55,16 @@ describe("magic link engine", () => {
     expect(a.ok && b.ok && a.value.user.id === b.value.user.id).toBe(true);
   });
 
+  it("sends a link to an address with a bar: the key reaches the limiter and does not throw", async () => {
+    const { config, mail } = makeAuth();
+    expect(await requestMagicLink(config, { email: "a|b@example.com", ip: null })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(mail).toHaveLength(1);
+    expect(mail[0]?.to).toBe("a|b@example.com");
+  });
+
   it("answers ok and sends nothing for an email that is not an address", async () => {
     const { config, mail } = makeAuth();
     expect(await requestMagicLink(config, { email: "not-an-address", ip: null })).toEqual({

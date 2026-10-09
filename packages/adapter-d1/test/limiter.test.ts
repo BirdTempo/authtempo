@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { limiterKey } from "@tempo-auth/core";
 import { runLimiterConformance } from "@tempo-auth/core/limiter-conformance";
 import { expect, it } from "vitest";
 import { createD1Limiter } from "../src/index.js";
@@ -34,7 +35,7 @@ it("lets exactly one of two concurrent calls at max - 1 pass", async () => {
   const both = await Promise.all([limiter.allow("race", w), limiter.allow("race", w)]);
   expect(both.filter((b) => b)).toHaveLength(1);
   const row = await env.DB.prepare("SELECT count FROM ta_limit WHERE key = ?1")
-    .bind("race|60|3")
+    .bind(limiterKey("race", w))
     .first<{ count: number }>();
   expect(row?.count).toBe(w.max + 1);
   await clear();

@@ -1,3 +1,4 @@
+import { limiterKey } from "@tempo-auth/core";
 import { runLimiterConformance } from "@tempo-auth/core/limiter-conformance";
 import { expect, it } from "vitest";
 import { createPostgresLimiter } from "../src/index.js";
@@ -31,7 +32,7 @@ it("lets exactly one of two concurrent calls at max - 1 pass", async () => {
     expect(both.filter((b) => b)).toHaveLength(1);
     const rows = await db.sql.unsafe<{ count: string }[]>(
       "SELECT count FROM ta_limit WHERE key = $1",
-      ["race|60|3"],
+      [limiterKey("race", w)],
     );
     expect(Number(rows[0]?.count)).toBe(w.max + 1);
   } finally {

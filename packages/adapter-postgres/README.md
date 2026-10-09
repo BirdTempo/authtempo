@@ -58,8 +58,10 @@ const auth = createAuth({ /* ... */, limiter: createPostgresLimiter(sql) });
 Each call runs one statement. It inserts the key at count 1, or on a
 conflict resets the window when it has ended, else adds 1, and returns the
 count. The call passes when the count is at most `max`. The upsert locks the row, so two concurrent calls cannot both see `max - 1`.
-A key must not contain `|`: the stored key is `${key}|${seconds}|${max}`,
-so the limiter throws an `Error` on such a key.
+The stored key is the key, the seconds, and the max, joined by U+001F
+(the unit separator). A key with `|` is an ordinary key. A key with U+001F
+throws an `Error`: no caller value can carry it, and it would alias
+another window.
 
 ## Transactions
 

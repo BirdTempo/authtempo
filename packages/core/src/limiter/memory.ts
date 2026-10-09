@@ -1,20 +1,21 @@
 import type { Clock } from "../primitives/clock.js";
-import type { LimiterPort, LimitWindow } from "./port.js";
+import { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./port.js";
 
 /**
- * The stored key of every limiter: `${key}|${seconds}|${max}`. The window is
- * part of the identity, so one key under two windows is two limits. `|` is
- * the separator, so a key that contains it is refused: else the key
- * `a|60` with max 3 and the key `a` with window 60 and max 3 share a bucket.
- * The memory, D1, and Postgres limiters all read this one function.
+ * The stored key of every limiter: the key, the seconds, and the max, joined
+ * by `KEY_SEPARATOR` (U+001F). The window is part of the identity, so one key
+ * under two windows is two limits. The memory, D1, and Postgres limiters all
+ * read this one function. A key with `|` is an ordinary key.
  */
 export function limiterKey(key: string, window: LimitWindow): string {
-  if (key.includes("|")) {
+  // No caller value can carry it: normalizeEmail refuses control characters
+  // and an IP address has none. A key with it would alias another window.
+  if (key.includes(KEY_SEPARATOR)) {
     throw new Error(
-      "tempo-auth limiter: a key must not contain `|`, the separator of the stored key",
+      "tempo-auth limiter: a key must not contain U+001F, the separator of the stored key",
     );
   }
-  return `${key}|${window.seconds}|${window.max}`;
+  return `${key}${KEY_SEPARATOR}${window.seconds}${KEY_SEPARATOR}${window.max}`;
 }
 
 /**
