@@ -3,7 +3,8 @@
 // (b) a second launch of the binary with the URL in argv, which reaches the first app as second-instance.
 // It also delivers a URL off the redirect, which the opener must drop.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,13 +14,23 @@ import { buildBundle, deleteKeychainItem, unregisterBundle } from "./bundle.mjs"
 const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT = resolve(PKG_DIR, "..", "..");
 const EMAIL = "electron-proof@example.com";
+const BUNDLE_PREFIX = ".proof-bundle-";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A run that ended on a signal can leave a registered bundle. Two registered bundles claim
+// example-app, and `open` can then start the stale copy. So remove every old one first.
+for (const name of readdirSync(PKG_DIR)) {
+  if (!name.startsWith(BUNDLE_PREFIX)) continue;
+  unregisterBundle(join(PKG_DIR, name, "TempoAuthExample.app"));
+  rmSync(join(PKG_DIR, name), { recursive: true, force: true });
+}
+
 const proofDir = mkdtempSync(join(tmpdir(), "tempo-auth-electron-proof-"));
 // LaunchServices marks an app in a temporary folder "launch-disabled in-temp-dir" and binds no
 // URL scheme to it: `open` then fails with -10814 (lsregister -dump, macOS 27.0, 2026-10-10).
 // So the bundle lives in the package folder, which .gitignore excludes, and the run removes it.
-const bundleDir = mkdtempSync(join(PKG_DIR, ".proof-bundle-"));
-// The failure text of `open` holds the URL. The record must not hold a handoff code.
+const bundleDir = mkdtempSync(join(PKG_DIR, BUNDLE_PREFIX));
+// The record must not hold a handoff code. Every failure text goes through this.
 const scrub = (text) => text.replace(/hc_[A-Za-z0-9_-]+/g, "hc_<redacted>");
 const eventsFile = join(proofDir, "events.jsonl");
 const events = () =>
@@ -48,24 +59,76 @@ async function waitFor(label, pick, ms = 30_000) {
   }
   throw new Error(`timed out: ${label}; read ${eventsFile}`);
 }
+// `open` writes the whole URL to stderr when it fails. The pipe keeps that text out of the
+// terminal, and the error names only the route and the code length.
+function openUrl(url) {
+  try {
+    execFileSync("open", [url], { stdio: ["ignore", "ignore", "pipe"], timeout: 15_000 });
+  } catch (e) {
+    const { url: route, codeLength } = redacted(url);
+    const why = scrub(String(e.stderr ?? "").trim()) || String(e.code ?? e.signal ?? e.status);
+    throw new Error(`open of ${route} (code length ${codeLength}) failed: ${why}`);
+  }
+}
 const failures = [];
 const check = (name, ok) => {
   if (!ok) failures.push(name);
 };
 
-const macOS = execFileSync("sw_vers", ["-productVersion"], { encoding: "utf8" }).trim();
 let first = null;
 let second = null;
 let bundle = null;
 let worker = null;
 let electron = null;
+
+// Sends SIGTERM, waits at most 5 s for the exit, then SIGKILL. The app must be gone before the
+// cleanup deletes its bundle and its Keychain item, or it can write the item again.
+async function stopApp(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((r) => child.once("exit", r));
+  child.kill();
+  const timer = (ms) => sleep(ms).then(() => "timeout");
+  if ((await Promise.race([exited, timer(5_000)])) === "timeout") {
+    child.kill("SIGKILL");
+    await Promise.race([exited, timer(2_000)]);
+  }
+}
+// The sync part of the cleanup, safe to call twice. A signal handler can run only sync code.
+function cleanupSync() {
+  for (const child of [first, second]) {
+    if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  }
+  if (bundle) unregisterBundle(bundle.app);
+  rmSync(bundleDir, { recursive: true, force: true });
+  deleteKeychainItem();
+}
+// Ctrl-C or SIGTERM skips `finally`. This handler is added before startWorker adds the kit's
+// handler, so it runs first. process.exit then runs the kit's exit handler, which stops the Worker.
+for (const [signal, code] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+]) {
+  process.on(signal, () => {
+    try {
+      cleanupSync();
+    } finally {
+      process.exit(code);
+    }
+  });
+}
+
+const macOS = execFileSync("sw_vers", ["-productVersion"], {
+  encoding: "utf8",
+  timeout: 15_000,
+}).trim();
 try {
   // Turbo runs from the root: turbo is a root devDependency. --force: the proof reads dist/main.js,
-  // so the build must be newer than the source, never a cache replay.
+  // so the build must be newer than the source, never a cache replay. The build of four packages
+  // takes about 10 s; 5 min allows a loaded machine.
   execFileSync(
     "pnpm",
     ["exec", "turbo", "run", "build", "--force", "--filter=tempo-auth-example-electron..."],
-    { cwd: ROOT, stdio: "inherit" },
+    { cwd: ROOT, stdio: "inherit", timeout: 300_000 },
   );
   deleteKeychainItem();
   worker = await startWorker();
@@ -84,25 +147,39 @@ try {
   );
   const url1 = await playBrowser(start1.url, EMAIL);
   check("round 1 app URL is on the redirect", url1.startsWith("example-app://auth?code=hc_"));
-  // Break proof inside the run: the same code on another route. The opener must drop it.
-  const wrong = url1.replace("example-app://auth?", "example-app://other?");
-  execFileSync("open", [wrong]);
+  // Break proof inside the run: a URL off the redirect. The opener must drop it.
+  // Its code has the shape of a real one but is not url1's code. The log holds no code, so it
+  // cannot show which URL a sign-in used. With url1's code, an opener that took the wrong URL
+  // could sign in after url1's open-url line, and the log order would look right. With another
+  // code, such an opener writes sign-in-failed (invalid_token), which no timing can hide.
+  const wrong = `example-app://other?code=hc_${randomBytes(32).toString("base64url")}`;
+  openUrl(wrong);
   await waitFor("open-url of the wrong URL", (e) =>
     e.find((x) => x.event === "open-url" && delivered(x, wrong)),
   );
-  await sleep(1000);
-  check(
-    "the wrong URL did not end the wait",
-    !events().some((x) => x.event === "sign-in-failed" || x.event === "signed-in"),
-  );
-  execFileSync("open", [url1]);
-  const openUrl = await waitFor("open-url of round 1", (e) =>
+  openUrl(url1);
+  await waitFor("open-url of round 1", (e) =>
     e.find((x) => x.event === "open-url" && delivered(x, url1)),
   );
-  check("open-url reached the first instance", openUrl.pid === firstPid);
-  const s1 = await waitFor("signed-in round 1", (e) =>
-    e.find((x) => x.event === "signed-in" && x.round === 1),
+  // The first round 1 outcome, a sign-in or a failure. The log is one append-only file from one
+  // process, so the line index is the exact order of the events.
+  const isOutcome1 = (x) =>
+    (x.event === "signed-in" || x.event === "sign-in-failed") && x.round === 1;
+  await waitFor("round 1 outcome", (e) => e.find(isOutcome1));
+  const log1 = events();
+  const iWrong = log1.findIndex((x) => x.event === "open-url" && delivered(x, wrong));
+  const iRight = log1.findIndex((x) => x.event === "open-url" && delivered(x, url1));
+  const iOutcome = log1.findIndex(isOutcome1);
+  const outcome1 = log1[iOutcome];
+  check("the wrong URL arrived before the right URL", iWrong < iRight);
+  check("no round 1 outcome came before the right URL arrived", iOutcome > iRight);
+  check(
+    `round 1 signed in, not ${outcome1.event} (${outcome1.code ?? "ok"})`,
+    outcome1.event === "signed-in",
   );
+  check("open-url reached the first instance", log1[iRight].pid === firstPid);
+  if (outcome1.event !== "signed-in") throw new Error("round 1 did not sign in; stop the run");
+  const s1 = outcome1;
 
   // Round 2: second-instance.
   const start2 = await waitFor(
@@ -150,12 +227,14 @@ try {
 } catch (e) {
   failures.push(scrub(String(e)));
 } finally {
-  if (first && first.exitCode === null) first.kill();
-  if (second && second.exitCode === null) second.kill();
-  await worker?.stop();
-  if (bundle) unregisterBundle(bundle.app);
-  rmSync(bundleDir, { recursive: true, force: true });
-  deleteKeychainItem();
+  try {
+    await stopApp(first);
+    await stopApp(second);
+    await worker?.stop();
+    cleanupSync();
+  } catch (e) {
+    failures.push(`cleanup: ${scrub(String(e))}`);
+  }
 }
 console.log(
   JSON.stringify({

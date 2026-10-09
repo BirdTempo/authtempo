@@ -18,6 +18,10 @@ const PLIST_BUDDY = "/usr/libexec/PlistBuddy";
 const BUNDLE_ID = "dev.tempo-auth.example-electron";
 // Chromium names the Keychain item "<app name> Safe Storage". The app name comes from productName.
 const KEYCHAIN_SERVICE = "TempoAuthExample Safe Storage";
+// Every child process has a limit, so a dialog or a stuck tool fails the run, never hangs it.
+// 15 s for a quick tool. 60 s for a copy or a signature of the whole Electron.app (about 250 MB).
+const QUICK = 15_000;
+const SLOW = 60_000;
 
 /**
  * Deletes every Keychain item of the proof. The access list of an item names an earlier ad hoc
@@ -29,9 +33,15 @@ export function deleteKeychainItem() {
     try {
       execFileSync("security", ["delete-generic-password", "-s", KEYCHAIN_SERVICE], {
         stdio: "ignore",
+        timeout: QUICK,
       });
-    } catch {
-      return;
+    } catch (e) {
+      // Exit 44: no such item, which is the clean state. Any other end (a timeout on a Keychain
+      // dialog, a locked Keychain) leaves an item, so it must fail the run.
+      if (e.status === 44) return;
+      throw new Error(
+        `security delete-generic-password ended with ${e.status ?? e.code ?? e.signal}`,
+      );
     }
   }
   throw new Error(`more than 20 Keychain items named "${KEYCHAIN_SERVICE}"; delete them by hand`);
@@ -42,9 +52,10 @@ export function buildBundle(outDir) {
   const binary = require("electron");
   const source = resolve(binary, "..", "..", "..");
   const app = join(outDir, "TempoAuthExample.app");
-  execFileSync("ditto", [source, app]);
+  execFileSync("ditto", [source, app], { timeout: SLOW });
   const plist = join(app, "Contents", "Info.plist");
-  const pb = (command) => execFileSync(PLIST_BUDDY, ["-c", command, plist]);
+  const pb = (command) =>
+    execFileSync(PLIST_BUDDY, ["-c", command, plist], { stdio: "pipe", timeout: QUICK });
   pb(`Set :CFBundleIdentifier ${BUNDLE_ID}`);
   pb("Set :CFBundleName TempoAuthExample");
   try {
@@ -73,13 +84,16 @@ export function buildBundle(outDir) {
   const main = pathToFileURL(join(PKG_DIR, "dist", "main.js")).href;
   writeFileSync(join(appDir, "main.js"), `import ${JSON.stringify(main)};\n`);
   // The plist edit breaks the bundle seal. An ad hoc signature makes it valid again.
-  execFileSync("codesign", ["--force", "--deep", "--sign", "-", app]);
-  execFileSync(LSREGISTER, ["-f", app]);
+  execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], {
+    stdio: "pipe",
+    timeout: SLOW,
+  });
+  execFileSync(LSREGISTER, ["-f", app], { timeout: QUICK });
   return { app, exe: join(app, "Contents", "MacOS", "Electron") };
 }
 
 export function unregisterBundle(app) {
   try {
-    execFileSync(LSREGISTER, ["-u", app]);
+    execFileSync(LSREGISTER, ["-u", app], { stdio: "pipe", timeout: QUICK });
   } catch {}
 }
