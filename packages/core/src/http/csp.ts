@@ -4,15 +4,26 @@ import { redirectAllowed } from "../engine/handoff.js";
 /**
  * The `form-action` sources a sign-in page may post to and, in Chromium,
  * redirect to after the post: this origin, the trusted web origins, and
- * the handoff schemes. A scheme source is `name:`.
+ * the handoff schemes. A scheme source is `name:`. This array is the one
+ * source of the list; every policy builds from it, never from split text.
  */
-export function formAction(config: ResolvedConfig): string {
+function formActionSources(config: ResolvedConfig): string[] {
   const parts = ["'self'"];
   for (const o of config.trustedOrigins) {
     if (o.startsWith("https://") || o.startsWith("http://")) parts.push(o);
   }
   for (const s of config.handoff?.schemes ?? []) parts.push(s.replace(/:\/\/$/, ":"));
-  return parts.join(" ");
+  return parts;
+}
+
+/** The `form-action` sources as one header value. */
+export function formAction(config: ResolvedConfig): string {
+  return formActionSources(config).join(" ");
+}
+
+/** The policy text of a page with no script, around a list of `form-action` sources. */
+function noScriptPolicyWith(sources: readonly string[]): string {
+  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${sources.join(" ")}; base-uri 'none'; frame-ancestors 'none'`;
 }
 
 /**
@@ -22,7 +33,7 @@ export function formAction(config: ResolvedConfig): string {
  * it to every redirect that follows the form post.
  */
 export function noScriptPagePolicy(config: ResolvedConfig): string {
-  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
+  return noScriptPolicyWith(formActionSources(config));
 }
 
 /**
@@ -52,10 +63,10 @@ function devRedirectSource(redirect: string): string | null {
  * start uses, so the page never lists a source the start refused.
  */
 export function confirmPagePolicy(config: ResolvedConfig, redirect: string): string {
-  const parts = formAction(config).split(" ");
+  const parts = formActionSources(config);
   const source = redirectAllowed(config, redirect) ? devRedirectSource(redirect) : null;
   if (source !== null && !parts.includes(source)) parts.push(source);
-  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${parts.join(" ")}; base-uri 'none'; frame-ancestors 'none'`;
+  return noScriptPolicyWith(parts);
 }
 
 /** The headers every page core serves carries. The policy differs per page. */

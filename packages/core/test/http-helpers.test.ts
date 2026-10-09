@@ -210,7 +210,7 @@ describe("csp", () => {
       handoff: {
         schemes: ["consumera://"],
         devRedirectPattern:
-          /^(exp:\/\/[\d.]+:\d+\/--\/auth|http:\/\/127\.0\.0\.1:\d+\/auth|http:\/\/\[::1\]:\d+\/auth|https:\/\/evil\.example\/auth)$/,
+          /^(exp:\/\/[\d.]+:\d+\/--\/auth|http:\/\/127\.0\.0\.1(:\d+)?\/auth|https:\/\/localhost:\d+\/auth|http:\/\/\[::1\]:\d+\/auth|https:\/\/evil\.example\/auth)$/,
       },
     });
     const withAction = (extra: string) =>
@@ -221,6 +221,17 @@ describe("csp", () => {
     it("adds the origin of a loopback dev redirect", () => {
       expect(confirmPagePolicy(dev, "http://127.0.0.1:43123/auth")).toBe(
         withAction(" http://127.0.0.1:43123"),
+      );
+    });
+    it("adds the https origin of a localhost dev redirect, with its port", () => {
+      expect(confirmPagePolicy(dev, "https://localhost:8443/auth")).toBe(
+        withAction(" https://localhost:8443"),
+      );
+    });
+    it("adds the origin with no port for a loopback dev redirect on the default port", () => {
+      // The URL parser drops the default port, so the source is the bare origin.
+      expect(confirmPagePolicy(dev, "http://127.0.0.1:80/auth")).toBe(
+        withAction(" http://127.0.0.1"),
       );
     });
     it("adds nothing for a redirect on the schemes list, or for one the start would refuse", () => {
