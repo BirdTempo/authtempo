@@ -8,7 +8,7 @@ import { createSession } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 
 export const MAGIC_LINK_PREFIX = "ml_";
-const TOKEN_RE = /^ml_[A-Za-z0-9_-]{43}$/;
+export const MAGIC_LINK_TOKEN_RE = /^ml_[A-Za-z0-9_-]{43}$/;
 const PER_EMAIL = { seconds: 15 * 60, max: 5 };
 const PER_IP = { seconds: 15 * 60, max: 20 };
 
@@ -72,7 +72,7 @@ export async function verifyMagicLink(
   config: ResolvedConfig,
   input: MagicLinkVerify,
 ): Promise<Result<{ token: string; next: string; user: UserRow }>> {
-  if (!TOKEN_RE.test(input.token)) return fail("invalid_token");
+  if (!MAGIC_LINK_TOKEN_RE.test(input.token)) return fail("invalid_token");
   const now = config.clock.now();
   const valueHash = await sha256Hex(input.token);
   const row = await config.storage.findOne("verification", [

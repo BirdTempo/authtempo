@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
-import { requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
+import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
 import { readBody } from "../body.js";
 import { sessionCookie } from "../cookies.js";
 import { readJson, respond } from "../json.js";
@@ -12,9 +12,6 @@ const requestBody = z.object({
 });
 
 const verifyBody = z.object({ token: z.string().max(64) });
-
-/** The engine's format rule, repeated here so GET can reject before it renders. */
-const TOKEN_RE = /^ml_[A-Za-z0-9_-]{43}$/;
 
 /**
  * Locks the page down: no script, no remote resource, the form may post
@@ -54,7 +51,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
       path: "/magic-link/verify",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
-        if (!TOKEN_RE.test(token)) return failed("invalid_token");
+        if (!MAGIC_LINK_TOKEN_RE.test(token)) return failed("invalid_token");
         const html = config.magicLink.confirmPage({ action: verifyPath, token });
         return new Response(html, {
           status: 200,
