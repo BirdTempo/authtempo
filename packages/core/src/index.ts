@@ -4,7 +4,9 @@ export type { AuthConfig, MailMessage, MailPort, OrganizationsConfig } from "./c
 export { ConfigError } from "./config.js";
 export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
+export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
+export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
