@@ -1,9 +1,25 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
-import { type PasswordSession, passwordSignIn, passwordSignUp } from "../../engine/password.js";
-import { publicSession } from "../../engine/sessions.js";
+import {
+  changePassword,
+  PASSWORD_RESET_TOKEN_RE,
+  PASSWORD_VERIFY_TOKEN_RE,
+  type PasswordSession,
+  passwordSignIn,
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "../../engine/password.js";
+import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
+import { publicSession, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import { fail } from "../../result.js";
+import { isJsonRequest, readBody } from "../body.js";
 import { sessionCookie } from "../cookies.js";
+import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
+import { defaultPasswordVerifyPage } from "../password-pages.js";
+import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 
 const signUpBody = z.object({
@@ -19,21 +35,50 @@ const signInBody = z.object({
   password: z.string().max(1024),
 });
 
+const tokenBody = z.object({ token: z.string().max(64) });
+
+const resetRequestBody = z.object({
+  email: z.string().max(320),
+  next: z.string().max(2048).optional(),
+});
+
+const resetBody = z.object({
+  token: z.string().max(64),
+  // The engine refuses more than 128 code points; this cap only bounds the body.
+  password: z.string().max(1024),
+});
+
+const changeBody = z.object({
+  currentPassword: z.string().max(1024).optional(),
+  newPassword: z.string().max(1024),
+});
+
+/** The refusals the reset page shows. The link is still valid after each. */
+const PAGE_ERRORS = new Set(["password_policy", "password_breached"]);
+
 /** No route without a `password` config, so the router answers 404. */
 export function passwordRoutes(config: ResolvedConfig): Route[] {
   if (!config.password) return [];
+  const pw = config.password;
+  const verifyPath = `${config.basePath}/password/verify`;
+  const resetPath = `${config.basePath}/password/reset`;
+  const failed = (code: string) => redirect(authErrorUrl(config, code));
+  const page = (html: string) =>
+    new Response(html, { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) });
+  const cookieFor = (token: string) =>
+    sessionCookie(
+      config.cookieName,
+      token,
+      config.session.ttlDays * 86_400,
+      config.cookie.sameSite,
+    );
   /** `{ token, user, session }` with the session cookie: a browser keeps the cookie, a native app keeps the token. */
   const signedIn = (v: PasswordSession): Response =>
     json(
       { token: v.token, ...publicSession({ user: v.user, session: v.session, refreshed: false }) },
       200,
       {
-        "set-cookie": sessionCookie(
-          config.cookieName,
-          v.token,
-          config.session.ttlDays * 86_400,
-          config.cookie.sameSite,
-        ),
+        "set-cookie": cookieFor(v.token),
       },
     );
   return [
@@ -66,6 +111,126 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           userAgent: ctx.request.headers.get("user-agent"),
         });
         return r.ok ? signedIn(r.value) : respond(r);
+      },
+    },
+    {
+      // A mail scanner fetches this. It must change nothing: no storage
+      // read, no limiter call, no cookie. The person presses the button.
+      method: "GET",
+      path: "/password/verify",
+      async handler(ctx) {
+        const token = ctx.url.searchParams.get("token") ?? "";
+        if (!PASSWORD_VERIFY_TOKEN_RE.test(token)) return failed("invalid_token");
+        return page(
+          defaultPasswordVerifyPage({ action: verifyPath, token, appName: config.appName }),
+        );
+      },
+    },
+    {
+      method: "POST",
+      path: "/password/verify",
+      async handler(ctx) {
+        const jsonCaller = isJsonRequest(ctx.request);
+        const body = await readBody(ctx.request, tokenBody);
+        // A form with no token is a client bug. The person sees the page for a bad link.
+        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        const r = await verifyPasswordEmail(config, {
+          token: body.value.token,
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+        });
+        if (!r.ok) return jsonCaller ? respond(r) : failed(r.code);
+        const res = jsonCaller ? json({ verified: true }) : redirect(resolveNext(config, "/"));
+        if (r.value.signedIn) res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
+        return res;
+      },
+    },
+    {
+      method: "POST",
+      path: "/password/reset/request",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, resetRequestBody);
+        if (!body.ok) return respond(body);
+        return respond(
+          await requestPasswordReset(config, {
+            email: body.value.email,
+            next: body.value.next,
+            ip: ctx.ip,
+          }),
+        );
+      },
+    },
+    {
+      // A mail scanner fetches this too. No storage read, no cookie.
+      method: "GET",
+      path: "/password/reset",
+      async handler(ctx) {
+        const token = ctx.url.searchParams.get("token") ?? "";
+        if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed("invalid_token");
+        const raw = ctx.url.searchParams.get("error");
+        const error =
+          raw !== null && PAGE_ERRORS.has(raw)
+            ? (raw as "password_policy" | "password_breached")
+            : null;
+        return page(
+          pw.resetPage({
+            action: resetPath,
+            token,
+            appName: config.appName,
+            minLength: pw.minLength,
+            maxLength: PASSWORD_MAX_LENGTH,
+            error,
+          }),
+        );
+      },
+    },
+    {
+      method: "POST",
+      path: "/password/reset",
+      async handler(ctx) {
+        const jsonCaller = isJsonRequest(ctx.request);
+        const body = await readBody(ctx.request, resetBody);
+        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        const r = await resetPassword(config, {
+          token: body.value.token,
+          password: body.value.password,
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+        });
+        if (!r.ok) {
+          if (jsonCaller) return respond(r);
+          // The link is still valid after a refused password: send the person back to the form.
+          if (PAGE_ERRORS.has(r.code))
+            return redirect(
+              `${config.baseURL}${resetPath}?token=${encodeURIComponent(body.value.token)}&error=${r.code}`,
+            );
+          return failed(r.code);
+        }
+        if (jsonCaller) return signedIn(r.value);
+        const res = redirect(resolveNext(config, r.value.next));
+        res.headers.set("set-cookie", cookieFor(r.value.token));
+        return res;
+      },
+    },
+    {
+      method: "POST",
+      path: "/password/change",
+      async handler(ctx) {
+        const resolved = await sessionFromRequest(config, ctx.request);
+        if (!resolved) return json({ error: "unauthorized" }, 401);
+        const renewed = renewedSessionCookie(config, ctx.request, resolved);
+        const body = await readJson(ctx.request, changeBody);
+        const res = body.ok
+          ? respond(
+              await changePassword(config, {
+                session: resolved,
+                currentPassword: body.value.currentPassword,
+                newPassword: body.value.newPassword,
+              }),
+            )
+          : respond(body);
+        if (renewed) res.headers.append("set-cookie", renewed);
+        return res;
       },
     },
   ];

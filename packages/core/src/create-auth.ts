@@ -42,11 +42,20 @@ import {
   verifyPasskeyRegistration,
 } from "./engine/passkeys.js";
 import {
+  changePassword,
+  type PasswordChange,
+  type PasswordReset,
+  type PasswordResetRequest,
   type PasswordSession,
   type PasswordSignIn,
   type PasswordSignUp,
+  type PasswordVerified,
+  type PasswordVerify,
   passwordSignIn,
   passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
 } from "./engine/password.js";
 import {
   destroySession,
@@ -84,6 +93,10 @@ import type {
 export interface PasswordApi {
   signUp(input: PasswordSignUp): Promise<Result<PasswordSession>>;
   signIn(input: PasswordSignIn): Promise<Result<PasswordSession>>;
+  verifyEmail(input: PasswordVerify): Promise<Result<PasswordVerified>>;
+  requestReset(input: PasswordResetRequest): Promise<Result<{ sent: true }>>;
+  reset(input: PasswordReset): Promise<Result<PasswordSession & { next: string }>>;
+  change(input: PasswordChange): Promise<Result<{ ok: true }>>;
 }
 
 export interface AuthApi {
@@ -264,6 +277,10 @@ export function createAuth(input: AuthConfig): Auth {
             password: {
               signUp: (i) => passwordSignUp(config, i),
               signIn: (i) => passwordSignIn(config, i),
+              verifyEmail: (i) => verifyPasswordEmail(config, i),
+              requestReset: (i) => requestPasswordReset(config, i),
+              reset: (i) => resetPassword(config, i),
+              change: (i) => changePassword(config, i),
             },
           }
         : {}),

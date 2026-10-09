@@ -1,14 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ResolvedConfig } from "../src/config.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
-import { passwordSignIn, passwordSignUp } from "../src/engine/password.js";
+import {
+  changePassword,
+  passwordSignIn,
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { resolveSocialUser } from "../src/engine/social.js";
-import { claimEmail, ensureEmailIdentity } from "../src/engine/users.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "../src/seams/password-hash.js";
 import type { StorageAdapter, Where } from "../src/storage/port.js";
 import { makeAuth, post, tokenFromMail } from "./helpers.js";
-import { FAST, pwAuth, pwHandle } from "./password-helpers.js";
+import { FAST, pwAuth, pwHandle, signUpAndVerify } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
@@ -237,30 +244,12 @@ function withSeam(config: ResolvedConfig, hash: PasswordHashSeam): ResolvedConfi
 }
 
 /**
- * A reachable verified user with a password: the sign-up, then what the
- * sign-up verify link does in one transaction (claim the email and keep
- * this password row, then add the email identity). Task 6 owns this state:
- * when its verify engine function lands, call it here in place of this copy.
+ * The statements of a reset (`keep` null) or a change (`keep` the
+ * changer's session), as they land inside another flow's open transaction
+ * on D1: the new hash first, then the session delete. The engine keeps the
+ * same order; "writes the new hash before the session delete" pins it.
  */
-async function signUpAndVerify(auth: ReturnType<typeof makeAuth>) {
-  const up = await signUp(auth);
-  if (!up.ok) throw new Error(up.code);
-  const [row] = await auth.storage.findMany("password", []);
-  if (!row) throw new Error("no password row");
-  const now = auth.clock.now();
-  await auth.storage.transaction(async (tx) => {
-    await claimEmail(tx, up.value.user.id, { passwordId: row.id }, now);
-    await ensureEmailIdentity(tx, up.value.user.id, EMAIL, now);
-  });
-  return row;
-}
-
-/**
- * What Task 7's reset (`keep` null) and change (`keep` the changer's
- * session) do: write the new hash first, then delete the sessions. The
- * order matters: the sign-in re-check sees the hash before the session delete.
- */
-async function changePassword(
+async function writeHashThenEndSessions(
   auth: ReturnType<typeof makeAuth>,
   userId: string,
   hash: string,
@@ -488,10 +477,10 @@ describe("passwordSignIn", () => {
   it("keeps the hash and no session when a change lands between the verify and the rehash", async () => {
     const auth = pwAuth();
     const before = await signUpAndVerify(auth);
-    // A change (Task 7) writes the new hash, then deletes the sessions, after this sign-in read the row.
+    // A change writes the new hash, then deletes the sessions, after this sign-in read the row.
     const other = await FAST.hash("the new password");
     const { seam } = counting(createPbkdf2PasswordHash({ iterations: 2000 }), async () => {
-      await changePassword(auth, before.userId, other, null);
+      await writeHashThenEndSessions(auth, before.userId, other, null);
     });
     const transactions = vi.spyOn(auth.storage, "transaction");
     const r = await passwordSignIn(withSeam(auth.config, seam), {
@@ -514,11 +503,11 @@ describe("passwordSignIn", () => {
     const auth = pwAuth();
     const before = await signUpAndVerify(auth);
     const other = await FAST.hash("the new password");
-    // A reset (Task 7): write the new hash, then delete every session. It
+    // A reset: write the new hash, then delete every session. It
     // runs inside the sign-in's transaction, after the verify and before
     // the session insert, as on D1.
     const gate = beforeSessionInsert(auth.storage, () =>
-      changePassword(auth, before.userId, other, null),
+      writeHashThenEndSessions(auth, before.userId, other, null),
     );
     expect(await signIn(auth)).toMatchObject({ ok: false, code: "invalid_credentials" });
     expect(gate.fired()).toBe(true);
@@ -534,9 +523,9 @@ describe("passwordSignIn", () => {
     const mine = await signIn(auth);
     if (!mine.ok) throw new Error(mine.code);
     const other = await FAST.hash("the new password");
-    // A change (Task 7): write the new hash, then delete every other session.
+    // A change: write the new hash, then delete every other session.
     const gate = beforeSessionInsert(auth.storage, () =>
-      changePassword(auth, before.userId, other, mine.value.session.id),
+      writeHashThenEndSessions(auth, before.userId, other, mine.value.session.id),
     );
     expect(await signIn(auth, { ip: "5.5.5.5" })).toMatchObject({
       ok: false,
@@ -641,5 +630,496 @@ describe("POST /password/sign-in", () => {
       userAgent: null,
     });
     expect(r).toMatchObject({ ok: true, value: { user: { email: EMAIL } } });
+  });
+});
+
+const verifyToken = (auth: ReturnType<typeof pwAuth>) =>
+  tokenFromMail(auth.mail.find((m) => m.subject.startsWith("Confirm"))?.text ?? "");
+const resetToken = (auth: ReturnType<typeof pwAuth>) =>
+  tokenFromMail(auth.mail.filter((m) => m.subject.startsWith("Reset")).at(-1)?.text ?? "");
+const req = { ip: "1.1.1.1", userAgent: "ua" };
+
+/**
+ * Records each write of the next transaction as `op:model`, in order, so a
+ * test can read the statement order of one flow.
+ */
+function recordNextTransaction(storage: StorageAdapter): string[] {
+  const writes: string[] = [];
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        create: (m, d) => {
+          writes.push(`create:${m}`);
+          return tx.create(m, d);
+        },
+        update: (m, w, d) => {
+          writes.push(`update:${m}`);
+          return tx.update(m, w, d);
+        },
+        delete: (m, w) => {
+          writes.push(`delete:${m}`);
+          return tx.delete(m, w);
+        },
+      }),
+    );
+  };
+  return writes;
+}
+
+/**
+ * An auth whose mail port records, for each mail, whether a transaction
+ * was open and which verification rows existed at the send.
+ */
+function mailWatchAuth() {
+  let open = 0;
+  const seen: { open: number; purposes: string[]; users: number }[] = [];
+  const auth = makeAuth({
+    password: { hash: FAST },
+    mail: {
+      send: async () => {
+        const rows = await auth.storage.findMany("verification", []);
+        const users = (await auth.storage.findMany("user", [])).length;
+        seen.push({ open, purposes: rows.map((r) => r.purpose), users });
+      },
+    },
+  });
+  const original = auth.storage.transaction.bind(auth.storage);
+  auth.storage.transaction = async <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    open++;
+    try {
+      return await original(fn);
+    } finally {
+      open--;
+    }
+  };
+  return { auth, seen };
+}
+
+describe("verifyPasswordEmail", () => {
+  it("verifies the user, keeps the password, adds the email identity, and makes the only session", async () => {
+    const auth = pwAuth();
+    const up = await signUp(auth);
+    if (!up.ok) throw new Error(up.code);
+    const [row] = await auth.storage.findMany("password", []);
+    const r = await verifyPasswordEmail(auth.config, { token: verifyToken(auth), ...req });
+    if (!r.ok || !r.value.signedIn) throw new Error("no session");
+    expect(r.value.user.emailVerified).toBe(true);
+    expect(
+      await auth.storage.findOne("password", [{ field: "id", op: "eq", value: row?.id ?? "" }]),
+    ).not.toBeNull();
+    expect(
+      await auth.storage.findOne("identity", [{ field: "provider", op: "eq", value: "email" }]),
+    ).toMatchObject({ subject: EMAIL });
+    expect(await resolveSession(auth.config, up.value.token)).toBeNull();
+    expect(await resolveSession(auth.config, r.value.signedIn.token)).not.toBeNull();
+    expect((await signIn(auth)).ok).toBe(true);
+  });
+
+  it("answers invalid_token on a replay and token_expired after the ttl", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    const token = verifyToken(auth);
+    expect((await verifyPasswordEmail(auth.config, { token, ...req })).ok).toBe(true);
+    expect(await verifyPasswordEmail(auth.config, { token, ...req })).toMatchObject({
+      code: "invalid_token",
+    });
+    const late = pwAuth();
+    await signUp(late);
+    late.clock.advance(15 * 60_000);
+    expect(
+      await verifyPasswordEmail(late.config, { token: verifyToken(late), ...req }),
+    ).toMatchObject({ code: "token_expired" });
+  });
+
+  it("consumes the link and answers invalid_token with no change when a magic link claim deleted the password", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    await requestMagicLink(auth.config, { email: EMAIL, ip: null });
+    const ml = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    expect((await verifyMagicLink(auth.config, { token: ml, ip: null, userAgent: null })).ok).toBe(
+      true,
+    );
+    const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
+    const sessions = await auth.storage.findMany("session", []);
+    auth.clock.advance(1000);
+    const r = await verifyPasswordEmail(auth.config, { token: verifyToken(auth), ...req });
+    expect(r).toMatchObject({ ok: false, code: "invalid_token" });
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    expect(await auth.storage.findMany("session", [])).toEqual(sessions);
+    expect(
+      await auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]),
+    ).toEqual(user);
+    const [link] = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "password-verify" },
+    ]);
+    expect(link?.consumedAt).toEqual(auth.clock.now());
+  });
+
+  it("sends the verify mail after the sign-up transaction commits and after the row exists", async () => {
+    const { auth, seen } = mailWatchAuth();
+    expect((await signUp(auth)).ok).toBe(true);
+    expect(seen).toEqual([{ open: 0, purposes: ["password-verify"], users: 1 }]);
+  });
+});
+
+describe("requestPasswordReset and resetPassword", () => {
+  it("always answers sent, mails a reset link for a well-formed address, and nothing for a malformed one", async () => {
+    const auth = pwAuth();
+    expect(await requestPasswordReset(auth.config, { email: "not-an-email", ip: null })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(auth.mail).toEqual([]);
+    expect(
+      await requestPasswordReset(auth.config, { email: "nobody@example.com", ip: null }),
+    ).toEqual({ ok: true, value: { sent: true } });
+    expect(auth.mail[0]?.subject).toBe("Reset your password for api.example.com");
+    expect(auth.mail[0]?.text).toMatch(
+      /https:\/\/api\.example\.com\/auth\/password\/reset\?token=pr_[A-Za-z0-9_-]{43}/,
+    );
+    const [row] = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "password-reset" },
+    ]);
+    expect(row?.expiresAt.getTime()).toBe(auth.clock.now().getTime() + 15 * 60_000);
+  });
+
+  it("normalizes the address before the limit key and the row", async () => {
+    const auth = pwAuth();
+    await requestPasswordReset(auth.config, { email: "  ADA@Example.COM ", ip: null });
+    const [row] = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "password-reset" },
+    ]);
+    expect(row?.identifier).toBe(EMAIL);
+    expect(auth.mail[0]?.to).toBe(EMAIL);
+    for (let i = 0; i < 4; i++) await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    expect(
+      await requestPasswordReset(auth.config, { email: "Ada@example.com", ip: null }),
+    ).toMatchObject({ code: "rate_limited" });
+  });
+
+  it("sends the reset mail after the row exists and outside any transaction", async () => {
+    const { auth, seen } = mailWatchAuth();
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    expect(seen).toEqual([{ open: 0, purposes: ["password-reset"], users: 0 }]);
+  });
+
+  it("limits to 5 per email and 20 per ip per 15 minutes", async () => {
+    const auth = pwAuth();
+    for (let i = 0; i < 5; i++)
+      await requestPasswordReset(auth.config, { email: EMAIL, ip: `3.3.3.${i}` });
+    expect(await requestPasswordReset(auth.config, { email: EMAIL, ip: "3.3.3.9" })).toMatchObject({
+      code: "rate_limited",
+    });
+    for (let i = 0; i < 20; i++)
+      await requestPasswordReset(auth.config, { email: `r${i}@example.com`, ip: "4.4.4.4" });
+    expect(
+      await requestPasswordReset(auth.config, { email: "r20@example.com", ip: "4.4.4.4" }),
+    ).toMatchObject({ code: "rate_limited" });
+  });
+
+  it("creates a verified user with the password for an unknown address", async () => {
+    const auth = pwAuth();
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const r = await resetPassword(auth.config, {
+      token: resetToken(auth),
+      password: "new password 1",
+      ...req,
+    });
+    if (!r.ok) throw new Error(r.code);
+    expect(r.value.user).toMatchObject({ email: EMAIL, emailVerified: true });
+    expect(r.value.next).toBe("/");
+    expect(
+      await auth.storage.findMany("identity", [{ field: "provider", op: "eq", value: "email" }]),
+    ).toMatchObject([{ subject: EMAIL, userId: r.value.user.id }]);
+    expect((await signIn(auth, { password: "new password 1" })).ok).toBe(true);
+  });
+
+  it("claims an unverified claimant's account: the claimant's password and session go", async () => {
+    const auth = pwAuth();
+    const claimant = await signUp(auth, { password: "claimant password" });
+    if (!claimant.ok) throw new Error(claimant.code);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    expect(
+      (
+        await resetPassword(auth.config, {
+          token: resetToken(auth),
+          password: "owner password 1",
+          ...req,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(await resolveSession(auth.config, claimant.value.token)).toBeNull();
+    expect(await signIn(auth, { password: "claimant password" })).toMatchObject({
+      code: "invalid_credentials",
+    });
+    expect((await signIn(auth, { password: "owner password 1" })).ok).toBe(true);
+  });
+
+  it("claims an unverified social claimant: the claimant's identity goes, the new password stays", async () => {
+    const auth = pwAuth();
+    // Reachable: a provider that does not verify the address created the user.
+    const social = await resolveSocialUser(
+      auth.storage,
+      "google",
+      { subject: "g-1", email: EMAIL, emailVerified: false, name: null, image: null },
+      auth.clock.now(),
+    );
+    if (!social.ok) throw new Error(social.code);
+    const claimant = await auth.storage.findOne("user", [
+      { field: "email", op: "eq", value: EMAIL },
+    ]);
+    if (!claimant || claimant.emailVerified) throw new Error("no unverified claimant");
+    const old = await createSession(auth.config, {
+      userId: claimant.id,
+      ip: null,
+      userAgent: null,
+    });
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const r = await resetPassword(auth.config, {
+      token: resetToken(auth),
+      password: "owner password 1",
+      ...req,
+    });
+    if (!r.ok) throw new Error(r.code);
+    expect(r.value.user).toMatchObject({ id: claimant.id, emailVerified: true });
+    expect(await resolveSession(auth.config, old.token)).toBeNull();
+    const identities = await auth.storage.findMany("identity", []);
+    expect(identities.map((x) => [x.provider, x.subject])).toEqual([["email", EMAIL]]);
+    expect((await signIn(auth, { password: "owner password 1" })).ok).toBe(true);
+  });
+
+  it("ends every session of a verified user and keeps the user's passkeys and social identities", async () => {
+    const auth = pwAuth();
+    const user = await auth.seedUser(EMAIL);
+    const now = auth.clock.now();
+    await auth.storage.create("identity", {
+      id: "i1",
+      userId: user.id,
+      provider: "google",
+      subject: "g-1",
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await auth.storage.create("passkey", {
+      id: "k1",
+      userId: user.id,
+      credentialId: "c1",
+      publicKey: "pk",
+      counter: 0,
+      transports: null,
+      deviceType: "singleDevice",
+      backedUp: false,
+      name: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const old = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const r = await resetPassword(auth.config, {
+      token: resetToken(auth),
+      password: "new password 1",
+      ...req,
+    });
+    if (!r.ok) throw new Error(r.code);
+    expect(await resolveSession(auth.config, old.token)).toBeNull();
+    expect(await resolveSession(auth.config, r.value.token)).not.toBeNull();
+    expect(
+      await auth.storage.findMany("identity", [{ field: "provider", op: "eq", value: "google" }]),
+    ).toHaveLength(1);
+    expect(await auth.storage.findMany("passkey", [])).toHaveLength(1);
+  });
+
+  it("refuses a replay, an expired link, and leaves the link usable after a refused password (Review Focus 3)", async () => {
+    const auth = pwAuth({ breachCheck: async (p) => p === "breached password" });
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const token = resetToken(auth);
+    expect(await resetPassword(auth.config, { token, password: "short", ...req })).toMatchObject({
+      code: "password_policy",
+    });
+    expect(
+      await resetPassword(auth.config, { token, password: "breached password", ...req }),
+    ).toMatchObject({ code: "password_breached" });
+    expect(
+      (await resetPassword(auth.config, { token, password: "first password", ...req })).ok,
+    ).toBe(true);
+    expect(
+      await resetPassword(auth.config, { token, password: "second password", ...req }),
+    ).toMatchObject({ code: "invalid_token" });
+    expect(await signIn(auth, { password: "second password" })).toMatchObject({
+      code: "invalid_credentials",
+    });
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const late = resetToken(auth);
+    auth.clock.advance(15 * 60_000);
+    expect(
+      await resetPassword(auth.config, { token: late, password: "third password", ...req }),
+    ).toMatchObject({ code: "token_expired" });
+  });
+
+  it("carries a safe next and drops an unsafe one", async () => {
+    const auth = pwAuth();
+    await requestPasswordReset(auth.config, {
+      email: EMAIL,
+      next: "/auth/handoff/continue?h=hs_x",
+      ip: null,
+    });
+    const r = await resetPassword(auth.config, {
+      token: resetToken(auth),
+      password: "new password 1",
+      ...req,
+    });
+    expect(r.ok && r.value.next).toBe("/auth/handoff/continue?h=hs_x");
+    await requestPasswordReset(auth.config, {
+      email: "b@example.com",
+      next: "//evil.example",
+      ip: null,
+    });
+    const s = await resetPassword(auth.config, {
+      token: resetToken(auth),
+      password: "new password 1",
+      ...req,
+    });
+    expect(s.ok && s.value.next).toBe("/");
+  });
+
+  it("writes the new hash before the session delete, for a verified and an unverified user", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const claim = recordNextTransaction(auth.storage);
+    expect(
+      (
+        await resetPassword(auth.config, {
+          token: resetToken(auth),
+          password: "owner pw 1",
+          ...req,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(claim.indexOf("update:password")).toBeGreaterThanOrEqual(0);
+    expect(claim.indexOf("update:password")).toBeLessThan(claim.indexOf("delete:session"));
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const verified = recordNextTransaction(auth.storage);
+    expect(
+      (
+        await resetPassword(auth.config, {
+          token: resetToken(auth),
+          password: "owner pw 2",
+          ...req,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(verified.indexOf("update:password")).toBeGreaterThanOrEqual(0);
+    expect(verified.indexOf("update:password")).toBeLessThan(verified.indexOf("delete:session"));
+  });
+});
+
+describe("changePassword", () => {
+  async function verifiedWithPassword(auth: ReturnType<typeof pwAuth>) {
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const r = await resetPassword(auth.config, { token: resetToken(auth), password: PW, ...req });
+    if (!r.ok) throw new Error(r.code);
+    const resolved = await resolveSession(auth.config, r.value.token);
+    if (!resolved) throw new Error("no session");
+    return resolved;
+  }
+
+  it("changes the password with the right current one and ends every other session", async () => {
+    const auth = pwAuth();
+    const session = await verifiedWithPassword(auth);
+    const other = await createSession(auth.config, {
+      userId: session.user.id,
+      ip: null,
+      userAgent: null,
+    });
+    expect(
+      await changePassword(auth.config, {
+        session,
+        currentPassword: PW,
+        newPassword: "changed password",
+      }),
+    ).toEqual({ ok: true, value: { ok: true } });
+    expect(await resolveSession(auth.config, other.token)).toBeNull();
+    expect(
+      await auth.storage.findOne("session", [{ field: "id", op: "eq", value: session.session.id }]),
+    ).not.toBeNull();
+    expect((await signIn(auth, { password: "changed password" })).ok).toBe(true);
+    expect(await signIn(auth, { password: PW })).toMatchObject({ code: "invalid_credentials" });
+  });
+
+  it("refuses a wrong or missing current password, and sets a first password with none", async () => {
+    const auth = pwAuth();
+    const session = await verifiedWithPassword(auth);
+    expect(
+      await changePassword(auth.config, {
+        session,
+        currentPassword: "wrong",
+        newPassword: "changed password",
+      }),
+    ).toMatchObject({ code: "invalid_credentials" });
+    expect(
+      await changePassword(auth.config, { session, newPassword: "changed password" }),
+    ).toMatchObject({ code: "invalid_credentials" });
+    const fresh = pwAuth();
+    const user = await fresh.seedUser(EMAIL);
+    const s = await createSession(fresh.config, { userId: user.id, ip: null, userAgent: null });
+    const resolved = await resolveSession(fresh.config, s.token);
+    if (!resolved) throw new Error("no session");
+    expect(
+      (await changePassword(fresh.config, { session: resolved, newPassword: "first password" })).ok,
+    ).toBe(true);
+    expect((await signIn(fresh, { password: "first password" })).ok).toBe(true);
+  });
+
+  it("refuses an unverified user and limits to 10 per user per 15 minutes", async () => {
+    const auth = pwAuth();
+    const up = await signUp(auth);
+    if (!up.ok) throw new Error(up.code);
+    const unverified = await resolveSession(auth.config, up.value.token);
+    if (!unverified) throw new Error("no session");
+    expect(
+      await changePassword(auth.config, {
+        session: unverified,
+        currentPassword: PW,
+        newPassword: "changed password",
+      }),
+    ).toMatchObject({ code: "email_unverified", status: 403 });
+    const other = pwAuth();
+    const session = await verifiedWithPassword(other);
+    for (let i = 0; i < 10; i++)
+      await changePassword(other.config, {
+        session,
+        currentPassword: "wrong",
+        newPassword: "changed password",
+      });
+    expect(
+      await changePassword(other.config, {
+        session,
+        currentPassword: PW,
+        newPassword: "changed password",
+      }),
+    ).toMatchObject({ code: "rate_limited" });
+  });
+
+  it("writes the new hash before the session delete", async () => {
+    const auth = pwAuth();
+    const session = await verifiedWithPassword(auth);
+    const writes = recordNextTransaction(auth.storage);
+    expect(
+      (
+        await changePassword(auth.config, {
+          session,
+          currentPassword: PW,
+          newPassword: "changed password",
+        })
+      ).ok,
+    ).toBe(true);
+    expect(writes).toEqual(["update:password", "delete:session"]);
   });
 });

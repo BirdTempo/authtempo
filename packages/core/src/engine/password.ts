@@ -1,13 +1,15 @@
 import type { ResolvedConfig } from "../config.js";
+import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
-import { StorageError } from "../storage/port.js";
+import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
-import { createSession } from "./sessions.js";
-import { normalizeEmail, userStillUnverified } from "./users.js";
+import { createSession, type ResolvedSession } from "./sessions.js";
+import { claimEmail, ensureEmailIdentity, normalizeEmail, userStillUnverified } from "./users.js";
+import { consumeVerification } from "./verification.js";
 
 export const PASSWORD_VERIFY_PREFIX = "pv_";
 export const PASSWORD_VERIFY_TOKEN_RE = /^pv_[A-Za-z0-9_-]{43}$/;
@@ -20,6 +22,11 @@ const NAME_MAX = 200;
 // addresses; the IP limit stops one address that tries many accounts.
 const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
 const SIGN_IN_PER_EMAIL = { seconds: 900, max: 10 };
+// Per 15 minutes, as the magic link request.
+const RESET_PER_IP = { seconds: 900, max: 20 };
+const RESET_PER_EMAIL = { seconds: 900, max: 5 };
+// Per 15 minutes. A stolen session must not run an unlimited guess of the current password.
+const CHANGE_PER_USER = { seconds: 900, max: 10 };
 
 export interface PasswordSession {
   token: string;
@@ -283,4 +290,329 @@ export async function passwordSignIn(
     }
     return ok({ token: s.token, user, session: s.session });
   });
+}
+
+export interface PasswordVerify {
+  token: string;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface PasswordVerified {
+  user: UserRow;
+  signedIn: { token: string; session: SessionRow } | null;
+}
+
+/**
+ * The sign-up link. The claim keeps the password this link confirms and
+ * deletes every other credential of the user, then signs the person in,
+ * maybe on another device. When the password row is gone (a claim or a
+ * reset deleted it), the link confirms nothing: it is consumed, it answers
+ * `invalid_token`, and the user does not change. A user already verified
+ * gets no session and no change.
+ */
+export async function verifyPasswordEmail(
+  config: ResolvedConfig,
+  input: PasswordVerify,
+): Promise<Result<PasswordVerified>> {
+  if (!config.password) return fail("not_found");
+  if (!PASSWORD_VERIFY_TOKEN_RE.test(input.token)) return fail("invalid_token");
+  const now = config.clock.now();
+  const consumed = await consumeVerification(config.storage, {
+    purpose: "password-verify",
+    valueHash: await sha256Hex(input.token),
+    now,
+  });
+  if (!consumed.ok) return consumed;
+  const row = consumed.value;
+  const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
+  if (typeof passwordId !== "string") return fail("invalid_token");
+  return config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
+    const user = await tx.findOne("user", [{ field: "email", op: "eq", value: row.identifier }]);
+    if (!user) return fail("invalid_token");
+    // A conditional update, not a read, so that it sees a claim's
+    // statements on D1. It is the first write: zero rows refuses with no
+    // change. The row must also belong to this user: a user deleted and
+    // made again under the address does not inherit the link.
+    const kept = await tx.update(
+      "password",
+      [
+        { field: "id", op: "eq", value: passwordId },
+        { field: "userId", op: "eq", value: user.id },
+      ],
+      { updatedAt: now },
+    );
+    if (kept === 0) return fail("invalid_token");
+    if (user.emailVerified) return ok({ user, signedIn: null });
+    await claimEmail(tx, user.id, { passwordId }, now);
+    await ensureEmailIdentity(tx, user.id, user.email, now);
+    const s = await createSession(
+      config,
+      { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+      tx,
+    );
+    return ok({ user: { ...user, emailVerified: true, updatedAt: now }, signedIn: s });
+  });
+}
+
+export interface PasswordResetRequest {
+  email: string;
+  next?: string | undefined;
+  ip: string | null;
+}
+
+/**
+ * Always `sent` for a well-formed call, so a caller cannot learn whether an
+ * address has an account. `rate_limited` is the one visible failure. The
+ * mail goes after the row is written, never inside a transaction.
+ */
+export async function requestPasswordReset(
+  config: ResolvedConfig,
+  input: PasswordResetRequest,
+): Promise<Result<{ sent: true }>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  // Before any limit key and before the row: both trust a normalized address.
+  const email = normalizeEmail(input.email);
+  if (email === null) return ok({ sent: true });
+  if (!(await config.limiter.allow(`password-reset:ip:${input.ip ?? "unknown"}`, RESET_PER_IP)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`password-reset:email:${email}`, RESET_PER_EMAIL)))
+    return fail("rate_limited");
+  const now = config.clock.now();
+  const token = randomToken(PASSWORD_RESET_PREFIX);
+  await config.storage.create("verification", {
+    id: newId(now),
+    purpose: "password-reset",
+    identifier: email,
+    valueHash: await sha256Hex(token),
+    expiresAt: new Date(now.getTime() + pw.resetTtlMinutes * 60_000),
+    consumedAt: null,
+    data: { next: safeNext(input.next) },
+    createdAt: now,
+    updatedAt: now,
+  });
+  const link = `${config.baseURL}${config.basePath}/password/reset?token=${encodeURIComponent(token)}`;
+  await config.mail.send({
+    to: email,
+    subject: `Reset your password for ${config.appName}`,
+    text: `Open this link to choose a new password. It is valid for ${pw.resetTtlMinutes} minutes.\n\n${link}\n\nIf you did not ask for it, ignore this message. Your password does not change.`,
+  });
+  return ok({ sent: true });
+}
+
+export interface PasswordReset {
+  token: string;
+  password: string;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+/**
+ * A reset proves the mailbox, as a magic link does. The policy and the
+ * breach check run before the consume, so a refused password leaves the
+ * link usable. Then one transaction: an unknown address gets a new
+ * verified user; the password row is set; an unverified user is claimed
+ * with `keep.passwordId` (every credential of the claimant goes, except
+ * the new password); a verified user loses every session and keeps the
+ * passkeys and the social identities (spec 8.7, deviation 2); a new
+ * session starts.
+ */
+export async function resetPassword(
+  config: ResolvedConfig,
+  input: PasswordReset,
+): Promise<Result<PasswordSession & { next: string }>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  if (!PASSWORD_RESET_TOKEN_RE.test(input.token)) return fail("invalid_token");
+  const valueHash = await sha256Hex(input.token);
+  const peek = await config.storage.findOne("verification", [
+    { field: "valueHash", op: "eq", value: valueHash },
+    { field: "purpose", op: "eq", value: "password-reset" },
+  ]);
+  if (!peek) return fail("invalid_token");
+  const refused = await screen(pw, input.password, peek.identifier);
+  if (refused) return fail(refused);
+  // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
+  const hash = await pw.hash.hash(input.password);
+  const now = config.clock.now();
+  const consumed = await consumeVerification(config.storage, {
+    purpose: "password-reset",
+    valueHash,
+    now,
+  });
+  if (!consumed.ok) return consumed;
+  const row = consumed.value;
+  const next = safeNext((row.data as { next?: unknown } | null)?.next);
+  // A failure after this point burns the link by design. The person
+  // requests a new one.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const done = await applyReset(config, input, row.identifier, hash, now);
+      return ok({ ...done, next });
+    } catch (err) {
+      // Two resets for one address raced: the loser's user, email
+      // identity, or password create failed on a unique key. Caught here,
+      // outside: inside, Postgres has already aborted the transaction. Run
+      // once more, so the read finds the winner's rows.
+      if (
+        attempt === 0 &&
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        (err.model === "user" || err.model === "identity" || err.model === "password")
+      )
+        continue;
+      throw err;
+    }
+  }
+}
+
+function applyReset(
+  config: ResolvedConfig,
+  input: PasswordReset,
+  email: string,
+  hash: string,
+  now: Date,
+): Promise<PasswordSession> {
+  return config.storage.transaction(async (tx): Promise<PasswordSession> => {
+    let user = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
+    if (!user) {
+      user = await tx.create("user", {
+        id: newId(now),
+        email,
+        emailVerified: true,
+        name: null,
+        image: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    // The new password row before any session delete. A password sign-in
+    // in flight re-checks its row by id and by the hash it verified as its
+    // last statement. When that re-check still finds the old hash, this
+    // write has not run, so the session delete below still removes that
+    // sign-in's session. The opposite order lets an old-password sign-in
+    // commit a session after the delete.
+    const passwordId = await setPassword(tx, user.id, hash, now);
+    if (!user.emailVerified) {
+      // The claim deletes the claimant's sessions, identities, passkeys,
+      // and every other password row, and keeps the new password.
+      await claimEmail(tx, user.id, { passwordId }, now);
+      user = { ...user, emailVerified: true, updatedAt: now };
+    } else {
+      await tx.delete("session", [{ field: "userId", op: "eq", value: user.id }]);
+    }
+    await ensureEmailIdentity(tx, user.id, email, now);
+    const s = await createSession(
+      config,
+      { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+      tx,
+    );
+    return { token: s.token, user, session: s.session };
+  });
+}
+
+/** Writes `hash` into the user's one password row, or creates it. Returns the row id. */
+async function setPassword(
+  tx: StorageAdapter,
+  userId: string,
+  hash: string,
+  now: Date,
+): Promise<string> {
+  const existing = await tx.findOne("password", [{ field: "userId", op: "eq", value: userId }]);
+  // Zero rows means a claim deleted the row since the read: create one.
+  if (
+    existing &&
+    (await tx.update("password", [{ field: "id", op: "eq", value: existing.id }], {
+      hash,
+      updatedAt: now,
+    })) === 1
+  )
+    return existing.id;
+  const created = await tx.create("password", {
+    id: newId(now),
+    userId,
+    hash,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return created.id;
+}
+
+export interface PasswordChange {
+  session: ResolvedSession;
+  currentPassword?: string | undefined;
+  newPassword: string;
+}
+
+/**
+ * Needs a verified email: a claimant's new password row could otherwise
+ * land after a claim deleted the passwords. The current password is
+ * required when one exists. Every other session of the user ends.
+ */
+export async function changePassword(
+  config: ResolvedConfig,
+  input: PasswordChange,
+): Promise<Result<{ ok: true }>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  const { user, session } = input.session;
+  if (!user.emailVerified) return fail("email_unverified");
+  if (!(await config.limiter.allow(`password-change:user:${user.id}`, CHANGE_PER_USER)))
+    return fail("rate_limited");
+  const row = await config.storage.findOne("password", [
+    { field: "userId", op: "eq", value: user.id },
+  ]);
+  if (row) {
+    const current = input.currentPassword;
+    // The length is the caller's own input. The refusal bounds the CPU.
+    if (current === undefined || [...current].length > PASSWORD_MAX_LENGTH)
+      return fail("invalid_credentials");
+    if (!(await pw.hash.verify(current, row.hash)).ok) return fail("invalid_credentials");
+  }
+  const refused = await screen(pw, input.newPassword, user.email);
+  if (refused) return fail(refused);
+  // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
+  const hash = await pw.hash.hash(input.newPassword);
+  const now = config.clock.now();
+  try {
+    return await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
+      // The new hash before the session delete, for the reason in
+      // `applyReset`: the sign-in re-check matches the row by id and hash.
+      // Do not read `password.updatedAt` as the change time: the sign-in
+      // re-check writes it too.
+      if (row) {
+        // Conditional on the hash this call verified, so two changes do not
+        // both win. It is the first write: zero rows refuses with no change.
+        const n = await tx.update(
+          "password",
+          [
+            { field: "id", op: "eq", value: row.id },
+            { field: "hash", op: "eq", value: row.hash },
+          ],
+          { hash, updatedAt: now },
+        );
+        if (n === 0) return fail("conflict");
+      } else {
+        await tx.create("password", {
+          id: newId(now),
+          userId: user.id,
+          hash,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await tx.delete("session", [
+        { field: "userId", op: "eq", value: user.id },
+        { field: "id", op: "ne", value: session.id },
+      ]);
+      return ok({ ok: true });
+    });
+  } catch (err) {
+    // A concurrent first password (a reset) won the unique key. Caught
+    // here, outside: inside, Postgres has already aborted the transaction.
+    if (err instanceof StorageError && err.code === "unique_violation" && err.model === "password")
+      return fail("conflict");
+    throw err;
+  }
 }
