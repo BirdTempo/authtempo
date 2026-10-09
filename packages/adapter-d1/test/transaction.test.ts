@@ -194,6 +194,10 @@ describe("d1 undo log", () => {
           if (/^SELECT .*ta_verification/.test(sql)) await fire();
           return r;
         },
+        first: async (col: string) =>
+          env.DB.prepare(sql)
+            .bind(...params)
+            .first(col),
         run: async () =>
           env.DB.prepare(sql)
             .bind(...params)
