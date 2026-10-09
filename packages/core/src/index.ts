@@ -29,6 +29,12 @@ export {
   type SignES256Input,
   type VerifyIdTokenInput,
 } from "./seams/jwt.js";
+export {
+  type AuthenticatedPasskey,
+  createSimpleWebAuthnSeam,
+  type RegisteredPasskey,
+  type WebAuthnSeam,
+} from "./seams/webauthn.js";
 export type { AppleConfig } from "./social/apple.js";
 export type { GoogleConfig } from "./social/google.js";
 export type { SocialProfile, SocialProviderName } from "./social/provider.js";
