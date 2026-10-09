@@ -6,7 +6,10 @@ const worker = await startWorker();
 let ok = false;
 try {
   const token = await bearerFor(email);
-  const me = await fetch(`${BASE}/me`, { headers: { authorization: `Bearer ${token}` } });
+  const me = await fetch(`${BASE}/me`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10_000),
+  });
   const body = me.status === 200 ? await me.json() : null;
   ok = body?.email === email;
   console.log(
@@ -18,6 +21,6 @@ try {
     }),
   );
 } finally {
-  worker.stop();
+  await worker.stop();
 }
 process.exit(ok ? 0 : 1);

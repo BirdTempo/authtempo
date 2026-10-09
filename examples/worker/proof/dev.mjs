@@ -4,7 +4,7 @@
 // drives one itself.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtempSync, openSync } from "node:fs";
+import { mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,13 +13,48 @@ export const BASE = "http://localhost:8787";
 const WORKER_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Every fetch in the kit has a timeout. A hung connection must not stretch a limit.
+const http = (url, init = {}) => fetch(url, { signal: AbortSignal.timeout(10_000), ...init });
+
 async function answers(url) {
   try {
-    await fetch(url);
+    await fetch(url, { signal: AbortSignal.timeout(2_000) });
     return true;
   } catch {
     return false;
   }
+}
+
+// Each running Worker registers a sync kill here. The handlers below call them on Ctrl-C,
+// on SIGTERM, and on any exit. Wrangler runs in its own process group (detached), so a signal
+// to this process does not reach it. Without these handlers an interrupted proof leaves an
+// orphan on port 8787, and the next run stops at the "port answers already" check.
+const killers = new Set();
+let handlersInstalled = false;
+function killAll() {
+  for (const kill of killers) kill();
+}
+function installHandlers() {
+  if (handlersInstalled) return;
+  handlersInstalled = true;
+  process.on("exit", killAll);
+  for (const [signal, code] of [
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+  ]) {
+    process.on(signal, () => {
+      killAll();
+      process.exit(code);
+    });
+  }
+}
+
+async function waitFor(condition, ms) {
+  for (let t = 0; t < ms; t += 100) {
+    if (await condition()) return true;
+    await sleep(100);
+  }
+  return false;
 }
 
 export async function startWorker() {
@@ -57,20 +92,44 @@ export async function startWorker() {
     // detached puts pnpm, wrangler, and workerd in one process group, so stop() ends all three.
     { cwd: WORKER_DIR, env, stdio: ["ignore", log, log], detached: true },
   );
-  const stop = () => {
+  let exited = false;
+  child.on("exit", () => {
+    exited = true;
+  });
+  const killGroup = (signal) => {
     try {
-      process.kill(-child.pid, "SIGTERM");
+      process.kill(-child.pid, signal);
     } catch {}
   };
-  for (let i = 0; i < 300; i++) {
+  // Sync part: ends the process group and removes the temp directory. Safe to call twice.
+  const killSync = () => {
+    killGroup("SIGKILL");
+    killers.delete(killSync);
+    rmSync(persist, { recursive: true, force: true });
+  };
+  killers.add(killSync);
+  installHandlers();
+  // Waits until the port is closed, so the next startWorker does not see this Worker.
+  const stop = async () => {
+    killGroup("SIGTERM");
+    if (!(await waitFor(async () => !(await answers(BASE)), 10_000))) killGroup("SIGKILL");
+    if (!(await waitFor(async () => !(await answers(BASE)) && exited, 10_000)))
+      throw new Error("wrangler dev did not stop in 20 s");
+    killSync();
+  };
+  for (let i = 0; i < 300 && !exited; i++) {
     try {
-      const r = await fetch(`${BASE}/__test/last-link`);
+      const r = await http(`${BASE}/__test/last-link`);
       if (r.status === 200) return { persist, logFile, stop };
     } catch {}
     await sleep(200);
   }
-  stop();
-  throw new Error(`wrangler dev did not answer in 60 s; read ${logFile}`);
+  // The log goes into the error because stop() removes the directory that holds it.
+  const tail = readFileSync(logFile, "utf8").slice(-2000);
+  await stop();
+  throw new Error(
+    `wrangler dev ${exited ? "exited" : "did not answer in 60 s"}; its log ended with:\n${tail}`,
+  );
 }
 
 export function pkce() {
@@ -84,36 +143,42 @@ function expectStatus(res, status, step) {
 }
 
 export async function playBrowser(startUrl, email) {
-  const start = await fetch(startUrl, { redirect: "manual" });
+  const start = await http(startUrl, { redirect: "manual" });
   expectStatus(start, 200, "GET /auth/handoff/start");
   const cont = /data-continue="([^"]+)"/.exec(await start.text())?.[1];
   if (!cont?.startsWith("/auth/handoff/continue?h=hs_"))
     throw new Error("no continue path on the start page");
-  const req = await fetch(`${BASE}/auth/magic-link/request`, {
+  const req = await http(`${BASE}/auth/magic-link/request`, {
     method: "POST",
     headers: { "content-type": "application/json", origin: BASE },
     body: JSON.stringify({ email, next: cont }),
   });
   expectStatus(req, 200, "POST /auth/magic-link/request");
-  const { link } = await (await fetch(`${BASE}/__test/last-link`)).json();
+  const { link } = await (await http(`${BASE}/__test/last-link`)).json();
   // This proves that --var BASE_URL took effect: core builds the link from baseURL.
-  if (!link?.startsWith(`${BASE}/`)) throw new Error(`the magic link ${link} is not on ${BASE}`);
+  // The error must not print the link: it holds a live token.
+  if (!link?.startsWith(`${BASE}/`)) throw new Error(`the magic link is not on ${BASE}`);
   const token = new URL(link).searchParams.get("token") ?? "";
-  const verify = await fetch(`${BASE}/auth/magic-link/verify`, {
+  const verify = await http(`${BASE}/auth/magic-link/verify`, {
     method: "POST",
     redirect: "manual",
     headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
     body: new URLSearchParams({ token }).toString(),
   });
   expectStatus(verify, 302, "POST /auth/magic-link/verify");
+  // The e2e test checks the same: verify returns to the continue path.
+  if (verify.headers.get("location") !== `${BASE}${cont}`)
+    throw new Error("POST /auth/magic-link/verify did not redirect to the continue path");
   const cookie = verify.headers
     .getSetCookie()
     .map((c) => c.split(";")[0])
     .join("; ");
-  const confirm = await fetch(`${BASE}${cont}`, { redirect: "manual", headers: { cookie } });
+  const confirm = await http(`${BASE}${cont}`, { redirect: "manual", headers: { cookie } });
   expectStatus(confirm, 200, "GET the continue path");
+  if (!(await confirm.text()).includes("Continue to tempo-auth example?"))
+    throw new Error("the continue page has no confirm prompt");
   const h = new URL(`${BASE}${cont}`).searchParams.get("h") ?? "";
-  const next = await fetch(`${BASE}/auth/handoff/continue`, {
+  const next = await http(`${BASE}/auth/handoff/continue`, {
     method: "POST",
     redirect: "manual",
     headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE, cookie },
@@ -131,7 +196,7 @@ export async function bearerFor(email) {
     email,
   );
   const code = new URL(location).searchParams.get("code") ?? "";
-  const redeem = await fetch(`${BASE}/auth/handoff/redeem`, {
+  const redeem = await http(`${BASE}/auth/handoff/redeem`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ code, verifier }),
