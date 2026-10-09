@@ -85,6 +85,8 @@ const handoff = createHandoff({
   session keeps no cookies. The social binding cookie then dies between
   the provider start and its callback, and the flow fails with
   `invalid_token`. Do not change this option.
+  Unconfirmed on 2026-10-10: no phone has tested this claim. Step 8 of
+  `docs/superpowers/runbooks/2026-10-10-expo-cookie-proof.md` settles it.
 - `expoCrypto` is required on Hermes. Hermes has no `crypto.subtle`.
 
 ## Electron

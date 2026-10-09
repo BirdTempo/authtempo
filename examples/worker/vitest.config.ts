@@ -18,6 +18,8 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             GOOGLE_CLIENT_ID: "example-client",
             GOOGLE_CLIENT_SECRET: "example-secret",
+            // The Expo Go redirect for the dev-redirect test. A RegExp source with no flags.
+            DEV_REDIRECT_PATTERN: "^exp://192\\.168\\.1\\.20:8081/--/auth$",
           },
         },
       }),

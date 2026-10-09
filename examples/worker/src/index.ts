@@ -39,8 +39,15 @@ function getAuth(env: Env): Auth {
       rpName: "tempo-auth example",
       origins: [env.BASE_URL],
     },
-    // The handoff for a desktop or native app. The example admits one scheme.
-    handoff: { schemes: ["example-app://"] },
+    // The handoff for a desktop or native app. The example admits one scheme. In development,
+    // DEV_REDIRECT_PATTERN admits an Expo Go redirect such as exp://192.168.1.20:8081/--/auth.
+    // Leave it unset in a deploy: a dev pattern admits a redirect that no app store binds to this app.
+    handoff: {
+      schemes: ["example-app://"],
+      ...(env.DEV_REDIRECT_PATTERN
+        ? { devRedirectPattern: new RegExp(env.DEV_REDIRECT_PATTERN) }
+        : {}),
+    },
     // Organizations, members, and mailed invitations. The routes need the 0002 migration.
     organizations: {},
     // Password sign-in. The default PBKDF2 seam costs 100000 iterations per

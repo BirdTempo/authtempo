@@ -17,6 +17,9 @@ export interface ExpoWebBrowserLike {
  * cookie dies between the provider start and its callback, and the flow
  * answers `invalid_token`. A shared session also lets a saved browser
  * session sign in with one press.
+ *
+ * Unconfirmed on 2026-10-10: no phone has tested the ephemeral claim above.
+ * Step 8 of docs/superpowers/runbooks/2026-10-10-expo-cookie-proof.md settles it.
  */
 export function expoOpener(WebBrowser: ExpoWebBrowserLike): HandoffOpener {
   return {
