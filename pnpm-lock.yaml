@@ -178,6 +178,9 @@ importers:
 
   examples/worker:
     dependencies:
+      '@tempo-auth/adapter-d1':
+        specifier: workspace:*
+        version: link:../../packages/adapter-d1
       '@tempo-auth/core':
         specifier: workspace:*
         version: link:../../packages/core

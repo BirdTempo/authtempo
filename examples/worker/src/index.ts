@@ -1,18 +1,18 @@
-import { type Auth, createAuth, createMemoryAdapter } from "@tempo-auth/core";
+import { createD1Adapter } from "@tempo-auth/adapter-d1";
+import { type Auth, createAuth } from "@tempo-auth/core";
 
-// One adapter per isolate. Rows vanish when the isolate does. Plan 2 replaces
-// this with the D1 adapter and a binding.
-const storage = createMemoryAdapter();
 let lastLink: string | null = null;
 let auth: Auth | null = null;
 
+// Built once per isolate. Bindings in `env` are fixed for the isolate's life,
+// so the D1 handle and the limiter can live here.
 function getAuth(env: Env): Auth {
   if (auth) return auth;
   auth = createAuth({
     baseURL: env.BASE_URL,
     secret: env.AUTH_SECRET,
     trustedOrigins: [env.BASE_URL],
-    storage,
+    storage: createD1Adapter(env.DB),
     mail: {
       async send(message) {
         // The example has no mail transport. It records the last link for the test.

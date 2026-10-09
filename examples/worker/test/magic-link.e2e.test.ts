@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { expect, it } from "vitest";
 
 const BASE = "https://example.test";
@@ -27,6 +27,13 @@ it("signs in by magic link, reads /me with the cookie and with a bearer, and sig
   expect(me.status).toBe(200);
   expect(await me.json()).toMatchObject({ email: "ada@example.com" });
 
+  const sessions = await env.DB.prepare("SELECT count(*) AS n FROM ta_session").first<{
+    n: number;
+  }>();
+  expect(sessions?.n).toBe(1);
+  const users = await env.DB.prepare("SELECT email FROM ta_user").all<{ email: string }>();
+  expect(users.results.map((u) => u.email)).toEqual(["ada@example.com"]);
+
   const bearer = await SELF.fetch(`${BASE}/me`, { headers: { authorization: `Bearer ${token}` } });
   expect(bearer.status).toBe(200);
 
@@ -36,6 +43,9 @@ it("signs in by magic link, reads /me with the cookie and with a bearer, and sig
   });
   expect(out.status).toBe(200);
   expect((await SELF.fetch(`${BASE}/me`, { headers: { cookie } })).status).toBe(401);
+
+  const after = await env.DB.prepare("SELECT count(*) AS n FROM ta_session").first<{ n: number }>();
+  expect(after?.n).toBe(0);
 });
 
 it("refuses a POST from an untrusted origin", async () => {
