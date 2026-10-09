@@ -14,6 +14,7 @@ import { formAction, pageHeaders } from "../src/http/csp.js";
 import { json, readJson, respond } from "../src/http/json.js";
 import { authErrorUrl, redirect, resolveNext } from "../src/http/redirect.js";
 import { safeNext } from "../src/http/safe-next.js";
+import { defaultSignInPage } from "../src/http/sign-in-page.js";
 import { fail, ok } from "../src/result.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
@@ -242,5 +243,38 @@ describe("isJsonRequest", () => {
     expect(isJsonRequest(req({ "content-type": "application/json; charset=utf-8" }))).toBe(true);
     expect(isJsonRequest(req({ "content-type": "application/x-www-form-urlencoded" }))).toBe(false);
     expect(isJsonRequest(req({}))).toBe(false);
+  });
+});
+
+describe("sign-in page", () => {
+  const input = {
+    basePath: "/auth",
+    continuePath: "/auth/handoff/continue?h=hs_abc",
+    methods: { magicLink: true as const, google: true, apple: false, passkey: true },
+    nonce: "n0nce",
+  };
+  it("renders the enabled methods with the nonce and escaped values", () => {
+    const html = defaultSignInPage(input);
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain(`<script nonce="n0nce">`);
+    expect(html).toContain(`<form id="magic-link"`);
+    expect(html).toContain(
+      `href="/auth/social/google/start?next=%2Fauth%2Fhandoff%2Fcontinue%3Fh%3Dhs_abc"`,
+    );
+    expect(html).not.toContain("/social/apple/start");
+    expect(html).toContain(`<button id="passkey"`);
+    expect(html).toContain(`data-continue="/auth/handoff/continue?h=hs_abc"`);
+    expect(html).toContain(`<meta name="referrer" content="no-referrer">`);
+  });
+  it("escapes the continue path and hides disabled methods", () => {
+    const html = defaultSignInPage({
+      ...input,
+      continuePath: `/auth/x"><script>`,
+      methods: { magicLink: true, google: false, apple: true, passkey: false },
+    });
+    expect(html).toContain(`data-continue="/auth/x&quot;&gt;&lt;script&gt;"`);
+    expect(html).not.toContain(`<script>`);
+    expect(html).not.toContain(`id="passkey"`);
+    expect(html).toContain("/social/apple/start");
   });
 });

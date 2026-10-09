@@ -5,9 +5,11 @@ import {
   redeemHandoff,
   startHandoff,
 } from "../src/engine/handoff.js";
-import { resolveSession } from "../src/engine/sessions.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
+import { createRouter } from "../src/http/router.js";
+import { handoffRoutes } from "../src/http/routes/handoff.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
-import { makeAuth } from "./helpers.js";
+import { BASE_URL, get, makeAuth, post } from "./helpers.js";
 
 const SCHEMES = ["consumera://"];
 const DEV = /^exp:\/\/[\d.]+:\d+\/--\/auth$/;
@@ -261,5 +263,127 @@ describe("continueHandoff and redeemHandoff", () => {
         userAgent: null,
       }),
     ).toMatchObject({ ok: false, code: "rate_limited" });
+  });
+});
+
+describe("handoff routes", () => {
+  async function challenge() {
+    const { verifier, challenge } = await pkce();
+    return {
+      verifier,
+      q: `challenge=${challenge}&redirect=${encodeURIComponent("consumera://auth")}`,
+    };
+  }
+
+  it("GET start renders the sign-in page with the continue path, a nonce, and the policy", async () => {
+    const auth = handoffAuth({
+      social: { google: { clientId: "g", clientSecret: "s" } },
+      passkey: { rpID: "api.example.com", rpName: "x", origins: ["https://api.example.com"] },
+    });
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    const { q } = await challenge();
+    const res = await handle(get(`/auth/handoff/start?${q}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const csp = res.headers.get("content-security-policy") ?? "";
+    const nonce = /script-src 'nonce-([A-Za-z0-9_-]+)'/.exec(csp)?.[1] ?? "";
+    expect(nonce).toHaveLength(22);
+    expect(csp).toBe(
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self' https://app.example.com consumera:; base-uri 'none'; frame-ancestors 'none'`,
+    );
+    const html = await res.text();
+    expect(html).toContain(`<script nonce="${nonce}">`);
+    expect(html).toContain(`data-continue="/auth/handoff/continue?h=hs_`);
+    expect(html).toContain("/social/google/start");
+    expect(html).toContain(`id="passkey"`);
+  });
+
+  it("GET start with a session skips the page and continues at once", async () => {
+    const auth = handoffAuth();
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    const user = await auth.seedUser("ada@example.com");
+    const { token } = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const { q } = await challenge();
+    const res = await handle(get(`/auth/handoff/start?${q}`, { cookie: `tempo_session=${token}` }));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toMatch(/^consumera:\/\/auth\?code=hc_/);
+  });
+
+  it("GET start answers 400 on a bad redirect or challenge, and 429 when limited, as JSON", async () => {
+    const auth = handoffAuth();
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    const bad = await handle(
+      get(`/auth/handoff/start?challenge=x&redirect=${encodeURIComponent("https://evil.example")}`),
+    );
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "invalid_body" });
+    const { q } = await challenge();
+    for (let i = 0; i < 30; i++)
+      await handle(get(`/auth/handoff/start?${q}`, { "cf-connecting-ip": "7.7.7.7" }));
+    expect(
+      (await handle(get(`/auth/handoff/start?${q}`, { "cf-connecting-ip": "7.7.7.7" }))).status,
+    ).toBe(429);
+  });
+
+  it("GET continue with a session redirects to the app with a code; without one it renders the page again", async () => {
+    const auth = handoffAuth();
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    const { verifier, q } = await challenge();
+    const page = await handle(get(`/auth/handoff/start?${q}`));
+    const h =
+      /data-continue="\/auth\/handoff\/continue\?h=(hs_[A-Za-z0-9_-]+)"/.exec(
+        await page.text(),
+      )?.[1] ?? "";
+    const anon = await handle(get(`/auth/handoff/continue?h=${h}`));
+    expect(anon.status).toBe(200);
+    expect(await anon.text()).toContain(`data-continue="/auth/handoff/continue?h=${h}"`);
+    const user = await auth.seedUser("ada@example.com");
+    const { token } = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const res = await handle(
+      get(`/auth/handoff/continue?h=${h}`, { cookie: `tempo_session=${token}` }),
+    );
+    expect(res.status).toBe(302);
+    const code = new URL(res.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    expect(code).toMatch(/^hc_/);
+    const redeem = await handle(post("/auth/handoff/redeem", { code, verifier }));
+    expect(redeem.status).toBe(200);
+    expect(await redeem.json()).toMatchObject({
+      token: expect.stringMatching(/^ts_/),
+      user: { email: "ada@example.com" },
+      session: { id: expect.any(String) },
+    });
+    expect(redeem.headers.get("set-cookie")).toBeNull();
+    // A spent handoff id with a session answers an error redirect on appURL.
+    const spent = await handle(
+      get(`/auth/handoff/continue?h=${h}`, { cookie: `tempo_session=${token}` }),
+    );
+    expect(spent.status).toBe(302);
+    expect(spent.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+  });
+
+  it("POST redeem answers 400 on a bad body and on a wrong code, with no session", async () => {
+    const auth = handoffAuth();
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    expect((await handle(post("/auth/handoff/redeem", { code: "x" }))).status).toBe(400);
+    const res = await handle(
+      post("/auth/handoff/redeem", { code: "hc_nope", verifier: "v".repeat(43) }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_token" });
+  });
+
+  it("registers no handoff route when handoff is off", async () => {
+    const auth = makeAuth();
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    expect((await handle(get("/auth/handoff/start?challenge=x&redirect=y"))).status).toBe(404);
   });
 });

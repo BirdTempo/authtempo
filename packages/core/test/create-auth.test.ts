@@ -111,4 +111,12 @@ describe("createAuth", () => {
     });
     expect((await withGoogle.handle(get("/auth/social/google/start"))).status).toBe(302);
   });
+  it("exposes the handoff api", async () => {
+    const { auth } = setup();
+    expect(typeof auth.api.startHandoff).toBe("function");
+    expect(await auth.api.startHandoff({ challenge: "x", redirect: "y", ip: null })).toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
+  });
 });
