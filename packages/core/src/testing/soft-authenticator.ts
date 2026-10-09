@@ -33,7 +33,7 @@ export interface SoftAuthenticationResponse {
     clientDataJSON: string;
     authenticatorData: string;
     signature: string;
-    userHandle: string | null;
+    userHandle?: string;
   };
 }
 
@@ -134,7 +134,7 @@ export class SoftAuthenticator {
         clientDataJSON: toBase64Url(clientDataJSON),
         authenticatorData: toBase64Url(authData),
         signature: toBase64Url(derSignature(raw)),
-        userHandle: this.userHandle ? toBase64Url(this.userHandle) : null,
+        ...(this.userHandle ? { userHandle: toBase64Url(this.userHandle) } : {}),
       },
     };
   }

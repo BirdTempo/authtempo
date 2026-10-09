@@ -37,15 +37,8 @@ it("runs both WebAuthn ceremonies on the Workers runtime", async () => {
   expect(stored.id).toBe(auth.credentialId);
   const authChallenge = crypto.getRandomValues(new Uint8Array(32));
   const request = await seam.authenticationOptions({ rpID: RP.rpID, challenge: authChallenge });
-  const assertion = await auth.authenticate(request.challenge);
-  // The soft authenticator emits userHandle: null, as browsers do. The library
-  // type allows only a string or no key, so drop the null here.
-  const { userHandle, ...assertionResponse } = assertion.response;
   const result = await seam.verifyAuthentication({
-    response: {
-      ...assertion,
-      response: userHandle === null ? assertionResponse : { ...assertionResponse, userHandle },
-    },
+    response: await auth.authenticate(request.challenge),
     expectedChallenge: request.challenge,
     expectedOrigin: [RP.origin],
     expectedRPID: RP.rpID,
