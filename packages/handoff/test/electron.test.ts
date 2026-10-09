@@ -104,6 +104,8 @@ describe("createTokenStore", () => {
       isEncryptionAvailable: () => available,
       encryptString: (s: string) => enc.encode(`enc:${s}`),
       decryptString: (b: Uint8Array) => dec.decode(b).replace(/^enc:/, ""),
+      // A strong Linux backend, so that no test depends on the host platform.
+      getSelectedStorageBackend: () => "gnome_libsecret",
     };
   }
   function fakeAsyncSafeStorage(available = true, shouldReEncrypt = false) {
@@ -121,6 +123,7 @@ describe("createTokenStore", () => {
         calls.push("decrypt");
         return { result: dec.decode(b).replace(/^a?enc:/, ""), shouldReEncrypt };
       },
+      getSelectedStorageBackend: () => "gnome_libsecret",
     };
     return { storage, calls };
   }
@@ -189,6 +192,60 @@ describe("createTokenStore", () => {
     });
     await store.set("ts_secret");
     expect(await store.get()).toBe("ts_secret");
+  });
+  it("refuses to write on Linux when getSelectedStorageBackend is missing, in both helpers (final review M-5)", async () => {
+    const { getSelectedStorageBackend: _sync, ...syncStorage } = fakeSafeStorage();
+    const syncFile = fakeFile();
+    const syncStore = createTokenStore({
+      cipher: safeStorageCipher(syncStorage, { platform: "linux" }),
+      ...syncFile,
+    });
+    await expect(syncStore.set("ts_secret")).rejects.toBeInstanceOf(TokenStoreError);
+    expect(syncFile.current()).toBeNull();
+    const { getSelectedStorageBackend: _async, ...asyncStorage } = fakeAsyncSafeStorage().storage;
+    const asyncFile = fakeFile();
+    const asyncStore = createTokenStore({
+      cipher: asyncSafeStorageCipher(asyncStorage, { platform: "linux" }),
+      ...asyncFile,
+    });
+    await expect(asyncStore.set("ts_secret")).rejects.toBeInstanceOf(TokenStoreError);
+    expect(asyncFile.current()).toBeNull();
+  });
+  it("writes on macOS and Windows, which have no getSelectedStorageBackend, in both helpers (final review M-5)", async () => {
+    for (const platform of ["darwin", "win32"]) {
+      const { getSelectedStorageBackend: _sync, ...syncStorage } = fakeSafeStorage();
+      const syncStore = createTokenStore({
+        cipher: safeStorageCipher(syncStorage, { platform }),
+        ...fakeFile(),
+      });
+      await syncStore.set("ts_secret");
+      expect(await syncStore.get()).toBe("ts_secret");
+      const { getSelectedStorageBackend: _async, ...asyncStorage } = fakeAsyncSafeStorage().storage;
+      const asyncStore = createTokenStore({
+        cipher: asyncSafeStorageCipher(asyncStorage, { platform }),
+        ...fakeFile(),
+      });
+      await asyncStore.set("ts_secret");
+      expect(await asyncStore.get()).toBe("ts_secret");
+    }
+  });
+  it("answers the next get after a set that rejects (Task 4 low)", async () => {
+    const file = fakeFile();
+    await file.write(enc.encode("enc:ts_old"));
+    const base = safeStorageCipher(fakeSafeStorage());
+    const store = createTokenStore({
+      cipher: {
+        ...base,
+        encrypt: async () => {
+          throw new Error("keychain");
+        },
+      },
+      ...file,
+    });
+    const failed = store.set("ts_new");
+    const next = store.get();
+    await expect(failed).rejects.toThrow("keychain");
+    expect(await next).toBe("ts_old");
   });
   it("answers null even when removing the unreadable file fails", async () => {
     const file = fakeFile();

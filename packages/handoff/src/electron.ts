@@ -124,18 +124,57 @@ function isWeakBackend(backend: string | undefined): boolean {
   return backend === "basic_text" || backend === "unknown";
 }
 
+/** The platform the cipher runs on. The default is `process.platform` when `process` exists. */
+export interface CipherOptions {
+  platform?: string;
+}
+
+function defaultPlatform(): string | undefined {
+  return (globalThis as { process?: { platform?: string } }).process?.platform;
+}
+
+/**
+ * True when the backend is weak. On Linux the no-plaintext promise rests on
+ * `getSelectedStorageBackend`. When a later Electron drops that function,
+ * the backend is unknown, so it counts as weak and the store refuses.
+ * macOS and Windows have no such function and no weak backend.
+ */
+function weakStorage(
+  getBackend: (() => string) | undefined,
+  options: CipherOptions | undefined,
+): boolean {
+  const platform = options?.platform ?? defaultPlatform();
+  if (!getBackend) return platform === "linux";
+  return isWeakBackend(getBackend());
+}
+
 /** Wraps the sync `safeStorage` API. Use `asyncSafeStorageCipher` in a new app. */
-export function safeStorageCipher(safeStorage: SafeStorageLike): TokenCipher {
+export function safeStorageCipher(
+  safeStorage: SafeStorageLike,
+  options?: CipherOptions,
+): TokenCipher {
   return {
     available: () =>
       safeStorage.isEncryptionAvailable() &&
-      !isWeakBackend(safeStorage.getSelectedStorageBackend?.()),
+      !weakStorage(safeStorage.getSelectedStorageBackend?.bind(safeStorage), options),
     encrypt: async (plain) => safeStorage.encryptString(plain),
     decrypt: async (bytes) => ({ plain: safeStorage.decryptString(bytes), reEncrypt: false }),
   };
 }
 
-/** The async `safeStorage` functions. Electron 44 adds them; Electron 45 deprecates the sync ones. */
+/**
+ * The async `safeStorage` functions.
+ * Checked 2026-10-10 against the Electron doc page "safeStorage"
+ * (https://www.electronjs.org/docs/latest/api/safe-storage):
+ * `isAsyncEncryptionAvailable()` resolves a boolean, `encryptStringAsync(plainText)`
+ * resolves a Buffer (a Uint8Array), and `decryptStringAsync(encrypted)` resolves
+ * `{ shouldReEncrypt: boolean, result: string }`. `getSelectedStorageBackend()` is
+ * Linux only and answers `basic_text`, `gnome_libsecret`, `kwallet`, `kwallet5`,
+ * `kwallet6`, or `unknown`. The page shows no Electron version. It says only that
+ * the sync API "may be deprecated in a future version". This check did not confirm
+ * which Electron version adds the async functions or deprecates the sync ones.
+ * The repo pins no Electron types, so the doc page is the only source.
+ */
 export interface AsyncSafeStorageLike {
   isAsyncEncryptionAvailable(): Promise<boolean>;
   encryptStringAsync(plain: string): Promise<Uint8Array>;
@@ -145,11 +184,14 @@ export interface AsyncSafeStorageLike {
 }
 
 /** Wraps the async `safeStorage` API, and asks the store to write again when Electron says so. */
-export function asyncSafeStorageCipher(safeStorage: AsyncSafeStorageLike): TokenCipher {
+export function asyncSafeStorageCipher(
+  safeStorage: AsyncSafeStorageLike,
+  options?: CipherOptions,
+): TokenCipher {
   return {
     available: async () =>
       (await safeStorage.isAsyncEncryptionAvailable()) &&
-      !isWeakBackend(safeStorage.getSelectedStorageBackend?.()),
+      !weakStorage(safeStorage.getSelectedStorageBackend?.bind(safeStorage), options),
     encrypt: (plain) => safeStorage.encryptStringAsync(plain),
     decrypt: async (bytes) => {
       const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(bytes);
