@@ -26,6 +26,8 @@ one-day release age; move the example to plugin 1.4.0 and vitest 5 on
 
 Organizations are in core behind `organizations: {}`.
 
+The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The memory limiter is for tests. `auth.api.sweepExpired()` deletes expired rows, including limit windows, and runs from a scheduled handler.
+
 ## Commands
 
 | Command | What it does |
