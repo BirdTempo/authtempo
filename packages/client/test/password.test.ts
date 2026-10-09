@@ -46,7 +46,8 @@ describe("password", () => {
     );
   });
 
-  it("sends only the fields the caller set", async () => {
+  /** A client whose fetch records each request body as text. */
+  function recordingClient() {
     const bodies: string[] = [];
     const client = createClient({
       baseURL: BASE_URL,
@@ -55,6 +56,13 @@ describe("password", () => {
         return Response.json({ sent: true });
       }) as typeof fetch,
     });
+    return { client, bodies };
+  }
+
+  // JSON drops an undefined value, so this test cannot catch a missing
+  // conditional. The next test pins the conditionals with set values.
+  it("sends no key for an optional field the caller did not set", async () => {
+    const { client, bodies } = recordingClient();
     await client.password.signUp({ email: EMAIL, password: PW });
     await client.password.requestReset({ email: EMAIL });
     await client.password.change({ newPassword: "first password" });
@@ -62,6 +70,18 @@ describe("password", () => {
       `{"email":"${EMAIL}","password":"${PW}"}`,
       `{"email":"${EMAIL}"}`,
       `{"newPassword":"first password"}`,
+    ]);
+  });
+
+  it("sends name, next, and currentPassword when the caller sets them (plan 8 final review T8)", async () => {
+    const { client, bodies } = recordingClient();
+    await client.password.signUp({ email: EMAIL, password: PW, name: "Ada" });
+    await client.password.requestReset({ email: EMAIL, next: "/home" });
+    await client.password.change({ currentPassword: PW, newPassword: "second password" });
+    expect(bodies.map((b) => JSON.parse(b))).toEqual([
+      { email: EMAIL, password: PW, name: "Ada" },
+      { email: EMAIL, next: "/home" },
+      { currentPassword: PW, newPassword: "second password" },
     ]);
   });
 
