@@ -62,6 +62,13 @@ The organization routes follow.
 
 Without an `organizations` config none of the organization routes exist, and the router answers 404.
 
+Set `appName` in the config to name the app. It is 1 to 80 characters with
+no control character. The default is the host of `baseURL`. The default
+pages show it in the title and the heading. The magic link mail subject is
+`Sign in to <appName>`. The invitation mail subject is
+`You are invited to <organization name> on <appName>`. Each page function
+receives `appName` in its input.
+
 The confirm page is `defaultConfirmPage`. Replace it with
 `magicLink.confirmPage` in the config. The function returns the markup
 only; core sets `cache-control`, `referrer-policy`, `x-robots-tag`, and a
@@ -260,11 +267,39 @@ Check the member's rank on each request.
 | `email_mismatch` | 403 | The invitation is for another address |
 | `conflict` | 409 | A concurrent write changed the organization or the member; retry |
 
+## Sweep
+
+`auth.api.sweepExpired()` deletes the rows that no flow can use any more.
+It removes every verification row past its expiry, consumed or not. It
+removes a consumed verification row one day after the consume; this only
+matters when `magicLink.ttlMinutes` is above one day. It removes
+invitations that are accepted or expired, and sessions past their expiry.
+It also calls the limiter's `sweep`, when the limiter has one, to delete
+the limit windows that ended. It answers five counts:
+`verificationExpired`, `verificationConsumed`, `invitations`, `sessions`,
+and `limits`. It is an `api` function and not a route. Call it from a
+scheduled handler. It is safe to run at any time. A replayed token
+answers `invalid_token` after the sweep because its row is gone.
+
+```ts
+export default {
+  fetch: (request: Request) => auth.handle(request),
+  async scheduled(_event: ScheduledController, _env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(auth.api.sweepExpired());
+  },
+};
+```
+
+Add a cron trigger to the Worker config, for example `"triggers": { "crons": ["17 * * * *"] }`.
+Without a trigger, expired rows stay in the database.
+
 ## Limits in version 1
 
 - The default limiter counts in memory. On Workers every isolate has its
   own count, so the real limit is the limit times the isolate count. Pass
-  a shared `limiter` for a real limit.
+  a shared `limiter` for a real limit. The D1 adapter ships `createD1Limiter`
+  and the Postgres adapter ships `createPostgresLimiter`, both on `ta_limit`.
+  The memory limiter is for tests.
 - The memory adapter is for tests and examples. It keeps rows in the
   isolate.
 - A request with no client IP counts against one shared IP bucket. A host

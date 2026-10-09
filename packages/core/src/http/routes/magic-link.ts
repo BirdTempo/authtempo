@@ -55,7 +55,11 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!MAGIC_LINK_TOKEN_RE.test(token)) return failed("invalid_token");
-        const html = config.magicLink.confirmPage({ action: verifyPath, token });
+        const html = config.magicLink.confirmPage({
+          action: verifyPath,
+          token,
+          appName: config.appName,
+        });
         return new Response(html, {
           status: 200,
           headers: pageHeaders(config, pagePolicy(config)),

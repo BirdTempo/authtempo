@@ -6,6 +6,14 @@ import { magicLinkRoutes } from "../src/http/routes/magic-link.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 
 describe("magic link engine", () => {
+  it("names the app in the mail subject", async () => {
+    const def = makeAuth();
+    await requestMagicLink(def.config, { email: "ada@example.com", ip: null });
+    expect(def.mail[0]?.subject).toBe("Sign in to api.example.com");
+    const named = makeAuth({ appName: "Acme" });
+    await requestMagicLink(named.config, { email: "ada@example.com", ip: null });
+    expect(named.mail[0]?.subject).toBe("Sign in to Acme");
+  });
   it("sends a link whose token is stored only as a hash", async () => {
     const { config, storage, mail } = makeAuth();
     const r = await requestMagicLink(config, {
@@ -45,6 +53,16 @@ describe("magic link engine", () => {
       userAgent: null,
     });
     expect(a.ok && b.ok && a.value.user.id === b.value.user.id).toBe(true);
+  });
+
+  it("sends a link to an address with a bar: the key reaches the limiter and does not throw", async () => {
+    const { config, mail } = makeAuth();
+    expect(await requestMagicLink(config, { email: "a|b@example.com", ip: null })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(mail).toHaveLength(1);
+    expect(mail[0]?.to).toBe("a|b@example.com");
   });
 
   it("answers ok and sends nothing for an email that is not an address", async () => {

@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
+import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
@@ -38,11 +39,8 @@ export interface MemberSummary {
 const NAME_MAX = 120;
 
 /** The name goes into a mail subject; a CR or LF would inject a header. */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the class names the control characters it refuses.
-const CONTROL_RE = /[\u0000-\u001f\u007f]/;
-
 function validName(name: string): boolean {
-  return name.length >= 1 && name.length <= NAME_MAX && !CONTROL_RE.test(name);
+  return name.length >= 1 && name.length <= NAME_MAX && !hasControlChar(name);
 }
 
 export function publicOrganization(row: OrganizationRow): OrganizationSummary {

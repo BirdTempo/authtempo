@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface BaseRow {
   id: string;
@@ -152,7 +152,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       activeOrganizationId: { type: "string", nullable: true },
     },
     unique: [["tokenHash"]],
-    indexes: [["userId"]],
+    indexes: [["userId"], ["activeOrganizationId"]],
   },
   verification: {
     fields: {

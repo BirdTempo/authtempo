@@ -185,11 +185,16 @@ describe("continueHandoff and redeemHandoff", () => {
     if (!r.ok) throw new Error(r.code);
     return { verifier, handoffId: r.value.handoffId };
   }
+  /** A browser session for the user, as the continue route checks it. */
+  async function sessionId(auth: ReturnType<typeof makeAuth>, userId: string) {
+    return (await createSession(auth.config, { userId, ip: null, userAgent: null })).session.id;
+  }
   async function continued(auth: ReturnType<typeof makeAuth>, handoffId: string, userId: string) {
-    const r = await continueHandoff(auth.config, { handoffId, userId });
+    const browser = await sessionId(auth, userId);
+    const r = await continueHandoff(auth.config, { handoffId, userId, sessionId: browser });
     if (!r.ok) throw new Error(r.code);
     const url = new URL(r.value.location);
-    return { location: r.value.location, code: url.searchParams.get("code") ?? "" };
+    return { location: r.value.location, code: url.searchParams.get("code") ?? "", browser };
   }
 
   it("consumes the start row, mints a code row for the user, and redeems it for a bearer session", async () => {
@@ -221,6 +226,20 @@ describe("continueHandoff and redeemHandoff", () => {
     expect((await rows(auth))[1]?.consumedAt).not.toBeNull();
   });
 
+  it("refuses a live session of one user passed with the user id of another, and mints no code (final review M-6)", async () => {
+    const auth = handoffAuth();
+    const ada = await auth.seedUser("ada@example.com");
+    const bob = await auth.seedUser("bob@example.com");
+    const { handoffId } = await started(auth);
+    const adaSession = await sessionId(auth, ada.id);
+    const r = await continueHandoff(auth.config, {
+      handoffId,
+      userId: bob.id,
+      sessionId: adaSession,
+    });
+    expect(r).toMatchObject({ ok: false, code: "invalid_token" });
+    expect((await rows(auth)).filter((x) => x.identifier === bob.id)).toEqual([]);
+  });
   it("redeems a verifier that holds . and ~, as RFC 7636 allows", async () => {
     const auth = handoffAuth();
     const user = await auth.seedUser("ada@example.com");
@@ -256,7 +275,7 @@ describe("continueHandoff and redeemHandoff", () => {
     const auth = handoffAuth();
     const user = await auth.seedUser("ada@example.com");
     const { handoffId } = await started(auth);
-    const { code } = await continued(auth, handoffId, user.id);
+    const { code, browser } = await continued(auth, handoffId, user.id);
     const other = await pkce();
     expect(
       await redeemHandoff(auth.config, {
@@ -266,7 +285,10 @@ describe("continueHandoff and redeemHandoff", () => {
         userAgent: null,
       }),
     ).toMatchObject({ ok: false, code: "invalid_token" });
-    expect(await auth.storage.findMany("session", [])).toHaveLength(0);
+    // The browser session that continued the handoff is not a bearer session.
+    expect(
+      await auth.storage.findMany("session", [{ field: "id", op: "ne", value: browser }]),
+    ).toHaveLength(0);
     expect((await rows(auth))[1]?.consumedAt).not.toBeNull();
   });
 
@@ -274,14 +296,16 @@ describe("continueHandoff and redeemHandoff", () => {
     const auth = handoffAuth();
     const user = await auth.seedUser("ada@example.com");
     const { verifier, handoffId } = await started(auth);
-    const { code } = await continued(auth, handoffId, user.id);
+    const { code, browser } = await continued(auth, handoffId, user.id);
     expect(
       (await redeemHandoff(auth.config, { code, verifier, ip: null, userAgent: null })).ok,
     ).toBe(true);
     expect(
       await redeemHandoff(auth.config, { code, verifier, ip: null, userAgent: null }),
     ).toMatchObject({ ok: false, code: "invalid_token" });
-    expect(await auth.storage.findMany("session", [])).toHaveLength(1);
+    expect(
+      await auth.storage.findMany("session", [{ field: "id", op: "ne", value: browser }]),
+    ).toHaveLength(1);
   });
 
   it("rejects an expired code, a malformed code, a start id used as a code, and a reused or unknown handoff id", async () => {
@@ -292,12 +316,22 @@ describe("continueHandoff and redeemHandoff", () => {
       await redeemHandoff(auth.config, { code: handoffId, verifier, ip: null, userAgent: null }),
     ).toMatchObject({ ok: false, code: "invalid_token" });
     const { code } = await continued(auth, handoffId, user.id);
-    expect(await continueHandoff(auth.config, { handoffId, userId: user.id })).toMatchObject({
+    expect(
+      await continueHandoff(auth.config, {
+        handoffId,
+        userId: user.id,
+        sessionId: await sessionId(auth, user.id),
+      }),
+    ).toMatchObject({
       ok: false,
       code: "invalid_token",
     });
     expect(
-      await continueHandoff(auth.config, { handoffId: "hs_nope", userId: user.id }),
+      await continueHandoff(auth.config, {
+        handoffId: "hs_nope",
+        userId: user.id,
+        sessionId: await sessionId(auth, user.id),
+      }),
     ).toMatchObject({ ok: false, code: "invalid_token" });
     auth.clock.advance(2 * 60_000);
     expect(
@@ -308,7 +342,13 @@ describe("continueHandoff and redeemHandoff", () => {
     ).toMatchObject({ ok: false, code: "invalid_token" });
     const { handoffId: h2 } = await started(auth);
     auth.clock.advance(15 * 60_000);
-    expect(await continueHandoff(auth.config, { handoffId: h2, userId: user.id })).toMatchObject({
+    expect(
+      await continueHandoff(auth.config, {
+        handoffId: h2,
+        userId: user.id,
+        sessionId: await sessionId(auth, user.id),
+      }),
+    ).toMatchObject({
       ok: false,
       code: "token_expired",
     });

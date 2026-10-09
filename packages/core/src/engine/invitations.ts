@@ -110,8 +110,8 @@ export async function inviteMember(
   });
   await config.mail.send({
     to: email,
-    subject: `You are invited to ${s.value.organization.name}`,
-    text: `${input.user.email} invited you to ${s.value.organization.name} on ${new URL(config.appURL).host}. Open this link to accept. It is valid for ${o.invitationTtlDays} days.\n\n${link}\n\nIf you do not know this organization, ignore this message.`,
+    subject: `You are invited to ${s.value.organization.name} on ${config.appName}`,
+    text: `${input.user.email} invited you to ${s.value.organization.name} on ${config.appName}. Open this link to accept. It is valid for ${o.invitationTtlDays} days.\n\n${link}\n\nIf you do not know this organization, ignore this message.`,
   });
   return ok(summary(row));
 }

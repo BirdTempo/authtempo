@@ -57,7 +57,7 @@ export async function requestMagicLink(
   const link = config.magicLink.linkBuilder(token, next);
   await config.mail.send({
     to: email,
-    subject: "Your sign-in link",
+    subject: `Sign in to ${config.appName}`,
     text: `Open this link to sign in. It is valid for ${config.magicLink.ttlMinutes} minutes.\n\n${link}\n\nIf you did not ask for it, ignore this message.`,
   });
   return ok({ sent: true });
@@ -97,12 +97,16 @@ export async function verifyMagicLink(
   }
   // A failure after this point burns the link by design. The person
   // requests a new one.
-  const { user } = await findOrCreateUserByEmail(config.storage, row.identifier, now);
-  const { token } = await createSession(config, {
-    userId: user.id,
-    ip: input.ip,
-    userAgent: input.userAgent,
-  });
+  // The session commits with the claim in one transaction, so a claimant's
+  // in-flight callback cannot keep a session the claim deleted.
+  const { user, after } = await findOrCreateUserByEmail(
+    config.storage,
+    row.identifier,
+    now,
+    (tx, resolved) =>
+      createSession(config, { userId: resolved.id, ip: input.ip, userAgent: input.userAgent }, tx),
+  );
+  const { token } = after;
   const next = safeNext((row.data as { next?: unknown } | null)?.next);
   return ok({ token, next, user });
 }

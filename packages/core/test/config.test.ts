@@ -25,6 +25,21 @@ describe("resolveConfig", () => {
       "https://api.example.com/auth/magic-link/verify?token=a%2Bb%2Fc%3D%26d",
     );
   });
+  it("defaults appName to the host of baseURL and accepts a set one", () => {
+    expect(resolveConfig(base).appName).toBe("api.example.com");
+    expect(resolveConfig({ ...base, appName: "Acme" }).appName).toBe("Acme");
+    // URL.host keeps a port that is not the default for the scheme.
+    expect(resolveConfig({ ...base, baseURL: "https://api.example.com:8443" }).appName).toBe(
+      "api.example.com:8443",
+    );
+  });
+  it("rejects an empty, long, or control-character appName", () => {
+    // U+0000 and U+007F are the two edges of the refused set.
+    for (const appName of ["", "a".repeat(81), "A\nB", "A\u0000B", "A\u007fB"]) {
+      expect(() => resolveConfig({ ...base, appName })).toThrow(/appName/);
+    }
+    expect(resolveConfig({ ...base, appName: "a".repeat(80) }).appName).toHaveLength(80);
+  });
   it("rejects a short secret", () => {
     expect(() => resolveConfig({ ...base, secret: "short" })).toThrow(/secret/);
   });
@@ -48,7 +63,9 @@ describe("magicLink.confirmPage", () => {
       ...base,
       magicLink: { confirmPage: (i) => `<p>${i.action}|${i.token}</p>` },
     });
-    expect(custom.magicLink.confirmPage({ action: "/x", token: "t" })).toBe("<p>/x|t</p>");
+    expect(custom.magicLink.confirmPage({ action: "/x", token: "t", appName: "App" })).toBe(
+      "<p>/x|t</p>",
+    );
     expect(custom.magicLink.ttlMinutes).toBe(15);
   });
 });

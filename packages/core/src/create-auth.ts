@@ -56,6 +56,7 @@ import {
   type SocialStarted,
   startSocial,
 } from "./engine/social.js";
+import { type SweepResult, sweepExpired } from "./engine/sweep.js";
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
 import { handoffRoutes } from "./http/routes/handoff.js";
@@ -72,6 +73,8 @@ import type {
 } from "./seams/webauthn.js";
 
 export interface AuthApi {
+  /** Deletes rows that no flow can use any more. Call it from a scheduled handler. */
+  sweepExpired(): Promise<SweepResult>;
   requestMagicLink(input: MagicLinkRequest): Promise<Result<{ sent: true }>>;
   verifyMagicLink(
     input: MagicLinkVerify,
@@ -102,6 +105,8 @@ export interface AuthApi {
   continueHandoff(input: {
     handoffId: string;
     userId: string;
+    /** The browser session the caller checked. A claim that deleted it undoes the code. */
+    sessionId: string;
   }): Promise<Result<{ location: string }>>;
   redeemHandoff(input: {
     code: string;
@@ -208,6 +213,7 @@ export function createAuth(input: AuthConfig): Auth {
     session: (request) => sessionFromRequest(config, request),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     api: {
+      sweepExpired: () => sweepExpired(config),
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),
       startSocial: (i) => startSocial(config, i),

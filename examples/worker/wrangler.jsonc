@@ -23,7 +23,10 @@
       // here the workspace link resolves to the same files.
       "migrations_dir": "../../packages/adapter-d1/migrations"
     }
-  ]
+  ],
+  // Expired magic link tokens, consumed tokens, and stale invitations pile up
+  // in D1 until something deletes them. Without this trigger they stay forever.
+  "triggers": { "crons": ["*/15 * * * *"] }
   // AUTH_SECRET is a secret: `wrangler secret put AUTH_SECRET` in a real
   // deployment. The test config sets it in vitest.config.ts.
 }

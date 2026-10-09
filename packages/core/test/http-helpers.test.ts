@@ -150,7 +150,11 @@ describe("confirm page", () => {
     );
   });
   it("renders a form that posts the escaped token to the action (Review Focus 2)", () => {
-    const html = defaultConfirmPage({ action: "/auth/magic-link/verify", token: `<script>` });
+    const html = defaultConfirmPage({
+      action: "/auth/magic-link/verify",
+      token: `<script>`,
+      appName: "App",
+    });
     expect(html.startsWith("<!doctype html>")).toBe(true);
     expect(html).toContain(`<form method="post" action="/auth/magic-link/verify">`);
     expect(html).toContain(`<input type="hidden" name="token" value="&lt;script&gt;">`);
@@ -160,7 +164,7 @@ describe("confirm page", () => {
     expect(html).toContain(`<meta name="robots" content="noindex">`);
   });
   it("escapes the action too", () => {
-    const html = defaultConfirmPage({ action: `/a"b`, token: "ml_x" });
+    const html = defaultConfirmPage({ action: `/a"b`, token: "ml_x", appName: "App" });
     expect(html).toContain(`action="/a&quot;b"`);
   });
 });
@@ -223,6 +227,7 @@ describe("handoff confirm page", () => {
     handoffId: "hs_abc",
     email: "ada@example.com",
     redirect: "consumera://auth",
+    appName: "App",
   };
   it("shows the account and the redirect and posts the id to the action", () => {
     const html = defaultHandoffConfirmPage(input);
@@ -283,12 +288,41 @@ describe("isJsonRequest", () => {
   });
 });
 
+describe("appName on the pages", () => {
+  it("escapes the name in the title and the heading of each page", () => {
+    const appName = "A<b>";
+    const signIn = defaultSignInPage({
+      basePath: "/auth",
+      continuePath: "/auth/handoff/continue?h=hs_abc",
+      methods: { magicLink: true as const, google: false, apple: false, passkey: false },
+      nonce: "n0nce",
+      appName,
+    });
+    expect(signIn).toContain("<title>Sign in to A&lt;b&gt;</title>");
+    expect(signIn).toContain("<h1>Sign in to A&lt;b&gt;</h1>");
+    const confirm = defaultConfirmPage({ action: "/a", token: "ml_x", appName });
+    expect(confirm).toContain("<title>Continue to sign in to A&lt;b&gt;</title>");
+    expect(confirm).toContain("<h1>Continue to sign in to A&lt;b&gt;</h1>");
+    const handoff = defaultHandoffConfirmPage({
+      action: "/a",
+      handoffId: "hs_abc",
+      email: "ada@example.com",
+      redirect: "consumera://auth",
+      appName,
+    });
+    expect(handoff).toContain("<title>Continue to A&lt;b&gt;</title>");
+    expect(handoff).toContain("<h1>Continue to A&lt;b&gt;?</h1>");
+    for (const html of [signIn, confirm, handoff]) expect(html).not.toContain("A<b>");
+  });
+});
+
 describe("sign-in page", () => {
   const input = {
     basePath: "/auth",
     continuePath: "/auth/handoff/continue?h=hs_abc",
     methods: { magicLink: true as const, google: true, apple: false, passkey: true },
     nonce: "n0nce",
+    appName: "App",
   };
   it("renders the enabled methods with the nonce and escaped values", () => {
     const html = defaultSignInPage(input);

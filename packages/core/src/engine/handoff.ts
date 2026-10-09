@@ -8,7 +8,9 @@ import {
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
+import type { StorageAdapter } from "../storage/port.js";
 import { createSession } from "./sessions.js";
+import { ClaimRacedError, undoSessionIfClaimed } from "./users.js";
 
 export const HANDOFF_ID_PREFIX = "hs_";
 export const HANDOFF_CODE_PREFIX = "hc_";
@@ -40,6 +42,12 @@ interface StartData {
 interface CodeData {
   challenge: string;
   redirect: string;
+  /**
+   * The user's flag when the code was minted. A code minted for an
+   * unverified user runs the claim guard at redeem, whatever a later read
+   * of the user says. A code without the flag counts as unverified.
+   */
+  emailVerified?: boolean;
 }
 
 /** The path the browser visits after any sign-in completes. It stays on the API origin. */
@@ -107,14 +115,15 @@ export async function startHandoff(
 async function consume(
   config: ResolvedConfig,
   valueHash: string,
+  storage: StorageAdapter = config.storage,
 ): Promise<Result<VerificationRow>> {
   const now = config.clock.now();
-  const row = await config.storage.findOne("verification", [
+  const row = await storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: valueHash },
     { field: "purpose", op: "eq", value: "handoff-code" },
   ]);
   if (!row) return fail("invalid_token");
-  const consumed = await config.storage.update(
+  const consumed = await storage.update(
     "verification",
     [
       { field: "id", op: "eq", value: row.id },
@@ -154,37 +163,68 @@ export async function peekHandoff(
 /**
  * The signed-in browser continues the handoff: the start row is spent,
  * a code row is written for the user, and the app's redirect gets the code.
+ * `sessionId` is the browser session the caller checked. The consume, the
+ * user read, the code write, and a re-check of that session run in one
+ * transaction.
  */
 export async function continueHandoff(
   config: ResolvedConfig,
-  input: { handoffId: string; userId: string },
+  input: { handoffId: string; userId: string; sessionId: string },
 ): Promise<Result<{ location: string }>> {
   if (!config.handoff) return fail("not_found");
   if (!ID_RE.test(input.handoffId)) return fail("invalid_token");
-  const start = await consume(config, await sha256Hex(input.handoffId));
-  if (!start.ok) return start;
-  // Defense in depth: the hs_ and hc_ prefixes already keep a start row and a code row apart, so this branch is unreachable through the public API and has no test.
-  if (start.value.identifier !== START_ID) return fail("invalid_token");
-  const data = start.value.data as StartData | null;
-  if (!data || typeof data.challenge !== "string" || typeof data.redirect !== "string")
-    return fail("invalid_token");
+  const startHash = await sha256Hex(input.handoffId);
   const now = config.clock.now();
   const code = randomToken(HANDOFF_CODE_PREFIX);
-  const codeData: CodeData = { challenge: data.challenge, redirect: data.redirect };
-  await config.storage.create("verification", {
-    id: newId(now),
-    purpose: "handoff-code",
-    identifier: input.userId,
-    valueHash: await sha256Hex(code),
-    expiresAt: new Date(now.getTime() + CODE_TTL_MS),
-    consumedAt: null,
-    data: { ...codeData },
-    createdAt: now,
-    updatedAt: now,
-  });
-  // The handoff package matches this string byte for byte; URL serialization would rewrite the redirect. The code is base64url with the hc_ prefix, so it needs no escape.
-  const separator = data.redirect.includes("?") ? "&" : "?";
-  return ok({ location: `${data.redirect}${separator}code=${code}` });
+  const codeHash = await sha256Hex(code);
+  try {
+    return await config.storage.transaction(async (tx): Promise<Result<{ location: string }>> => {
+      const start = await consume(config, startHash, tx);
+      if (!start.ok) return start;
+      // Defense in depth: the hs_ and hc_ prefixes already keep a start row and a code row apart, so this branch is unreachable through the public API and has no test.
+      if (start.value.identifier !== START_ID) return fail("invalid_token");
+      const data = start.value.data as StartData | null;
+      if (!data || typeof data.challenge !== "string" || typeof data.redirect !== "string")
+        return fail("invalid_token");
+      // Read before the code row is written: a claim after this read deletes
+      // the code row, or the redeem guard sees the claim's flip.
+      const user = await tx.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
+      const codeData: CodeData = {
+        challenge: data.challenge,
+        redirect: data.redirect,
+        emailVerified: user?.emailVerified === true,
+      };
+      await tx.create("verification", {
+        id: newId(now),
+        purpose: "handoff-code",
+        identifier: input.userId,
+        valueHash: codeHash,
+        expiresAt: new Date(now.getTime() + CODE_TTL_MS),
+        consumedAt: null,
+        data: { ...codeData },
+        createdAt: now,
+        updatedAt: now,
+      });
+      // The session was checked before this transaction. A claim in between deleted it and verified the user; the conditional update sees the deletion and undoes the code, which would otherwise skip the redeem guard.
+      // The user id is in the where too: an api caller passes the two
+      // values apart, and a live session of another user must not pass.
+      const n = await tx.update(
+        "session",
+        [
+          { field: "id", op: "eq", value: input.sessionId },
+          { field: "userId", op: "eq", value: input.userId },
+        ],
+        { updatedAt: now },
+      );
+      if (n === 0) throw new ClaimRacedError();
+      // The handoff package matches this string byte for byte; URL serialization would rewrite the redirect. The code is base64url with the hc_ prefix, so it needs no escape.
+      const separator = data.redirect.includes("?") ? "&" : "?";
+      return ok({ location: `${data.redirect}${separator}code=${code}` });
+    });
+  } catch (err) {
+    if (err instanceof ClaimRacedError) return fail("invalid_token");
+    throw err;
+  }
 }
 
 /**
@@ -211,14 +251,27 @@ export async function redeemHandoff(
   if (!data || typeof data.challenge !== "string") return fail("invalid_token");
   if (!constantTimeEqual(await sha256Base64Url(input.verifier), data.challenge))
     return fail("invalid_token");
-  const user = await config.storage.findOne("user", [
-    { field: "id", op: "eq", value: row.value.identifier },
-  ]);
-  if (!user) return fail("invalid_token");
-  const { token, session } = await createSession(config, {
-    userId: user.id,
-    ip: input.ip,
-    userAgent: input.userAgent,
-  });
-  return ok({ token, user, session });
+  const userId = row.value.identifier;
+  const now = config.clock.now();
+  try {
+    return await config.storage.transaction(async (tx) => {
+      const user = await tx.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+      if (!user) return fail("invalid_token");
+      const { token, session } = await createSession(
+        config,
+        { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+        tx,
+      );
+      // The flag from the mint, not this read: a claim can commit between
+      // the consume and this read, and this read then sees the user verified.
+      if (data.emailVerified !== true) {
+        // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
+        await undoSessionIfClaimed(tx, user.id, now);
+      }
+      return ok({ token, user, session });
+    });
+  } catch (err) {
+    if (err instanceof ClaimRacedError) return fail("invalid_token");
+    throw err;
+  }
 }

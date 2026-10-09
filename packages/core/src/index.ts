@@ -11,6 +11,7 @@ export type { PasskeySummary } from "./engine/passkeys.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
+export type { SweepResult } from "./engine/sweep.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export {
@@ -18,9 +19,9 @@ export {
   type HandoffConfirmPageInput,
 } from "./http/handoff-confirm-page.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
-export { createMemoryLimiter } from "./limiter/memory.js";
-export type { LimiterPort, LimitWindow } from "./limiter/port.js";
-export type { Clock } from "./primitives/clock.js";
+export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
+export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
+export { type Clock, systemClock } from "./primitives/clock.js";
 export type { Result } from "./result.js";
 export {
   type IdentityRow,

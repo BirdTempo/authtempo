@@ -1,6 +1,7 @@
 import type { Sql } from "postgres";
 import * as m0001 from "./migrations/0001_schema_v1.js";
 import * as m0002 from "./migrations/0002_schema_v2.js";
+import * as m0003 from "./migrations/0003_schema_v3.js";
 
 export interface Migration {
   name: string;
@@ -11,6 +12,7 @@ export interface Migration {
 export const MIGRATIONS: readonly Migration[] = [
   { name: m0001.name, sql: m0001.sql },
   { name: m0002.name, sql: m0002.sql },
+  { name: m0003.name, sql: m0003.sql },
 ];
 
 const TABLE = "ta_migrations";

@@ -6,7 +6,7 @@ The storage adapter for Cloudflare D1. No Node dependency and no compatibility f
 import { createAuth } from "@tempo-auth/core";
 import { createD1Adapter } from "@tempo-auth/adapter-d1";
 
-const auth = createAuth({ /* ... */, storage: createD1Adapter(env.DB) });
+const auth = createAuth({ ...config, storage: createD1Adapter(env.DB) });
 ```
 
 ## Migrations
@@ -34,6 +34,37 @@ with code `schema_mismatch` until the migrations run. Only a missing
 through unchanged, and the next operation reads again.
 
 Version 2 (plan 6, 2026-10-09) adds `ta_organization`, `ta_member`, and `ta_invitation`. Apply `0002_schema_v2` before you deploy a core at version 2; the adapter refuses a database at version 1.
+
+Version 3 (plan 6b, 2026-10-10) adds `ta_limit` for the owned limiter (with the index `ix_ta_limit__expires_at` for its sweep) and the index `ix_ta_session__active_organization_id`. Apply `0003_schema_v3` before you deploy a core at version 3; the adapter refuses a database at version 2.
+
+## Limiter
+
+The memory limiter is per isolate; this one is the limit the product owns.
+On Workers every isolate has its own memory limiter, so the real limit is
+the configured limit times the isolate count. `createD1Limiter` keeps one count
+per key and window in `ta_limit` (schema version 3) for every caller:
+
+```ts
+const auth = createAuth({ ...config, limiter: createD1Limiter(env.DB) });
+```
+
+Each call runs one statement. It inserts the key at count 1, or on a
+conflict resets the window when it has ended, else adds 1, and returns the
+count. The call passes when the count is at most `max`. D1 runs one statement at a time, so two concurrent calls cannot both see `max - 1`.
+Checked 2026-10-10: the Cloudflare page "D1 limits"
+(<https://developers.cloudflare.com/d1/platform/limits/>) says each D1
+database "processes queries one at a time". The race and burst tests in
+`test/limiter.test.ts` are the local evidence.
+The stored key is the key, the seconds, and the max, joined by U+001F
+(the unit separator). A key with `|` is an ordinary key. A key with U+001F
+throws an `Error`: no caller value can carry it, and it would alias
+another window.
+
+Each row carries `expires_at`, the window start plus the window. The
+limiter's `sweep(now)` deletes every row whose window ended and answers
+the count. `auth.api.sweepExpired()` calls it and reports it as `limits`.
+Without a scheduled sweep, `ta_limit` keeps one row for every key and
+window that ever reached the limiter.
 
 ## Transactions
 

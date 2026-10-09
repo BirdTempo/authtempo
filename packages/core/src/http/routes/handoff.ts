@@ -34,6 +34,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
       continuePath: continuePath(config, handoffId),
       methods,
       nonce,
+      appName: config.appName,
     });
     const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
     return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
@@ -44,6 +45,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
       handoffId,
       email,
       redirect: redirectTo,
+      appName: config.appName,
     });
     const policy = `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
     return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
@@ -99,7 +101,11 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
         const session = await sessionFromRequest(config, ctx.request);
         // No session: mint nothing, and show the sign-in page for this id.
         if (!session) return page(handoffId);
-        const r = await continueHandoff(config, { handoffId, userId: session.user.id });
+        const r = await continueHandoff(config, {
+          handoffId,
+          userId: session.user.id,
+          sessionId: session.session.id,
+        });
         return r.ok ? redirect(r.value.location) : redirect(authErrorUrl(config, r.code));
       },
     },
