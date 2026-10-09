@@ -1,4 +1,4 @@
-import { type FieldType, type ModelName, type Models, schema } from "../schema.js";
+import { type FieldType, type ModelName, type Models, SCHEMA_VERSION, schema } from "../schema.js";
 import { type FindManyOptions, StorageError, type Where } from "./port.js";
 
 export interface Dialect {
@@ -93,6 +93,13 @@ function invalid(model: ModelName, field: string, why: string): StorageError {
 
 const NUL_ESCAPE = /(?<!\\)(?:\\\\)*\\u0000/;
 
+function isPlainJson(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  if (Array.isArray(value)) return true;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 /** Encodes one value for the dialect, or throws invalid_argument when the type does not fit the column. */
 export function encodeValue(
   d: Dialect,
@@ -105,6 +112,9 @@ export function encodeValue(
   switch (type) {
     case "string":
       if (typeof value !== "string") throw invalid(model, field, "expected a string");
+      // Postgres text rejects U+0000 with a raw driver error, and SQLite stores it.
+      // Refuse it on every dialect, so both adapters give the same invalid_argument.
+      if (value.includes("\u0000")) throw invalid(model, field, "string holds a NUL character");
       return value;
     case "integer":
       if (typeof value !== "number" || !Number.isInteger(value))
@@ -118,7 +128,9 @@ export function encodeValue(
         throw invalid(model, field, "expected a valid Date");
       return d.name === "sqlite" ? value.getTime() : value;
     case "json": {
-      if (typeof value !== "object") throw invalid(model, field, "expected an object");
+      // Only plain objects and arrays. A Date, Map, or class instance does not
+      // round-trip: JSON.stringify turns it into a string or an empty object.
+      if (!isPlainJson(value)) throw invalid(model, field, "expected a plain object or an array");
       const text = JSON.stringify(value);
       // Postgres jsonb rejects the NUL escape, so refuse it on every dialect for the same behavior.
       // The pattern needs an odd run of backslashes, so a literal backslash before "u0000" passes.
@@ -157,6 +169,17 @@ export function decodeRow<M extends ModelName>(
   return out as unknown as Models[M];
 }
 
+/**
+ * The json parameter is serialized text. `::text::jsonb` makes the server type
+ * the parameter as text, so the driver sends the string unchanged and the
+ * server parses it. With a bare `::jsonb`, postgres.js learns the parameter is
+ * jsonb and serializes the string a second time: the column then holds a JSON
+ * string, not an object.
+ */
+function jsonbCast(placeholder: string): string {
+  return `${placeholder}::text::jsonb`;
+}
+
 export interface Statement {
   sql: string;
   params: unknown[];
@@ -192,6 +215,10 @@ function compileWhere<M extends ModelName>(
   for (const w of where) {
     const col = columnName(w.field);
     const type = fieldType(model, w.field);
+    // SQLite compares json as text, so key order decides a match. Postgres
+    // compares jsonb by value. No engine call filters on json, so refuse it.
+    if (type === "json")
+      throw invalid(model, w.field, "a where clause cannot filter on a json field");
     const enc = (v: unknown) => encodeValue(d, type, v, model, w.field);
     switch (w.op) {
       case "eq":
@@ -257,7 +284,7 @@ export function insertStatement<M extends ModelName>(
     const ph = p.add(
       encodeValue(d, type, (data as unknown as Record<string, unknown>)[f], model, f),
     );
-    return type === "json" && d.json === "jsonb" ? `${ph}::jsonb` : ph;
+    return type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph;
   });
   return {
     sql: `INSERT INTO ${TABLES[model]} (${fields.map(columnName).join(", ")}) VALUES (${values.join(", ")})`,
@@ -306,7 +333,7 @@ export function updateStatement<M extends ModelName>(
   const sets = keys.map((f) => {
     const type = fieldType(model, f);
     const ph = p.add(encodeValue(d, type, (data as Record<string, unknown>)[f], model, f));
-    return `${columnName(f)} = ${type === "json" && d.json === "jsonb" ? `${ph}::jsonb` : ph}`;
+    return `${columnName(f)} = ${type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph}`;
   });
   const w = compileWhere(d, model, where, p);
   if (w.impossible) return null;
@@ -324,4 +351,34 @@ export function deleteStatement<M extends ModelName>(
   const w = compileWhere(d, model, where, p);
   if (w.impossible) return null;
   return { sql: `DELETE FROM ${TABLES[model]}${w.clause}`, params: p.values };
+}
+
+/**
+ * The schema version gate. It calls `read` once and keeps the result. `read`
+ * returns the stored version, or null when the meta table or row is missing.
+ * An older, missing, or non-integer version throws schema_mismatch. A newer
+ * version is accepted: a later migration must stay compatible with this
+ * adapter until the adapter is updated. A failed check is not kept, so the
+ * next call reads again. An error that `read` throws passes through unchanged,
+ * so an outage never looks like "run the migrations".
+ */
+export function schemaVersionGate(read: () => Promise<string | null>): () => Promise<void> {
+  let checked: Promise<void> | null = null;
+  return () => {
+    checked ??= (async () => {
+      try {
+        // Start `read` after this promise is stored, so a read that throws at
+        // once still resets the gate below.
+        const value = await Promise.resolve().then(read);
+        const found = value === null ? Number.NaN : Number(value);
+        if (!Number.isInteger(found) || found < SCHEMA_VERSION) {
+          throw new StorageError("schema_mismatch", "meta", [value ?? "none"]);
+        }
+      } catch (e) {
+        checked = null;
+        throw e;
+      }
+    })();
+    return checked;
+  };
 }

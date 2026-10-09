@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { schema } from "../src/schema.js";
+import { StorageError } from "../src/storage/port.js";
 import {
   assertFields,
   assertModel,
@@ -14,6 +15,7 @@ import {
   insertStatement,
   POSTGRES,
   SQLITE,
+  schemaVersionGate,
   selectStatement,
   TABLES,
   uniqueIndexName,
@@ -150,7 +152,7 @@ describe("statements", () => {
       createdAt: t0,
       updatedAt: t0,
     });
-    expect(p.sql).toContain("VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)");
+    expect(p.sql).toContain("VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::jsonb)");
     expect(p.params[8]).toBe('{"n":1}');
   });
   it("builds selects with the null rules and the sort rules", () => {
@@ -314,5 +316,130 @@ describe("review fixes", () => {
     expect(() => encodeValue(POSTGRES, "json", { a: "x\u0000y" })).toThrow(/invalid_argument/);
     expect(() => encodeValue(SQLITE, "json", { a: "x\u0000y" })).toThrow(/invalid_argument/);
     expect(encodeValue(POSTGRES, "json", { a: "x\\u0000y" })).toBe('{"a":"x\\\\u0000y"}');
+  });
+});
+
+describe("final review fixes", () => {
+  it("casts a json parameter through text on postgres, for insert and update", () => {
+    const u = updateStatement(POSTGRES, "verification", [{ field: "id", op: "eq", value: "v1" }], {
+      data: { a: 1 },
+    });
+    expect(u?.sql).toBe("UPDATE ta_verification SET data = $1::text::jsonb WHERE id = $2");
+    expect(u?.params).toEqual(['{"a":1}', "v1"]);
+    const s = updateStatement(SQLITE, "verification", [{ field: "id", op: "eq", value: "v1" }], {
+      data: { a: 1 },
+    });
+    expect(s?.sql).toBe("UPDATE ta_verification SET data = ? WHERE id = ?");
+  });
+  it("rejects a where clause on a json field on both dialects", () => {
+    for (const d of [SQLITE, POSTGRES]) {
+      expect(() =>
+        selectStatement(d, "verification", [{ field: "data", op: "eq", value: { a: 1 } }]),
+      ).toThrow(/invalid_argument/);
+      expect(() =>
+        selectStatement(d, "verification", [{ field: "data", op: "eq", value: null }]),
+      ).toThrow(/invalid_argument/);
+      expect(() =>
+        deleteStatement(d, "verification", [{ field: "data", op: "in", value: [] }]),
+      ).toThrow(/invalid_argument/);
+    }
+  });
+  it("accepts only plain objects and arrays as json", () => {
+    class Box {
+      a = 1;
+    }
+    for (const d of [SQLITE, POSTGRES]) {
+      for (const bad of [new Date(0), new Map([["a", 1]]), new Box(), "text", 5, true]) {
+        expect(() => encodeValue(d, "json", bad)).toThrow(/invalid_argument/);
+      }
+      expect(encodeValue(d, "json", [1, { z: null }])).toBe('[1,{"z":null}]');
+      expect(encodeValue(d, "json", Object.assign(Object.create(null), { a: 1 }))).toBe('{"a":1}');
+    }
+  });
+  it("rejects a string that holds U+0000 on both dialects", () => {
+    for (const d of [SQLITE, POSTGRES]) {
+      expect(() => encodeValue(d, "string", "a\u0000b")).toThrow(/invalid_argument/);
+      expect(encodeValue(d, "string", "a\\u0000b")).toBe("a\\u0000b");
+      expect(() =>
+        insertStatement(d, "user", {
+          id: "u1",
+          email: "a\u0000@example.com",
+          emailVerified: false,
+          name: null,
+          image: null,
+          createdAt: t0,
+          updatedAt: t0,
+        }),
+      ).toThrow(/invalid_argument/);
+    }
+  });
+});
+
+describe("schemaVersionGate", () => {
+  function fake(values: (string | null | Error)[]) {
+    let calls = 0;
+    const read = async () => {
+      const v = values[Math.min(calls, values.length - 1)];
+      calls++;
+      if (v instanceof Error) throw v;
+      return v ?? null;
+    };
+    return { read, calls: () => calls };
+  }
+
+  it("reads once and accepts the current and a newer version", async () => {
+    for (const v of ["1", "2"]) {
+      const f = fake([v]);
+      const gate = schemaVersionGate(f.read);
+      await gate();
+      await gate();
+      await Promise.all([gate(), gate()]);
+      expect(f.calls()).toBe(1);
+    }
+  });
+
+  it("throws schema_mismatch for an older, missing, or non-integer version", async () => {
+    for (const [v, field] of [
+      ["0", "0"],
+      [null, "none"],
+      ["abc", "abc"],
+      ["1.5", "1.5"],
+    ] as const) {
+      const gate = schemaVersionGate(fake([v]).read);
+      const err = await gate().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StorageError);
+      expect(err).toMatchObject({ code: "schema_mismatch", model: "meta", fields: [field] });
+    }
+  });
+
+  it("resets after a failure, so the next call reads again", async () => {
+    const f = fake(["0", "1"]);
+    const gate = schemaVersionGate(f.read);
+    await expect(gate()).rejects.toMatchObject({ code: "schema_mismatch" });
+    await expect(gate()).resolves.toBeUndefined();
+    await gate();
+    expect(f.calls()).toBe(2);
+  });
+
+  it("rethrows an error from read unchanged and retries on the next call", async () => {
+    const boom = new Error("D1_ERROR: boom");
+    const f = fake([boom, "1"]);
+    const gate = schemaVersionGate(f.read);
+    const err = await gate().catch((e: unknown) => e);
+    expect(err).toBe(boom);
+    await expect(gate()).resolves.toBeUndefined();
+    expect(f.calls()).toBe(2);
+  });
+
+  it("resets when read throws before it returns a promise", async () => {
+    const boom = new Error("sync");
+    let calls = 0;
+    const gate = schemaVersionGate(() => {
+      calls++;
+      if (calls === 1) throw boom;
+      return Promise.resolve("1");
+    });
+    await expect(gate()).rejects.toBe(boom);
+    await expect(gate()).resolves.toBeUndefined();
   });
 });
