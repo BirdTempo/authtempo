@@ -49,7 +49,7 @@ it("hands a magic link sign-in in the browser off to an app as a bearer token on
   // The browser follows to continue with the new cookie and sees the confirm page.
   const confirm = await SELF.fetch(`${BASE}${cont}`, { redirect: "manual", headers: { cookie } });
   expect(confirm.status).toBe(200);
-  expect(await confirm.text()).toContain("Continue to the app");
+  expect(await confirm.text()).toContain("Continue to example.test?");
 
   // The person presses the button: the form posts from the API origin and lands on the app scheme.
   const h = new URL(`${BASE}${cont}`).searchParams.get("h") ?? "";
