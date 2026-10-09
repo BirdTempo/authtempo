@@ -35,7 +35,7 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
 | POST | `/password/sign-up` | `{ email, password, name? }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `password_policy`, `password_breached`; 409 `email_taken`, `email_taken_unverified`; 429 `rate_limited`. The user is unverified until the mail link is confirmed |
-| POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 401 `invalid_credentials`; 429 `rate_limited` |
+| POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
@@ -226,7 +226,9 @@ reset writes the new password before it deletes the sessions. A reset of
 a verified user also deletes the user's pending handoff codes. Every reset
 deletes the address's other pending reset links. A password change writes
 the new password first, deletes every other session, and deletes the
-user's pending handoff codes. It keeps the current session.
+user's pending handoff codes. It keeps the current session. A change also
+deletes the address's pending reset links (added 2026-10-10 by the plan 8
+final fix wave).
 
 The limits, in the same limiter as the other routes:
 
@@ -239,6 +241,12 @@ The limits, in the same limiter as the other routes:
 | `password-reset:email:<email>` | 5 per 15 minutes |
 | `password-reset-post:ip:<ip>` | 20 per 15 minutes |
 | `password-change:user:<userId>` | 10 per 15 minutes |
+
+The `password:email` limit is a trade-off: 10 wrong tries from anyone stop
+password sign-in for that address for 15 minutes. The magic link still
+works for the owner. Without the limit, a guess run on one account from
+many IP addresses has no bound. Recorded 2026-10-10 by the plan 8 final
+fix wave.
 
 The reset POST checks its limit, then reads the link row, then the policy,
 then the breach check, then hashes. A transaction consumes the link first.
