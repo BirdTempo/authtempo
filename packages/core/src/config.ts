@@ -1,4 +1,8 @@
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
+import {
+  defaultHandoffConfirmPage,
+  type HandoffConfirmPageInput,
+} from "./http/handoff-confirm-page.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
@@ -93,6 +97,7 @@ export interface AuthConfig {
     schemes: string[];
     devRedirectPattern?: RegExp;
     signInPage?: (input: SignInPageInput) => string;
+    confirmPage?: (input: HandoffConfirmPageInput) => string;
   };
 }
 
@@ -123,6 +128,7 @@ export interface ResolvedConfig {
     schemes: string[];
     devRedirectPattern: RegExp | null;
     signInPage: (input: SignInPageInput) => string;
+    confirmPage: (input: HandoffConfirmPageInput) => string;
   } | null;
 }
 
@@ -186,10 +192,15 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       if (s === "https://" || s === "http://")
         throw new ConfigError(`handoff.schemes must not hold ${s}`);
     }
+    const pattern = input.handoff.devRedirectPattern;
+    // A global or sticky regex keeps state between test calls and alternates its answer.
+    if (pattern && (pattern.flags.includes("g") || pattern.flags.includes("y")))
+      throw new ConfigError("handoff.devRedirectPattern must not use the g or y flag");
     handoff = {
       schemes: [...input.handoff.schemes],
       devRedirectPattern: input.handoff.devRedirectPattern ?? null,
       signInPage: input.handoff.signInPage ?? defaultSignInPage,
+      confirmPage: input.handoff.confirmPage ?? defaultHandoffConfirmPage,
     };
   }
   const basePath = input.basePath ?? "/auth";

@@ -46,8 +46,19 @@ it("hands a magic link sign-in in the browser off to an app as a bearer token on
   expect(verify.headers.get("location")).toBe(`${BASE}${cont}`);
   const cookie = verify.headers.get("set-cookie")?.split(";")[0] ?? "";
 
-  // The browser follows to continue with the new cookie and lands on the app scheme.
-  const next = await SELF.fetch(`${BASE}${cont}`, { redirect: "manual", headers: { cookie } });
+  // The browser follows to continue with the new cookie and sees the confirm page.
+  const confirm = await SELF.fetch(`${BASE}${cont}`, { redirect: "manual", headers: { cookie } });
+  expect(confirm.status).toBe(200);
+  expect(await confirm.text()).toContain("Continue to the app");
+
+  // The person presses the button: the form posts from the API origin and lands on the app scheme.
+  const h = new URL(`${BASE}${cont}`).searchParams.get("h") ?? "";
+  const next = await SELF.fetch(`${BASE}/auth/handoff/continue`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE, cookie },
+    body: new URLSearchParams({ h }).toString(),
+  });
   expect(next.status).toBe(302);
   const location = next.headers.get("location") ?? "";
   expect(location).toMatch(/^example-app:\/\/auth\?code=hc_/);

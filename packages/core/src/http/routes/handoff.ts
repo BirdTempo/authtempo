@@ -3,16 +3,19 @@ import type { ResolvedConfig } from "../../config.js";
 import {
   continueHandoff,
   continuePath,
+  peekHandoff,
   redeemHandoff,
   startHandoff,
 } from "../../engine/handoff.js";
 import { publicSession, sessionFromRequest } from "../../engine/sessions.js";
 import { randomBase64Url } from "../../primitives/crypto.js";
+import { readBody } from "../body.js";
 import { formAction, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import type { Route } from "../router.js";
 
+const continueBody = z.object({ h: z.string().max(64) });
 const redeemBody = z.object({ code: z.string().max(64), verifier: z.string().min(43).max(128) });
 
 export function handoffRoutes(config: ResolvedConfig): Route[] {
@@ -35,9 +38,15 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
     return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
   };
-  const continueFor = async (handoffId: string, userId: string): Promise<Response> => {
-    const r = await continueHandoff(config, { handoffId, userId });
-    return r.ok ? redirect(r.value.location) : redirect(authErrorUrl(config, r.code));
+  const confirm = (handoffId: string, email: string, redirectTo: string): Response => {
+    const html = handoff.confirmPage({
+      action: `${config.basePath}/handoff/continue`,
+      handoffId,
+      email,
+      redirect: redirectTo,
+    });
+    const policy = `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
+    return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
   };
   return [
     {
@@ -50,9 +59,9 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
         });
         if (!r.ok) return respond(r);
-        // A browser that already holds a session needs no page.
+        // A browser that already holds a session still sees the confirm page. A GET never mints a code.
         const session = await sessionFromRequest(config, ctx.request);
-        if (session) return continueFor(r.value.handoffId, session.user.id);
+        if (session) return redirect(`${config.baseURL}${continuePath(config, r.value.handoffId)}`);
         return page(r.value.handoffId);
       },
     },
@@ -61,11 +70,34 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
       path: "/handoff/continue",
       async handler(ctx) {
         const handoffId = ctx.url.searchParams.get("h") ?? "";
+        // Never render a page for an id that is spent, expired, or unknown.
+        const live = await peekHandoff(config, handoffId);
+        if (!live.ok) return redirect(authErrorUrl(config, live.code));
         const session = await sessionFromRequest(config, ctx.request);
         // No session yet: the person came back here before any sign-in
         // completed, so show the page again for the same handoff.
         if (!session) return page(handoffId);
-        return continueFor(handoffId, session.user.id);
+        return confirm(handoffId, session.user.email, live.value.redirect);
+      },
+    },
+    {
+      method: "POST",
+      path: "/handoff/continue",
+      async handler(ctx) {
+        // Stricter than the router: the confirm page posts from baseURL only. A trusted app origin, or a sibling subdomain, must not be able to post this form, even with a SameSite=None cookie.
+        const origin = ctx.request.headers.get("origin");
+        if (origin !== config.baseURL) return json({ error: "origin_not_trusted" }, 403);
+        const site = ctx.request.headers.get("sec-fetch-site");
+        if (site !== null && site !== "same-origin")
+          return json({ error: "origin_not_trusted" }, 403);
+        const body = await readBody(ctx.request, continueBody);
+        if (!body.ok) return redirect(authErrorUrl(config, "invalid_token"));
+        const handoffId = body.value.h;
+        const session = await sessionFromRequest(config, ctx.request);
+        // No session: mint nothing, and show the sign-in page for this id.
+        if (!session) return page(handoffId);
+        const r = await continueHandoff(config, { handoffId, userId: session.user.id });
+        return r.ok ? redirect(r.value.location) : redirect(authErrorUrl(config, r.code));
       },
     },
     {

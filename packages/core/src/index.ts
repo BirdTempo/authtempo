@@ -10,6 +10,10 @@ export type { ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
+export {
+  defaultHandoffConfirmPage,
+  type HandoffConfirmPageInput,
+} from "./http/handoff-confirm-page.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 export { createMemoryLimiter } from "./limiter/memory.js";
 export type { LimiterPort, LimitWindow } from "./limiter/port.js";

@@ -14,10 +14,11 @@ export const HANDOFF_ID_PREFIX = "hs_";
 export const HANDOFF_CODE_PREFIX = "hc_";
 const ID_RE = /^hs_[A-Za-z0-9_-]{43}$/;
 const CODE_RE = /^hc_[A-Za-z0-9_-]{43}$/;
-// RFC 7636 verifier length: 43 to 128 unreserved characters.
-const VERIFIER_RE = /^[A-Za-z0-9_-]{43,128}$/;
+// RFC 7636 verifier: 43 to 128 characters of the unreserved set (letters, digits, "-", ".", "_", "~").
+const VERIFIER_RE = /^[A-Za-z0-9._~-]{43,128}$/;
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
-const START_TTL_MS = 10 * 60_000;
+// A start row lives at least 10 minutes, and at least as long as a magic link, so a person who signs in by the link at its last minute can still continue.
+const START_MIN_TTL_MINUTES = 10;
 const CODE_TTL_MS = 2 * 60_000;
 const START_ID = "start";
 const START_LIMIT = { seconds: 15 * 60, max: 30 };
@@ -50,7 +51,18 @@ function redirectAllowed(config: ResolvedConfig, redirect: string): boolean {
   const h = config.handoff;
   if (!h) return false;
   if (h.schemes.some((s) => redirect === `${s}auth`)) return true;
-  return h.devRedirectPattern?.test(redirect) ?? false;
+  if (!h.devRedirectPattern?.test(redirect)) return false;
+  // A dev pattern may admit a loopback web URL (RFC 8252 section 7.3) or a non-web scheme; never a remote web origin, which would carry the code to a server that also holds the verifier.
+  let url: URL;
+  try {
+    url = new URL(redirect);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    return ["127.0.0.1", "[::1]", "::1", "localhost"].includes(url.hostname);
+  }
+  return true;
 }
 
 /**
@@ -78,7 +90,9 @@ export async function startHandoff(
     purpose: "handoff-code",
     identifier: START_ID,
     valueHash: await sha256Hex(handoffId),
-    expiresAt: new Date(now.getTime() + START_TTL_MS),
+    expiresAt: new Date(
+      now.getTime() + Math.max(START_MIN_TTL_MINUTES, config.magicLink.ttlMinutes) * 60_000,
+    ),
     consumedAt: null,
     data: { ...data },
     createdAt: now,
@@ -114,6 +128,27 @@ async function consume(
   return ok(row);
 }
 
+/** The live start row for a handoff id, without consuming it. */
+export async function peekHandoff(
+  config: ResolvedConfig,
+  handoffId: string,
+): Promise<Result<{ redirect: string }>> {
+  if (!config.handoff) return fail("not_found");
+  if (!ID_RE.test(handoffId)) return fail("invalid_token");
+  const now = config.clock.now();
+  const row = await config.storage.findOne("verification", [
+    { field: "valueHash", op: "eq", value: await sha256Hex(handoffId) },
+    { field: "purpose", op: "eq", value: "handoff-code" },
+  ]);
+  if (!row || row.identifier !== START_ID) return fail("invalid_token");
+  if (row.consumedAt !== null) return fail("invalid_token");
+  if (row.expiresAt.getTime() <= now.getTime()) return fail("token_expired");
+  const data = row.data as { redirect?: unknown } | null;
+  return typeof data?.redirect === "string"
+    ? ok({ redirect: data.redirect })
+    : fail("invalid_token");
+}
+
 /**
  * The signed-in browser continues the handoff: the start row is spent,
  * a code row is written for the user, and the app's redirect gets the code.
@@ -145,7 +180,9 @@ export async function continueHandoff(
     createdAt: now,
     updatedAt: now,
   });
-  return ok({ location: `${data.redirect}?code=${encodeURIComponent(code)}` });
+  const url = new URL(data.redirect);
+  url.searchParams.set("code", code);
+  return ok({ location: url.toString() });
 }
 
 /**

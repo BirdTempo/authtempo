@@ -11,6 +11,7 @@ import {
   sessionCookie,
 } from "../src/http/cookies.js";
 import { formAction, pageHeaders } from "../src/http/csp.js";
+import { defaultHandoffConfirmPage } from "../src/http/handoff-confirm-page.js";
 import { json, readJson, respond } from "../src/http/json.js";
 import { authErrorUrl, redirect, resolveNext } from "../src/http/redirect.js";
 import { safeNext } from "../src/http/safe-next.js";
@@ -155,7 +156,7 @@ describe("confirm page", () => {
     expect(html).toContain(`<input type="hidden" name="token" value="&lt;script&gt;">`);
     expect(html).not.toContain("<script>");
     expect(html).toContain(`<button type="submit">Continue</button>`);
-    expect(html).toContain(`<meta name="referrer" content="no-referrer">`);
+    expect(html).toContain(`<meta name="referrer" content="strict-origin">`);
     expect(html).toContain(`<meta name="robots" content="noindex">`);
   });
   it("escapes the action too", () => {
@@ -200,15 +201,51 @@ describe("csp", () => {
       "'self' https://app.example.com http://localhost:5173 consumera: com.example.app:",
     );
   });
+  it("sends strict-origin, never no-referrer", () => {
+    // With no-referrer, Chrome sends "Origin: null" on a same-origin form post and the router answers 403 (headless Chrome 155, 2026-10-09). no-referrer must never come back.
+    expect(pageHeaders(cfg(), "x")["referrer-policy"]).toBe("strict-origin");
+  });
   it("builds the page headers with the policy and no-store", () => {
     const h = pageHeaders(cfg(), "default-src 'none'");
     expect(h).toEqual({
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
+      "referrer-policy": "strict-origin",
       "x-robots-tag": "noindex",
       "content-security-policy": "default-src 'none'",
     });
+  });
+});
+
+describe("handoff confirm page", () => {
+  const input = {
+    action: "/auth/handoff/continue",
+    handoffId: "hs_abc",
+    email: "ada@example.com",
+    redirect: "consumera://auth",
+  };
+  it("shows the account and the redirect and posts the id to the action", () => {
+    const html = defaultHandoffConfirmPage(input);
+    expect(html).toContain("Signed in as <strong>ada@example.com</strong>");
+    expect(html).toContain("<code>consumera://auth</code>");
+    expect(html).toContain(`<form method="post" action="/auth/handoff/continue">`);
+    expect(html).toContain(`<input type="hidden" name="h" value="hs_abc">`);
+    expect(html).toContain(`<meta name="referrer" content="strict-origin">`);
+    expect(html).not.toContain("<script");
+  });
+  it("escapes every value", () => {
+    const html = defaultHandoffConfirmPage({
+      ...input,
+      redirect: "http://127.0.0.1/<b>",
+      email: `a"<i>@x`,
+      handoffId: `h"><script>`,
+      action: `/a"b`,
+    });
+    expect(html).toContain("http://127.0.0.1/&lt;b&gt;");
+    expect(html).not.toContain("<b>");
+    expect(html).not.toContain("<i>");
+    expect(html).not.toContain("<script");
+    expect(html).toContain(`action="/a&quot;b"`);
   });
 });
 
@@ -264,7 +301,7 @@ describe("sign-in page", () => {
     expect(html).not.toContain("/social/apple/start");
     expect(html).toContain(`<button id="passkey"`);
     expect(html).toContain(`data-continue="/auth/handoff/continue?h=hs_abc"`);
-    expect(html).toContain(`<meta name="referrer" content="no-referrer">`);
+    expect(html).toContain(`<meta name="referrer" content="strict-origin">`);
   });
   it("escapes the continue path and hides disabled methods", () => {
     const html = defaultSignInPage({

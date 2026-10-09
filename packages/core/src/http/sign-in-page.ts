@@ -29,7 +29,7 @@ export function defaultSignInPage(input: SignInPageInput): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
+<meta name="referrer" content="strict-origin">
 <meta name="robots" content="noindex">
 <title>Sign in</title>
 <style>
@@ -44,7 +44,7 @@ p.status { min-height: 1.5rem; color: #555; }
 <body>
 <main data-base="${base}" data-continue="${cont}">
 <h1>Sign in</h1>
-<form id="magic-link" autocomplete="on">
+<form id="magic-link" method="post" autocomplete="on">
 <input type="email" name="email" placeholder="you@example.com" required autofocus>
 <button type="submit">Email me a sign-in link</button>
 </form>
@@ -67,10 +67,13 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
     e.preventDefault();
     var email = e.target.elements.email.value;
     postJson("/magic-link/request", { email: email, next: cont }).then(function (res) {
-      say(res.ok ? "Check your email for a sign-in link." : "Too many requests. Try again later.");
-    });
+      if (res.ok) say("Check your email for a sign-in link.");
+      else if (res.status === 429) say("Too many requests. Try again later.");
+      else say("The request was not accepted.");
+    }).catch(function () { say("Could not reach the server. Try again."); });
   });
   var passkey = document.getElementById("passkey");
+  if (passkey && (typeof PublicKeyCredential === "undefined" || typeof PublicKeyCredential.parseRequestOptionsFromJSON !== "function")) passkey.hidden = true;
   if (passkey) passkey.addEventListener("click", function () {
     say("");
     postJson("/passkey/authenticate/options", {}).then(function (res) { return res.json(); }).then(function (options) {

@@ -189,7 +189,7 @@ describe("magic link routes", () => {
     if (!page) throw new Error("no page");
     expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(page.headers.get("cache-control")).toBe("no-store");
-    expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(page.headers.get("referrer-policy")).toBe("strict-origin");
     expect(page.headers.get("x-robots-tag")).toBe("noindex");
     expect(page.headers.get("content-security-policy")).toBe(
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://app.example.com; base-uri 'none'; frame-ancestors 'none'",

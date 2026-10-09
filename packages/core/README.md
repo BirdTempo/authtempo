@@ -34,8 +34,9 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
-| GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the app's redirect with a code when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
-| GET | `/handoff/continue` | `?h=` | 302 to `<redirect>?code=` with a session; the page again without one; 302 to `/?auth_error=<code>` on a spent or unknown id |
+| GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the confirm page when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
+| GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
+| POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
 | POST | `/handoff/redeem` | `{ code, verifier }` | `{ token, user, session }` as a bearer answer, no cookie; 400 `invalid_body`, `invalid_token`, `token_expired`; 429 `rate_limited` |
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
@@ -72,14 +73,19 @@ verifier and its S256 challenge, then opens the system browser at
 `GET /auth/handoff/start?challenge=<c>&redirect=consumera://auth`. Core
 shows the sign-in page: a magic link form, the configured social
 buttons, and a passkey button. Every method ends by visiting
-`/auth/handoff/continue?h=<id>` on the API origin, which mints a
-one-time code and redirects to `consumera://auth?code=<code>`. The app
+`/auth/handoff/continue?h=<id>` on the API origin, which shows a confirm
+page. When the person presses the button, core mints a one-time code and
+redirects to `consumera://auth?code=<code>`. The app
 then calls `POST /auth/handoff/redeem { code, verifier }` and keeps the
 bearer token. A code lives two minutes and redeems once; a start lives
-ten minutes.
+ten minutes, or as long as a magic link if that is longer.
+
+The continue is a consent step. A signed-in browser sees a page that names the account and the app, and the code is minted only when the person presses the button. The post is accepted from the API origin only.
 
 In development `devRedirectPattern` admits a full redirect URL, for
-example `/^exp:\/\/[\d.]+:\d+\/--\/auth$/` for Expo Go. `signInPage`
+example `/^exp:\/\/[\d.]+:\d+\/--\/auth$/` for Expo Go. Core refuses a
+pattern with the `g` or `y` flag, and refuses any admitted `http` or
+`https` URL that is not on a loopback host. `signInPage`
 replaces the page; the function gets the base path, the continue path,
 the enabled methods, and the script nonce, and must put the nonce on its
 script tag. `@tempo-auth/handoff` (plan 5b) does the app side.

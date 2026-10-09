@@ -170,6 +170,11 @@ describe("appURL, cookie, handoff config", () => {
     expect(c.handoff?.devRedirectPattern?.test("exp://192.168.1.5:8081/--/auth")).toBe(true);
     expect(typeof c.handoff?.signInPage).toBe("function");
     expect(() => resolveConfig({ ...base, handoff: { schemes: [] } })).toThrow(/handoff.schemes/);
+    // A g or y regex keeps state between test calls and alternates its answer.
+    for (const devRedirectPattern of [/x/g, /x/y])
+      expect(() =>
+        resolveConfig({ ...base, handoff: { schemes: ["consumera://"], devRedirectPattern } }),
+      ).toThrow(/devRedirectPattern/);
     expect(() => resolveConfig({ ...base, handoff: { schemes: ["https://"] } })).toThrow(
       /handoff.schemes/,
     );

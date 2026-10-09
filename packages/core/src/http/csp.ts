@@ -19,7 +19,8 @@ export function pageHeaders(_config: ResolvedConfig, policy: string): Record<str
   return {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
-    "referrer-policy": "no-referrer",
+    // strict-origin, not no-referrer: with no-referrer Chrome sends Origin: null on a same-origin form post and the router refuses it (proved with headless Chrome 155 on 2026-10-09). strict-origin sends the origin only, so a token in the page URL never leaves in a Referer.
+    "referrer-policy": "strict-origin",
     "x-robots-tag": "noindex",
     "content-security-policy": policy,
   };
