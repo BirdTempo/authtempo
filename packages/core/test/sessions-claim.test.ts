@@ -120,6 +120,38 @@ function interleaveAfterIdentityRead(
   return { fired: () => fired };
 }
 
+/**
+ * Wraps the next `storage.transaction` call so that `afterUserCreate` runs
+ * inside that transaction, just after its user insert and before any later
+ * statement. Later transactions run unchanged.
+ */
+function interleaveAfterUserCreate(
+  storage: StorageAdapter,
+  afterUserCreate: () => Promise<void>,
+): { fired: () => boolean } {
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  let fired = false;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        create: async (m, d) => {
+          const row = await tx.create(m, d);
+          if (m === "user" && !fired) {
+            fired = true;
+            await afterUserCreate();
+          }
+          return row;
+        },
+      }),
+    );
+  };
+  return { fired: () => fired };
+}
+
 /** Runs `before` just before the next `storage.transaction` call starts. */
 function interleaveBeforeNextTransaction(
   storage: StorageAdapter,
@@ -362,6 +394,46 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(
       await auth.storage.findMany("identity", [{ field: "subject", op: "eq", value: "attacker" }]),
     ).toEqual([]);
+    const sessions = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await resolveSession(auth.config, proved.value.token)).not.toBeNull();
+  });
+
+  it("links nothing to the owner's account when the claim lands between the claimant's user create and identity create (re-review R-1)", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const auth = socialAuth({}, fakeJwt(tokens));
+    const s = await started(auth);
+    tokens["idtok-default"] = googleToken(s.nonce, { sub: "attacker", email_verified: false });
+    const link = await magicLinkToken(auth);
+
+    // On D1 the owner's whole claim runs inside the claimant's open
+    // transaction, just after its user create: the claim finds the new user,
+    // adds the email identity, and verifies the user before the claimant's
+    // identity exists, so a guard on that identity would pass.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveAfterUserCreate(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await complete(auth, s);
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const userId = proved.value.user.id;
+    expect(
+      await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
+    ).toMatchObject({ email: EMAIL, emailVerified: true });
+    const identities = await auth.storage.findMany("identity", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(identities.map((x) => [x.provider, x.subject])).toEqual([["email", EMAIL]]);
     const sessions = await auth.storage.findMany("session", [
       { field: "userId", op: "eq", value: userId },
     ]);

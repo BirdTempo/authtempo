@@ -16,9 +16,9 @@ import { createSession } from "./sessions.js";
 import {
   ClaimRacedError,
   claimEmail,
-  identityStillLinked,
   normalizeEmail,
   undoSessionIfIdentityGone,
+  userStillUnverified,
 } from "./users.js";
 
 export const OAUTH_STATE_PREFIX = "os_";
@@ -266,10 +266,11 @@ async function exchangeCode(
  * attempt. A `unique_violation` is caught here, outside the transaction,
  * and the whole resolution runs once more against the winner's rows.
  * `after` runs inside the same transaction once the user is resolved, so
- * the sign-in's session commits with the claim. When an identity row
- * without a proof of the address authorizes the sign-in, a guard on that
- * row is the last statement, and a raced claim answers
- * `email_taken_unverified`.
+ * the sign-in's session commits with the claim. When an existing identity
+ * row without a proof of the address authorizes the sign-in, a guard on
+ * that row is the last statement. When this transaction creates an
+ * unverified user, the guard is on the user row. A raced claim answers
+ * `email_taken_unverified` in both cases.
  */
 export function resolveSocialUser(
   storage: StorageAdapter,
@@ -305,10 +306,19 @@ export async function resolveSocialUser<T extends AfterSession>(
             // before the commit. A throw would undo the user create, and the
             // undo deletes the user row by id. That row is the owner's now:
             // the owner's email identity and session would point to no user,
-            // and the owner could not sign in again. So delete only the own
-            // session, and commit (final review I-1, 2026-10-10).
-            if (!(await identityStillLinked(tx, trustedIdentityId, now))) {
+            // and the owner could not sign in again (final review I-1).
+            // The guard is on the user row, not on the identity row: a claim
+            // that ran before this transaction created its identity did not
+            // delete that identity (re-review R-1). claimEmail flips the flag
+            // in its first statement, so any claim since the user create
+            // makes this match zero rows. Then delete the own session and the
+            // own identity by id, and commit, so no undo runs. When it
+            // matches one row it is the last statement, so no undo runs after
+            // it, and a later claim deletes the identity and the session.
+            // Checked 2026-10-10.
+            if (!(await userStillUnverified(tx, user.id, now))) {
               await tx.delete("session", [{ field: "id", op: "eq", value: value.session.id }]);
+              await tx.delete("identity", [{ field: "id", op: "eq", value: trustedIdentityId }]);
               return fail<never>("email_taken_unverified");
             }
           } else if (trustedIdentityId) {

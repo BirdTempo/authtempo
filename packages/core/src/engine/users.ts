@@ -88,6 +88,19 @@ export async function undoSessionIfClaimed(
   userId: string,
   now: Date,
 ): Promise<void> {
+  if (!(await userStillUnverified(tx, userId, now))) throw new ClaimRacedError();
+}
+
+/**
+ * Runs inside the caller's transaction. False when a claim verified the
+ * user since this transaction read or created it. `claimEmail` flips the
+ * flag in its first statement, so a conditional update sees any claim.
+ */
+export async function userStillUnverified(
+  tx: StorageAdapter,
+  userId: string,
+  now: Date,
+): Promise<boolean> {
   const n = await tx.update(
     "user",
     [
@@ -96,7 +109,7 @@ export async function undoSessionIfClaimed(
     ],
     { updatedAt: now },
   );
-  if (n === 0) throw new ClaimRacedError();
+  return n > 0;
 }
 
 /**
@@ -119,7 +132,7 @@ export async function undoSessionIfIdentityGone(
  * identity row since the identity read. A conditional update, not a read,
  * so that it sees the claim's first statement on D1.
  */
-export async function identityStillLinked(
+async function identityStillLinked(
   tx: StorageAdapter,
   identityId: string,
   now: Date,
