@@ -10,6 +10,7 @@ import {
 import { resolveSession } from "../src/engine/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { makeAuth } from "./helpers.js";
 
@@ -178,6 +179,21 @@ describe("passkey registration", () => {
     expect((await challengeRows(auth)).every((row) => row.consumedAt !== null)).toBe(true);
     expect(await auth.storage.findMany("session", [])).toHaveLength(0);
   });
+
+  it("refuses a credential id that another user already registered", async () => {
+    const auth = passkeyAuth();
+    const ada = await auth.seedUser("ada@example.com");
+    const bob = await auth.seedUser("bob@example.com");
+    const { soft } = await registered(auth, ada);
+    const options = await passkeyRegistrationOptions(auth.config, { user: bob });
+    if (!options.ok) throw new Error(options.code);
+    const r = await verifyPasskeyRegistration(auth.config, {
+      user: bob,
+      response: await soft.register(options.value.challenge),
+    });
+    expect(r).toMatchObject({ ok: false, code: "passkey_failed" });
+    expect(await auth.storage.findMany("passkey", [])).toHaveLength(1);
+  });
 });
 
 describe("passkey authentication", () => {
@@ -308,6 +324,41 @@ describe("passkey authentication", () => {
         userAgent: null,
       }),
     ).toMatchObject({ ok: false, code: "rate_limited" });
+  });
+
+  it("refuses a sign-in when the stored counter moved after it was read", async () => {
+    const auth = passkeyAuth();
+    const user = await auth.seedUser("ada@example.com");
+    const { soft } = await registered(auth, user);
+    const options = await passkeyAuthenticationOptions(auth.config, { ip: null });
+    if (!options.ok) throw new Error(options.code);
+    const response = await soft.authenticate(options.value.challenge);
+    // A concurrent replay moves the counter between our read and our write.
+    const inner = auth.config.storage;
+    const racing: StorageAdapter = {
+      create: (m, d) => inner.create(m, d),
+      findOne: (m, w) => inner.findOne(m, w),
+      findMany: (m, w, o) => inner.findMany(m, w, o),
+      update: async (m, w, d) => {
+        if (m === "passkey") {
+          await inner.update(
+            "passkey",
+            [{ field: "credentialId", op: "eq", value: soft.credentialId }],
+            { counter: 7 },
+          );
+        }
+        return inner.update(m, w, d);
+      },
+      delete: (m, w) => inner.delete(m, w),
+      transaction: (fn) => inner.transaction(fn),
+    };
+    const r = await verifyPasskeyAuthentication(
+      { ...auth.config, storage: racing },
+      { response, ip: null, userAgent: null },
+    );
+    expect(r).toMatchObject({ ok: false, code: "passkey_failed" });
+    expect(await auth.storage.findMany("session", [])).toHaveLength(0);
+    expect((await auth.storage.findMany("passkey", []))[0]?.counter).toBe(7);
   });
 });
 

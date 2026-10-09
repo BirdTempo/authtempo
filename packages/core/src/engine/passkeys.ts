@@ -9,6 +9,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "../seams/webauthn.js";
+import { StorageError } from "../storage/port.js";
 import { createSession } from "./sessions.js";
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -166,19 +167,30 @@ export async function verifyPasskeyRegistration(
     return fail("passkey_failed");
   }
   const now = config.clock.now();
-  const row = await config.storage.create("passkey", {
-    id: newId(now),
-    userId: input.user.id,
-    credentialId: registered.id,
-    publicKey: toBase64Url(registered.publicKey),
-    counter: registered.counter,
-    transports: registered.transports ? registered.transports.join(",") : null,
-    deviceType: registered.deviceType,
-    backedUp: registered.backedUp,
-    name: input.name ?? null,
-    createdAt: now,
-    updatedAt: now,
-  });
+  let row: PasskeyRow;
+  try {
+    row = await config.storage.create("passkey", {
+      id: newId(now),
+      userId: input.user.id,
+      credentialId: registered.id,
+      publicKey: toBase64Url(registered.publicKey),
+      counter: registered.counter,
+      transports: registered.transports ? registered.transports.join(",") : null,
+      deviceType: registered.deviceType,
+      backedUp: registered.backedUp,
+      name: input.name ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (e) {
+    // The credential id is unique across users. A second registration of
+    // the same authenticator answers like any other failed ceremony.
+    if (e instanceof StorageError && e.code === "unique_violation" && e.model === "passkey") {
+      console.error("tempo-auth: passkey credential already registered");
+      return fail("passkey_failed");
+    }
+    throw e;
+  }
   return ok(summary(row));
 }
 
@@ -241,11 +253,20 @@ export async function verifyPasskeyAuthentication(
   ]);
   if (!user) return fail("passkey_failed");
   const now = config.clock.now();
-  await config.storage.update("passkey", [{ field: "id", op: "eq", value: passkey.id }], {
-    counter: verified.newCounter,
-    backedUp: verified.backedUp,
-    updatedAt: now,
-  });
+  // Conditional on the counter we read, so a concurrent replay of the same
+  // assertion cannot also pass: only one request moves the counter.
+  const moved = await config.storage.update(
+    "passkey",
+    [
+      { field: "id", op: "eq", value: passkey.id },
+      { field: "counter", op: "eq", value: passkey.counter },
+    ],
+    { counter: verified.newCounter, backedUp: verified.backedUp, updatedAt: now },
+  );
+  if (moved !== 1) {
+    console.error("tempo-auth: passkey counter moved");
+    return fail("passkey_failed");
+  }
   const { token, session } = await createSession(config, {
     userId: user.id,
     ip: input.ip,
