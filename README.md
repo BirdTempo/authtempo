@@ -18,13 +18,9 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@tempo-auth/handoff` | Native and desktop sign-in through the system browser, with openers for Expo and Electron. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
-The example pins `@cloudflare/vitest-plugin` 1.3.7, which needs vitest 4, so
-it runs vitest 4.1.11 while core runs vitest 5.0.3. Plugin 1.4.0 is the
-first with vitest 5 support, and on 2026-10-09 it was younger than the
-one-day release age; move the example to plugin 1.4.0 and vitest 5 on
-2026-10-10 or later.
+The example pins `@cloudflare/vitest-plugin` 1.4.0 and runs vitest 5.0.3, the same as core.
 
-Organizations are in core behind `organizations: {}`.
+Organizations are in core behind `organizations: {}`. Passwords are in core behind `password: {}`; one hash needs Workers Paid.
 
 The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The memory limiter is for tests. `auth.api.sweepExpired()` deletes expired rows, including limit windows, and runs from a scheduled handler.
 
@@ -43,6 +39,7 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
 
 - A POST with an `Origin` header not in `trustedOrigins` gets 403.
 - Every token is stored as a SHA-256 hash. The clear token appears once.
+- A password row is a credential under the claim rule: a proof of an unverified address deletes it, except the row the verify link confirms.
 - A magic link is single use. Two clicks race for one conditional update.
 - A `next` path must start with `/` and not `//`. Anything else becomes `/`.
 - The core runs on Workers with no compatibility flag. The example Worker

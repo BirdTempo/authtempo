@@ -37,6 +37,8 @@ Version 2 (plan 6, 2026-10-09) adds `ta_organization`, `ta_member`, and `ta_invi
 
 Version 3 (plan 6b, 2026-10-10) adds `ta_limit` for the owned limiter (with the index `ix_ta_limit__expires_at` for its sweep) and the index `ix_ta_session__active_organization_id`. Apply `0003_schema_v3` before you deploy a core at version 3; the adapter refuses a database at version 2.
 
+Version 4 (plan 8, 2026-10-10) adds `ta_password`, one row per user, with a unique index on the user. Apply `0004_schema_v4` before you deploy a core at version 4; the adapter refuses a database at version 3.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.
