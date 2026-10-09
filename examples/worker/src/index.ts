@@ -36,6 +36,8 @@ function getAuth(env: Env): Auth {
       rpName: "tempo-auth example",
       origins: [env.BASE_URL],
     },
+    // The handoff for a desktop or native app. The example admits one scheme.
+    handoff: { schemes: ["example-app://"] },
   });
   return auth;
 }

@@ -22,13 +22,6 @@ export interface Route {
   handler(ctx: RouteContext): Promise<Response>;
 }
 
-/**
- * The client IP comes from `config.clientIp`. On Workers the platform sets
- * `cf-connecting-ip`, and the default reads it. On any other host a caller
- * can set that header, so a deployment there must pass its own `clientIp`
- * that reads the trusted proxy header. A null IP counts against one shared
- * IP bucket in the magic link limit, which fails closed.
- */
 function originTrusted(config: ResolvedConfig, origin: string): boolean {
   if (origin === config.baseURL) return true;
   return config.trustedOrigins.has(origin);
@@ -43,6 +36,12 @@ function cors(res: Response, origin: string): Response {
 }
 
 /**
+ * The client IP comes from `config.clientIp`. On Workers the platform sets
+ * `cf-connecting-ip`, and the default reads it. On any other host a caller
+ * can set that header, so a deployment there must pass its own `clientIp`
+ * that reads the trusted proxy header. A null IP counts against one shared
+ * IP bucket in the magic link limit, which fails closed.
+ *
  * Exact match on method and `basePath + route.path`. An `OPTIONS` from a
  * trusted origin gets 204 with the CORS headers. Any other `OPTIONS` gets 403.
  * Every response to a trusted origin carries the CORS headers. The POST

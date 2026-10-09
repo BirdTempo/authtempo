@@ -86,6 +86,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         );
         if (jsonCaller) {
           // One extra read, on the JSON path only. verifyMagicLink does not return the row.
+          // The session row was created a moment ago; a null here is a storage failure, and the token is spent. The caller asks for a new link.
           const resolved = await resolveSession(config, result.value.token);
           if (!resolved) return respond(fail("invalid_token"));
           return json(publicSession(resolved), 200, { "set-cookie": cookie });
