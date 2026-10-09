@@ -151,9 +151,9 @@ describe("simplewebauthn seam", () => {
         expectedChallenge: c,
         expectedOrigin: [RP.origin],
         expectedRPID: RP.rpID,
-        credential: { ...credential, counter: 5 },
+        credential,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/authentication not verified/);
     expect(fromBase64Url(stored.id)).toHaveLength(16);
   });
 });
