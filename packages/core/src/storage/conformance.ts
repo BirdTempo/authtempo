@@ -488,5 +488,81 @@ export function runAdapterConformance(
         code: "unknown_field",
       });
     });
+
+    it("sorts by several keys in order, so id breaks a tie (plan 6)", async () => {
+      const at = t0;
+      await db.create("organization", {
+        id: "o2",
+        slug: "b",
+        name: "Same",
+        metadata: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      await db.create("organization", {
+        id: "o1",
+        slug: "a",
+        name: "Same",
+        metadata: { k: 1 },
+        createdAt: at,
+        updatedAt: at,
+      });
+      await db.create("organization", {
+        id: "o3",
+        slug: "c",
+        name: "Other",
+        metadata: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const rows = await db.findMany("organization", [], {
+        sort: [
+          { field: "name", dir: "asc" },
+          { field: "id", dir: "asc" },
+        ],
+      });
+      expect(rows.map((r) => r.id)).toEqual(["o3", "o1", "o2"]);
+      expect(rows[1]?.metadata).toEqual({ k: 1 });
+    });
+
+    it("round-trips the version 2 models and keeps their unique keys", async () => {
+      const at = t0;
+      await db.create("member", {
+        id: "m1",
+        organizationId: "o1",
+        userId: "u1",
+        role: "owner",
+        createdAt: at,
+        updatedAt: at,
+      });
+      await expect(
+        db.create("member", {
+          id: "m2",
+          organizationId: "o1",
+          userId: "u1",
+          role: "admin",
+          createdAt: at,
+          updatedAt: at,
+        }),
+      ).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["organizationId", "userId"],
+      });
+      await db.create("invitation", {
+        id: "i1",
+        organizationId: "o1",
+        email: "b@example.com",
+        role: "member",
+        inviterId: "u1",
+        tokenHash: "h1",
+        expiresAt: new Date(at.getTime() + 1000),
+        acceptedAt: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const inv = await db.findOne("invitation", [{ field: "tokenHash", op: "eq", value: "h1" }]);
+      expect(inv?.acceptedAt).toBeNull();
+      expect(inv?.expiresAt.getTime()).toBe(at.getTime() + 1000);
+    });
   });
 }

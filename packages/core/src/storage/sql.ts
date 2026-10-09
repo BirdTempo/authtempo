@@ -299,19 +299,25 @@ export function selectStatement<M extends ModelName>(
   opts: FindManyOptions<M> = {},
 ): Statement | null {
   assertModel(model);
-  if (opts.sort) assertFields(model, [opts.sort.field]);
+  const sorts = opts.sort === undefined ? [] : Array.isArray(opts.sort) ? opts.sort : [opts.sort];
+  assertFields(
+    model,
+    sorts.map((x) => x.field),
+  );
   validateLimit(model, opts.limit);
   const p = new Params(d);
   const w = compileWhere(d, model, where, p);
   if (w.impossible) return null;
   let sql = `SELECT ${columnsOf(model).join(", ")} FROM ${TABLES[model]}${w.clause}`;
-  if (opts.sort) {
-    const col = columnName(opts.sort.field);
-    const dir = opts.sort.dir === "asc" ? "ASC" : "DESC";
-    sql +=
-      d.nullsOrder === "explicit"
-        ? ` ORDER BY ${col} IS NULL${dir === "DESC" ? " DESC" : ""}, ${col} ${dir}`
-        : ` ORDER BY ${col} ${dir}`;
+  if (sorts.length > 0) {
+    const terms = sorts.map((x) => {
+      const col = columnName(x.field);
+      const dir = x.dir === "asc" ? "ASC" : "DESC";
+      return d.nullsOrder === "explicit"
+        ? `${col} IS NULL${dir === "DESC" ? " DESC" : ""}, ${col} ${dir}`
+        : `${col} ${dir}`;
+    });
+    sql += ` ORDER BY ${terms.join(", ")}`;
   }
   if (opts.limit !== undefined) sql += ` LIMIT ${p.add(opts.limit)}`;
   return { sql, params: p.values };

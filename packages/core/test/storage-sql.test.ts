@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { schema } from "../src/schema.js";
+import { SCHEMA_VERSION, schema } from "../src/schema.js";
 import { StorageError } from "../src/storage/port.js";
 import {
   assertFields,
@@ -388,7 +388,7 @@ describe("schemaVersionGate", () => {
   }
 
   it("reads once and accepts the current and a newer version", async () => {
-    for (const v of ["1", "2"]) {
+    for (const v of [String(SCHEMA_VERSION), String(SCHEMA_VERSION + 1)]) {
       const f = fake([v]);
       const gate = schemaVersionGate(f.read);
       await gate();
@@ -413,7 +413,7 @@ describe("schemaVersionGate", () => {
   });
 
   it("resets after a failure, so the next call reads again", async () => {
-    const f = fake(["0", "1"]);
+    const f = fake(["0", String(SCHEMA_VERSION)]);
     const gate = schemaVersionGate(f.read);
     await expect(gate()).rejects.toMatchObject({ code: "schema_mismatch" });
     await expect(gate()).resolves.toBeUndefined();
@@ -423,7 +423,7 @@ describe("schemaVersionGate", () => {
 
   it("rethrows an error from read unchanged and retries on the next call", async () => {
     const boom = new Error("D1_ERROR: boom");
-    const f = fake([boom, "1"]);
+    const f = fake([boom, String(SCHEMA_VERSION)]);
     const gate = schemaVersionGate(f.read);
     const err = await gate().catch((e: unknown) => e);
     expect(err).toBe(boom);
@@ -437,7 +437,7 @@ describe("schemaVersionGate", () => {
     const gate = schemaVersionGate(() => {
       calls++;
       if (calls === 1) throw boom;
-      return Promise.resolve("1");
+      return Promise.resolve(String(SCHEMA_VERSION));
     });
     await expect(gate()).rejects.toBe(boom);
     await expect(gate()).resolves.toBeUndefined();

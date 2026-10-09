@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface BaseRow {
   id: string;
@@ -56,12 +56,39 @@ export interface PasskeyRow extends BaseRow {
   name: string | null;
 }
 
+export interface OrganizationRow extends BaseRow {
+  /** NFKC-normalized, lowercase, unique. */
+  slug: string;
+  name: string;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface MemberRow extends BaseRow {
+  organizationId: string;
+  userId: string;
+  /** One or more roles joined by comma. The rank is the highest part. */
+  role: string;
+}
+
+export interface InvitationRow extends BaseRow {
+  organizationId: string;
+  email: string;
+  role: string;
+  inviterId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  acceptedAt: Date | null;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
   session: SessionRow;
   verification: VerificationRow;
   passkey: PasskeyRow;
+  organization: OrganizationRow;
+  member: MemberRow;
+  invitation: InvitationRow;
 }
 
 export type ModelName = keyof Models;
@@ -154,5 +181,39 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["credentialId"]],
     indexes: [["userId"]],
+  },
+  organization: {
+    fields: {
+      ...base,
+      slug: { type: "string" },
+      name: { type: "string" },
+      metadata: { type: "json", nullable: true },
+    },
+    unique: [["slug"]],
+    indexes: [],
+  },
+  member: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      userId: { type: "string" },
+      role: { type: "string" },
+    },
+    unique: [["organizationId", "userId"]],
+    indexes: [["userId"]],
+  },
+  invitation: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      email: { type: "string" },
+      role: { type: "string" },
+      inviterId: { type: "string" },
+      tokenHash: { type: "string" },
+      expiresAt: { type: "date" },
+      acceptedAt: { type: "date", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    indexes: [["organizationId", "email"]],
   },
 };

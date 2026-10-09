@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from "@tempo-auth/core";
 import type { Sql } from "postgres";
 import { describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
@@ -26,7 +27,9 @@ describe("postgres schema version", () => {
         code: "schema_mismatch",
         fields: ["none"],
       });
-      await db.sql.unsafe("INSERT INTO ta_meta (key, value) VALUES ('schema_version', '2')");
+      await db.sql.unsafe(
+        `INSERT INTO ta_meta (key, value) VALUES ('schema_version', '${SCHEMA_VERSION + 1}')`,
+      );
       const adapter = createPostgresAdapter(db.sql);
       await expect(adapter.findMany("user", [])).resolves.toEqual([]);
       await db.sql.unsafe("UPDATE ta_meta SET value = '0'");
@@ -42,7 +45,9 @@ describe("postgres schema version", () => {
       await db.sql.unsafe("UPDATE ta_meta SET value = '0' WHERE key = 'schema_version'");
       const adapter = createPostgresAdapter(db.sql);
       await expect(adapter.findMany("user", [])).rejects.toMatchObject({ code: "schema_mismatch" });
-      await db.sql.unsafe("UPDATE ta_meta SET value = '1' WHERE key = 'schema_version'");
+      await db.sql.unsafe(
+        `UPDATE ta_meta SET value = '${SCHEMA_VERSION}' WHERE key = 'schema_version'`,
+      );
       await expect(adapter.findMany("user", [])).resolves.toEqual([]);
     } finally {
       await db.close();
@@ -61,7 +66,9 @@ describe("postgres schema version", () => {
       for (const r of results) {
         expect(r).toMatchObject({ status: "rejected", reason: { code: "schema_mismatch" } });
       }
-      await db.sql.unsafe("UPDATE ta_meta SET value = '1' WHERE key = 'schema_version'");
+      await db.sql.unsafe(
+        `UPDATE ta_meta SET value = '${SCHEMA_VERSION}' WHERE key = 'schema_version'`,
+      );
       await expect(adapter.findMany("user", [])).resolves.toEqual([]);
     } finally {
       await db.close();

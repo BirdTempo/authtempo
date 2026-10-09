@@ -21,8 +21,11 @@ export type { Clock } from "./primitives/clock.js";
 export type { Result } from "./result.js";
 export {
   type IdentityRow,
+  type InvitationRow,
+  type MemberRow,
   type ModelName,
   type Models,
+  type OrganizationRow,
   type PasskeyRow,
   SCHEMA_VERSION,
   type SessionRow,
