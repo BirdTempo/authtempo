@@ -273,4 +273,57 @@ describe("createTokenStore", () => {
     expect(await store.get()).toBe("ts_now");
     expect(file.writes()).toBe(1);
   });
+  it("orders a clear after a get whose re-encrypt write is slow", async () => {
+    const { storage } = fakeAsyncSafeStorage(true, true);
+    const file = fakeFile();
+    await file.write(enc.encode("enc:ts_old"));
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let stored: Uint8Array | null = file.current();
+    const store = createTokenStore({
+      cipher: asyncSafeStorageCipher(storage),
+      read: async () => stored,
+      write: async (b) => {
+        await gate;
+        stored = b;
+      },
+      remove: async () => {
+        stored = null;
+      },
+    });
+    const got = store.get();
+    const cleared = store.clear();
+    release();
+    expect(await got).toBe("ts_old");
+    await cleared;
+    expect(stored).toBeNull();
+  });
+  it("does not re-encrypt when the cipher is unavailable, and answers the plain", async () => {
+    const file = fakeFile();
+    await file.write(enc.encode("enc:ts_old"));
+    const base = safeStorageCipher(fakeSafeStorage());
+    const store = createTokenStore({
+      cipher: {
+        ...base,
+        available: async () => false,
+        decrypt: async (b) => ({ ...(await base.decrypt(b)), reEncrypt: true }),
+      },
+      ...file,
+    });
+    expect(await store.get()).toBe("ts_old");
+    expect(file.writes()).toBe(1);
+  });
+  it("answers null and removes the file when the async decrypt rejects", async () => {
+    const file = fakeFile();
+    await file.write(enc.encode("garbage"));
+    const { storage } = fakeAsyncSafeStorage();
+    storage.decryptStringAsync = async () => {
+      throw new Error("bad");
+    };
+    const store = createTokenStore({ cipher: asyncSafeStorageCipher(storage), ...file });
+    expect(await store.get()).toBeNull();
+    expect(file.current()).toBeNull();
+  });
 });

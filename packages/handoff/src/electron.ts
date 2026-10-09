@@ -172,31 +172,45 @@ export function createTokenStore(input: {
   write(bytes: Uint8Array): Promise<void>;
   remove(): Promise<void>;
 }): TokenStore {
+  // The re-encrypt write inside get must not land after a clear or over a set; one queue orders every operation.
+  let queue: Promise<unknown> = Promise.resolve();
+  const run = <T>(fn: () => Promise<T>): Promise<T> => {
+    const p = queue.then(fn, fn);
+    queue = p.then(
+      () => undefined,
+      () => undefined,
+    );
+    return p;
+  };
   return {
-    async get() {
-      const bytes = await input.read();
-      if (!bytes) return null;
-      let decrypted: { plain: string; reEncrypt: boolean };
-      try {
-        decrypted = await input.cipher.decrypt(bytes);
-      } catch {
-        // The keychain entry changed, or the file is damaged. Drop it; the person signs in again.
-        // The contract is that unreadable bytes never throw, even when the remove fails.
-        await input.remove().catch(() => {});
-        return null;
-      }
-      if (decrypted.reEncrypt) {
-        // The platform asked for a fresh encryption. A failure here keeps the old bytes, which still decrypt, so the person stays signed in.
+    get: () =>
+      run(async () => {
+        const bytes = await input.read();
+        if (!bytes) return null;
+        let decrypted: { plain: string; reEncrypt: boolean };
         try {
-          await input.write(await input.cipher.encrypt(decrypted.plain));
-        } catch {}
-      }
-      return decrypted.plain;
-    },
-    async set(token) {
-      if (!(await input.cipher.available())) throw new TokenStoreError("encryption_unavailable");
-      await input.write(await input.cipher.encrypt(token));
-    },
-    clear: () => input.remove(),
+          decrypted = await input.cipher.decrypt(bytes);
+        } catch {
+          // The keychain entry changed, or the file is damaged. Drop it; the person signs in again.
+          // The contract is that unreadable bytes never throw, even when the remove fails.
+          await input.remove().catch(() => {});
+          return null;
+        }
+        // A weak backend must not receive bytes that set would refuse.
+        if (decrypted.reEncrypt) {
+          // A failure here keeps the old bytes, which still decrypt, so the person stays signed in.
+          try {
+            if (await input.cipher.available())
+              await input.write(await input.cipher.encrypt(decrypted.plain));
+          } catch {}
+        }
+        return decrypted.plain;
+      }),
+    set: (token) =>
+      run(async () => {
+        if (!(await input.cipher.available())) throw new TokenStoreError("encryption_unavailable");
+        await input.write(await input.cipher.encrypt(token));
+      }),
+    clear: () => run(() => input.remove()),
   };
 }
