@@ -40,3 +40,35 @@ it("lets exactly one of two concurrent calls at max - 1 pass", async () => {
   expect(row?.count).toBe(w.max + 1);
   await clear();
 });
+
+it("lets exactly max of twenty concurrent calls pass", async () => {
+  // A read-then-write limiter (a SELECT of the count, then an upsert of the
+  // count plus one) failed this test in the proof run of 2026-10-10: all
+  // twenty reads ran before the first write. The one statement passes.
+  await clear();
+  const w = { seconds: 60, max: 3 };
+  const limiter = createD1Limiter(env.DB, manualClock());
+  const all = await Promise.all(Array.from({ length: 20 }, () => limiter.allow("burst", w)));
+  expect(all.filter((b) => b)).toHaveLength(w.max);
+  await clear();
+});
+
+it("keeps one count for two limiter instances on one database", async () => {
+  // Each isolate builds its own limiter. The count is in ta_limit, so two
+  // instances share it. A limiter that counted in memory would let each
+  // instance run to max on its own.
+  await clear();
+  const w = { seconds: 60, max: 4 };
+  const clock = manualClock();
+  const a = createD1Limiter(env.DB, clock);
+  const b = createD1Limiter(env.DB, clock);
+  const half = w.max / 2;
+  const first = await Promise.all([
+    ...Array.from({ length: half }, () => a.allow("shared", w)),
+    ...Array.from({ length: half }, () => b.allow("shared", w)),
+  ]);
+  expect(first).toEqual(Array.from({ length: w.max }, () => true));
+  expect(await a.allow("shared", w)).toBe(false);
+  expect(await b.allow("shared", w)).toBe(false);
+  await clear();
+});

@@ -5,6 +5,10 @@ import { type Clock, type LimiterPort, limiterKey, systemClock } from "@tempo-au
  * when it has ended, else add 1. D1 runs one statement at a time, so two
  * concurrent calls at `max - 1` cannot both read `max - 1`: one sees `max`,
  * the other `max + 1`. `?1` the stored key, `?2` now in ms, `?3` the window in ms.
+ * Checked 2026-10-10: the Cloudflare page "D1 limits"
+ * (developers.cloudflare.com/d1/platform/limits/) says "Each individual D1
+ * database is inherently single-threaded, and processes queries one at a
+ * time." The race and burst tests in test/limiter.test.ts are the local evidence.
  */
 const ALLOW = `INSERT INTO ta_limit (key, window_start, count, expires_at) VALUES (?1, ?2, 1, ?2 + ?3)
 ON CONFLICT(key) DO UPDATE SET

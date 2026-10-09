@@ -6,7 +6,7 @@ The storage adapter for Cloudflare D1. No Node dependency and no compatibility f
 import { createAuth } from "@tempo-auth/core";
 import { createD1Adapter } from "@tempo-auth/adapter-d1";
 
-const auth = createAuth({ /* ... */, storage: createD1Adapter(env.DB) });
+const auth = createAuth({ ...config, storage: createD1Adapter(env.DB) });
 ```
 
 ## Migrations
@@ -51,6 +51,10 @@ const auth = createAuth({ ...config, limiter: createD1Limiter(env.DB) });
 Each call runs one statement. It inserts the key at count 1, or on a
 conflict resets the window when it has ended, else adds 1, and returns the
 count. The call passes when the count is at most `max`. D1 runs one statement at a time, so two concurrent calls cannot both see `max - 1`.
+Checked 2026-10-10: the Cloudflare page "D1 limits"
+(<https://developers.cloudflare.com/d1/platform/limits/>) says each D1
+database "processes queries one at a time". The race and burst tests in
+`test/limiter.test.ts` are the local evidence.
 The stored key is the key, the seconds, and the max, joined by U+001F
 (the unit separator). A key with `|` is an ordinary key. A key with U+001F
 throws an `Error`: no caller value can carry it, and it would alias
