@@ -1,5 +1,4 @@
 import type { ResolvedConfig } from "../config.js";
-import { safeNext } from "../http/safe-next.js";
 import {
   constantTimeEqual,
   randomToken,
@@ -15,6 +14,8 @@ export const HANDOFF_ID_PREFIX = "hs_";
 export const HANDOFF_CODE_PREFIX = "hc_";
 const ID_RE = /^hs_[A-Za-z0-9_-]{43}$/;
 const CODE_RE = /^hc_[A-Za-z0-9_-]{43}$/;
+// RFC 7636 verifier length: 43 to 128 unreserved characters.
+const VERIFIER_RE = /^[A-Za-z0-9_-]{43,128}$/;
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
 const START_TTL_MS = 10 * 60_000;
 const CODE_TTL_MS = 2 * 60_000;
@@ -27,14 +28,12 @@ export interface HandoffStart {
   challenge: string;
   /** `<scheme>auth` for a configured scheme, or a URL the dev pattern admits. */
   redirect: string;
-  next?: string | undefined;
   ip: string | null;
 }
 
 interface StartData {
   challenge: string;
   redirect: string;
-  next: string;
 }
 
 interface CodeData {
@@ -73,7 +72,6 @@ export async function startHandoff(
   const data: StartData = {
     challenge: input.challenge,
     redirect: input.redirect,
-    next: safeNext(input.next),
   };
   await config.storage.create("verification", {
     id: newId(now),
@@ -128,6 +126,7 @@ export async function continueHandoff(
   if (!ID_RE.test(input.handoffId)) return fail("invalid_token");
   const start = await consume(config, await sha256Hex(input.handoffId));
   if (!start.ok) return start;
+  // Defense in depth: the hs_ and hc_ prefixes already keep a start row and a code row apart, so this branch is unreachable through the public API and has no test.
   if (start.value.identifier !== START_ID) return fail("invalid_token");
   const data = start.value.data as StartData | null;
   if (!data || typeof data.challenge !== "string" || typeof data.redirect !== "string")
@@ -163,8 +162,11 @@ export async function redeemHandoff(
     return fail("rate_limited");
   }
   if (!CODE_RE.test(input.code)) return fail("invalid_token");
+  // A malformed verifier cannot match, so refuse it before the consume spends the code.
+  if (!VERIFIER_RE.test(input.verifier)) return fail("invalid_token");
   const row = await consume(config, await sha256Hex(input.code));
   if (!row.ok) return row;
+  // Defense in depth: the hs_ and hc_ prefixes already keep a start row and a code row apart, so this branch is unreachable through the public API and has no test.
   if (row.value.identifier === START_ID) return fail("invalid_token");
   const data = row.value.data as CodeData | null;
   if (!data || typeof data.challenge !== "string") return fail("invalid_token");

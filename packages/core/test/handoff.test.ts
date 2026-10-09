@@ -36,7 +36,6 @@ describe("startHandoff", () => {
     const r = await startHandoff(auth.config, {
       challenge,
       redirect: "consumera://auth",
-      next: "/notes",
       ip: "1.1.1.1",
     });
     expect(r.ok).toBe(true);
@@ -226,6 +225,20 @@ describe("continueHandoff and redeemHandoff", () => {
       ok: false,
       code: "token_expired",
     });
+  });
+
+  it("refuses a malformed verifier without spending the code", async () => {
+    const auth = handoffAuth();
+    const user = await auth.seedUser("ada@example.com");
+    const { verifier, handoffId } = await started(auth);
+    const { code } = await continued(auth, handoffId, user.id);
+    expect(
+      await redeemHandoff(auth.config, { code, verifier: "short", ip: null, userAgent: null }),
+    ).toMatchObject({ ok: false, code: "invalid_token" });
+    expect((await rows(auth))[1]?.consumedAt).toBeNull();
+    expect(
+      (await redeemHandoff(auth.config, { code, verifier, ip: null, userAgent: null })).ok,
+    ).toBe(true);
   });
 
   it("limits redeems to 20 per ip per 15 minutes", async () => {
