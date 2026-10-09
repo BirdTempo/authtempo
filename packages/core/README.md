@@ -294,7 +294,9 @@ Without a trigger, expired rows stay in the database.
 
 - The default limiter counts in memory. On Workers every isolate has its
   own count, so the real limit is the limit times the isolate count. Pass
-  a shared `limiter` for a real limit.
+  a shared `limiter` for a real limit. The D1 adapter ships `createD1Limiter`
+  and the Postgres adapter ships `createPostgresLimiter`, both on `ta_limit`.
+  The memory limiter is for tests.
 - The memory adapter is for tests and examples. It keeps rows in the
   isolate.
 - A request with no client IP counts against one shared IP bucket. A host
