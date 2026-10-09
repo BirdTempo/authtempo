@@ -155,13 +155,16 @@ async function main() {
 - `createTokenStore({ cipher, read, write, remove })` keeps the token
   encrypted at rest. `read` returns the stored bytes, or `null` when there
   are none. `write` stores the bytes. `remove` deletes them and ignores a
-  missing file. Electron 45 deprecates the sync functions; use the async
-  cipher in a new app. `safeStorageCipher(safeStorage)` wraps the sync
-  functions for an older app.
+  missing file. The Electron `safeStorage` page says the sync functions
+  "may be deprecated in a future version" (checked 2026-10-10); use the
+  async cipher in a new app. `safeStorageCipher(safeStorage)` wraps the
+  sync functions for an older app.
 - If `safeStorage` has no encryption, `set` throws `TokenStoreError` and
   writes nothing. On Linux the `basic_text` backend counts as no
-  encryption, because its password is public. A plaintext token on disk is
-  worse than a new sign-in.
+  encryption, because its password is public. On Linux a missing
+  `getSelectedStorageBackend` also counts as no encryption. Both helpers
+  take `{ platform }` as a second argument; the default is
+  `process.platform`. A plaintext token on disk is worse than a new sign-in.
 - Call `set` after `app` is ready. Before `ready`, Windows and Linux
   report no encryption, and `set` throws.
 - The token stays in the main process. A renderer asks the main process
