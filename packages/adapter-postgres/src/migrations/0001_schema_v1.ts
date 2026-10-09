@@ -72,7 +72,7 @@ CREATE TABLE ta_passkey (
   user_id text NOT NULL,
   credential_id text NOT NULL,
   public_key text NOT NULL,
-  counter integer NOT NULL,
+  counter bigint NOT NULL,
   transports text,
   device_type text NOT NULL,
   backed_up boolean NOT NULL,

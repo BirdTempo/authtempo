@@ -21,23 +21,10 @@ interface Ctx {
   ready: () => Promise<void>;
 }
 
-const TEXT_OID = 25;
-
-/**
- * The builder sends json as serialized text and marks its placeholder `$n::jsonb`.
- * postgres.js learns that the parameter is jsonb and would JSON.stringify the
- * string a second time, so a json column would hold a JSON string, not an object.
- * Send those parameters as explicit text: the server then casts the text to jsonb.
- */
-function bindParams(conn: Conn, s: Statement): never[] {
-  const jsonIndexes = new Set([...s.sql.matchAll(/\$(\d+)::jsonb/g)].map((m) => Number(m[1]) - 1));
-  return s.params.map((p, i) =>
-    jsonIndexes.has(i) && typeof p === "string" ? conn.typed(p, TEXT_OID) : p,
-  ) as never[];
-}
-
 async function query(conn: Conn, s: Statement): Promise<{ rows: Row[]; count: number }> {
-  const res = await conn.unsafe<Row[]>(s.sql, bindParams(conn, s));
+  // The builder casts json parameters with `$n::text::jsonb`, so postgres.js
+  // sends the serialized text unchanged and the server parses it.
+  const res = await conn.unsafe<Row[]>(s.sql, s.params as never[]);
   return { rows: res as unknown as Row[], count: res.count };
 }
 

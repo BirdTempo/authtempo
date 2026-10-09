@@ -29,18 +29,24 @@ Its first Workers consumer proves that run.
 
 `applyPostgresMigrations(sql)` creates `ta_migrations` and runs every
 migration it does not list yet, each in its own transaction. It is safe
-to run on every deploy. `MIGRATIONS` exposes the SQL text for review.
+to run on every deploy, also from two replicas at once. Each migration
+transaction first takes an advisory lock and then reads the applied names
+again. A second runner waits for the first and then skips the migrations
+that the first applied. `MIGRATIONS` exposes the SQL text for review.
 
 The adapter reads `ta_meta.schema_version` once. If it is older than the
 core's `SCHEMA_VERSION` or missing, every operation throws `StorageError`
-with code `schema_mismatch` until the migrations run.
+with code `schema_mismatch` until the migrations run. Only a missing
+`ta_meta` table (SQLSTATE 42P01) counts as a missing version. Any other
+read error passes through unchanged, and the next operation reads again.
 
 ## Transactions
 
 A transaction is `BEGIN` and `COMMIT` on one reserved connection. A
-nested transaction is a savepoint. Concurrent transactions that read and
-then create the same unique value leave one row; the loser gets
-`unique_violation`.
+nested transaction is a savepoint. If the nested function throws, only
+the savepoint rolls back, and the outer transaction can catch the error
+and continue. Concurrent transactions that read and then create the same
+unique value leave one row. The loser gets `unique_violation`.
 
 ## Tests
 
