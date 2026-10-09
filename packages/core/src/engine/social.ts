@@ -123,7 +123,6 @@ export async function completeSocial(
 ): Promise<Result<{ token: string; next: string; user: UserRow }>> {
   const provider = findProvider(config, input.provider);
   if (!provider) return fail("not_found");
-  if (input.error) return fail("oauth_denied");
   const state = input.state ?? "";
   if (!STATE_RE.test(state)) return fail("invalid_token");
   const now = config.clock.now();
@@ -153,6 +152,7 @@ export async function completeSocial(
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash)) {
     return fail("invalid_token");
   }
+  if (input.error) return fail("oauth_denied");
   if (!input.code) return fail("oauth_failed");
 
   const idToken = await exchangeCode(config, provider, input.code, data.verifier, now);
@@ -201,9 +201,22 @@ async function exchangeCode(
   verifier: string,
   now: Date,
 ): Promise<string | null> {
+  let clientSecret: string;
+  try {
+    clientSecret = await provider.clientSecret({ jwt: config.jwt, now });
+  } catch (e) {
+    console.error(
+      "tempo-auth: social client secret failed",
+      provider.name,
+      e instanceof Error ? e.name : typeof e,
+    );
+    return null;
+  }
   let res: Response;
   try {
     res = await config.social.fetch(provider.tokenUrl, {
+      // A provider that hangs must not hold the request open. 10 s covers a slow token endpoint.
+      signal: AbortSignal.timeout(10_000),
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: buildQuery({
@@ -211,7 +224,7 @@ async function exchangeCode(
         code,
         redirect_uri: callbackUrl(config, provider),
         client_id: provider.clientId,
-        client_secret: await provider.clientSecret({ jwt: config.jwt, now }),
+        client_secret: clientSecret,
         code_verifier: verifier,
       }),
     });
@@ -272,7 +285,14 @@ function linkInTransaction(
     if (identity) {
       const user = await tx.findOne("user", [{ field: "id", op: "eq", value: identity.userId }]);
       if (!user) throw new Error("tempo-auth: identity without a user");
-      if (!user.emailVerified && profile.emailVerified) {
+      // The provider's address is proof for this user only when it is this
+      // user's address. A claimant who changes the provider address to one
+      // they own must not verify the address they claimed.
+      const proved =
+        profile.emailVerified &&
+        profile.email !== null &&
+        normalizeEmail(profile.email) === user.email;
+      if (!user.emailVerified && proved) {
         await claimEmail(tx, user.id, identity.id, now);
         await ensureEmailIdentity(tx, user.id, user.email, now);
         return ok(

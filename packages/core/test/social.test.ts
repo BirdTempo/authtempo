@@ -203,6 +203,13 @@ describe("completeSocial", () => {
       ok: false,
       code: "oauth_denied",
     });
+    expect(await complete(auth, s4)).toMatchObject({ ok: false, code: "invalid_token" });
+    // A denied callback with a bad state is not a denial: no row, no cookie, no effect.
+    const s5 = await started(auth);
+    expect(await complete(auth, s5, { error: "access_denied", state: "nope" })).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
     expect(auth.calls).toHaveLength(0);
   });
 
@@ -280,6 +287,20 @@ describe("completeSocial", () => {
     const auth = socialAuth();
     const s = await started(auth);
     expect(await complete(auth, s, { code: null })).toMatchObject({
+      ok: false,
+      code: "oauth_failed",
+    });
+    expect(auth.calls).toHaveLength(0);
+  });
+
+  it("fails oauth_failed without a fetch call when the client secret cannot be signed (review M5)", async () => {
+    const jwt = fakeJwt({});
+    jwt.signES256 = async () => {
+      throw new Error("bad pem");
+    };
+    const auth = socialAuth({}, jwt);
+    const s = await started(auth, "apple");
+    expect(await complete(auth, s, { provider: "apple" })).toMatchObject({
       ok: false,
       code: "oauth_failed",
     });
@@ -468,6 +489,43 @@ describe("resolveSocialUser", () => {
     expect((await auth.storage.findMany("identity", [])).map((i) => i.provider)).toEqual(["email"]);
   });
 
+  it("does not verify a claimed address when the provider later verifies a different address (final review C1)", async () => {
+    const auth = socialAuth();
+    // The attacker claims the victim's address, unverified.
+    await resolveSocialUser(
+      auth.storage,
+      "google",
+      { ...profile, subject: "attacker", emailVerified: false },
+      now,
+    );
+    // The attacker's provider account now reports a verified address of their own.
+    const r = await resolveSocialUser(
+      auth.storage,
+      "google",
+      { ...profile, subject: "attacker", email: "attacker@evil.example", emailVerified: true },
+      now,
+    );
+    expect(r.ok && r.value.emailVerified).toBe(false);
+    expect(r.ok && r.value.email).toBe("ada@example.com");
+    expect((await auth.storage.findMany("identity", [])).map((i) => i.provider)).toEqual([
+      "google",
+    ]);
+    // The real owner then proves the address and the claimant is revoked.
+    const owner = await resolveSocialUser(
+      auth.storage,
+      "apple",
+      { ...profile, subject: "owner" },
+      now,
+    );
+    expect(owner.ok && owner.value.emailVerified).toBe(true);
+    expect(
+      (await auth.storage.findMany("identity", [])).map((i) => [i.provider, i.subject]).sort(),
+    ).toEqual([
+      ["apple", "owner"],
+      ["email", "ada@example.com"],
+    ]);
+  });
+
   it("keeps the identity that carries the proof when the same identity returns verified", async () => {
     const auth = socialAuth();
     await resolveSocialUser(auth.storage, "google", { ...profile, emailVerified: false }, now);
@@ -579,11 +637,22 @@ describe("social routes", () => {
     );
     expect(noCookie.status).toBe(302);
     expect(noCookie.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
-    expect(noCookie.headers.getSetCookie()).toEqual([
+    expect(noCookie.headers.getSetCookie()).toEqual([]);
+    const stray = await handle(get("/auth/social/google/callback?error=access_denied&state=x"));
+    expect(stray.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    expect(stray.headers.getSetCookie()).toEqual([]);
+    const start2 = await handle(get("/auth/social/google/start"));
+    const bind2 = start2.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const state2 = new URL(start2.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    const denied = await handle(
+      get(`/auth/social/google/callback?error=access_denied&state=${encodeURIComponent(state2)}`, {
+        cookie: bind2,
+      }),
+    );
+    expect(denied.headers.get("location")).toBe(`${BASE_URL}/?auth_error=oauth_denied`);
+    expect(denied.headers.getSetCookie()).toEqual([
       `${BIND}=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None`,
     ]);
-    const denied = await handle(get("/auth/social/google/callback?error=access_denied&state=x"));
-    expect(denied.headers.get("location")).toBe(`${BASE_URL}/?auth_error=oauth_denied`);
     const empty = await handle(
       new Request(`${BASE_URL}/auth/social/apple/callback`, {
         method: "POST",

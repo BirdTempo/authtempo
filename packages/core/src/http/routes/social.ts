@@ -29,7 +29,11 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
   const bindPath = `${config.basePath}/social`;
   const failed = (code: string) => {
     const res = redirect(`${config.baseURL}/?auth_error=${code}`);
-    res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
+    // An invalid_token answer means no row was consumed for this browser.
+    // An in-flight flow in another tab keeps its cookie.
+    if (code !== "invalid_token") {
+      res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
+    }
     return res;
   };
   return config.social.providers.flatMap((provider): Route[] => [

@@ -88,6 +88,13 @@ endpoint and a fake verifier, so no test reaches a provider.
   the person asks for a new link. A page from `magicLink.confirmPage` may
   disable the button after the first press, but core's content security
   policy permits no script, so such a page needs its own route in the app.
+- One binding cookie per browser: a second social start, in another tab
+  or for the other provider, replaces it, and the first flow then answers
+  `invalid_token`. Start again.
+- The binding cookie and the session cookie are plain host cookies. A
+  host on a sibling subdomain of the API can set a cookie with the same
+  name for the parent domain. Keep the API on its own registrable domain,
+  or wait for the `__Host-` decision in plan 5.
 
 ## The storage port
 
