@@ -44,6 +44,11 @@ export {
   type SignES256Input,
   type VerifyIdTokenInput,
 } from "./seams/jwt.js";
+export {
+  createPbkdf2PasswordHash,
+  type PasswordHashSeam,
+  PBKDF2_ITERATIONS,
+} from "./seams/password-hash.js";
 export type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
