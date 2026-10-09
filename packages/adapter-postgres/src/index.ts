@@ -8,4 +8,5 @@ export function createPostgresAdapter(sql: Sql): StorageAdapter {
 }
 
 export { toStorageError } from "./errors.js";
+export { createPostgresLimiter } from "./limiter.js";
 export { applyPostgresMigrations, MIGRATIONS, type Migration } from "./migrations.js";

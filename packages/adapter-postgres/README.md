@@ -42,6 +42,25 @@ read error passes through unchanged, and the next operation reads again.
 
 Version 2 (plan 6, 2026-10-09) adds `ta_organization`, `ta_member`, and `ta_invitation`. Apply `0002_schema_v2` before you deploy a core at version 2; the adapter refuses a database at version 1.
 
+Version 3 (plan 6b, 2026-10-10) adds `ta_limit` for the owned limiter and the index `ix_ta_session__active_organization_id`. Apply `0003_schema_v3` before you deploy a core at version 3; the adapter refuses a database at version 2.
+
+## Limiter
+
+The memory limiter is per isolate; this one is the limit the product owns.
+On Workers every isolate has its own memory limiter, so the real limit is
+the configured limit times the isolate count. `createPostgresLimiter` keeps one count
+per key and window in `ta_limit` (schema version 3) for every caller:
+
+```ts
+const auth = createAuth({ /* ... */, limiter: createPostgresLimiter(sql) });
+```
+
+Each call runs one statement. It inserts the key at count 1, or on a
+conflict resets the window when it has ended, else adds 1, and returns the
+count. The call passes when the count is at most `max`. The upsert locks the row, so two concurrent calls cannot both see `max - 1`.
+A key must not contain `|`: the stored key is `${key}|${seconds}|${max}`,
+so the limiter throws an `Error` on such a key.
+
 ## Transactions
 
 A transaction is `BEGIN` and `COMMIT` on one reserved connection. A

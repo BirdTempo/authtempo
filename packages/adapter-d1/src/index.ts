@@ -10,3 +10,4 @@ export function createD1Adapter(db: D1Database): StorageAdapter {
 }
 
 export { toStorageError } from "./errors.js";
+export { createD1Limiter } from "./limiter.js";
