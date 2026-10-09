@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { systemClock } from "../src/primitives/clock.js";
 import {
   constantTimeEqual,
+  fromBase64Url,
   randomBase64Url,
   randomToken,
   sha256Base64Url,
   sha256Hex,
+  toBase64Url,
 } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
 
@@ -65,5 +67,19 @@ describe("base64url helpers", () => {
     expect(await sha256Base64Url("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).toBe(
       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
     );
+  });
+});
+
+describe("base64url round trip", () => {
+  it("encodes and decodes bytes with no padding", () => {
+    const bytes = new Uint8Array([0, 1, 2, 250, 251, 252, 253, 254, 255]);
+    const text = toBase64Url(bytes);
+    expect(text).toBe("AAEC-vv8_f7_");
+    expect(Array.from(fromBase64Url(text))).toEqual(Array.from(bytes));
+    expect(Array.from(fromBase64Url(""))).toEqual([]);
+  });
+  it("rejects a character outside the alphabet", () => {
+    expect(() => fromBase64Url("ab+/")).toThrow();
+    expect(() => fromBase64Url("ab=")).toThrow();
   });
 });

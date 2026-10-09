@@ -6,6 +6,8 @@ export const ERRORS = {
   oauth_denied: 400,
   oauth_failed: 400,
   email_required: 400,
+  passkey_failed: 400,
+  email_unverified: 403,
   unauthorized: 401,
   origin_not_trusted: 403,
   not_found: 404,
