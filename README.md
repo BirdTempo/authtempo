@@ -12,6 +12,8 @@ Plans: `docs/superpowers/plans/README.md`.
 | Package | Role |
 | --- | --- |
 | `@tempo-auth/core` | The engine: `createAuth(config)` returns `handle`, `session`, and `api`. |
+| `@tempo-auth/adapter-d1` | Storage on Cloudflare D1. Ships the migration. No compatibility flag. |
+| `@tempo-auth/adapter-postgres` | Storage on Postgres through postgres.js. `nodejs_compat` on Workers. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
 The example pins `@cloudflare/vitest-plugin` 1.3.7, which needs vitest 4, so
@@ -20,14 +22,15 @@ first with vitest 5 support, and on 2026-10-09 it was younger than the
 one-day release age; move the example to plugin 1.4.0 and vitest 5 on
 2026-10-10 or later.
 
-Adapters for D1 and Postgres, social sign-in, passkeys, the native handoff,
-and organizations arrive in the later plans.
+Social sign-in, passkeys, the native handoff, and organizations arrive in the
+later plans.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `pnpm install` | Install. pnpm 12.8.1, Node 22 or newer. |
+| `docker compose up -d` | Start Postgres on port 5439. Run it before `pnpm test`. The Postgres tests fail without it. |
 | `pnpm test` | Run every package's tests through Turborepo. The cache is off for tests. |
 | `pnpm typecheck` | `tsc --noEmit` in every package. |
 | `pnpm lint` | Biome. |

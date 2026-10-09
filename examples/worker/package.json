@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tempo-auth/adapter-d1": "workspace:*",
     "@tempo-auth/core": "workspace:*"
   },
   "devDependencies": {

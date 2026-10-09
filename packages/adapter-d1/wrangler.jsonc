@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tempo-auth-adapter-d1-test",
+  "compatibility_date": "2026-09-30",
+  // No compatibility_flags on purpose: the D1 adapter has no Node dependency.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tempo-auth-test",
+      // A placeholder: the Workers test pool runs D1 locally and never reads it.
+      "database_id": "tempo-auth-test",
+      // Relative to this config file.
+      "migrations_dir": "migrations"
+    }
+  ]
+}

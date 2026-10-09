@@ -22,15 +22,23 @@ export type StorageErrorCode =
   | "unique_violation"
   | "unknown_model"
   | "unknown_field"
-  | "invalid_argument";
+  | "invalid_argument"
+  | "schema_mismatch"
+  /**
+   * Thrown when a D1 rollback could not reverse every write. `cause` holds
+   * `{ original, failures }`: the error that started the rollback and the
+   * errors of the undo entries that failed.
+   */
+  | "rollback_failed";
 
 export class StorageError extends Error {
   constructor(
     readonly code: StorageErrorCode,
     readonly model: string,
     readonly fields: readonly string[] = [],
+    options?: { cause?: unknown },
   ) {
-    super(`${code} on ${model}${fields.length ? ` (${fields.join(", ")})` : ""}`);
+    super(`${code} on ${model}${fields.length ? ` (${fields.join(", ")})` : ""}`, options);
     this.name = "StorageError";
   }
 }
@@ -61,7 +69,9 @@ export class StorageError extends Error {
  * Argument rules. `update` and `delete` with an empty `where` throw
  * `invalid_argument`, so a bug cannot change or remove every row. A `limit`
  * that is not a non-negative integer throws `invalid_argument`. A `limit` of
- * 0 returns an empty list.
+ * 0 returns an empty list. `schema_mismatch` means the database reports a
+ * schema version older than `SCHEMA_VERSION`, or no version at all. Run the
+ * adapter's migrations.
  *
  * Transaction rules. Reads inside a transaction see its own writes; the
  * engine relies on this. If the function throws, only the transaction's own
