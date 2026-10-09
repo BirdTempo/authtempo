@@ -2,6 +2,7 @@ import type { ModelName, StorageAdapter } from "@tempo-auth/core";
 import { StorageError } from "@tempo-auth/core";
 import {
   assertModel,
+  columnsOf,
   decodeRow,
   deleteStatement,
   insertStatement,
@@ -63,6 +64,32 @@ function reinsertRowStatement(model: ModelName, row: Row): Statement {
   };
 }
 
+/**
+ * Runs every undo entry in reverse. A failed entry does not stop the rest.
+ * Always throws the original error; the failures, if any, go in its cause.
+ * No db.batch here: a batch that fails midway applies nothing.
+ */
+async function rethrowAfterUndo(
+  db: D1Database,
+  entries: Undo[],
+  original: unknown,
+): Promise<never> {
+  const failures: unknown[] = [];
+  for (const u of [...entries].reverse()) {
+    try {
+      await run(db, u);
+    } catch (f) {
+      failures.push(f);
+    }
+  }
+  if (failures.length === 0) throw original;
+  if (original instanceof Error && original.cause === undefined) {
+    original.cause = failures;
+    throw original;
+  }
+  throw new Error("transaction failed and the rollback failed", { cause: { original, failures } });
+}
+
 function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
   const self: StorageAdapter = {
     async create(model, data) {
@@ -97,43 +124,63 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       await ctx.ready();
       const s = updateStatement(SQLITE, model, where, data);
       if (!s) return 0;
-      let prior: Row[] = [];
-      if (ctx.undo) {
-        const sel = selectStatement(SQLITE, model, where);
-        prior = sel ? await all(db, sel) : [];
+      if (!ctx.undo) {
+        try {
+          return (await run(db, s)).meta.changes;
+        } catch (e) {
+          throw toStorageError(model, e) ?? e;
+        }
       }
-      let res: D1Result<Row>;
+      // The prior read and the write run in one batch, which D1 applies as one
+      // unit. The prior set is then exactly the changed set, so a rollback
+      // never overwrites a row that another request wrote in between.
+      const sel = selectStatement(SQLITE, model, where);
+      if (!sel) return 0;
+      let results: D1Result<Row>[];
       try {
-        res = await run(db, s);
+        results = await db.batch<Row>([
+          db.prepare(sel.sql).bind(...sel.params),
+          db.prepare(s.sql).bind(...s.params),
+        ]);
       } catch (e) {
         throw toStorageError(model, e) ?? e;
       }
-      for (const row of prior) ctx.undo?.push(restoreRowStatement(model, row));
-      return res.meta.changes;
+      for (const row of results[0]?.results ?? []) ctx.undo.push(restoreRowStatement(model, row));
+      return results[1]?.meta.changes ?? 0;
     },
     async delete(model, where) {
       await ctx.ready();
       const s = deleteStatement(SQLITE, model, where);
       if (!s) return 0;
-      let prior: Row[] = [];
-      if (ctx.undo) {
-        const sel = selectStatement(SQLITE, model, where);
-        prior = sel ? await all(db, sel) : [];
-      }
-      const res = await run(db, s);
-      for (const row of prior) ctx.undo?.push(reinsertRowStatement(model, row));
-      return res.meta.changes;
+      if (!ctx.undo) return (await run(db, s)).meta.changes;
+      // RETURNING gives the exact rows this statement removed, in one statement.
+      const returning = {
+        sql: `${s.sql} RETURNING ${columnsOf(model).join(", ")}`,
+        params: s.params,
+      };
+      const rows = await all(db, returning);
+      for (const row of rows) ctx.undo.push(reinsertRowStatement(model, row));
+      return rows.length;
     },
     async transaction(fn) {
       await ctx.ready();
-      if (ctx.undo) return fn(self);
+      if (ctx.undo) {
+        // A nested call shares the log. A throw reverses only its own entries.
+        const log = ctx.undo;
+        const mark = log.length;
+        try {
+          return await fn(self);
+        } catch (e) {
+          const own = log.splice(mark);
+          return rethrowAfterUndo(db, own, e);
+        }
+      }
       const inner: Ctx = { undo: [], ready: ctx.ready };
       const tx = adapterOn(db, inner);
       try {
         return await fn(tx);
       } catch (e) {
-        for (const u of [...(inner.undo ?? [])].reverse()) await run(db, u);
-        throw e;
+        return rethrowAfterUndo(db, inner.undo ?? [], e);
       }
     },
   };

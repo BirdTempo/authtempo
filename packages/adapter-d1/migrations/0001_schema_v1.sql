@@ -11,7 +11,7 @@ CREATE TABLE ta_meta (
 INSERT INTO ta_meta (key, value) VALUES ('schema_version', '1');
 
 CREATE TABLE ta_user (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   email TEXT NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE ta_user (
 CREATE UNIQUE INDEX ux_ta_user__email ON ta_user (email);
 
 CREATE TABLE ta_identity (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   user_id TEXT NOT NULL,
@@ -34,7 +34,7 @@ CREATE UNIQUE INDEX ux_ta_identity__provider__subject ON ta_identity (provider, 
 CREATE INDEX ix_ta_identity__user_id ON ta_identity (user_id);
 
 CREATE TABLE ta_session (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   user_id TEXT NOT NULL,
@@ -49,7 +49,7 @@ CREATE UNIQUE INDEX ux_ta_session__token_hash ON ta_session (token_hash);
 CREATE INDEX ix_ta_session__user_id ON ta_session (user_id);
 
 CREATE TABLE ta_verification (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   purpose TEXT NOT NULL,
@@ -63,7 +63,7 @@ CREATE UNIQUE INDEX ux_ta_verification__value_hash ON ta_verification (value_has
 CREATE INDEX ix_ta_verification__purpose__identifier ON ta_verification (purpose, identifier);
 
 CREATE TABLE ta_passkey (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   user_id TEXT NOT NULL,
