@@ -25,6 +25,8 @@ const SIGN_IN_PER_EMAIL = { seconds: 900, max: 10 };
 // Per 15 minutes, as the magic link request.
 const RESET_PER_IP = { seconds: 900, max: 20 };
 const RESET_PER_EMAIL = { seconds: 900, max: 5 };
+// Per 15 minutes. Each reset POST can cost one breach call and one hash.
+const RESET_POST_PER_IP = { seconds: 900, max: 20 };
 // Per 15 minutes. A stolen session must not run an unlimited guess of the current password.
 const CHANGE_PER_USER = { seconds: 900, max: 10 };
 
@@ -309,7 +311,9 @@ export interface PasswordVerified {
  * maybe on another device. When the password row is gone (a claim or a
  * reset deleted it), the link confirms nothing: it is consumed, it answers
  * `invalid_token`, and the user does not change. A user already verified
- * gets no session and no change.
+ * (a reset by the owner keeps this row id) gets no session and no change
+ * to the user or the credentials; only `password.updatedAt` is written,
+ * by the row check.
  */
 export async function verifyPasswordEmail(
   config: ResolvedConfig,
@@ -409,14 +413,16 @@ export interface PasswordReset {
 }
 
 /**
- * A reset proves the mailbox, as a magic link does. The policy and the
- * breach check run before the consume, so a refused password leaves the
- * link usable. Then one transaction: an unknown address gets a new
- * verified user; the password row is set; an unverified user is claimed
- * with `keep.passwordId` (every credential of the claimant goes, except
- * the new password); a verified user loses every session and keeps the
- * passkeys and the social identities (spec 8.7, deviation 2); a new
- * session starts.
+ * A reset proves the mailbox, as a magic link does. The order: the limit,
+ * a read of the row (a spent or expired link answers at once), the policy,
+ * the breach check, the hash, then one transaction that consumes the row
+ * first. So a refused password leaves the link usable. In the
+ * transaction: an unknown address gets a new verified user; the password
+ * row is set; an unverified user is claimed with `keep.passwordId` (every
+ * credential of the claimant goes, except the new password); a verified
+ * user loses every session and every handoff code, and keeps the passkeys
+ * and the social identities (spec 8.7, deviation 2); the other reset
+ * links of the address go; a new session starts.
  */
 export async function resetPassword(
   config: ResolvedConfig,
@@ -425,36 +431,40 @@ export async function resetPassword(
   const pw = config.password;
   if (!pw) return fail("not_found");
   if (!PASSWORD_RESET_TOKEN_RE.test(input.token)) return fail("invalid_token");
+  // Before any read, the breach call, and the hash: each POST costs one
+  // breach call and one hash at full cost. The limiter is the owned one,
+  // so a refusal holds whatever a supplier does.
+  if (
+    !(await config.limiter.allow(
+      `password-reset-post:ip:${input.ip ?? "unknown"}`,
+      RESET_POST_PER_IP,
+    ))
+  )
+    return fail("rate_limited");
   const valueHash = await sha256Hex(input.token);
+  const now = config.clock.now();
+  // A read, not the consume: a refused password must leave the link usable.
+  // A missing, spent, or expired row answers at once, with no breach call
+  // and no hash. The consume in the transaction stays the authority for a race.
   const peek = await config.storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: valueHash },
     { field: "purpose", op: "eq", value: "password-reset" },
   ]);
-  if (!peek) return fail("invalid_token");
+  if (!peek || peek.consumedAt !== null) return fail("invalid_token");
+  if (peek.expiresAt.getTime() <= now.getTime()) return fail("token_expired");
   const refused = await screen(pw, input.password, peek.identifier);
   if (refused) return fail(refused);
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
-  const now = config.clock.now();
-  const consumed = await consumeVerification(config.storage, {
-    purpose: "password-reset",
-    valueHash,
-    now,
-  });
-  if (!consumed.ok) return consumed;
-  const row = consumed.value;
-  const next = safeNext((row.data as { next?: unknown } | null)?.next);
-  // A failure after this point burns the link by design. The person
-  // requests a new one.
   for (let attempt = 0; ; attempt++) {
     try {
-      const done = await applyReset(config, input, row.identifier, hash, now);
-      return ok({ ...done, next });
+      return await applyReset(config, input, valueHash, hash, now);
     } catch (err) {
       // Two resets for one address raced: the loser's user, email
       // identity, or password create failed on a unique key. Caught here,
-      // outside: inside, Postgres has already aborted the transaction. Run
-      // once more, so the read finds the winner's rows.
+      // outside: inside, Postgres has already aborted the transaction, and
+      // the abort also undid this call's consume. Run once more, so the
+      // read finds the winner's rows.
       if (
         attempt === 0 &&
         err instanceof StorageError &&
@@ -470,46 +480,74 @@ export async function resetPassword(
 function applyReset(
   config: ResolvedConfig,
   input: PasswordReset,
-  email: string,
+  valueHash: string,
   hash: string,
   now: Date,
-): Promise<PasswordSession> {
-  return config.storage.transaction(async (tx): Promise<PasswordSession> => {
-    let user = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
-    if (!user) {
-      user = await tx.create("user", {
-        id: newId(now),
-        email,
-        emailVerified: true,
-        name: null,
-        image: null,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-    // The new password row before any session delete. A password sign-in
-    // in flight re-checks its row by id and by the hash it verified as its
-    // last statement. When that re-check still finds the old hash, this
-    // write has not run, so the session delete below still removes that
-    // sign-in's session. The opposite order lets an old-password sign-in
-    // commit a session after the delete.
-    const passwordId = await setPassword(tx, user.id, hash, now);
-    if (!user.emailVerified) {
-      // The claim deletes the claimant's sessions, identities, passkeys,
-      // and every other password row, and keeps the new password.
-      await claimEmail(tx, user.id, { passwordId }, now);
-      user = { ...user, emailVerified: true, updatedAt: now };
-    } else {
-      await tx.delete("session", [{ field: "userId", op: "eq", value: user.id }]);
-    }
-    await ensureEmailIdentity(tx, user.id, email, now);
-    const s = await createSession(
-      config,
-      { userId: user.id, ip: input.ip, userAgent: input.userAgent },
-      tx,
-    );
-    return { token: s.token, user, session: s.session };
-  });
+): Promise<Result<PasswordSession & { next: string }>> {
+  return config.storage.transaction(
+    async (tx): Promise<Result<PasswordSession & { next: string }>> => {
+      // The first statement. Two POSTs of one token race here, and only one
+      // wins. A refusal comes before any write, so nothing is left to undo.
+      const consumed = await consumeVerification(tx, { purpose: "password-reset", valueHash, now });
+      if (!consumed.ok) return consumed;
+      const email = consumed.value.identifier;
+      const next = safeNext((consumed.value.data as { next?: unknown } | null)?.next);
+      let user = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      if (!user) {
+        user = await tx.create("user", {
+          id: newId(now),
+          email,
+          emailVerified: true,
+          name: null,
+          image: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      // The new password row before any session delete. A password sign-in
+      // in flight re-checks its row by id and by the hash it verified as its
+      // last statement. When that re-check still finds the old hash, this
+      // write has not run, so the session delete below still removes that
+      // sign-in's session. The opposite order lets an old-password sign-in
+      // commit a session after the delete.
+      const passwordId = await setPassword(tx, user.id, hash, now);
+      if (!user.emailVerified) {
+        // The claim deletes the claimant's sessions, identities, passkeys,
+        // handoff codes, and every other password row, and keeps the new password.
+        await claimEmail(tx, user.id, { passwordId }, now);
+        user = { ...user, emailVerified: true, updatedAt: now };
+      } else {
+        await tx.delete("session", [{ field: "userId", op: "eq", value: user.id }]);
+        await deleteHandoffCodes(tx, user.id);
+      }
+      // The other links for this address. A person who reads the mailbox
+      // later must not set a password with a second link.
+      await tx.delete("verification", [
+        { field: "purpose", op: "eq", value: "password-reset" },
+        { field: "identifier", op: "eq", value: email },
+        { field: "consumedAt", op: "eq", value: null },
+      ]);
+      await ensureEmailIdentity(tx, user.id, email, now);
+      const s = await createSession(
+        config,
+        { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+        tx,
+      );
+      return ok({ token: s.token, user, session: s.session, next });
+    },
+  );
+}
+
+/**
+ * A handoff code is a session in waiting: the redeem does not check the
+ * session that minted it. So a flow that ends sessions ends the codes too,
+ * as `claimEmail` does for a claimant.
+ */
+async function deleteHandoffCodes(tx: StorageAdapter, userId: string): Promise<void> {
+  await tx.delete("verification", [
+    { field: "purpose", op: "eq", value: "handoff-code" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
 }
 
 /** Writes `hash` into the user's one password row, or creates it. Returns the row id. */
@@ -606,6 +644,9 @@ export async function changePassword(
         { field: "userId", op: "eq", value: user.id },
         { field: "id", op: "ne", value: session.id },
       ]);
+      // The codes of the changer's own session go too. The row names the
+      // user, not the session, and a lost code costs one more handoff.
+      await deleteHandoffCodes(tx, user.id);
       return ok({ ok: true });
     });
   } catch (err) {

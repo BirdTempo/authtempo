@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ResolvedConfig } from "../src/config.js";
+import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import {
   changePassword,
@@ -11,7 +12,7 @@ import {
 } from "../src/engine/password.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { resolveSocialUser } from "../src/engine/social.js";
-import { sha256Hex } from "../src/primitives/crypto.js";
+import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "../src/seams/password-hash.js";
 import type { StorageAdapter, Where } from "../src/storage/port.js";
 import { makeAuth, post, tokenFromMail } from "./helpers.js";
@@ -1120,6 +1121,260 @@ describe("changePassword", () => {
         })
       ).ok,
     ).toBe(true);
-    expect(writes).toEqual(["update:password", "delete:session"]);
+    expect(writes).toEqual(["update:password", "delete:session", "delete:verification"]);
+  });
+});
+
+/** An auth with password sign-in and the handoff on. */
+function handoffAuth() {
+  return makeAuth({ password: { hash: FAST }, handoff: { schemes: ["consumera://"] } });
+}
+
+/** Mints a handoff code from a live session, as the browser continue does. */
+async function mintCode(auth: ReturnType<typeof makeAuth>, userId: string, sessionId: string) {
+  const verifier = randomBase64Url(32);
+  const start = await startHandoff(auth.config, {
+    challenge: await sha256Base64Url(verifier),
+    redirect: "consumera://auth",
+    ip: null,
+  });
+  if (!start.ok) throw new Error(start.code);
+  const cont = await continueHandoff(auth.config, {
+    handoffId: start.value.handoffId,
+    userId,
+    sessionId,
+  });
+  if (!cont.ok) throw new Error(cont.code);
+  const code = new URL(cont.value.location).searchParams.get("code") ?? "";
+  return () => redeemHandoff(auth.config, { code, verifier, ip: null, userAgent: null });
+}
+
+describe("fix round 1: handoff codes end with the sessions", () => {
+  it("a reset of a verified user ends the user's pending handoff codes (Important 1)", async () => {
+    const auth = handoffAuth();
+    await signUpAndVerify(auth);
+    const mine = await signIn(auth);
+    if (!mine.ok) throw new Error(mine.code);
+    const control = await mintCode(auth, mine.value.user.id, mine.value.session.id);
+    expect((await control()).ok).toBe(true);
+    const pending = await mintCode(auth, mine.value.user.id, mine.value.session.id);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const r = await resetPassword(auth.config, {
+      token: resetToken(auth),
+      password: "new password 1",
+      ...req,
+    });
+    if (!r.ok) throw new Error(r.code);
+    expect(await pending()).toMatchObject({ ok: false, code: "invalid_token" });
+  });
+
+  it("a change ends the user's pending handoff codes (Important 1)", async () => {
+    const auth = handoffAuth();
+    await signUpAndVerify(auth);
+    const mine = await signIn(auth);
+    if (!mine.ok) throw new Error(mine.code);
+    const pending = await mintCode(auth, mine.value.user.id, mine.value.session.id);
+    const session = await resolveSession(auth.config, mine.value.token);
+    if (!session) throw new Error("no session");
+    expect(
+      (
+        await changePassword(auth.config, {
+          session,
+          currentPassword: PW,
+          newPassword: "changed password",
+        })
+      ).ok,
+    ).toBe(true);
+    expect(await pending()).toMatchObject({ ok: false, code: "invalid_token" });
+  });
+});
+
+describe("fix round 1: the reset POST order", () => {
+  /** A config whose breach check and hash seam count their calls. */
+  function countingAuth() {
+    const counts = { breach: 0 };
+    const auth = pwAuth({
+      breachCheck: async (p) => {
+        counts.breach++;
+        return p === "breached password";
+      },
+    });
+    return { auth, counts };
+  }
+
+  it("answers a spent or an expired link at once, with no breach call and no hash (Important 2)", async () => {
+    const { auth, counts } = countingAuth();
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const spent = resetToken(auth);
+    expect(
+      (await resetPassword(auth.config, { token: spent, password: "first password", ...req })).ok,
+    ).toBe(true);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const late = resetToken(auth);
+    auth.clock.advance(15 * 60_000);
+    counts.breach = 0;
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    try {
+      expect(
+        await resetPassword(auth.config, { token: spent, password: "second password", ...req }),
+      ).toMatchObject({ ok: false, code: "invalid_token" });
+      expect(
+        await resetPassword(auth.config, { token: late, password: "second password", ...req }),
+      ).toMatchObject({ ok: false, code: "token_expired" });
+      expect(counts.breach).toBe(0);
+      expect(derive).not.toHaveBeenCalled();
+    } finally {
+      derive.mockRestore();
+    }
+  });
+
+  it("writes one password when two POSTs of one token run at once (Important 2)", async () => {
+    const auth = pwAuth();
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const token = resetToken(auth);
+    let writes = 0;
+    const original = auth.storage.transaction.bind(auth.storage);
+    auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          create: (m, d) => {
+            if (m === "password") writes++;
+            return tx.create(m, d);
+          },
+          update: (m, w, d) => {
+            if (m === "password") writes++;
+            return tx.update(m, w, d);
+          },
+        }),
+      );
+    const [a, b] = await Promise.all([
+      resetPassword(auth.config, { token, password: "password one", ...req }),
+      resetPassword(auth.config, { token, password: "password two", ...req }),
+    ]);
+    expect([a.ok, b.ok].sort()).toEqual([false, true]);
+    expect([a, b].find((x) => !x.ok)).toMatchObject({ code: "invalid_token" });
+    expect(writes).toBe(1);
+  });
+
+  it("leaves the link live after a refused password (Important 2)", async () => {
+    const { auth, counts } = countingAuth();
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const token = resetToken(auth);
+    const live = async () =>
+      (
+        await auth.storage.findMany("verification", [
+          { field: "purpose", op: "eq", value: "password-reset" },
+        ])
+      )[0]?.consumedAt;
+    expect(await resetPassword(auth.config, { token, password: "short", ...req })).toMatchObject({
+      code: "password_policy",
+    });
+    expect(await live()).toBeNull();
+    expect(
+      await resetPassword(auth.config, { token, password: "breached password", ...req }),
+    ).toMatchObject({ code: "password_breached" });
+    expect(counts.breach).toBe(1);
+    expect(await live()).toBeNull();
+    expect(
+      (await resetPassword(auth.config, { token, password: "good password", ...req })).ok,
+    ).toBe(true);
+  });
+
+  it("limits the reset POST to 20 per ip per 15 minutes", async () => {
+    const auth = pwAuth();
+    const unknown = `pr_${"A".repeat(43)}`;
+    for (let i = 0; i < 20; i++)
+      expect(
+        await resetPassword(auth.config, {
+          token: unknown,
+          password: "x",
+          ip: "6.6.6.6",
+          userAgent: null,
+        }),
+      ).toMatchObject({ code: "invalid_token" });
+    expect(
+      await resetPassword(auth.config, {
+        token: unknown,
+        password: "x",
+        ip: "6.6.6.6",
+        userAgent: null,
+      }),
+    ).toMatchObject({ code: "rate_limited" });
+  });
+
+  it("ends the address's other reset links (Minor 2)", async () => {
+    const auth = pwAuth();
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const other = resetToken(auth);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const used = resetToken(auth);
+    expect(
+      (await resetPassword(auth.config, { token: used, password: "new password 1", ...req })).ok,
+    ).toBe(true);
+    expect(
+      await resetPassword(auth.config, { token: other, password: "new password 2", ...req }),
+    ).toMatchObject({ ok: false, code: "invalid_token" });
+    const rows = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "password-reset" },
+    ]);
+    expect(rows.map((r) => r.consumedAt === null)).toEqual([false]);
+  });
+});
+
+describe("fix round 1: the verify link of a verified user", () => {
+  it("changes nothing when the owner opens a claimant's old link after a reset kept its row id (Minor 1)", async () => {
+    const auth = pwAuth();
+    // Reachable: a claimant signs up (the Confirm mail carries the
+    // claimant's row id), the owner resets (the row keeps its id and gets
+    // the owner's hash), and the owner then presses the old Confirm button.
+    const claimant = await signUp(auth, { password: "claimant password" });
+    if (!claimant.ok) throw new Error(claimant.code);
+    const link = verifyToken(auth);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const r = await resetPassword(auth.config, {
+      token: resetToken(auth),
+      password: "owner password 1",
+      ...req,
+    });
+    if (!r.ok) throw new Error(r.code);
+    const now = auth.clock.now();
+    await auth.storage.create("identity", {
+      id: "i1",
+      userId: r.value.user.id,
+      provider: "google",
+      subject: "g-1",
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await auth.storage.create("passkey", {
+      id: "k1",
+      userId: r.value.user.id,
+      credentialId: "c1",
+      publicKey: "pk",
+      counter: 0,
+      transports: null,
+      deviceType: "singleDevice",
+      backedUp: false,
+      name: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const before = {
+      identities: await auth.storage.findMany("identity", []),
+      passkeys: await auth.storage.findMany("passkey", []),
+      sessions: await auth.storage.findMany("session", []),
+      user: await auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]),
+    };
+    const v = await verifyPasswordEmail(auth.config, { token: link, ...req });
+    expect(v).toMatchObject({ ok: true, value: { signedIn: null } });
+    expect(await auth.storage.findMany("identity", [])).toEqual(before.identities);
+    expect(await auth.storage.findMany("passkey", [])).toEqual(before.passkeys);
+    expect(await auth.storage.findMany("session", [])).toEqual(before.sessions);
+    expect(
+      await auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]),
+    ).toEqual(before.user);
+    expect((await signIn(auth, { password: "owner password 1" })).ok).toBe(true);
   });
 });
