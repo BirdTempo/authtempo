@@ -13,6 +13,13 @@ export const ERRORS = {
   not_found: 404,
   rate_limited: 429,
   email_taken_unverified: 409,
+  // plan 6: organizations
+  forbidden_rank: 403,
+  slug_reserved: 400,
+  slug_taken: 409,
+  last_owner: 409,
+  already_member: 409,
+  email_mismatch: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

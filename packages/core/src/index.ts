@@ -1,11 +1,12 @@
 export const VERSION = "0.0.0";
 
-export type { AuthConfig, MailMessage, MailPort } from "./config.js";
+export type { AuthConfig, MailMessage, MailPort, OrganizationsConfig } from "./config.js";
 export { ConfigError } from "./config.js";
 export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
+export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
