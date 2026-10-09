@@ -4,17 +4,18 @@ import { createTokenStore, electronOpener, TokenStoreError } from "../src/electr
 type Listener = (event: unknown, url: string) => void;
 
 function fakeApp() {
-  const listeners = new Set<Listener>();
+  const listeners: Listener[] = [];
   return {
     listeners,
     on(_e: "open-url", l: Listener) {
-      listeners.add(l);
+      listeners.push(l);
     },
     removeListener(_e: "open-url", l: Listener) {
-      listeners.delete(l);
+      const i = listeners.indexOf(l);
+      if (i >= 0) listeners.splice(i, 1);
     },
     emit(url: string) {
-      for (const l of listeners) l({}, url);
+      for (const l of [...listeners]) l({}, url);
     },
   };
 }
@@ -32,7 +33,7 @@ describe("electronOpener", () => {
     app.emit("consumera://other?code=1");
     app.emit("consumera://auth?code=hc_1");
     expect(await p).toBe("consumera://auth?code=hc_1");
-    expect(app.listeners.size).toBe(0);
+    expect(app.listeners.length).toBe(0);
   });
   it("resolves through receive() for a second-instance argument", async () => {
     const app = fakeApp();
@@ -49,14 +50,29 @@ describe("electronOpener", () => {
     const first = opener.open("https://api/start", "consumera://auth");
     const second = opener.open("https://api/start", "consumera://auth");
     expect(await first).toBeNull();
+    expect(app.listeners.length).toBe(1);
     app.emit("consumera://auth?code=hc_3");
     expect(await second).toBe("consumera://auth?code=hc_3");
+    expect(app.listeners.length).toBe(0);
+  });
+  it("resolves null and drops the listener when the browser cannot open", async () => {
+    const app = fakeApp();
+    const opener = electronOpener({
+      shell: {
+        openExternal: async () => {
+          throw new Error("no browser");
+        },
+      },
+      app,
+    });
+    expect(await opener.open("https://api/start", "consumera://auth")).toBeNull();
+    expect(app.listeners.length).toBe(0);
   });
   it("resolves null at the timeout", async () => {
     const app = fakeApp();
     const opener = electronOpener({ shell: { openExternal: async () => {} }, app, timeoutMs: 20 });
     expect(await opener.open("https://api/start", "consumera://auth")).toBeNull();
-    expect(app.listeners.size).toBe(0);
+    expect(app.listeners.length).toBe(0);
   });
 });
 
@@ -96,6 +112,23 @@ describe("createTokenStore", () => {
     const store = createTokenStore({ safeStorage: fakeSafeStorage(false), ...file });
     await expect(store.set("ts_secret")).rejects.toBeInstanceOf(TokenStoreError);
     expect(file.current()).toBeNull();
+  });
+  it("answers null even when removing the unreadable file fails", async () => {
+    const file = fakeFile();
+    await file.write(new TextEncoder().encode("garbage"));
+    const store = createTokenStore({
+      safeStorage: {
+        ...fakeSafeStorage(),
+        decryptString: () => {
+          throw new Error("bad");
+        },
+      },
+      ...file,
+      remove: async () => {
+        throw new Error("disk");
+      },
+    });
+    expect(await store.get()).toBeNull();
   });
   it("answers null and removes the file when the bytes do not decrypt", async () => {
     const file = fakeFile();

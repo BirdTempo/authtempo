@@ -63,7 +63,10 @@ export function electronOpener(input: {
         };
         pending = { redirect, resolve: wrapped };
         input.app.on("open-url", listener);
-        void input.shell.openExternal(url);
+        // The person sees no browser, so waiting out the timeout is wrong. Settle now.
+        input.shell.openExternal(url).catch(() => {
+          if (pending?.resolve === wrapped) settle(null);
+        });
       });
     },
   };
@@ -116,7 +119,8 @@ export function createTokenStore(input: {
         return input.safeStorage.decryptString(bytes);
       } catch {
         // The keychain entry changed, or the file is damaged. Drop it; the person signs in again.
-        await input.remove();
+        // The contract is that unreadable bytes never throw, even when the remove fails.
+        await input.remove().catch(() => {});
         return null;
       }
     },
