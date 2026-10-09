@@ -3,7 +3,7 @@ import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { magicLinkRoutes } from "../src/http/routes/magic-link.js";
-import { get, makeAuth, post, tokenFromMail } from "./helpers.js";
+import { BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 
 describe("magic link engine", () => {
   it("sends a link whose token is stored only as a hash", async () => {
@@ -126,6 +126,21 @@ describe("magic link engine", () => {
 });
 
 describe("magic link routes", () => {
+  const VERIFY = "/auth/magic-link/verify";
+
+  /** A browser form post from the confirm page: same origin as baseURL. */
+  function verifyForm(token: string, headers: Record<string, string> = {}): Request {
+    return new Request(`${BASE_URL}${VERIFY}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: BASE_URL,
+        ...headers,
+      },
+      body: new URLSearchParams({ token }).toString(),
+    });
+  }
+
   it("POST request answers 200 with no detail, 400 on a bad body, 429 when limited", async () => {
     const { config, mail } = makeAuth();
     const handle = createRouter(config, magicLinkRoutes(config));
@@ -141,12 +156,88 @@ describe("magic link routes", () => {
     ).toBe(429);
   });
 
-  it("GET verify sets the cookie and redirects to next", async () => {
+  it("GET verify renders the confirm page with the token and no side effect (Review Focus 1)", async () => {
+    const { config, storage, mail } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com", next: "/home" }));
+    const token = tokenFromMail(mail[0]?.text ?? "");
+    // Count every call to storage and the limiter while GET runs. Zero is the rule.
+    const calls: string[] = [];
+    const counting = <T extends object>(name: string, target: T): T =>
+      new Proxy(target, {
+        get(obj, prop, receiver) {
+          const value = Reflect.get(obj, prop, receiver);
+          if (typeof value !== "function") return value;
+          return (...args: unknown[]) => {
+            calls.push(`${name}.${String(prop)}`);
+            return Reflect.apply(value, obj, args);
+          };
+        },
+      });
+    const spied = {
+      ...config,
+      storage: counting("storage", config.storage),
+      limiter: counting("limiter", config.limiter),
+    };
+    const spiedHandle = createRouter(spied, magicLinkRoutes(spied));
+    let page: Response | undefined;
+    for (let i = 0; i < 3; i++) {
+      page = await spiedHandle(get(`${VERIFY}?token=${encodeURIComponent(token)}`));
+      expect(page.status).toBe(200);
+    }
+    expect(calls).toEqual([]);
+    if (!page) throw new Error("no page");
+    expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(page.headers.get("x-robots-tag")).toBe("noindex");
+    expect(page.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    );
+    expect(page.headers.get("set-cookie")).toBeNull();
+    const html = await page.text();
+    expect(html).toContain(`<form method="post" action="${VERIFY}">`);
+    expect(html).toContain(`<input type="hidden" name="token" value="${token}">`);
+    const rows = await storage.findMany("verification", []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.consumedAt).toBeNull();
+    expect(await storage.findMany("session", [])).toHaveLength(0);
+    expect(await storage.findMany("user", [])).toHaveLength(0);
+  });
+
+  it("GET verify uses the configured page", async () => {
+    const { config, mail } = makeAuth({
+      magicLink: { confirmPage: (i) => `<p>custom ${i.action} ${i.token}</p>` },
+    });
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const token = tokenFromMail(mail[0]?.text ?? "");
+    const page = await handle(get(`${VERIFY}?token=${encodeURIComponent(token)}`));
+    expect(await page.text()).toBe(`<p>custom ${VERIFY} ${token}</p>`);
+  });
+
+  it("GET verify with a malformed or missing token redirects without rendering (Review Focus 2)", async () => {
+    const { config } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    for (const path of [
+      VERIFY,
+      `${VERIFY}?token=`,
+      `${VERIFY}?token=${encodeURIComponent("<script>")}`,
+      `${VERIFY}?token=ml_short`,
+    ]) {
+      const res = await handle(get(path));
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("https://api.example.com/?auth_error=invalid_token");
+      expect(res.headers.get("set-cookie")).toBeNull();
+    }
+  });
+
+  it("POST verify sets the cookie and redirects to next", async () => {
     const { config, mail } = makeAuth();
     const handle = createRouter(config, magicLinkRoutes(config));
     await handle(post("/auth/magic-link/request", { email: "ada@example.com", next: "/home" }));
     const token = tokenFromMail(mail[0]?.text ?? "");
-    const res = await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
+    const res = await handle(verifyForm(token));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://api.example.com/home");
     expect(res.headers.get("set-cookie")).toMatch(
@@ -155,42 +246,93 @@ describe("magic link routes", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("GET verify with an expired token redirects with auth_error=token_expired", async () => {
+  it("POST verify accepts a JSON body from a script", async () => {
+    const { config, mail } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const token = tokenFromMail(mail[0]?.text ?? "");
+    const res = await handle(post(VERIFY, { token }));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://api.example.com/");
+    expect(res.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+  });
+
+  it("POST verify twice signs in once (Review Focus 3)", async () => {
+    const { config, storage, mail } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const token = tokenFromMail(mail[0]?.text ?? "");
+    const first = await handle(verifyForm(token));
+    expect(first.status).toBe(302);
+    expect(first.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    const second = await handle(verifyForm(token));
+    expect(second.status).toBe(302);
+    expect(second.headers.get("location")).toBe(
+      "https://api.example.com/?auth_error=invalid_token",
+    );
+    expect(second.headers.get("set-cookie")).toBeNull();
+    expect(await storage.findMany("session", [])).toHaveLength(1);
+  });
+
+  it("POST verify from a foreign origin is refused and consumes nothing (Review Focus 4)", async () => {
+    const { config, storage, mail } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
+    const token = tokenFromMail(mail[0]?.text ?? "");
+    const res = await handle(verifyForm(token, { origin: "https://evil.example" }));
+    expect(res.status).toBe(403);
+    const rows = await storage.findMany("verification", []);
+    expect(rows[0]?.consumedAt).toBeNull();
+    expect((await handle(verifyForm(token))).headers.get("set-cookie")).toMatch(
+      /^tempo_session=ts_/,
+    );
+  });
+
+  it("POST verify with an expired token redirects with auth_error=token_expired", async () => {
     const { config, mail, clock } = makeAuth();
     const handle = createRouter(config, magicLinkRoutes(config));
     await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
     const token = tokenFromMail(mail[0]?.text ?? "");
     clock.advance(15 * 60_000);
-    const res = await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
+    const res = await handle(verifyForm(token));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://api.example.com/?auth_error=token_expired");
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
-  it("GET verify with a spent token reports invalid_token even after it expires", async () => {
+  it("POST verify with a spent token reports invalid_token even after it expires", async () => {
     const { config, mail, clock } = makeAuth();
     const handle = createRouter(config, magicLinkRoutes(config));
     await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
     const token = tokenFromMail(mail[0]?.text ?? "");
-    await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
+    await handle(verifyForm(token));
     clock.advance(15 * 60_000);
-    const res = await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
+    const res = await handle(verifyForm(token));
     expect(res.headers.get("location")).toBe("https://api.example.com/?auth_error=invalid_token");
   });
 
-  it("GET verify with a spent or missing token redirects to / with auth_error", async () => {
-    const { config, mail } = makeAuth();
+  it("POST verify with a missing, empty, or badly encoded token redirects with invalid_token (Review Focus 5)", async () => {
+    const { config } = makeAuth();
     const handle = createRouter(config, magicLinkRoutes(config));
-    await handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
-    const token = tokenFromMail(mail[0]?.text ?? "");
-    await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
-    const spent = await handle(get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`));
-    expect(spent.status).toBe(302);
-    expect(spent.headers.get("location")).toBe("https://api.example.com/?auth_error=invalid_token");
-    expect(spent.headers.get("set-cookie")).toBeNull();
-    const missing = await handle(get("/auth/magic-link/verify"));
-    expect(missing.headers.get("location")).toBe(
-      "https://api.example.com/?auth_error=invalid_token",
-    );
+    const bodies: Request[] = [
+      verifyForm(""),
+      new Request(`${BASE_URL}${VERIFY}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE_URL },
+        body: "nope=1",
+      }),
+      new Request(`${BASE_URL}${VERIFY}`, {
+        method: "POST",
+        headers: { "content-type": "text/plain", origin: BASE_URL },
+        body: "token=ml_x",
+      }),
+      new Request(`${BASE_URL}${VERIFY}`, { method: "POST", headers: { origin: BASE_URL } }),
+    ];
+    for (const req of bodies) {
+      const res = await handle(req);
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("https://api.example.com/?auth_error=invalid_token");
+      expect(res.headers.get("set-cookie")).toBeNull();
+    }
   });
 });

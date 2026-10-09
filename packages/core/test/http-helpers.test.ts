@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { readBody } from "../src/http/body.js";
+import { defaultConfirmPage, escapeHtml } from "../src/http/confirm-page.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "../src/http/cookies.js";
 import { json, readJson, respond } from "../src/http/json.js";
 import { safeNext } from "../src/http/safe-next.js";
@@ -65,5 +67,85 @@ describe("safeNext", () => {
     expect(safeNext("")).toBe("/");
     expect(safeNext(undefined)).toBe("/");
     expect(safeNext("/".padEnd(2049, "a"))).toBe("/");
+  });
+});
+
+describe("readBody", () => {
+  const schema = z.object({ token: z.string().min(1) });
+  it("reads a form-urlencoded body", async () => {
+    const req = new Request("https://x/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: "ml_abc" }).toString(),
+    });
+    expect(await readBody(req, schema)).toEqual(ok({ token: "ml_abc" }));
+  });
+  it("reads a form body whose content type carries a charset", async () => {
+    const req = new Request("https://x/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded; charset=UTF-8" },
+      body: "token=ml_abc",
+    });
+    expect(await readBody(req, schema)).toEqual(ok({ token: "ml_abc" }));
+  });
+  it("reads a json body", async () => {
+    const req = new Request("https://x/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "ml_abc" }),
+    });
+    expect(await readBody(req, schema)).toEqual(ok({ token: "ml_abc" }));
+  });
+  it("keeps a field named like an Object prototype key", async () => {
+    const req = new Request("https://x/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "constructor=x&token=ml_abc",
+    });
+    expect(await readBody(req, schema)).toEqual(ok({ token: "ml_abc" }));
+  });
+  it("fails invalid_body for another content type, a schema miss, and a repeated field", async () => {
+    const text = new Request("https://x/", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "token=ml_abc",
+    });
+    expect(await readBody(text, schema)).toEqual(fail("invalid_body"));
+    const empty = new Request("https://x/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "token=",
+    });
+    expect(await readBody(empty, schema)).toEqual(fail("invalid_body"));
+    const none = new Request("https://x/", { method: "POST" });
+    expect(await readBody(none, schema)).toEqual(fail("invalid_body"));
+    const twice = new Request("https://x/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "token=a&token=b",
+    });
+    expect(await readBody(twice, schema)).toEqual(fail("invalid_body"));
+  });
+});
+
+describe("confirm page", () => {
+  it("escapes the five HTML characters", () => {
+    expect(escapeHtml(`<a href="x" title='y'>&</a>`)).toBe(
+      "&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;&amp;&lt;/a&gt;",
+    );
+  });
+  it("renders a form that posts the escaped token to the action (Review Focus 2)", () => {
+    const html = defaultConfirmPage({ action: "/auth/magic-link/verify", token: `<script>` });
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain(`<form method="post" action="/auth/magic-link/verify">`);
+    expect(html).toContain(`<input type="hidden" name="token" value="&lt;script&gt;">`);
+    expect(html).not.toContain("<script>");
+    expect(html).toContain(`<button type="submit">Continue</button>`);
+    expect(html).toContain(`<meta name="referrer" content="no-referrer">`);
+    expect(html).toContain(`<meta name="robots" content="noindex">`);
+  });
+  it("escapes the action too", () => {
+    const html = defaultConfirmPage({ action: `/a"b`, token: "ml_x" });
+    expect(html).toContain(`action="/a&quot;b"`);
   });
 });

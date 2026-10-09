@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../src/config.js";
+import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 const base = {
@@ -36,5 +37,18 @@ describe("resolveConfig", () => {
     expect(() => resolveConfig({ ...base, trustedOrigins: ["https://*.example.com"] })).toThrow(
       /trustedOrigins/,
     );
+  });
+});
+
+describe("magicLink.confirmPage", () => {
+  it("defaults to the core page and accepts an override", () => {
+    const defaults = resolveConfig(base);
+    expect(defaults.magicLink.confirmPage).toBe(defaultConfirmPage);
+    const custom = resolveConfig({
+      ...base,
+      magicLink: { confirmPage: (i) => `<p>${i.action}|${i.token}</p>` },
+    });
+    expect(custom.magicLink.confirmPage({ action: "/x", token: "t" })).toBe("<p>/x|t</p>");
+    expect(custom.magicLink.ttlMinutes).toBe(15);
   });
 });

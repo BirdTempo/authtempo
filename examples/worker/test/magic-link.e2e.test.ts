@@ -16,7 +16,27 @@ it("signs in by magic link, reads /me with the cookie and with a bearer, and sig
   const { link } = (await last.json()) as { link: string };
   expect(link.startsWith(`${BASE}/auth/magic-link/verify?token=ml_`)).toBe(true);
 
-  const verify = await SELF.fetch(link, { redirect: "manual" });
+  // A scanner fetches the link twice. Nothing changes.
+  for (let i = 0; i < 2; i++) {
+    const page = await SELF.fetch(link, { redirect: "manual" });
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(page.headers.get("set-cookie")).toBeNull();
+    expect(await page.text()).toContain(`<form method="post" action="/auth/magic-link/verify">`);
+  }
+  const unconsumed = await env.DB.prepare(
+    "SELECT count(*) AS n FROM ta_verification WHERE consumed_at IS NULL",
+  ).first<{ n: number }>();
+  expect(unconsumed?.n).toBe(1);
+
+  // The person presses the button. The browser posts the form from the page's origin.
+  const tokenValue = new URL(link).searchParams.get("token") ?? "";
+  const verify = await SELF.fetch(`${BASE}/auth/magic-link/verify`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+    body: new URLSearchParams({ token: tokenValue }).toString(),
+  });
   expect(verify.status).toBe(302);
   expect(verify.headers.get("location")).toBe(`${BASE}/me`);
   const setCookie = verify.headers.get("set-cookie") ?? "";

@@ -37,9 +37,7 @@ describe("createAuth", () => {
       ).status,
     ).toBe(200);
     const token = tokenFromMail(sent[0]?.text ?? "");
-    const verify = await auth.handle(
-      get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`),
-    );
+    const verify = await auth.handle(post("/auth/magic-link/verify", { token }));
     expect(verify.status).toBe(302);
     const cookie = verify.headers.get("set-cookie")?.split(";")[0] ?? "";
     const me = await auth.session(get("/anything", { cookie }));
@@ -80,9 +78,7 @@ describe("createAuth", () => {
     const { auth, sent, clock } = setup();
     await auth.handle(post("/auth/magic-link/request", { email: "ada@example.com" }));
     const token = tokenFromMail(sent[0]?.text ?? "");
-    const verify = await auth.handle(
-      get(`/auth/magic-link/verify?token=${encodeURIComponent(token)}`),
-    );
+    const verify = await auth.handle(post("/auth/magic-link/verify", { token }));
     const cookie = verify.headers.get("set-cookie")?.split(";")[0] ?? "";
     const withCookie = get("/anything", { cookie });
     const fresh = await auth.session(withCookie);
