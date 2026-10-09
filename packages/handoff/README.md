@@ -176,7 +176,7 @@ Core admits a development redirect only when the API sets
 `devRedirectPattern`. For Expo Go the redirect is an `exp://` URL. For
 a web or desktop test it is a loopback URL, for example
 `http://127.0.0.1:8081/auth`. Core refuses any `http` or `https` URL
-that is not on a loopback host.
+that is not on a loopback host. The handoff confirm page adds the source of the matched dev redirect to `form-action`: its scheme (`exp:`), or the origin of a loopback URL (`http://127.0.0.1:8081`). A dev redirect on `[::1]` cannot be listed. Use `127.0.0.1`.
 
 ## Failure codes
 

@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { redirectAllowed } from "../engine/handoff.js";
 
 /**
  * The `form-action` sources a sign-in page may post to and, in Chromium,
@@ -22,6 +23,39 @@ export function formAction(config: ResolvedConfig): string {
  */
 export function noScriptPagePolicy(config: ResolvedConfig): string {
   return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
+}
+
+/**
+ * The source that lets `form-action` follow a dev redirect: the origin of a
+ * loopback http(s) URL, or the scheme of any other URL (`exp:`). It is null
+ * when the URL does not parse, and for an IPv6 host, because a CSP
+ * host-source has no IPv6 literal form. Use 127.0.0.1 in that case.
+ */
+function devRedirectSource(redirect: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(redirect);
+  } catch {
+    return null;
+  }
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    return url.hostname.startsWith("[") ? null : url.origin;
+  }
+  return url.protocol;
+}
+
+/**
+ * The policy of the handoff confirm page. It is the no-script policy plus
+ * the source of the handoff redirect. A redirect that `devRedirectPattern`
+ * admitted is in no other list, and without its source Chromium refuses the
+ * 302 that answers the Continue post. The match is the one the handoff
+ * start uses, so the page never lists a source the start refused.
+ */
+export function confirmPagePolicy(config: ResolvedConfig, redirect: string): string {
+  const parts = formAction(config).split(" ");
+  const source = redirectAllowed(config, redirect) ? devRedirectSource(redirect) : null;
+  if (source !== null && !parts.includes(source)) parts.push(source);
+  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${parts.join(" ")}; base-uri 'none'; frame-ancestors 'none'`;
 }
 
 /** The headers every page core serves carries. The policy differs per page. */

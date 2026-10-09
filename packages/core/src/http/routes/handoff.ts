@@ -10,7 +10,7 @@ import {
 import { publicSession, sessionFromRequest } from "../../engine/sessions.js";
 import { randomBase64Url } from "../../primitives/crypto.js";
 import { readBody } from "../body.js";
-import { formAction, noScriptPagePolicy, pageHeaders } from "../csp.js";
+import { confirmPagePolicy, formAction, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import type { Route } from "../router.js";
@@ -50,7 +50,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     });
     return new Response(html, {
       status: 200,
-      headers: pageHeaders(config, noScriptPagePolicy(config)),
+      headers: pageHeaders(config, confirmPagePolicy(config, redirectTo)),
     });
   };
   return [

@@ -541,8 +541,8 @@ describe("handoff routes", () => {
     const cookie = await signedIn(auth);
     const confirm = await handle(get(`/auth/handoff/continue?h=${h}`, { cookie }));
     expect(confirm.status).toBe(200);
-    // The whole header: the confirm page shares the no-script policy constant
-    // with three other pages (plan 8 final review T3).
+    // The whole header. A redirect on the schemes list adds nothing to the
+    // no-script policy that the password and magic link pages also use.
     expect(confirm.headers.get("content-security-policy")).toBe(
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://app.example.com consumera:; base-uri 'none'; frame-ancestors 'none'",
     );
@@ -571,6 +571,32 @@ describe("handoff routes", () => {
     const spent = await handle(formPost(h, { origin: BASE_URL, cookie }));
     expect(spent.status).toBe(302);
     expect(spent.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+  });
+
+  it("lists a dev redirect's source in the confirm page's form-action (plan 6c)", async () => {
+    const cases = [
+      { pattern: DEV, redirect: "exp://192.168.1.20:8081/--/auth", source: "exp:" },
+      {
+        pattern: /^http:\/\/127\.0\.0\.1:\d+\/auth$/,
+        redirect: "http://127.0.0.1:8081/auth",
+        source: "http://127.0.0.1:8081",
+      },
+    ];
+    for (const c of cases) {
+      const auth = makeAuth({ handoff: { schemes: SCHEMES, devRedirectPattern: c.pattern } });
+      const handle = createRouter(auth.config, handoffRoutes(auth.config));
+      const { challenge } = await pkce();
+      const h = await startedId(
+        handle,
+        `challenge=${challenge}&redirect=${encodeURIComponent(c.redirect)}`,
+      );
+      const cookie = await signedIn(auth);
+      const confirm = await handle(get(`/auth/handoff/continue?h=${h}`, { cookie }));
+      expect(confirm.status).toBe(200);
+      expect(confirm.headers.get("content-security-policy")).toBe(
+        `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${APP_ORIGIN} consumera: ${c.source}; base-uri 'none'; frame-ancestors 'none'`,
+      );
+    }
   });
 
   it("POST continue accepts the form from baseURL only, and mints nothing without a session", async () => {

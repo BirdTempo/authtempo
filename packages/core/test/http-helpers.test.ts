@@ -10,7 +10,7 @@ import {
   readCookie,
   sessionCookie,
 } from "../src/http/cookies.js";
-import { formAction, pageHeaders } from "../src/http/csp.js";
+import { confirmPagePolicy, formAction, noScriptPagePolicy, pageHeaders } from "../src/http/csp.js";
 import { defaultHandoffConfirmPage } from "../src/http/handoff-confirm-page.js";
 import { json, readJson, respond } from "../src/http/json.js";
 import { authErrorUrl, redirect, resolveNext } from "../src/http/redirect.js";
@@ -204,6 +204,36 @@ describe("csp", () => {
     expect(formAction(cfg({ handoff: { schemes: ["consumera://", "com.example.app://"] } }))).toBe(
       "'self' https://app.example.com http://localhost:5173 consumera: com.example.app:",
     );
+  });
+  describe("confirmPagePolicy", () => {
+    const dev = cfg({
+      handoff: {
+        schemes: ["consumera://"],
+        devRedirectPattern:
+          /^(exp:\/\/[\d.]+:\d+\/--\/auth|http:\/\/127\.0\.0\.1:\d+\/auth|http:\/\/\[::1\]:\d+\/auth|https:\/\/evil\.example\/auth)$/,
+      },
+    });
+    const withAction = (extra: string) =>
+      `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://app.example.com http://localhost:5173 consumera:${extra}; base-uri 'none'; frame-ancestors 'none'`;
+    it("adds the scheme of a custom scheme dev redirect", () => {
+      expect(confirmPagePolicy(dev, "exp://192.168.1.10:8081/--/auth")).toBe(withAction(" exp:"));
+    });
+    it("adds the origin of a loopback dev redirect", () => {
+      expect(confirmPagePolicy(dev, "http://127.0.0.1:43123/auth")).toBe(
+        withAction(" http://127.0.0.1:43123"),
+      );
+    });
+    it("adds nothing for a redirect on the schemes list, or for one the start would refuse", () => {
+      expect(confirmPagePolicy(dev, "consumera://auth")).toBe(noScriptPagePolicy(dev));
+      expect(confirmPagePolicy(dev, "https://evil.example/auth")).toBe(noScriptPagePolicy(dev));
+      expect(confirmPagePolicy(dev, "http://[::1]:8081/auth")).toBe(noScriptPagePolicy(dev));
+    });
+    it("keeps the old header byte for byte when no dev pattern is set", () => {
+      const plain = cfg({ handoff: { schemes: ["consumera://"] } });
+      expect(confirmPagePolicy(plain, "exp://192.168.1.10:8081/--/auth")).toBe(
+        noScriptPagePolicy(plain),
+      );
+    });
   });
   it("sends strict-origin, never no-referrer", () => {
     // With no-referrer, Chrome sends "Origin: null" on a same-origin form post and the router answers 403 (headless Chrome 155, 2026-10-09). no-referrer must never come back.

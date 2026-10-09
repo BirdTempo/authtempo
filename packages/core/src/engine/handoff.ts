@@ -55,7 +55,7 @@ export function continuePath(config: ResolvedConfig, handoffId: string): string 
   return `${config.basePath}/handoff/continue?h=${encodeURIComponent(handoffId)}`;
 }
 
-function redirectAllowed(config: ResolvedConfig, redirect: string): boolean {
+export function redirectAllowed(config: ResolvedConfig, redirect: string): boolean {
   const h = config.handoff;
   if (!h) return false;
   // The client refuses every URL with a fragment, so the API must not admit a redirect that has one.
