@@ -155,7 +155,7 @@ describe("d1 undo log", () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(StorageError);
-    expect(caught).toMatchObject({ code: "rollback_failed", fields: [] });
+    expect(caught).toMatchObject({ code: "rollback_failed", fields: ["user:delete"] });
     const cause = (caught as Error).cause as { original: unknown; failures: unknown[] };
     expect(cause.original).toBe(original);
     expect(original.cause).toBeUndefined();
