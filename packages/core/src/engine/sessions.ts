@@ -98,6 +98,15 @@ export function readSessionToken(config: ResolvedConfig, request: Request): stri
   return m?.[1] ?? null;
 }
 
+/** The caller's session from the cookie or the bearer header, or null. */
+export async function sessionFromRequest(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<ResolvedSession | null> {
+  const token = readSessionToken(config, request);
+  return token ? resolveSession(config, token) : null;
+}
+
 /**
  * The Set-Cookie value that renews the session cookie after a sliding
  * refresh, or null. Null when nothing was refreshed, and null when the

@@ -1,9 +1,22 @@
 const BASE64URL = /[+/=]/g;
 
-function toBase64Url(bytes: Uint8Array): string {
+export function toBase64Url(bytes: Uint8Array): string {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(BASE64URL, (c) => (c === "+" ? "-" : c === "/" ? "_" : ""));
+}
+
+const BASE64URL_ALPHABET = /^[A-Za-z0-9_-]*$/;
+
+/** Decodes base64url with no padding. Throws on a character outside the alphabet. */
+export function fromBase64Url(text: string): Uint8Array {
+  if (!BASE64URL_ALPHABET.test(text)) throw new Error("not base64url");
+  const b64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+  const bin = atob(padded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 /** `bytes` random bytes as base64url with no padding. 32 bytes make 43 characters. */

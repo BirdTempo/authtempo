@@ -4,6 +4,7 @@ export type { AuthConfig, MailMessage, MailPort } from "./config.js";
 export { ConfigError } from "./config.js";
 export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
+export type { PasskeySummary } from "./engine/passkeys.js";
 export type { ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
@@ -29,6 +30,18 @@ export {
   type SignES256Input,
   type VerifyIdTokenInput,
 } from "./seams/jwt.js";
+export type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "./seams/webauthn.js";
+export {
+  type AuthenticatedPasskey,
+  createSimpleWebAuthnSeam,
+  type RegisteredPasskey,
+  type WebAuthnSeam,
+} from "./seams/webauthn.js";
 export type { AppleConfig } from "./social/apple.js";
 export type { GoogleConfig } from "./social/google.js";
 export type { SocialProfile, SocialProviderName } from "./social/provider.js";

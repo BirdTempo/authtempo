@@ -83,3 +83,57 @@ describe("social config", () => {
     ).toThrow(/social.apple.keyId/);
   });
 });
+
+describe("passkey config", () => {
+  it("is null by default and the simplewebauthn seam is the default webauthn", () => {
+    const c = resolveConfig(base);
+    expect(c.passkey).toBeNull();
+    expect(typeof c.webauthn.verifyRegistration).toBe("function");
+  });
+  it("accepts origins whose host is the rpID or a subdomain of it", () => {
+    const c = resolveConfig({
+      ...base,
+      trustedOrigins: ["https://example.com", "https://app.example.com:8443"],
+      passkey: {
+        rpID: "example.com",
+        rpName: "Example",
+        origins: ["https://example.com", "https://app.example.com:8443"],
+      },
+    });
+    expect(c.passkey).toEqual({
+      rpID: "example.com",
+      rpName: "Example",
+      origins: ["https://example.com", "https://app.example.com:8443"],
+    });
+  });
+  it("accepts the baseURL or a trusted origin and refuses any other passkey origin", () => {
+    const pk = { rpID: "example.com", rpName: "Example" };
+    expect(() =>
+      resolveConfig({ ...base, passkey: { ...pk, origins: ["https://api.example.com"] } }),
+    ).not.toThrow();
+    expect(() =>
+      resolveConfig({ ...base, passkey: { ...pk, origins: ["https://app.example.com"] } }),
+    ).not.toThrow();
+    expect(() =>
+      resolveConfig({ ...base, passkey: { ...pk, origins: ["https://other.example.com"] } }),
+    ).toThrow(/trustedOrigins/);
+  });
+  it("refuses an origin outside the rpID, an origin with a path, an empty list, and an empty rpID", () => {
+    const good = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
+    expect(() =>
+      resolveConfig({ ...base, passkey: { ...good, origins: ["https://evil.example"] } }),
+    ).toThrow(/passkey.origins/);
+    expect(() =>
+      resolveConfig({ ...base, passkey: { ...good, origins: ["https://app.example.com/"] } }),
+    ).toThrow(/passkey.origins/);
+    expect(() => resolveConfig({ ...base, passkey: { ...good, origins: [] } })).toThrow(
+      /passkey.origins/,
+    );
+    expect(() => resolveConfig({ ...base, passkey: { ...good, rpID: "" } })).toThrow(
+      /passkey.rpID/,
+    );
+    expect(() =>
+      resolveConfig({ ...base, passkey: { ...good, origins: ["https://notexample.com"] } }),
+    ).toThrow(/passkey.origins/);
+  });
+});

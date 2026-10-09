@@ -3,6 +3,7 @@ import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
+import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
 import type { Provider } from "./social/provider.js";
@@ -59,6 +60,14 @@ export interface AuthConfig {
   };
   /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
   jwt?: JwtSeam;
+  /**
+   * Passkeys are on when set. `rpID` is the registrable domain the
+   * credentials bind to; every origin must be on that domain. Exact
+   * origins, no path.
+   */
+  passkey?: { rpID: string; rpName: string; origins: string[] };
+  /** The WebAuthn ceremonies. Default: @simplewebauthn/server. Tests inject a fake. */
+  webauthn?: WebAuthnSeam;
 }
 
 export interface ResolvedConfig {
@@ -80,6 +89,8 @@ export interface ResolvedConfig {
   };
   social: { providers: Provider[]; fetch: typeof fetch };
   jwt: JwtSeam;
+  passkey: { rpID: string; rpName: string; origins: string[] } | null;
+  webauthn: WebAuthnSeam;
 }
 
 /**
@@ -134,6 +145,39 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   }
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
   const fetchFn = input.social?.fetch ?? globalThis.fetch.bind(globalThis);
+  let passkey: ResolvedConfig["passkey"] = null;
+  if (input.passkey) {
+    requireFields("passkey", input.passkey, ["rpID", "rpName"]);
+    if (input.passkey.origins.length === 0)
+      throw new ConfigError("passkey.origins must not be empty");
+    for (const o of input.passkey.origins) {
+      let u: URL;
+      try {
+        u = new URL(o);
+      } catch {
+        throw new ConfigError(`passkey.origins has a value that is not a URL: ${o}`);
+      }
+      if (u.origin !== o)
+        throw new ConfigError(`passkey.origins must hold exact origins, no path: ${o}`);
+      const host = u.hostname;
+      const rp = input.passkey.rpID;
+      if (host !== rp && !host.endsWith(`.${rp}`)) {
+        throw new ConfigError(`passkey.origins host ${host} is not on rpID ${rp}`);
+      }
+      // The router answers 403 to a post from an origin that is not trusted, so an
+      // origin the passkey config accepts but the router refuses is a silent break.
+      if (o !== input.baseURL && !input.trustedOrigins.includes(o)) {
+        throw new ConfigError(
+          `passkey.origins has ${o}, which is neither baseURL nor in trustedOrigins; add it to trustedOrigins or the router answers 403 to its posts`,
+        );
+      }
+    }
+    passkey = {
+      rpID: input.passkey.rpID,
+      rpName: input.passkey.rpName,
+      origins: [...input.passkey.origins],
+    };
+  }
   return {
     basePath,
     baseURL: input.baseURL,
@@ -159,6 +203,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     },
     social: { providers, fetch: fetchFn },
     jwt: input.jwt ?? createJoseJwtSeam(fetchFn),
+    passkey,
+    webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
   };
 }
 

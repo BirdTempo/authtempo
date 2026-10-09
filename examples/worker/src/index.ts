@@ -29,6 +29,13 @@ function getAuth(env: Env): Auth {
           },
         }
       : {}),
+    // Passkeys bind to the API's own host in this example. A real app sets
+    // rpID to its registrable domain and lists every web origin.
+    passkey: {
+      rpID: new URL(env.BASE_URL).hostname,
+      rpName: "tempo-auth example",
+      origins: [env.BASE_URL],
+    },
   });
   return auth;
 }

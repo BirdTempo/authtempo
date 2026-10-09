@@ -22,8 +22,9 @@ export function normalizeEmail(raw: string): string | null {
 /**
  * A user created through an unverified email is a claim, not proof. When a
  * sign-in proves the address, every identity that came in before (except
- * the one that carries the proof, and the `email` identity) and every
- * session are deleted, so a claimant cannot keep access to the account.
+ * the one that carries the proof, and the `email` identity), every
+ * session, every passkey, and every pending passkey challenge are
+ * deleted, so a claimant cannot keep access to the account.
  * Runs inside the caller's transaction.
  */
 export async function claimEmail(
@@ -39,6 +40,13 @@ export async function claimEmail(
   if (keepIdentityId) where.push({ field: "id", op: "ne", value: keepIdentityId });
   await tx.delete("identity", where);
   await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
+  // A claimant's passkeys would keep the account open after the claim.
+  // Registration already needs a verified email; this closes any other path.
+  await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);
+  await tx.delete("verification", [
+    { field: "purpose", op: "eq", value: "passkey-challenge" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
   await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
     emailVerified: true,
     updatedAt: now,

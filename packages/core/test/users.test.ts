@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findOrCreateUserByEmail, normalizeEmail } from "../src/engine/users.js";
+import { claimEmail, findOrCreateUserByEmail, normalizeEmail } from "../src/engine/users.js";
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -162,5 +162,80 @@ describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input
     });
     await findOrCreateUserByEmail(storage, "ada@example.com", now);
     expect(await storage.findMany("identity", [])).toHaveLength(1);
+  });
+});
+
+describe("claimEmail covers passkeys (plan 4 input)", () => {
+  it("deletes the user's passkeys and pending passkey challenges", async () => {
+    // Registration refuses an unverified user, so the product never creates these rows for U1. The deletes are a second guard; this test pins that guard only.
+    const storage = createMemoryAdapter();
+    const now = new Date("2026-01-01T00:00:00.000Z");
+    const row = { createdAt: now, updatedAt: now };
+    await storage.create("user", {
+      id: "U1",
+      email: "a@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      ...row,
+    });
+    await storage.create("passkey", {
+      id: "P1",
+      userId: "U1",
+      credentialId: "c1",
+      publicKey: "k",
+      counter: 0,
+      transports: null,
+      deviceType: "singleDevice",
+      backedUp: false,
+      name: null,
+      ...row,
+    });
+    await storage.create("user", {
+      id: "U2",
+      email: "b@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      ...row,
+    });
+    await storage.create("passkey", {
+      id: "P2",
+      userId: "U2",
+      credentialId: "c2",
+      publicKey: "k",
+      counter: 0,
+      transports: null,
+      deviceType: "singleDevice",
+      backedUp: false,
+      name: null,
+      ...row,
+    });
+    await storage.create("verification", {
+      id: "V1",
+      purpose: "passkey-challenge",
+      identifier: "U1",
+      valueHash: "h1",
+      expiresAt: now,
+      consumedAt: null,
+      data: { kind: "registration" },
+      ...row,
+    });
+    await storage.create("verification", {
+      id: "V2",
+      purpose: "passkey-challenge",
+      identifier: "sign-in",
+      valueHash: "h2",
+      expiresAt: now,
+      consumedAt: null,
+      data: { kind: "authentication" },
+      ...row,
+    });
+    await storage.transaction((tx) => claimEmail(tx, "U1", null, now));
+    expect((await storage.findMany("passkey", [])).map((p) => p.id)).toEqual(["P2"]);
+    expect((await storage.findMany("verification", [])).map((v) => v.id)).toEqual(["V2"]);
+    expect(
+      (await storage.findOne("user", [{ field: "id", op: "eq", value: "U1" }]))?.emailVerified,
+    ).toBe(true);
   });
 });

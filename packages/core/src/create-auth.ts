@@ -6,11 +6,20 @@ import {
   verifyMagicLink,
 } from "./engine/magic-link.js";
 import {
+  deletePasskey,
+  listPasskeys,
+  type PasskeySummary,
+  passkeyAuthenticationOptions,
+  passkeyRegistrationOptions,
+  verifyPasskeyAuthentication,
+  verifyPasskeyRegistration,
+} from "./engine/passkeys.js";
+import {
   destroySession,
   type ResolvedSession,
-  readSessionToken,
   renewedSessionCookie,
   resolveSession,
+  sessionFromRequest,
 } from "./engine/sessions.js";
 import {
   completeSocial,
@@ -22,10 +31,15 @@ import {
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
+import { passkeyRoutes } from "./http/routes/passkeys.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
 import type { Result } from "./result.js";
-import type { UserRow } from "./schema.js";
+import type { SessionRow, UserRow } from "./schema.js";
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+} from "./seams/webauthn.js";
 
 export interface AuthApi {
   requestMagicLink(input: MagicLinkRequest): Promise<Result<{ sent: true }>>;
@@ -36,6 +50,24 @@ export interface AuthApi {
   completeSocial(
     input: SocialComplete,
   ): Promise<Result<{ token: string; next: string; user: UserRow }>>;
+  passkeyRegistrationOptions(input: {
+    user: UserRow;
+  }): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;
+  verifyPasskeyRegistration(input: {
+    user: UserRow;
+    response: unknown;
+    name?: string | undefined;
+  }): Promise<Result<PasskeySummary>>;
+  passkeyAuthenticationOptions(input: {
+    ip: string | null;
+  }): Promise<Result<PublicKeyCredentialRequestOptionsJSON>>;
+  verifyPasskeyAuthentication(input: {
+    response: unknown;
+    ip: string | null;
+    userAgent: string | null;
+  }): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>>;
+  listPasskeys(input: { user: UserRow }): Promise<Result<PasskeySummary[]>>;
+  deletePasskey(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
 }
@@ -63,19 +95,23 @@ export function createAuth(input: AuthConfig): Auth {
     ...sessionRoutes(config),
     ...magicLinkRoutes(config),
     ...socialRoutes(config),
+    ...passkeyRoutes(config),
   ]);
   return {
     handle,
-    async session(request) {
-      const token = readSessionToken(config, request);
-      return token ? resolveSession(config, token) : null;
-    },
+    session: (request) => sessionFromRequest(config, request),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     api: {
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),
       startSocial: (i) => startSocial(config, i),
       completeSocial: (i) => completeSocial(config, i),
+      passkeyRegistrationOptions: (i) => passkeyRegistrationOptions(config, i),
+      verifyPasskeyRegistration: (i) => verifyPasskeyRegistration(config, i),
+      passkeyAuthenticationOptions: (i) => passkeyAuthenticationOptions(config, i),
+      verifyPasskeyAuthentication: (i) => verifyPasskeyAuthentication(config, i),
+      listPasskeys: (i) => listPasskeys(config, i),
+      deletePasskey: (i) => deletePasskey(config, i),
       getSession: (token) => resolveSession(config, token),
       signOut: (token) => destroySession(config, token),
     },

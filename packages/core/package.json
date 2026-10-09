@@ -15,6 +15,10 @@
     "./sql": {
       "types": "./dist/storage/sql.d.ts",
       "default": "./dist/storage/sql.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/soft-authenticator.d.ts",
+      "default": "./dist/testing/soft-authenticator.js"
     }
   },
   "files": [
@@ -26,6 +30,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@simplewebauthn/server": "14.0.3",
     "jose": "6.2.12",
     "zod": "4.6.5"
   },
