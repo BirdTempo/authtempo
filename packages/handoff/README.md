@@ -100,36 +100,44 @@ import { createHandoff } from "@tempo-auth/handoff";
 import { createTokenStore, electronOpener } from "@tempo-auth/handoff/electron";
 
 // Without the lock, Windows and Linux start a second app, and the sign-in waits until the timeout.
-if (!app.requestSingleInstanceLock()) app.quit();
-app.setAsDefaultProtocolClient("consumera");
+// `app.quit()` does not stop this script, so the losing instance must return here.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  main();
+}
 
-const opener = electronOpener({ shell, app });
-app.on("second-instance", (_event, argv) => {
-  opener.receive(argv.find((a) => a.startsWith("consumera://")) ?? "");
-});
+async function main() {
+  app.setAsDefaultProtocolClient("consumera");
 
-const file = join(app.getPath("userData"), "token.bin");
-const store = createTokenStore({
-  safeStorage,
-  // The bytes of the file, or null when there is no file.
-  read: () =>
-    readFile(file).catch((e: NodeJS.ErrnoException) =>
-      e.code === "ENOENT" ? null : Promise.reject(e),
-    ),
-  write: (bytes) => writeFile(file, bytes),
-  remove: () =>
-    unlink(file).catch((e: NodeJS.ErrnoException) => {
-      if (e.code !== "ENOENT") throw e;
-    }),
-});
+  const opener = electronOpener({ shell, app });
+  app.on("second-instance", (_event, argv) => {
+    opener.receive(argv.find((a) => a.startsWith("consumera://")) ?? "");
+  });
 
-const baseURL = "https://api.example.com";
-const client = createClient({ baseURL, credentials: "omit", token: () => store.get() });
-const handoff = createHandoff({ baseURL, redirect: "consumera://auth", opener });
+  const file = join(app.getPath("userData"), "token.bin");
+  const store = createTokenStore({
+    safeStorage,
+    // The bytes of the file, or null when there is no file.
+    read: () =>
+      readFile(file).catch((e: NodeJS.ErrnoException) =>
+        e.code === "ENOENT" ? null : Promise.reject(e),
+      ),
+    write: (bytes) => writeFile(file, bytes),
+    remove: () =>
+      unlink(file).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== "ENOENT") throw e;
+      }),
+  });
 
-await app.whenReady();
-const result = await handoff.signIn();
-if (result.ok) await store.set(result.value.token);
+  const baseURL = "https://api.example.com";
+  const client = createClient({ baseURL, credentials: "omit", token: () => store.get() });
+  const handoff = createHandoff({ baseURL, redirect: "consumera://auth", opener });
+
+  await app.whenReady();
+  const result = await handoff.signIn();
+  if (result.ok) await store.set(result.value.token);
+}
 ```
 
 - Call `app.requestSingleInstanceLock()` before anything else. Without
@@ -137,8 +145,9 @@ if (result.ok) await store.set(result.value.token);
   first app waits until the timeout and answers `cancelled`.
 - Call `app.setAsDefaultProtocolClient` so the system routes the scheme
   to the app. On Windows, an unpackaged app in development must pass
-  `process.execPath` and the script path as the second and third
-  arguments.
+  `process.execPath` as the second argument and the script path inside
+  the `args` array as the third:
+  `app.setAsDefaultProtocolClient("consumera", process.execPath, [resolve(process.argv[1])])`.
 - macOS delivers the URL as an `open-url` event. The opener listens for
   it.
 - Windows and Linux start a second instance with the URL in `argv`.
