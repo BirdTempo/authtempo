@@ -300,7 +300,10 @@ Check the member's rank on each request.
 - Replay protection is the challenge: a second use of the same assertion answers `invalid_token`. The counter write is conditional on the counter read, which separates two different assertions; an authenticator that always reports 0 is accepted after 0, as WebAuthn allows.
 - Invite is limited to 20 per inviting user per 15 minutes and to 5 per
   invited address per hour, in the same per-isolate limiter. Each invite
-  sends a mail from the app's sender, so the product owns this limit.
+  sends a mail from the app's sender, so the product owns this limit. The
+  per-address budget is shared by every inviter, so one verified user can
+  use up an address's five invites for an hour; the per-user budget bounds
+  how many addresses one user can do that to.
 - Organization `metadata` is at most 4096 bytes as JSON. A larger value
   answers 400 `invalid_body`. Every member reads it in `GET /organizations`.
 - Two invites for the same address at the same time can leave two pending
