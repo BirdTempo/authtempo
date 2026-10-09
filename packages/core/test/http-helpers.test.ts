@@ -302,6 +302,11 @@ describe("sign-in page", () => {
     expect(html).toContain(`<button id="passkey"`);
     expect(html).toContain(`data-continue="/auth/handoff/continue?h=hs_abc"`);
     expect(html).toContain(`<meta name="referrer" content="strict-origin">`);
+    // The script sets `hidden` on the passkey button when the browser lacks
+    // the JSON parsers. The page's own `button { display: block }` rule beats
+    // the browser's hidden rule, so the page must carry its own.
+    expect(html).toContain("[hidden] { display: none !important; }");
+    expect(html).toContain("passkey.hidden = true");
   });
   it("escapes the continue path and hides disabled methods", () => {
     const html = defaultSignInPage({

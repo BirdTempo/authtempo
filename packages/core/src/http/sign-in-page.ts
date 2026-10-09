@@ -36,6 +36,7 @@ export function defaultSignInPage(input: SignInPageInput): string {
 body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #f6f6f6; color: #111; }
 main { background: #fff; padding: 2rem; border-radius: 0.5rem; box-shadow: 0 1px 4px rgba(0,0,0,0.12); width: 22rem; max-width: 90vw; }
 h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+[hidden] { display: none !important; }
 .button, button { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 0.75rem 1rem; margin: 0.5rem 0; border: 0; border-radius: 0.375rem; background: #111; color: #fff; text-align: center; text-decoration: none; cursor: pointer; }
 input { width: 100%; box-sizing: border-box; font: inherit; padding: 0.75rem; margin: 0.5rem 0; border: 1px solid #ccc; border-radius: 0.375rem; }
 p.status { min-height: 1.5rem; color: #555; }

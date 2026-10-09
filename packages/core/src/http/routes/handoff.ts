@@ -93,6 +93,9 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
         const body = await readBody(ctx.request, continueBody);
         if (!body.ok) return redirect(authErrorUrl(config, "invalid_token"));
         const handoffId = body.value.h;
+        // The same rule as the GET: no page for a spent, expired, or unknown id.
+        const live = await peekHandoff(config, handoffId);
+        if (!live.ok) return redirect(authErrorUrl(config, live.code));
         const session = await sessionFromRequest(config, ctx.request);
         // No session: mint nothing, and show the sign-in page for this id.
         if (!session) return page(handoffId);

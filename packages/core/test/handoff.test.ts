@@ -513,6 +513,15 @@ describe("handoff routes", () => {
       expect(spent.status).toBe(302);
       expect(spent.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
     }
+    // The POST follows the same rule, with and without a session: no page for a dead id.
+    for (const headers of [{ origin: BASE_URL }, { origin: BASE_URL, cookie }]) {
+      const spent = await handle(formPost(h, headers));
+      expect(spent.status).toBe(302);
+      expect(spent.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+      const unknown = await handle(formPost("hs_nope", headers));
+      expect(unknown.status).toBe(302);
+      expect(unknown.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    }
   });
 
   it("POST redeem answers 400 on a bad body and on a wrong code, with no session", async () => {
