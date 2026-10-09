@@ -9,6 +9,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import { createSession } from "./sessions.js";
+import { ClaimRacedError, undoSessionIfClaimed } from "./users.js";
 
 export const HANDOFF_ID_PREFIX = "hs_";
 export const HANDOFF_CODE_PREFIX = "hc_";
@@ -211,14 +212,25 @@ export async function redeemHandoff(
   if (!data || typeof data.challenge !== "string") return fail("invalid_token");
   if (!constantTimeEqual(await sha256Base64Url(input.verifier), data.challenge))
     return fail("invalid_token");
-  const user = await config.storage.findOne("user", [
-    { field: "id", op: "eq", value: row.value.identifier },
-  ]);
-  if (!user) return fail("invalid_token");
-  const { token, session } = await createSession(config, {
-    userId: user.id,
-    ip: input.ip,
-    userAgent: input.userAgent,
-  });
-  return ok({ token, user, session });
+  const userId = row.value.identifier;
+  const now = config.clock.now();
+  try {
+    return await config.storage.transaction(async (tx) => {
+      const user = await tx.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+      if (!user) return fail("invalid_token");
+      const { token, session } = await createSession(
+        config,
+        { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+        tx,
+      );
+      if (!user.emailVerified) {
+        // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
+        await undoSessionIfClaimed(tx, user.id, now);
+      }
+      return ok({ token, user, session });
+    });
+  } catch (err) {
+    if (err instanceof ClaimRacedError) return fail("invalid_token");
+    throw err;
+  }
 }

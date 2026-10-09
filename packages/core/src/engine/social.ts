@@ -13,7 +13,7 @@ import type { UserRow } from "../schema.js";
 import { buildQuery, type Provider, type SocialProfile } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { createSession } from "./sessions.js";
-import { claimEmail, normalizeEmail } from "./users.js";
+import { ClaimRacedError, claimEmail, normalizeEmail, undoSessionIfClaimed } from "./users.js";
 
 export const OAUTH_STATE_PREFIX = "os_";
 const STATE_RE = /^os_[A-Za-z0-9_-]{43}$/;
@@ -185,14 +185,31 @@ export async function completeSocial(
 
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
-  const resolved = await resolveSocialUser(
-    config.storage,
-    provider.name,
-    profile,
-    now,
-    (tx, user) =>
-      createSession(config, { userId: user.id, ip: input.ip, userAgent: input.userAgent }, tx),
-  );
+  let resolved: Result<{ user: UserRow; after: { token: string } }>;
+  try {
+    resolved = await resolveSocialUser(
+      config.storage,
+      provider.name,
+      profile,
+      now,
+      async (tx, user) => {
+        const created = await createSession(
+          config,
+          { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+          tx,
+        );
+        if (!user.emailVerified) {
+          // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
+          await undoSessionIfClaimed(tx, user.id, now);
+        }
+        return created;
+      },
+    );
+  } catch (err) {
+    // The claim won. The address is proved by its owner now.
+    if (err instanceof ClaimRacedError) return fail("email_taken_unverified");
+    throw err;
+  }
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
   return ok({ token: after.token, next: safeNext(data.next), user });

@@ -33,6 +33,11 @@ export async function claimEmail(
   keepIdentityId: string | null,
   now: Date,
 ): Promise<void> {
+  // First, so a concurrent session insert for this user sees the verified flag and undoes itself (see the conditional update after each session insert).
+  await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
+    emailVerified: true,
+    updatedAt: now,
+  });
   const where: Where<"identity">[] = [
     { field: "userId", op: "eq", value: userId },
     { field: "provider", op: "ne", value: "email" },
@@ -52,10 +57,6 @@ export async function claimEmail(
     { field: "purpose", op: "eq", value: "handoff-code" },
     { field: "identifier", op: "eq", value: userId },
   ]);
-  await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
-    emailVerified: true,
-    updatedAt: now,
-  });
 }
 
 /**
@@ -64,6 +65,39 @@ export async function claimEmail(
  * claimant's write cannot land between the claim and this work.
  */
 export type AfterResolve<T> = (tx: StorageAdapter, user: UserRow, created: boolean) => Promise<T>;
+
+/**
+ * Thrown inside a transaction when a claim verified the user after this
+ * transaction read the user as unverified. The throw undoes the session
+ * insert. The caller catches it outside the transaction.
+ */
+export class ClaimRacedError extends Error {
+  constructor() {
+    super("tempo-auth: a claim raced this session insert");
+    this.name = "ClaimRacedError";
+  }
+}
+
+/**
+ * Runs inside the caller's transaction, after a session insert for a user
+ * who was unverified when the transaction read the row. Throws
+ * `ClaimRacedError` when the user is verified now.
+ */
+export async function undoSessionIfClaimed(
+  tx: StorageAdapter,
+  userId: string,
+  now: Date,
+): Promise<void> {
+  const n = await tx.update(
+    "user",
+    [
+      { field: "id", op: "eq", value: userId },
+      { field: "emailVerified", op: "eq", value: false },
+    ],
+    { updatedAt: now },
+  );
+  if (n === 0) throw new ClaimRacedError();
+}
 
 export function findOrCreateUserByEmail(
   storage: StorageAdapter,
