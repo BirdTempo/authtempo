@@ -156,9 +156,11 @@ async function unverifiedHandoffCode(auth: ReturnType<typeof makeAuth>) {
     ip: null,
   });
   if (!start.ok) throw new Error(start.code);
+  const browser = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
   const cont = await continueHandoff(auth.config, {
     handoffId: start.value.handoffId,
     userId: user.id,
+    sessionId: browser.session.id,
   });
   if (!cont.ok) throw new Error(cont.code);
   const code = new URL(cont.value.location).searchParams.get("code") ?? "";
@@ -339,9 +341,15 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       ip: null,
     });
     if (!start.ok) throw new Error(start.code);
+    const browser = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
     const cont = await continueHandoff(auth.config, {
       handoffId: start.value.handoffId,
       userId: user.id,
+      sessionId: browser.session.id,
     });
     if (!cont.ok) throw new Error(cont.code);
     const code = new URL(cont.value.location).searchParams.get("code") ?? "";
@@ -515,5 +523,83 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       { field: "id", op: "eq", value: claim.value.id },
     ]);
     expect(stored).toMatchObject({ emailVerified: false, name: null, image: null });
+  });
+
+  it("undoes the handoff code when the claim deletes the checked browser session before the mint (re-review finding C)", async () => {
+    const auth = makeAuth({ handoff: { schemes: ["consumera://"] } });
+    const now = auth.clock.now();
+    const user = await auth.storage.create("user", {
+      id: "01CLAIMANT",
+      email: EMAIL,
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // The claimant's browser session passed the continue route's check.
+    const browser = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const start = await startHandoff(auth.config, {
+      challenge: await sha256Base64Url(randomBase64Url(32)),
+      redirect: "consumera://auth",
+      ip: null,
+    });
+    if (!start.ok) throw new Error(start.code);
+    const link = await magicLinkToken(auth);
+
+    // Inside the continue's transaction, before its user read, the owner's
+    // whole claim runs on a D1-like view: it deletes the browser session and
+    // the handoff codes and verifies the user. The continue then reads the
+    // user verified and writes a code that would skip the redeem guard.
+    const original = auth.storage.transaction.bind(auth.storage);
+    let fired = false;
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          findOne: async (m, w) => {
+            if (m === "user" && !fired) {
+              fired = true;
+              owner = await verifyMagicLink(d1Like(auth.config), {
+                token: link,
+                ip: null,
+                userAgent: null,
+              });
+            }
+            return tx.findOne(m, w);
+          },
+        }),
+      );
+
+    const r = await continueHandoff(auth.config, {
+      handoffId: start.value.handoffId,
+      userId: user.id,
+      sessionId: browser.session.id,
+    });
+    expect(fired).toBe(true);
+    expect(r).toMatchObject({ ok: false, code: "invalid_token" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    expect(proved?.ok).toBe(true);
+    expect(
+      await auth.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "handoff-code" },
+        { field: "identifier", op: "eq", value: user.id },
+      ]),
+    ).toEqual([]);
+    // The undo also reverses the start row's consume: the row is live again.
+    // The claimant's browser session is gone, so a second continue shows
+    // the sign-in page.
+    const startRow = await auth.storage.findOne("verification", [
+      { field: "valueHash", op: "eq", value: await sha256Hex(start.value.handoffId) },
+    ]);
+    expect(startRow?.consumedAt).toBeNull();
+    expect(
+      await auth.storage.findOne("session", [{ field: "id", op: "eq", value: browser.session.id }]),
+    ).toBeNull();
   });
 });

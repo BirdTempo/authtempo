@@ -101,7 +101,11 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
         const session = await sessionFromRequest(config, ctx.request);
         // No session: mint nothing, and show the sign-in page for this id.
         if (!session) return page(handoffId);
-        const r = await continueHandoff(config, { handoffId, userId: session.user.id });
+        const r = await continueHandoff(config, {
+          handoffId,
+          userId: session.user.id,
+          sessionId: session.session.id,
+        });
         return r.ok ? redirect(r.value.location) : redirect(authErrorUrl(config, r.code));
       },
     },

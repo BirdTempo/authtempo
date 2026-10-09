@@ -105,6 +105,8 @@ export interface AuthApi {
   continueHandoff(input: {
     handoffId: string;
     userId: string;
+    /** The browser session the caller checked. A claim that deleted it undoes the code. */
+    sessionId: string;
   }): Promise<Result<{ location: string }>>;
   redeemHandoff(input: {
     code: string;
