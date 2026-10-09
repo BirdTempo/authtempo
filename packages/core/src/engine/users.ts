@@ -4,10 +4,18 @@ import { type StorageAdapter, StorageError } from "../storage/port.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 
-/** Lowercase, trimmed, and shaped like an address, or null. The shape check is loose on purpose: the magic link proves the address. */
+/**
+ * Lowercase, trimmed, and shaped like an address, or null. The shape check
+ * is loose on purpose: the magic link proves the address. A control
+ * character is never part of an address, and storage rejects U+0000.
+ */
 export function normalizeEmail(raw: string): string | null {
   const email = raw.trim().toLowerCase();
   if (email.length > 254 || !EMAIL_RE.test(email)) return null;
+  for (const ch of email) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code <= 0x1f || code === 0x7f) return null;
+  }
   return email;
 }
 
@@ -41,6 +49,25 @@ function createOrFindInTransaction(
   return storage.transaction(async (tx) => {
     const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
     if (existing) {
+      // An isolate that died between the user create and the identity
+      // create left a user with no email identity. Repair it here. A
+      // concurrent repair fails unique_violation, which the caller catches
+      // outside this transaction.
+      const identity = await tx.findOne("identity", [
+        { field: "provider", op: "eq", value: "email" },
+        { field: "subject", op: "eq", value: email },
+      ]);
+      if (!identity) {
+        await tx.create("identity", {
+          id: newId(now),
+          userId: existing.id,
+          provider: "email",
+          subject: email,
+          linkedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
       if (!existing.emailVerified) {
         await tx.update("user", [{ field: "id", op: "eq", value: existing.id }], {
           emailVerified: true,

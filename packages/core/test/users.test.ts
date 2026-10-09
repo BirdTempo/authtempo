@@ -121,3 +121,46 @@ describe("findOrCreateUserByEmail", () => {
     expect(await real.findMany("user", [])).toHaveLength(1);
   });
 });
+
+describe("normalizeEmail control characters (plan 3 input)", () => {
+  it("returns null for a NUL, a newline, a tab, and DEL", () => {
+    for (const bad of [
+      "a\u0000@example.com",
+      "a\n@example.com",
+      "a\t@example.com",
+      "a\u007f@example.com",
+    ]) {
+      expect(normalizeEmail(bad)).toBeNull();
+    }
+    expect(normalizeEmail("Ada@Example.com")).toBe("ada@example.com");
+  });
+});
+
+describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input)", () => {
+  it("creates the email identity when the user exists without one", async () => {
+    const storage = createMemoryAdapter();
+    const now = new Date("2026-01-01T00:00:00.000Z");
+    await storage.create("user", {
+      id: "01USER",
+      email: "ada@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(await storage.findMany("identity", [])).toHaveLength(0);
+    const { user, created } = await findOrCreateUserByEmail(storage, "ada@example.com", now);
+    expect(created).toBe(false);
+    expect(user.id).toBe("01USER");
+    const identities = await storage.findMany("identity", []);
+    expect(identities).toHaveLength(1);
+    expect(identities[0]).toMatchObject({
+      userId: "01USER",
+      provider: "email",
+      subject: "ada@example.com",
+    });
+    await findOrCreateUserByEmail(storage, "ada@example.com", now);
+    expect(await storage.findMany("identity", [])).toHaveLength(1);
+  });
+});
