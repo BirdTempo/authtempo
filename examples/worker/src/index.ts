@@ -38,6 +38,8 @@ function getAuth(env: Env): Auth {
     },
     // The handoff for a desktop or native app. The example admits one scheme.
     handoff: { schemes: ["example-app://"] },
+    // Organizations, members, and mailed invitations. The routes need the 0002 migration.
+    organizations: {},
   });
   return auth;
 }

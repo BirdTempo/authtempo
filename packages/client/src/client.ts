@@ -1,4 +1,8 @@
 import type {
+  InvitationSummary,
+  MemberRow,
+  MemberSummary,
+  OrganizationSummary,
   PasskeySummary,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -10,6 +14,17 @@ import { createTransport, type TransportOptions } from "./transport.js";
 import { type BrowserWebAuthn, browserWebAuthn, WebAuthnCancelled } from "./webauthn.js";
 
 export type PasskeySummaryJSON = Omit<PasskeySummary, "createdAt"> & { createdAt: string };
+
+export type OrganizationJSON = Omit<OrganizationSummary, "createdAt"> & { createdAt: string };
+export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string };
+export type InvitationJSON = Omit<InvitationSummary, "expiresAt" | "createdAt"> & {
+  expiresAt: string;
+  createdAt: string;
+};
+export type MemberRowJSON = Omit<MemberRow, "createdAt" | "updatedAt"> & {
+  createdAt: string;
+  updatedAt: string;
+};
 
 export interface ClientOptions extends TransportOptions {
   /** The browser WebAuthn seam. Default `browserWebAuthn()`. Tests inject a soft one. */
@@ -43,6 +58,58 @@ export interface Client {
   passkeys: {
     list(): Promise<ClientResult<PasskeySummaryJSON[]>>;
     delete(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+  };
+  /** Every operation answers `not_found` when the server runs without the `organizations` config. */
+  organizations: {
+    create(input: {
+      slug: string;
+      name: string;
+      metadata?: Record<string, unknown> | null | undefined;
+    }): Promise<ClientResult<{ organization: OrganizationJSON; member: MemberRowJSON }>>;
+    list(): Promise<ClientResult<{ organization: OrganizationJSON; role: string }[]>>;
+    update(input: {
+      organizationId: string;
+      name?: string | undefined;
+      slug?: string | undefined;
+      metadata?: Record<string, unknown> | null | undefined;
+    }): Promise<ClientResult<OrganizationJSON>>;
+    delete(input: { organizationId: string }): Promise<ClientResult<{ ok: true }>>;
+    members: {
+      list(input: { organizationId: string }): Promise<ClientResult<MemberJSON[]>>;
+      add(input: {
+        organizationId: string;
+        userId: string;
+        role: string;
+      }): Promise<ClientResult<MemberJSON>>;
+      role(input: {
+        organizationId: string;
+        userId: string;
+        role: string;
+      }): Promise<ClientResult<MemberJSON>>;
+      remove(input: {
+        organizationId: string;
+        userId: string;
+      }): Promise<ClientResult<{ ok: true }>>;
+    };
+    invitations: {
+      /** The invitation is mailed. The token never comes back to the inviter. */
+      invite(input: {
+        organizationId: string;
+        email: string;
+        role: string;
+      }): Promise<ClientResult<InvitationJSON>>;
+      list(input: { organizationId: string }): Promise<ClientResult<InvitationJSON[]>>;
+      revoke(input: {
+        organizationId: string;
+        invitationId: string;
+      }): Promise<ClientResult<{ ok: true }>>;
+      accept(input: {
+        token: string;
+      }): Promise<ClientResult<{ organization: OrganizationJSON; member: MemberJSON }>>;
+      decline(input: { token: string }): Promise<ClientResult<{ ok: true }>>;
+    };
+    /** Answers the session, so the caller reads `session.activeOrganizationId` from it. `null` clears it. */
+    setActive(input: { organizationId: string | null }): Promise<ClientResult<PublicSession>>;
   };
   errors: typeof ERRORS;
 }
@@ -109,6 +176,78 @@ export function createClient(options: ClientOptions): Client {
         return r.ok ? ok(r.value.passkeys) : r;
       },
       delete: (input) => call<{ ok: true }>("POST", "/passkeys/delete", input),
+    },
+    organizations: {
+      create: ({ metadata, ...rest }) =>
+        call<{ organization: OrganizationJSON; member: MemberRowJSON }>(
+          "POST",
+          "/organizations/create",
+          { ...rest, ...(metadata !== undefined ? { metadata } : {}) },
+        ),
+      async list() {
+        const r = await call<{
+          organizations: { organization: OrganizationJSON; role: string }[];
+        }>("GET", "/organizations");
+        return r.ok ? ok(r.value.organizations) : r;
+      },
+      async update({ metadata, name, slug, organizationId }) {
+        const r = await call<{ organization: OrganizationJSON }>("POST", "/organizations/update", {
+          organizationId,
+          ...(name !== undefined ? { name } : {}),
+          ...(slug !== undefined ? { slug } : {}),
+          ...(metadata !== undefined ? { metadata } : {}),
+        });
+        return r.ok ? ok(r.value.organization) : r;
+      },
+      delete: (input) => call<{ ok: true }>("POST", "/organizations/delete", input),
+      members: {
+        async list(input) {
+          const r = await call<{ members: MemberJSON[] }>(
+            "GET",
+            `/organizations/members?organizationId=${encodeURIComponent(input.organizationId)}`,
+          );
+          return r.ok ? ok(r.value.members) : r;
+        },
+        async add(input) {
+          const r = await call<{ member: MemberJSON }>("POST", "/organizations/members/add", input);
+          return r.ok ? ok(r.value.member) : r;
+        },
+        async role(input) {
+          const r = await call<{ member: MemberJSON }>(
+            "POST",
+            "/organizations/members/role",
+            input,
+          );
+          return r.ok ? ok(r.value.member) : r;
+        },
+        remove: (input) => call<{ ok: true }>("POST", "/organizations/members/remove", input),
+      },
+      invitations: {
+        async invite(input) {
+          const r = await call<{ invitation: InvitationJSON }>(
+            "POST",
+            "/organizations/invite",
+            input,
+          );
+          return r.ok ? ok(r.value.invitation) : r;
+        },
+        async list(input) {
+          const r = await call<{ invitations: InvitationJSON[] }>(
+            "GET",
+            `/organizations/invitations?organizationId=${encodeURIComponent(input.organizationId)}`,
+          );
+          return r.ok ? ok(r.value.invitations) : r;
+        },
+        revoke: (input) => call<{ ok: true }>("POST", "/organizations/invitations/revoke", input),
+        accept: (input) =>
+          call<{ organization: OrganizationJSON; member: MemberJSON }>(
+            "POST",
+            "/organizations/invitations/accept",
+            input,
+          ),
+        decline: (input) => call<{ ok: true }>("POST", "/organizations/invitations/decline", input),
+      },
+      setActive: (input) => call<PublicSession>("POST", "/organizations/active", input),
     },
     errors: ERRORS,
   };
