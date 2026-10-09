@@ -14,10 +14,13 @@
     {
       "binding": "DB",
       "database_name": "tempo-auth-example",
+      // A placeholder for local tests. A real deploy needs the id that
+      // `wrangler d1 create` prints; with this value the deploy fails.
       "database_id": "tempo-auth-example",
-      // The adapter package ships the migrations. In a real app this path is
-      // node_modules/@tempo-auth/adapter-d1/migrations; here the workspace
-      // link resolves to the same files.
+      // The adapter package ships the migrations. wrangler reads this path
+      // relative to this config file, not to the shell's directory. In a
+      // real app the path is node_modules/@tempo-auth/adapter-d1/migrations;
+      // here the workspace link resolves to the same files.
       "migrations_dir": "../../packages/adapter-d1/migrations"
     }
   ]

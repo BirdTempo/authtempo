@@ -66,7 +66,10 @@ function reinsertRowStatement(model: ModelName, row: Row): Statement {
 
 /**
  * Runs every undo entry in reverse. A failed entry does not stop the rest.
- * Always throws the original error; the failures, if any, go in its cause.
+ * When every entry succeeds, rethrows the original error unchanged. When any
+ * entry fails, throws one rollback_failed error with `{ original, failures }`
+ * as its cause, so a broken rollback never looks like the original error
+ * (for example a benign unique_violation race). The original is never changed.
  * No db.batch here: a batch that fails midway applies nothing.
  */
 async function rethrowAfterUndo(
@@ -83,11 +86,8 @@ async function rethrowAfterUndo(
     }
   }
   if (failures.length === 0) throw original;
-  if (original instanceof Error && original.cause === undefined) {
-    original.cause = failures;
-    throw original;
-  }
-  throw new Error("transaction failed and the rollback failed", { cause: { original, failures } });
+  const model = original instanceof StorageError ? original.model : "meta";
+  throw new StorageError("rollback_failed", model, [], { cause: { original, failures } });
 }
 
 function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {

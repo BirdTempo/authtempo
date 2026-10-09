@@ -61,4 +61,31 @@ describe("d1 schema version", () => {
     await setVersion("1");
     await expect(db.findMany("user", [])).resolves.toEqual([]);
   });
+
+  it("passes a read error through unchanged, not as schema_mismatch, and retries", async () => {
+    const boom = new Error("D1_ERROR: boom");
+    let failing = true;
+    const wrapped = {
+      prepare: (sql: string) => {
+        if (failing) throw boom;
+        return env.DB.prepare(sql);
+      },
+      batch: (s: D1PreparedStatement[]) => env.DB.batch(s),
+    } as unknown as D1Database;
+    const db = createD1Adapter(wrapped);
+    const err = await db.findMany("user", []).catch((e: unknown) => e);
+    expect(err).toBe(boom);
+    failing = false;
+    await expect(db.findMany("user", [])).resolves.toEqual([]);
+  });
+
+  it("maps a missing ta_meta table to schema_mismatch none", async () => {
+    const wrapped = {
+      prepare: (sql: string) => env.DB.prepare(sql.replaceAll("ta_meta", "ta_meta_missing")),
+    } as unknown as D1Database;
+    await expect(createD1Adapter(wrapped).findMany("user", [])).rejects.toMatchObject({
+      code: "schema_mismatch",
+      fields: ["none"],
+    });
+  });
 });

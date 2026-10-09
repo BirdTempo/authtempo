@@ -29,20 +29,43 @@ wrangler d1 migrations apply my-app
 
 The adapter reads `ta_meta.schema_version` once. If it is older than the
 core's `SCHEMA_VERSION` or missing, every operation throws `StorageError`
-with code `schema_mismatch` until the migrations run.
+with code `schema_mismatch` until the migrations run. Only a missing
+`ta_meta` table counts as a missing version. Any other read error passes
+through unchanged, and the next operation reads again.
 
 ## Transactions
 
-D1 has no interactive transaction. A transaction runs its statements at
-once and reverses its own writes if the function throws. It is not
-isolated from other requests: another request can read a row this
-transaction later reverses, and a rollback restores the row this
-transaction saw. The engine's real guards are unique keys and conditional
-updates. Nested transactions share the outer undo log. In a transaction,
-`update` runs its prior read and its write in one atomic D1 batch, and
-`delete` uses `RETURNING`, so a rollback never overwrites a write that
-landed between the read and the write. A write that lands after this
-transaction's own write and before its rollback is still overwritten.
+D1 has no interactive transaction. The adapter keeps an undo log in
+memory: one entry for each write in the transaction. If the function
+throws, the adapter rolls back the transaction: it runs the undo log in
+reverse order. The rollback affects only the writes of this transaction.
+
+A transaction is not isolated from other requests. Another request can
+read a row that a later rollback removes. A rollback restores the row
+that this transaction saw. The engine's real guards are unique keys and
+conditional updates.
+
+In a transaction, `update` runs its prior read and its write in one
+atomic D1 batch, and `delete` uses `RETURNING`. So a rollback never
+overwrites a write that landed between the read and the write. A write
+that lands after this transaction's own write and before its rollback is
+still overwritten.
+
+A nested transaction adds its entries to the same undo log. If the nested
+function throws, the rollback affects only the entries of the nested
+transaction. The outer transaction can catch the error and continue.
+
+If an undo entry fails, the adapter still runs the other entries. It then
+throws `StorageError` with code `rollback_failed`. Its `cause` holds
+`{ original, failures }`. The adapter does not throw the original error
+in this case, so a failed rollback never looks like a normal unique
+conflict.
+
+An isolate that stops during a transaction never rolls back, because the
+undo log lives in memory. The writes made before the stop stay. Until
+plan 3 lands, sign-in can leave a user row without its email identity,
+and no later sign-in creates it. Plan 3 repairs this: it creates the
+missing email identity when the user exists.
 
 ## Tests
 

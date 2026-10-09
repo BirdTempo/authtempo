@@ -5,7 +5,7 @@
 -- unique indexes ux_<table>__<col>__<col>, indexes ix_<table>__<col>.
 
 CREATE TABLE ta_meta (
-  key TEXT PRIMARY KEY,
+  key TEXT PRIMARY KEY NOT NULL,
   value TEXT NOT NULL
 );
 INSERT INTO ta_meta (key, value) VALUES ('schema_version', '1');

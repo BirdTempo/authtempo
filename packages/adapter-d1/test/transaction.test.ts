@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { StorageError } from "@tempo-auth/core";
 import { TABLES } from "@tempo-auth/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
@@ -113,7 +114,7 @@ describe("d1 undo log", () => {
     expect(rows.map((r) => r.id)).toEqual(["u1"]);
   });
 
-  it("runs every undo entry and rethrows the original error with the failures as cause", async () => {
+  it("runs every undo entry and throws rollback_failed with the original in cause when one fails", async () => {
     const db = createD1Adapter(env.DB);
     await db.create("user", {
       id: "u1",
@@ -124,6 +125,7 @@ describe("d1 undo log", () => {
       createdAt: t0,
       updatedAt: t0,
     });
+    const original = new Error("boom");
     let caught: unknown;
     try {
       await db.transaction(async (tx) => {
@@ -147,15 +149,41 @@ describe("d1 undo log", () => {
           createdAt: t0,
           updatedAt: t0,
         });
-        throw new Error("boom");
+        throw original;
       });
     } catch (e) {
       caught = e;
     }
-    expect(caught).toMatchObject({ message: "boom" });
-    expect((caught as Error).cause).toHaveLength(1);
+    expect(caught).toBeInstanceOf(StorageError);
+    expect(caught).toMatchObject({ code: "rollback_failed", fields: [] });
+    const cause = (caught as Error).cause as { original: unknown; failures: unknown[] };
+    expect(cause.original).toBe(original);
+    expect(original.cause).toBeUndefined();
+    expect(cause.failures).toHaveLength(1);
     const ids = (await db.findMany("user", [])).map((r) => r.id);
     expect(ids).toEqual(["u2"]);
+  });
+
+  it("rethrows the original error unchanged when every undo entry succeeds", async () => {
+    const db = createD1Adapter(env.DB);
+    const original = new Error("boom");
+    const caught = await db
+      .transaction(async (tx) => {
+        await tx.create("user", {
+          id: "u1",
+          email: "a@example.com",
+          emailVerified: false,
+          name: null,
+          image: null,
+          createdAt: t0,
+          updatedAt: t0,
+        });
+        throw original;
+      })
+      .catch((e: unknown) => e);
+    expect(caught).toBe(original);
+    expect(original.cause).toBeUndefined();
+    expect(await db.findMany("user", [])).toEqual([]);
   });
 
   it("does not un-consume a token that another request consumed between the read and the write", async () => {

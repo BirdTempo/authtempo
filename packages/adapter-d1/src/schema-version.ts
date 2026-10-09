@@ -1,31 +1,21 @@
-import { SCHEMA_VERSION, StorageError } from "@tempo-auth/core";
-import { META_TABLE, SCHEMA_VERSION_KEY } from "@tempo-auth/core/sql";
+import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@tempo-auth/core/sql";
 
 /**
- * Reads the schema version once. An older or missing version throws
- * schema_mismatch on every operation until the migrations run. A newer
- * version is accepted: a later migration must stay compatible with this
- * adapter until the adapter is updated.
+ * The schema version check for D1, on the core gate. Only a missing table
+ * ("no such table") counts as "no version", because that means the migrations
+ * never ran. Every other error passes through, so a D1 outage never reads as
+ * "run the migrations".
  */
 export function schemaVersionCheck(db: D1Database): () => Promise<void> {
-  let checked: Promise<void> | null = null;
-  return () => {
-    checked ??= (async () => {
-      let value: string | null = null;
-      try {
-        value = await db
-          .prepare(`SELECT value FROM ${META_TABLE} WHERE key = ?`)
-          .bind(SCHEMA_VERSION_KEY)
-          .first<string>("value");
-      } catch {
-        value = null;
-      }
-      const found = value === null ? Number.NaN : Number(value);
-      if (!Number.isInteger(found) || found < SCHEMA_VERSION) {
-        checked = null;
-        throw new StorageError("schema_mismatch", "meta", [value ?? "none"]);
-      }
-    })();
-    return checked;
-  };
+  return schemaVersionGate(async () => {
+    try {
+      return await db
+        .prepare(`SELECT value FROM ${META_TABLE} WHERE key = ?`)
+        .bind(SCHEMA_VERSION_KEY)
+        .first<string>("value");
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("no such table")) return null;
+      throw e;
+    }
+  });
 }

@@ -7,7 +7,9 @@
     {
       "binding": "DB",
       "database_name": "tempo-auth-test",
+      // A placeholder: the Workers test pool runs D1 locally and never reads it.
       "database_id": "tempo-auth-test",
+      // Relative to this config file.
       "migrations_dir": "migrations"
     }
   ]
