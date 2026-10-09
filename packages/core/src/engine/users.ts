@@ -19,18 +19,26 @@ export function normalizeEmail(raw: string): string | null {
   return email;
 }
 
+export interface ClaimKeep {
+  /** The identity that carries the proof. */
+  identityId?: string;
+  /** The password row that the proof confirms (the sign-up verify link). */
+  passwordId?: string;
+}
+
 /**
  * A user created through an unverified email is a claim, not proof. When a
  * sign-in proves the address, every identity that came in before (except
  * the one that carries the proof, and the `email` identity), every
- * session, every passkey, every pending passkey challenge, and every
+ * session, every password row (except the one `keep.passwordId` names),
+ * every passkey, every pending passkey challenge, and every
  * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
  * Runs inside the caller's transaction.
  */
 export async function claimEmail(
   tx: StorageAdapter,
   userId: string,
-  keepIdentityId: string | null,
+  keep: ClaimKeep | null,
   now: Date,
 ): Promise<void> {
   // First, so a concurrent session insert for this user sees the verified flag and undoes itself (see the conditional update after each session insert).
@@ -42,8 +50,15 @@ export async function claimEmail(
     { field: "userId", op: "eq", value: userId },
     { field: "provider", op: "ne", value: "email" },
   ];
-  if (keepIdentityId) where.push({ field: "id", op: "ne", value: keepIdentityId });
+  if (keep?.identityId) where.push({ field: "id", op: "ne", value: keep.identityId });
   await tx.delete("identity", where);
+  // Before the session delete. A password sign-in of an unverified user
+  // checks its password row as the last statement after its session
+  // insert. When that check still finds the row, this delete has not run,
+  // so the session delete below still removes that sign-in's session.
+  const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
+  if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
+  await tx.delete("password", passwords);
   await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
   // A claimant's passkeys would keep the account open after the claim.
   // Registration already needs a verified email; this closes any other path.
@@ -205,21 +220,7 @@ async function resolveInTransaction(
     // create left a user with no email identity. Repair it here. A
     // concurrent repair fails unique_violation, which the caller catches
     // outside this transaction.
-    const identity = await tx.findOne("identity", [
-      { field: "provider", op: "eq", value: "email" },
-      { field: "subject", op: "eq", value: email },
-    ]);
-    if (!identity) {
-      await tx.create("identity", {
-        id: newId(now),
-        userId: existing.id,
-        provider: "email",
-        subject: email,
-        linkedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
+    await ensureEmailIdentity(tx, existing.id, email, now);
     if (!existing.emailVerified) {
       await claimEmail(tx, existing.id, null, now);
       return { user: { ...existing, emailVerified: true, updatedAt: now }, created: false };
@@ -245,4 +246,28 @@ async function resolveInTransaction(
     updatedAt: now,
   });
   return { user, created: true };
+}
+
+/** The `email` identity means "this address signs in by magic link". It exists once the address is proved. */
+export async function ensureEmailIdentity(
+  tx: StorageAdapter,
+  userId: string,
+  email: string,
+  now: Date,
+): Promise<void> {
+  const found = await tx.findOne("identity", [
+    { field: "provider", op: "eq", value: "email" },
+    { field: "subject", op: "eq", value: email },
+  ]);
+  if (!found) {
+    await tx.create("identity", {
+      id: newId(now),
+      userId,
+      provider: "email",
+      subject: email,
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 }

@@ -285,3 +285,59 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
     ]);
   });
 });
+
+describe("claimEmail and the password row (plan 8)", () => {
+  async function unverifiedWithPassword() {
+    const storage = createMemoryAdapter();
+    const now = new Date("2026-10-10T00:00:00Z");
+    await storage.create("user", {
+      id: "u1",
+      email: "ada@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await storage.create("password", {
+      id: "p1",
+      userId: "u1",
+      hash: "h",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { storage, now };
+  }
+  const ofUser = [{ field: "userId", op: "eq", value: "u1" }] as const;
+
+  it("deletes the user's password row when nothing is kept", async () => {
+    const { storage, now } = await unverifiedWithPassword();
+    await storage.transaction((tx) => claimEmail(tx, "u1", null, now));
+    expect(await storage.findMany("password", [...ofUser])).toEqual([]);
+  });
+
+  it("keeps the password row that keep.passwordId names", async () => {
+    const { storage, now } = await unverifiedWithPassword();
+    await storage.transaction((tx) => claimEmail(tx, "u1", { passwordId: "p1" }, now));
+    expect(
+      await storage.findOne("password", [{ field: "id", op: "eq", value: "p1" }]),
+    ).not.toBeNull();
+  });
+
+  it("deletes the password rows before the sessions", async () => {
+    const { storage, now } = await unverifiedWithPassword();
+    const order: string[] = [];
+    await storage.transaction((tx) => {
+      const recording: StorageAdapter = {
+        ...tx,
+        delete: async (m, w) => {
+          order.push(m);
+          return tx.delete(m, w);
+        },
+      };
+      return claimEmail(recording, "u1", null, now);
+    });
+    expect(order.indexOf("password")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("password")).toBeLessThan(order.indexOf("session"));
+  });
+});

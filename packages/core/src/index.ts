@@ -1,6 +1,12 @@
 export const VERSION = "0.0.0";
 
-export type { AuthConfig, MailMessage, MailPort, OrganizationsConfig } from "./config.js";
+export type {
+  AuthConfig,
+  MailMessage,
+  MailPort,
+  OrganizationsConfig,
+  PasswordConfig,
+} from "./config.js";
 export { ConfigError } from "./config.js";
 export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
@@ -18,6 +24,12 @@ export {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
 } from "./http/handoff-confirm-page.js";
+export {
+  defaultPasswordVerifyPage,
+  defaultResetPage,
+  type PasswordVerifyPageInput,
+  type ResetPageInput,
+} from "./http/password-pages.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";

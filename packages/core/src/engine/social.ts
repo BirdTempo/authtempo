@@ -16,6 +16,7 @@ import { createSession } from "./sessions.js";
 import {
   ClaimRacedError,
   claimEmail,
+  ensureEmailIdentity,
   normalizeEmail,
   undoSessionIfIdentityGone,
   userStillUnverified,
@@ -375,7 +376,7 @@ async function linkInTransaction(
       profile.email !== null &&
       normalizeEmail(profile.email) === user.email;
     if (!user.emailVerified && proved) {
-      await claimEmail(tx, user.id, identity.id, now);
+      await claimEmail(tx, user.id, { identityId: identity.id }, now);
       await ensureEmailIdentity(tx, user.id, user.email, now);
       const filled = await fillUser(
         tx,
@@ -434,20 +435,6 @@ async function linkInTransaction(
   if (profile.emailVerified) await tx.create("identity", identityRow(user.id, "email", email, now));
   // A claim can find this unverified user before the commit on D1.
   return ok({ user, trustedIdentityId: profile.emailVerified ? null : identityId, created: true });
-}
-
-/** The email identity means "this address signs in by magic link". It exists once the address is proved. */
-async function ensureEmailIdentity(
-  tx: StorageAdapter,
-  userId: string,
-  email: string,
-  now: Date,
-): Promise<void> {
-  const found = await tx.findOne("identity", [
-    { field: "provider", op: "eq", value: "email" },
-    { field: "subject", op: "eq", value: email },
-  ]);
-  if (!found) await tx.create("identity", identityRow(userId, "email", email, now));
 }
 
 function identityRow(userId: string, provider: string, subject: string, now: Date) {
