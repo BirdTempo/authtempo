@@ -34,10 +34,21 @@ function originTrusted(config: ResolvedConfig, origin: string): boolean {
   return config.trustedOrigins.has(origin);
 }
 
+/** Credentialed CORS for one trusted origin. `Vary: Origin` keeps a cache from serving it to another. */
+function cors(res: Response, origin: string): Response {
+  res.headers.set("access-control-allow-origin", origin);
+  res.headers.set("access-control-allow-credentials", "true");
+  res.headers.append("vary", "Origin");
+  return res;
+}
+
 /**
- * Exact match on method and `basePath + route.path`. A POST whose Origin
- * header is present and not trusted gets 403 before any handler runs. A
- * POST with no Origin is a non-browser client and passes.
+ * Exact match on method and `basePath + route.path`. An `OPTIONS` from a
+ * trusted origin gets 204 with the CORS headers. Any other `OPTIONS` gets 403.
+ * Every response to a trusted origin carries the CORS headers. The POST
+ * Origin rule is unchanged: a POST whose Origin header is present and not
+ * trusted gets 403 before any handler runs. A POST with no Origin is a
+ * non-browser client and passes.
  */
 export function createRouter(
   config: ResolvedConfig,
@@ -45,6 +56,29 @@ export function createRouter(
 ): (request: Request) => Promise<Response> {
   const table = new Map(routes.map((r) => [`${r.method} ${config.basePath}${r.path}`, r]));
   return async (request) => {
+    const origin = request.headers.get("origin");
+    const trusted = origin !== null && originTrusted(config, origin);
+    if (request.method === "OPTIONS") {
+      // A browser on another origin asks before a credentialed request. Only
+      // a trusted origin gets an answer it can use.
+      if (!trusted) return json({ error: "origin_not_trusted" }, 403);
+      return cors(
+        new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-methods": "GET, POST",
+            "access-control-allow-headers": "content-type, authorization",
+            "access-control-max-age": "600",
+          },
+        }),
+        origin,
+      );
+    }
+    const res = await dispatch(request);
+    return trusted ? cors(res, origin) : res;
+  };
+
+  async function dispatch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const route = table.get(`${request.method} ${url.pathname}`);
     if (!route) return json({ error: "not_found" }, 404);
@@ -71,5 +105,5 @@ export function createRouter(
       );
       return json({ error: "internal" }, 500);
     }
-  };
+  }
 }

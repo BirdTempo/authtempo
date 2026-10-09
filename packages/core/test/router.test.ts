@@ -148,4 +148,71 @@ describe("router", () => {
     expect((await r(new Request("https://api.example.com/auth/apple", foreign))).status).toBe(200);
     expect((await r(new Request("https://api.example.com/auth/plain", foreign))).status).toBe(403);
   });
+  it("answers a preflight from a trusted origin and marks its responses (CORS)", async () => {
+    const pre = await handle(
+      new Request("https://api.example.com/auth/echo", {
+        method: "OPTIONS",
+        headers: { origin: "https://app.example.com", "access-control-request-method": "POST" },
+      }),
+    );
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
+    expect(pre.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(pre.headers.get("access-control-allow-methods")).toBe("GET, POST");
+    expect(pre.headers.get("access-control-allow-headers")).toBe("content-type, authorization");
+    expect(pre.headers.get("access-control-max-age")).toBe("600");
+    expect(pre.headers.get("vary")).toBe("Origin");
+    const res = await handle(
+      new Request("https://api.example.com/auth/ping", {
+        headers: { origin: "https://app.example.com" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
+    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(res.headers.get("vary")).toBe("Origin");
+    const missing = await handle(
+      new Request("https://api.example.com/auth/nope", {
+        headers: { origin: "https://app.example.com" },
+      }),
+    );
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
+  });
+  it("refuses a preflight from an untrusted origin and marks nothing for it (Review Focus 1)", async () => {
+    const pre = await handle(
+      new Request("https://api.example.com/auth/echo", {
+        method: "OPTIONS",
+        headers: { origin: "https://evil.example", "access-control-request-method": "POST" },
+      }),
+    );
+    expect(pre.status).toBe(403);
+    expect(pre.headers.get("access-control-allow-origin")).toBeNull();
+    const res = await handle(
+      new Request("https://api.example.com/auth/ping", {
+        headers: { origin: "https://evil.example" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    expect(res.headers.get("vary")).toBeNull();
+    const noOrigin = await handle(new Request("https://api.example.com/auth/ping"));
+    expect(noOrigin.headers.get("access-control-allow-origin")).toBeNull();
+    const noOriginPre = await handle(
+      new Request("https://api.example.com/auth/ping", { method: "OPTIONS" }),
+    );
+    expect(noOriginPre.status).toBe(403);
+  });
+  it("marks the baseURL origin and an app scheme as trusted for CORS", async () => {
+    const self = await handle(
+      new Request("https://api.example.com/auth/ping", {
+        headers: { origin: "https://api.example.com" },
+      }),
+    );
+    expect(self.headers.get("access-control-allow-origin")).toBe("https://api.example.com");
+    const scheme = await handle(
+      new Request("https://api.example.com/auth/ping", { headers: { origin: "consumera://" } }),
+    );
+    expect(scheme.headers.get("access-control-allow-origin")).toBe("consumera://");
+  });
 });
