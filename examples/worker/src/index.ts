@@ -1,4 +1,4 @@
-import { createD1Adapter } from "@tempo-auth/adapter-d1";
+import { createD1Adapter, createD1Limiter } from "@tempo-auth/adapter-d1";
 import { type Auth, createAuth } from "@tempo-auth/core";
 
 let lastLink: string | null = null;
@@ -10,9 +10,12 @@ function getAuth(env: Env): Auth {
   if (auth) return auth;
   auth = createAuth({
     baseURL: env.BASE_URL,
+    appName: "tempo-auth example",
     secret: env.AUTH_SECRET,
     trustedOrigins: [env.BASE_URL],
     storage: createD1Adapter(env.DB),
+    // The owned limiter keeps its counts in D1, so every isolate shares them.
+    limiter: createD1Limiter(env.DB),
     mail: {
       async send(message) {
         // The example has no mail transport. It records the last link for the test.
@@ -63,5 +66,14 @@ export default {
       return Response.json({ link: lastLink });
     }
     return new Response("not found", { status: 404 });
+  },
+  // The cron trigger in wrangler.jsonc calls this. It deletes expired tokens and invitations.
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<void> {
+    const counts = await getAuth(env).api.sweepExpired();
+    console.log("sweepExpired", JSON.stringify(counts));
   },
 } satisfies ExportedHandler<Env>;
