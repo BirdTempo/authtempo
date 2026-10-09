@@ -34,6 +34,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
       continuePath: continuePath(config, handoffId),
       methods,
       nonce,
+      appName: config.appName,
     });
     const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
     return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
@@ -44,6 +45,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
       handoffId,
       email,
       redirect: redirectTo,
+      appName: config.appName,
     });
     const policy = `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
     return new Response(html, { status: 200, headers: pageHeaders(config, policy) });

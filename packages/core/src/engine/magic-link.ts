@@ -57,7 +57,7 @@ export async function requestMagicLink(
   const link = config.magicLink.linkBuilder(token, next);
   await config.mail.send({
     to: email,
-    subject: "Your sign-in link",
+    subject: `Sign in to ${config.appName}`,
     text: `Open this link to sign in. It is valid for ${config.magicLink.ttlMinutes} minutes.\n\n${link}\n\nIf you did not ask for it, ignore this message.`,
   });
   return ok({ sent: true });

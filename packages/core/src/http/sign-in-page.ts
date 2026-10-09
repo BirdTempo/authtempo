@@ -9,6 +9,8 @@ export interface SignInPageInput {
   methods: { magicLink: true; google: boolean; apple: boolean; passkey: boolean };
   /** The script nonce the policy header names. */
   nonce: string;
+  /** The app name from the config. Escaped in the title and the heading. */
+  appName: string;
 }
 
 /**
@@ -21,6 +23,7 @@ export interface SignInPageInput {
 export function defaultSignInPage(input: SignInPageInput): string {
   const base = escapeHtml(input.basePath);
   const cont = escapeHtml(input.continuePath);
+  const appName = escapeHtml(input.appName);
   const nextParam = encodeURIComponent(input.continuePath);
   const social = (name: string, label: string) =>
     `<a class="button" href="${base}/social/${name}/start?next=${escapeHtml(nextParam)}">${label}</a>`;
@@ -31,7 +34,7 @@ export function defaultSignInPage(input: SignInPageInput): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="strict-origin">
 <meta name="robots" content="noindex">
-<title>Sign in</title>
+<title>Sign in to ${appName}</title>
 <style>
 body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #f6f6f6; color: #111; }
 main { background: #fff; padding: 2rem; border-radius: 0.5rem; box-shadow: 0 1px 4px rgba(0,0,0,0.12); width: 22rem; max-width: 90vw; }
@@ -44,7 +47,7 @@ p.status { min-height: 1.5rem; color: #555; }
 </head>
 <body>
 <main data-base="${base}" data-continue="${cont}">
-<h1>Sign in</h1>
+<h1>Sign in to ${appName}</h1>
 <form id="magic-link" method="post" autocomplete="on">
 <input type="email" name="email" placeholder="you@example.com" required autofocus>
 <button type="submit">Email me a sign-in link</button>

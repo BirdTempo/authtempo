@@ -3,6 +3,8 @@ export interface ConfirmPageInput {
   action: string;
   /** The clear magic link token. Already format-checked; escape it anyway. */
   token: string;
+  /** The app name from the config. Escaped in the title and the heading. */
+  appName: string;
 }
 
 const ESCAPES: Record<string, string> = {
@@ -27,6 +29,7 @@ export function escapeHtml(value: string): string {
 export function defaultConfirmPage(input: ConfirmPageInput): string {
   const action = escapeHtml(input.action);
   const token = escapeHtml(input.token);
+  const appName = escapeHtml(input.appName);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -34,7 +37,7 @@ export function defaultConfirmPage(input: ConfirmPageInput): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="strict-origin">
 <meta name="robots" content="noindex">
-<title>Continue to sign in</title>
+<title>Continue to sign in to ${appName}</title>
 <style>
 body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #f6f6f6; color: #111; }
 main { background: #fff; padding: 2rem; border-radius: 0.5rem; box-shadow: 0 1px 4px rgba(0,0,0,0.12); text-align: center; max-width: 24rem; }
@@ -43,7 +46,7 @@ button { font: inherit; padding: 0.75rem 1.5rem; border: 0; border-radius: 0.375
 </head>
 <body>
 <main>
-<h1>Continue to sign in</h1>
+<h1>Continue to sign in to ${appName}</h1>
 <p>Press the button to finish your sign-in.</p>
 <form method="post" action="${action}">
 <input type="hidden" name="token" value="${token}">

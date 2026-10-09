@@ -62,6 +62,13 @@ The organization routes follow.
 
 Without an `organizations` config none of the organization routes exist, and the router answers 404.
 
+Set `appName` in the config to name the app. It is 1 to 80 characters with
+no control character. The default is the host of `baseURL`. The default
+pages show it in the title and the heading. The magic link mail subject is
+`Sign in to <appName>`. The invitation mail subject is
+`You are invited to <organization name> on <appName>`. Each page function
+receives `appName` in its input.
+
 The confirm page is `defaultConfirmPage`. Replace it with
 `magicLink.confirmPage` in the config. The function returns the markup
 only; core sets `cache-control`, `referrer-policy`, `x-robots-tag`, and a

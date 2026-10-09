@@ -8,6 +8,8 @@ export interface HandoffConfirmPageInput {
   email: string;
   /** Where the code goes: the app scheme, or the full dev redirect. */
   redirect: string;
+  /** The app name from the config. Escaped in the title and the heading. */
+  appName: string;
 }
 
 /**
@@ -20,6 +22,7 @@ export function defaultHandoffConfirmPage(input: HandoffConfirmPageInput): strin
   const handoffId = escapeHtml(input.handoffId);
   const email = escapeHtml(input.email);
   const redirect = escapeHtml(input.redirect);
+  const appName = escapeHtml(input.appName);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -27,7 +30,7 @@ export function defaultHandoffConfirmPage(input: HandoffConfirmPageInput): strin
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="strict-origin">
 <meta name="robots" content="noindex">
-<title>Continue to the app</title>
+<title>Continue to ${appName}</title>
 <style>
 body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #f6f6f6; color: #111; }
 main { background: #fff; padding: 2rem; border-radius: 0.5rem; box-shadow: 0 1px 4px rgba(0,0,0,0.12); text-align: center; max-width: 24rem; }
@@ -36,7 +39,7 @@ button { font: inherit; padding: 0.75rem 1.5rem; border: 0; border-radius: 0.375
 </head>
 <body>
 <main>
-<h1>Continue to the app?</h1>
+<h1>Continue to ${appName}?</h1>
 <p>Signed in as <strong>${email}</strong>.</p>
 <p>The app at <code>${redirect}</code> gets a one-time sign-in code.</p>
 <p>Continue only if you started a sign-in in that app just now.</p>

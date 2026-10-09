@@ -8,6 +8,7 @@ import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js"
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
+import { hasControlChar } from "./primitives/text.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
@@ -33,6 +34,12 @@ export interface AuthConfig {
   baseURL: string;
   /** At least 32 characters. */
   secret: string;
+  /**
+   * The name of the app, shown on the sign-in pages and in the mail
+   * subjects. 1 to 80 characters, no control character. Default: the host
+   * of `baseURL`.
+   */
+  appName?: string;
   /** Exact origins and app schemes. No wildcards in version 1. */
   trustedOrigins: string[];
   /**
@@ -117,6 +124,7 @@ export interface OrganizationsConfig {
 export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
+  appName: string;
   secret: string;
   trustedOrigins: ReadonlySet<string>;
   appURL: string;
@@ -175,6 +183,7 @@ const DEFAULT_RESERVED_SLUGS = [
   "www",
 ];
 
+const APP_NAME_MAX = 80;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\/$/;
 
 export class ConfigError extends Error {
@@ -196,6 +205,12 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   if (origin.pathname !== "/" || input.baseURL.endsWith("/") || origin.search || origin.hash) {
     throw new ConfigError("baseURL must be an origin with no path and no trailing slash");
   }
+  const appName = input.appName ?? origin.host;
+  // The name goes into a mail subject, so a CR or LF would inject a header.
+  if (appName.length < 1 || appName.length > APP_NAME_MAX || hasControlChar(appName))
+    throw new ConfigError(
+      `appName must be 1 to ${APP_NAME_MAX} characters with no control character`,
+    );
   for (const o of input.trustedOrigins) {
     if (o.includes("*")) throw new ConfigError(`trustedOrigins has a wildcard: ${o}`);
   }
@@ -347,6 +362,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   return {
     basePath,
     baseURL: input.baseURL,
+    appName,
     secret: input.secret,
     trustedOrigins: new Set(input.trustedOrigins),
     appURL,
