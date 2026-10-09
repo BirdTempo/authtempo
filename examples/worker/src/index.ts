@@ -1,5 +1,5 @@
 import { createD1Adapter, createD1Limiter } from "@tempo-auth/adapter-d1";
-import { type Auth, createAuth } from "@tempo-auth/core";
+import { type Auth, createAuth, createPbkdf2PasswordHash } from "@tempo-auth/core";
 
 let lastLink: string | null = null;
 let auth: Auth | null = null;
@@ -43,6 +43,11 @@ function getAuth(env: Env): Auth {
     handoff: { schemes: ["example-app://"] },
     // Organizations, members, and mailed invitations. The routes need the 0002 migration.
     organizations: {},
+    // Password sign-in. The default PBKDF2 seam costs 100000 iterations per
+    // hash. That needs more CPU than Workers Free allows, so a deployment needs
+    // Workers Paid. In TEST_MODE only, use 1000 iterations so the end-to-end
+    // test does not pay the full cost for each hash. Production keeps the default.
+    password: env.TEST_MODE === "1" ? { hash: createPbkdf2PasswordHash({ iterations: 1000 }) } : {},
   });
   return auth;
 }
