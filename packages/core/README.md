@@ -21,9 +21,17 @@ const s = await auth.session(request);     // { user, session } or null
 | Method | Path | Body or query | Answer |
 | --- | --- | --- | --- |
 | POST | `/magic-link/request` | `{ email, next? }` | `{ sent: true }` always; 429 when rate limited; 400 on a bad body |
-| GET | `/magic-link/verify` | `?token=` | 302 to `next` with the session cookie; 302 to `/?auth_error=<code>` on failure |
+| GET | `/magic-link/verify` | `?token=` | 200 HTML confirm page with a form that posts the token; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
+| POST | `/magic-link/verify` | form or JSON `token` | 302 to `next` with the session cookie; 302 to `/?auth_error=<code>` on failure |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401 |
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
+
+The confirm page is `defaultConfirmPage`. Replace it with
+`magicLink.confirmPage` in the config. The function returns the markup
+only; core sets `cache-control`, `referrer-policy`, `x-robots-tag`, and a
+content security policy that permits inline style, no script, and a form
+post to this origin only. A page that needs script or a remote stylesheet
+needs its own route in the app, because the policy header is fixed.
 
 ## Limits in version 1
 
