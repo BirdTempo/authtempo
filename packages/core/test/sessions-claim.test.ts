@@ -88,7 +88,84 @@ function interleaveBeforeSessionInsert(
   return { fired: () => fired };
 }
 
-async function magicLinkToken(auth: ReturnType<typeof socialAuth>): Promise<string> {
+/**
+ * Wraps the next `storage.transaction` call so that `afterIdentityRead`
+ * runs inside that transaction, just after its first identity read. Later
+ * transactions run unchanged.
+ */
+function interleaveAfterIdentityRead(
+  storage: StorageAdapter,
+  afterIdentityRead: () => Promise<void>,
+): { fired: () => boolean } {
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  let fired = false;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        findOne: async (m, w) => {
+          const row = await tx.findOne(m, w);
+          if (m === "identity" && !fired) {
+            fired = true;
+            await afterIdentityRead();
+          }
+          return row;
+        },
+      }),
+    );
+  };
+  return { fired: () => fired };
+}
+
+/** Runs `before` just before the next `storage.transaction` call starts. */
+function interleaveBeforeNextTransaction(
+  storage: StorageAdapter,
+  before: () => Promise<void>,
+): { fired: () => boolean } {
+  const original = storage.transaction.bind(storage);
+  let fired = false;
+  storage.transaction = async <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!fired) {
+      fired = true;
+      await before();
+    }
+    return original(fn);
+  };
+  return { fired: () => fired };
+}
+
+/** An unverified user, as a provider that does not verify the address creates, with a handoff code minted for it. */
+async function unverifiedHandoffCode(auth: ReturnType<typeof makeAuth>) {
+  const now = auth.clock.now();
+  const user = await auth.storage.create("user", {
+    id: "01CLAIMANT",
+    email: EMAIL,
+    emailVerified: false,
+    name: null,
+    image: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const verifier = randomBase64Url(32);
+  const start = await startHandoff(auth.config, {
+    challenge: await sha256Base64Url(verifier),
+    redirect: "consumera://auth",
+    ip: null,
+  });
+  if (!start.ok) throw new Error(start.code);
+  const cont = await continueHandoff(auth.config, {
+    handoffId: start.value.handoffId,
+    userId: user.id,
+  });
+  if (!cont.ok) throw new Error(cont.code);
+  const code = new URL(cont.value.location).searchParams.get("code") ?? "";
+  return { user, code, verifier };
+}
+
+async function magicLinkToken(auth: ReturnType<typeof makeAuth>): Promise<string> {
   await requestMagicLink(auth.config, { email: EMAIL, ip: null });
   return tokenFromMail(auth.mail.at(-1)?.text ?? "");
 }
@@ -337,5 +414,106 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       { field: "userId", op: "eq", value: "01WINNER" },
     ]);
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(r.after.token)]);
+  });
+
+  it("undoes the claimant's social session when the claim commits between the identity read and the user read (re-review finding A)", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const auth = socialAuth({}, fakeJwt(tokens));
+    const now = auth.clock.now();
+    const claim = await resolveSocialUser(
+      auth.storage,
+      "google",
+      { subject: "attacker", email: EMAIL, emailVerified: false, name: null, image: null },
+      now,
+    );
+    if (!claim.ok) throw new Error("no claimant");
+    const userId = claim.value.id;
+    const s = await started(auth);
+    tokens["idtok-default"] = googleToken(s.nonce, { sub: "attacker", email_verified: false });
+    const link = await magicLinkToken(auth);
+
+    // The claimant reads its identity. Then the owner's whole claim runs, on
+    // a D1-like view inside the claimant's open transaction. Then the
+    // claimant reads the user, which is verified now.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveAfterIdentityRead(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await complete(auth, s);
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const sessions = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+  });
+
+  it("undoes the handoff redeem session when the claim commits between the consume and the user read (re-review finding A)", async () => {
+    const auth = makeAuth({ handoff: { schemes: ["consumera://"] } });
+    const { user, code, verifier } = await unverifiedHandoffCode(auth);
+    const link = await magicLinkToken(auth);
+
+    // The redeem consumes the code. Then the owner's claim commits whole.
+    // Then the redeem's transaction reads the user, which is verified now.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveBeforeNextTransaction(auth.storage, async () => {
+      owner = await verifyMagicLink(auth.config, { token: link, ip: null, userAgent: null });
+    });
+
+    const r = await redeemHandoff(auth.config, { code, verifier, ip: null, userAgent: null });
+    expect(gate.fired()).toBe(true);
+    expect(r).toMatchObject({ ok: false, code: "invalid_token" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const sessions = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+  });
+
+  it("writes nothing to the user row on an unverified social sign-in (re-review finding B)", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const auth = socialAuth({}, fakeJwt(tokens));
+    const now = auth.clock.now();
+    const claim = await resolveSocialUser(
+      auth.storage,
+      "google",
+      { subject: "attacker", email: EMAIL, emailVerified: false, name: null, image: null },
+      now,
+    );
+    if (!claim.ok) throw new Error("no claimant");
+    const s = await started(auth);
+    tokens["idtok-default"] = googleToken(s.nonce, {
+      sub: "attacker",
+      email_verified: false,
+      name: "Mallory",
+      picture: "https://p/m.png",
+    });
+    const userWrites: string[] = [];
+    const rawTransaction = auth.storage.transaction.bind(auth.storage);
+    auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      rawTransaction((tx) =>
+        fn({
+          ...tx,
+          update: (m, w, d) => {
+            userWrites.push(m);
+            return tx.update(m, w, d);
+          },
+        }),
+      );
+    const r = await complete(auth, s);
+    expect(r.ok).toBe(true);
+    expect(userWrites.filter((m) => m === "user")).toEqual([]);
+    const stored = await auth.storage.findOne("user", [
+      { field: "id", op: "eq", value: claim.value.id },
+    ]);
+    expect(stored).toMatchObject({ emailVerified: false, name: null, image: null });
   });
 });

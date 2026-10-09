@@ -41,6 +41,12 @@ interface StartData {
 interface CodeData {
   challenge: string;
   redirect: string;
+  /**
+   * The user's flag when the code was minted. A code minted for an
+   * unverified user runs the claim guard at redeem, whatever a later read
+   * of the user says. A code without the flag counts as unverified.
+   */
+  emailVerified?: boolean;
 }
 
 /** The path the browser visits after any sign-in completes. It stays on the API origin. */
@@ -171,7 +177,16 @@ export async function continueHandoff(
     return fail("invalid_token");
   const now = config.clock.now();
   const code = randomToken(HANDOFF_CODE_PREFIX);
-  const codeData: CodeData = { challenge: data.challenge, redirect: data.redirect };
+  // Read before the code row is written: a claim after this read deletes
+  // the code row, or the redeem guard sees the claim's flip.
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: input.userId },
+  ]);
+  const codeData: CodeData = {
+    challenge: data.challenge,
+    redirect: data.redirect,
+    emailVerified: user?.emailVerified === true,
+  };
   await config.storage.create("verification", {
     id: newId(now),
     purpose: "handoff-code",
@@ -223,7 +238,9 @@ export async function redeemHandoff(
         { userId: user.id, ip: input.ip, userAgent: input.userAgent },
         tx,
       );
-      if (!user.emailVerified) {
+      // The flag from the mint, not this read: a claim can commit between
+      // the consume and this read, and this read then sees the user verified.
+      if (data.emailVerified !== true) {
         // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
         await undoSessionIfClaimed(tx, user.id, now);
       }

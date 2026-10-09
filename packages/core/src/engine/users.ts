@@ -99,6 +99,24 @@ export async function undoSessionIfClaimed(
   if (n === 0) throw new ClaimRacedError();
 }
 
+/**
+ * Runs inside the caller's transaction, as its last statement, after a
+ * session insert that an identity row authorizes. `claimEmail` deletes
+ * every identity except the proving one and the `email` one, so a claim
+ * that ran since the identity read makes this match zero rows. Throws
+ * `ClaimRacedError` then.
+ */
+export async function undoSessionIfIdentityGone(
+  tx: StorageAdapter,
+  identityId: string,
+  now: Date,
+): Promise<void> {
+  const n = await tx.update("identity", [{ field: "id", op: "eq", value: identityId }], {
+    updatedAt: now,
+  });
+  if (n === 0) throw new ClaimRacedError();
+}
+
 export function findOrCreateUserByEmail(
   storage: StorageAdapter,
   email: string,
