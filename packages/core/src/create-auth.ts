@@ -42,6 +42,22 @@ import {
   verifyPasskeyRegistration,
 } from "./engine/passkeys.js";
 import {
+  changePassword,
+  type PasswordChange,
+  type PasswordReset,
+  type PasswordResetRequest,
+  type PasswordSession,
+  type PasswordSignIn,
+  type PasswordSignUp,
+  type PasswordVerified,
+  type PasswordVerify,
+  passwordSignIn,
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "./engine/password.js";
+import {
   destroySession,
   type PublicSession,
   type ResolvedSession,
@@ -63,6 +79,7 @@ import { handoffRoutes } from "./http/routes/handoff.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
 import { organizationRoutes } from "./http/routes/organizations.js";
 import { passkeyRoutes } from "./http/routes/passkeys.js";
+import { passwordRoutes } from "./http/routes/password.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
 import type { Result } from "./result.js";
@@ -71,6 +88,16 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
 } from "./seams/webauthn.js";
+
+/** Present on `api` only when the config has a `password` section. */
+export interface PasswordApi {
+  signUp(input: PasswordSignUp): Promise<Result<PasswordSession>>;
+  signIn(input: PasswordSignIn): Promise<Result<PasswordSession>>;
+  verifyEmail(input: PasswordVerify): Promise<Result<PasswordVerified>>;
+  requestReset(input: PasswordResetRequest): Promise<Result<{ sent: true }>>;
+  reset(input: PasswordReset): Promise<Result<PasswordSession & { next: string }>>;
+  change(input: PasswordChange): Promise<Result<{ ok: true }>>;
+}
 
 export interface AuthApi {
   /** Deletes rows that no flow can use any more. Call it from a scheduled handler. */
@@ -179,6 +206,7 @@ export interface AuthApi {
   }): Promise<Result<PublicSession>>;
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
+  password?: PasswordApi;
 }
 
 export interface Auth {
@@ -205,6 +233,7 @@ export function createAuth(input: AuthConfig): Auth {
     ...magicLinkRoutes(config),
     ...socialRoutes(config),
     ...passkeyRoutes(config),
+    ...passwordRoutes(config),
     ...handoffRoutes(config),
     ...organizationRoutes(config),
   ]);
@@ -243,6 +272,18 @@ export function createAuth(input: AuthConfig): Auth {
       setActiveOrganization: (i) => setActiveOrganization(config, i),
       getSession: (token) => resolveSession(config, token),
       signOut: (token) => destroySession(config, token),
+      ...(config.password
+        ? {
+            password: {
+              signUp: (i) => passwordSignUp(config, i),
+              signIn: (i) => passwordSignIn(config, i),
+              verifyEmail: (i) => verifyPasswordEmail(config, i),
+              requestReset: (i) => requestPasswordReset(config, i),
+              reset: (i) => resetPassword(config, i),
+              change: (i) => changePassword(config, i),
+            },
+          }
+        : {}),
     },
     errors: ERRORS,
   };

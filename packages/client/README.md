@@ -63,6 +63,8 @@ on `baseURL` is removed.
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `ClientResult<{ ok: true }>` |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `ClientResult<{ token } & PublicSession>` |
 
+The password operations are in the Passwords section.
+
 `client.errors` is the error code table of core.
 
 ## Results
@@ -81,6 +83,27 @@ client can see:
 | `network` | The fetch rejected. The device is offline, or the host is not reachable. |
 | `unexpected` | The answer is not JSON, or its error code is not in the core table. |
 | `cancelled` | The person dismissed the passkey prompt, or no authenticator matched. |
+
+## Passwords
+
+Every password operation answers `not_found` when the server runs
+without the `password` config.
+
+| Operation | Route | Answer type |
+| --- | --- | --- |
+| `client.password.signUp({ email, password, name? })` | `POST /password/sign-up` | `ClientResult<{ token } & PublicSession>` |
+| `client.password.signIn({ email, password })` | `POST /password/sign-in` | `ClientResult<{ token } & PublicSession>` |
+| `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `ClientResult<{ sent: true }>` |
+| `client.password.reset({ token, password })` | `POST /password/reset` | `ClientResult<{ token } & PublicSession>` |
+| `client.password.change({ currentPassword?, newPassword })` | `POST /password/change` | `ClientResult<{ ok: true }>` |
+
+The client has no token store. `signUp`, `signIn`, and `reset` answer the
+bearer token. A browser app ignores it, because the cookie carries the
+session. A native app stores the token in its own store and returns it
+from the `token` option. An Electron app can use `createTokenStore` from
+`@tempo-auth/handoff`.
+
+The password goes in the request body only. It never goes in a URL.
 
 ## Organizations
 

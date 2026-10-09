@@ -589,5 +589,22 @@ export function runAdapterConformance(
       expect(inv?.acceptedAt).toBeNull();
       expect(inv?.expiresAt.getTime()).toBe(at.getTime() + 1000);
     });
+
+    it("round-trips the version 4 password model and keeps its unique key (plan 8)", async () => {
+      const at = new Date("2026-10-10T00:00:00.000Z");
+      await db.create("password", {
+        id: "p1",
+        userId: "u1",
+        hash: "pbkdf2-sha256$1000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        createdAt: at,
+        updatedAt: at,
+      });
+      await expect(
+        db.create("password", { id: "p2", userId: "u1", hash: "x", createdAt: at, updatedAt: at }),
+      ).rejects.toMatchObject({ code: "unique_violation", fields: ["userId"] });
+      const row = await db.findOne("password", [{ field: "userId", op: "eq", value: "u1" }]);
+      expect(row?.hash.startsWith("pbkdf2-sha256$1000$")).toBe(true);
+      expect(row?.createdAt.getTime()).toBe(at.getTime());
+    });
   });
 }

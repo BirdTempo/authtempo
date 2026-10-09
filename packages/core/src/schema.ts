@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export interface BaseRow {
   id: string;
@@ -34,7 +34,11 @@ export type VerificationPurpose =
   | "magic-link"
   | "oauth-state"
   | "handoff-code"
-  | "passkey-challenge";
+  | "passkey-challenge"
+  /** data: { passwordId: string } */
+  | "password-verify"
+  /** data: { next: string } */
+  | "password-reset";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;
@@ -80,6 +84,12 @@ export interface InvitationRow extends BaseRow {
   acceptedAt: Date | null;
 }
 
+export interface PasswordRow extends BaseRow {
+  userId: string;
+  /** Names its algorithm and its cost, so a later hash seam can rehash. */
+  hash: string;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -89,6 +99,7 @@ export interface Models {
   organization: OrganizationRow;
   member: MemberRow;
   invitation: InvitationRow;
+  password: PasswordRow;
 }
 
 export type ModelName = keyof Models;
@@ -215,5 +226,15 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["tokenHash"]],
     indexes: [["organizationId", "email"]],
+  },
+  // plan 8: one password per user. Not an identity row: the identity unique key is (provider, subject).
+  password: {
+    fields: {
+      ...base,
+      userId: { type: "string" },
+      hash: { type: "string" },
+    },
+    unique: [["userId"]],
+    indexes: [],
   },
 };

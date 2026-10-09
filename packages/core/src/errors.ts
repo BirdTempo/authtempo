@@ -22,6 +22,11 @@ export const ERRORS = {
   email_mismatch: 403,
   // plan 6: a concurrent write changed the row; the caller retries
   conflict: 409,
+  // plan 8: passwords
+  invalid_credentials: 401,
+  password_policy: 400,
+  password_breached: 400,
+  email_taken: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

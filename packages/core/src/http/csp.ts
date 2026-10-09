@@ -14,6 +14,16 @@ export function formAction(config: ResolvedConfig): string {
   return parts.join(" ");
 }
 
+/**
+ * The policy of a page with no script: no remote resource, no framing. The
+ * inline style is the page's own. `form-action` names this origin, the
+ * trusted web origins, and the handoff schemes, because Chromium applies
+ * it to every redirect that follows the form post.
+ */
+export function noScriptPagePolicy(config: ResolvedConfig): string {
+  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
+}
+
 /** The headers every page core serves carries. The policy differs per page. */
 export function pageHeaders(_config: ResolvedConfig, policy: string): Record<string, string> {
   return {

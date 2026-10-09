@@ -285,3 +285,98 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
     ]);
   });
 });
+
+describe("claimEmail and the password row (plan 8)", () => {
+  async function unverifiedWithPassword() {
+    const storage = createMemoryAdapter();
+    const now = new Date("2026-10-10T00:00:00Z");
+    await storage.create("user", {
+      id: "u1",
+      email: "ada@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await storage.create("password", {
+      id: "p1",
+      userId: "u1",
+      hash: "h",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { storage, now };
+  }
+  const ofUser = [{ field: "userId", op: "eq", value: "u1" }] as const;
+
+  it("deletes the user's password row when nothing is kept", async () => {
+    const { storage, now } = await unverifiedWithPassword();
+    await storage.transaction((tx) => claimEmail(tx, "u1", null, now));
+    expect(await storage.findMany("password", [...ofUser])).toEqual([]);
+  });
+
+  it("keeps the password row that keep.passwordId names", async () => {
+    const { storage, now } = await unverifiedWithPassword();
+    await storage.transaction((tx) => claimEmail(tx, "u1", { passwordId: "p1" }, now));
+    expect(
+      await storage.findOne("password", [{ field: "id", op: "eq", value: "p1" }]),
+    ).not.toBeNull();
+  });
+
+  it("deletes the password rows before the sessions", async () => {
+    const { storage, now } = await unverifiedWithPassword();
+    const order: string[] = [];
+    await storage.transaction((tx) => {
+      const recording: StorageAdapter = {
+        ...tx,
+        delete: async (m, w) => {
+          order.push(m);
+          return tx.delete(m, w);
+        },
+      };
+      return claimEmail(recording, "u1", null, now);
+    });
+    expect(order.indexOf("password")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("password")).toBeLessThan(order.indexOf("session"));
+  });
+
+  it("flips emailVerified in its first statement and deletes the password rows before the sessions (plan 8 final review T3)", async () => {
+    // Every sign-up and sign-in guard depends on this order. The
+    // interleave tests run whole claims, so a reorder inside claimEmail
+    // passes them; this test records each statement.
+    const { storage, now } = await unverifiedWithPassword();
+    const order: string[] = [];
+    await storage.transaction((tx) => {
+      const recording: StorageAdapter = {
+        ...tx,
+        findOne: async (m, w) => {
+          order.push(`findOne:${m}`);
+          return tx.findOne(m, w);
+        },
+        findMany: async (m, w, o) => {
+          order.push(`findMany:${m}`);
+          return tx.findMany(m, w, o);
+        },
+        create: async (m, d) => {
+          order.push(`create:${m}`);
+          return tx.create(m, d);
+        },
+        update: async (m, w, d) => {
+          order.push(`update:${m}:${JSON.stringify(Object.keys(d))}`);
+          return tx.update(m, w, d);
+        },
+        delete: async (m, w) => {
+          order.push(`delete:${m}`);
+          return tx.delete(m, w);
+        },
+      };
+      return claimEmail(recording, "u1", null, now);
+    });
+    expect(order[0]).toBe(`update:user:["emailVerified","updatedAt"]`);
+    expect(order.filter((x) => x.startsWith("update:"))).toHaveLength(1);
+    const password = order.indexOf("delete:password");
+    expect(password).toBeGreaterThan(0);
+    expect(password).toBeLessThan(order.indexOf("delete:session"));
+  });
+});

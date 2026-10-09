@@ -34,12 +34,22 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
+| POST | `/password/sign-up` | `{ email, password, name? }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `password_policy`, `password_breached`; 409 `email_taken`, `email_taken_unverified`; 429 `rate_limited`. The user is unverified until the mail link is confirmed |
+| POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
+| GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
+| POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
+| POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
+| GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
+| POST | `/password/reset` | form or JSON `token`, `password` | form body: 302 to `next` with the cookie, or back to the form on `password_policy` or `password_breached`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited` |
+| POST | `/password/change` | session, `{ currentPassword?, newPassword }` | `{ ok: true }`; 400 `invalid_body`, `password_policy`, `password_breached`; 401 without a session; 401 `invalid_credentials` for a missing or wrong current password; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited` |
 | GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the confirm page when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
 | GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
 | POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
 | POST | `/handoff/redeem` | `{ code, verifier }` | `{ token, user, session }` as a bearer answer, no cookie; 400 `invalid_body`, `invalid_token`, `token_expired`; 429 `rate_limited` |
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
+
+Without a `password` config none of the password routes exist, and the router answers 404.
 
 The organization routes follow.
 
@@ -100,7 +110,8 @@ Set `handoff: { schemes: ["consumera://"] }`. The app makes a PKCE
 verifier and its S256 challenge, then opens the system browser at
 `GET /auth/handoff/start?challenge=<c>&redirect=consumera://auth`. Core
 shows the sign-in page: a magic link form, the configured social
-buttons, and a passkey button. Every method ends by visiting
+buttons, a passkey button, and, with a `password` config, an email and
+password form with a Forgot password button. Every method ends by visiting
 `/auth/handoff/continue?h=<id>` on the API origin, which shows a confirm
 page. When the person presses the button, core mints a one-time code and
 redirects to `consumera://auth?code=<code>`. The app
@@ -116,7 +127,9 @@ pattern with the `g` or `y` flag, and refuses any admitted `http` or
 `https` URL that is not on a loopback host. `signInPage`
 replaces the page; the function gets the base path, the continue path,
 the enabled methods, and the script nonce, and must put the nonce on its
-script tag. `@tempo-auth/handoff` (plan 5b) does the app side.
+script tag. The `methods` input has the flags `magicLink`, `google`,
+`apple`, `passkey`, and `password`. `password` is true when the config
+has a `password` section. `@tempo-auth/handoff` (plan 5b) does the app side.
 
 ## Social sign-in
 
@@ -169,6 +182,75 @@ tests prove the whole flow without a browser.
 `webauthn` in the config replaces the seam. The default is
 @simplewebauthn/server 14.0.3, which runs on Workers without
 `nodejs_compat` (proved by the example Worker's spike test).
+
+## Passwords
+
+Set `password: {}` to turn on password sign-in. The fields are all
+optional.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `hash` | `createPbkdf2PasswordHash()` | The hash seam. It has `hash`, `verify`, and `dummy`. |
+| `minLength` | 8 | The lower bound, 8 to 128. Counted in code points. |
+| `breachCheck` | none | `(plain) => Promise<boolean>`. True refuses the password with `password_breached`. |
+| `resetTtlMinutes` | 15 | The life of a reset link, 1 to 1440. |
+| `resetPage` | `defaultResetPage` | The HTML of the reset page. |
+
+The default hash is PBKDF2-HMAC-SHA256 on Web Crypto. A hash is stored as
+`pbkdf2-sha256$<iterations>$<salt>$<hash>`. The salt is 16 random bytes and
+the output is 32 bytes, both in base64url. The default cost is 100000
+iterations, because Workers refuses a higher count. `maxIterations`
+(default 100000) is the highest cost the seam hashes or verifies. A stored
+hash above it answers `{ ok: false, rehash: false }` and never runs. A
+hash with a lower cost verifies, then the engine rehashes it at the next
+sign-in.
+
+The default cost needs more CPU than Workers Free allows (10 ms per
+request). A deployment needs Workers Paid.
+
+A password is hashed as given, with no Unicode normalization. A person who
+types the same text in another normal form does not sign in.
+
+A sign-in for an unknown address, or for a user with no password, verifies
+against a dummy hash. The seam builds the dummy on first use and keeps it,
+so the time is the same. A hash error never reaches the caller: the answer
+is `invalid_credentials`.
+
+A magic link or a provider proof of an unverified address deletes that
+user's password, as it deletes the other credentials of a claimant. The
+verify link keeps the password it confirms.
+
+A reset of a verified user ends every session and keeps the passkeys and
+social identities. A reset of an unverified user claims the address. A
+reset writes the new password before it deletes the sessions. A reset of
+a verified user also deletes the user's pending handoff codes. Every reset
+deletes the address's other pending reset links. A password change writes
+the new password first, deletes every other session, and deletes the
+user's pending handoff codes. It keeps the current session. A change also
+deletes the address's pending reset links (added 2026-10-10 by the plan 8
+final fix wave).
+
+The limits, in the same limiter as the other routes:
+
+| Key | Limit |
+| --- | --- |
+| `password-sign-up:ip:<ip>` | 10 per hour |
+| `password:ip:<ip>` | 20 per 15 minutes |
+| `password:email:<email>` | 10 per 15 minutes |
+| `password-reset:ip:<ip>` | 20 per 15 minutes |
+| `password-reset:email:<email>` | 5 per 15 minutes |
+| `password-reset-post:ip:<ip>` | 20 per 15 minutes |
+| `password-change:user:<userId>` | 10 per 15 minutes |
+
+The `password:email` limit is a trade-off: 10 wrong tries from anyone stop
+password sign-in for that address for 15 minutes. The magic link still
+works for the owner. Without the limit, a guess run on one account from
+many IP addresses has no bound. Recorded 2026-10-10 by the plan 8 final
+fix wave.
+
+The reset POST checks its limit, then reads the link row, then the policy,
+then the breach check, then hashes. A transaction consumes the link first.
+A spent or expired link costs no breach call and no hash.
 
 ## Organizations
 
@@ -349,7 +431,7 @@ Without a trigger, expired rows stay in the database.
   about ML-DSA. It is the library's post-quantum probe, not a tempo-auth
   setting, and workerd prints nothing.
 - Invitation accept is limited to 20 per IP per 15 minutes, in the same per-isolate limiter.
-- Core at version 2 needs the `0002_schema_v2` migration in both adapters.
+- Core at version 4 needs the `0004_schema_v4` migration in both adapters. Version 4 adds the password table.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

@@ -5,7 +5,7 @@ import { publicSession, resolveSession } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { sessionCookie } from "../cookies.js";
-import { formAction, pageHeaders } from "../csp.js";
+import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
@@ -16,16 +16,6 @@ const requestBody = z.object({
 });
 
 const verifyBody = z.object({ token: z.string().max(64) });
-
-/**
- * Locks the page down: no script, no remote resource, no framing. The
- * inline style is the page's own. `form-action` names this origin, the
- * trusted web origins, and the handoff schemes, because Chromium applies
- * it to every redirect that follows the form post.
- */
-function pagePolicy(config: ResolvedConfig): string {
-  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
-}
 
 export function magicLinkRoutes(config: ResolvedConfig): Route[] {
   const verifyPath = `${config.basePath}/magic-link/verify`;
@@ -62,7 +52,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         });
         return new Response(html, {
           status: 200,
-          headers: pageHeaders(config, pagePolicy(config)),
+          headers: pageHeaders(config, noScriptPagePolicy(config)),
         });
       },
     },

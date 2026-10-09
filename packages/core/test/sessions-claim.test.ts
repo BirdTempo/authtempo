@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { ResolvedConfig } from "../src/config.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
+import {
+  changePassword,
+  passwordSignIn,
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, resolveSocialUser, startSocial } from "../src/engine/social.js";
 import { findOrCreateUserByEmail } from "../src/engine/users.js";
@@ -9,6 +17,7 @@ import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/c
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
+import { FAST } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, socialAuth } from "./social-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -143,6 +152,71 @@ function interleaveAfterUserCreate(
           if (m === "user" && !fired) {
             fired = true;
             await afterUserCreate();
+          }
+          return row;
+        },
+      }),
+    );
+  };
+  return { fired: () => fired };
+}
+
+/**
+ * Wraps the next `storage.transaction` call so that `afterFirstCreate`
+ * runs inside that transaction, just after its first insert of any model
+ * and before any later statement. In a sign-up, that is between its two
+ * creates, whichever comes first. Later transactions run unchanged.
+ */
+function interleaveAfterFirstCreate(
+  storage: StorageAdapter,
+  afterFirstCreate: () => Promise<void>,
+): { fired: () => boolean } {
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  let fired = false;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        create: async (m, d) => {
+          const row = await tx.create(m, d);
+          if (!fired) {
+            fired = true;
+            await afterFirstCreate();
+          }
+          return row;
+        },
+      }),
+    );
+  };
+  return { fired: () => fired };
+}
+
+/**
+ * Wraps the next `storage.transaction` call so that `afterUserRead` runs
+ * inside that transaction, just after its first user read. Later
+ * transactions run unchanged.
+ */
+function interleaveAfterUserRead(
+  storage: StorageAdapter,
+  afterUserRead: () => Promise<void>,
+): { fired: () => boolean } {
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  let fired = false;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        findOne: async (m, w) => {
+          const row = await tx.findOne(m, w);
+          if (m === "user" && !fired) {
+            fired = true;
+            await afterUserRead();
           }
           return row;
         },
@@ -721,5 +795,543 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(
       await auth.storage.findOne("session", [{ field: "id", op: "eq", value: browser.session.id }]),
     ).toBeNull();
+  });
+
+  it("leaves no password on the owner's account when the claim lands just after the sign-up's user create (plan 8, Review Focus 4)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await magicLinkToken(auth);
+
+    // On D1 the owner's whole claim runs inside the claimant's open sign-up
+    // transaction, just after its user create (the second create, after the
+    // password create): the claim finds the new user, verifies it, deletes
+    // the claimant's password row, and adds the email identity. A throw
+    // would undo the user create and delete the owner's user row by id.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveAfterUserCreate(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const userId = proved.value.user.id;
+    expect(
+      await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
+    ).toMatchObject({ email: EMAIL, emailVerified: true });
+    const identities = await auth.storage.findMany("identity", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(identities.map((x) => [x.provider, x.subject])).toEqual([["email", EMAIL]]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await resolveSession(auth.config, proved.value.token)).not.toBeNull();
+    // The claimant got no verify mail: the magic link mail is the only one.
+    expect(auth.mail).toHaveLength(1);
+    expect(
+      await auth.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "password-verify" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("undoes the claimant's password sign-in session when the claim lands inside it (plan 8, Review Focus 2)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    // Reachable: the claimant signs up and never uses the verify link.
+    const up = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const link = await magicLinkToken(auth);
+
+    // On D1 the owner's whole claim runs inside the claimant's open sign-in
+    // transaction, after the password verify and before the session
+    // insert: the claim verifies the user and deletes the password row and
+    // every session. The claimant's session insert comes after it.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveBeforeSessionInsert(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "invalid_credentials" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const userId = proved.value.user.id;
+    expect(userId).toBe(up.value.user.id);
+    expect(
+      await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
+    ).toMatchObject({ email: EMAIL, emailVerified: true });
+    const identities = await auth.storage.findMany("identity", [
+      { field: "userId", op: "eq", value: userId },
+    ]);
+    expect(identities.map((x) => [x.provider, x.subject])).toEqual([["email", EMAIL]]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await resolveSession(auth.config, proved.value.token)).not.toBeNull();
+  });
+
+  it("answers the loser of two sign-ups for one new address with email_taken and keeps one user (plan 8, unique_violation retry)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const inner = auth.storage;
+    // The loser's first user read misses. On that miss the winner's whole
+    // sign-up commits through the outer adapter, as a second isolate would.
+    // The loser's user create then fails with unique_violation.
+    let winner: Awaited<ReturnType<typeof passwordSignUp>> | null = null;
+    let missed = false;
+    const wrap = (a: StorageAdapter): StorageAdapter => ({
+      create: (m, d) => a.create(m, d),
+      findOne: async (m, w) => {
+        if (m === "user" && !missed) {
+          missed = true;
+          winner = await passwordSignUp(d1Like(auth.config), {
+            email: EMAIL,
+            password: "winner password",
+            ip: null,
+            userAgent: null,
+          });
+          return null;
+        }
+        return a.findOne(m, w);
+      },
+      findMany: (m, w, o) => a.findMany(m, w, o),
+      update: (m, w, d) => a.update(m, w, d),
+      delete: (m, w) => a.delete(m, w),
+      transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+    });
+    const loser = await passwordSignUp(
+      { ...auth.config, storage: wrap(inner) },
+      { email: EMAIL, password: "loser password", ip: null, userAgent: null },
+    );
+    expect(missed).toBe(true);
+    const won = winner as Awaited<ReturnType<typeof passwordSignUp>> | null;
+    if (!won?.ok) throw new Error("the winner's sign-up failed");
+    expect(loser).toMatchObject({ ok: false, code: "email_taken", status: 409 });
+    const users = await inner.findMany("user", []);
+    expect(users.map((u) => u.id)).toEqual([won.value.user.id]);
+    const passwords = await inner.findMany("password", []);
+    expect(passwords.map((p) => p.userId)).toEqual([won.value.user.id]);
+    const sessions = await inner.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(won.value.token)]);
+    expect(auth.mail).toHaveLength(1);
+  });
+
+  it("answers email_taken_unverified on the unique_violation retry when the winner is an unverified social user (plan 8)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const inner = auth.storage;
+    // The winner is a social sign-in whose provider does not verify the
+    // address. It commits on the loser's first user read. The retry reads
+    // the winner's rows and answers by the sign-up's own rules.
+    let missed = false;
+    const wrap = (a: StorageAdapter): StorageAdapter => ({
+      create: (m, d) => a.create(m, d),
+      findOne: async (m, w) => {
+        if (m === "user" && !missed) {
+          missed = true;
+          const social = await resolveSocialUser(
+            d1Like(auth.config).storage,
+            "google",
+            { subject: "g-1", email: EMAIL, emailVerified: false, name: null, image: null },
+            auth.clock.now(),
+          );
+          if (!social.ok) throw new Error(social.code);
+          return null;
+        }
+        return a.findOne(m, w);
+      },
+      findMany: (m, w, o) => a.findMany(m, w, o),
+      update: (m, w, d) => a.update(m, w, d),
+      delete: (m, w) => a.delete(m, w),
+      transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+    });
+    const loser = await passwordSignUp(
+      { ...auth.config, storage: wrap(inner) },
+      { email: EMAIL, password: "loser password", ip: null, userAgent: null },
+    );
+    expect(missed).toBe(true);
+    expect(loser).toMatchObject({ ok: false, code: "email_taken_unverified", status: 409 });
+    expect(await inner.findMany("user", [])).toHaveLength(1);
+    expect(await inner.findMany("password", [])).toEqual([]);
+    expect(await inner.findMany("session", [])).toEqual([]);
+    expect(auth.mail).toEqual([]);
+  });
+
+  it("keeps a password sign-in when the verify link that confirms this password lands inside it (plan 8, Review Focus 2)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const up = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "owner password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const token = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    const gate = interleaveBeforeSessionInsert(auth.storage, async () => {
+      const v = await verifyPasswordEmail(d1Like(auth.config), {
+        token,
+        ip: null,
+        userAgent: null,
+      });
+      if (!v.ok) throw new Error(v.code);
+    });
+    const r = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: "owner password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    if (!r.ok) throw new Error(r.code);
+    expect(await resolveSession(auth.config, r.value.token)).not.toBeNull();
+  });
+
+  it("answers invalid_token and keeps the owner's session when a claim lands inside the verify link (plan 8, verify fails closed)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    // Reachable: a sign-up, then the owner of the address uses a magic link
+    // while the sign-up's verify link runs, as on D1.
+    const up = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const verify = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    const link = await magicLinkToken(auth);
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveAfterUserRead(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+    const r = await verifyPasswordEmail(auth.config, { token: verify, ip: null, userAgent: null });
+    expect(gate.fired()).toBe(true);
+    expect(r).toMatchObject({ ok: false, code: "invalid_token" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    const [row] = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "password-verify" },
+    ]);
+    expect(row?.consumedAt).not.toBeNull();
+  });
+
+  it("leaves one user when two resets for an address with no user race (plan 8, reset unique_violation retry)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const [first, second] = auth.mail.map((m) => tokenFromMail(m.text));
+    const inner = auth.storage;
+    // The loser's first user read misses. On that miss the winner's whole
+    // reset commits through the outer adapter, as a second isolate would.
+    // The loser's user create then fails with unique_violation.
+    let winner: Awaited<ReturnType<typeof resetPassword>> | null = null;
+    let missed = false;
+    const wrap = (a: StorageAdapter): StorageAdapter => ({
+      create: (m, d) => a.create(m, d),
+      findOne: async (m, w) => {
+        if (m === "user" && !missed) {
+          missed = true;
+          winner = await resetPassword(d1Like(auth.config), {
+            token: first ?? "",
+            password: "winner password",
+            ip: null,
+            userAgent: null,
+          });
+          return null;
+        }
+        return a.findOne(m, w);
+      },
+      findMany: (m, w, o) => a.findMany(m, w, o),
+      update: (m, w, d) => a.update(m, w, d),
+      delete: (m, w) => a.delete(m, w),
+      transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+    });
+    const loser = await resetPassword(
+      { ...auth.config, storage: wrap(inner) },
+      { token: second ?? "", password: "loser password", ip: null, userAgent: null },
+    );
+    expect(missed).toBe(true);
+    const won = winner as Awaited<ReturnType<typeof resetPassword>> | null;
+    if (!won?.ok) throw new Error("the winner's reset failed");
+    if (!loser.ok) throw new Error(loser.code);
+    expect(loser.value.user.id).toBe(won.value.user.id);
+    expect(await inner.findMany("user", [])).toHaveLength(1);
+    expect(await inner.findMany("password", [])).toHaveLength(1);
+    expect(await inner.findMany("identity", [])).toHaveLength(1);
+    // The last reset wins: its password signs in, and its session is the only one.
+    const sessions = await inner.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(loser.value.token)]);
+    expect(
+      (
+        await passwordSignIn(auth.config, {
+          email: EMAIL,
+          password: "loser password",
+          ip: null,
+          userAgent: null,
+        })
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("answers conflict when another change wins between the verify and the write (plan 8, change conflict)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const set = await resetPassword(auth.config, {
+      token: tokenFromMail(auth.mail.at(-1)?.text ?? ""),
+      password: "first password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!set.ok) throw new Error(set.code);
+    const session = await resolveSession(auth.config, set.value.token);
+    if (!session) throw new Error("no session");
+    let other: Awaited<ReturnType<typeof changePassword>> | null = null;
+    const gate = interleaveBeforeNextTransaction(auth.storage, async () => {
+      other = await changePassword(auth.config, {
+        session,
+        currentPassword: "first password",
+        newPassword: "other password",
+      });
+    });
+    const r = await changePassword(auth.config, {
+      session,
+      currentPassword: "first password",
+      newPassword: "loser password",
+    });
+    expect(gate.fired()).toBe(true);
+    expect(other).toEqual({ ok: true, value: { ok: true } });
+    expect(r).toMatchObject({ ok: false, code: "conflict", status: 409 });
+    const signIn = (password: string) =>
+      passwordSignIn(auth.config, { email: EMAIL, password, ip: null, userAgent: null });
+    expect((await signIn("other password")).ok).toBe(true);
+    expect(await signIn("loser password")).toMatchObject({ code: "invalid_credentials" });
+  });
+
+  it("answers conflict when a reset sets the first password between the read and the create (plan 8, change conflict)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    // Reachable: a verified user with no password, from a magic link.
+    const link = await magicLinkToken(auth);
+    const ml = await verifyMagicLink(auth.config, { token: link, ip: null, userAgent: null });
+    if (!ml.ok) throw new Error(ml.code);
+    const session = await resolveSession(auth.config, ml.value.token);
+    if (!session) throw new Error("no session");
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const reset = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    const gate = interleaveBeforeNextTransaction(auth.storage, async () => {
+      const r = await resetPassword(auth.config, {
+        token: reset,
+        password: "reset password",
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    });
+    const r = await changePassword(auth.config, { session, newPassword: "change password" });
+    expect(gate.fired()).toBe(true);
+    expect(r).toMatchObject({ ok: false, code: "conflict", status: 409 });
+    const rows = await auth.storage.findMany("password", []);
+    expect(rows).toHaveLength(1);
+    expect(
+      (
+        await passwordSignIn(auth.config, {
+          email: EMAIL,
+          password: "reset password",
+          ip: null,
+          userAgent: null,
+        })
+      ).ok,
+    ).toBe(true);
+  });
+
+  /** A reset link for EMAIL, requested before the sign-up, as the owner holds it. */
+  async function resetLinkToken(auth: ReturnType<typeof makeAuth>): Promise<string> {
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    return tokenFromMail(auth.mail.at(-1)?.text ?? "");
+  }
+
+  function signInAs(auth: ReturnType<typeof makeAuth>, password: string) {
+    return passwordSignIn(auth.config, { email: EMAIL, password, ip: null, userAgent: null });
+  }
+
+  it("keeps the owner's user, identity, session, and password when the owner's reset lands between the sign-up's two creates (plan 8 final review I-1)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    // Reachable: a reset request mails a link for an address with no user.
+    const link = await resetLinkToken(auth);
+
+    // On D1 the owner's whole reset runs inside the claimant's open sign-up
+    // transaction, just after its first create.
+    let owner: Awaited<ReturnType<typeof resetPassword>> | null = null;
+    const gate = interleaveAfterFirstCreate(auth.storage, async () => {
+      owner = await resetPassword(d1Like(auth.config), {
+        token: link,
+        password: "owner password",
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken", status: 409 });
+    const proved = owner as Awaited<ReturnType<typeof resetPassword>> | null;
+    if (!proved?.ok) throw new Error("the owner's reset failed");
+    const userId = proved.value.user.id;
+    const users = await auth.storage.findMany("user", []);
+    expect(users.map((u) => [u.id, u.email, u.emailVerified])).toEqual([[userId, EMAIL, true]]);
+    const identities = await auth.storage.findMany("identity", []);
+    expect(identities.map((x) => [x.userId, x.provider, x.subject])).toEqual([
+      [userId, "email", EMAIL],
+    ]);
+    const passwords = await auth.storage.findMany("password", []);
+    expect(passwords.map((p) => p.userId)).toEqual([userId]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await resolveSession(auth.config, proved.value.token)).not.toBeNull();
+    expect((await signInAs(auth, "owner password")).ok).toBe(true);
+    expect(await signInAs(auth, "claimant password")).toMatchObject({
+      ok: false,
+      code: "invalid_credentials",
+    });
+    // The claimant got no verify mail: the reset mail is the only one.
+    expect(auth.mail).toHaveLength(1);
+  });
+
+  it("keeps the owner's new password when the owner's reset lands after the sign-up's two creates (plan 8 final review I-2)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await resetLinkToken(auth);
+
+    // On D1 the owner's whole reset runs inside the claimant's open sign-up
+    // transaction, after both creates: it writes the owner's hash into the
+    // claimant's password row, keeps that row id, and verifies the user.
+    let owner: Awaited<ReturnType<typeof resetPassword>> | null = null;
+    const gate = interleaveAfterUserCreate(auth.storage, async () => {
+      owner = await resetPassword(d1Like(auth.config), {
+        token: link,
+        password: "owner password",
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof resetPassword>> | null;
+    if (!proved?.ok) throw new Error("the owner's reset failed");
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect((await signInAs(auth, "owner password")).ok).toBe(true);
+    expect(await signInAs(auth, "claimant password")).toMatchObject({
+      ok: false,
+      code: "invalid_credentials",
+    });
+  });
+
+  it("keeps the owner's new password when the owner's reset lands just before the sign-up's session insert (plan 8 final review I-2)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await resetLinkToken(auth);
+
+    let owner: Awaited<ReturnType<typeof resetPassword>> | null = null;
+    const gate = interleaveBeforeSessionInsert(auth.storage, async () => {
+      owner = await resetPassword(d1Like(auth.config), {
+        token: link,
+        password: "owner password",
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof resetPassword>> | null;
+    if (!proved?.ok) throw new Error("the owner's reset failed");
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect((await signInAs(auth, "owner password")).ok).toBe(true);
+    expect(await signInAs(auth, "claimant password")).toMatchObject({
+      ok: false,
+      code: "invalid_credentials",
+    });
+  });
+
+  it("leaves the claimant no session when the owner's magic link lands just before the sign-up's session insert (plan 8 final review M-2)", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await magicLinkToken(auth);
+
+    // On D1 the owner's whole claim runs inside the claimant's open sign-up
+    // transaction, after both creates and before the session insert. The
+    // claim deletes the sessions that exist then; the claimant's session
+    // comes after it, so only the guard after the insert removes it.
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    const gate = interleaveBeforeSessionInsert(auth.storage, async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(
+      await auth.storage.findOne("user", [{ field: "id", op: "eq", value: proved.value.user.id }]),
+    ).toMatchObject({ email: EMAIL, emailVerified: true });
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
   });
 });

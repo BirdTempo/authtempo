@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../src/config.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
+import { defaultResetPage } from "../src/http/password-pages.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 const base = {
@@ -201,5 +202,28 @@ describe("appURL, cookie, handoff config", () => {
     expect(() => resolveConfig({ ...base, handoff: { schemes: ["Notes Mine://"] } })).toThrow(
       /handoff.schemes/,
     );
+  });
+});
+
+describe("password config (plan 8)", () => {
+  it("is off when absent, and on with the defaults for {}", () => {
+    expect(resolveConfig(base).password).toBeNull();
+    const p = resolveConfig({ ...base, password: {} }).password;
+    expect(p).toMatchObject({ minLength: 8, resetTtlMinutes: 15, breachCheck: null });
+    expect(p?.resetPage).toBe(defaultResetPage);
+    expect(typeof p?.hash.verify).toBe("function");
+  });
+
+  it("refuses a minLength outside 8 to 128 and a resetTtlMinutes outside 1 to 1440", () => {
+    for (const minLength of [7, 129, 8.5]) {
+      expect(() => resolveConfig({ ...base, password: { minLength } })).toThrow(
+        /password.minLength/,
+      );
+    }
+    for (const resetTtlMinutes of [0, 1441, 2.5]) {
+      expect(() => resolveConfig({ ...base, password: { resetTtlMinutes } })).toThrow(
+        /password.resetTtlMinutes/,
+      );
+    }
   });
 });

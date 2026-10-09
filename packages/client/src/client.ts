@@ -54,6 +54,33 @@ export interface Client {
     list(): Promise<ClientResult<PasskeySummaryJSON[]>>;
     delete(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
   };
+  /**
+   * Every operation answers `not_found` when the server runs without the `password` config.
+   * `signUp`, `signIn`, and `reset` answer the bearer token. A browser app keeps the cookie, and a native app stores the token.
+   */
+  password: {
+    signUp(input: {
+      email: string;
+      password: string;
+      name?: string | undefined;
+    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    signIn(input: {
+      email: string;
+      password: string;
+    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    requestReset(input: {
+      email: string;
+      next?: string | undefined;
+    }): Promise<ClientResult<{ sent: true }>>;
+    reset(input: {
+      token: string;
+      password: string;
+    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    change(input: {
+      currentPassword?: string | undefined;
+      newPassword: string;
+    }): Promise<ClientResult<{ ok: true }>>;
+  };
   /** Every operation answers `not_found` when the server runs without the `organizations` config. */
   organizations: {
     create(input: {
@@ -171,6 +198,26 @@ export function createClient(options: ClientOptions): Client {
         return r.ok ? ok(r.value.passkeys) : r;
       },
       delete: (input) => call<{ ok: true }>("POST", "/passkeys/delete", input),
+    },
+    password: {
+      signUp: ({ name, ...rest }) =>
+        call<{ token: string } & PublicSession>("POST", "/password/sign-up", {
+          ...rest,
+          ...(name !== undefined ? { name } : {}),
+        }),
+      signIn: (input) =>
+        call<{ token: string } & PublicSession>("POST", "/password/sign-in", input),
+      requestReset: ({ next, ...rest }) =>
+        call<{ sent: true }>("POST", "/password/reset/request", {
+          ...rest,
+          ...(next !== undefined ? { next } : {}),
+        }),
+      reset: (input) => call<{ token: string } & PublicSession>("POST", "/password/reset", input),
+      change: ({ currentPassword, newPassword }) =>
+        call<{ ok: true }>("POST", "/password/change", {
+          ...(currentPassword !== undefined ? { currentPassword } : {}),
+          newPassword,
+        }),
     },
     organizations: {
       create: ({ metadata, ...rest }) =>

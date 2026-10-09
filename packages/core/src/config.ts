@@ -1,15 +1,18 @@
+import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
 } from "./http/handoff-confirm-page.js";
+import { defaultResetPage, type ResetPageInput } from "./http/password-pages.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import { hasControlChar } from "./primitives/text.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
+import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
@@ -109,6 +112,25 @@ export interface AuthConfig {
   };
   /** Off when absent or `false`. `{}` turns it on with the defaults. */
   organizations?: OrganizationsConfig | false;
+  /**
+   * Password sign-in is on when set. `{}` turns it on with the defaults.
+   * Absent: no password route, no form on the sign-in page, no
+   * `api.password`.
+   */
+  password?: PasswordConfig;
+}
+
+export interface PasswordConfig {
+  /** The hash seam. Default: PBKDF2-SHA256 (see `createPbkdf2PasswordHash`). */
+  hash?: PasswordHashSeam;
+  /** 8 to 128. Default 8. */
+  minLength?: number;
+  /** True when the password is in a known breach. Default: no check. */
+  breachCheck?: (plain: string) => Promise<boolean>;
+  /** 1 to 1440. Default 15. */
+  resetTtlMinutes?: number;
+  /** The HTML of the reset page. The default is `defaultResetPage`. */
+  resetPage?: (input: ResetPageInput) => string;
 }
 
 export interface OrganizationsConfig {
@@ -158,6 +180,13 @@ export interface ResolvedConfig {
     platformRole: string | null;
     invitationTtlDays: number;
     invitationLinkBuilder: (token: string, organization: { slug: string; name: string }) => string;
+  } | null;
+  password: {
+    hash: PasswordHashSeam;
+    minLength: number;
+    breachCheck: ((plain: string) => Promise<boolean>) | null;
+    resetTtlMinutes: number;
+    resetPage: (input: ResetPageInput) => string;
   } | null;
 }
 
@@ -359,6 +388,25 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       origins: [...input.passkey.origins],
     };
   }
+  let password: ResolvedConfig["password"] = null;
+  if (input.password) {
+    const p = input.password;
+    const minLength = p.minLength ?? 8;
+    if (!Number.isSafeInteger(minLength) || minLength < 8 || minLength > PASSWORD_MAX_LENGTH)
+      throw new ConfigError(
+        `password.minLength must be an integer from 8 to ${PASSWORD_MAX_LENGTH}`,
+      );
+    const resetTtlMinutes = p.resetTtlMinutes ?? 15;
+    if (!Number.isSafeInteger(resetTtlMinutes) || resetTtlMinutes < 1 || resetTtlMinutes > 1440)
+      throw new ConfigError("password.resetTtlMinutes must be an integer from 1 to 1440");
+    password = {
+      hash: p.hash ?? createPbkdf2PasswordHash(),
+      minLength,
+      breachCheck: p.breachCheck ?? null,
+      resetTtlMinutes,
+      resetPage: p.resetPage ?? defaultResetPage,
+    };
+  }
   return {
     basePath,
     baseURL: input.baseURL,
@@ -391,6 +439,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
     handoff,
     organizations,
+    password,
   };
 }
 

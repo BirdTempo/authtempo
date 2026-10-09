@@ -5,8 +5,18 @@ export interface SignInPageInput {
   basePath: string;
   /** The path the browser visits after any sign-in completes; carries the handoff id. */
   continuePath: string;
-  /** Which methods the config enables. */
-  methods: { magicLink: true; google: boolean; apple: boolean; passkey: boolean };
+  /**
+   * Which methods the config enables. `password` is true when the config
+   * has a `password` section: the page shows the password form and the
+   * forgot button.
+   */
+  methods: {
+    magicLink: true;
+    google: boolean;
+    apple: boolean;
+    passkey: boolean;
+    password: boolean;
+  };
   /** The script nonce the policy header names. */
   nonce: string;
   /** The app name from the config. Escaped in the title and the heading. */
@@ -52,6 +62,16 @@ p.status { min-height: 1.5rem; color: #555; }
 <input type="email" name="email" placeholder="you@example.com" required autofocus>
 <button type="submit">Email me a sign-in link</button>
 </form>
+${
+  input.methods.password
+    ? `<form id="password" method="post" action="${base}/password/sign-in" autocomplete="on">
+<input type="email" name="email" placeholder="you@example.com" autocomplete="username" required>
+<input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+<button type="submit">Sign in with password</button>
+<button id="forgot" type="button">Forgot password</button>
+</form>`
+    : ""
+}
 ${input.methods.passkey ? `<button id="passkey" type="button">Sign in with a passkey</button>` : ""}
 ${input.methods.google ? social("google", "Continue with Google") : ""}
 ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
@@ -76,6 +96,28 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
       else say("The request was not accepted.");
     }).catch(function () { say("Could not reach the server. Try again."); });
   });
+  var pwForm = document.getElementById("password");
+  if (pwForm) {
+    pwForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      say("");
+      postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
+        if (res.ok) location.href = cont;
+        else if (res.status === 401) say("The email or the password is not correct.");
+        else if (res.status === 429) say("Too many attempts. Try again later.");
+        else say("The request was not accepted.");
+      }).catch(function () { say("Could not reach the server. Try again."); });
+    });
+    document.getElementById("forgot").addEventListener("click", function () {
+      var email = pwForm.elements.email.value;
+      if (!email) { say("Type your email first."); return; }
+      postJson("/password/reset/request", { email: email, next: cont }).then(function (res) {
+        if (res.ok) say("Check your email for a link to reset your password.");
+        else if (res.status === 429) say("Too many requests. Try again later.");
+        else say("The request was not accepted.");
+      }).catch(function () { say("Could not reach the server. Try again."); });
+    });
+  }
   var passkey = document.getElementById("passkey");
   if (passkey && (typeof PublicKeyCredential === "undefined" || typeof PublicKeyCredential.parseRequestOptionsFromJSON !== "function")) passkey.hidden = true;
   if (passkey) passkey.addEventListener("click", function () {

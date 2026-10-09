@@ -10,7 +10,7 @@ import {
 import { publicSession, sessionFromRequest } from "../../engine/sessions.js";
 import { randomBase64Url } from "../../primitives/crypto.js";
 import { readBody } from "../body.js";
-import { formAction, pageHeaders } from "../csp.js";
+import { formAction, noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import type { Route } from "../router.js";
@@ -26,6 +26,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     google: config.social.providers.some((p) => p.name === "google"),
     apple: config.social.providers.some((p) => p.name === "apple"),
     passkey: config.passkey !== null,
+    password: config.password !== null,
   };
   const page = (handoffId: string): Response => {
     const nonce = randomBase64Url(16);
@@ -47,8 +48,10 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
       redirect: redirectTo,
       appName: config.appName,
     });
-    const policy = `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
-    return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
+    return new Response(html, {
+      status: 200,
+      headers: pageHeaders(config, noScriptPagePolicy(config)),
+    });
   };
   return [
     {

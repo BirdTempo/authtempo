@@ -1,13 +1,29 @@
 export const VERSION = "0.0.0";
 
-export type { AuthConfig, MailMessage, MailPort, OrganizationsConfig } from "./config.js";
+export type {
+  AuthConfig,
+  MailMessage,
+  MailPort,
+  OrganizationsConfig,
+  PasswordConfig,
+} from "./config.js";
 export { ConfigError } from "./config.js";
-export { type Auth, type AuthApi, createAuth } from "./create-auth.js";
+export { type Auth, type AuthApi, createAuth, type PasswordApi } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
+export type {
+  PasswordChange,
+  PasswordReset,
+  PasswordResetRequest,
+  PasswordSession,
+  PasswordSignIn,
+  PasswordSignUp,
+  PasswordVerified,
+  PasswordVerify,
+} from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
@@ -18,6 +34,12 @@ export {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
 } from "./http/handoff-confirm-page.js";
+export {
+  defaultPasswordVerifyPage,
+  defaultResetPage,
+  type PasswordVerifyPageInput,
+  type ResetPageInput,
+} from "./http/password-pages.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
@@ -31,6 +53,7 @@ export {
   type Models,
   type OrganizationRow,
   type PasskeyRow,
+  type PasswordRow,
   SCHEMA_VERSION,
   type SessionRow,
   schema,
@@ -43,6 +66,11 @@ export {
   type SignES256Input,
   type VerifyIdTokenInput,
 } from "./seams/jwt.js";
+export {
+  createPbkdf2PasswordHash,
+  type PasswordHashSeam,
+  PBKDF2_ITERATIONS,
+} from "./seams/password-hash.js";
 export type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
