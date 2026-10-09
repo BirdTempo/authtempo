@@ -239,3 +239,49 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
     ).toBe(true);
   });
 });
+
+describe("claimEmail covers handoff codes (plan 5a input)", () => {
+  it("deletes the user's handoff code rows and keeps the start rows and other users' rows", async () => {
+    const storage = createMemoryAdapter();
+    const now = new Date("2026-01-01T00:00:00.000Z");
+    const row = { createdAt: now, updatedAt: now, expiresAt: now, consumedAt: null };
+    await storage.create("user", {
+      id: "U1",
+      email: "a@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await storage.create("verification", {
+      id: "H1",
+      purpose: "handoff-code",
+      identifier: "U1",
+      valueHash: "c1",
+      data: { challenge: "x", redirect: "app://auth" },
+      ...row,
+    });
+    await storage.create("verification", {
+      id: "H2",
+      purpose: "handoff-code",
+      identifier: "U2",
+      valueHash: "c2",
+      data: { challenge: "y", redirect: "app://auth" },
+      ...row,
+    });
+    await storage.create("verification", {
+      id: "H3",
+      purpose: "handoff-code",
+      identifier: "start",
+      valueHash: "s1",
+      data: { challenge: "z", redirect: "app://auth" },
+      ...row,
+    });
+    await storage.transaction((tx) => claimEmail(tx, "U1", null, now));
+    expect((await storage.findMany("verification", [])).map((v) => v.id).sort()).toEqual([
+      "H2",
+      "H3",
+    ]);
+  });
+});
