@@ -1,10 +1,13 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
-import { readBody } from "../body.js";
+import { publicSession, resolveSession } from "../../engine/sessions.js";
+import { fail } from "../../result.js";
+import { isJsonRequest, readBody } from "../body.js";
 import { sessionCookie } from "../cookies.js";
-import { readJson, respond } from "../json.js";
-import { redirect } from "../redirect.js";
+import { formAction, pageHeaders } from "../csp.js";
+import { json, readJson, respond } from "../json.js";
+import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 
 const requestBody = z.object({
@@ -15,19 +18,18 @@ const requestBody = z.object({
 const verifyBody = z.object({ token: z.string().max(64) });
 
 /**
- * Locks the page down: no script, no remote resource, the form may post
- * to this origin only, no framing. The inline style is the page's own.
- * Chromium applies `form-action` to the redirect that follows the form
- * post as well. Today the redirect goes to `baseURL`, which is 'self'.
- * Plan 5 redirects to the app origin or an app scheme, so it must widen
- * `form-action` to those `trustedOrigins` and prove it in a real browser.
+ * Locks the page down: no script, no remote resource, no framing. The
+ * inline style is the page's own. `form-action` names this origin, the
+ * trusted web origins, and the handoff schemes, because Chromium applies
+ * it to every redirect that follows the form post.
  */
-const PAGE_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+function pagePolicy(config: ResolvedConfig): string {
+  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
+}
 
 export function magicLinkRoutes(config: ResolvedConfig): Route[] {
   const verifyPath = `${config.basePath}/magic-link/verify`;
-  const failed = (code: string) => redirect(`${config.baseURL}/?auth_error=${code}`);
+  const failed = (code: string) => redirect(authErrorUrl(config, code));
   return [
     {
       method: "POST",
@@ -56,13 +58,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         const html = config.magicLink.confirmPage({ action: verifyPath, token });
         return new Response(html, {
           status: 200,
-          headers: {
-            "content-type": "text/html; charset=utf-8",
-            "cache-control": "no-store",
-            "referrer-policy": "no-referrer",
-            "x-robots-tag": "noindex",
-            "content-security-policy": PAGE_CSP,
-          },
+          headers: pageHeaders(config, pagePolicy(config)),
         });
       },
     },
@@ -70,19 +66,33 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
       method: "POST",
       path: "/magic-link/verify",
       async handler(ctx) {
+        const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, verifyBody);
         // A form with no token is a client bug, not a user error. The
         // person sees the same page they see for a bad link.
-        if (!body.ok) return failed("invalid_token");
+        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
         const result = await verifyMagicLink(config, {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
         });
-        if (!result.ok) return failed(result.code);
+        if (!result.ok) return jsonCaller ? respond(result) : failed(result.code);
         const maxAge = config.session.ttlDays * 86_400;
-        const res = redirect(`${config.baseURL}${result.value.next}`);
-        res.headers.set("set-cookie", sessionCookie(config.cookieName, result.value.token, maxAge));
+        const cookie = sessionCookie(
+          config.cookieName,
+          result.value.token,
+          maxAge,
+          config.cookie.sameSite,
+        );
+        if (jsonCaller) {
+          // One extra read, on the JSON path only. verifyMagicLink does not return the row.
+          // The session row was created a moment ago; a null here is a storage failure, and the token is spent. The caller asks for a new link.
+          const resolved = await resolveSession(config, result.value.token);
+          if (!resolved) return respond(fail("invalid_token"));
+          return json(publicSession(resolved), 200, { "set-cookie": cookie });
+        }
+        const res = redirect(resolveNext(config, result.value.next));
+        res.headers.set("set-cookie", cookie);
         return res;
       },
     },

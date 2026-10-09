@@ -91,7 +91,12 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
           publicSession({ user: r.value.user, session: r.value.session, refreshed: false }),
           200,
           {
-            "set-cookie": sessionCookie(config.cookieName, r.value.token, maxAge),
+            "set-cookie": sessionCookie(
+              config.cookieName,
+              r.value.token,
+              maxAge,
+              config.cookie.sameSite,
+            ),
           },
         );
       },

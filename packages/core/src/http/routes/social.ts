@@ -3,7 +3,7 @@ import type { ResolvedConfig } from "../../config.js";
 import { completeSocial, startSocial } from "../../engine/social.js";
 import { readBody } from "../body.js";
 import { clearOauthCookie, oauthCookie, readCookie, sessionCookie } from "../cookies.js";
-import { redirect } from "../redirect.js";
+import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 
 const BIND_MAX_AGE_SECONDS = 600;
@@ -28,7 +28,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
   const bindName = `${config.cookieName}_oauth`;
   const bindPath = `${config.basePath}/social`;
   const failed = (code: string) => {
-    const res = redirect(`${config.baseURL}/?auth_error=${code}`);
+    const res = redirect(authErrorUrl(config, code));
     // An invalid_token answer means no row was consumed for this browser.
     // An in-flight flow in another tab keeps its cookie.
     if (code !== "invalid_token") {
@@ -46,7 +46,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           next: ctx.url.searchParams.get("next") ?? undefined,
           ip: ctx.ip,
         });
-        if (!r.ok) return redirect(`${config.baseURL}/?auth_error=${r.code}`);
+        if (!r.ok) return redirect(authErrorUrl(config, r.code));
         const res = redirect(r.value.location);
         res.headers.set(
           "set-cookie",
@@ -71,10 +71,15 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           userAgent: ctx.request.headers.get("user-agent"),
         });
         if (!r.ok) return failed(r.code);
-        const res = redirect(`${config.baseURL}${r.value.next}`);
+        const res = redirect(resolveNext(config, r.value.next));
         res.headers.append(
           "set-cookie",
-          sessionCookie(config.cookieName, r.value.token, config.session.ttlDays * 86_400),
+          sessionCookie(
+            config.cookieName,
+            r.value.token,
+            config.session.ttlDays * 86_400,
+            config.cookie.sameSite,
+          ),
         );
         res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
         return res;

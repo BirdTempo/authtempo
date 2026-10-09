@@ -22,7 +22,7 @@ const s = await auth.session(request);     // { user, session } or null
 | --- | --- | --- | --- |
 | POST | `/magic-link/request` | `{ email, next? }` | `{ sent: true }` always; 429 when rate limited; 400 on a bad body |
 | GET | `/magic-link/verify` | `?token=` | 200 HTML confirm page with a form that posts the token; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
-| POST | `/magic-link/verify` | form or JSON `token` | 302 to `next` with the session cookie; 302 to `/?auth_error=<code>` on failure |
+| POST | `/magic-link/verify` | form or JSON `token` | form body: 302 to `appURL` plus `next` with the session cookie, or 302 to `/?auth_error=<code>`; JSON body: 200 `{ user, session }` with the cookie, or the error as JSON |
 | GET | `/social/google/start`, `/social/apple/start` | `?next=` | 302 to the provider with a binding cookie; 302 to `/?auth_error=rate_limited` when limited. A route exists only for a configured provider |
 | GET | `/social/google/callback` | `?code&state` | 302 to `next` with the session cookie; 302 to `/?auth_error=<code>` on failure |
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
@@ -34,6 +34,10 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
+| GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the confirm page when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
+| GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
+| POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
+| POST | `/handoff/redeem` | `{ code, verifier }` | `{ token, user, session }` as a bearer answer, no cookie; 400 `invalid_body`, `invalid_token`, `token_expired`; 429 `rate_limited` |
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
@@ -43,6 +47,48 @@ only; core sets `cache-control`, `referrer-policy`, `x-robots-tag`, and a
 content security policy that permits inline style, no script, and a form
 post to this origin only. A page that needs script or a remote stylesheet
 needs its own route in the app, because the policy header is fixed.
+
+## Apps on another origin
+
+Set `appURL` to the app's origin and list it in `trustedOrigins`. Every
+redirect after a sign-in then lands on `appURL` plus `next`, and errors
+go to `appURL/?auth_error=<code>`. A `next` under `basePath` stays on
+`baseURL`; that is how the handoff rides through a sign-in.
+
+A trusted origin gets credentialed CORS: the router answers its
+preflight with 204 and marks every response with
+`Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials`.
+The browser still needs the session cookie on the request. With the
+default `SameSite=Lax` the cookie goes on every same-site request, so an
+app on a sibling subdomain of the API works as is. An app on another
+site needs `cookie: { sameSite: "None" }`; then any site can make the
+browser send the cookie, and the Origin rule on POST is what refuses
+them. The cookie names stay `tempo_session` and `tempo_session_oauth` in
+version 1; a `__Host-` prefix is a version 2 item.
+
+## Handoff for native and desktop apps
+
+Set `handoff: { schemes: ["consumera://"] }`. The app makes a PKCE
+verifier and its S256 challenge, then opens the system browser at
+`GET /auth/handoff/start?challenge=<c>&redirect=consumera://auth`. Core
+shows the sign-in page: a magic link form, the configured social
+buttons, and a passkey button. Every method ends by visiting
+`/auth/handoff/continue?h=<id>` on the API origin, which shows a confirm
+page. When the person presses the button, core mints a one-time code and
+redirects to `consumera://auth?code=<code>`. The app
+then calls `POST /auth/handoff/redeem { code, verifier }` and keeps the
+bearer token. A code lives two minutes and redeems once; a start lives
+ten minutes, or as long as a magic link if that is longer.
+
+The continue is a consent step. A signed-in browser sees a page that names the account and the app, and the code is minted only when the person presses the button. The post is accepted from the API origin only.
+
+In development `devRedirectPattern` admits a full redirect URL, for
+example `/^exp:\/\/[\d.]+:\d+\/--\/auth$/` for Expo Go. Core refuses a
+pattern with the `g` or `y` flag, and refuses any admitted `http` or
+`https` URL that is not on a loopback host. `signInPage`
+replaces the page; the function gets the base path, the continue path,
+the enabled methods, and the script nonce, and must put the nonce on its
+script tag. `@tempo-auth/handoff` (plan 5b) does the app side.
 
 ## Social sign-in
 
@@ -137,6 +183,19 @@ tests prove the whole flow without a browser.
 - On Node, loading @simplewebauthn/server prints one ExperimentalWarning
   about ML-DSA. It is the library's post-quantum probe, not a tempo-auth
   setting, and workerd prints nothing.
+- Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
+  minutes, in the same per-isolate limiter.
+- The sign-in page needs a browser that keeps cookies between the start
+  and the callback of a social sign-in; an ephemeral auth session that
+  drops cookies answers `invalid_token` on the callback.
+- `devRedirectPattern` admits any URL it matches. A loose pattern lets a
+  page that can open the system browser send the one-time code to an
+  origin it controls. Keep the pattern to the dev host and port, and
+  leave it unset in production.
+- The router adds the CORS headers to a handler's response in place. A
+  handler that returns a `Response` with immutable headers, such as
+  `Response.redirect` or a proxied fetch answer, must copy it first. Every
+  route core ships builds its own `Response`.
 
 ## The storage port
 

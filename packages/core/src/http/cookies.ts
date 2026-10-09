@@ -1,9 +1,16 @@
-export function sessionCookie(name: string, token: string, maxAgeSeconds: number): string {
-  return `${name}=${token}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+export type SameSite = "Lax" | "None";
+
+export function sessionCookie(
+  name: string,
+  token: string,
+  maxAgeSeconds: number,
+  sameSite: SameSite,
+): string {
+  return `${name}=${token}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=${sameSite}`;
 }
 
-export function clearSessionCookie(name: string): string {
-  return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+export function clearSessionCookie(name: string, sameSite: SameSite): string {
+  return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=${sameSite}`;
 }
 
 export function readCookie(request: Request, name: string): string | null {

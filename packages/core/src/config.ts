@@ -1,4 +1,9 @@
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
+import {
+  defaultHandoffConfirmPage,
+  type HandoffConfirmPageInput,
+} from "./http/handoff-confirm-page.js";
+import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
@@ -29,6 +34,19 @@ export interface AuthConfig {
   secret: string;
   /** Exact origins and app schemes. No wildcards in version 1. */
   trustedOrigins: string[];
+  /**
+   * The origin the browser lands on after a sign-in, and where
+   * `?auth_error=` goes. Default `baseURL`. Set it when the app lives on
+   * another origin. Must be `baseURL` or a member of `trustedOrigins`.
+   */
+  appURL?: string;
+  /**
+   * `SameSite` of the session cookie. `Lax` (default) is sent on every
+   * same-site request and on top-level navigations. An app on another
+   * site, not a sibling subdomain, needs `None`, which also lets any site
+   * trigger credentialed requests that the Origin rule must then refuse.
+   */
+  cookie?: { sameSite?: "Lax" | "None" };
   storage: StorageAdapter;
   mail: MailPort;
   limiter?: LimiterPort;
@@ -68,6 +86,19 @@ export interface AuthConfig {
   passkey?: { rpID: string; rpName: string; origins: string[] };
   /** The WebAuthn ceremonies. Default: @simplewebauthn/server. Tests inject a fake. */
   webauthn?: WebAuthnSeam;
+  /**
+   * The handoff for native and desktop apps. `schemes` are the app schemes
+   * the one-time code may redirect to, each ending in `://`. In
+   * development `devRedirectPattern` may admit a full redirect URL, for
+   * example an Expo Go `exp://` address. `signInPage` replaces the page
+   * core ships.
+   */
+  handoff?: {
+    schemes: string[];
+    devRedirectPattern?: RegExp;
+    signInPage?: (input: SignInPageInput) => string;
+    confirmPage?: (input: HandoffConfirmPageInput) => string;
+  };
 }
 
 export interface ResolvedConfig {
@@ -75,6 +106,8 @@ export interface ResolvedConfig {
   baseURL: string;
   secret: string;
   trustedOrigins: ReadonlySet<string>;
+  appURL: string;
+  cookie: { sameSite: "Lax" | "None" };
   storage: StorageAdapter;
   mail: MailPort;
   limiter: LimiterPort;
@@ -91,6 +124,12 @@ export interface ResolvedConfig {
   jwt: JwtSeam;
   passkey: { rpID: string; rpName: string; origins: string[] } | null;
   webauthn: WebAuthnSeam;
+  handoff: {
+    schemes: string[];
+    devRedirectPattern: RegExp | null;
+    signInPage: (input: SignInPageInput) => string;
+    confirmPage: (input: HandoffConfirmPageInput) => string;
+  } | null;
 }
 
 /**
@@ -101,6 +140,8 @@ export interface ResolvedConfig {
 export function workersClientIp(request: Request): string | null {
   return request.headers.get("cf-connecting-ip") || null;
 }
+
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\/$/;
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -123,6 +164,44 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   }
   for (const o of input.trustedOrigins) {
     if (o.includes("*")) throw new ConfigError(`trustedOrigins has a wildcard: ${o}`);
+  }
+  const appURL = input.appURL ?? input.baseURL;
+  if (appURL !== input.baseURL) {
+    let app: URL;
+    try {
+      app = new URL(appURL);
+    } catch {
+      throw new ConfigError("appURL must be an absolute URL");
+    }
+    if (app.origin !== appURL)
+      throw new ConfigError("appURL must be an exact origin, no path and no trailing slash");
+    if (!input.trustedOrigins.includes(appURL)) {
+      throw new ConfigError(`appURL ${appURL} must be baseURL or a member of trustedOrigins`);
+    }
+  }
+  const sameSite = input.cookie?.sameSite ?? "Lax";
+  if (sameSite !== "Lax" && sameSite !== "None")
+    throw new ConfigError("cookie.sameSite must be Lax or None");
+  let handoff: ResolvedConfig["handoff"] = null;
+  if (input.handoff) {
+    if (input.handoff.schemes.length === 0)
+      throw new ConfigError("handoff.schemes must not be empty");
+    for (const s of input.handoff.schemes) {
+      if (!SCHEME_RE.test(s))
+        throw new ConfigError(`handoff.schemes entry must be like app://, got ${s}`);
+      if (s === "https://" || s === "http://")
+        throw new ConfigError(`handoff.schemes must not hold ${s}`);
+    }
+    const pattern = input.handoff.devRedirectPattern;
+    // A global or sticky regex keeps state between test calls and alternates its answer.
+    if (pattern && (pattern.flags.includes("g") || pattern.flags.includes("y")))
+      throw new ConfigError("handoff.devRedirectPattern must not use the g or y flag");
+    handoff = {
+      schemes: [...input.handoff.schemes],
+      devRedirectPattern: input.handoff.devRedirectPattern ?? null,
+      signInPage: input.handoff.signInPage ?? defaultSignInPage,
+      confirmPage: input.handoff.confirmPage ?? defaultHandoffConfirmPage,
+    };
   }
   const basePath = input.basePath ?? "/auth";
   if (!basePath.startsWith("/") || basePath.endsWith("/")) {
@@ -183,6 +262,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     baseURL: input.baseURL,
     secret: input.secret,
     trustedOrigins: new Set(input.trustedOrigins),
+    appURL,
+    cookie: { sameSite },
     storage: input.storage,
     mail: input.mail,
     limiter: input.limiter ?? createMemoryLimiter(clock),
@@ -205,6 +286,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     jwt: input.jwt ?? createJoseJwtSeam(fetchFn),
     passkey,
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
+    handoff,
   };
 }
 

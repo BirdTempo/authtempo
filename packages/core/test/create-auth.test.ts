@@ -38,7 +38,7 @@ describe("createAuth", () => {
     ).toBe(200);
     const token = tokenFromMail(sent[0]?.text ?? "");
     const verify = await auth.handle(post("/auth/magic-link/verify", { token }));
-    expect(verify.status).toBe(302);
+    expect(verify.status).toBe(200);
     const cookie = verify.headers.get("set-cookie")?.split(";")[0] ?? "";
     const me = await auth.session(get("/anything", { cookie }));
     expect(me?.user.email).toBe("ada@example.com");
@@ -110,5 +110,13 @@ describe("createAuth", () => {
       social: { google: { clientId: "g", clientSecret: "s" } },
     });
     expect((await withGoogle.handle(get("/auth/social/google/start"))).status).toBe(302);
+  });
+  it("exposes the handoff api", async () => {
+    const { auth } = setup();
+    expect(typeof auth.api.startHandoff).toBe("function");
+    expect(await auth.api.startHandoff({ challenge: "x", redirect: "y", ip: null })).toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
   });
 });

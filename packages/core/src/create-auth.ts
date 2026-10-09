@@ -1,5 +1,11 @@
 import { type AuthConfig, resolveConfig } from "./config.js";
 import {
+  continueHandoff,
+  type HandoffStart,
+  redeemHandoff,
+  startHandoff,
+} from "./engine/handoff.js";
+import {
   type MagicLinkRequest,
   type MagicLinkVerify,
   requestMagicLink,
@@ -30,6 +36,7 @@ import {
 } from "./engine/social.js";
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
+import { handoffRoutes } from "./http/routes/handoff.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
 import { passkeyRoutes } from "./http/routes/passkeys.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
@@ -68,6 +75,17 @@ export interface AuthApi {
   }): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>>;
   listPasskeys(input: { user: UserRow }): Promise<Result<PasskeySummary[]>>;
   deletePasskey(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
+  startHandoff(input: HandoffStart): Promise<Result<{ handoffId: string }>>;
+  continueHandoff(input: {
+    handoffId: string;
+    userId: string;
+  }): Promise<Result<{ location: string }>>;
+  redeemHandoff(input: {
+    code: string;
+    verifier: string;
+    ip: string | null;
+    userAgent: string | null;
+  }): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>>;
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
 }
@@ -96,6 +114,7 @@ export function createAuth(input: AuthConfig): Auth {
     ...magicLinkRoutes(config),
     ...socialRoutes(config),
     ...passkeyRoutes(config),
+    ...handoffRoutes(config),
   ]);
   return {
     handle,
@@ -112,6 +131,9 @@ export function createAuth(input: AuthConfig): Auth {
       verifyPasskeyAuthentication: (i) => verifyPasskeyAuthentication(config, i),
       listPasskeys: (i) => listPasskeys(config, i),
       deletePasskey: (i) => deletePasskey(config, i),
+      startHandoff: (i) => startHandoff(config, i),
+      continueHandoff: (i) => continueHandoff(config, i),
+      redeemHandoff: (i) => redeemHandoff(config, i),
       getSession: (token) => resolveSession(config, token),
       signOut: (token) => destroySession(config, token),
     },

@@ -137,3 +137,52 @@ describe("passkey config", () => {
     ).toThrow(/passkey.origins/);
   });
 });
+
+describe("appURL, cookie, handoff config", () => {
+  it("defaults appURL to baseURL, sameSite to Lax, and handoff to null", () => {
+    const c = resolveConfig(base);
+    expect(c.appURL).toBe("https://api.example.com");
+    expect(c.cookie).toEqual({ sameSite: "Lax" });
+    expect(c.handoff).toBeNull();
+  });
+  it("accepts appURL when it is baseURL or a trusted origin, and refuses others", () => {
+    expect(resolveConfig({ ...base, appURL: "https://app.example.com" }).appURL).toBe(
+      "https://app.example.com",
+    );
+    expect(() => resolveConfig({ ...base, appURL: "https://other.example" })).toThrow(/appURL/);
+    expect(() => resolveConfig({ ...base, appURL: "https://app.example.com/" })).toThrow(/appURL/);
+  });
+  it("accepts sameSite None and refuses another value", () => {
+    expect(resolveConfig({ ...base, cookie: { sameSite: "None" } }).cookie.sameSite).toBe("None");
+    expect(() => resolveConfig({ ...base, cookie: { sameSite: "Strict" as "Lax" } })).toThrow(
+      /sameSite/,
+    );
+  });
+  it("validates handoff schemes and keeps the dev pattern", () => {
+    const c = resolveConfig({
+      ...base,
+      handoff: {
+        schemes: ["consumera://", "com.example.app://"],
+        devRedirectPattern: /^exp:\/\/[\d.]+:\d+\/--\/auth$/,
+      },
+    });
+    expect(c.handoff?.schemes).toEqual(["consumera://", "com.example.app://"]);
+    expect(c.handoff?.devRedirectPattern?.test("exp://192.168.1.5:8081/--/auth")).toBe(true);
+    expect(typeof c.handoff?.signInPage).toBe("function");
+    expect(() => resolveConfig({ ...base, handoff: { schemes: [] } })).toThrow(/handoff.schemes/);
+    // A g or y regex keeps state between test calls and alternates its answer.
+    for (const devRedirectPattern of [/x/g, /x/y])
+      expect(() =>
+        resolveConfig({ ...base, handoff: { schemes: ["consumera://"], devRedirectPattern } }),
+      ).toThrow(/devRedirectPattern/);
+    expect(() => resolveConfig({ ...base, handoff: { schemes: ["https://"] } })).toThrow(
+      /handoff.schemes/,
+    );
+    expect(() => resolveConfig({ ...base, handoff: { schemes: ["consumera"] } })).toThrow(
+      /handoff.schemes/,
+    );
+    expect(() => resolveConfig({ ...base, handoff: { schemes: ["Notes Mine://"] } })).toThrow(
+      /handoff.schemes/,
+    );
+  });
+});
