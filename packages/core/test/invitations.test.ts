@@ -48,6 +48,8 @@ describe("inviteMember", () => {
       role: "member",
     });
     expect(auth.mail[0]?.subject).toBe("You are invited to Acme Co on Acme");
+    // The body names the same app as the subject (Task 1 low).
+    expect(auth.mail[0]?.text).toContain("invited you to Acme Co on Acme.");
   });
   it("writes a hashed row, mails the link, lists it, and replaces a pending invitation for the same email", async () => {
     const auth = orgAuth();

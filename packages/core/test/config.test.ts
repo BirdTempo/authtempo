@@ -28,9 +28,14 @@ describe("resolveConfig", () => {
   it("defaults appName to the host of baseURL and accepts a set one", () => {
     expect(resolveConfig(base).appName).toBe("api.example.com");
     expect(resolveConfig({ ...base, appName: "Acme" }).appName).toBe("Acme");
+    // URL.host keeps a port that is not the default for the scheme.
+    expect(resolveConfig({ ...base, baseURL: "https://api.example.com:8443" }).appName).toBe(
+      "api.example.com:8443",
+    );
   });
   it("rejects an empty, long, or control-character appName", () => {
-    for (const appName of ["", "a".repeat(81), "A\nB"]) {
+    // U+0000 and U+007F are the two edges of the refused set.
+    for (const appName of ["", "a".repeat(81), "A\nB", "A\u0000B", "A\u007fB"]) {
       expect(() => resolveConfig({ ...base, appName })).toThrow(/appName/);
     }
     expect(resolveConfig({ ...base, appName: "a".repeat(80) }).appName).toHaveLength(80);
