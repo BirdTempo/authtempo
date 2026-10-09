@@ -1,0 +1,85 @@
+// Builds a temporary app bundle for the proof. macOS routes a URL scheme only to a bundle whose
+// Info.plist declares it in CFBundleURLTypes (Electron 44.7.0 docs for setAsDefaultProtocolClient
+// and open-url, read 2026-10-10). The unpackaged Electron.app declares no example-app.
+// On macOS 27.0 the unpackaged app got open-url all the same (spike, 2026-10-10): the runtime
+// call set a handler preference for com.github.electron. A shipped app is a bundle, and every
+// Electron dev binary shares that bundle id, so the proof keeps its own bundle.
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const require = createRequire(import.meta.url);
+const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const LSREGISTER =
+  "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+const PLIST_BUDDY = "/usr/libexec/PlistBuddy";
+const BUNDLE_ID = "dev.tempo-auth.example-electron";
+// Chromium names the Keychain item "<app name> Safe Storage". The app name comes from productName.
+const KEYCHAIN_SERVICE = "TempoAuthExample Safe Storage";
+
+/**
+ * Deletes every Keychain item of the proof. The access list of an item names an earlier ad hoc
+ * signature, so a read would ask for a password and the proof would hang (Review Focus 2).
+ * One call deletes one item, so this repeats until `security` answers exit 44 (no such item).
+ */
+export function deleteKeychainItem() {
+  for (let i = 0; i < 20; i++) {
+    try {
+      execFileSync("security", ["delete-generic-password", "-s", KEYCHAIN_SERVICE], {
+        stdio: "ignore",
+      });
+    } catch {
+      return;
+    }
+  }
+  throw new Error(`more than 20 Keychain items named "${KEYCHAIN_SERVICE}"; delete them by hand`);
+}
+
+export function buildBundle(outDir) {
+  // From Node, require("electron") answers the path of the binary in Electron.app/Contents/MacOS.
+  const binary = require("electron");
+  const source = resolve(binary, "..", "..", "..");
+  const app = join(outDir, "TempoAuthExample.app");
+  execFileSync("ditto", [source, app]);
+  const plist = join(app, "Contents", "Info.plist");
+  const pb = (command) => execFileSync(PLIST_BUDDY, ["-c", command, plist]);
+  pb(`Set :CFBundleIdentifier ${BUNDLE_ID}`);
+  pb("Set :CFBundleName TempoAuthExample");
+  try {
+    pb("Delete :CFBundleURLTypes");
+  } catch {
+    // Electron.app may declare none. The delete keeps the step the same either way.
+  }
+  pb("Add :CFBundleURLTypes array");
+  pb("Add :CFBundleURLTypes:0 dict");
+  pb(`Add :CFBundleURLTypes:0:CFBundleURLName string ${BUNDLE_ID}`);
+  pb("Add :CFBundleURLTypes:0:CFBundleURLSchemes array");
+  pb("Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string example-app");
+  // Electron runs Contents/Resources/app before its default app. The stub imports the built main,
+  // so module resolution starts in examples/electron and finds the workspace packages.
+  const appDir = join(app, "Contents", "Resources", "app");
+  mkdirSync(appDir, { recursive: true });
+  writeFileSync(
+    join(appDir, "package.json"),
+    JSON.stringify({
+      name: "tempo-auth-example-electron",
+      productName: "TempoAuthExample",
+      type: "module",
+      main: "main.js",
+    }),
+  );
+  const main = pathToFileURL(join(PKG_DIR, "dist", "main.js")).href;
+  writeFileSync(join(appDir, "main.js"), `import ${JSON.stringify(main)};\n`);
+  // The plist edit breaks the bundle seal. An ad hoc signature makes it valid again.
+  execFileSync("codesign", ["--force", "--deep", "--sign", "-", app]);
+  execFileSync(LSREGISTER, ["-f", app]);
+  return { app, exe: join(app, "Contents", "MacOS", "Electron") };
+}
+
+export function unregisterBundle(app) {
+  try {
+    execFileSync(LSREGISTER, ["-u", app]);
+  } catch {}
+}
