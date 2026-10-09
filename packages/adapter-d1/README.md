@@ -35,7 +35,7 @@ through unchanged, and the next operation reads again.
 
 Version 2 (plan 6, 2026-10-09) adds `ta_organization`, `ta_member`, and `ta_invitation`. Apply `0002_schema_v2` before you deploy a core at version 2; the adapter refuses a database at version 1.
 
-Version 3 (plan 6b, 2026-10-10) adds `ta_limit` for the owned limiter and the index `ix_ta_session__active_organization_id`. Apply `0003_schema_v3` before you deploy a core at version 3; the adapter refuses a database at version 2.
+Version 3 (plan 6b, 2026-10-10) adds `ta_limit` for the owned limiter (with the index `ix_ta_limit__expires_at` for its sweep) and the index `ix_ta_session__active_organization_id`. Apply `0003_schema_v3` before you deploy a core at version 3; the adapter refuses a database at version 2.
 
 ## Limiter
 
@@ -45,7 +45,7 @@ the configured limit times the isolate count. `createD1Limiter` keeps one count
 per key and window in `ta_limit` (schema version 3) for every caller:
 
 ```ts
-const auth = createAuth({ /* ... */, limiter: createD1Limiter(env.DB) });
+const auth = createAuth({ ...config, limiter: createD1Limiter(env.DB) });
 ```
 
 Each call runs one statement. It inserts the key at count 1, or on a
@@ -55,6 +55,12 @@ The stored key is the key, the seconds, and the max, joined by U+001F
 (the unit separator). A key with `|` is an ordinary key. A key with U+001F
 throws an `Error`: no caller value can carry it, and it would alias
 another window.
+
+Each row carries `expires_at`, the window start plus the window. The
+limiter's `sweep(now)` deletes every row whose window ended and answers
+the count. `auth.api.sweepExpired()` calls it and reports it as `limits`.
+Without a scheduled sweep, `ta_limit` keeps one row for every key and
+window that ever reached the limiter.
 
 ## Transactions
 

@@ -8,14 +8,27 @@ import { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./port.js";
  * read this one function. A key with `|` is an ordinary key.
  */
 export function limiterKey(key: string, window: LimitWindow): string {
-  // No caller value can carry it: normalizeEmail refuses control characters
-  // and an IP address has none. A key with it would alias another window.
+  // normalizeEmail refuses control characters, and the default `clientIp`
+  // gives none. A custom hook that returns one makes that request throw.
+  // A key with it would alias another window.
   if (key.includes(KEY_SEPARATOR)) {
     throw new Error(
       "tempo-auth limiter: a key must not contain U+001F, the separator of the stored key",
     );
   }
+  // A zero or fractional window has no meaning: `max: 0` refuses all on SQL
+  // and allows the first call on memory, and `seconds: 0` limits nothing.
+  // Postgres also casts the window milliseconds to bigint.
+  if (!isPositiveSafeInteger(window.seconds) || !isPositiveSafeInteger(window.max)) {
+    throw new Error(
+      `tempo-auth limiter: seconds and max must be positive safe integers, got ${window.seconds} and ${window.max}`,
+    );
+  }
   return `${key}${KEY_SEPARATOR}${window.seconds}${KEY_SEPARATOR}${window.max}`;
+}
+
+function isPositiveSafeInteger(n: number): boolean {
+  return Number.isSafeInteger(n) && n > 0;
 }
 
 /**
@@ -25,17 +38,28 @@ export function limiterKey(key: string, window: LimitWindow): string {
  */
 export function createMemoryLimiter(clock: Clock): LimiterPort & { size(): number } {
   const buckets = new Map<string, { start: number; count: number; seconds: number }>();
+  // Each bucket expires by its own window, not the window of the caller.
+  function drop(now: number): number {
+    let dropped = 0;
+    for (const [k, v] of buckets) {
+      if (v.start + v.seconds * 1000 <= now) {
+        buckets.delete(k);
+        dropped += 1;
+      }
+    }
+    return dropped;
+  }
   return {
     size: () => buckets.size,
+    async sweep(now) {
+      return drop(now.getTime());
+    },
     async allow(key, window) {
       const id = limiterKey(key, window);
       const now = clock.now().getTime();
       // Keys carry caller-chosen values, so drop every expired bucket here.
-      // Each bucket expires by its own window, not the window of this call.
       // Without this sweep a long-lived isolate keeps every key it ever saw.
-      for (const [k, v] of buckets) {
-        if (v.start + v.seconds * 1000 <= now) buckets.delete(k);
-      }
+      drop(now);
       // The window is part of the bucket identity, so a stored window never goes stale.
       const b = buckets.get(id);
       if (!b || now - b.start >= window.seconds * 1000) {

@@ -4,6 +4,8 @@ export interface SweepResult {
   verificationExpired: number;
   verificationConsumed: number;
   invitations: number;
+  /** Limiter windows that ended. 0 when the limiter has no sweep. */
+  limits: number;
 }
 
 // A consumed verification row stays for one day. While it exists, a replayed token
@@ -29,5 +31,8 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   const expired = await storage.delete("invitation", [
     { field: "expiresAt", op: "lt", value: now },
   ]);
-  return { verificationExpired, verificationConsumed, invitations: accepted + expired };
+  // The owned limiters keep one row per key and window. Without this sweep
+  // every address and IP that reached a limiter stays in ta_limit forever.
+  const limits = (await config.limiter.sweep?.(now)) ?? 0;
+  return { verificationExpired, verificationConsumed, invitations: accepted + expired, limits };
 }

@@ -55,7 +55,7 @@ it("lets exactly max of twenty concurrent calls pass", async () => {
   }
 });
 
-it("stores window_start and count as bigint", async () => {
+it("stores window_start, count, and expires_at as bigint", async () => {
   const db = await freshDatabase();
   try {
     const cols = await db.sql.unsafe<{ column_name: string; data_type: string }[]>(
@@ -65,6 +65,7 @@ it("stores window_start and count as bigint", async () => {
       ["key", "text"],
       ["window_start", "bigint"],
       ["count", "bigint"],
+      ["expires_at", "bigint"],
     ]);
   } finally {
     await db.close();

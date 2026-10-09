@@ -272,7 +272,9 @@ Check the member's rank on each request.
 `auth.api.sweepExpired()` deletes the rows that no flow can use any more.
 It removes verification rows past their expiry, verification rows consumed
 more than one day ago, and invitations that are accepted or expired. It
-answers the three counts. It is an `api` function and not a route. Call it
+also calls the limiter's `sweep`, when the limiter has one, to delete the
+limit windows that ended. It answers the four counts, the last as
+`limits`. It is an `api` function and not a route. Call it
 from a scheduled handler. It is safe to run at any time. A consumed row
 stays for one day so that a replayed token still answers `invalid_token`.
 

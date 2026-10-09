@@ -44,9 +44,18 @@ describe("sweepExpired", () => {
     await inv("i-accepted", at(DAY), at(-HOUR));
     await inv("i-pending", at(DAY), null);
     await inv("i-expired", at(-HOUR), null);
+    // A limit window that ends before the sweep, and one that is still live.
+    await config.limiter.allow("ended", { seconds: 60, max: 3 });
+    await config.limiter.allow("live", { seconds: 3600, max: 3 });
+    clock.advance(60_000);
 
     const first = await sweepExpired(config);
-    expect(first).toEqual({ verificationExpired: 1, verificationConsumed: 1, invitations: 2 });
+    expect(first).toEqual({
+      verificationExpired: 1,
+      verificationConsumed: 1,
+      invitations: 2,
+      limits: 1,
+    });
 
     const ids = (await storage.findMany("verification", [])).map((r) => r.id).sort();
     expect(ids).toEqual(["v-consumed-recent", "v-pending"]);
@@ -57,6 +66,7 @@ describe("sweepExpired", () => {
       verificationExpired: 0,
       verificationConsumed: 0,
       invitations: 0,
+      limits: 0,
     });
   });
 });

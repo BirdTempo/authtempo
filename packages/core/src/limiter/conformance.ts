@@ -47,10 +47,12 @@ export function runLimiterConformance(
 
     it("keeps a different window on the same key independent", async () => {
       expect(await calls("k", w.max + 1)).toEqual([true, true, true, false]);
+      // Each window runs to its own limit, so a stored key that drops the
+      // max or the seconds shares a count with `w` and fails here.
       const other = { seconds: 60, max: 5 };
-      expect(await calls("k", 1, other)).toEqual([true]);
+      expect(await calls("k", other.max + 1, other)).toEqual([true, true, true, true, true, false]);
       const longer = { seconds: 3600, max: 3 };
-      expect(await calls("k", 1, longer)).toEqual([true]);
+      expect(await calls("k", longer.max + 1, longer)).toEqual([true, true, true, false]);
     });
 
     it("still refuses one millisecond before the window ends", async () => {
@@ -74,6 +76,28 @@ export function runLimiterConformance(
       expect(await calls("a|b", w.max + 1)).toEqual([true, true, true, false]);
       expect(await calls("a|", w.max + 1)).toEqual([true, true, true, false]);
       expect(await calls("ab", w.max + 1)).toEqual([true, true, true, false]);
+    });
+
+    it("throws on a window whose seconds or max is not a positive integer", async () => {
+      await expect(limiter.allow("k", { seconds: 0, max: 3 })).rejects.toThrow(Error);
+      await expect(limiter.allow("k", { seconds: 60, max: 0 })).rejects.toThrow(Error);
+      await expect(limiter.allow("k", { seconds: 1.5, max: 3 })).rejects.toThrow(Error);
+      await expect(limiter.allow("k", { seconds: 60, max: -1 })).rejects.toThrow(Error);
+    });
+
+    it("sweep removes an ended window and keeps a live one", async () => {
+      const sweep = limiter.sweep?.bind(limiter);
+      expect(sweep).toBeTypeOf("function");
+      if (!sweep) return;
+      const long = { seconds: 3600, max: 3 };
+      await calls("ended", 1);
+      await calls("live", 1, long);
+      target.clock.advance(w.seconds * 1000);
+      // Sweep before any allow: the memory limiter also drops on allow.
+      expect(await sweep(target.clock.now())).toBe(1);
+      expect(await sweep(target.clock.now())).toBe(0);
+      // The live window kept its count: two calls are left, then it refuses.
+      expect(await calls("live", 3, long)).toEqual([true, true, false]);
     });
 
     it("throws on a key with U+001F, the separator of the stored key", async () => {

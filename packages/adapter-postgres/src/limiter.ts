@@ -8,11 +8,15 @@ import type { Sql } from "postgres";
  * the other `max + 1`. `$1` the stored key, `$2` now in ms, `$3` the window in ms.
  * Both are bigint, so the statement compares integers, as on D1.
  */
-const ALLOW = `INSERT INTO ta_limit (key, window_start, count) VALUES ($1, $2::bigint, 1)
+const ALLOW = `INSERT INTO ta_limit (key, window_start, count, expires_at) VALUES ($1, $2::bigint, 1, $2::bigint + $3::bigint)
 ON CONFLICT (key) DO UPDATE SET
   count = CASE WHEN ta_limit.window_start + $3::bigint <= $2::bigint THEN 1 ELSE ta_limit.count + 1 END,
-  window_start = CASE WHEN ta_limit.window_start + $3::bigint <= $2::bigint THEN $2::bigint ELSE ta_limit.window_start END
+  window_start = CASE WHEN ta_limit.window_start + $3::bigint <= $2::bigint THEN $2::bigint ELSE ta_limit.window_start END,
+  expires_at = CASE WHEN ta_limit.window_start + $3::bigint <= $2::bigint THEN $2::bigint + $3::bigint ELSE ta_limit.window_start + $3::bigint END
 RETURNING count`;
+
+/** A window that ended. `expires_at` is the window start plus the window. */
+const SWEEP = "DELETE FROM ta_limit WHERE expires_at <= $1::bigint";
 
 /**
  * The limiter the product owns on Postgres: one count per key and window for
@@ -33,6 +37,10 @@ export function createPostgresLimiter(sql: Sql, clock: Clock = systemClock): Lim
       if (row === undefined) throw new Error("tempo-auth limiter: the upsert returned no row");
       // postgres.js answers a bigint as a string.
       return Number(row.count) <= window.max;
+    },
+    async sweep(now) {
+      const res = await sql.unsafe(SWEEP, [now.getTime()]);
+      return res.count;
     },
   };
 }
