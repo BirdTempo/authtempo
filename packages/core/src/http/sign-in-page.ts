@@ -64,7 +64,7 @@ p.status { min-height: 1.5rem; color: #555; }
 </form>
 ${
   input.methods.password
-    ? `<form id="password" method="post" autocomplete="on">
+    ? `<form id="password" method="post" action="${base}/password/sign-in" autocomplete="on">
 <input type="email" name="email" placeholder="you@example.com" autocomplete="username" required>
 <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
 <button type="submit">Sign in with password</button>
@@ -103,8 +103,9 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
       say("");
       postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
         if (res.ok) location.href = cont;
+        else if (res.status === 401) say("The email or the password is not correct.");
         else if (res.status === 429) say("Too many attempts. Try again later.");
-        else say("The email or the password is not correct.");
+        else say("The request was not accepted.");
       }).catch(function () { say("Could not reach the server. Try again."); });
     });
     document.getElementById("forgot").addEventListener("click", function () {

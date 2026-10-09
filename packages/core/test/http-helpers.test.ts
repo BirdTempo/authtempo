@@ -369,7 +369,11 @@ describe("sign-in page", () => {
       appName: "Acme",
     };
     const on = defaultSignInPage(pw);
-    expect(on).toContain(`<form id="password" method="post" autocomplete="on">`);
+    // An explicit action: with no script the browser posts to the sign-in
+    // route, not to the continue path (plan 8 final review N-4).
+    expect(on).toContain(
+      `<form id="password" method="post" action="/auth/password/sign-in" autocomplete="on">`,
+    );
     expect(on).toContain(`autocomplete="current-password"`);
     expect(on).toContain(`<button id="forgot" type="button">Forgot password</button>`);
     expect(on).toContain(`postJson("/password/sign-in"`);
@@ -377,6 +381,19 @@ describe("sign-in page", () => {
     const off = defaultSignInPage({ ...pw, methods: { ...pw.methods, password: false } });
     expect(off).not.toContain(`id="password"`);
     expect(off).not.toContain(`id="forgot"`);
+  });
+  it("says 'not correct' for a 401 only and 'not accepted' for every other failure but 429 (plan 8 final review M-1)", () => {
+    const html = defaultSignInPage({ ...input, methods: { ...input.methods, password: true } });
+    const start = html.indexOf(`postJson("/password/sign-in"`);
+    const handler = html.slice(start, html.indexOf(".catch(", start));
+    expect(handler).toContain(
+      `else if (res.status === 401) say("The email or the password is not correct.");`,
+    );
+    expect(handler).toContain(
+      `else if (res.status === 429) say("Too many attempts. Try again later.");`,
+    );
+    expect(handler).toContain(`else say("The request was not accepted.");`);
+    expect(html.split("is not correct").length).toBe(2);
   });
   it("escapes the continue path and hides disabled methods", () => {
     const html = defaultSignInPage({
