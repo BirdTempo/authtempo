@@ -11,6 +11,7 @@ export type { PasskeySummary } from "./engine/passkeys.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
+export type { SweepResult } from "./engine/sweep.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export {

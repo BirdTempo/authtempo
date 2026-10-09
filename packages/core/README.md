@@ -267,6 +267,27 @@ Check the member's rank on each request.
 | `email_mismatch` | 403 | The invitation is for another address |
 | `conflict` | 409 | A concurrent write changed the organization or the member; retry |
 
+## Sweep
+
+`auth.api.sweepExpired()` deletes the rows that no flow can use any more.
+It removes verification rows past their expiry, verification rows consumed
+more than one day ago, and invitations that are accepted or expired. It
+answers the three counts. It is an `api` function and not a route. Call it
+from a scheduled handler. It is safe to run at any time. A consumed row
+stays for one day so that a replayed token still answers `invalid_token`.
+
+```ts
+export default {
+  fetch: (request: Request) => auth.handle(request),
+  async scheduled(_event: ScheduledController, _env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(auth.api.sweepExpired());
+  },
+};
+```
+
+Add a cron trigger to the Worker config, for example `"triggers": { "crons": ["17 * * * *"] }`.
+Without a trigger, expired rows stay in the database.
+
 ## Limits in version 1
 
 - The default limiter counts in memory. On Workers every isolate has its
