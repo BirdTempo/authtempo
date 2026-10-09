@@ -20,7 +20,7 @@ it("deletes an expired verification row when the cron trigger fires", async () =
     .bind(now - 10_000, now - 5_000, now + 600_000)
     .run();
 
-  // SELF.scheduled does not work in @cloudflare/vitest-plugin 1.3.7, checked on
+  // SELF.scheduled does not work in @cloudflare/vitest-plugin 1.3.7 or 1.4.0, checked on
   // 2026-10-10: the call fails with a DataCloneError. Call the handler directly.
   const ctx = createExecutionContext();
   await worker.scheduled(
