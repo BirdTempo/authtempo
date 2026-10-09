@@ -6,11 +6,22 @@ function toBase64Url(bytes: Uint8Array): string {
   return btoa(bin).replace(BASE64URL, (c) => (c === "+" ? "-" : c === "/" ? "_" : ""));
 }
 
+/** `bytes` random bytes as base64url with no padding. 32 bytes make 43 characters. */
+export function randomBase64Url(bytes = 32): string {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return toBase64Url(buf);
+}
+
 /** 32 random bytes, base64url, behind a prefix that names the token kind. */
 export function randomToken(prefix: string): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return prefix + toBase64Url(bytes);
+  return prefix + randomBase64Url(32);
+}
+
+/** The PKCE S256 transform: base64url of the SHA-256 of the input. */
+export async function sha256Base64Url(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return toBase64Url(new Uint8Array(digest));
 }
 
 export async function sha256Hex(input: string): Promise<string> {

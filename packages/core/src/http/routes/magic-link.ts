@@ -4,6 +4,7 @@ import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../en
 import { readBody } from "../body.js";
 import { sessionCookie } from "../cookies.js";
 import { readJson, respond } from "../json.js";
+import { redirect } from "../redirect.js";
 import type { Route } from "../router.js";
 
 const requestBody = z.object({
@@ -23,10 +24,6 @@ const verifyBody = z.object({ token: z.string().max(64) });
  */
 const PAGE_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
-
-function redirect(location: string): Response {
-  return new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } });
-}
 
 export function magicLinkRoutes(config: ResolvedConfig): Route[] {
   const verifyPath = `${config.basePath}/magic-link/verify`;
