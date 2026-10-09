@@ -55,6 +55,29 @@ it("lets exactly max of twenty concurrent calls pass", async () => {
   }
 });
 
+it("keeps one count for two limiter instances on one database", async () => {
+  // Each replica builds its own limiter. The count is in ta_limit, so two
+  // instances share it. A limiter that counted in memory would let each
+  // instance run to max on its own.
+  const db = await freshDatabase();
+  try {
+    const w = { seconds: 60, max: 4 };
+    const clock = manualClock();
+    const a = createPostgresLimiter(db.sql, clock);
+    const b = createPostgresLimiter(db.sql, clock);
+    const half = w.max / 2;
+    const first = await Promise.all([
+      ...Array.from({ length: half }, () => a.allow("shared", w)),
+      ...Array.from({ length: half }, () => b.allow("shared", w)),
+    ]);
+    expect(first).toEqual(Array.from({ length: w.max }, () => true));
+    expect(await a.allow("shared", w)).toBe(false);
+    expect(await b.allow("shared", w)).toBe(false);
+  } finally {
+    await db.close();
+  }
+});
+
 it("stores window_start, count, and expires_at as bigint", async () => {
   const db = await freshDatabase();
   try {

@@ -9,7 +9,7 @@ import postgres from "postgres";
 
 const sql = postgres(env.DATABASE_URL, { max: 1, prepare: false, fetch_types: false });
 await applyPostgresMigrations(sql);     // on deploy, not on every request
-const auth = createAuth({ /* ... */, storage: createPostgresAdapter(sql) });
+const auth = createAuth({ ...config, storage: createPostgresAdapter(sql) });
 ```
 
 ## On Cloudflare Workers
