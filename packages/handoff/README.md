@@ -3,7 +3,8 @@
 This package signs in a native or desktop app through the system
 browser. It does the app side of the handoff of `@tempo-auth/core`. It
 has two adapters, one for Expo and one for Electron. It does not depend
-on Expo or Electron. It has no third-party dependency.
+on Expo or Electron. Its only dependencies are `@tempo-auth/client` and
+`@tempo-auth/core`.
 
 ## The flow
 
@@ -33,15 +34,16 @@ const result = await handoff.signIn();
 
 | Option | Meaning |
 | --- | --- |
-| `baseURL` | The API origin. |
+| `baseURL` | The API origin. One trailing `/` is removed. |
 | `basePath` | The mount path of the auth routes. Default `/auth`. |
-| `redirect` | `<scheme>auth` for a scheme in the API's `handoff.schemes`, or a development URL that `devRedirectPattern` admits. |
+| `redirect` | `<scheme>auth`, where `<scheme>` is an entry of the API's `handoff.schemes` with its `://`. For `schemes: ["consumera://"]` the redirect is `consumera://auth`. Or a development URL that `devRedirectPattern` admits. A redirect that contains `#` is refused. |
 | `opener` | The browser side. See the next section. |
 | `fetch` | The fetch to use. Default `globalThis.fetch`. |
 | `crypto` | The crypto seam. Default Web Crypto. Hermes needs `expoCrypto`. |
 
 `signIn()` returns `{ ok: true, value: { token, user, session } }` or a
-failure. `startUrl(challenge)` returns the start URL for apps that open
+failure. `signIn()` is single flight. A second call while one runs gets
+the result of the first call, and the opener runs once. `startUrl(challenge)` returns the start URL for apps that open
 the browser themselves.
 
 ## The opener contract
@@ -54,6 +56,9 @@ An opener has one method: `open(url, redirect)`.
   handoff then returns the code `cancelled`.
 - It never resolves with a URL from another flow. One handoff waits at a
   time.
+- A URL on the redirect from another flow ends the wait. The redeem then
+  fails with `invalid_token`. The protocol has no state value that an
+  opener could match.
 
 The returned URL must sit on the configured `redirect`, byte for byte.
 If it does not, no redeem happens and the code is `redirect_mismatch`.
@@ -87,28 +92,67 @@ const handoff = createHandoff({
 Run all of this in the main process.
 
 ```ts
+import { readFile, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { app, safeStorage, shell } from "electron";
+import { createClient } from "@tempo-auth/client";
 import { createHandoff } from "@tempo-auth/handoff";
 import { createTokenStore, electronOpener } from "@tempo-auth/handoff/electron";
 
+// Without the lock, Windows and Linux start a second app, and the sign-in waits until the timeout.
+if (!app.requestSingleInstanceLock()) app.quit();
 app.setAsDefaultProtocolClient("consumera");
 
 const opener = electronOpener({ shell, app });
 app.on("second-instance", (_event, argv) => {
   opener.receive(argv.find((a) => a.startsWith("consumera://")) ?? "");
 });
+
+const file = join(app.getPath("userData"), "token.bin");
+const store = createTokenStore({
+  safeStorage,
+  // The bytes of the file, or null when there is no file.
+  read: () =>
+    readFile(file).catch((e: NodeJS.ErrnoException) =>
+      e.code === "ENOENT" ? null : Promise.reject(e),
+    ),
+  write: (bytes) => writeFile(file, bytes),
+  remove: () =>
+    unlink(file).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== "ENOENT") throw e;
+    }),
+});
+
+const baseURL = "https://api.example.com";
+const client = createClient({ baseURL, credentials: "omit", token: () => store.get() });
+const handoff = createHandoff({ baseURL, redirect: "consumera://auth", opener });
+
+await app.whenReady();
+const result = await handoff.signIn();
+if (result.ok) await store.set(result.value.token);
 ```
 
+- Call `app.requestSingleInstanceLock()` before anything else. Without
+  the lock, `second-instance` never fires on Windows and Linux. The
+  first app waits until the timeout and answers `cancelled`.
 - Call `app.setAsDefaultProtocolClient` so the system routes the scheme
-  to the app.
+  to the app. On Windows, an unpackaged app in development must pass
+  `process.execPath` and the script path as the second and third
+  arguments.
 - macOS delivers the URL as an `open-url` event. The opener listens for
   it.
 - Windows and Linux start a second instance with the URL in `argv`.
   Forward it from the `second-instance` handler to `opener.receive`.
 - `createTokenStore({ safeStorage, read, write, remove })` keeps the token
-  encrypted at rest. If `safeStorage` has no encryption, `set` throws
-  `TokenStoreError` and writes nothing. A plaintext token on disk is worse
-  than a new sign-in.
+  encrypted at rest. `read` returns the stored bytes, or `null` when there
+  are none. `write` stores the bytes. `remove` deletes them and ignores a
+  missing file.
+- If `safeStorage` has no encryption, `set` throws `TokenStoreError` and
+  writes nothing. On Linux the `basic_text` backend counts as no
+  encryption, because its password is public. A plaintext token on disk is
+  worse than a new sign-in.
+- Call `set` after `app` is ready. Before `ready`, Windows and Linux
+  report no encryption, and `set` throws.
 - The token stays in the main process. A renderer asks the main process
   to make requests. The renderer never holds the token.
 
@@ -125,11 +169,15 @@ that is not on a loopback host.
 | Code | Meaning |
 | --- | --- |
 | `cancelled` | The person closed the browser, or the wait ended. |
-| `redirect_mismatch` | The returned URL is not on the configured `redirect`. No redeem happened. |
+| `redirect_mismatch` | The returned URL is not on the configured `redirect`. No redeem happened. In Electron the opener drops a URL off the redirect, so this code does not appear there and the wait continues. |
 | Core codes | The server's codes pass through, for example `invalid_token`, `token_expired`, `rate_limited`. |
 | `network`, `unexpected` | The same as in `@tempo-auth/client`. |
 
 ## Show the signed-in email
 
-After any sign-in, show `user.email` to the person. A crafted link can
-sign a person into another account. The email is how the person notices.
+Two one-click lures stay open. The first is a crafted start URL. The
+second is a magic link whose `next` is an attacker's continue path. The
+confirm page shows the account, but a person can press Continue without
+reading it. Show `user.email` after every sign-in, so the person notices
+a sign-in to another account.
+

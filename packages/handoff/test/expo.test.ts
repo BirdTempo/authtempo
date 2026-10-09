@@ -42,6 +42,7 @@ describe("expoCrypto", () => {
   it("builds the handoff crypto on expo-crypto's two functions", async () => {
     const Crypto = {
       getRandomBytes: (n: number) => new Uint8Array(n).fill(1),
+      CryptoDigestAlgorithm: { SHA256: "SHA-256" as const },
       digest: async (_a: "SHA-256", data: Uint8Array) =>
         new Uint8Array(32).fill(data.length).buffer,
     };

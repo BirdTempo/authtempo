@@ -23,12 +23,12 @@ export type HandoffResult = { ok: true; value: HandoffSession } | HandoffFailure
 
 export interface HandoffOptions {
   baseURL: string;
-  basePath?: string;
-  /** `<scheme>auth` for a production app, or the loopback URL the API's `devRedirectPattern` admits. */
+  basePath?: string | undefined;
+  /** `<scheme>auth`, where `<scheme>` is an entry of the API's `handoff.schemes` with its `://`, such as `consumera://auth`. Or the loopback URL the API's `devRedirectPattern` admits. */
   redirect: string;
   opener: HandoffOpener;
-  fetch?: typeof fetch;
-  crypto?: HandoffCrypto;
+  fetch?: typeof fetch | undefined;
+  crypto?: HandoffCrypto | undefined;
 }
 
 export interface Handoff {
@@ -50,25 +50,36 @@ function encode(s: string): string {
 export function createHandoff(options: HandoffOptions): Handoff {
   const basePath = options.basePath ?? "/auth";
   const c = options.crypto ?? webCrypto();
+  // A trailing slash on baseURL would build `//auth/handoff/start`, which the router answers with 404.
+  const baseURL = options.baseURL.replace(/\/$/, "");
   const client = createClient({
-    baseURL: options.baseURL,
+    baseURL,
     basePath,
     credentials: "omit",
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
   const startUrl = (challenge: string) =>
-    `${options.baseURL}${basePath}/handoff/start?challenge=${encode(challenge)}&redirect=${encode(options.redirect)}`;
+    `${baseURL}${basePath}/handoff/start?challenge=${encode(challenge)}&redirect=${encode(options.redirect)}`;
+  async function run(): Promise<HandoffResult> {
+    const { verifier, challenge } = await makePkce(c);
+    const returned = await options.opener.open(startUrl(challenge), options.redirect);
+    if (returned === null) return { ok: false, code: "cancelled", status: 0 };
+    const parsed = parseReturnedUrl(options.redirect, returned);
+    if (!parsed.ok) return { ok: false, code: "redirect_mismatch", status: 0 };
+    const code = parsed.params.code;
+    if (!code) return { ok: false, code: "unexpected", status: 0 };
+    return client.handoff.redeem({ code, verifier });
+  }
+  // Single flight. On Expo a second openAuthSessionAsync call can reject while the first session is open, and signIn must not reject for a platform event.
+  // A second caller gets the first call's result. The slot clears when the call ends.
+  let inFlight: Promise<HandoffResult> | null = null;
   return {
     startUrl,
-    async signIn() {
-      const { verifier, challenge } = await makePkce(c);
-      const returned = await options.opener.open(startUrl(challenge), options.redirect);
-      if (returned === null) return { ok: false, code: "cancelled", status: 0 };
-      const parsed = parseReturnedUrl(options.redirect, returned);
-      if (!parsed.ok) return { ok: false, code: "redirect_mismatch", status: 0 };
-      const code = parsed.params.code;
-      if (!code) return { ok: false, code: "unexpected", status: 0 };
-      return client.handoff.redeem({ code, verifier });
+    signIn() {
+      inFlight ??= run().finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
     },
   };
 }

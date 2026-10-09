@@ -32,6 +32,58 @@ describe("createHandoff", () => {
     expect(sessions).toHaveLength(4);
   });
 
+  it("signs in with a dev redirect whose query holds an escape (the continue keeps the redirect byte for byte)", async () => {
+    const server = makeServer();
+    const handoff = createHandoff({
+      baseURL: BASE_URL,
+      redirect: "http://127.0.0.1:5000/auth?state=a%20b",
+      opener: scriptedOpener(server),
+      fetch: server.fetch,
+    });
+    expect(await handoff.signIn()).toMatchObject({ ok: true });
+  });
+
+  it("strips one trailing slash from baseURL in the start URL and the redeem (M-7)", async () => {
+    const server = makeServer();
+    const opener = scriptedOpener(server);
+    const handoff = createHandoff({
+      baseURL: `${BASE_URL}/`,
+      redirect: REDIRECT,
+      opener,
+      fetch: server.fetch,
+    });
+    expect(handoff.startUrl("c")).toBe(
+      `${BASE_URL}/auth/handoff/start?challenge=c&redirect=consumera%3A%2F%2Fauth`,
+    );
+    expect(await handoff.signIn()).toMatchObject({ ok: true });
+    expect(opener.opened[0]?.startsWith(`${BASE_URL}/auth/handoff/start?`)).toBe(true);
+  });
+
+  it("is single flight: two calls make one open call and share the result (M-1)", async () => {
+    const server = makeServer();
+    const real = scriptedOpener(server);
+    let opens = 0;
+    const handoff = createHandoff({
+      baseURL: BASE_URL,
+      redirect: REDIRECT,
+      opener: {
+        open: async (url, redirect) => {
+          opens++;
+          await new Promise((r) => setTimeout(r, 20));
+          return real.open(url, redirect);
+        },
+      },
+      fetch: server.fetch,
+    });
+    const [a, b] = await Promise.all([handoff.signIn(), handoff.signIn()]);
+    expect(opens).toBe(1);
+    expect(a).toBe(b);
+    expect(a.ok).toBe(true);
+    // The slot clears at the end, so a later call starts a new sign-in.
+    expect((await handoff.signIn()).ok).toBe(true);
+    expect(opens).toBe(2);
+  });
+
   it("answers cancelled when the opener returns null, and makes no redeem call", async () => {
     const server = makeServer();
     const calls: string[] = [];

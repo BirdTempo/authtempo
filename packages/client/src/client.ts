@@ -13,7 +13,7 @@ export type PasskeySummaryJSON = Omit<PasskeySummary, "createdAt"> & { createdAt
 
 export interface ClientOptions extends TransportOptions {
   /** The browser WebAuthn seam. Default `browserWebAuthn()`. Tests inject a soft one. */
-  webauthn?: BrowserWebAuthn;
+  webauthn?: BrowserWebAuthn | undefined;
 }
 
 export interface Client {
@@ -21,7 +21,10 @@ export interface Client {
   session(): Promise<ClientResult<PublicSession | null>>;
   signOut(): Promise<ClientResult<{ ok: true }>>;
   magicLink: {
-    request(input: { email: string; next?: string }): Promise<ClientResult<{ sent: true }>>;
+    request(input: {
+      email: string;
+      next?: string | undefined;
+    }): Promise<ClientResult<{ sent: true }>>;
     /** The JSON verify: the session answer with the cookie. A form post is the page's job, not the client's. */
     verify(input: { token: string }): Promise<ClientResult<PublicSession>>;
   };
@@ -33,7 +36,7 @@ export interface Client {
   };
   passkey: {
     /** Needs a session. Registers a new passkey for the signed-in user. */
-    register(input?: { name?: string }): Promise<ClientResult<PasskeySummaryJSON>>;
+    register(input?: { name?: string | undefined }): Promise<ClientResult<PasskeySummaryJSON>>;
     /** A discoverable-credential sign-in. Answers the session; the browser gets the cookie. */
     signIn(): Promise<ClientResult<PublicSession>>;
   };

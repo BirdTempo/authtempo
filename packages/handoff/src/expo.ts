@@ -29,16 +29,30 @@ export function expoOpener(WebBrowser: ExpoWebBrowserLike): HandoffOpener {
   };
 }
 
-/** The part of `expo-crypto` the PKCE step needs. Pass the module itself. */
-export interface ExpoCryptoLike {
+/**
+ * The part of `expo-crypto` the PKCE step needs. Pass the module itself.
+ * `A` is the module's own `CryptoDigestAlgorithm` enum type. The real
+ * `digest` takes that enum and a `BufferSource`, so a string literal does
+ * not typecheck (expo-crypto 57.0.2, checked 2026-10-09). The type fixture in
+ * `typetest/` pins this shape against a copy of the module's declarations.
+ */
+export interface ExpoCryptoLike<A> {
+  CryptoDigestAlgorithm: { SHA256: A };
   getRandomBytes(n: number): Uint8Array;
-  digest(algorithm: "SHA-256", data: Uint8Array): Promise<ArrayBuffer>;
+  digest(algorithm: A, data: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer>;
 }
 
-/** Hermes has no `crypto.subtle`; expo-crypto supplies the digest and the random bytes. */
-export function expoCrypto(Crypto: ExpoCryptoLike): HandoffCrypto {
+/**
+ * Hermes has no `crypto.subtle`; expo-crypto supplies the digest and the
+ * random bytes. The digest input is a copy on its own `ArrayBuffer`, the same
+ * as `webCrypto()`, because `BufferSource` refuses a shared buffer.
+ */
+export function expoCrypto<A>(Crypto: ExpoCryptoLike<A>): HandoffCrypto {
   return {
     randomBytes: (n) => Crypto.getRandomBytes(n),
-    sha256: async (data) => new Uint8Array(await Crypto.digest("SHA-256", data)),
+    sha256: async (data) =>
+      new Uint8Array(
+        await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new Uint8Array(data)),
+      ),
   };
 }

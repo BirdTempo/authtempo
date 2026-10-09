@@ -1,4 +1,5 @@
-// Shapes checked against the electron docs (app open-url, shell.openExternal, safeStorage) on 2026-10-09 (electron 44.7.0).
+// Shapes checked against the electron docs on 2026-10-09 (electron 44.7.0): app open-url (with event.preventDefault),
+// app second-instance, app.requestSingleInstanceLock, shell.openExternal, and safeStorage (isEncryptionAvailable, getSelectedStorageBackend).
 import type { HandoffOpener } from "./handoff.js";
 import { parseReturnedUrl } from "./redirect.js";
 
@@ -18,6 +19,9 @@ export interface ElectronOpener extends HandoffOpener {
    * Windows and Linux deliver the URL as a command line argument of a second
    * instance. Forward it from the `second-instance` handler:
    * `opener.receive(argv.find((a) => a.startsWith("consumera://")) ?? "")`.
+   * The app must hold `app.requestSingleInstanceLock()`. Without the lock,
+   * Windows and Linux start a second full app, `second-instance` never fires,
+   * and the sign-in waits until the timeout.
    */
   receive(url: string): void;
 }
@@ -33,7 +37,7 @@ export function electronOpener(input: {
   shell: ElectronShellLike;
   app: ElectronAppLike;
   /** Default ten minutes, the start row's shortest life on the API. */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
 }): ElectronOpener {
   const timeoutMs = input.timeoutMs ?? 10 * 60_000;
   let pending: { redirect: string; resolve: (url: string | null) => void } | null = null;
@@ -42,14 +46,19 @@ export function electronOpener(input: {
     pending = null;
     p?.resolve(url);
   };
-  const receive = (url: string) => {
-    if (!pending) return;
-    if (!parseReturnedUrl(pending.redirect, url).ok) return;
+  /** True when the URL ended the wait. */
+  const accept = (url: string): boolean => {
+    if (!pending) return false;
+    if (!parseReturnedUrl(pending.redirect, url).ok) return false;
     settle(url);
+    return true;
   };
-  const listener: OpenUrlListener = (_event, url) => receive(url);
+  const listener: OpenUrlListener = (event, url) => {
+    // The Electron docs ask the handler to call preventDefault when the app handles the URL. A dropped URL stays unhandled.
+    if (accept(url)) (event as { preventDefault?: () => void } | null)?.preventDefault?.();
+  };
   return {
-    receive,
+    receive: (url) => void accept(url),
     open(url, redirect) {
       settle(null);
       return new Promise<string | null>((resolve) => {
@@ -76,6 +85,8 @@ export interface SafeStorageLike {
   isEncryptionAvailable(): boolean;
   encryptString(plain: string): Uint8Array;
   decryptString(encrypted: Uint8Array): string;
+  /** Linux only. The other platforms have no such function. */
+  getSelectedStorageBackend?(): string;
 }
 
 export class TokenStoreError extends Error {
@@ -126,6 +137,12 @@ export function createTokenStore(input: {
     },
     async set(token) {
       if (!input.safeStorage.isEncryptionAvailable())
+        throw new TokenStoreError("encryption_unavailable");
+      // On Linux with no secret store, Electron selects `basic_text`. That backend uses a fixed, public password, so the file is plaintext in effect.
+      // The promise that the store never writes a plaintext token must not rest on what isEncryptionAvailable answers in that state, which depends on the Electron version.
+      // Checked against the Electron 44.7.0 docs on 2026-10-09.
+      const backend = input.safeStorage.getSelectedStorageBackend?.();
+      if (backend === "basic_text" || backend === "unknown")
         throw new TokenStoreError("encryption_unavailable");
       await input.write(input.safeStorage.encryptString(token));
     },

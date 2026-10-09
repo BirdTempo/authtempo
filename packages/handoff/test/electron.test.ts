@@ -55,6 +55,18 @@ describe("electronOpener", () => {
     expect(await second).toBe("consumera://auth?code=hc_3");
     expect(app.listeners.length).toBe(0);
   });
+  it("calls preventDefault on an accepted open-url, and not on a dropped one (M-3)", async () => {
+    const app = fakeApp();
+    const opener = electronOpener({ shell: { openExternal: async () => {} }, app });
+    const p = opener.open("https://api/start", "consumera://auth");
+    let prevented = 0;
+    const event = { preventDefault: () => void prevented++ };
+    app.listeners[0]?.(event, "consumera://other?code=1");
+    expect(prevented).toBe(0);
+    app.listeners[0]?.(event, "consumera://auth?code=hc_4");
+    expect(prevented).toBe(1);
+    expect(await p).toBe("consumera://auth?code=hc_4");
+  });
   it("resolves null and drops the listener when the browser cannot open", async () => {
     const app = fakeApp();
     const opener = electronOpener({
@@ -112,6 +124,24 @@ describe("createTokenStore", () => {
     const store = createTokenStore({ safeStorage: fakeSafeStorage(false), ...file });
     await expect(store.set("ts_secret")).rejects.toBeInstanceOf(TokenStoreError);
     expect(file.current()).toBeNull();
+  });
+  it("refuses to write on the basic_text or unknown backend, and writes nothing (I-4)", async () => {
+    for (const backend of ["basic_text", "unknown"]) {
+      const file = fakeFile();
+      const store = createTokenStore({
+        safeStorage: { ...fakeSafeStorage(), getSelectedStorageBackend: () => backend },
+        ...file,
+      });
+      await expect(store.set("ts_secret")).rejects.toBeInstanceOf(TokenStoreError);
+      expect(file.current()).toBeNull();
+    }
+    const file = fakeFile();
+    const store = createTokenStore({
+      safeStorage: { ...fakeSafeStorage(), getSelectedStorageBackend: () => "gnome_libsecret" },
+      ...file,
+    });
+    await store.set("ts_secret");
+    expect(await store.get()).toBe("ts_secret");
   });
   it("answers null even when removing the unreadable file fails", async () => {
     const file = fakeFile();

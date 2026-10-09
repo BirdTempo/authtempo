@@ -2,16 +2,16 @@ import { ERRORS } from "@tempo-auth/core/errors";
 import { type ClientResult, fail, ok } from "./result.js";
 
 export interface TransportOptions {
-  /** The API origin, for example `https://api.example.com`. No trailing slash. */
+  /** The API origin, for example `https://api.example.com`. One trailing slash is stripped. */
   baseURL: string;
   /** The mount path of the auth routes. Default `/auth`. */
-  basePath?: string;
+  basePath?: string | undefined;
   /** The fetch to use. Default `globalThis.fetch`. Tests inject one. */
-  fetch?: typeof fetch;
+  fetch?: typeof fetch | undefined;
   /** The bearer token of a native or desktop app. A browser app leaves it out and the cookie carries the session. */
-  token?: () => string | null | Promise<string | null>;
+  token?: (() => string | null | Promise<string | null>) | undefined;
   /** Default `include`, so the browser sends the session cookie to the API origin. */
-  credentials?: RequestCredentials;
+  credentials?: RequestCredentials | undefined;
 }
 
 export type Call = <T>(
@@ -30,6 +30,8 @@ function isKnownCode(code: unknown): code is keyof typeof ERRORS {
  * known error code passes through with its status.
  */
 export function createTransport(options: TransportOptions): Call {
+  // A trailing slash on baseURL would build `//auth/session`, which the router answers with 404.
+  const baseURL = options.baseURL.replace(/\/$/, "");
   const basePath = options.basePath ?? "/auth";
   const doFetch = options.fetch ?? globalThis.fetch;
   const credentials = options.credentials ?? "include";
@@ -44,7 +46,7 @@ export function createTransport(options: TransportOptions): Call {
     if (token) headers.authorization = `Bearer ${token}`;
     let res: Response;
     try {
-      res = await doFetch(`${options.baseURL}${basePath}${path}`, {
+      res = await doFetch(`${baseURL}${basePath}${path}`, {
         method,
         headers,
         credentials,

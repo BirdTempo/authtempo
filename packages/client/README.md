@@ -2,7 +2,7 @@
 
 This package is the app side of tempo-auth. It calls the routes of
 `@tempo-auth/core` and returns typed results. It runs in a browser, in
-Expo, and in Electron. It has no third-party dependency.
+Expo, and in Electron. Its only dependency is `@tempo-auth/core`.
 
 ## Install
 
@@ -31,7 +31,23 @@ const client = createClient({
 ```
 
 Other options: `basePath` (default `/auth`), `fetch` (default
-`globalThis.fetch`), and `webauthn` (the passkey seam).
+`globalThis.fetch`), and `webauthn` (the passkey seam). One trailing `/`
+on `baseURL` is removed.
+
+### What each kind of app must configure
+
+- A browser app on its own origin needs that origin in the API's
+  `trustedOrigins`.
+- A browser app on another site also needs `cookie: { sameSite: "None" }`
+  on the API. Without it, the browser drops the cookie and `session()`
+  answers `null`.
+- An untrusted origin makes the browser block the answer. The client then
+  reports `network`, not `origin_not_trusted`.
+- A native app must pass `credentials: "omit"`. Core reads the cookie
+  before the bearer header. A stray cookie in a native cookie jar
+  replaces the bearer session.
+- When a bearer app gets `null` from `session()`, the token is dead.
+  Clear it from the store.
 
 ## Operations
 
@@ -83,7 +99,16 @@ Call `supportsPasskeys()` before you show a passkey button. It returns
 A dismissed prompt gives the code `cancelled`. Treat it as a normal
 event. Do not show an error.
 
+`unexpected` with status 0 on `register` can mean that the device
+already holds a passkey for this account. The browser rejects with
+`InvalidStateError` in that case, and the client cannot tell it from
+another failure.
+
 ## Show the signed-in email
 
-After any sign-in, show `user.email` to the person. A crafted link can
-sign a person into another account. The email is how the person notices.
+Two one-click lures stay open. The first is a crafted start URL. The
+second is a magic link whose `next` is an attacker's continue path. The
+confirm page shows the account, but a person can press Continue without
+reading it. Show `user.email` after every sign-in, so the person notices
+a sign-in to another account.
+

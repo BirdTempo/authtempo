@@ -21,6 +21,12 @@ describe("parseReturnedUrl", () => {
       params: {},
     });
   });
+  it("gives the params no prototype, so constructor is a plain key (M-9)", () => {
+    const r = parseReturnedUrl("a://auth", "a://auth?constructor=x&code=hc_1");
+    if (!r.ok) throw new Error("refused");
+    expect(Object.keys(r.params).sort()).toEqual(["code", "constructor"]);
+    expect(r.params.constructor).toBe("x");
+  });
   it("decodes percent-encoding and keeps the first value of a repeated key", () => {
     expect(parseReturnedUrl("a://auth", "a://auth?code=hc%5F1&code=hc_2")).toEqual({
       ok: true,

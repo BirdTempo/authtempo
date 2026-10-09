@@ -65,6 +65,19 @@ describe("createTransport", () => {
     }
   });
 
+  it("treats an inherited key as unknown: a body of toString is unexpected (M-9)", async () => {
+    const f = answering(400, `{"error":"toString"}`);
+    const call = createTransport({ baseURL: BASE, fetch: f.fetch });
+    expect(await call("GET", "/session")).toEqual({ ok: false, code: "unexpected", status: 400 });
+  });
+
+  it("strips one trailing slash from baseURL (M-7)", async () => {
+    const f = answering(200, `{}`);
+    const call = createTransport({ baseURL: `${BASE}/`, fetch: f.fetch });
+    await call("GET", "/session");
+    expect(f.calls[0]?.url).toBe(`${BASE}/auth/session`);
+  });
+
   it("answers network with status 0 when fetch rejects", async () => {
     const call = createTransport({
       baseURL: BASE,
