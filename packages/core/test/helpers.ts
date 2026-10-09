@@ -62,3 +62,36 @@ export function tokenFromMail(text: string): string {
   if (!m?.[1]) throw new Error("no token in mail");
   return decodeURIComponent(m[1]);
 }
+
+export function platformAuth() {
+  return makeAuth({
+    organizations: {
+      platformRole: "operator",
+      platformOrganization: "platform-co",
+      ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+    },
+  });
+}
+
+/** The platform slug is reserved, so the app seeds the organization and root's membership through storage, as a migration would. */
+export async function seedPlatform(auth: ReturnType<typeof makeAuth>) {
+  const root = await auth.seedUser("root@example.com");
+  const now = auth.clock.now();
+  const platformOrg = await auth.storage.create("organization", {
+    id: "org-platform",
+    slug: "platform-co",
+    name: "Platform",
+    metadata: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await auth.storage.create("member", {
+    id: "m-root",
+    organizationId: platformOrg.id,
+    userId: root.id,
+    role: "owner,operator",
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { root, platformOrg };
+}

@@ -65,7 +65,7 @@ import { passkeyRoutes } from "./http/routes/passkeys.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
 import type { Result } from "./result.js";
-import type { MemberRow, SessionRow, UserRow } from "./schema.js";
+import type { SessionRow, UserRow } from "./schema.js";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -114,7 +114,7 @@ export interface AuthApi {
     slug: string;
     name: string;
     metadata?: Record<string, unknown> | null;
-  }): Promise<Result<{ organization: OrganizationSummary; member: MemberRow }>>;
+  }): Promise<Result<{ organization: OrganizationSummary; member: MemberSummary }>>;
   listOrganizations(input: {
     user: UserRow;
   }): Promise<Result<{ organization: OrganizationSummary; role: string }[]>>;

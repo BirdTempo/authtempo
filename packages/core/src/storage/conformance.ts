@@ -525,6 +525,31 @@ export function runAdapterConformance(
       expect(rows[1]?.metadata).toEqual({ k: 1 });
     });
 
+    it("applies each key's own direction, so an ascending id follows a descending name", async () => {
+      const at = t0;
+      for (const [id, name] of [
+        ["o2", "Same"],
+        ["o1", "Same"],
+        ["o3", "Zed"],
+      ] as const) {
+        await db.create("organization", {
+          id,
+          slug: id,
+          name,
+          metadata: null,
+          createdAt: at,
+          updatedAt: at,
+        });
+      }
+      const rows = await db.findMany("organization", [], {
+        sort: [
+          { field: "name", dir: "desc" },
+          { field: "id", dir: "asc" },
+        ],
+      });
+      expect(rows.map((r) => r.id)).toEqual(["o3", "o1", "o2"]);
+    });
+
     it("round-trips the version 2 models and keeps their unique keys", async () => {
       const at = t0;
       await db.create("member", {

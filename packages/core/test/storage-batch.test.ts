@@ -40,4 +40,17 @@ describe("findManyIn", () => {
     expect(calls).toEqual([IN_CHUNK, IN_CHUNK, 3]);
     expect(await findManyIn(db, "user", "id", [])).toEqual([]);
   });
+
+  it("refuses an in clause in the caller's where", async () => {
+    const db = createMemoryAdapter();
+    await expect(
+      findManyIn(
+        db,
+        "user",
+        "id",
+        ["u1"],
+        [{ field: "email", op: "in", value: ["a@example.com"] }],
+      ),
+    ).rejects.toMatchObject({ code: "invalid_argument", model: "user", fields: ["where"] });
+  });
 });

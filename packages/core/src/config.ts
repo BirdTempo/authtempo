@@ -244,7 +244,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     for (const [role, rank] of Object.entries(ranks)) {
       if (!ROLE_RE.test(role) || role.includes(","))
         throw new ConfigError(`organizations.ranks has a bad role name: ${role}`);
-      if (!Number.isInteger(rank) || rank < 1)
+      if (!Number.isSafeInteger(rank) || rank < 1)
         throw new ConfigError(`organizations.ranks.${role} must be a positive integer`);
     }
     // The create path makes the creator owner, and the last-owner rule reads that rank.
@@ -277,7 +277,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       platformRole = o.platformRole;
     }
     const ttl = o.invitationTtlDays ?? 7;
-    if (!Number.isInteger(ttl) || ttl < 1)
+    if (!Number.isSafeInteger(ttl) || ttl < 1)
       throw new ConfigError("organizations.invitationTtlDays must be a positive integer");
     organizations = {
       ranks: { ...ranks },

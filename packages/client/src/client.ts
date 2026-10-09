@@ -1,6 +1,5 @@
 import type {
   InvitationSummary,
-  MemberRow,
   MemberSummary,
   OrganizationSummary,
   PasskeySummary,
@@ -20,10 +19,6 @@ export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string 
 export type InvitationJSON = Omit<InvitationSummary, "expiresAt" | "createdAt"> & {
   expiresAt: string;
   createdAt: string;
-};
-export type MemberRowJSON = Omit<MemberRow, "createdAt" | "updatedAt"> & {
-  createdAt: string;
-  updatedAt: string;
 };
 
 export interface ClientOptions extends TransportOptions {
@@ -65,7 +60,7 @@ export interface Client {
       slug: string;
       name: string;
       metadata?: Record<string, unknown> | null | undefined;
-    }): Promise<ClientResult<{ organization: OrganizationJSON; member: MemberRowJSON }>>;
+    }): Promise<ClientResult<{ organization: OrganizationJSON; member: MemberJSON }>>;
     list(): Promise<ClientResult<{ organization: OrganizationJSON; role: string }[]>>;
     update(input: {
       organizationId: string;
@@ -179,7 +174,7 @@ export function createClient(options: ClientOptions): Client {
     },
     organizations: {
       create: ({ metadata, ...rest }) =>
-        call<{ organization: OrganizationJSON; member: MemberRowJSON }>(
+        call<{ organization: OrganizationJSON; member: MemberJSON }>(
           "POST",
           "/organizations/create",
           { ...rest, ...(metadata !== undefined ? { metadata } : {}) },

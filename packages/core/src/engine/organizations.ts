@@ -90,7 +90,7 @@ async function standing(
   o: ResolvedOrganizations,
   user: UserRow,
   organizationId: string,
-  rule: keyof typeof RULES,
+  rule: keyof typeof RULES | null,
 ): Promise<Result<{ member: MemberRow; organization: OrganizationRow; rank: number }>> {
   const organization = await config.storage.findOne("organization", [
     { field: "id", op: "eq", value: organizationId },
@@ -98,7 +98,8 @@ async function standing(
   if (!organization) return fail("not_found");
   const m = await membership(config, organizationId, user.id);
   if (!m) return fail("forbidden_rank");
-  if (m.rank < needs(o, rule)) return fail("forbidden_rank");
+  // A null rule needs membership only: a member may leave at any rank, rank 0 included.
+  if (rule !== null && m.rank < needs(o, rule)) return fail("forbidden_rank");
   return ok(m);
 }
 
@@ -123,47 +124,68 @@ function isOwner(o: ResolvedOrganizations, rank: number): boolean {
 }
 
 /**
- * A write that can remove an owner: the owner count, the lock, and the write
- * run in one transaction. `organization` is the row from the standing read.
+ * Thrown inside a transaction to roll back writes that already ran, then
+ * caught outside it and answered as conflict. A thrown error is the only
+ * signal that makes every adapter undo its writes.
+ */
+class OwnerConflict extends Error {}
+
+/**
+ * A write that can remove an owner: the owner count, the lock, the write, and
+ * the recount run in one transaction. `organization` is the row from the
+ * standing read. `write` returns the number of member rows it changed.
  *
  * The port has no row lock. The conditional update of updatedAt is an
- * optimistic lock: of two concurrent owner writes, the second matches zero
- * rows (Postgres re-checks the WHERE after the first commit; D1 and memory
- * run statements in order) and answers conflict.
+ * optimistic lock: on Postgres the second of two concurrent owner writes
+ * re-checks the WHERE after the first commit, matches zero rows, and answers
+ * conflict. Memory runs one transaction at a time.
  *
- * Each refusal returns a value from the transaction function and never
- * throws: no write has run at that point, so the commit changes nothing.
+ * D1 transactions are not isolated: a second request can read the stamp this
+ * transaction wrote and pass the lock before this transaction deletes its
+ * owner. The recount after the write catches that case. If no owner remains,
+ * the sentinel rolls this transaction back, and the later of the two racers
+ * answers conflict.
+ *
+ * A refusal before the first write returns a value and does not throw: no
+ * write has run at that point, so the commit changes nothing.
  */
 async function ownerWrite(
   config: ResolvedConfig,
   o: ResolvedOrganizations,
   organization: OrganizationRow,
-  write: (tx: StorageAdapter) => Promise<void>,
+  write: (tx: StorageAdapter) => Promise<number>,
 ): Promise<Result<true>> {
   const now = config.clock.now();
   const seen = organization.updatedAt;
-  return config.storage.transaction(async (tx): Promise<Result<true>> => {
-    if ((await ownerCount(tx, o, organization.id)) <= 1) return fail("last_owner");
-    // One millisecond past the read, so the stamp changes even when the clock has not moved.
-    const stamp = new Date(Math.max(now.getTime(), seen.getTime() + 1));
-    const n = await tx.update(
-      "organization",
-      [
-        { field: "id", op: "eq", value: organization.id },
-        { field: "updatedAt", op: "eq", value: seen },
-      ],
-      { updatedAt: stamp },
-    );
-    if (n === 0) return fail("conflict");
-    await write(tx);
-    return ok(true);
-  });
+  try {
+    return await config.storage.transaction(async (tx): Promise<Result<true>> => {
+      if ((await ownerCount(tx, o, organization.id)) <= 1) return fail("last_owner");
+      // One millisecond past the read, so the stamp changes even when the clock has not moved.
+      const stamp = new Date(Math.max(now.getTime(), seen.getTime() + 1));
+      const n = await tx.update(
+        "organization",
+        [
+          { field: "id", op: "eq", value: organization.id },
+          { field: "updatedAt", op: "eq", value: seen },
+        ],
+        { updatedAt: stamp },
+      );
+      if (n === 0) return fail("conflict");
+      // Zero rows: the member's role changed after the standing read. The lock update must roll back.
+      if ((await write(tx)) === 0) throw new OwnerConflict();
+      if ((await ownerCount(tx, o, organization.id)) < 1) throw new OwnerConflict();
+      return ok(true);
+    });
+  } catch (err) {
+    if (err instanceof OwnerConflict) return fail("conflict");
+    throw err;
+  }
 }
 
 export async function createOrganization(
   config: ResolvedConfig,
   input: Caller & { slug: string; name: string; metadata?: Record<string, unknown> | null },
-): Promise<Result<{ organization: OrganizationSummary; member: MemberRow }>> {
+): Promise<Result<{ organization: OrganizationSummary; member: MemberSummary }>> {
   const o = on(config);
   if (!o) return fail("not_found");
   const v = verified(input.user);
@@ -198,7 +220,17 @@ export async function createOrganization(
     if (err instanceof StorageError && err.code === "unique_violation") return fail("slug_taken");
     throw err;
   }
-  return ok({ organization: publicOrganization(organization), member });
+  return ok({
+    organization: publicOrganization(organization),
+    member: {
+      id: member.id,
+      userId: member.userId,
+      role: member.role,
+      email: input.user.email,
+      name: input.user.name,
+      createdAt: member.createdAt,
+    },
+  });
 }
 
 export async function listOrganizations(
@@ -253,6 +285,8 @@ export async function updateOrganization(
   if (input.metadata !== undefined) data.metadata = input.metadata;
   if (input.slug !== undefined) {
     if (s.value.rank < needs(o, "slugChange")) return fail("forbidden_rank");
+    // The platform role is valid in the platform organization only, and the slug is reserved, so a rename could never come back.
+    if (s.value.organization.slug === o.platformOrganization) return fail("slug_reserved");
     const slug = normalizeSlug(input.slug);
     if (slug === null) return fail("invalid_body");
     if (o.reservedSlugs.has(slug)) return fail("slug_reserved");
@@ -283,6 +317,8 @@ export async function deleteOrganization(
   if (!v.ok) return v;
   const s = await standing(config, o, input.user, input.organizationId, "delete");
   if (!s.ok) return s;
+  // The app seeds the platform organization; the engine never deletes it, because no route could create it again.
+  if (s.value.organization.slug === o.platformOrganization) return fail("slug_reserved");
   const id = input.organizationId;
   await config.storage.transaction(async (tx) => {
     await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
@@ -411,24 +447,29 @@ export async function updateMemberRole(
   if (!target) return fail("not_found");
   // A caller never touches a member above their own rank.
   if (target.rank > s.value.rank) return fail("forbidden_rank");
-  const now = config.clock.now();
-  const setRole = async (storage: StorageAdapter) => {
-    await storage.update("member", [{ field: "id", op: "eq", value: target.member.id }], {
-      role: input.role,
-      updatedAt: now,
-    });
-  };
-  if (isOwner(o, target.rank) && !isOwner(o, g.value)) {
-    // The demotion can remove an owner: count, lock, and write in one transaction.
-    const w = await ownerWrite(config, o, s.value.organization, setRole);
-    if (!w.ok) return w;
-  } else {
-    await setRole(config.storage);
-  }
+  // Read the user before any write, so a missing user never answers not_found after a change.
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
   if (!user) return fail("not_found");
+  const now = config.clock.now();
+  // The role from the read is in the where: if another request changed it since, zero rows match.
+  const setRole = (storage: StorageAdapter) =>
+    storage.update(
+      "member",
+      [
+        { field: "id", op: "eq", value: target.member.id },
+        { field: "role", op: "eq", value: target.member.role },
+      ],
+      { role: input.role, updatedAt: now },
+    );
+  if (isOwner(o, target.rank) && !isOwner(o, g.value)) {
+    // The demotion can remove an owner: count, lock, and write in one transaction.
+    const w = await ownerWrite(config, o, s.value.organization, setRole);
+    if (!w.ok) return w;
+  } else if ((await setRole(config.storage)) === 0) {
+    return fail("conflict");
+  }
   return ok({
     id: target.member.id,
     userId: user.id,
@@ -448,26 +489,45 @@ export async function removeMember(
   const v = verified(input.user);
   if (!v.ok) return v;
   const self = input.userId === input.user.id;
+  // Leave needs membership only, at any rank. Remove of another member needs the removeOther rule.
   const s = await standing(
     config,
     o,
     input.user,
     input.organizationId,
-    self ? "members" : "removeOther",
+    self ? null : "removeOther",
   );
   if (!s.ok) return s;
   const target = self ? s.value : await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
   if (!self && target.rank > s.value.rank) return fail("forbidden_rank");
+  const organizationId = input.organizationId;
+  // The role from the read is in the where: if another request changed it since, zero rows match.
+  // The active organization is a choice, not a right; it goes with the membership in the same write.
   const drop = async (storage: StorageAdapter) => {
-    await storage.delete("member", [{ field: "id", op: "eq", value: target.member.id }]);
+    const n = await storage.delete("member", [
+      { field: "id", op: "eq", value: target.member.id },
+      { field: "role", op: "eq", value: target.member.role },
+    ]);
+    if (n === 0) return 0;
+    await storage.update(
+      "session",
+      [
+        { field: "userId", op: "eq", value: target.member.userId },
+        { field: "activeOrganizationId", op: "eq", value: organizationId },
+      ],
+      { activeOrganizationId: null },
+    );
+    return n;
   };
   if (isOwner(o, target.rank)) {
     // The removal of an owner: count, lock, and write in one transaction.
     const w = await ownerWrite(config, o, s.value.organization, drop);
     if (!w.ok) return w;
   } else {
-    await drop(config.storage);
+    // A delete of zero rows writes nothing, so the commit changes nothing.
+    const n = await config.storage.transaction((tx) => drop(tx));
+    if (n === 0) return fail("conflict");
   }
   return ok({ ok: true });
 }

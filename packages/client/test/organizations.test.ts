@@ -39,6 +39,10 @@ describe("organizations through the client", () => {
     const orgId = created.value.organization.id;
     expect(typeof created.value.organization.createdAt).toBe("string");
     expect(created.value.member.role).toBe("owner");
+    // Create answers the same member shape as every other route (Review M-13).
+    expect(created.value.member.email).toBe("ada@example.com");
+    expect(typeof created.value.member.createdAt).toBe("string");
+    expect("organizationId" in created.value.member).toBe(false);
 
     const listed = await ada.client.organizations.list();
     expect(listed.ok && listed.value.map((e) => [e.organization.slug, e.role])).toEqual([
@@ -146,6 +150,45 @@ describe("organizations through the client", () => {
     const body = JSON.parse(sent.at(-1) ?? "{}") as Record<string, unknown>;
     expect(body).toEqual({ slug: "acme", name: "Acme" });
     expect("metadata" in body).toBe(false);
+  });
+
+  it("sends metadata null as null on update, and no metadata key when it is absent", async () => {
+    const server = makeServer({ organizations: {} });
+    const sent: string[] = [];
+    const { fetch } = inProcessFetch(server.auth);
+    const spy = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body === "string") sent.push(init.body);
+      return fetch(input, init);
+    }) as typeof globalThis.fetch;
+    const client = createClient({ baseURL: BASE_URL, fetch: spy });
+    await client.magicLink.request({ email: "ada@example.com" });
+    await client.magicLink.verify({ token: tokenFromMail(server.mail.at(-1)?.text ?? "") });
+    const created = await client.organizations.create({
+      slug: "acme",
+      name: "Acme",
+      metadata: { plan: "free" },
+    });
+    if (!created.ok) throw new Error(created.code);
+    const organizationId = created.value.organization.id;
+    const cleared = await client.organizations.update({ organizationId, metadata: null });
+    expect(sent.at(-1)).toBe(JSON.stringify({ organizationId, metadata: null }));
+    expect(cleared.ok && cleared.value.metadata).toBeNull();
+    await client.organizations.update({ organizationId, name: "Acme 2" });
+    const body = JSON.parse(sent.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(body).toEqual({ organizationId, name: "Acme 2" });
+    expect("metadata" in body).toBe(false);
+  });
+
+  it("encodes the organization id in the invitations list URL", async () => {
+    const server = makeServer({ organizations: {} });
+    const urls: string[] = [];
+    const { client } = await signedIn(server, "ada@example.com", urls);
+    const odd = "a b/c?d=e&f#g";
+    await client.organizations.invitations.list({ organizationId: odd });
+    expect(urls.at(-1)).toBe(
+      `GET ${BASE_URL}/auth/organizations/invitations?organizationId=${encodeURIComponent(odd)}`,
+    );
+    expect(urls.at(-1)).toContain("a%20b%2Fc%3Fd%3De%26f%23g");
   });
 
   it("answers not_found when organizations are off", async () => {

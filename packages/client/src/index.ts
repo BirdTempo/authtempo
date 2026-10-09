@@ -5,7 +5,6 @@ export {
   createClient,
   type InvitationJSON,
   type MemberJSON,
-  type MemberRowJSON,
   type OrganizationJSON,
   type PasskeySummaryJSON,
 } from "./client.js";

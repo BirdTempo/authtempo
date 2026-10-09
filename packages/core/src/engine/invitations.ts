@@ -18,6 +18,9 @@ import { normalizeEmail } from "./users.js";
 export const INVITATION_PREFIX = "inv_";
 export const INVITATION_TOKEN_RE = /^inv_[A-Za-z0-9_-]{43}$/;
 const ACCEPT_LIMIT = { seconds: 15 * 60, max: 20 };
+/** Each invite sends a mail from the app's sender. The product owns this limit, not the mail supplier. */
+const INVITE_USER_LIMIT = { seconds: 15 * 60, max: 20 };
+const INVITE_EMAIL_LIMIT = { seconds: 60 * 60, max: 5 };
 
 export interface InvitationSummary {
   id: string;
@@ -73,6 +76,11 @@ export async function inviteMember(
     return fail("invalid_body");
   const rank = rankOf(o.ranks, input.role);
   if (rank === 0 || rank > s.value.rank) return fail("forbidden_rank");
+  // After the rank checks, so a stranger cannot spend an admin's budget.
+  if (!(await config.limiter.allow(`invite:user:${input.user.id}`, INVITE_USER_LIMIT)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`invite:email:${email}`, INVITE_EMAIL_LIMIT)))
+    return fail("rate_limited");
   const now = config.clock.now();
   const token = randomToken(INVITATION_PREFIX);
   const row: InvitationRow = {
@@ -194,7 +202,15 @@ export async function acceptInvitation(
         { field: "userId", op: "eq", value: inv.inviterId },
       ]);
       const inviterRank = inviter ? rankOf(o.ranks, inviter.role) : 0;
-      if (inviterRank < needs(o, "invite") || inviterRank < rankOf(o.ranks, inv.role)) {
+      const grantRank = rankOf(o.ranks, inv.role);
+      // The rank table or the organization slug can change after the invite. A role that now ranks 0, or a
+      // platform role outside the platform organization, is a grant no live caller could make.
+      if (
+        inviterRank < needs(o, "invite") ||
+        inviterRank < grantRank ||
+        grantRank === 0 ||
+        !roleAllowedIn(o, inv.role, organization.slug)
+      ) {
         // Only a pending row: an accepted row is a record of a grant that already happened.
         await tx.delete("invitation", [
           { field: "id", op: "eq", value: inv.id },

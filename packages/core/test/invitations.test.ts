@@ -16,7 +16,7 @@ import {
   updateMemberRole,
 } from "../src/engine/organizations.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
-import { makeAuth } from "./helpers.js";
+import { makeAuth, platformAuth, seedPlatform } from "./helpers.js";
 
 function orgAuth() {
   return makeAuth({ organizations: {} });
@@ -417,5 +417,124 @@ describe("acceptInvitation re-checks the inviter (Review I-1)", () => {
     });
     expect(await memberOf(auth, org.id, x.id)).toBeNull();
     expect(await auth.storage.findMany("invitation", [])).toEqual([]);
+  });
+
+  it("refuses with invalid_token a role that ranks 0 after a rank table change (Review M-3)", async () => {
+    const before = makeAuth({
+      organizations: { ranks: { guest: 1, viewer: 2, member: 3, admin: 4, owner: 5 } },
+    });
+    const { owner, org } = await owned(before);
+    const inv = await inviteMember(before.config, {
+      user: owner,
+      organizationId: org.id,
+      email: "x@example.com",
+      role: "guest",
+    });
+    expect(inv.ok).toBe(true);
+    const token = tokenFrom(before.mail[0]?.text ?? "");
+    const x = await before.seedUser("x@example.com");
+    // The app drops guest from the rank table before the accept.
+    const after = makeAuth({ organizations: {}, storage: before.storage });
+    expect(await acceptInvitation(after.config, { user: x, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
+    expect(await memberOf(after, org.id, x.id)).toBeNull();
+  });
+
+  it("refuses with invalid_token a platform role when the organization no longer has the platform slug (Review I-4)", async () => {
+    const auth = platformAuth();
+    const { root, platformOrg } = await seedPlatform(auth);
+    const inv = await inviteMember(auth.config, {
+      user: root,
+      organizationId: platformOrg.id,
+      email: "op2@example.com",
+      role: "operator",
+    });
+    expect(inv.ok).toBe(true);
+    const token = tokenFrom(auth.mail[0]?.text ?? "");
+    const op2 = await auth.seedUser("op2@example.com");
+    await auth.storage.update("organization", [{ field: "id", op: "eq", value: platformOrg.id }], {
+      slug: "staff",
+    });
+    expect(await acceptInvitation(auth.config, { user: op2, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
+    expect(await memberOf(auth, platformOrg.id, op2.id)).toBeNull();
+  });
+});
+
+describe("inviteMember limits (Review I-6)", () => {
+  it("answers rate_limited and sends no mail on the 21st invite by one user in 15 minutes", async () => {
+    const auth = orgAuth();
+    const { owner, org } = await owned(auth);
+    for (let i = 0; i < 20; i++) {
+      const r = await inviteMember(auth.config, {
+        user: owner,
+        organizationId: org.id,
+        email: `p${i}@example.com`,
+        role: "member",
+      });
+      expect(r.ok).toBe(true);
+    }
+    expect(
+      await inviteMember(auth.config, {
+        user: owner,
+        organizationId: org.id,
+        email: "p20@example.com",
+        role: "member",
+      }),
+    ).toMatchObject({ ok: false, code: "rate_limited", status: 429 });
+    expect(auth.mail).toHaveLength(20);
+  });
+
+  it("answers rate_limited and sends no mail on the sixth invite to one address in an hour", async () => {
+    const auth = orgAuth();
+    const { owner, org } = await owned(auth);
+    for (let i = 0; i < 5; i++) {
+      const r = await inviteMember(auth.config, {
+        user: owner,
+        organizationId: org.id,
+        email: "victim@example.com",
+        role: "member",
+      });
+      expect(r.ok).toBe(true);
+    }
+    expect(
+      await inviteMember(auth.config, {
+        user: owner,
+        organizationId: org.id,
+        email: "Victim@Example.com",
+        role: "member",
+      }),
+    ).toMatchObject({ ok: false, code: "rate_limited", status: 429 });
+    expect(auth.mail).toHaveLength(5);
+  });
+
+  it("checks the limits after the rank checks, so a stranger spends no budget", async () => {
+    const auth = orgAuth();
+    const { owner, org } = await owned(auth);
+    const stranger = await auth.seedUser("s@example.com");
+    for (let i = 0; i < 10; i++) {
+      expect(
+        await inviteMember(auth.config, {
+          user: stranger,
+          organizationId: org.id,
+          email: "victim@example.com",
+          role: "member",
+        }),
+      ).toMatchObject({ ok: false, code: "forbidden_rank" });
+    }
+    expect(
+      (
+        await inviteMember(auth.config, {
+          user: owner,
+          organizationId: org.id,
+          email: "victim@example.com",
+          role: "member",
+        })
+      ).ok,
+    ).toBe(true);
   });
 });

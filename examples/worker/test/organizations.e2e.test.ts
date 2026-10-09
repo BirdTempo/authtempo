@@ -50,7 +50,10 @@ it("creates, invites, and accepts an organization on D1", async () => {
     role: "member",
   });
   expect(invited.ok).toBe(true);
-  const token = (await lastLink()).searchParams.get("invitation") ?? "";
+  const link = await lastLink();
+  // The example sets no appURL, so the link opens on the base URL (Review M-12).
+  expect(link.origin).toBe(BASE);
+  const token = link.searchParams.get("invitation") ?? "";
   expect(token).toMatch(/^inv_/);
 
   const accepted = await grace.organizations.invitations.accept({ token });

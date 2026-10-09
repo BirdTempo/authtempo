@@ -18,7 +18,15 @@ function setup(over: Parameters<typeof makeAuth>[0] = { organizations: {} }) {
     });
     return { cookie: `${auth.config.cookieName}=${token}` };
   }
-  return { auth, handle, cookieFor };
+  async function bearerFor(user: UserRow) {
+    const { token } = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    return { authorization: `Bearer ${token}` };
+  }
+  return { auth, handle, cookieFor, bearerFor };
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: test reads loose JSON
@@ -76,6 +84,62 @@ describe("organization routes: create and list", () => {
     expect(del.status).toBe(200);
     expect(await body(del)).toEqual({ ok: true });
   });
+
+  it("refuses metadata above 4096 bytes on create and on update (Review M-6)", async () => {
+    const s = setup();
+    const ada = await s.auth.seedUser("ada@example.com");
+    const { h, id } = await createAcme(s, ada);
+    const big = { blob: "x".repeat(5000) };
+    const create = await s.handle(
+      post(`${P}/create`, { slug: "big", name: "Big", metadata: big }, h),
+    );
+    expect(create.status).toBe(400);
+    expect(await body(create)).toEqual({ error: "invalid_body" });
+    const update = await s.handle(post(`${P}/update`, { organizationId: id, metadata: big }, h));
+    expect(update.status).toBe(400);
+    expect(await body(update)).toEqual({ error: "invalid_body" });
+    expect(await s.auth.storage.findMany("organization", [])).toHaveLength(1);
+    const row = await s.auth.storage.findOne("organization", [
+      { field: "id", op: "eq", value: id },
+    ]);
+    expect(row?.metadata).toBeNull();
+    // 4096 bytes is the cap: {"blob":"…"} adds 11 bytes around the value.
+    const atCap = { blob: "x".repeat(4096 - 11) };
+    const fits = await s.handle(post(`${P}/update`, { organizationId: id, metadata: atCap }, h));
+    expect(fits.status).toBe(200);
+  });
+
+  it("answers create with the member summary, email included (Review M-13)", async () => {
+    const s = setup();
+    const ada = await s.auth.seedUser("ada@example.com");
+    const res = await s.handle(
+      post(`${P}/create`, { slug: "acme", name: "Acme" }, await s.cookieFor(ada)),
+    );
+    const b = await body(res);
+    expect(Object.keys(b.member).sort()).toEqual([
+      "createdAt",
+      "email",
+      "id",
+      "name",
+      "role",
+      "userId",
+    ]);
+    expect(b.member).toMatchObject({ userId: ada.id, email: "ada@example.com", role: "owner" });
+  });
+
+  it("renews the session cookie on an organization route after the refresh point", async () => {
+    const s = setup();
+    const ada = await s.auth.seedUser("ada@example.com");
+    const h = await s.cookieFor(ada);
+    const before = await s.handle(get(P, h));
+    expect(before.headers.get("set-cookie")).toBeNull();
+    s.auth.clock.advance((s.auth.config.session.slidingRefreshDays + 1) * 86_400_000);
+    const res = await s.handle(get(P, h));
+    expect(res.status).toBe(200);
+    const cookies = res.headers.getSetCookie();
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]?.startsWith(`${s.auth.config.cookieName}=`)).toBe(true);
+  });
 });
 
 describe("organization routes: members", () => {
@@ -127,7 +191,10 @@ describe("organization routes: invitations", () => {
     expect(token).toMatch(/^inv_/);
     const list = await s.handle(get(`${P}/invitations?organizationId=${id}`, h));
     expect(list.status).toBe(200);
-    expect((await body(list)).invitations).toHaveLength(1);
+    const listText = await list.text();
+    expect(JSON.parse(listText).invitations).toHaveLength(1);
+    expect(listText).not.toContain("inv_");
+    expect(listText).not.toContain("tokenHash");
 
     const wrong = await s.handle(post(`${P}/invitations/accept`, { token }, await s.cookieFor(cy)));
     expect(wrong.status).toBe(403);
@@ -177,6 +244,16 @@ describe("organization routes: active", () => {
     expect(await body(out)).toEqual({ error: "forbidden_rank" });
     const missing = await s.handle(post(`${P}/active`, {}, h));
     expect(missing.status).toBe(400);
+  });
+
+  it("accepts a bearer token with no cookie and sets no cookie", async () => {
+    const s = setup();
+    const ada = await s.auth.seedUser("ada@example.com");
+    const { id } = await createAcme(s, ada);
+    const res = await s.handle(post(`${P}/active`, { organizationId: id }, await s.bearerFor(ada)));
+    expect(res.status).toBe(200);
+    expect(await body(res)).toMatchObject({ session: { activeOrganizationId: id } });
+    expect(res.headers.get("set-cookie")).toBeNull();
   });
 });
 

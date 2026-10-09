@@ -74,6 +74,32 @@ describe("organizations config", () => {
     expect(ok?.platformOrganization).toBe("platform-co");
     expect(ok?.reservedSlugs.has("platform-co")).toBe(true);
   });
+  it("refuses a bad role name, ranks without owner, an unsafe integer, a bad ttl, and a platform setting that is incomplete or not a slug", () => {
+    for (const role of ["a,b", "Admin"])
+      expect(() => makeAuth({ organizations: { ranks: { ...RANKS, [role]: 2 } } })).toThrow(
+        /bad role name/,
+      );
+    expect(() => makeAuth({ organizations: { ranks: { viewer: 1, admin: 2 } } })).toThrow(
+      /must name owner/,
+    );
+    expect(() => makeAuth({ organizations: { ranks: { ...RANKS, owner: 2 ** 60 } } })).toThrow(
+      /ranks.owner must be a positive integer/,
+    );
+    expect(() =>
+      makeAuth({ organizations: { platformRole: "operator", ranks: { ...RANKS, operator: 5 } } }),
+    ).toThrow(/platformRole needs organizations.platformOrganization/);
+    for (const ttl of [0, 1.5, 2 ** 60])
+      expect(() => makeAuth({ organizations: { invitationTtlDays: ttl } })).toThrow(
+        /invitationTtlDays/,
+      );
+    expect(() => makeAuth({ organizations: { platformOrganization: "Not A Slug" } })).toThrow(
+      /platformOrganization is not a slug/,
+    );
+    expect(
+      makeAuth({ organizations: { invitationTtlDays: 30 } }).config.organizations
+        ?.invitationTtlDays,
+    ).toBe(30);
+  });
   it("needs() reads the rule table against the rank table", () => {
     const c = makeAuth({ organizations: {} }).config.organizations;
     if (!c) throw new Error("off");
@@ -98,6 +124,9 @@ describe("organizations config", () => {
     expect(roleAllowedIn(c, "operator", "platform-co")).toBe(true);
     expect(roleAllowedIn(c, "admin,operator", "other")).toBe(false);
     expect(roleAllowedIn(c, "admin", "other")).toBe(true);
+    // The check splits on comma and compares whole parts, never substrings.
+    expect(roleAllowedIn(c, "operators", "other")).toBe(true);
+    expect(roleAllowedIn(c, "member,operator", "other")).toBe(false);
     expect(
       roleAllowedIn(makeAuth({ organizations: {} }).config.organizations ?? c, "operator", "x"),
     ).toBe(true);

@@ -89,6 +89,9 @@ operation below answers `not_found`.
 
 Every operation needs a session. The exception is `invitations.decline`,
 which needs only the token. All dates in the answers are ISO strings.
+Each `member` in an answer has the type `MemberJSON`: `id`, `userId`,
+`role`, `email`, `name`, and `createdAt`. The `create` answer uses the
+same type.
 
 | Operation | Route | Answer |
 | --- | --- | --- |

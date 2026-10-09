@@ -25,7 +25,18 @@ import type { Route, RouteContext } from "../router.js";
 
 const id = z.string().min(1).max(64);
 const role = z.string().min(1).max(64);
-const metadata = z.record(z.string(), z.unknown()).nullable().optional();
+/** Every member reads metadata in GET /organizations, so its size is capped. */
+const METADATA_MAX_BYTES = 4096;
+const metadata = z
+  .record(z.string(), z.unknown())
+  .nullable()
+  .optional()
+  .refine(
+    (m) =>
+      m === undefined ||
+      m === null ||
+      new TextEncoder().encode(JSON.stringify(m)).length <= METADATA_MAX_BYTES,
+  );
 
 const createBody = z.object({
   slug: z.string().min(1).max(64),
