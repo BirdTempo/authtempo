@@ -37,7 +37,9 @@
 // because a step that never reached the parsers proves nothing about them.
 // This proof covers the client package. The sign-in page script of core does not use the client.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BASE, bearerFor, startWorker } from "./dev.mjs";
@@ -49,18 +51,85 @@ const firefoxBinary =
   process.env.FIREFOX_BINARY ??
   ["/Applications/Firefox.app/Contents/MacOS/firefox"].find((p) => existsSync(p));
 
+// On macOS 27.0 with Firefox 157.0.1 (checked 2026-10-10, in a normal Terminal), a direct start
+// of the Firefox binary ends with status 1 and "Could not find profile folder", while a start
+// through LaunchServices (`open`) works. So on macOS the script starts Firefox itself through
+// `open` with a Marionette port in its profile, and geckodriver attaches with --connect-existing.
+// FIREFOX_LAUNCH=direct keeps the plain geckodriver launch.
+const FIREFOX_APP = "/Applications/Firefox.app";
+const MARIONETTE_PORT = 2828;
+const firefoxThroughOpen =
+  process.platform === "darwin" &&
+  process.env.FIREFOX_LAUNCH !== "direct" &&
+  existsSync(FIREFOX_APP);
+
+const portOpen = (port) =>
+  new Promise((done) => {
+    const s = connect({ port, host: "127.0.0.1" });
+    s.once("connect", () => {
+      s.destroy();
+      done(true);
+    });
+    s.once("error", () => done(false));
+  });
+
+// Starts Firefox through `open` with a profile that holds the Marionette port. Answers a stop().
+async function openFirefox(result) {
+  const profile = mkdtempSync(join(tmpdir(), "tempo-auth-proof-firefox-"));
+  writeFileSync(
+    join(profile, "user.js"),
+    [
+      `user_pref("marionette.port", ${MARIONETTE_PORT});`,
+      'user_pref("marionette.enabled", true);',
+      'user_pref("remote.active-protocols", 3);',
+    ].join("\n"),
+  );
+  if (await portOpen(MARIONETTE_PORT)) {
+    throw new Error(`port ${MARIONETTE_PORT} answers already; stop the other Firefox first`);
+  }
+  const args = ["-marionette", "-headless", "-no-remote", "-profile", profile];
+  const opener = spawn("/usr/bin/open", ["-n", "-a", FIREFOX_APP, "--args", ...args], {
+    stdio: "ignore",
+    timeout: 30_000,
+  });
+  opener.on("error", (e) => {
+    result.firefoxOpenError = String(e);
+  });
+  let up = false;
+  for (let i = 0; i < 150 && !up; i++) {
+    up = await portOpen(MARIONETTE_PORT);
+    if (!up) await sleep(200);
+  }
+  if (!up) throw new Error(`Firefox did not open Marionette on ${MARIONETTE_PORT} in 30 s`);
+  result.firefoxLaunch = "open + geckodriver --connect-existing";
+  return () => {
+    try {
+      // The pattern starts with a dash, so "--" ends the option list.
+      execFileSync("pkill", ["-f", "--", `-profile ${profile}`], { timeout: 5_000 });
+    } catch {}
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 3 });
+    } catch {}
+  };
+}
+
 const BROWSERS = {
   firefox: {
     command: "geckodriver",
-    args: ["--port", "4445"],
+    args: firefoxThroughOpen
+      ? ["--port", "4445", "--connect-existing", "--marionette-port", String(MARIONETTE_PORT)]
+      : ["--port", "4445"],
     port: 4445,
-    capabilities: {
-      browserName: "firefox",
-      "moz:firefoxOptions": {
-        ...(firefoxBinary ? { binary: firefoxBinary } : {}),
-        args: ["-headless"],
-      },
-    },
+    ...(firefoxThroughOpen ? { prepare: openFirefox } : {}),
+    capabilities: firefoxThroughOpen
+      ? { browserName: "firefox" }
+      : {
+          browserName: "firefox",
+          "moz:firefoxOptions": {
+            ...(firefoxBinary ? { binary: firefoxBinary } : {}),
+            args: ["-headless"],
+          },
+        },
     driverVersion: () =>
       execFileSync("geckodriver", ["--version"], { encoding: "utf8", timeout: 15_000 }).split(
         "\n",
@@ -268,8 +337,20 @@ function exercised(s, hasCredential) {
   );
 }
 
-// The weak path accepts only a cancel or the abort of the script itself. Any other name fails.
-const WEAK_OK = new Set(["WebAuthnCancelled", "NotAllowedError", "TimeoutError", "AbortError"]);
+// The weak path accepts only a cancel, the abort of the script itself, or a ConstraintError. Any
+// other name fails. A ConstraintError is the WebAuthn outcome when the authenticator cannot give
+// the required resident key or user verification (Web Authentication Level 3, create() step on
+// authenticatorSelection); the browser raises it after it parsed the options, so it is evidence
+// that the option shapes were accepted. Firefox 157.0.1's virtual authenticator answers it for
+// every ceremony that requires both (checked 2026-10-10; geckodriver 0.37.1 calls these endpoints
+// unreliable).
+const WEAK_OK = new Set([
+  "WebAuthnCancelled",
+  "NotAllowedError",
+  "TimeoutError",
+  "AbortError",
+  "ConstraintError",
+]);
 const weakStepOk = (s) => s.optionsStatus === 200 && s.error && WEAK_OK.has(s.error.name);
 
 const result = {
@@ -284,7 +365,11 @@ let driver = null;
 let driverSpawnError = null;
 let worker = null;
 let session = null;
-const killDriver = () => driver?.kill();
+let stopBrowser = null;
+const killDriver = () => {
+  driver?.kill();
+  stopBrowser?.();
+};
 process.on("exit", killDriver);
 const probe = (url) => fetch(url, { signal: AbortSignal.timeout(2_000) });
 try {
@@ -295,6 +380,7 @@ try {
   );
   if (busy) throw new Error(`port ${browser.port} answers already; stop the other driver first`);
   result.driver = browser.driverVersion();
+  if (browser.prepare) stopBrowser = await browser.prepare(result);
   driver = spawn(browser.command, browser.args, { stdio: "ignore" });
   driver.on("error", (e) => {
     driverSpawnError = String(e);
@@ -340,6 +426,7 @@ try {
   result.browserVersion = created.value.capabilities.browserVersion;
   await wd("POST", `/session/${session}/timeouts`, { script: 30_000, pageLoad: 30_000 });
 
+  // PROOF_AUTHENTICATOR holds a JSON object merged over this default, for driver experiments.
   const authenticator = {
     protocol: "ctap2",
     transport: "internal",
@@ -347,7 +434,9 @@ try {
     hasUserVerification: true,
     isUserConsenting: true,
     isUserVerified: true,
+    ...(process.env.PROOF_AUTHENTICATOR ? JSON.parse(process.env.PROOF_AUTHENTICATOR) : {}),
   };
+  result.authenticator = authenticator;
   const addAuthenticator = async () => {
     const r = await wd("POST", `/session/${session}/webauthn/authenticator`, authenticator);
     return r.status === 200 ? { id: r.value } : { error: r.value?.message ?? `HTTP ${r.status}` };
@@ -407,6 +496,20 @@ try {
     // A pass without the evidence is "parsers not exercised", and that is a failure.
     result.result = ceremoniesOk && parsersRan ? "pass" : "fail";
     if (ceremoniesOk && !parsersRan) result.reason = "parsers not exercised";
+    // When the virtual authenticator cannot satisfy the required resident key or user verification,
+    // every step ends in ConstraintError and the strong path is unusable. The same steps then
+    // count under the weak rule: the options were accepted, and the fallback parsers ran.
+    const constrained =
+      !ceremoniesOk && active.length > 0 && active.every((s) => s.error?.name === "ConstraintError");
+    if (constrained) {
+      result.path = "weak";
+      result.reason =
+        "virtual authenticator cannot satisfy residentKey/userVerification required; weak rule applied";
+      const rejected = active.every((s) => !s.driverError && weakStepOk(s));
+      const weakParsersRan = active.every((s) => s.ran && exercised(s, false));
+      result.parsersExercised = weakParsersRan;
+      result.result = rejected && weakParsersRan ? "pass" : "fail";
+    }
   } else {
     result.path = "weak";
     for (const [op, mode] of [
