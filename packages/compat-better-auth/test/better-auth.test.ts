@@ -451,7 +451,7 @@ describe("withPolicyCode on the reset and change routes (M-7)", () => {
 });
 
 describe("api refuses the arguments core cannot keep (M-3)", () => {
-  it("answers 501 NOT_SUPPORTED for callbackURL at sign-up, and callbackURL or rememberMe at sign-in", async () => {
+  it("answers 501 NOT_SUPPORTED for callbackURL at sign-up, and callbackURL or rememberMe: false at sign-in", async () => {
     const { auth } = app();
     const notSupported = { statusCode: 501, body: { code: "NOT_SUPPORTED" } };
     await expect(
@@ -475,5 +475,9 @@ describe("api refuses the arguments core cannot keep (M-3)", () => {
       auth.api.signInEmail({ body: { ...body, rememberMe: false } }),
     ).rejects.toMatchObject(notSupported);
     await expect(auth.api.signInEmail({ body })).resolves.toMatchObject({ redirect: false });
+    // rememberMe: true is Better Auth's default and what core does (review R-1).
+    await expect(
+      auth.api.signInEmail({ body: { ...body, rememberMe: true } }),
+    ).resolves.toMatchObject({ redirect: false });
   });
 });

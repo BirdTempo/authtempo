@@ -55,11 +55,13 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
       // and every session lives session.expiresIn.
       if (body.callbackURL !== undefined)
         throw new APIError(501, NOT_SUPPORTED, "core takes no callbackURL at sign-in");
-      if (body.rememberMe !== undefined)
+      // rememberMe: true is Better Auth's default and what core does, so it is
+      // accepted. false asks for a browser-session cookie, which core does not set.
+      if (body.rememberMe === false)
         throw new APIError(
           501,
           NOT_SUPPORTED,
-          "core takes no rememberMe: every session lives session.expiresIn",
+          "core takes no rememberMe: false: every session lives session.expiresIn",
         );
       const req = requestOf(headers);
       const v = unwrap(

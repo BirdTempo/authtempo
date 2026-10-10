@@ -148,9 +148,11 @@ Better Auth defaults that core does not keep:
 
 Call arguments that core cannot keep: on the server, `api.signUpEmail` with
 `callbackURL` or `image`, and `api.signInEmail` with `callbackURL` or
-`rememberMe`, throw `APIError` `NOT_SUPPORTED` with status 501. Core's verify
-link lands on the app origin, and every session lives `session.expiresIn`. On
-the client, `callbackURL` on `signUp.email` and `rememberMe` have no effect.
+`rememberMe: false`, throw `APIError` `NOT_SUPPORTED` with status 501. Core's
+verify link lands on the app origin, and every session lives
+`session.expiresIn`. `rememberMe: true` is Better Auth's default and is
+accepted. On the client, `callbackURL` on `signUp.email` and `rememberMe` have
+no effect.
 
 An invitation has two ids. The mail id (`data.id` in `sendInvitationEmail`)
 accepts the invitation, and the row id (from `api.createInvitation`) cancels it.
