@@ -1,12 +1,16 @@
 import { StorageError } from "@tempo-auth/core";
 import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@tempo-auth/core/sql";
 import type { Sql } from "postgres";
+import { ISSUERS } from "./mapping.js";
 import { BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
 
 /** The mapping version in ta_meta. A mapping change that needs new columns is migration 0002 and the value 2. */
 export const COMPAT_SCHEMA_VERSION = 1;
 export const COMPAT_META_KEY = "compat_better_auth";
 export const MIGRATION_NAME = "0001_compat_better_auth";
+
+/** Postgres: now, cut to the millisecond precision that core reads back. */
+const MS_NOW = "date_trunc('milliseconds', now())";
 
 /** The core columns with no Better Auth column. `from` fills existing rows. */
 const ADDED: readonly {
@@ -105,10 +109,14 @@ export function compatMigrationSql(
   const date = pg ? "timestamptz" : "TEXT";
   const issuer = C("account", "issuer");
   const providerId = C("account", "providerId");
-  // Better Auth 1.7's issuers (@better-auth/core src/db/schema/account.ts,
-  // google.ts, apple.ts) and core's own `email` identity (deviation 2), the
-  // same values as issuerFor in mapping.ts. Rows that already have one keep it.
-  const fillIssuer = `UPDATE ${T("account")} SET ${issuer} = CASE ${providerId} WHEN 'credential' THEN 'local:credential' WHEN 'email' THEN 'local:email' WHEN 'google' THEN 'https://accounts.google.com' WHEN 'apple' THEN 'https://appleid.apple.com' ELSE 'local:oauth:' || ${providerId} END WHERE ${issuer} IS NULL;`;
+  // The named issuers come from ISSUERS, the table issuerFor reads (one
+  // source). Any other provider id is 'local:oauth:' || providerId, which
+  // equals issuerFor's encodeURIComponent form for every id of letters,
+  // digits, and - _ . ! ~ * ' ( ). Rows that already have an issuer keep it.
+  const cases = Object.entries(ISSUERS)
+    .map(([id, value]) => `WHEN '${id}' THEN '${value}'`)
+    .join(" ");
+  const fillIssuer = `UPDATE ${T("account")} SET ${issuer} = CASE ${providerId} ${cases} ELSE 'local:oauth:' || ${providerId} END WHERE ${issuer} IS NULL;`;
   const issuerIndex = `CREATE UNIQUE INDEX ux_account__issuer__account_id ON ${T("account")} (${issuer}, ${C("account", "accountId")});`;
   const lines: string[] = [];
   if (pg) {
@@ -126,9 +134,11 @@ export function compatMigrationSql(
       // Better Auth 1.7 has its own unique index on (issuer, accountId), under
       // its own name (account_issuer_accountId_uidx). A second equal index
       // costs one more index write per account insert. So look for any
-      // unique, non-partial index on exactly these two columns, by any name.
+      // valid, unique, non-partial index on exactly these two columns, by
+      // any name. The names sort in byte order on both sides: COLLATE "C"
+      // in SQL, and JavaScript's sort() in code-unit order.
       "DO $$ BEGIN",
-      `  IF NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class t ON t.oid = i.indrelid JOIN pg_namespace s ON s.oid = t.relnamespace WHERE s.nspname = ${schemaExpr} AND t.relname = '${n.rawTable("account")}' AND i.indisunique AND i.indpred IS NULL AND i.indnatts = 2 AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text) FROM pg_attribute a WHERE a.attrelid = t.oid AND a.attnum = ANY (i.indkey)) = ARRAY[${[
+      `  IF NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class t ON t.oid = i.indrelid JOIN pg_namespace s ON s.oid = t.relnamespace WHERE s.nspname = ${schemaExpr} AND t.relname = '${n.rawTable("account")}' AND i.indisunique AND i.indisvalid AND i.indpred IS NULL AND i.indnatts = 2 AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text COLLATE "C") FROM pg_attribute a WHERE a.attrelid = t.oid AND a.attnum = ANY (i.indkey)) = ARRAY[${[
         n.rawColumn("account", "issuer"),
         n.rawColumn("account", "accountId"),
       ]
@@ -138,7 +148,7 @@ export function compatMigrationSql(
       `    ${issuerIndex}`,
       "  END IF;",
       "END $$;",
-      `UPDATE ${T("passkey")} SET ${C("passkey", "createdAt")} = now() WHERE ${C("passkey", "createdAt")} IS NULL;`,
+      `UPDATE ${T("passkey")} SET ${C("passkey", "createdAt")} = ${MS_NOW} WHERE ${C("passkey", "createdAt")} IS NULL;`,
     );
   } else {
     lines.push(
@@ -153,11 +163,25 @@ export function compatMigrationSql(
   }
   lines.push("CREATE INDEX ix_ta_limit__expires_at ON ta_limit (expires_at);");
   for (const a of ADDED) {
+    // Postgres: a column filled from a Better Auth column also gets a
+    // default, so a row that another writer adds after the migration (an old
+    // replica during the deploy, the app's own SQL) has a value. Without it
+    // core reads null in a field that is not nullable and throws
+    // schema_mismatch on that row. The value is cut to milliseconds, the
+    // precision core reads back (to_char ... MS): a guard that compares a
+    // read value with `eq` (ownerWrite on organization.updatedAt) then
+    // matches. SQLite stores ISO text with milliseconds, and its ALTER TABLE
+    // takes no expression default.
+    const def = pg && a.from ? ` DEFAULT ${MS_NOW}` : "";
     lines.push(
-      `ALTER TABLE ${T(a.table)} ADD COLUMN ${C(a.table, a.field)} ${a.type === "date" ? date : pg ? "text" : "TEXT"};`,
+      `ALTER TABLE ${T(a.table)} ADD COLUMN ${C(a.table, a.field)} ${a.type === "date" ? date : pg ? "text" : "TEXT"}${def};`,
     );
-    if (a.from)
-      lines.push(`UPDATE ${T(a.table)} SET ${C(a.table, a.field)} = ${C(a.table, a.from)};`);
+    if (a.from) {
+      const from = C(a.table, a.from);
+      lines.push(
+        `UPDATE ${T(a.table)} SET ${C(a.table, a.field)} = ${pg ? `date_trunc('milliseconds', ${from})` : from};`,
+      );
+    }
   }
   for (const i of INDEXES) {
     lines.push(

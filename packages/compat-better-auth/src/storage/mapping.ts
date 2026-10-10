@@ -48,22 +48,26 @@ function same<K extends string>(...keys: K[]): Record<K, FieldMap> {
 }
 
 /**
- * Better Auth 1.7's account issuer (@better-auth/core src/db/schema/account.ts
+ * Better Auth 1.7's account issuers (@better-auth/core src/db/schema/account.ts
  * and src/social-providers/{google,apple}.ts, read 2026-10-10): local methods
  * are `local:<id>`, Google and Apple carry their own, other OAuth providers
- * are `local:oauth:<id>`. The unique key is (issuer, accountId).
+ * are `local:oauth:<id>`. The unique key is (issuer, accountId). `email` is
+ * core's own identity (deviation 2). The one source for the named issuers:
+ * `issuerFor` reads it, and migration 0001 builds its SQL fill from it, in
+ * this key order (a shipped migration's text never changes).
  */
+export const ISSUERS: Readonly<Record<string, string>> = {
+  credential: "local:credential",
+  email: "local:email",
+  google: "https://accounts.google.com",
+  apple: "https://appleid.apple.com",
+};
+
+/** The issuer of a provider id. A provider with no named issuer is `local:oauth:<id>`. */
 export function issuerFor(provider: string): string {
-  switch (provider) {
-    case "google":
-      return "https://accounts.google.com";
-    case "apple":
-      return "https://appleid.apple.com";
-    case "email":
-      return "local:email";
-    default:
-      return `local:oauth:${encodeURIComponent(provider)}`;
-  }
+  return Object.hasOwn(ISSUERS, provider)
+    ? (ISSUERS[provider] as string)
+    : `local:oauth:${encodeURIComponent(provider)}`;
 }
 
 function notCredential(provider: string): string {
@@ -100,7 +104,7 @@ export const MAPPING: { [M in ModelName]: ModelMap<M> } = {
     // Better Auth writes the credential row with accountId equal to the user id (dist/api/routes/sign-in.mjs:320).
     insertExtras: (row) => ({
       providerId: "credential",
-      issuer: "local:credential",
+      issuer: issuerFor("credential"),
       accountId: row.userId,
     }),
     updateExtras: (data) => (data.userId === undefined ? {} : { accountId: data.userId }),

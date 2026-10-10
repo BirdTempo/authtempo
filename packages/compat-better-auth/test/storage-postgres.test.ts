@@ -1,9 +1,15 @@
-import { SCHEMA_VERSION, type StorageAdapter } from "@tempo-auth/core";
+import { applyPostgresMigrations } from "@tempo-auth/adapter-postgres";
+import {
+  createAuth,
+  createPbkdf2PasswordHash,
+  SCHEMA_VERSION,
+  type StorageAdapter,
+} from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
 import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
-import { type AnyModelMap, MAPPING } from "../src/storage/mapping.js";
+import { type AnyModelMap, issuerFor, MAPPING } from "../src/storage/mapping.js";
 import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG, withoutForeignKeys } from "./fixtures.js";
@@ -332,6 +338,23 @@ describe("the Better Auth mapping on postgres", () => {
       "2026-09-07T00:00:00.000Z",
     );
   });
+
+  it("reads a member row and an account row that another writer adds after the migration (I-1)", async () => {
+    // An old replica during the deploy, or the app's own SQL, writes Better Auth's columns only.
+    await raw(`
+      INSERT INTO "user" ("id","name","email","emailVerified","createdAt","updatedAt") VALUES ('ba-u2','Ann','ann@example.com',true,now(),now());
+      INSERT INTO "member" ("id","organizationId","userId","role","createdAt") VALUES ('ba-m2','ba-o','ba-u2','member',now());
+      INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdAt","updatedAt") VALUES ('ba-gh','local:oauth:github','42','github','ba-u2',now(),now());
+    `);
+    expect((await db.findOne("member", [eq("id", "ba-m2")]))?.updatedAt).toBeInstanceOf(Date);
+    const identity = await db.findOne("identity", [eq("provider", "github"), eq("subject", "42")]);
+    expect(identity?.linkedAt).toBeInstanceOf(Date);
+    // The default is cut to milliseconds, the precision core reads back.
+    const cut = await raw<{ ok: boolean }>(
+      `SELECT bool_and(m."taUpdatedAt" = date_trunc('milliseconds', m."taUpdatedAt") AND a."taLinkedAt" = date_trunc('milliseconds', a."taLinkedAt")) AS ok FROM "member" m, "account" a WHERE m."id" = 'ba-m2' AND a."id" = 'ba-gh'`,
+    );
+    expect(cut[0]?.ok).toBe(true);
+  });
 });
 
 /** The unique indexes on account whose columns are exactly issuer and accountId, in either casing, by name. */
@@ -547,19 +570,167 @@ describe("the Better Auth foreign keys on postgres", () => {
     await pg.close();
   });
 
-  it("writes a sign-up's rows in core's order, user first", async () => {
-    await db.transaction(signUpRows("user-first"));
-    expect([await count("user"), await count("account"), await count("session")]).toEqual([
-      1, 2, 1,
-    ]);
-    expect(await db.findOne("password", [eq("userId", "u1")])).toMatchObject({ id: "p1" });
-  });
-
   it("refuses a password row before its user row, and keeps no row", async () => {
     await expect(db.transaction(signUpRows("password-first"))).rejects.toMatchObject({
       code: "23503",
       constraint_name: "account_userId_fkey",
     });
     expect([await count("user"), await count("account")]).toEqual([0, 0]);
+  });
+});
+
+describe("the compat migration and core's own write paths on postgres", () => {
+  const fast = createPbkdf2PasswordHash({ iterations: 1000 });
+  const authOn = (s: ReturnType<typeof betterAuthSchemaStorage>) =>
+    createAuth({
+      baseURL: "https://api.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: s.storage,
+      limiter: s.limiter,
+      mail: { send: async () => {} },
+      password: { hash: fast },
+      organizations: {},
+    });
+
+  it("runs core's email sign-up on the tables with their foreign keys (M-2)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await s.migrate();
+      const pw = authOn(s).api.password;
+      if (!pw) throw new Error("the password api is missing");
+      const r = await pw.signUp({
+        email: "new@example.com",
+        password: "a long passphrase 1",
+        ip: null,
+        userAgent: null,
+      });
+      expect(r.ok).toBe(true);
+      const rows = await pg.sql.unsafe<{ providerId: string; password: string | null }[]>(
+        'SELECT a."providerId", a."password" FROM "account" a JOIN "user" u ON u."id" = a."userId" WHERE u."email" = $1 ORDER BY a."providerId"',
+        ["new@example.com"],
+      );
+      // The pending$ row was activated by core's conditional update on account.password.
+      expect(rows.map((x) => x.providerId)).toContain("credential");
+      const credential = rows.find((x) => x.providerId === "credential");
+      expect(credential?.password).toMatch(/^pbkdf2-sha256\$1000\$/);
+      expect((await pg.sql.unsafe('SELECT "id" FROM "session"')).length).toBe(1);
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("lets an owner write on a Better Auth-era organization whose createdAt has microseconds (I-2)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await pg.sql.unsafe(`
+        INSERT INTO "user" ("id","name","email","emailVerified") VALUES ('o1','One','one@example.com',true), ('o2','Two','two@example.com',true);
+        INSERT INTO "organization" ("id","name","slug","createdAt") VALUES ('org','Org','org','2026-09-07T10:11:12.345678Z');
+        INSERT INTO "member" ("id","organizationId","userId","role","createdAt") VALUES ('m1','org','o1','owner','2026-09-07T10:11:12.345678Z'), ('m2','org','o2','owner','2026-09-07T10:11:12.345678Z');
+      `);
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await s.migrate();
+      const caller = await s.storage.findOne("user", [eq("id", "o1")]);
+      if (!caller) throw new Error("the caller is missing");
+      // Demoting an owner runs ownerWrite: update organization where updatedAt = the read value.
+      const r = await authOn(s).api.updateMemberRole({
+        user: caller,
+        organizationId: "org",
+        userId: "o2",
+        role: "member",
+      });
+      expect(r).toMatchObject({ ok: true });
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("fills the issuer of every provider core knows with the value issuerFor writes (M-1)", async () => {
+    const pg = await freshBetterAuthSchema(CONSUMER_I_PG);
+    const providers = ["credential", "email", "google", "apple", "github"];
+    try {
+      await pg.sql.unsafe(
+        `INSERT INTO "user" ("id","name","email") VALUES ('u','U','u@example.com');`,
+      );
+      for (const p of providers) {
+        await pg.sql.unsafe(
+          'INSERT INTO "account" ("id","account_id","provider_id","user_id") VALUES ($1, $2, $3, $4)',
+          [`a-${p}`, `sub-${p}`, p, "u"],
+        );
+      }
+      await betterAuthSchemaStorage({
+        dialect: "postgres",
+        sql: pg.sql,
+        casing: "snake",
+      }).migrate();
+      const rows = await pg.sql.unsafe<{ provider_id: string; issuer: string }[]>(
+        'SELECT "provider_id", "issuer" FROM "account" ORDER BY "id"',
+      );
+      expect(Object.fromEntries(rows.map((r) => [r.provider_id, r.issuer]))).toEqual(
+        Object.fromEntries(providers.map((p) => [p, issuerFor(p)])),
+      );
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("finds Better Auth's unique index on a capitalized column name in byte order (M-3)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      // Under an ICU or a glibc en_US collation "accountId" sorts before "Issuer"; in byte order
+      // (COLLATE "C", JavaScript sort()), after. The test server runs on musl, whose en_US.utf8
+      // sorts in byte order, so the break proof uses COLLATE "en-x-icu".
+      await pg.sql.unsafe('ALTER TABLE "account" RENAME COLUMN "issuer" TO "Issuer"');
+      await betterAuthSchemaStorage({
+        dialect: "postgres",
+        sql: pg.sql,
+        columns: { account: { issuer: "Issuer" } },
+      }).migrate();
+      expect(await uniqueIssuerIndexes(pg.sql)).toEqual(["account_issuer_accountId_uidx"]);
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("makes its own unique index when the existing one is not valid (M-3)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await pg.sql.unsafe(`
+        DROP INDEX "account_issuer_accountId_uidx";
+        INSERT INTO "user" ("id","name","email","emailVerified") VALUES ('u','U','u@example.com',true);
+        INSERT INTO "account" ("id","issuer","accountId","providerId","userId","updatedAt") VALUES ('a1','i','s','google','u',now()), ('a2','i','s','google','u',now());
+      `);
+      // A concurrent build that fails on the duplicate leaves an index with indisvalid false.
+      await expect(
+        pg.sql.unsafe(
+          'CREATE UNIQUE INDEX CONCURRENTLY "broken_uidx" ON "account" ("issuer", "accountId")',
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await pg.sql.unsafe(`DELETE FROM "account" WHERE "id" = 'a2'`);
+      await betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate();
+      expect(await uniqueIssuerIndexes(pg.sql)).toEqual([
+        "broken_uidx",
+        "ux_account__issuer__account_id",
+      ]);
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("stops at migrate() on a schema that holds core's own ta_meta and ta_limit, and changes nothing (README)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await applyPostgresMigrations(pg.sql);
+      await expect(
+        betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate(),
+      ).rejects.toThrow('relation "ta_limit" already exists');
+      const added = await pg.sql.unsafe(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'account' AND column_name = 'taLinkedAt'",
+      );
+      expect(added.length).toBe(0);
+    } finally {
+      await pg.close();
+    }
   });
 });
