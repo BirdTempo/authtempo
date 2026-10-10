@@ -196,7 +196,7 @@ function loadClientSource() {
 // The injected source declares toBinaryCreationOptions, toBinaryRequestOptions and credentialToJSON
 // as function declarations in this same scope. Assigning to them wraps them with a counter, and
 // browserWebAuthn calls the wrapped ones.
-function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
+function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, abortMs, done) {
   const PKC = globalThis.PublicKeyCredential;
   const report = {
     op,
@@ -253,13 +253,18 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
   toBinaryCreationOptions = count("ownOptions", toBinaryCreationOptions);
   toBinaryRequestOptions = count("ownOptions", toBinaryRequestOptions);
   credentialToJSON = count("ownToJSON", credentialToJSON);
-  // An abort after 8 s ends a ceremony that no authenticator answers, so the script never hangs.
+  // An abort after abortMs (8 s, or 120 s in manual mode) ends a ceremony that no authenticator
+  // answers, so the script never hangs.
   const container = {
     create: (o) => {
       if (stub) throw new TypeError("stub: navigator.credentials.create");
-      return globalThis.navigator.credentials.create({ ...o, signal: AbortSignal.timeout(8000) });
+      return globalThis.navigator.credentials.create({
+        ...o,
+        signal: AbortSignal.timeout(abortMs),
+      });
     },
-    get: (o) => globalThis.navigator.credentials.get({ ...o, signal: AbortSignal.timeout(8000) }),
+    get: (o) =>
+      globalThis.navigator.credentials.get({ ...o, signal: AbortSignal.timeout(abortMs) }),
   };
   const webauthn = browserWebAuthn(container);
   const post = async (path, body, withBearer) => {
@@ -297,8 +302,8 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, done) {
 // assignments in pageCeremony reach them. The report, or a throw, goes to the DOM node that the
 // poll reads (see the Xray note in the header).
 const REPORT_ID = "tempo-auth-proof";
-const pageText = (op, mode, bearer) =>
-  `(() => { const save = (r) => { const el = document.createElement("script"); el.type = "application/json"; el.id = ${JSON.stringify(REPORT_ID)}; el.textContent = JSON.stringify(r); (document.body ?? document.documentElement).appendChild(el); }; try { ${source}\n(${pageCeremony.toString()})(browserWebAuthn, ${JSON.stringify(BASE)}, ${JSON.stringify(bearer)}, ${JSON.stringify(op)}, ${JSON.stringify(mode)}, ${JSON.stringify(STUB)}, save); } catch (e) { save({ pageError: String(e) }); } })();`;
+const pageText = (op, mode, bearer, abortMs) =>
+  `(() => { const save = (r) => { const el = document.createElement("script"); el.type = "application/json"; el.id = ${JSON.stringify(REPORT_ID)}; el.textContent = JSON.stringify(r); (document.body ?? document.documentElement).appendChild(el); }; try { ${source}\n(${pageCeremony.toString()})(browserWebAuthn, ${JSON.stringify(BASE)}, ${JSON.stringify(bearer)}, ${JSON.stringify(op)}, ${JSON.stringify(mode)}, ${JSON.stringify(STUB)}, ${JSON.stringify(abortMs)}, save); } catch (e) { save({ pageError: String(e) }); } })();`;
 // Reads the report through the DOM, never through a window property.
 const POLL = `const el = document.getElementById(${JSON.stringify(REPORT_ID)}); return el ? el.textContent : null;`;
 const INJECT = `const el = document.createElement("script"); el.textContent = arguments[0]; document.documentElement.appendChild(el); return null;`;
@@ -441,17 +446,33 @@ try {
     const r = await wd("POST", `/session/${session}/webauthn/authenticator`, authenticator);
     return r.status === 200 ? { id: r.value } : { error: r.value?.message ?? `HTTP ${r.status}` };
   };
+  // PROOF_MANUAL=1: no virtual authenticator; the owner approves the browser's own passkey prompts
+  // on screen (Touch ID on this Mac), and the script checks the server side. Safari 27.0 shows its
+  // platform sheet even with a virtual authenticator added (checked 2026-10-10), so this is the
+  // strong-path proof on Safari. The second registration uses a second account, because a real
+  // authenticator refuses a duplicate credential through excludeCredentials.
+  const MANUAL = process.env.PROOF_MANUAL === "1";
+  const EMAIL2 = `webauthn-${name}-2@example.com`;
+  const bearer2 = MANUAL ? await bearerFor(EMAIL2) : null;
+  const POLLS = MANUAL ? 600 : 150;
+  if (MANUAL) {
+    await wd("POST", `/session/${session}/timeouts`, { script: 120_000, pageLoad: 30_000 });
+  }
   const ceremony = async (op, mode) => {
     const fail = (driverError) => ({ op, mode, driverError });
     // A 404 text page on the Worker origin: same origin as the passkey routes.
     const nav = await wd("POST", `/session/${session}/url`, { url: `${BASE}/__proof` });
     if (nav.status !== 200) return fail(nav.value);
+    const token = MANUAL && op === "create" && mode === "fallback" ? bearer2 : bearer;
+    if (MANUAL) {
+      process.stderr.write(`\n>>> approve the passkey prompt in ${name} now (${op}, ${mode})\n`);
+    }
     const inject = await wd("POST", `/session/${session}/execute/sync`, {
       script: INJECT,
-      args: [pageText(op, mode, bearer)],
+      args: [pageText(op, mode, token, MANUAL ? 120_000 : 8_000)],
     });
     if (inject.status !== 200) return fail(inject.value);
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < POLLS; i++) {
       const r = await wd("POST", `/session/${session}/execute/sync`, { script: POLL, args: [] });
       if (r.status !== 200) return fail(r.value);
       if (typeof r.value === "string") {
@@ -465,46 +486,61 @@ try {
       }
       await sleep(200);
     }
-    return fail("no report in 30 s");
+    return fail(`no report in ${MANUAL ? "120" : "30"} s`);
   };
 
-  const first = FORCE_WEAK ? { error: "PROOF_FORCE_WEAK=1" } : await addAuthenticator();
-  result.virtualAuthenticator = first.id ? "added" : first.error;
+  const first = MANUAL
+    ? { id: "manual" }
+    : FORCE_WEAK
+      ? { error: "PROOF_FORCE_WEAK=1" }
+      : await addAuthenticator();
+  result.virtualAuthenticator = MANUAL
+    ? "none: the owner approved the browser's own prompts (PROOF_MANUAL=1)"
+    : first.id
+      ? "added"
+      : first.error;
   const steps = [];
   const ran = (s) => !s.skipped;
   if (first.id) {
     result.path = "strong";
     steps.push(await ceremony("create", "native"));
-    // A second credential on the same authenticator fails on excludeCredentials. A fresh one also
-    // sends the first credential id through the fallback conversion of excludeCredentials.
-    await wd("DELETE", `/session/${session}/webauthn/authenticator/${first.id}`);
-    const second = await addAuthenticator();
-    if (!second.id) throw new Error(`second authenticator: ${second.error}`);
+    if (!MANUAL) {
+      // A second credential on the same authenticator fails on excludeCredentials. A fresh one
+      // also sends the first credential id through the fallback conversion of excludeCredentials.
+      await wd("DELETE", `/session/${session}/webauthn/authenticator/${first.id}`);
+      const second = await addAuthenticator();
+      if (!second.id) throw new Error(`second authenticator: ${second.error}`);
+    }
     steps.push(await ceremony("create", "fallback"));
     steps.push(await ceremony("get", "fallback"));
     steps.push(await ceremony("get", "native"));
     const active = steps.filter(ran);
+    const owners = MANUAL ? [EMAIL, EMAIL2] : [EMAIL];
     const ceremoniesOk = active.every(
       (s) =>
         !s.driverError &&
         !s.error &&
         s.verify?.status === 200 &&
-        (s.op === "create" || s.verify.body?.user?.email === EMAIL),
+        (s.op === "create" || owners.includes(s.verify.body?.user?.email)),
     );
     const parsersRan = active.every((s) => s.ran && exercised(s, true));
     result.parsersExercised = parsersRan;
     // A pass without the evidence is "parsers not exercised", and that is a failure.
     result.result = ceremoniesOk && parsersRan ? "pass" : "fail";
     if (ceremoniesOk && !parsersRan) result.reason = "parsers not exercised";
-    // When the virtual authenticator cannot satisfy the required resident key or user verification,
-    // every step ends in ConstraintError and the strong path is unusable. The same steps then
-    // count under the weak rule: the options were accepted, and the fallback parsers ran.
+    // When the virtual authenticator does not serve the ceremonies, every step ends in an error the
+    // weak rule accepts (a ConstraintError for the required resident key or user verification, or a
+    // dismissed browser prompt), and the strong path is unusable. The same steps then count under
+    // the weak rule: the options were accepted, and the fallback parsers ran.
+    // Manual mode never degrades: the owner approved real prompts, so the strong path must hold.
     const constrained =
-      !ceremoniesOk && active.length > 0 && active.every((s) => s.error?.name === "ConstraintError");
+      !MANUAL &&
+      !ceremoniesOk &&
+      active.length > 0 &&
+      active.every((s) => !s.driverError && s.error && WEAK_OK.has(s.error.name));
     if (constrained) {
       result.path = "weak";
-      result.reason =
-        "virtual authenticator cannot satisfy residentKey/userVerification required; weak rule applied";
+      result.reason = `virtual authenticator did not serve the ceremonies (${[...new Set(active.map((s) => s.error.name))].join(", ")}); weak rule applied`;
       const rejected = active.every((s) => !s.driverError && weakStepOk(s));
       const weakParsersRan = active.every((s) => s.ran && exercised(s, false));
       result.parsersExercised = weakParsersRan;
@@ -553,7 +589,7 @@ const line = JSON.stringify(result);
 const resultsDir = join(dirname(fileURLToPath(import.meta.url)), "results");
 mkdirSync(resultsDir, { recursive: true });
 // The latest record, and a dated copy that a later run never overwrites.
-const base = `webauthn-${name}${FORCE_WEAK ? "-weak" : ""}${STUB ? "-stub" : ""}`;
+const base = `webauthn-${name}${process.env.PROOF_MANUAL === "1" ? "-manual" : ""}${FORCE_WEAK ? "-weak" : ""}${STUB ? "-stub" : ""}`;
 writeFileSync(join(resultsDir, `${base}.json`), `${line}\n`);
 writeFileSync(join(resultsDir, `${base}-${result.date.replace(/[:.]/g, "-")}.json`), `${line}\n`);
 console.log(line);
