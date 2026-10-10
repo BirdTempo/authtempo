@@ -128,3 +128,68 @@ session lives `session.expiresIn`).
 Errors: `APIError` on the server and `error` on the client carry Better Auth's
 code (`body.code`, `error.code`) and core's HTTP status. The table is
 `BETTER_AUTH_CODES`.
+
+## Client
+
+`createAuthClient` from `better-auth/react` or `better-auth/client` talks to
+tempo-auth's routes under `basePath`. A hand-written `fetch` to a Better Auth
+path does not work. consumer-i's invite dialog posts to
+`/organization/invite-member`; call `authClient.organization.inviteMember`
+instead.
+
+These are every path that Better Auth 1.7.2 defines in `better-auth`
+(`dist/api/routes`, the organization and magic link plugins) and in
+`@better-auth/passkey` and `@better-auth/expo` (read 2026-10-10 from each
+`createAuthEndpoint` call). The handler serves none of them under its Better
+Auth request and answer shapes. It answers 404 for each, with two exceptions
+that are core's own routes (core `http/routes`, read 2026-10-10): `POST
+/sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
+core's magic link route, so a Better Auth-era link answers `invalid_token`.
+
+- Core: `/account-info`, `/callback/:id`, `/change-email`, `/change-password`,
+  `/delete-user`, `/delete-user/callback`, `/error`, `/get-access-token`,
+  `/get-session`, `/link-social`, `/list-accounts`, `/list-sessions`, `/ok`,
+  `/refresh-token`, `/request-password-reset`, `/reset-password`,
+  `/reset-password/:token`, `/revoke-other-sessions`, `/revoke-session`,
+  `/revoke-sessions`, `/send-verification-email`, `/sign-in/email`,
+  `/sign-in/social`, `/sign-out`, `/sign-up/email`, `/unlink-account`,
+  `/update-session`, `/update-user`, `/verify-email`, `/verify-password`.
+- Organization: `/organization/accept-invitation`, `/add-team-member`,
+  `/cancel-invitation`, `/check-slug`, `/create`, `/create-role`,
+  `/create-team`, `/delete`, `/delete-role`, `/get-active-member`,
+  `/get-active-member-role`, `/get-full-organization`, `/get-invitation`,
+  `/get-organization`, `/get-role`, `/has-permission`, `/invite-member`,
+  `/leave`, `/list`, `/list-invitations`, `/list-members`, `/list-roles`,
+  `/list-team-members`, `/list-teams`, `/list-user-invitations`,
+  `/list-user-teams`, `/reject-invitation`, `/remove-member`, `/remove-team`,
+  `/remove-team-member`, `/set-active`, `/set-active-team`, `/update`,
+  `/update-member-role`, `/update-role`, `/update-team` (each under
+  `/organization`).
+- Magic link: `/sign-in/magic-link`, `/magic-link/verify` (see above).
+- Passkey: `/passkey/delete-passkey`, `/passkey/generate-authenticate-options`,
+  `/passkey/generate-register-options`, `/passkey/list-user-passkeys`,
+  `/passkey/update-passkey`, `/passkey/verify-authentication`,
+  `/passkey/verify-registration`.
+- Expo: `/expo-authorization-proxy`.
+
+Results keep Better Auth's `{ data, error }` shape. `error.code` is Better
+Auth's code from `BETTER_AUTH_CODES`; `error.status` is tempo-auth's HTTP
+status. A password that core's policy refuses answers `PASSWORD_TOO_SHORT`
+below the server's `minPasswordLength`, `PASSWORD_TOO_LONG` over 128, and
+`INVALID_PASSWORD` otherwise. The server's handler names the case, so the
+client and `api` answer the same code.
+
+An absolute `callbackURL` or `redirectTo` keeps its path only when its origin
+is the page's origin, and the server's `tempoAuth.appURL` must be that
+origin, because core lands every sign-in on `appURL`. Any other absolute value
+answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL` with status 403, as
+Better Auth's origin check does. A trusted origin that is not `appURL` is
+refused too. In React Native there is no page origin, so use a path.
+
+On Expo, `expoClient({ scheme, storagePrefix, storage })` keeps the session
+token in `storage` and sends it as the bearer header. `getCookie()` answers
+`tempo_session=<token>`, which the server reads as the session cookie.
+`signIn.email` and `signUp.email` run in the app. `signIn.social` and
+`signIn.magicLink` run in the system browser through tempo-auth's handoff and
+need `webBrowser` (the `expo-web-browser` module) and `crypto` (the
+`expo-crypto` module) in `expoClient`; without them they answer `NOT_SUPPORTED`.

@@ -34,4 +34,17 @@ describe("the manifest", () => {
     const m = JSON.parse(manifest) as { dependencies: Record<string, string> };
     expect(m.dependencies).toEqual({ "@noble/hashes": "2.4.0" });
   });
+
+  it("maps every subpath export to a source file", () => {
+    const sources = Object.keys(import.meta.glob("../src/**/*.{ts,tsx}"));
+    const exports = (JSON.parse(manifest) as { exports: Record<string, { default: string }> })
+      .exports;
+    for (const [subpath, target] of Object.entries(exports)) {
+      const source = target.default.replace("./dist/", "../src/").replace(/\.js$/, ".ts");
+      expect({
+        subpath,
+        found: sources.includes(source) || sources.includes(`${source}x`),
+      }).toEqual({ subpath, found: true });
+    }
+  });
 });
