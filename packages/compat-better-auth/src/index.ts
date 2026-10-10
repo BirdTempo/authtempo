@@ -3,8 +3,10 @@
 
 export { type DrizzleAdapterConfig, drizzleAdapter } from "./adapters/drizzle.js";
 export { BetterAuthCompatError } from "./compat-error.js";
+export { APIError, BETTER_AUTH_CODES, NOT_SUPPORTED } from "./errors.js";
 export { betterAuthPasswordHash, SCRYPT, type ScryptFn } from "./hash.js";
 export { expo, passkey } from "./plugins.js";
+export { betterAuth } from "./server/better-auth.js";
 export {
   betterAuthSchemaStorage,
   type D1DatabaseLike,

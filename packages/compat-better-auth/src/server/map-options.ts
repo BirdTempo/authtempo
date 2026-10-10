@@ -1,0 +1,168 @@
+import type { AuthConfig, LimiterPort } from "@tempo-auth/core";
+import { betterAuthPasswordHash } from "../hash.js";
+import {
+  type BetterAuthOptions,
+  COMPAT_PLUGIN,
+  type CompatDatabase,
+  type CompatPlugin,
+} from "../types.js";
+import { pluginOf } from "./check-options.js";
+import { compatMail } from "./mail.js";
+import { COOKIE_NAME } from "./shapes.js";
+
+/** Better Auth 1.7's defaults (read in its source on 2026-10-10). They apply before the mapping. */
+export const BETTER_AUTH_DEFAULTS = {
+  sessionExpiresIn: 604_800,
+  sessionUpdateAge: 86_400,
+  resetPasswordTokenExpiresIn: 3_600,
+  minPasswordLength: 8,
+  magicLinkExpiresIn: 300,
+  emailVerificationExpiresIn: 3_600,
+  invitationExpiresIn: 172_800,
+  basePath: "/api/auth",
+} as const;
+
+const DAY = 86_400;
+
+export interface Mapped {
+  config: AuthConfig;
+  origin: string;
+  basePath: string;
+  /** The ids of the compat plugins in use. */
+  plugins: Set<string>;
+  clientIp: (request: Request) => string | null;
+  /** Where core lands a sign-in: `tempoAuth.appURL`, else the origin of baseURL. */
+  appOrigin: string;
+  /** `emailAndPassword.minPasswordLength` or Better Auth's default, for the length codes. */
+  minPasswordLength: number;
+}
+
+/**
+ * Core keys a per-IP limit as `<flow>:ip:<ip>`, and as `<flow>:ip:unknown`
+ * when the request has no client IP (every `limiter.allow` in core's
+ * engine/*.ts, read 2026-10-10). With `disableIpTracking`, or off Workers
+ * with no `ipAddressHeaders`, no request has one, so that one bucket would
+ * hold every caller and one person could lock every sign-in. The wrapper
+ * skips that key. The per-email and per-user limits stay. A flow name is
+ * lowercase letters and hyphens, so a per-email key never matches.
+ */
+const NO_IP_KEY = /^[a-z-]+:ip:unknown$/;
+
+export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
+  const sweep = limiter.sweep?.bind(limiter);
+  return {
+    allow: (key, window) =>
+      NO_IP_KEY.test(key) ? Promise.resolve(true) : limiter.allow(key, window),
+    ...(sweep ? { sweep } : {}),
+  };
+}
+
+/** The default reads `cf-connecting-ip`, as core does. Better Auth's own default (`x-forwarded-for`) is not copied: any caller sets it. */
+function clientIpOf(options: BetterAuthOptions): ((request: Request) => string | null) | null {
+  const ip = options.advanced?.ipAddress;
+  if (ip?.disableIpTracking === true) return () => null;
+  const headers = ip?.ipAddressHeaders;
+  if (!headers || headers.length === 0) return null;
+  return (request) => {
+    for (const h of headers) {
+      const first = request.headers.get(h)?.split(",")[0]?.trim();
+      if (first) return first;
+    }
+    return null;
+  };
+}
+
+/** Runs after checkOptions found no refusal, so every value here has its checked type. */
+export function mapOptions(options: BetterAuthOptions): Mapped {
+  const url = new URL(options.baseURL ?? "");
+  const path = url.pathname.replace(/\/+$/, "");
+  const basePath = options.basePath ?? (path || BETTER_AUTH_DEFAULTS.basePath);
+  const origin = url.origin;
+  const database = options.database as CompatDatabase;
+  const plugins = new Set(
+    (options.plugins ?? [])
+      .filter((p) => (p as CompatPlugin).kind === COMPAT_PLUGIN)
+      .map((p) => p.id),
+  );
+  const magic = pluginOf(options, "magic-link");
+  const org = pluginOf(options, "organization");
+  const ttlSeconds = magic
+    ? (magic.options.expiresIn ?? BETTER_AUTH_DEFAULTS.magicLinkExpiresIn)
+    : (options.emailVerification?.expiresIn ?? BETTER_AUTH_DEFAULTS.emailVerificationExpiresIn);
+  const sameSite = options.advanced?.defaultCookieAttributes?.sameSite?.toLowerCase();
+  const clientIp = clientIpOf(options);
+  const google = options.socialProviders?.google;
+  const apple = options.socialProviders?.apple;
+  const ep = options.emailAndPassword;
+  const config: AuthConfig = {
+    baseURL: origin,
+    basePath,
+    secret: options.secret ?? "",
+    trustedOrigins: Array.isArray(options.trustedOrigins) ? [...options.trustedOrigins] : [],
+    ...(options.appName !== undefined ? { appName: options.appName } : {}),
+    ...(options.tempoAuth?.appURL !== undefined ? { appURL: options.tempoAuth.appURL } : {}),
+    // One name in this package (shapes.ts), passed to core, so core and the shim read one cookie.
+    cookieName: COOKIE_NAME,
+    storage: database.storage,
+    limiter: skipUnknownIp(database.limiter),
+    mail: compatMail({
+      origin,
+      basePath,
+      storage: database.storage,
+      sendResetPassword: ep?.sendResetPassword,
+      sendVerificationEmail: options.emailVerification?.sendVerificationEmail,
+      sendMagicLink: magic?.options.sendMagicLink,
+      sendInvitationEmail: org?.options.sendInvitationEmail,
+    }),
+    ...(clientIp ? { clientIp } : {}),
+    ...(sameSite
+      ? { cookie: { sameSite: sameSite === "none" ? ("None" as const) : ("Lax" as const) } }
+      : {}),
+    session: {
+      ttlDays: (options.session?.expiresIn ?? BETTER_AUTH_DEFAULTS.sessionExpiresIn) / DAY,
+      slidingRefreshDays:
+        (options.session?.updateAge ?? BETTER_AUTH_DEFAULTS.sessionUpdateAge) / DAY,
+    },
+    magicLink: { ttlMinutes: ttlSeconds / 60 },
+    ...(google || apple
+      ? {
+          social: {
+            ...(google
+              ? { google: { clientId: google.clientId, clientSecret: google.clientSecret } }
+              : {}),
+            ...(apple
+              ? {
+                  apple: {
+                    clientId: apple.clientId,
+                    teamId: apple.teamId ?? "",
+                    keyId: apple.keyId ?? "",
+                    privateKey: apple.privateKey ?? "",
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
+    ...(ep?.enabled === true
+      ? {
+          password: {
+            hash: options.tempoAuth?.passwordHash ?? betterAuthPasswordHash(),
+            minLength: ep.minPasswordLength ?? BETTER_AUTH_DEFAULTS.minPasswordLength,
+            resetTtlMinutes:
+              (ep.resetPasswordTokenExpiresIn ?? BETTER_AUTH_DEFAULTS.resetPasswordTokenExpiresIn) /
+              60,
+          },
+        }
+      : {}),
+    // Task 8: passkey, handoff, and organizations from the plugins.
+  };
+  return {
+    config,
+    origin,
+    basePath,
+    plugins,
+    clientIp: clientIp ?? ((r) => r.headers.get("cf-connecting-ip") || null),
+    appOrigin: options.tempoAuth?.appURL ?? origin,
+    minPasswordLength: ep?.minPasswordLength ?? BETTER_AUTH_DEFAULTS.minPasswordLength,
+  };
+}

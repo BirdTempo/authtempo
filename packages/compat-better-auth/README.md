@@ -97,3 +97,34 @@ other names, write the file from `storage.migrationSql()` or
 `storage.migrationSql("before-1.7")`. Dates are
 ISO 8601 text and booleans are 1 and 0, as Better Auth's Kysely adapter writes
 them. A Drizzle SQLite schema with integer timestamps is not supported.
+
+## What fails at start
+
+`betterAuth(options)` checks every option against an allow list. One
+`BetterAuthCompatError` lists every option, plugin, and provider that
+tempo-auth cannot keep, so the app fails at start and never at run time. The
+error's `refusals` holds the list. Options that change only speed, such as
+`session.cookieCache`, are accepted and log one line.
+
+Better Auth's defaults apply: a session lives 7 days and refreshes after 1 day,
+a reset link lives 1 hour, a magic link 5 minutes, an invitation 2 days.
+
+Better Auth defaults that core does not keep:
+
+| Better Auth default | tempo-auth |
+| --- | --- |
+| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers. A request with no client IP (all requests under `disableIpTracking: true`, which logs a note) skips the per-IP limits and keeps the per-email limits, so callers never share one bucket. |
+| An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `tempoAuth.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
+| A reset keeps the other sessions | A reset ends every session. |
+| The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. |
+
+Call arguments with no effect: `callbackURL` on `signUpEmail` and
+`signUp.email` (core's verify link lands on the app origin), `rememberMe` (every
+session lives `session.expiresIn`).
+
+`api.sendVerificationEmail` and `authClient.sendVerificationEmail` answer
+`NOT_SUPPORTED` with status 501: core has no resend route until plan 8b.
+
+Errors: `APIError` on the server and `error` on the client carry Better Auth's
+code (`body.code`, `error.code`) and core's HTTP status. The table is
+`BETTER_AUTH_CODES`.
