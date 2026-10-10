@@ -279,7 +279,7 @@ factory prints without them.
 
 consumere (small edits):
 - Remove `secondaryStorage` and `session.storeSessionInDatabase: false`. Sessions move into a `session` table. Create it, and the `organization`, `member`, `invitation`, and `passkey` tables, with Better Auth's own SQL before migration 0001.
-- Remove `databaseHooks`. To store no IP, keep `advanced.ipAddress.disableIpTracking: true`; the factory logs a note: the per-IP limits are skipped, and the per-email limits stay. Core stores the user agent; the hook that dropped it has no replacement until plan 9d.
+- Remove `databaseHooks`. To store no IP, keep `advanced.ipAddress.disableIpTracking: true`; the factory logs a note. For a request with no client IP, only the password sign-in, the magic link, and the reset request skip the per-IP limit and keep the per-email limit. Every other flow keeps core's shared bucket. Core stores the user agent; the hook that dropped it has no replacement until plan 9d.
 - Remove GitHub and LinkedIn from `socialProviders` until plan 9c.
 - Run Drizzle on postgres.js (`drizzle-orm/postgres-js`), not on Neon's driver.
 - `sendVerificationEmail` answers NOT_SUPPORTED until plan 8b.
@@ -293,6 +293,6 @@ consumer-i (small edits):
 
 consumerc (follow-ups first): `hooks`, `databaseHooks`, and `organizationHooks` (plan 9d); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts`; the `getSchema()` test.
 
-consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (plan 9d), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, the rate limit storage.
+consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (plan 9d), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, `membershipLimit`, the rate limit storage.
 
-consumerb (follow-ups first): API keys (plan 8b), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, the `.well-known` routes.
+consumerb (follow-ups first): API keys (plan 8b), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes.
