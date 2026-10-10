@@ -7,6 +7,7 @@ import {
 } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { sessionRoutes } from "../src/http/routes/sessions.js";
+import { readSessionToken as publicReadSessionToken } from "../src/index.js";
 import { get, makeAuth, post } from "./helpers.js";
 
 const DAY = 86_400_000;
@@ -136,6 +137,13 @@ describe("sessions engine", () => {
     ).toBe("ts_c");
     expect(readSessionToken(config, get("/x", { authorization: "Basic abc" }))).toBeNull();
     expect(readSessionToken(config, get("/x"))).toBeNull();
+  });
+
+  it("exports the reader from the package root for a caller with only headers (plan 9 Task 4)", () => {
+    const read = (h: Record<string, string>) =>
+      publicReadSessionToken({ cookieName: "tempo_session" }, { headers: new Headers(h) });
+    expect(read({ cookie: "tempo_session=ts_c", authorization: "Bearer ts_b" })).toBe("ts_c");
+    expect(read({ authorization: "Bearer ts_b" })).toBe("ts_b");
   });
 });
 

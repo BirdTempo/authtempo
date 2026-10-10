@@ -25,7 +25,7 @@ export type {
   PasswordVerify,
 } from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
-export type { PublicSession, ResolvedSession } from "./engine/sessions.js";
+export { type PublicSession, type ResolvedSession, readSessionToken } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
 export { ERRORS, type ErrorCode } from "./errors.js";

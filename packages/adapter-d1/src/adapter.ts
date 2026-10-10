@@ -10,6 +10,7 @@ import {
   type Statement,
   selectStatement,
   TABLES,
+  undoCreateWhere,
   updateStatement,
 } from "@tempo-auth/core/sql";
 import { toStorageError } from "./errors.js";
@@ -109,12 +110,14 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       } catch (e) {
         throw toStorageError(model, e) ?? e;
       }
-      ctx.undo?.push({
-        model,
-        op: "create",
-        sql: `DELETE FROM ${TABLES[model]} WHERE id = ?`,
-        params: [(data as { id: string }).id],
-      });
+      if (ctx.undo) {
+        // The undo deletes `undoCreateWhere(...)`: a user created unverified
+        // only while it is still unverified, so an owner's claim inside this
+        // open transaction keeps its row (plan 8 I-1, plan 9 Task 4).
+        const u = deleteStatement(SQLITE, model, undoCreateWhere(model, data));
+        if (!u) throw new Error("undoCreate: an eq filter always compiles");
+        ctx.undo.push({ model, op: "create", ...u });
+      }
       return structuredClone(data);
     },
     async findOne(model, where) {

@@ -103,16 +103,18 @@ export async function passwordSignUp(
       created = await insertSignUp(config, input, { email, name: name ?? null, hash }, now);
     } catch (err) {
       // A concurrent sign-up or sign-in created the user between our read
-      // and our create. Caught here, outside: inside, Postgres has already
-      // aborted the transaction. Run once more, so the read finds the
-      // winner's row and the answer follows the rules for an existing user:
-      // `email_taken_unverified` tells an unverified social winner's owner
-      // to use the magic link.
+      // and our create, or (on D1) an owner's reset wrote this user's
+      // password row between our two creates and verified the user. Caught
+      // here, outside: inside, Postgres has already aborted the transaction.
+      // Run once more, so the read finds the winner's row and the answer
+      // follows the rules for an existing user: `email_taken_unverified`
+      // tells an unverified social winner's owner to use the magic link,
+      // and the owner's verified user answers `email_taken`.
       if (
         attempt === 0 &&
         err instanceof StorageError &&
         err.code === "unique_violation" &&
-        err.model === "user"
+        (err.model === "user" || err.model === "password")
       )
         continue;
       throw err;
@@ -142,30 +144,30 @@ function insertSignUp(
       const has = await tx.findOne("password", [{ field: "userId", op: "eq", value: existing.id }]);
       return fail(has ? "email_taken" : "email_taken_unverified");
     }
-    // The password row first, the user row second. Both get the user id
-    // drawn here (the schema has no foreign key). On D1 an owner's reset
-    // can run inside this open transaction. Before the user create, the
-    // reset finds no user, so it makes its own user and cannot see this
-    // password row. The user create then fails with unique_violation, and
-    // the undo deletes only this password row, by id. The retry reads the
-    // owner's verified user and answers `email_taken`. With the opposite
-    // order the reset writes a password row for this user first, the
-    // password create fails, and the undo deletes the owner's user row by
-    // id. Checked 2026-10-10.
-    const userId = newId(now);
-    const password = await tx.create("password", {
-      id: newId(now),
-      userId,
-      hash: row.hash,
-      createdAt: now,
-      updatedAt: now,
-    });
+    // The user row first, the password row second. The password row's
+    // `userId` can carry a foreign key to the user row (Better Auth's
+    // `account.userId` does, plan 9), and the database checks it at once.
+    // On D1 an owner's reset can run inside this open transaction, between
+    // the two creates: it finds this unverified user, writes the owner's
+    // password row for it, and verifies it in its claim. The password create
+    // then fails with unique_violation on `userId`. The undo of the user
+    // create deletes the row only while `emailVerified` is false
+    // (`undoCreateWhere`), so the owner's verified user stays, and the retry
+    // reads it and answers `email_taken`. Postgres isolates the transaction,
+    // so the order is no guard there. Checked 2026-10-10.
     const user = await tx.create("user", {
-      id: userId,
+      id: newId(now),
       email: row.email,
       emailVerified: false,
       name: row.name,
       image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const password = await tx.create("password", {
+      id: newId(now),
+      userId: user.id,
+      hash: row.hash,
       createdAt: now,
       updatedAt: now,
     });
@@ -176,12 +178,12 @@ function insertSignUp(
     );
     // claimEmail flips the flag in its first statement, so any claim since
     // the user create makes this match zero rows. The user row is the
-    // owner's now. A throw would undo the user create, and the D1 undo
-    // deletes the user row by id with no check: the owner's email identity
-    // and session would point to no user. So delete the own session and the
-    // own password row by id, and commit. When it matches one row it is the
-    // last statement, so no undo runs after it, and a later claim deletes
-    // the password row and the session. Checked 2026-10-10.
+    // owner's now. A throw would undo the password create, and the D1 undo
+    // deletes that row by id: after an owner's reset it holds the owner's
+    // hash. So delete the own session and the own password row by id and
+    // hash, and commit. When it matches one row it is the last statement, so
+    // no undo runs after it, and a later claim deletes the password row and
+    // the session. Checked 2026-10-10.
     // The password delete also matches the hash this sign-up wrote. An
     // owner's reset keeps this row id and writes the owner's hash into it,
     // and that row must stay.
