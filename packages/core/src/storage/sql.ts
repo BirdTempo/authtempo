@@ -436,8 +436,20 @@ export interface SqlStatements {
    * table set must keep the same rule.
    */
   undoCreate<M extends ModelName>(model: M, data: Models[M]): Statement;
-  /** D1 undo of an update: every raw column of `row` written back by id. */
-  restoreRow(model: ModelName, row: Record<string, unknown>): Statement;
+  /**
+   * D1 undo of an update. `row` is the raw row that `undoSelect` read before
+   * the update, and `data` is the update's data. The undo writes back by id
+   * only the columns that `data` set. On D1 another request can change other
+   * columns of the row inside the open transaction (an owner's claim sets
+   * `emailVerified`), and the undo must keep that change. A statement for
+   * another table set must keep the same rule. Plan 9 final review M-1
+   * (R-1), 2026-10-10.
+   */
+  restoreRow<M extends ModelName>(
+    model: M,
+    row: Record<string, unknown>,
+    data: Partial<Omit<Models[M], "id">>,
+  ): Statement;
   /** D1 undo of a delete: the raw row inserted again. */
   reinsertRow(model: ModelName, row: Record<string, unknown>): Statement;
   /** A delete inside a D1 transaction, with RETURNING of every raw column the undo needs. */
@@ -470,9 +482,12 @@ export function coreStatements(d: Dialect): SqlStatements {
       if (!s) throw new Error("undoCreate: an eq filter always compiles");
       return s;
     },
-    restoreRow(model, row) {
-      // Rebuild the full row from the raw columns: an UPDATE of every column by id.
-      const cols = Object.keys(row).filter((c) => c !== "id");
+    restoreRow(model, row, data) {
+      // Only the columns the update set, through the same field-to-column
+      // map as `updateStatement`, by id. See the interface comment.
+      const fields = Object.keys(data);
+      assertFields(model, fields);
+      const cols = fields.map(columnName);
       return {
         sql: `UPDATE ${TABLES[model]} SET ${cols.map((c, i) => `${c} = ${d.placeholder(i + 1)}`).join(", ")} WHERE id = ${d.placeholder(cols.length + 1)}`,
         params: [...cols.map((c) => row[c]), row.id],

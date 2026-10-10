@@ -61,7 +61,8 @@ function complete(auth: ReturnType<typeof socialAuth>, s: Awaited<ReturnType<typ
  * rows, and a throw runs this transaction's own undo log in reverse, as the
  * D1 adapter does. The undo of a create deletes `undoCreateWhere(...)`, the
  * D1 adapter's rule: a user created unverified only while it is still
- * unverified. A nested call shares the log and a throw reverses only its own
+ * unverified. The undo of an update writes back only the fields the update
+ * set, the D1 adapter's rule too. A nested call shares the log and a throw reverses only its own
  * entries. A failed entry does not stop the rest. When any entry fails, the
  * throw is one rollback_failed error with `{ original, failures }` as its
  * cause and `<model>:<op>` for each failed entry, as the D1 adapter's
@@ -106,12 +107,18 @@ function d1Like(config: ResolvedConfig): ResolvedConfig {
         async update(model, where, data) {
           const before = await raw.findMany(model, where);
           const n = await raw.update(model, where, data);
+          // The D1 adapter's rule (`SqlStatements.restoreRow`): the undo
+          // writes back only the fields the update set, so a claim that
+          // changed another field inside this transaction stays.
+          const fields = Object.keys(data);
           for (const row of before) {
-            const { id, ...rest } = row as unknown as { id: string } & Record<string, unknown>;
+            const all = row as unknown as { id: string } & Record<string, unknown>;
+            const back = Object.fromEntries(fields.map((f) => [f, all[f]]));
             log.push({
               model,
               op: "update",
-              run: () => raw.update(model, [{ field: "id", op: "eq", value: id }], rest as never),
+              run: () =>
+                raw.update(model, [{ field: "id", op: "eq", value: all.id }], back as never),
             });
           }
           return n;
@@ -1565,6 +1572,61 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
     expect(await auth.storage.findMany("password", [])).toEqual([]);
     expect(auth.mail).toHaveLength(1);
+  });
+});
+
+describe("an update undo restores only the columns the update set (plan 9 final review M-1, R-1)", () => {
+  it("keeps the owner's verified user and session when the sign-up's activation throws after the owner's claim", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await magicLinkToken(auth);
+    const claimantConfig = d1Like(auth.config);
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    // The sign-up's first user update is the guard. Its undo entry holds the
+    // user row with `emailVerified` false. The owner's claim runs just after it.
+    const gate = interleaveAfterUpdate(claimantConfig.storage, "user", async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+    // The activation, the sign-up's password update, throws once, as a
+    // transient D1 error does. The undo log then runs.
+    const transient = new Error("transient D1 error");
+    const original = claimantConfig.storage.transaction.bind(claimantConfig.storage);
+    let thrown = false;
+    claimantConfig.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>) =>
+      original((tx) =>
+        fn({
+          ...tx,
+          update: async (m, w, d) => {
+            if (m === "password" && !thrown) {
+              thrown = true;
+              throw transient;
+            }
+            return tx.update(m, w, d);
+          },
+        }),
+      );
+
+    const err = await passwordSignUp(claimantConfig, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    }).catch((e: unknown) => e);
+    expect(gate.fired()).toBe(true);
+    expect(thrown).toBe(true);
+    expect(err).toBe(transient);
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const users = await auth.storage.findMany("user", []);
+    expect(users.map((u) => [u.id, u.emailVerified])).toEqual([[proved.value.user.id, true]]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => [x.userId, x.tokenHash])).toEqual([
+      [proved.value.user.id, await sha256Hex(proved.value.token)],
+    ]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
   });
 });
 
