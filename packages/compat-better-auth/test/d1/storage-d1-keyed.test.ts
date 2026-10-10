@@ -133,4 +133,28 @@ describe("the Better Auth foreign keys on D1", () => {
     ).toBe(1);
     expect([await count('"account"'), await count('"session"')]).toEqual([0, 0]);
   });
+
+  it("restores only the columns an update set, so a claim's emailVerified stays (final review M-1)", async () => {
+    const s = storage().storage;
+    await s.create("user", {
+      id: "u1",
+      email: "a@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    await expect(
+      s.transaction(async (tx) => {
+        expect(await tx.update("user", [eq("id", "u1")], { updatedAt: later })).toBe(1);
+        // Another request, outside this transaction: an owner's claim verifies the row.
+        await env.DB.prepare(`UPDATE "user" SET "emailVerified" = 1 WHERE "id" = 'u1'`).run();
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    const back = await s.findOne("user", [eq("id", "u1")]);
+    expect(back?.updatedAt).toEqual(at);
+    expect(back?.emailVerified).toBe(true);
+  });
 });

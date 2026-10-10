@@ -103,6 +103,47 @@ describe("betterAuthPasswordHash", () => {
     expect(scrypt).toHaveBeenCalledTimes(6);
   });
 
+  it("frees the gate slot of a derive that throws, so a later verify still runs (final review L-4)", async () => {
+    const finish: Array<() => void> = [];
+    let calls = 0;
+    const scrypt = vi.fn((_pw: Uint8Array, _salt: Uint8Array) => {
+      const id = calls++;
+      // Derives 0 and 1 fill the gate. Derive 2 throws. Derive 3 answers at once.
+      if (id === 2) return Promise.reject(new Error("out of memory"));
+      if (id === 3) return Promise.resolve(new Uint8Array(64));
+      return new Promise<Uint8Array>((resolve) => {
+        finish[id] = () => resolve(new Uint8Array(64));
+      });
+    });
+    const seam = betterAuthPasswordHash({ pbkdf2: fast, scrypt });
+    const held = [seam.verify("pw", VECTOR.hash), seam.verify("pw", VECTOR.hash)];
+    await vi.waitFor(() => expect(finish).toHaveLength(2));
+    const thrown = seam.verify("pw", VECTOR.hash);
+    // Derive 0 ends and hands its slot to derive 2, which throws.
+    finish[0]?.();
+    expect(await thrown).toEqual({ ok: false, rehash: false });
+    // Derive 1 still holds one slot. The slot of derive 2 must be free.
+    let completed = false;
+    const later = seam.verify("pw", VECTOR.hash).then((r) => {
+      completed = true;
+      return r;
+    });
+    await vi.waitFor(() => expect(completed).toBe(true));
+    expect(await later).toEqual({ ok: false, rehash: false });
+    finish[1]?.();
+    await Promise.all(held);
+    expect(scrypt).toHaveBeenCalledTimes(4);
+  });
+
+  it("answers ok false with no derive for a pending$ row, also with a real PBKDF2 string after the prefix (final review L-1)", async () => {
+    const scrypt = vi.fn(nobleScrypt);
+    const seam = betterAuthPasswordHash({ pbkdf2: fast, scrypt });
+    const stored = await fast.hash("x");
+    expect(await seam.verify("x", stored)).toEqual({ ok: true, rehash: false });
+    expect(await seam.verify("x", `pending$${stored}`)).toEqual({ ok: false, rehash: false });
+    expect(scrypt).toHaveBeenCalledTimes(0);
+  });
+
   it("hashes and verifies new passwords through the PBKDF2 seam", async () => {
     const seam = betterAuthPasswordHash({ pbkdf2: fast });
     const stored = await seam.hash("new horse battery");

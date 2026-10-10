@@ -120,8 +120,15 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     if (v !== null) {
       if (type === "boolean") v = typeof v === "number" ? v !== 0 : v === true;
       else if (type === "date") v = new Date(v as string);
-      else if (type === "json") v = typeof v === "string" ? JSON.parse(v) : v;
-      else if (type === "integer") v = typeof v === "string" ? Number(v) : v;
+      else if (type === "json") {
+        // App SQL can write any text here. Name the model and the field, as
+        // for any other value core cannot read (final review L-10).
+        try {
+          v = typeof v === "string" ? JSON.parse(v) : v;
+        } catch {
+          throw new StorageError("schema_mismatch", model, [field]);
+        }
+      } else if (type === "integer") v = typeof v === "string" ? Number(v) : v;
       if ((codec === "nullAsEmpty" || codec === "emptyAsNull") && v === "") v = null;
       else if (codec === "base64Std") v = base64StdToUrl(v as string);
     }
@@ -331,13 +338,26 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       if (!s) throw new Error("undoCreate: an eq filter always compiles");
       return s;
     },
-    restoreRow(model, row) {
+    restoreRow(model, row, data) {
       // The row comes from SELECT *, so its keys are the DDL's spelling. On
-      // SQLite that can differ in case from the configured id name.
-      const t = MAP[model].table;
+      // SQLite that can differ in case from the configured names.
+      const map = MAP[model];
+      const t = map.table;
       const idKey =
         Object.keys(row).find((c) => fieldOfRaw(t, c) === "id") ?? names.rawColumn(t, "id");
-      const cols = Object.keys(row).filter((c) => c !== idKey);
+      // Core's rule (`SqlStatements.restoreRow`): only the columns the update
+      // set, the column of each field of `data` and each `updateExtras`
+      // column, so a claim's change to another column stays (final review M-1).
+      const set = [
+        ...Object.keys(data).map((f) => map.fields[f]?.column ?? f),
+        ...Object.keys(map.updateExtras?.(data as Row) ?? {}),
+      ];
+      const cols = set.map((f) => {
+        const c = Object.keys(row).find((k) => k !== idKey && fieldOfRaw(t, k) === f);
+        // The update wrote this column, so the SELECT * before it read it.
+        if (c === undefined) throw new StorageError("schema_mismatch", model, [f]);
+        return c;
+      });
       return {
         sql: `UPDATE ${table(model)} SET ${cols.map((c, i) => `${quoteRaw(c)} = ${d.placeholder(i + 1)}`).join(", ")} WHERE ${column(model, "id")} = ${d.placeholder(cols.length + 1)}`,
         params: [...cols.map((c) => row[c]), row[idKey]],

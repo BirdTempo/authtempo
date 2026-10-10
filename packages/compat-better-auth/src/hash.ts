@@ -16,8 +16,10 @@ export type ScryptFn = (password: Uint8Array, salt: Uint8Array) => Promise<Uint8
 
 /**
  * Pure JavaScript, so a Worker needs no nodejs_compat (plan 9 deviation 3).
- * One derive needs 32 MiB and more CPU than a PBKDF2 verify; it runs once
- * per legacy user, and the sign-in then writes PBKDF2.
+ * One derive needs 32 MiB and more CPU than a PBKDF2 verify. One derive runs
+ * on each sign-in against a legacy row, wrong passwords included, until a
+ * right sign-in rehashes the row to PBKDF2. The memory gate below bounds the
+ * derives that run at once.
  */
 export const nobleScrypt: ScryptFn = (password, salt) =>
   scryptAsync(password, salt, { ...SCRYPT, maxmem: MAXMEM });

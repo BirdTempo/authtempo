@@ -339,6 +339,16 @@ describe("the Better Auth mapping on postgres", () => {
     );
   });
 
+  it("answers schema_mismatch on metadata for an organization row that holds text that is not JSON (L-10)", async () => {
+    await raw(`UPDATE "organization" SET "metadata" = 'not json' WHERE "id" = 'ba-o'`);
+    const err = await db.findOne("organization", [eq("id", "ba-o")]).catch((e: unknown) => e);
+    expect(err).toMatchObject({
+      code: "schema_mismatch",
+      model: "organization",
+      fields: ["metadata"],
+    });
+  });
+
   it("reads a member row and an account row that another writer adds after the migration (I-1)", async () => {
     // An old replica during the deploy, or the app's own SQL, writes Better Auth's columns only.
     await raw(`
