@@ -4,6 +4,8 @@
 // It also delivers a URL off the redirect, which the opener must drop.
 // Each pass writes its JSON line to results/electron-macos-<date>.json, a new file each time. It
 // never overwrites a file: results/electron-macos.json is the committed record of the first pass.
+// biome.json skips every proof/results folder. A record is append-only evidence, written as the
+// proof printed it, so no formatter may ask for an edit of it. (biome.json takes no comments.)
 // After the cleanup, the result notes whether LaunchServices still keeps a handler preference for
 // example-app. Unregistering the bundle does not remove it (macOS 27.0, 2026-10-10).
 import { execFileSync, spawn } from "node:child_process";
