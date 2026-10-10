@@ -92,7 +92,7 @@ export default {
     }
     if (url.pathname === "/__test/compat-last-link") {
       if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
-      return Response.json({ link: compatLastLink() });
+      return Response.json({ link: compatLastLink(url.searchParams.get("to") ?? "") });
     }
     return new Response("not found", { status: 404 });
   },

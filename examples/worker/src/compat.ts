@@ -8,11 +8,12 @@ import { bearer, expo, organization } from "@tempo-auth/compat-better-auth/plugi
 import { createPbkdf2PasswordHash } from "@tempo-auth/core";
 
 let compat: BetterAuthInstance | null = null;
-let lastLink: string | null = null;
+// Keyed by the address, so a test reads only its own mail, whatever ran before it.
+const lastLinks = new Map<string, string>();
 
-/** The last URL a compat send callback received, for the test. The example has no mail transport. */
-export function compatLastLink(): string | null {
-  return lastLink;
+/** The last URL a compat send callback received for this address, for the test. The example has no mail transport. */
+export function compatLastLink(to: string): string | null {
+  return lastLinks.get(to.toLowerCase()) ?? null;
 }
 
 /**
@@ -22,8 +23,8 @@ export function compatLastLink(): string | null {
  */
 export function getCompat(env: Env): BetterAuthInstance {
   if (compat) return compat;
-  const record = async (data: { url: string }) => {
-    lastLink = data.url;
+  const record = async (data: { user: { email: string }; url: string }) => {
+    lastLinks.set(data.user.email.toLowerCase(), data.url);
   };
   compat = betterAuth({
     baseURL: env.BASE_URL,
@@ -51,7 +52,7 @@ export function getCompat(env: Env): BetterAuthInstance {
       organization({
         // data.id is the invitation token: the app builds its accept link from it.
         sendInvitationEmail: async (data) => {
-          lastLink = `invitation:${data.id}`;
+          lastLinks.set(data.email.toLowerCase(), `invitation:${data.id}`);
         },
       }),
     ],
