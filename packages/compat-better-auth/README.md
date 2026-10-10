@@ -47,6 +47,11 @@ refuses its plugin by id at construction.
 | `@better-auth/passkey` | `.` (`passkey`) |
 | `@better-auth/passkey/client` | `./client` (`passkeyClient`) |
 
+The package exports no other subpath. An import of `better-auth/api`,
+`better-auth/db`, `better-auth/types`, `better-auth/plugins/access`, or
+`better-auth/plugins/organization/access` fails at build. consumerc, consumerd,
+and consumerb import some of them: remove those imports first.
+
 ## Passwords from Better Auth
 
 `betterAuthPasswordHash` verifies a Better Auth scrypt hash and rewrites it as
@@ -88,6 +93,9 @@ What changes at cutover:
 - Users, Google and Apple accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The `ta_meta` and `ta_limit` tables go in the first schema of the search path, also when the Better Auth tables sit in another schema.
 - A passkey counter above 2147483647 fails: Better Auth's `counter` column is `integer`.
+- The session cookie is `tempo_session`, not `better-auth.session_token`. App code, tests, and legal pages that name the old cookie must change. For example, consumer-i's site lists `__Secure-better-auth.session_token` in its cookie text (`apps/site/test/legal.test.ts`).
+- Better Auth-era `account` rows of providers that core does not serve, such as GitHub and LinkedIn, stay in the table. Core reads them as identities of their users, so a claim of the address deletes them as it deletes any identity other than the proving one.
+- A credential row (`providerId` `credential`) with a null `account.password` answers `schema_mismatch`, so sign-in and reset for that address answer 500. Better Auth 1.7.2 never writes that row. Give the row a hash or delete it before cutover. A plan 9b input.
 
 On D1, `drizzleAdapter(db, { provider: "sqlite" })` needs `drizzle-orm/d1`, and
 `betterAuthSchemaStorage({ dialect: "d1", db: env.DB })` takes the binding.
@@ -125,6 +133,16 @@ timestamp columns. The storage also refuses every call with `schema_mismatch`
 while `account` has no unique index on (issuer, accountId): the 1.7 file uses
 Better Auth's own index and adds none.
 
+A Better Auth date in SQLite's `YYYY-MM-DD HH:MM:SS` form has no time zone.
+On Workers it reads as UTC. Off Workers, for example in a Node test of the
+same code, it reads as local time.
+
+These D1 facts come from the local Workers pool only and are not verified on
+a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound
+SELECT, the PRAGMA column names, the rollback of a failed migration file, and
+the time of the one date scan statement on a large table (it can reach D1's
+per-query limit). A plan 9b input verifies them on a real D1 database.
+
 ## What fails at start
 
 `betterAuth(options)` checks every option against an allow list. One
@@ -140,10 +158,11 @@ Better Auth defaults that core does not keep:
 
 | Better Auth default | tempo-auth |
 | --- | --- |
-| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, and the reset request, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
+| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, and the reset request, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
 | An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `tempoAuth.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
+| An organization stops at 100 members and 100 pending invitations when `membershipLimit` and `invitationLimit` are absent | Core has no count limit. Only core's per-inviter rate limit applies. The factory logs a note at start when the organization plugin is on. |
 | `trustedOrigins` takes a function and wildcards such as `https://*.example.com` | Each entry is an exact origin (`https://app.example.com`, no path or trailing slash) or an app scheme (`myapp://`). Any other entry is refused at start. |
 
 Call arguments that core cannot keep: on the server, `api.signUpEmail` with
@@ -308,11 +327,11 @@ consumer-i (small edits):
 - The invite dialog posts to `/api/auth/organization/invite-member` by hand. Call `authClient.organization.inviteMember` instead.
 - Add the `passkey` table. Migration 0001 adds and fills `account.issuer` on Postgres (consumer-i's tables are from before Better Auth 1.7).
 
-consumerc (follow-ups first): `hooks`, `databaseHooks`, and `organizationHooks` (plan 9d); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts`; the `getSchema()` test.
+consumerc (follow-ups first): `hooks`, `databaseHooks`, and `organizationHooks` (plan 9d); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts`; the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `databaseHooks`, `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].organizationHooks`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
 consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (plan 9d), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, `membershipLimit`, the rate limit storage.
 The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[email-otp]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].membershipLimit`, `plugins[organization].organizationHooks`, `plugins[organization].organizationLimit`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
 
-consumerb (follow-ups first): API keys (plan 8b), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes.
+consumerb (follow-ups first): API keys (plan 8b), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.requireEmailVerification`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].organizationHooks`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
