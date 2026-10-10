@@ -135,7 +135,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
         throw ctx.toStorageError(model, e) ?? e;
       }
       for (const row of results[0]?.results ?? [])
-        ctx.undo.push({ model, op: "update", ...st.restoreRow(model, row) });
+        ctx.undo.push({ model, op: "update", ...st.restoreRow(model, row, data) });
       return results[1]?.meta.changes ?? 0;
     },
     async delete(model, where) {

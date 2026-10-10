@@ -207,3 +207,23 @@ describe("a password sign-up on D1 while the owner resets the password (plan 8 I
     });
   });
 });
+
+describe("the D1 undo of an update (plan 9 final review M-1, R-1)", () => {
+  it("restores only the columns the update set and keeps a column another request changed", async () => {
+    const db = createD1Adapter(env.DB);
+    await db.create("user", user("u1", false));
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("user", byId("u1"), { name: "Ada" });
+        // Another request, outside this transaction: an owner's claim verifies the row.
+        await env.DB.prepare(`UPDATE ${TABLES.user} SET email_verified = 1 WHERE id = ?`)
+          .bind("u1")
+          .run();
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    const back = await db.findOne("user", byId("u1"));
+    expect(back?.name).toBeNull();
+    expect(back?.emailVerified).toBe(true);
+  });
+});
