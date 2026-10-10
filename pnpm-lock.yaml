@@ -199,9 +199,21 @@ importers:
       '@tempo-auth/adapter-d1':
         specifier: workspace:*
         version: link:../../packages/adapter-d1
+      '@tempo-auth/adapter-postgres':
+        specifier: workspace:*
+        version: link:../../packages/adapter-postgres
+      '@tempo-auth/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@tempo-auth/compat-better-auth':
+        specifier: workspace:*
+        version: link:../../packages/compat-better-auth
       '@tempo-auth/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@tempo-auth/handoff':
+        specifier: workspace:*
+        version: link:../../packages/handoff
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
@@ -209,12 +221,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
-      '@tempo-auth/client':
-        specifier: workspace:*
-        version: link:../../packages/client
-      '@tempo-auth/handoff':
-        specifier: workspace:*
-        version: link:../../packages/handoff
       typescript:
         specifier: 7.0.2
         version: 7.0.2
