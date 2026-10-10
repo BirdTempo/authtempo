@@ -133,11 +133,37 @@ describe("betterAuth", () => {
     ).toBe("198.51.100.7");
   });
 
+  it("answers null for a listed IP header value that is not an IPv4 or IPv6 literal (M-6)", () => {
+    const list = mapOptions({
+      baseURL: BASE,
+      secret: "x".repeat(32),
+      database: memoryDatabase(),
+      advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } },
+    });
+    const ipOf = (v: string) => list.clientIp(new Request(BASE, { headers: { "x-real-ip": v } }));
+    expect([ipOf("unknown"), ipOf("not-an-ip"), ipOf("1".repeat(300)), ipOf("256.1.1.1")]).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect([ipOf("203.0.113.9"), ipOf("2001:db8::1")]).toEqual(["203.0.113.9", "2001:db8::1"]);
+  });
+
+  it("notes the verify link lifetime when the magic link plugin is on and no verify lifetime is set (M-1)", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    app({ plugins: [magicLink({ sendMagicLink: async () => {} })] });
+    expect(info).toHaveBeenCalledWith(
+      "tempo-auth compat: emailVerification.expiresIn: not set: the verify link lives 300 s, the magic link's lifetime, not Better Auth's verify default of 3600 s",
+    );
+    info.mockRestore();
+  });
+
   it("skips the per-IP limits with a note under disableIpTracking, and keeps the per-email limits", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ advanced: { ipAddress: { disableIpTracking: true } } });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: the per-IP limits are skipped; the per-email limits stay",
+      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket",
     );
     info.mockRestore();
     const m = mapOptions({
@@ -149,9 +175,13 @@ describe("betterAuth", () => {
     const limiter = m.config.limiter as LimiterPort;
     const w = { seconds: 60, max: 1 };
     const twice = async (key: string) => [await limiter.allow(key, w), await limiter.allow(key, w)];
-    // Never one shared bucket for every caller with no IP.
+    // No shared bucket for the flows that keep a per-email limit.
     expect(await twice("password:ip:unknown")).toEqual([true, true]);
     expect(await twice("magic-link:ip:unknown")).toEqual([true, true]);
+    expect(await twice("password-reset:ip:unknown")).toEqual([true, true]);
+    // A flow with only a per-IP limit keeps core's shared bucket (review I-2).
+    expect(await twice("password-sign-up:ip:unknown")).toEqual([true, false]);
+    expect(await twice("invitation-accept:ip:unknown")).toEqual([true, false]);
     expect(await twice("password:email:a@example.com")).toEqual([true, false]);
     expect(await twice("password:ip:203.0.113.1")).toEqual([true, false]);
   });
@@ -385,14 +415,15 @@ describe("the mail routes through compatMail (fix round 1: I-1, M-7)", () => {
 describe("withPolicyCode on the reset and change routes (M-7)", () => {
   it("adds the length code on /password/reset (field password)", async () => {
     const { auth, sent } = app();
+    // Too long, not too short: a wrong field name reads "" and answers PASSWORD_TOO_SHORT.
     await auth.api.signUpEmail({
       body: { email: "a@example.com", password: "correct horse battery", name: "A" },
     });
     await auth.handler(json("/password/reset/request", { email: "a@example.com" }));
     const token = sent.find((m) => m.kind === "reset")?.data.token ?? "";
-    const res = await auth.handler(json("/password/reset", { token, password: "ten chars!" }));
+    const res = await auth.handler(json("/password/reset", { token, password: "x".repeat(129) }));
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "password_policy", code: "PASSWORD_TOO_SHORT" });
+    expect(await res.json()).toEqual({ error: "password_policy", code: "PASSWORD_TOO_LONG" });
   });
 
   it("adds the length code on /password/change (field newPassword)", async () => {

@@ -45,13 +45,18 @@ export interface Mapped {
 /**
  * Core keys a per-IP limit as `<flow>:ip:<ip>`, and as `<flow>:ip:unknown`
  * when the request has no client IP (every `limiter.allow` in core's
- * engine/*.ts, read 2026-10-10). With `disableIpTracking`, or off Workers
- * with no `ipAddressHeaders`, no request has one, so that one bucket would
- * hold every caller and one person could lock every sign-in. The wrapper
- * skips that key. The per-email and per-user limits stay. A flow name is
- * lowercase letters and hyphens, so a per-email key never matches.
+ * engine/*.ts, read 2026-10-10). With `disableIpTracking`, a server call
+ * with no headers, or off Workers with no `ipAddressHeaders`, a request has
+ * none, so that one bucket holds every such caller and one person could
+ * lock every sign-in. The wrapper skips that key only for the flows that
+ * also have a per-email limit: `password` (sign-in, `password:email:`),
+ * `magic-link` (`magic-link:email:`), and `password-reset` (the reset
+ * request, `password-reset:email:`). Every other flow (sign-up, the reset
+ * POST, invitation accept, handoff, passkey, social start) has only the
+ * per-IP limit, so it keeps core's shared unknown bucket: without it such a
+ * flow has no limit at all (review I-2).
  */
-const NO_IP_KEY = /^[a-z-]+:ip:unknown$/;
+const NO_IP_KEY = /^(password|magic-link|password-reset):ip:unknown$/;
 
 export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
   const sweep = limiter.sweep?.bind(limiter);
@@ -60,6 +65,26 @@ export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
       NO_IP_KEY.test(key) ? Promise.resolve(true) : limiter.allow(key, window),
     ...(sweep ? { sweep } : {}),
   };
+}
+
+const IPV4_PART = "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const IPV4 = new RegExp(`^${IPV4_PART}(\\.${IPV4_PART}){3}$`);
+
+/**
+ * True for an IPv4 or IPv6 literal. A listed header may carry any text the
+ * caller sends; the value becomes part of a limiter key, so `unknown` would
+ * match the skip key above and a long string would grow the key set
+ * (review M-6). The URL parser checks the IPv6 form.
+ */
+export function isIpLiteral(value: string): boolean {
+  if (IPV4.test(value)) return true;
+  if (!value.includes(":") || !/^[0-9a-fA-F:.]+$/.test(value)) return false;
+  try {
+    new URL(`http://[${value}]/`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The default reads `cf-connecting-ip`, as core does. Better Auth's own default (`x-forwarded-for`) is not copied: any caller sets it. */
@@ -71,7 +96,8 @@ function clientIpOf(options: BetterAuthOptions): ((request: Request) => string |
   return (request) => {
     for (const h of headers) {
       const first = request.headers.get(h)?.split(",")[0]?.trim();
-      if (first) return first;
+      // A value that is not an IP literal answers null, not the next header.
+      if (first) return isIpLiteral(first) ? first : null;
     }
     return null;
   };

@@ -115,14 +115,20 @@ Better Auth defaults that core does not keep:
 
 | Better Auth default | tempo-auth |
 | --- | --- |
-| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers. A request with no client IP (all requests under `disableIpTracking: true`, which logs a note) skips the per-IP limits and keeps the per-email limits, so callers never share one bucket. |
+| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, and the reset request, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
 | An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `tempoAuth.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
-| The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. |
+| The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
+| `trustedOrigins` takes a function and wildcards such as `https://*.example.com` | Each entry is an exact origin (`https://app.example.com`, no path or trailing slash) or an app scheme (`myapp://`). Any other entry is refused at start. |
 
-Call arguments with no effect: `callbackURL` on `signUpEmail` and
-`signUp.email` (core's verify link lands on the app origin), `rememberMe` (every
-session lives `session.expiresIn`).
+Call arguments that core cannot keep: on the server, `api.signUpEmail` with
+`callbackURL` or `image`, and `api.signInEmail` with `callbackURL` or
+`rememberMe`, throw `APIError` `NOT_SUPPORTED` with status 501. Core's verify
+link lands on the app origin, and every session lives `session.expiresIn`. On
+the client, `callbackURL` on `signUp.email` and `rememberMe` have no effect.
+
+An invitation has two ids. The mail id (`data.id` in `sendInvitationEmail`)
+accepts the invitation, and the row id (from `api.createInvitation`) cancels it.
 
 `api.sendVerificationEmail` and `authClient.sendVerificationEmail` answer
 `NOT_SUPPORTED` with status 501: core has no resend route until plan 8b.

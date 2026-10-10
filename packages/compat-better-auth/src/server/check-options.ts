@@ -162,9 +162,29 @@ const TOP: Record<string, Rule> = {
   basePath: string,
   secret: string,
   trustedOrigins: (v, p, out) => {
-    if (typeof v === "function")
+    if (typeof v === "function") {
       refuse(out, p, "a function is refused; pass a list of exact origins");
-    else stringList(v, p, out);
+      return;
+    }
+    stringList(v, p, out);
+    if (!Array.isArray(v)) return;
+    // Core matches the Origin header by exact set membership, and throws on a
+    // wildcard after this check (core config.ts). An entry with a path or a
+    // trailing slash never matches, so every browser POST from it answers 403.
+    v.forEach((x, i) => {
+      if (typeof x !== "string" || isAppScheme(x)) return;
+      let origin = "";
+      try {
+        origin = new URL(x).origin;
+      } catch {}
+      // The URL parser accepts `*` in a host, so a wildcard needs its own test.
+      if (origin !== x || x.includes("*"))
+        refuse(
+          out,
+          `${p}[${i}]`,
+          "expected an exact origin (scheme://host[:port], no path or trailing slash) or an app scheme (myapp://); Better Auth's wildcard form (https://*.example.com) is refused",
+        );
+    });
   },
   database: (v, p, out) => {
     if ((v as { kind?: unknown } | null)?.kind !== "tempo-auth-compat-database") {
@@ -212,6 +232,8 @@ const TOP: Record<string, Rule> = {
       if (name === "google") google(config, `${p}.google`, out);
       else if (name === "apple") {
         apple(config, `${p}.apple`, out);
+        // A null or non-object entry is refused above: read its keys only on an object.
+        if (typeof config !== "object" || config === null) continue;
         const a = config as Record<string, unknown>;
         if (!a.teamId || !a.keyId || !a.privateKey)
           refuse(out, `${p}.apple`, "needs teamId, keyId, and privateKey");
@@ -229,7 +251,11 @@ const TOP: Record<string, Rule> = {
       ipAddressHeaders: stringList,
       disableIpTracking: (v, p, out) => {
         if (v === true)
-          note(out, p, "accepted: the per-IP limits are skipped; the per-email limits stay");
+          note(
+            out,
+            p,
+            "accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket",
+          );
         else if (v !== false) refuse(out, p, "expected a boolean");
       },
     }),
@@ -279,6 +305,8 @@ export function pluginOf<I extends CompatPlugin["id"]>(
   id: I,
 ): Extract<CompatPlugin, { id: I }> | null {
   for (const p of options.plugins ?? []) {
+    // A null entry is refused by the plugins rule; the lookup must not throw on it.
+    if (typeof p !== "object" || p === null) continue;
     if ((p as CompatPlugin).kind === COMPAT_PLUGIN && p.id === id)
       return p as Extract<CompatPlugin, { id: I }>;
   }
@@ -287,13 +315,15 @@ export function pluginOf<I extends CompatPlugin["id"]>(
 
 /** An app scheme in trustedOrigins (`reception://`). The one copy: the check and the mapping use it. */
 const APP_SCHEME = /^[a-z][a-z0-9+.-]*:\/\/$/;
+/** An app scheme entry, not a bare http:// or https://. The exact-origin rule and appSchemes use it. */
+function isAppScheme(x: string): boolean {
+  return APP_SCHEME.test(x) && x !== "http://" && x !== "https://";
+}
 
 /** The app schemes of trustedOrigins, which core's handoff redirects to. */
 export function appSchemes(options: BetterAuthOptions): string[] {
   const list = Array.isArray(options.trustedOrigins) ? options.trustedOrigins : [];
-  return list.filter(
-    (o) => typeof o === "string" && APP_SCHEME.test(o) && o !== "http://" && o !== "https://",
-  );
+  return list.filter((o) => typeof o === "string" && isAppScheme(o));
 }
 
 /** The allow list (spec 16.1). Pure: no I/O, no throw. */
@@ -347,6 +377,15 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
       out,
       "emailVerification.expiresIn",
       "core gives the verify link the magic link's lifetime",
+    );
+  }
+  // Better Auth's verify link lives 3600 s by default. Core gives it the magic
+  // link's lifetime, so say so when the app set no verify lifetime (review M-1).
+  if (magic && verifyTtl === undefined && options.emailAndPassword?.enabled === true) {
+    note(
+      out,
+      "emailVerification.expiresIn",
+      `not set: the verify link lives ${magic.expiresIn ?? 300} s, the magic link's lifetime, not Better Auth's verify default of 3600 s`,
     );
   }
   const pk = pluginOf(options, "passkey")?.options;

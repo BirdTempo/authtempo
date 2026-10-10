@@ -150,6 +150,8 @@ describe("checkOptions: the allow list fails closed", () => {
         "socialProviders.google.prompt",
       ],
       [{ ...base, telemetry: { enabled: false, debug: true } }, "telemetry.debug"],
+      [{ ...base, socialProviders: { apple: null } }, "socialProviders.apple"],
+      [{ ...base, plugins: [null] }, "plugins[unknown]"],
     ] as const) {
       expect(paths(checkOptions(options as never).refusals)).toEqual([path]);
     }
@@ -184,5 +186,32 @@ describe("checkOptions: the allow list fails closed", () => {
       "plugins[passkey].rpID: required",
       "plugins[passkey].rpName: required",
     ]);
+  });
+
+  it("refuses a trustedOrigins function and each entry that is not an exact origin or an app scheme (M-2)", () => {
+    expect(checkOptions({ ...base, trustedOrigins: () => [] }).refusals).toEqual([
+      "trustedOrigins: a function is refused; pass a list of exact origins",
+    ]);
+    const c = checkOptions({
+      ...base,
+      trustedOrigins: [
+        "https://app.example.com",
+        "http://localhost:3000",
+        "app://",
+        "https://*.example.com",
+        "https://app.example.com/",
+        "https://app.example.com/path",
+        "https://",
+      ],
+    });
+    expect(paths(c.refusals)).toEqual([
+      "trustedOrigins[3]",
+      "trustedOrigins[4]",
+      "trustedOrigins[5]",
+      "trustedOrigins[6]",
+    ]);
+    expect(c.refusals[0]).toContain(
+      "Better Auth's wildcard form (https://*.example.com) is refused",
+    );
   });
 });
