@@ -16,6 +16,7 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@tempo-auth/adapter-postgres` | Storage on Postgres through postgres.js. `nodejs_compat` on Workers. |
 | `@tempo-auth/client` | The app side: `createClient` calls the routes and returns typed results. It runs in a browser, Expo, and Electron. |
 | `@tempo-auth/handoff` | Native and desktop sign-in through the system browser, with openers for Expo and Electron. |
+| `@tempo-auth/compat-better-auth` | Runs a Better Auth 1.7 app on tempo-auth through a package alias, on the app's own Better Auth tables. Fails at start on an option core cannot keep. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
 The example pins `@cloudflare/vitest-plugin` 1.4.0 and runs vitest 5.0.3, the same as core.
@@ -41,6 +42,7 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
 - Every token is stored as a SHA-256 hash. The clear token appears once.
 - A password row is a credential under the claim rule: a proof of an unverified address deletes it, except the row the verify link confirms.
 - A magic link is single use. Two clicks race for one conditional update.
+- A compatibility package never widens a promise of core: an option that core cannot keep stops the factory at construction, and the one error lists every such option.
 - A `next` path must start with `/` and not `//`. Anything else becomes `/`.
 - The core runs on Workers with no compatibility flag. The example Worker
   has none, and its test fails if the core gains a Node dependency.
