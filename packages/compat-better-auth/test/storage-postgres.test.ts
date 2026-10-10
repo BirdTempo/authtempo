@@ -10,6 +10,7 @@ import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { type AnyModelMap, issuerFor, MAPPING } from "../src/storage/mapping.js";
+import { compatMigrationSql } from "../src/storage/migration.js";
 import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG, withoutForeignKeys } from "./fixtures.js";
@@ -392,6 +393,11 @@ describe("the compat migration on postgres", () => {
     }
   });
 
+  it('sorts the issuer index columns in byte order with COLLATE "C" (L-5)', () => {
+    // The musl Postgres image of the tests sorts the same without it, so only the text can fail.
+    expect(compatMigrationSql("postgres", resolveNames())).toContain('COLLATE "C"');
+  });
+
   it("refuses a date column without a time zone", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
@@ -602,6 +608,45 @@ describe("the compat migration and core's own write paths on postgres", () => {
       password: { hash: fast },
       organizations: {},
     });
+
+  it("runs core's magic link sign-in for a new address on the tables with their foreign keys (L-9)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await s.migrate();
+      const mail: string[] = [];
+      const auth = createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [],
+        storage: s.storage,
+        limiter: s.limiter,
+        mail: { send: async (m) => void mail.push(m.text) },
+      });
+      expect((await auth.api.requestMagicLink({ email: "link@example.com", ip: null })).ok).toBe(
+        true,
+      );
+      const token = /token=([A-Za-z0-9_%-]+)/.exec(mail.at(-1) ?? "")?.[1];
+      if (!token) throw new Error("no token in mail");
+      const r = await auth.api.verifyMagicLink({
+        token: decodeURIComponent(token),
+        ip: null,
+        userAgent: null,
+      });
+      expect(r.ok).toBe(true);
+      const users = await pg.sql.unsafe<{ id: string }[]>(
+        'SELECT "id" FROM "user" WHERE "email" = $1',
+        ["link@example.com"],
+      );
+      expect(users).toHaveLength(1);
+      const accounts = await pg.sql.unsafe<{ providerId: string; userId: string }[]>(
+        'SELECT "providerId", "userId" FROM "account"',
+      );
+      expect(accounts).toEqual([{ providerId: "email", userId: users[0]?.id }]);
+    } finally {
+      await pg.close();
+    }
+  });
 
   it("runs core's email sign-up on the tables with their foreign keys (M-2)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
