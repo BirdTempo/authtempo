@@ -256,3 +256,30 @@ export function postgresCompatReady(sql: Sql): () => Promise<void> {
     () => read(COMPAT_META_KEY),
   );
 }
+
+interface D1Readable {
+  prepare(query: string): {
+    bind(...values: unknown[]): { first(column: string): Promise<unknown> };
+  };
+}
+
+/** Only "no such table" reads as "no version"; any other D1 error passes through. */
+export function d1CompatReady(db: unknown): () => Promise<void> {
+  const d1 = db as D1Readable;
+  const read = async (key: string) => {
+    try {
+      const v = await d1
+        .prepare(`SELECT value FROM ${META_TABLE} WHERE key = ?`)
+        .bind(key)
+        .first("value");
+      return typeof v === "string" ? v : null;
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("no such table")) return null;
+      throw e;
+    }
+  };
+  return compatVersionGate(
+    () => read(SCHEMA_VERSION_KEY),
+    () => read(COMPAT_META_KEY),
+  );
+}

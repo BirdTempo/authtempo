@@ -86,3 +86,14 @@ What changes at cutover:
 - Users, Google and Apple accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The `ta_meta` and `ta_limit` tables go in the first schema of the search path, also when the Better Auth tables sit in another schema.
 - A passkey counter above 2147483647 fails: Better Auth's `counter` column is `integer`.
+
+On D1, `drizzleAdapter(db, { provider: "sqlite" })` needs `drizzle-orm/d1`, and
+`betterAuthSchemaStorage({ dialect: "d1", db: env.DB })` takes the binding.
+Copy `node_modules/@tempo-auth/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`
+into the app's `migrations_dir` after the Better Auth table migration. For
+tables from before Better Auth 1.7 (no `account.issuer` column), copy the file
+of the same name from `migrations/d1-before-1.7/` instead. For tables with
+other names, write the file from `storage.migrationSql()` or
+`storage.migrationSql("before-1.7")`. Dates are
+ISO 8601 text and booleans are 1 and 0, as Better Auth's Kysely adapter writes
+them. A Drizzle SQLite schema with integer timestamps is not supported.

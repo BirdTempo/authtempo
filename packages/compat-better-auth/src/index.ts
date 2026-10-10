@@ -7,6 +7,9 @@ export { betterAuthPasswordHash, SCRYPT, type ScryptFn } from "./hash.js";
 export { expo, passkey } from "./plugins.js";
 export {
   betterAuthSchemaStorage,
+  type D1DatabaseLike,
+  type D1SchemaStorage,
+  type D1SchemaStorageOptions,
   type PostgresSchemaStorage,
   type PostgresSchemaStorageOptions,
 } from "./storage/index.js";

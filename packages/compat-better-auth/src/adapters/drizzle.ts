@@ -1,6 +1,6 @@
 import type { Sql } from "postgres";
 import { BetterAuthCompatError } from "../compat-error.js";
-import { betterAuthSchemaStorage } from "../storage/index.js";
+import { betterAuthSchemaStorage, type D1DatabaseLike } from "../storage/index.js";
 import {
   BETTER_AUTH_TABLES,
   type BetterAuthTable,
@@ -81,6 +81,15 @@ export function namesFromDrizzle(
   };
 }
 
+function isD1(c: unknown): c is D1DatabaseLike {
+  return (
+    typeof c === "object" &&
+    c !== null &&
+    typeof (c as { prepare?: unknown }).prepare === "function" &&
+    typeof (c as { batch?: unknown }).batch === "function"
+  );
+}
+
 function isPostgresJs(c: unknown): c is Sql {
   return (
     typeof c === "function" &&
@@ -111,6 +120,15 @@ export function drizzleAdapter(
       ]);
     }
     return betterAuthSchemaStorage({ dialect: "postgres", sql: db.$client, ...naming });
+  }
+  if (config.provider === "sqlite") {
+    if (!isD1(db.$client)) {
+      throw new BetterAuthCompatError([
+        "database: drizzleAdapter needs a Drizzle database on D1 (drizzle-orm/d1); other SQLite drivers are refused",
+      ]);
+    }
+    const { pgSchema: _, ...d1Naming } = naming;
+    return betterAuthSchemaStorage({ dialect: "d1", db: db.$client, ...d1Naming });
   }
   throw new BetterAuthCompatError([
     `database.provider: "${config.provider}" is refused; tempo-auth runs on Postgres and D1`,
