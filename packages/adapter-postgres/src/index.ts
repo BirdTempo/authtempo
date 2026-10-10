@@ -1,12 +1,19 @@
 import type { StorageAdapter } from "@tempo-auth/core";
+import { coreStatements, POSTGRES } from "@tempo-auth/core/sql";
 import type { Sql } from "postgres";
-import { createPostgresAdapterWith } from "./adapter.js";
+import { createPostgresAdapterOn } from "./adapter.js";
+import { toStorageError } from "./errors.js";
 import { schemaVersionCheck } from "./schema-version.js";
 
 export function createPostgresAdapter(sql: Sql): StorageAdapter {
-  return createPostgresAdapterWith(sql, schemaVersionCheck(sql));
+  return createPostgresAdapterOn(sql, {
+    statements: coreStatements(POSTGRES),
+    toStorageError,
+    ready: schemaVersionCheck(sql),
+  });
 }
 
+export { createPostgresAdapterOn, type PostgresAdapterOptions } from "./adapter.js";
 export { toStorageError } from "./errors.js";
 export { createPostgresLimiter } from "./limiter.js";
 export { applyPostgresMigrations, MIGRATIONS, type Migration } from "./migrations.js";

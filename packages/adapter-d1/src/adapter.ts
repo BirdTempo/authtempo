@@ -1,19 +1,6 @@
 import type { ModelName, StorageAdapter } from "@tempo-auth/core";
 import { StorageError } from "@tempo-auth/core";
-import {
-  assertModel,
-  columnsOf,
-  decodeRow,
-  deleteStatement,
-  insertStatement,
-  SQLITE,
-  type Statement,
-  selectStatement,
-  TABLES,
-  undoCreateWhere,
-  updateStatement,
-} from "@tempo-auth/core/sql";
-import { toStorageError } from "./errors.js";
+import { assertModel, type SqlStatements, type Statement } from "@tempo-auth/core/sql";
 
 type Row = Record<string, unknown>;
 
@@ -31,10 +18,16 @@ interface Undo extends Statement {
   op: "create" | "update" | "delete";
 }
 
-interface Ctx {
-  undo: Undo[] | null;
+/** What the adapter runs. `createD1Adapter` passes core's statements; plan 9's compatibility storage passes its own. */
+export interface D1AdapterOptions {
+  statements: SqlStatements;
+  toStorageError(model: ModelName, err: unknown): StorageError | null;
   /** The schema version check, run once per adapter. */
-  ready: () => Promise<void>;
+  ready(): Promise<void>;
+}
+
+interface Ctx extends D1AdapterOptions {
+  undo: Undo[] | null;
 }
 
 async function run(db: D1Database, s: Statement): Promise<D1Result<Row>> {
@@ -50,23 +43,6 @@ async function all(db: D1Database, s: Statement): Promise<Row[]> {
     .bind(...s.params)
     .all<Row>();
   return res.results;
-}
-
-function restoreRowStatement(model: ModelName, row: Row): Statement {
-  // Rebuild the full row from the raw columns: an UPDATE of every column by id.
-  const cols = Object.keys(row).filter((c) => c !== "id");
-  return {
-    sql: `UPDATE ${TABLES[model]} SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`,
-    params: [...cols.map((c) => row[c]), row.id],
-  };
-}
-
-function reinsertRowStatement(model: ModelName, row: Row): Statement {
-  const cols = Object.keys(row);
-  return {
-    sql: `INSERT INTO ${TABLES[model]} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
-    params: cols.map((c) => row[c]),
-  };
 }
 
 /**
@@ -100,54 +76,54 @@ async function rethrowAfterUndo(
 }
 
 function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
+  const st = ctx.statements;
   const self: StorageAdapter = {
     async create(model, data) {
       await ctx.ready();
       assertModel(model);
-      const s = insertStatement(SQLITE, model, data);
+      const s = st.insert(model, data);
       try {
         await run(db, s);
       } catch (e) {
-        throw toStorageError(model, e) ?? e;
+        throw ctx.toStorageError(model, e) ?? e;
       }
       if (ctx.undo) {
-        // The undo deletes `undoCreateWhere(...)`: a user created unverified
-        // only while it is still unverified, so an owner's claim inside this
-        // open transaction keeps its row (plan 8 I-1, plan 9 Task 4).
-        const u = deleteStatement(SQLITE, model, undoCreateWhere(model, data));
-        if (!u) throw new Error("undoCreate: an eq filter always compiles");
-        ctx.undo.push({ model, op: "create", ...u });
+        // The undo keeps the rule of `undoCreateWhere`: a user created
+        // unverified is deleted only while it is still unverified, so an
+        // owner's claim inside this open transaction keeps its row (plan 8
+        // I-1, plan 9 Task 4).
+        ctx.undo.push({ model, op: "create", ...st.undoCreate(model, data) });
       }
       return structuredClone(data);
     },
     async findOne(model, where) {
       await ctx.ready();
-      const s = selectStatement(SQLITE, model, where, { limit: 1 });
+      const s = st.select(model, where, { limit: 1 });
       if (!s) return null;
       const rows = await all(db, s);
-      return rows[0] ? decodeRow(SQLITE, model, rows[0]) : null;
+      return rows[0] ? st.decode(model, rows[0]) : null;
     },
     async findMany(model, where, opts) {
       await ctx.ready();
-      const s = selectStatement(SQLITE, model, where, opts);
+      const s = st.select(model, where, opts);
       if (!s) return [];
-      return (await all(db, s)).map((r) => decodeRow(SQLITE, model, r));
+      return (await all(db, s)).map((r) => st.decode(model, r));
     },
     async update(model, where, data) {
       await ctx.ready();
-      const s = updateStatement(SQLITE, model, where, data);
+      const s = st.update(model, where, data);
       if (!s) return 0;
       if (!ctx.undo) {
         try {
           return (await run(db, s)).meta.changes;
         } catch (e) {
-          throw toStorageError(model, e) ?? e;
+          throw ctx.toStorageError(model, e) ?? e;
         }
       }
       // The prior read and the write run in one batch, which D1 applies as one
       // unit. The prior set is then exactly the changed set, so a rollback
       // never overwrites a row that another request wrote in between.
-      const sel = selectStatement(SQLITE, model, where);
+      const sel = st.undoSelect(model, where);
       if (!sel) return 0;
       let results: D1Result<Row>[];
       try {
@@ -156,25 +132,25 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
           db.prepare(s.sql).bind(...s.params),
         ]);
       } catch (e) {
-        throw toStorageError(model, e) ?? e;
+        throw ctx.toStorageError(model, e) ?? e;
       }
       for (const row of results[0]?.results ?? [])
-        ctx.undo.push({ model, op: "update", ...restoreRowStatement(model, row) });
+        ctx.undo.push({ model, op: "update", ...st.restoreRow(model, row) });
       return results[1]?.meta.changes ?? 0;
     },
     async delete(model, where) {
       await ctx.ready();
-      const s = deleteStatement(SQLITE, model, where);
-      if (!s) return 0;
-      if (!ctx.undo) return (await run(db, s)).meta.changes;
+      if (!ctx.undo) {
+        const s = st.delete(model, where);
+        if (!s) return 0;
+        return (await run(db, s)).meta.changes;
+      }
       // RETURNING gives the exact rows this statement removed, in one statement.
-      const returning = {
-        sql: `${s.sql} RETURNING ${columnsOf(model).join(", ")}`,
-        params: s.params,
-      };
+      // An impossible where (an empty `in`) answers null here as in `delete`.
+      const returning = st.deleteReturning(model, where);
+      if (!returning) return 0;
       const rows = await all(db, returning);
-      for (const row of rows)
-        ctx.undo.push({ model, op: "delete", ...reinsertRowStatement(model, row) });
+      for (const row of rows) ctx.undo.push({ model, op: "delete", ...st.reinsertRow(model, row) });
       return rows.length;
     },
     async transaction(fn) {
@@ -190,7 +166,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
           return rethrowAfterUndo(db, own, e);
         }
       }
-      const inner: Ctx = { undo: [], ready: ctx.ready };
+      const inner: Ctx = { ...ctx, undo: [] };
       const tx = adapterOn(db, inner);
       try {
         return await fn(tx);
@@ -202,8 +178,8 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
   return self;
 }
 
-export function createD1AdapterWith(db: D1Database, ready: () => Promise<void>): StorageAdapter {
-  return adapterOn(db, { undo: null, ready });
+export function createD1AdapterOn(db: D1Database, options: D1AdapterOptions): StorageAdapter {
+  return adapterOn(db, { ...options, undo: null });
 }
 
 export { StorageError };
