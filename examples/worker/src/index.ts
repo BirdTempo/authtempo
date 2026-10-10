@@ -1,5 +1,6 @@
 import { createD1Adapter, createD1Limiter } from "@tempo-auth/adapter-d1";
 import { type Auth, createAuth, createPbkdf2PasswordHash } from "@tempo-auth/core";
+import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 
 let lastLink: string | null = null;
@@ -76,6 +77,22 @@ export default {
     if (url.pathname === "/__test/last-link") {
       if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
       return Response.json({ link: lastLink });
+    }
+    // The Better Auth compatibility instance (plan 9) on BA_DB. Core's routes above do not change.
+    if (url.pathname.startsWith("/api/auth/")) return getCompat(env).handler(request);
+    if (url.pathname === "/compat/me") {
+      const s = await getCompat(env).api.getSession({ headers: request.headers });
+      if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
+      return Response.json({
+        id: s.user.id,
+        email: s.user.email,
+        name: s.user.name,
+        activeOrganizationId: s.session.activeOrganizationId,
+      });
+    }
+    if (url.pathname === "/__test/compat-last-link") {
+      if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+      return Response.json({ link: compatLastLink(url.searchParams.get("to") ?? "") });
     }
     return new Response("not found", { status: 404 });
   },

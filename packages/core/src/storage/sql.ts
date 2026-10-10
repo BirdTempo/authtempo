@@ -388,3 +388,121 @@ export function schemaVersionGate(read: () => Promise<string | null>): () => Pro
     return checked;
   };
 }
+
+/**
+ * The rows the D1 undo of a create may delete: the created row by id. A
+ * user created unverified is deleted only while `emailVerified` is still
+ * false. On D1 another request can claim that user inside the open
+ * transaction: an owner's magic link or reset verifies it and links the
+ * owner's identity, session, and password to it, and the undo must keep
+ * that row. A row created verified keeps the delete by id, because no claim
+ * changes it. The memory adapter runs one transaction at a time and Postgres
+ * isolates it, so neither runs this. Plan 9 Task 4, 2026-10-10.
+ */
+export function undoCreateWhere<M extends ModelName>(model: M, data: Models[M]): Where<M>[] {
+  const byId = { field: "id", op: "eq", value: (data as { id: string }).id } as Where<M>;
+  if (model === "user" && (data as Models["user"]).emailVerified === false)
+    return [byId, { field: "emailVerified", op: "eq", value: false } as Where<M>];
+  return [byId];
+}
+
+/**
+ * Every SQL string an adapter runs. Core's tables use `coreStatements`. A
+ * package that maps the models onto other tables (plan 9, the Better Auth
+ * compatibility package) passes its own, so the adapters' transaction code
+ * and the D1 undo log stay in one place. Not a promise of core: the storage
+ * port and the conformance suite are the contract.
+ */
+export interface SqlStatements {
+  insert<M extends ModelName>(model: M, data: Models[M]): Statement;
+  select<M extends ModelName>(
+    model: M,
+    where: Where<M>[],
+    opts?: FindManyOptions<M>,
+  ): Statement | null;
+  update<M extends ModelName>(
+    model: M,
+    where: Where<M>[],
+    data: Partial<Omit<Models[M], "id">>,
+  ): Statement | null;
+  delete<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
+  decode<M extends ModelName>(model: M, row: Record<string, unknown>): Models[M];
+  /** D1 undo of an update: the raw rows the update will change, read in the same batch. */
+  undoSelect<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
+  /**
+   * D1 undo of a create. `data` is the row the create wrote. The delete keeps
+   * the rule of `undoCreateWhere`: a user created unverified is deleted only
+   * while it is still unverified (plan 9 Task 4). A statement for another
+   * table set must keep the same rule.
+   */
+  undoCreate<M extends ModelName>(model: M, data: Models[M]): Statement;
+  /**
+   * D1 undo of an update. `row` is the raw row that `undoSelect` read before
+   * the update, and `data` is the update's data. The undo writes back by id
+   * only the columns that `data` set. On D1 another request can change other
+   * columns of the row inside the open transaction (an owner's claim sets
+   * `emailVerified`), and the undo must keep that change. A statement for
+   * another table set must keep the same rule. Plan 9 final review M-1
+   * (R-1), 2026-10-10.
+   */
+  restoreRow<M extends ModelName>(
+    model: M,
+    row: Record<string, unknown>,
+    data: Partial<Omit<Models[M], "id">>,
+  ): Statement;
+  /** D1 undo of a delete: the raw row inserted again. */
+  reinsertRow(model: ModelName, row: Record<string, unknown>): Statement;
+  /** A delete inside a D1 transaction, with RETURNING of every raw column the undo needs. */
+  deleteReturning<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
+}
+
+/** Core's own statements on the `ta_` tables. The D1 strings are the ones the adapter built before plan 9. */
+export function coreStatements(d: Dialect): SqlStatements {
+  return {
+    insert(model, data) {
+      return insertStatement(d, model, data);
+    },
+    select(model, where, opts) {
+      return selectStatement(d, model, where, opts);
+    },
+    update(model, where, data) {
+      return updateStatement(d, model, where, data);
+    },
+    delete(model, where) {
+      return deleteStatement(d, model, where);
+    },
+    decode(model, row) {
+      return decodeRow(d, model, row);
+    },
+    undoSelect(model, where) {
+      return selectStatement(d, model, where);
+    },
+    undoCreate(model, data) {
+      const s = deleteStatement(d, model, undoCreateWhere(model, data));
+      if (!s) throw new Error("undoCreate: an eq filter always compiles");
+      return s;
+    },
+    restoreRow(model, row, data) {
+      // Only the columns the update set, through the same field-to-column
+      // map as `updateStatement`, by id. See the interface comment.
+      const fields = Object.keys(data);
+      assertFields(model, fields);
+      const cols = fields.map(columnName);
+      return {
+        sql: `UPDATE ${TABLES[model]} SET ${cols.map((c, i) => `${c} = ${d.placeholder(i + 1)}`).join(", ")} WHERE id = ${d.placeholder(cols.length + 1)}`,
+        params: [...cols.map((c) => row[c]), row.id],
+      };
+    },
+    reinsertRow(model, row) {
+      const cols = Object.keys(row);
+      return {
+        sql: `INSERT INTO ${TABLES[model]} (${cols.join(", ")}) VALUES (${cols.map((_, i) => d.placeholder(i + 1)).join(", ")})`,
+        params: cols.map((c) => row[c]),
+      };
+    },
+    deleteReturning(model, where) {
+      const s = deleteStatement(d, model, where);
+      return s && { sql: `${s.sql} RETURNING ${columnsOf(model).join(", ")}`, params: s.params };
+    },
+  };
+}

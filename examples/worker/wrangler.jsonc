@@ -22,6 +22,15 @@
       // real app the path is node_modules/@tempo-auth/adapter-d1/migrations;
       // here the workspace link resolves to the same files.
       "migrations_dir": "../../packages/adapter-d1/migrations"
+    },
+    {
+      // The compat example: Better Auth 1.7's tables with tempo-auth in place (plan 9).
+      // A real app runs Better Auth's own table migration first, then this directory.
+      "binding": "BA_DB",
+      "database_name": "tempo-auth-example-better-auth",
+      // A placeholder for local tests, as for DB.
+      "database_id": "tempo-auth-example-better-auth",
+      "migrations_dir": "../../packages/compat-better-auth/migrations/d1"
     }
   ],
   // Expired magic link tokens, consumed tokens, and stale invitations pile up

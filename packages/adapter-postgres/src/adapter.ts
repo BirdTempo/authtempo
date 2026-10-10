@@ -1,24 +1,21 @@
-import type { StorageAdapter } from "@tempo-auth/core";
-import {
-  assertModel,
-  decodeRow,
-  deleteStatement,
-  insertStatement,
-  POSTGRES,
-  type Statement,
-  selectStatement,
-  updateStatement,
-} from "@tempo-auth/core/sql";
+import type { ModelName, StorageAdapter, StorageError } from "@tempo-auth/core";
+import { assertModel, type SqlStatements, type Statement } from "@tempo-auth/core/sql";
 import type { Sql, TransactionSql } from "postgres";
-import { toStorageError } from "./errors.js";
 
 type Row = Record<string, unknown>;
 type Conn = Sql | TransactionSql;
 
-interface Ctx {
+/** What the adapter runs. `createPostgresAdapter` passes core's statements; plan 9's compatibility storage passes its own. */
+export interface PostgresAdapterOptions {
+  statements: SqlStatements;
+  toStorageError(model: ModelName, err: unknown): StorageError | null;
+  /** The schema version check, run once per adapter. */
+  ready(): Promise<void>;
+}
+
+interface Ctx extends PostgresAdapterOptions {
   conn: Conn;
   inTransaction: boolean;
-  ready: () => Promise<void>;
 }
 
 async function query(conn: Conn, s: Statement): Promise<{ rows: Row[]; count: number }> {
@@ -34,38 +31,38 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await ctx.ready();
       assertModel(model);
       try {
-        await query(ctx.conn, insertStatement(POSTGRES, model, data));
+        await query(ctx.conn, ctx.statements.insert(model, data));
       } catch (e) {
-        throw toStorageError(model, e) ?? e;
+        throw ctx.toStorageError(model, e) ?? e;
       }
       return structuredClone(data);
     },
     async findOne(model, where) {
       await ctx.ready();
-      const s = selectStatement(POSTGRES, model, where, { limit: 1 });
+      const s = ctx.statements.select(model, where, { limit: 1 });
       if (!s) return null;
       const { rows } = await query(ctx.conn, s);
-      return rows[0] ? decodeRow(POSTGRES, model, rows[0]) : null;
+      return rows[0] ? ctx.statements.decode(model, rows[0]) : null;
     },
     async findMany(model, where, opts) {
       await ctx.ready();
-      const s = selectStatement(POSTGRES, model, where, opts);
+      const s = ctx.statements.select(model, where, opts);
       if (!s) return [];
-      return (await query(ctx.conn, s)).rows.map((r) => decodeRow(POSTGRES, model, r));
+      return (await query(ctx.conn, s)).rows.map((r) => ctx.statements.decode(model, r));
     },
     async update(model, where, data) {
       await ctx.ready();
-      const s = updateStatement(POSTGRES, model, where, data);
+      const s = ctx.statements.update(model, where, data);
       if (!s) return 0;
       try {
         return (await query(ctx.conn, s)).count;
       } catch (e) {
-        throw toStorageError(model, e) ?? e;
+        throw ctx.toStorageError(model, e) ?? e;
       }
     },
     async delete(model, where) {
       await ctx.ready();
-      const s = deleteStatement(POSTGRES, model, where);
+      const s = ctx.statements.delete(model, where);
       if (!s) return 0;
       return (await query(ctx.conn, s)).count;
     },
@@ -74,11 +71,11 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       if (ctx.inTransaction) {
         // A nested transaction is a savepoint on the same connection.
         return savepoint(ctx.conn as TransactionSql, (sp) =>
-          fn(adapterOn({ conn: sp, inTransaction: true, ready: ctx.ready })),
+          fn(adapterOn({ ...ctx, conn: sp, inTransaction: true })),
         );
       }
       return begin(ctx.conn as Sql, (tx) =>
-        fn(adapterOn({ conn: tx, inTransaction: true, ready: ctx.ready })),
+        fn(adapterOn({ ...ctx, conn: tx, inTransaction: true })),
       );
     },
   };
@@ -96,6 +93,6 @@ async function savepoint<T>(
   return (await tx.savepoint(fn)) as T;
 }
 
-export function createPostgresAdapterWith(sql: Sql, ready: () => Promise<void>): StorageAdapter {
-  return adapterOn({ conn: sql, inTransaction: false, ready });
+export function createPostgresAdapterOn(sql: Sql, options: PostgresAdapterOptions): StorageAdapter {
+  return adapterOn({ ...options, conn: sql, inTransaction: false });
 }

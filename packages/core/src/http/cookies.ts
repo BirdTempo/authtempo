@@ -13,7 +13,8 @@ export function clearSessionCookie(name: string, sameSite: SameSite): string {
   return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=${sameSite}`;
 }
 
-export function readCookie(request: Request, name: string): string | null {
+/** Only the headers are read, so a caller with a `Headers` and no `Request` can pass `{ headers }`. */
+export function readCookie(request: Pick<Request, "headers">, name: string): string | null {
   const header = request.headers.get("cookie");
   if (!header) return null;
   for (const part of header.split(";")) {

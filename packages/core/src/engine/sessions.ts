@@ -97,8 +97,16 @@ export async function destroySession(config: ResolvedConfig, token: string): Pro
   ]);
 }
 
-/** The cookie wins over the bearer header, so a web page cannot be overridden by a stray header. */
-export function readSessionToken(config: ResolvedConfig, request: Request): string | null {
+/**
+ * The cookie wins over the bearer header, so a web page cannot be overridden by a stray header.
+ * Public from `@tempo-auth/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
+ * the session token with this function, so the cookie and bearer rule has one copy. It reads
+ * only `cookieName` and the headers, so the shim passes `{ cookieName }` and `{ headers }`.
+ */
+export function readSessionToken(
+  config: Pick<ResolvedConfig, "cookieName">,
+  request: Pick<Request, "headers">,
+): string | null {
   const cookie = readCookie(request, config.cookieName);
   if (cookie) return cookie;
   const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");

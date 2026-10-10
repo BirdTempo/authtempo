@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tempo-auth-compat-better-auth-test",
+  "compatibility_date": "2026-09-30",
+  // No compatibility_flags on purpose: the compat package must run without nodejs_compat (plan 9 deviation 3).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tempo-auth-compat-test",
+      // A placeholder: the Workers test pool runs D1 locally and never reads it.
+      "database_id": "tempo-auth-compat-test",
+      "migrations_dir": "migrations/d1"
+    }
+  ]
+}

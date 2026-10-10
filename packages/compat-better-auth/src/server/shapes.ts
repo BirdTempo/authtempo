@@ -1,0 +1,152 @@
+import {
+  type InvitationSummary,
+  type MemberSummary,
+  type OrganizationSummary,
+  readSessionToken,
+  type SessionRow,
+  type UserRow,
+} from "@tempo-auth/core";
+import type { Invitation, Member, Organization, Session, User } from "../types.js";
+
+// Each converter builds an object literal under the declared return type, so
+// a field added to the type and not filled here fails the compile, and an
+// extra field fails it too (Review Focus 4). The key lists below feed the
+// runtime check in test/better-auth.test.ts.
+
+export function toUser(u: UserRow): User {
+  return {
+    id: u.id,
+    name: u.name ?? "",
+    email: u.email,
+    emailVerified: u.emailVerified,
+    image: u.image,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
+  };
+}
+
+export function toSession(s: SessionRow, token: string): Session {
+  return {
+    id: s.id,
+    token,
+    userId: s.userId,
+    expiresAt: s.expiresAt,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    ipAddress: s.ip,
+    userAgent: s.userAgent,
+    activeOrganizationId: s.activeOrganizationId,
+  };
+}
+
+export function toOrganization(o: OrganizationSummary): Organization {
+  return {
+    id: o.id,
+    name: o.name,
+    slug: o.slug,
+    logo: null,
+    metadata: o.metadata,
+    createdAt: o.createdAt,
+  };
+}
+
+export function toMember(organizationId: string, m: MemberSummary): Member {
+  return {
+    id: m.id,
+    organizationId,
+    userId: m.userId,
+    role: m.role,
+    createdAt: m.createdAt,
+    user: { id: m.userId, email: m.email, name: m.name ?? "" },
+  };
+}
+
+export function toInvitation(
+  i: InvitationSummary,
+  id: string,
+  status: Invitation["status"],
+): Invitation {
+  return {
+    id,
+    organizationId: i.organizationId,
+    email: i.email,
+    role: i.role,
+    status,
+    inviterId: i.inviterId,
+    expiresAt: i.expiresAt,
+    createdAt: i.createdAt,
+  };
+}
+
+type Exact<T, K extends readonly (keyof T)[]> = [Exclude<keyof T, K[number]>] extends [never]
+  ? K
+  : never;
+const keys =
+  <T>() =>
+  <const K extends readonly (keyof T)[]>(k: Exact<T, K>) =>
+    k;
+export const USER_KEYS = keys<User>()([
+  "id",
+  "name",
+  "email",
+  "emailVerified",
+  "image",
+  "createdAt",
+  "updatedAt",
+]);
+export const SESSION_KEYS = keys<Session>()([
+  "id",
+  "token",
+  "userId",
+  "expiresAt",
+  "createdAt",
+  "updatedAt",
+  "ipAddress",
+  "userAgent",
+  "activeOrganizationId",
+]);
+
+/**
+ * The session cookie name. The one copy in this package: `mapOptions` passes
+ * it to core as `cookieName`, and the reader below, the bearer copy, and the
+ * client read it here.
+ */
+export const COOKIE_NAME = "tempo_session";
+
+/**
+ * The cookie or the bearer header, read by core's own `readSessionToken`
+ * with this package's cookie name. Only the session token for Better Auth's
+ * `session.token` comes from here; core's `auth.session(request)` decides
+ * who the caller is.
+ */
+export function readToken(headers: Headers): string | null {
+  return readSessionToken({ cookieName: COOKIE_NAME }, { headers });
+}
+
+/**
+ * Better Auth's callbackURL or redirectTo to core's `next`. Core takes a
+ * path only and lands every sign-in on one origin, appURL (core
+ * http/redirect.ts). A path stays as given. An absolute URL on `appOrigin`
+ * becomes its path, query, and fragment, so the browser lands where the app
+ * asked. Any other value answers null, and the caller refuses it with
+ * Better Auth's own code (`INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`,
+ * status 403, as Better Auth's origin check answers). A trusted origin that
+ * is not appURL is refused too: core would land on appURL with that path, so
+ * the browser would not reach the origin the app asked for. `appOrigin` null
+ * (a client with no `location`) refuses every absolute URL.
+ */
+export function toNext(
+  callbackURL: string | undefined,
+  appOrigin: string | null,
+): string | undefined | null {
+  if (callbackURL === undefined) return undefined;
+  if (callbackURL.startsWith("/") && !callbackURL.startsWith("//")) return callbackURL;
+  let u: URL;
+  try {
+    u = new URL(callbackURL);
+  } catch {
+    return null;
+  }
+  if (appOrigin === null || u.origin !== appOrigin) return null;
+  return `${u.pathname}${u.search}${u.hash}`;
+}

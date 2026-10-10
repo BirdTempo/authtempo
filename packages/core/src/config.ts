@@ -215,6 +215,15 @@ const DEFAULT_RESERVED_SLUGS = [
 const APP_NAME_MAX = 80;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\/$/;
 
+/**
+ * An app scheme such as `myapp://`, the form `handoff.schemes` takes. A bare
+ * `http://` or `https://` is not one. The one copy of this rule: the
+ * Better Auth compatibility package reads its app schemes with it (plan 9).
+ */
+export function isAppScheme(s: string): boolean {
+  return SCHEME_RE.test(s) && s !== "http://" && s !== "https://";
+}
+
 export class ConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -265,10 +274,12 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     if (input.handoff.schemes.length === 0)
       throw new ConfigError("handoff.schemes must not be empty");
     for (const s of input.handoff.schemes) {
-      if (!SCHEME_RE.test(s))
-        throw new ConfigError(`handoff.schemes entry must be like app://, got ${s}`);
-      if (s === "https://" || s === "http://")
-        throw new ConfigError(`handoff.schemes must not hold ${s}`);
+      if (!isAppScheme(s))
+        throw new ConfigError(
+          SCHEME_RE.test(s)
+            ? `handoff.schemes must not hold ${s}`
+            : `handoff.schemes entry must be like app://, got ${s}`,
+        );
     }
     const pattern = input.handoff.devRedirectPattern;
     // A global or sticky regex keeps state between test calls and alternates its answer.

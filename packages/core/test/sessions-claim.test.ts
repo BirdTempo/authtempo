@@ -14,8 +14,9 @@ import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, resolveSocialUser, startSocial } from "../src/engine/social.js";
 import { findOrCreateUserByEmail } from "../src/engine/users.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
-import type { UserRow } from "../src/schema.js";
-import type { StorageAdapter } from "../src/storage/port.js";
+import type { ModelName, UserRow } from "../src/schema.js";
+import { type StorageAdapter, StorageError } from "../src/storage/port.js";
+import { undoCreateWhere } from "../src/storage/sql.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, socialAuth } from "./social-helpers.js";
@@ -57,12 +58,94 @@ function complete(auth: ReturnType<typeof socialAuth>, s: Awaited<ReturnType<typ
 /**
  * The config with a storage whose transactions are not isolated, as on D1:
  * each statement of the transaction function runs at once on the shared
- * rows. A flow on this view does not wait for the memory adapter's
- * transaction lock, so it can run inside another flow's open transaction.
+ * rows, and a throw runs this transaction's own undo log in reverse, as the
+ * D1 adapter does. The undo of a create deletes `undoCreateWhere(...)`, the
+ * D1 adapter's rule: a user created unverified only while it is still
+ * unverified. The undo of an update writes back only the fields the update
+ * set, the D1 adapter's rule too. A nested call shares the log and a throw reverses only its own
+ * entries. A failed entry does not stop the rest. When any entry fails, the
+ * throw is one rollback_failed error with `{ original, failures }` as its
+ * cause and `<model>:<op>` for each failed entry, as the D1 adapter's
+ * `rethrowAfterUndo` throws, so a core test sees the error that real D1
+ * answers (plan 9 Task 4 review M-1). A flow on this view does
+ * not wait for the memory adapter's transaction lock, so it can run inside
+ * another flow's open transaction.
  */
 function d1Like(config: ResolvedConfig): ResolvedConfig {
   const raw = config.storage;
-  const view: StorageAdapter = { ...raw, transaction: (fn) => fn(view) };
+  type Undo = { model: ModelName; op: "create" | "update" | "delete"; run: () => Promise<unknown> };
+  const rollback = async (entries: Undo[], original: unknown): Promise<never> => {
+    const failures: unknown[] = [];
+    const fields: string[] = [];
+    for (const u of entries.reverse()) {
+      try {
+        await u.run();
+      } catch (f) {
+        failures.push(f);
+        fields.push(`${u.model}:${u.op}`);
+      }
+    }
+    if (failures.length === 0) throw original;
+    const model = original instanceof StorageError ? original.model : "meta";
+    throw new StorageError("rollback_failed", model, fields, { cause: { original, failures } });
+  };
+  const view: StorageAdapter = {
+    ...raw,
+    async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
+      const log: Undo[] = [];
+      const tx: StorageAdapter = {
+        ...raw,
+        async create(model, data) {
+          const row = await raw.create(model, data);
+          log.push({
+            model,
+            op: "create",
+            run: () => raw.delete(model, undoCreateWhere(model, data)),
+          });
+          return row;
+        },
+        async update(model, where, data) {
+          const before = await raw.findMany(model, where);
+          const n = await raw.update(model, where, data);
+          // The D1 adapter's rule (`SqlStatements.restoreRow`): the undo
+          // writes back only the fields the update set, so a claim that
+          // changed another field inside this transaction stays.
+          const fields = Object.keys(data);
+          for (const row of before) {
+            const all = row as unknown as { id: string } & Record<string, unknown>;
+            const back = Object.fromEntries(fields.map((f) => [f, all[f]]));
+            log.push({
+              model,
+              op: "update",
+              run: () =>
+                raw.update(model, [{ field: "id", op: "eq", value: all.id }], back as never),
+            });
+          }
+          return n;
+        },
+        async delete(model, where) {
+          const before = await raw.findMany(model, where);
+          const n = await raw.delete(model, where);
+          for (const row of before)
+            log.push({ model, op: "delete", run: () => raw.create(model, row) });
+          return n;
+        },
+        async transaction<U>(inner: (t: StorageAdapter) => Promise<U>): Promise<U> {
+          const mark = log.length;
+          try {
+            return await inner(tx);
+          } catch (e) {
+            return rollback(log.splice(mark), e);
+          }
+        },
+      };
+      try {
+        return await fn(tx);
+      } catch (e) {
+        return rollback(log, e);
+      }
+    },
+  };
   return { ...config, storage: view };
 }
 
@@ -130,13 +213,14 @@ function interleaveAfterIdentityRead(
 }
 
 /**
- * Wraps the next `storage.transaction` call so that `afterUserCreate` runs
- * inside that transaction, just after its user insert and before any later
- * statement. Later transactions run unchanged.
+ * Wraps the next `storage.transaction` call so that `after` runs inside
+ * that transaction, just after its first insert of `model` and before any
+ * later statement. Later transactions run unchanged.
  */
-function interleaveAfterUserCreate(
+function interleaveAfterCreate(
   storage: StorageAdapter,
-  afterUserCreate: () => Promise<void>,
+  model: ModelName,
+  after: () => Promise<void>,
 ): { fired: () => boolean } {
   const original = storage.transaction.bind(storage);
   let armed = true;
@@ -149,11 +233,44 @@ function interleaveAfterUserCreate(
         ...tx,
         create: async (m, d) => {
           const row = await tx.create(m, d);
-          if (m === "user" && !fired) {
+          if (m === model && !fired) {
             fired = true;
-            await afterUserCreate();
+            await after();
           }
           return row;
+        },
+      }),
+    );
+  };
+  return { fired: () => fired };
+}
+
+/**
+ * Wraps the next `storage.transaction` call so that `after` runs inside
+ * that transaction, just after its first update of `model` and before any
+ * later statement. Later transactions run unchanged.
+ */
+function interleaveAfterUpdate(
+  storage: StorageAdapter,
+  model: ModelName,
+  after: () => Promise<void>,
+): { fired: () => boolean } {
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  let fired = false;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        update: async (m, w, d) => {
+          const n = await tx.update(m, w, d);
+          if (m === model && !fired) {
+            fired = true;
+            await after();
+          }
+          return n;
         },
       }),
     );
@@ -487,7 +604,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     // adds the email identity, and verifies the user before the claimant's
     // identity exists, so a guard on that identity would pass.
     let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
-    const gate = interleaveAfterUserCreate(auth.storage, async () => {
+    const gate = interleaveAfterCreate(auth.storage, "user", async () => {
       owner = await verifyMagicLink(d1Like(auth.config), {
         token: link,
         ip: null,
@@ -802,12 +919,12 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     const link = await magicLinkToken(auth);
 
     // On D1 the owner's whole claim runs inside the claimant's open sign-up
-    // transaction, just after its user create (the second create, after the
-    // password create): the claim finds the new user, verifies it, deletes
-    // the claimant's password row, and adds the email identity. A throw
-    // would undo the user create and delete the owner's user row by id.
+    // transaction, just after its user create (the first create): the claim
+    // finds the new user, verifies it, and adds the email identity. The
+    // claimant's password create then succeeds, and its guard deletes that
+    // row and its session and commits.
     let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
-    const gate = interleaveAfterUserCreate(auth.storage, async () => {
+    const gate = interleaveAfterCreate(auth.storage, "user", async () => {
       owner = await verifyMagicLink(d1Like(auth.config), {
         token: link,
         ip: null,
@@ -1189,9 +1306,14 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     const link = await resetLinkToken(auth);
 
     // On D1 the owner's whole reset runs inside the claimant's open sign-up
-    // transaction, just after its first create.
+    // transaction, just after its first create (the user create): the reset
+    // finds the unverified user, writes the owner's password row for it, and
+    // verifies it. The claimant's password create fails on the `userId`
+    // unique key, its undo keeps the verified user, and the retry answers
+    // email_taken.
+    const claimantConfig = d1Like(auth.config);
     let owner: Awaited<ReturnType<typeof resetPassword>> | null = null;
-    const gate = interleaveAfterFirstCreate(auth.storage, async () => {
+    const gate = interleaveAfterFirstCreate(claimantConfig.storage, async () => {
       owner = await resetPassword(d1Like(auth.config), {
         token: link,
         password: "owner password",
@@ -1200,7 +1322,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       });
     });
 
-    const claimant = await passwordSignUp(auth.config, {
+    const claimant = await passwordSignUp(claimantConfig, {
       email: EMAIL,
       password: "claimant password",
       ip: null,
@@ -1238,8 +1360,9 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     // On D1 the owner's whole reset runs inside the claimant's open sign-up
     // transaction, after both creates: it writes the owner's hash into the
     // claimant's password row, keeps that row id, and verifies the user.
+    const claimantConfig = d1Like(auth.config);
     let owner: Awaited<ReturnType<typeof resetPassword>> | null = null;
-    const gate = interleaveAfterUserCreate(auth.storage, async () => {
+    const gate = interleaveAfterCreate(claimantConfig.storage, "password", async () => {
       owner = await resetPassword(d1Like(auth.config), {
         token: link,
         password: "owner password",
@@ -1248,7 +1371,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       });
     });
 
-    const claimant = await passwordSignUp(auth.config, {
+    const claimant = await passwordSignUp(claimantConfig, {
       email: EMAIL,
       password: "claimant password",
       ip: null,
@@ -1333,5 +1456,206 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       await auth.storage.findOne("user", [{ field: "id", op: "eq", value: proved.value.user.id }]),
     ).toMatchObject({ email: EMAIL, emailVerified: true });
     expect(await auth.storage.findMany("password", [])).toEqual([]);
+  });
+});
+
+/**
+ * The sign-up writes its password row with a pending marker and activates
+ * it as its last statement, after the guard proved the user still
+ * unverified. On D1 an owner's claim can land between the user create and
+ * the password create: it finds no password row to delete. Without the
+ * marker, a claimant sign-in in that window proves the sign-up password
+ * and keeps a session on the owner's verified user (plan 9 Task 4 review I-1).
+ */
+describe("the sign-up password row stays pending until the guard (plan 9 Task 4 review I-1)", () => {
+  const signUp = (config: ResolvedConfig) =>
+    passwordSignUp(config, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+  const signIn = (config: ResolvedConfig, password: string) =>
+    passwordSignIn(config, { email: EMAIL, password, ip: null, userAgent: null });
+
+  it("refuses a claimant sign-in when the owner's magic link lands between the sign-up's two creates", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await magicLinkToken(auth);
+    const claimantConfig = d1Like(auth.config);
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    let early: Awaited<ReturnType<typeof passwordSignIn>> | null = null;
+    // The owner's claim runs just after the user create. The claimant's
+    // sign-in runs just after the password create, before the guard.
+    const claim = interleaveAfterCreate(claimantConfig.storage, "user", async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+    const race = interleaveAfterCreate(claimantConfig.storage, "password", async () => {
+      early = await signIn(d1Like(auth.config), "claimant password");
+    });
+
+    const claimant = await signUp(claimantConfig);
+    expect(claim.fired()).toBe(true);
+    expect(race.fired()).toBe(true);
+    expect(early).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const users = await auth.storage.findMany("user", []);
+    expect(users.map((u) => [u.id, u.emailVerified])).toEqual([[proved.value.user.id, true]]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    expect(await signIn(auth.config, "claimant password")).toMatchObject({
+      ok: false,
+      code: "invalid_credentials",
+    });
+  });
+
+  it("runs the dummy verify for a sign-in against a pending row, as for no row", async () => {
+    const seen: string[] = [];
+    const hash = {
+      ...FAST,
+      verify: async (plain: string, stored: string) => {
+        seen.push(stored);
+        return FAST.verify(plain, stored);
+      },
+    };
+    const auth = makeAuth({ password: { hash } });
+    const claimantConfig = d1Like(auth.config);
+    let early: Awaited<ReturnType<typeof passwordSignIn>> | null = null;
+    // Reachable on D1: a sign-in runs inside the open sign-up, after its password create.
+    const race = interleaveAfterCreate(claimantConfig.storage, "password", async () => {
+      early = await signIn(d1Like(auth.config), "claimant password");
+    });
+
+    expect((await signUp(claimantConfig)).ok).toBe(true);
+    expect(race.fired()).toBe(true);
+    expect(early).toMatchObject({ ok: false, code: "invalid_credentials" });
+    // The flat cost: the one verify ran against the seam's dummy string.
+    expect(seen).toEqual([await FAST.dummy()]);
+  });
+
+  it("activates the password row of a plain sign-up, so a later sign-in works", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const created = await signUp(d1Like(auth.config));
+    expect(created.ok).toBe(true);
+    const rows = await auth.storage.findMany("password", []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.hash.startsWith("pending$")).toBe(false);
+    expect((await signIn(auth.config, "claimant password")).ok).toBe(true);
+  });
+
+  it("answers email_taken_unverified with no session when a claim lands between the guard and the activation", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await magicLinkToken(auth);
+    const claimantConfig = d1Like(auth.config);
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    // The sign-up's first user update is the guard.
+    const gate = interleaveAfterUpdate(claimantConfig.storage, "user", async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await signUp(claimantConfig);
+    expect(gate.fired()).toBe(true);
+    expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+    expect(auth.mail).toHaveLength(1);
+  });
+});
+
+describe("an update undo restores only the columns the update set (plan 9 final review M-1, R-1)", () => {
+  it("keeps the owner's verified user and session when the sign-up's activation throws after the owner's claim", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const link = await magicLinkToken(auth);
+    const claimantConfig = d1Like(auth.config);
+    let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
+    // The sign-up's first user update is the guard. Its undo entry holds the
+    // user row with `emailVerified` false. The owner's claim runs just after it.
+    const gate = interleaveAfterUpdate(claimantConfig.storage, "user", async () => {
+      owner = await verifyMagicLink(d1Like(auth.config), {
+        token: link,
+        ip: null,
+        userAgent: null,
+      });
+    });
+    // The activation, the sign-up's password update, throws once, as a
+    // transient D1 error does. The undo log then runs.
+    const transient = new Error("transient D1 error");
+    const original = claimantConfig.storage.transaction.bind(claimantConfig.storage);
+    let thrown = false;
+    claimantConfig.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>) =>
+      original((tx) =>
+        fn({
+          ...tx,
+          update: async (m, w, d) => {
+            if (m === "password" && !thrown) {
+              thrown = true;
+              throw transient;
+            }
+            return tx.update(m, w, d);
+          },
+        }),
+      );
+
+    const err = await passwordSignUp(claimantConfig, {
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    }).catch((e: unknown) => e);
+    expect(gate.fired()).toBe(true);
+    expect(thrown).toBe(true);
+    expect(err).toBe(transient);
+    const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
+    if (!proved?.ok) throw new Error("the owner's verify failed");
+    const users = await auth.storage.findMany("user", []);
+    expect(users.map((u) => [u.id, u.emailVerified])).toEqual([[proved.value.user.id, true]]);
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((x) => [x.userId, x.tokenHash])).toEqual([
+      [proved.value.user.id, await sha256Hex(proved.value.token)],
+    ]);
+    expect(await auth.storage.findMany("password", [])).toEqual([]);
+  });
+});
+
+describe("the D1-like test view (plan 9 Task 4 review M-1)", () => {
+  it("surfaces a failed undo entry as rollback_failed, as the D1 adapter does", async () => {
+    const auth = makeAuth();
+    const raw = auth.config.storage;
+    const at = auth.clock.now();
+    const user = {
+      id: "u1",
+      email: "u1@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: at,
+      updatedAt: at,
+    };
+    await raw.create("user", user);
+    const original = new Error("boom");
+    const err = await d1Like(auth.config)
+      .storage.transaction(async (tx) => {
+        await tx.delete("user", [{ field: "id", op: "eq", value: "u1" }]);
+        // Another request takes the id before the rollback, so the re-insert fails.
+        await raw.create("user", { ...user, email: "other@example.com" });
+        throw original;
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StorageError);
+    expect(err).toMatchObject({ code: "rollback_failed", model: "meta", fields: ["user:delete"] });
+    expect((err as StorageError).cause).toMatchObject({ original });
   });
 });
