@@ -230,6 +230,34 @@ token in `storage` and sends it as the bearer header. `getCookie()` answers
 need `webBrowser` (the `expo-web-browser` module) and `crypto` (the
 `expo-crypto` module) in `expoClient`; without them they answer `NOT_SUPPORTED`.
 
+`createAuthClient()` with no `baseURL` does not throw when the module loads.
+This matters for a Next server render of a client module. The client reads the
+base at the first call: `baseURL`, else the page's `location.origin`. A call
+with neither answers the error code `BASE_URL_REQUIRED`.
+
+`signIn.email` with `rememberMe: false` answers `NOT_SUPPORTED` (501): core
+keeps no short session. `rememberMe: true` works.
+
+`fetchOptions.onSuccess` runs once per call, with the last successful
+response. A failed sub-request of a call that sends several (for example the
+invitation list for a member below admin) never reaches it. The session read
+that `inviteMember` and `getFullOrganization` make for the active organization
+does not call it.
+
+| Client-only error | `error.code` | `error.status` |
+| --- | --- | --- |
+| No network answer | `NETWORK_ERROR` | 0 |
+| The person cancels a passkey or sign-in prompt | `AUTH_CANCELLED` | 0 |
+| The handoff redirect does not match | `INVALID_REDIRECT_URL` | 0 |
+
+Status 0 means that no HTTP response exists. Do not test `status >= 400` alone
+for these.
+
+On Expo, pass `expo-secure-store` as `storage`. The client accepts any object
+with `getItem` and `setItem`, as Better Auth does. With a plain store, such as
+`localStorage`, the session token lies readable at rest, and any script on the
+page can read it.
+
 ## Plugins
 
 | Plugin | What it does on tempo-auth |
