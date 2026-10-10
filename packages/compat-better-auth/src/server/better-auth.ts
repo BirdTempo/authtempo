@@ -5,6 +5,7 @@ import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { createApi } from "./api.js";
 import { checkOptions } from "./check-options.js";
 import { type Mapped, mapOptions } from "./map-options.js";
+import { COOKIE_NAME } from "./shapes.js";
 
 /** The JSON field that holds the new password, per core route (core http/routes/password.ts, read 2026-10-10). */
 const PASSWORD_FIELD: Record<string, string> = {
@@ -43,15 +44,47 @@ export async function withPolicyCode(
   );
 }
 
-/** Serves core's routes under basePath. Task 8 adds the plugin behavior here. */
+/** The non-empty session token a response sets, or null. */
+function sessionTokenOf(cookies: string[]): string | null {
+  const prefix = `${COOKIE_NAME}=`;
+  for (const c of cookies) {
+    if (!c.startsWith(prefix)) continue;
+    const value = c.slice(prefix.length).split(";")[0];
+    if (value) return value;
+  }
+  return null;
+}
+
+/** Serves core's routes under basePath, with the behavior of the bearer, expo, and magicLink plugins. */
 export function createHandler(auth: Auth, mapped: Mapped): (request: Request) => Promise<Response> {
+  const { basePath, plugins } = mapped;
+  const magicLinkPath = `${basePath}/magic-link/`;
   return async (request) => {
     const { pathname } = new URL(request.url);
-    if (pathname !== mapped.basePath && !pathname.startsWith(`${mapped.basePath}/`)) {
+    if (pathname !== basePath && !pathname.startsWith(`${basePath}/`)) {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
-    const copy = request.method === "POST" ? request.clone() : null;
-    return withPolicyCode(copy, await auth.handle(request), mapped);
+    // Core always mounts the magic link routes. Better Auth serves them only with the plugin.
+    if (!plugins.has("magic-link") && pathname.startsWith(magicLinkPath)) {
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }
+    let req = request;
+    // @better-auth/expo on the server: a native app sends its scheme as expo-origin.
+    const expoOrigin = request.headers.get("expo-origin");
+    if (plugins.has("expo") && expoOrigin && !request.headers.has("origin")) {
+      const headers = new Headers(request.headers);
+      headers.set("origin", expoOrigin);
+      req = new Request(request, { headers });
+    }
+    const copy = req.method === "POST" ? req.clone() : null;
+    const res = await withPolicyCode(copy, await auth.handle(req), mapped);
+    if (!plugins.has("bearer")) return res;
+    const token = sessionTokenOf(res.headers.getSetCookie());
+    if (!token) return res;
+    const out = new Response(res.body, res);
+    out.headers.set("set-auth-token", token);
+    out.headers.append("access-control-expose-headers", "set-auth-token");
+    return out;
   };
 }
 

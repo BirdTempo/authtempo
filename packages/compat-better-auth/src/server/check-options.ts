@@ -285,6 +285,17 @@ export function pluginOf<I extends CompatPlugin["id"]>(
   return null;
 }
 
+/** An app scheme in trustedOrigins (`reception://`). The one copy: the check and the mapping use it. */
+const APP_SCHEME = /^[a-z][a-z0-9+.-]*:\/\/$/;
+
+/** The app schemes of trustedOrigins, which core's handoff redirects to. */
+export function appSchemes(options: BetterAuthOptions): string[] {
+  const list = Array.isArray(options.trustedOrigins) ? options.trustedOrigins : [];
+  return list.filter(
+    (o) => typeof o === "string" && APP_SCHEME.test(o) && o !== "http://" && o !== "https://",
+  );
+}
+
 /** The allow list (spec 16.1). Pure: no I/O, no throw. */
 export function checkOptions(options: BetterAuthOptions): OptionCheck {
   const out: OptionCheck = { refusals: [], notes: [] };
@@ -344,6 +355,9 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
       if (pk[key] === undefined || pk[key] === null)
         refuse(out, `plugins[passkey].${key}`, "required");
     }
+  }
+  if (pluginOf(options, "expo") && appSchemes(options).length === 0) {
+    refuse(out, "plugins[expo]", "needs the app scheme, for example myapp://, in trustedOrigins");
   }
   out.refusals.sort();
   out.notes.sort();

@@ -8,10 +8,12 @@ export interface SignInPageInput {
   /**
    * Which methods the config enables. `password` is true when the config
    * has a `password` section: the page shows the password form and the
-   * forgot button.
+   * forgot button. `magicLink` is false only when a caller serves no magic
+   * link route (the Better Auth compatibility package without its magicLink
+   * plugin, plan 9). Core passes true.
    */
   methods: {
-    magicLink: true;
+    magicLink: boolean;
     google: boolean;
     apple: boolean;
     passkey: boolean;
@@ -58,10 +60,14 @@ p.status { min-height: 1.5rem; color: #555; }
 <body>
 <main data-base="${base}" data-continue="${cont}">
 <h1>Sign in to ${appName}</h1>
-<form id="magic-link" method="post" autocomplete="on">
+${
+  input.methods.magicLink
+    ? `<form id="magic-link" method="post" autocomplete="on">
 <input type="email" name="email" placeholder="you@example.com" required autofocus>
 <button type="submit">Email me a sign-in link</button>
-</form>
+</form>`
+    : ""
+}
 ${
   input.methods.password
     ? `<form id="password" method="post" action="${base}/password/sign-in" autocomplete="on">
@@ -87,7 +93,8 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
   function postJson(path, body) {
     return fetch(base + path, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   }
-  document.getElementById("magic-link").addEventListener("submit", function (e) {
+  var ml = document.getElementById("magic-link");
+  if (ml) ml.addEventListener("submit", function (e) {
     e.preventDefault();
     var email = e.target.elements.email.value;
     postJson("/magic-link/request", { email: email, next: cont }).then(function (res) {

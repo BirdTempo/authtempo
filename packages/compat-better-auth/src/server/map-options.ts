@@ -1,4 +1,9 @@
-import type { AuthConfig, LimiterPort } from "@tempo-auth/core";
+import {
+  type AuthConfig,
+  defaultSignInPage,
+  type LimiterPort,
+  type SignInPageInput,
+} from "@tempo-auth/core";
 import { betterAuthPasswordHash } from "../hash.js";
 import {
   type BetterAuthOptions,
@@ -6,8 +11,8 @@ import {
   type CompatDatabase,
   type CompatPlugin,
 } from "../types.js";
-import { pluginOf } from "./check-options.js";
-import { compatMail } from "./mail.js";
+import { appSchemes, pluginOf } from "./check-options.js";
+import { compatMail, INVITATION_LINK_PREFIX } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
 
 /** Better Auth 1.7's defaults (read in its source on 2026-10-10). They apply before the mapping. */
@@ -70,6 +75,42 @@ function clientIpOf(options: BetterAuthOptions): ((request: Request) => string |
     }
     return null;
   };
+}
+
+function pluginConfig(options: BetterAuthOptions): Partial<AuthConfig> {
+  const out: Partial<AuthConfig> = {};
+  const org = pluginOf(options, "organization");
+  if (org) {
+    out.organizations = {
+      invitationTtlDays:
+        (org.options.invitationExpiresIn ?? BETTER_AUTH_DEFAULTS.invitationExpiresIn) / DAY,
+      // Never mailed by core: the mail port hands the token to sendInvitationEmail (mail.ts).
+      invitationLinkBuilder: (token) => `${INVITATION_LINK_PREFIX}${token}`,
+    };
+  }
+  const pk = pluginOf(options, "passkey");
+  if (pk) {
+    const origin = pk.options.origin;
+    out.passkey = {
+      rpID: pk.options.rpID ?? "",
+      rpName: pk.options.rpName ?? "",
+      origins: Array.isArray(origin) ? [...origin] : typeof origin === "string" ? [origin] : [],
+    };
+  }
+  if (pluginOf(options, "expo")) {
+    out.handoff = {
+      schemes: appSchemes(options),
+      // Core serves the magic link always. Without the plugin this handler
+      // answers 404 on those paths, so the system-browser page must not offer it.
+      ...(pluginOf(options, "magic-link")
+        ? {}
+        : {
+            signInPage: (input: SignInPageInput) =>
+              defaultSignInPage({ ...input, methods: { ...input.methods, magicLink: false } }),
+          }),
+    };
+  }
+  return out;
 }
 
 /** Runs after checkOptions found no refusal, so every value here has its checked type. */
@@ -154,7 +195,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           },
         }
       : {}),
-    // Task 8: passkey, handoff, and organizations from the plugins.
+    ...pluginConfig(options),
   };
   return {
     config,

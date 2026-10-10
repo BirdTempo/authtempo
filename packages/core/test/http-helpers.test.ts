@@ -423,6 +423,14 @@ describe("sign-in page", () => {
     expect(off).not.toContain(`id="password"`);
     expect(off).not.toContain(`id="forgot"`);
   });
+  it("shows the magic link form only when methods.magicLink is true, and its script checks for it (plan 9)", () => {
+    const off = defaultSignInPage({ ...input, methods: { ...input.methods, magicLink: false } });
+    expect(off).not.toContain(`id="magic-link"`);
+    expect(off).toContain(`if (ml) ml.addEventListener("submit"`);
+    expect(defaultSignInPage(input)).toContain(
+      `<form id="magic-link" method="post" autocomplete="on">`,
+    );
+  });
   it("says 'not correct' for a 401 only and 'not accepted' for every other failure but 429 (plan 8 final review M-1)", () => {
     const html = defaultSignInPage({ ...input, methods: { ...input.methods, password: true } });
     const start = html.indexOf(`postJson("/password/sign-in"`);
