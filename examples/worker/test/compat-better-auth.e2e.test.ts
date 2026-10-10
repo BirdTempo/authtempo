@@ -250,12 +250,23 @@ it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer h
     { userId: up.data?.user.id, role: "owner" },
   ]);
 
+  // The confirm above ended the sign-up session, so sign in again: the sign-out
+  // check below must read a session that is live right before the sign-out.
+  const again = await mobile.signIn.email({ email: ownerEmail, password: PASSWORD });
+  expect(again.error).toBeNull();
+  const liveToken = again.data?.token ?? "";
+  expect(liveToken).not.toBe(mobileToken);
+  expect(mobile.getCookie()).toBe(`tempo_session=${liveToken}`);
+  expect(await me({ authorization: `Bearer ${liveToken}` })).toMatchObject({
+    status: 200,
+    body: { email: ownerEmail },
+  });
   const out = await mobile.signOut();
   expect(out.error).toBeNull();
   expect(out.data).toEqual({ success: true });
   expect(mobile.getCookie()).toBe("");
   // The server session ended too, not only the local store.
-  expect(await me({ authorization: `Bearer ${mobileToken}` })).toEqual(UNAUTHENTICATED);
+  expect(await me({ authorization: `Bearer ${liveToken}` })).toEqual(UNAUTHENTICATED);
 });
 
 it("signs in a Better Auth-era user with the scrypt hash and rehashes it to PBKDF2 in workerd", async () => {
