@@ -1,6 +1,6 @@
 import type { ClientCode } from "@tempo-auth/client";
 import type { Auth, Result } from "@tempo-auth/core";
-import { APIError, apiError, NOT_SUPPORTED, passwordPolicyCode } from "../errors.js";
+import { APIError, apiError, compatApiError, passwordPolicyCode } from "../errors.js";
 import type { CompatServerApi } from "../types.js";
 import type { Mapped } from "./map-options.js";
 import { readToken, toInvitation, toNext, toOrganization, toSession, toUser } from "./shapes.js";
@@ -33,10 +33,10 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
     },
     async signUpEmail({ body, headers }) {
       if (body.image !== undefined)
-        throw new APIError(501, NOT_SUPPORTED, "core takes no image at sign-up");
+        throw compatApiError("NOT_SUPPORTED", "core takes no image at sign-up");
       // Core's verify link lands on the app origin; a callbackURL would be dropped in silence.
       if (body.callbackURL !== undefined)
-        throw new APIError(501, NOT_SUPPORTED, "core takes no callbackURL at sign-up");
+        throw compatApiError("NOT_SUPPORTED", "core takes no callbackURL at sign-up");
       const req = requestOf(headers);
       const r = await passwords().signUp({
         email: body.email,
@@ -54,13 +54,12 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
       // Each would be dropped in silence: core answers a token, not a redirect,
       // and every session lives session.expiresIn.
       if (body.callbackURL !== undefined)
-        throw new APIError(501, NOT_SUPPORTED, "core takes no callbackURL at sign-in");
+        throw compatApiError("NOT_SUPPORTED", "core takes no callbackURL at sign-in");
       // rememberMe: true is Better Auth's default and what core does, so it is
       // accepted. false asks for a browser-session cookie, which core does not set.
       if (body.rememberMe === false)
-        throw new APIError(
-          501,
-          NOT_SUPPORTED,
+        throw compatApiError(
+          "NOT_SUPPORTED",
           "core takes no rememberMe: false: every session lives session.expiresIn",
         );
       const req = requestOf(headers);
@@ -82,9 +81,9 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
     async signInMagicLink({ body, headers }) {
       if (!plugins.has("magic-link")) throw apiError("not_found", 404);
       if (body.name !== undefined)
-        throw new APIError(501, NOT_SUPPORTED, "core takes no name at the magic link");
+        throw compatApiError("NOT_SUPPORTED", "core takes no name at the magic link");
       const next = toNext(body.callbackURL, appOrigin);
-      if (next === null) throw new APIError(403, "INVALID_CALLBACK_URL");
+      if (next === null) throw compatApiError("INVALID_CALLBACK_URL");
       unwrap(
         await auth.api.requestMagicLink({
           email: body.email,
@@ -95,16 +94,15 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
       return { status: true };
     },
     async sendVerificationEmail() {
-      throw new APIError(
-        501,
-        NOT_SUPPORTED,
+      throw compatApiError(
+        "NOT_SUPPORTED",
         "core has no resend route for the verify mail until plan 8b",
       );
     },
     async createInvitation({ body, headers }) {
       const s = await caller(headers);
       const organizationId = body.organizationId ?? s.session.activeOrganizationId;
-      if (!organizationId) throw new APIError(400, "NO_ACTIVE_ORGANIZATION");
+      if (!organizationId) throw compatApiError("NO_ACTIVE_ORGANIZATION");
       const v = unwrap(
         await auth.api.inviteMember({
           user: s.user,
@@ -120,7 +118,7 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
       const row = await storage.findOne("invitation", [
         { field: "id", op: "eq", value: body.invitationId },
       ]);
-      if (!row) throw new APIError(404, "INVITATION_NOT_FOUND");
+      if (!row) throw compatApiError("INVITATION_NOT_FOUND");
       unwrap(
         await auth.api.revokeInvitation({
           user: s.user,

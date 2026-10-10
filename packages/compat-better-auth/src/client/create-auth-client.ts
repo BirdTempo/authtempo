@@ -11,7 +11,7 @@ import {
 import type { PublicSession } from "@tempo-auth/core";
 import { createHandoff } from "@tempo-auth/handoff";
 import { expoCrypto, expoOpener } from "@tempo-auth/handoff/expo";
-import { BETTER_AUTH_CODES, clientError, NOT_SUPPORTED } from "../errors.js";
+import { BETTER_AUTH_CODES, type CompatCode, clientError, compatClientError } from "../errors.js";
 import { COOKIE_NAME, toNext } from "../server/shapes.js";
 import type {
   AuthClient,
@@ -116,7 +116,7 @@ export const CLIENT_SESSION_KEYS = keys<ClientSession>()([
 
 const notSupported = <T>(message: string): CompatClientResult<T> => ({
   data: null,
-  error: clientError(NOT_SUPPORTED, 501, message),
+  error: compatClientError("NOT_SUPPORTED", message),
 });
 
 /** Better Auth's baseURL may carry the path (consumerc: ".../api/auth"); it becomes basePath when basePath is absent. */
@@ -144,7 +144,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
   };
   const noBase = (): CompatClientResult<never> => ({
     data: null,
-    error: clientError("BASE_URL_REQUIRED", 500, NO_BASE),
+    error: compatClientError("BASE_URL_REQUIRED", NO_BASE),
   });
   const fo = options.fetchOptions ?? {};
   const baseFetch: typeof fetch =
@@ -258,7 +258,11 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
       return {
         data: null,
         error: clientError(
-          r.code === "redirect_mismatch" ? "INVALID_REDIRECT_URL" : BETTER_AUTH_CODES[r.code],
+          // The code from the shim's table. The status stays the handoff's
+          // 0: the mismatch is found in the app, with no HTTP response.
+          r.code === "redirect_mismatch"
+            ? ("INVALID_REDIRECT_URL" satisfies CompatCode)
+            : BETTER_AUTH_CODES[r.code],
           r.status,
         ),
       };
@@ -273,7 +277,9 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
 
   const api: AuthClient = {
     signIn: {
-      async email({ email, password, rememberMe }) {
+      async email({ email, password, rememberMe, callbackURL }) {
+        // The server api refuses the same field: one rule for one argument (final review M-4).
+        if (callbackURL !== undefined) return notSupported("core takes no callbackURL at sign-in");
         // Core keeps no short session. true is the only behavior core has, so it is accepted.
         if (rememberMe === false)
           return notSupported("core takes no rememberMe: every session lives session.expiresIn");
@@ -290,7 +296,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
       async social({ provider, callbackURL, disableRedirect }) {
         if (expo) return systemBrowser();
         const next = toNext(callbackURL, pageOrigin());
-        if (next === null) return { data: null, error: clientError("INVALID_CALLBACK_URL", 403) };
+        if (next === null) return { data: null, error: compatClientError("INVALID_CALLBACK_URL") };
         const resolved = resolveBase();
         if (!resolved) return noBase();
         const { origin, basePath } = resolved;
@@ -306,7 +312,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         }
         if (name !== undefined) return notSupported("core takes no name at the magic link");
         const next = toNext(callbackURL, pageOrigin());
-        if (next === null) return { data: null, error: clientError("INVALID_CALLBACK_URL", 403) };
+        if (next === null) return { data: null, error: compatClientError("INVALID_CALLBACK_URL") };
         return run(
           (c) => c.magicLink.request({ email, ...(next !== undefined ? { next } : {}) }),
           () => ({ status: true as const }),
@@ -319,8 +325,10 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
       },
     },
     signUp: {
-      async email({ email, password, name, image }) {
+      async email({ email, password, name, image, callbackURL }) {
         if (image !== undefined) return notSupported("core takes no image at sign-up");
+        // Core's verify link lands on the app origin. The server api refuses it too.
+        if (callbackURL !== undefined) return notSupported("core takes no callbackURL at sign-up");
         const r = await run(
           (c) => c.password.signUp({ email, password, ...(name !== "" ? { name } : {}) }),
           (v) => {
@@ -349,7 +357,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     },
     async requestPasswordReset({ email, redirectTo }) {
       const next = toNext(redirectTo, pageOrigin());
-      if (next === null) return { data: null, error: clientError("INVALID_REDIRECT_URL", 403) };
+      if (next === null) return { data: null, error: compatClientError("INVALID_REDIRECT_URL") };
       return run(
         (c) => c.password.requestReset({ email, ...(next !== undefined ? { next } : {}) }),
         () => ({ status: true as const }),
@@ -400,7 +408,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
       },
       async inviteMember({ email, role, organizationId }) {
         const id = organizationId ?? (await activeOrganization());
-        if (id === null) return { data: null, error: clientError("NO_ACTIVE_ORGANIZATION", 400) };
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
         return run(
           (c) => c.organizations.invitations.invite({ organizationId: id, email, role }),
           invitationOf,

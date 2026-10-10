@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BetterAuthCompatError } from "../src/compat-error.js";
 import { toNextJsHandler } from "../src/next-js.js";
 import { toNodeHandler } from "../src/node.js";
 
@@ -64,4 +65,40 @@ describe("toNodeHandler", () => {
       body: '{"a":1}',
     });
   });
+});
+
+describe("the IP setting off Workers (plan 9 final review M-2)", () => {
+  const instance = (options: object) => ({ ...echo, options });
+  const make = { toNextJsHandler, toNodeHandler };
+
+  for (const [name, wrap] of Object.entries(make)) {
+    it(`${name} refuses an instance with no IP header setting, at creation`, () => {
+      for (const options of [
+        {},
+        { advanced: {} },
+        { advanced: { ipAddress: { ipAddressHeaders: [] } } },
+      ]) {
+        let err: unknown = null;
+        try {
+          wrap(instance(options));
+        } catch (e) {
+          err = e;
+        }
+        expect(err).toBeInstanceOf(BetterAuthCompatError);
+        expect((err as BetterAuthCompatError).refusals).toEqual([
+          "advanced.ipAddress: off Workers any caller sets cf-connecting-ip, so every per-IP limit can be rotated; set ipAddressHeaders to the header your proxy writes, or disableIpTracking: true",
+        ]);
+      }
+    });
+
+    it(`${name} accepts ipAddressHeaders, disableIpTracking: true, and a bare handler`, () => {
+      expect(() =>
+        wrap(instance({ advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } } })),
+      ).not.toThrow();
+      expect(() =>
+        wrap(instance({ advanced: { ipAddress: { disableIpTracking: true } } })),
+      ).not.toThrow();
+      expect(() => wrap(echo.handler)).not.toThrow();
+    });
+  }
 });

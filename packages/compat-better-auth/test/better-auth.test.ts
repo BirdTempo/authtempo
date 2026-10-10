@@ -7,7 +7,12 @@ import {
   systemClock,
 } from "@tempo-auth/core";
 import { describe, expect, it, vi } from "vitest";
-import { APIError, BETTER_AUTH_CODES, passwordPolicyCode } from "../src/errors.js";
+import {
+  APIError,
+  BETTER_AUTH_CODES,
+  PASSWORD_MAX_LENGTH,
+  passwordPolicyCode,
+} from "../src/errors.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { magicLink } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -163,7 +168,7 @@ describe("betterAuth", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ advanced: { ipAddress: { disableIpTracking: true } } });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket",
+      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
     );
     info.mockRestore();
     const m = mapOptions({
@@ -243,6 +248,26 @@ describe("betterAuth", () => {
     await expect(
       auth.api.signInMagicLink({ body: { email: "a@example.com", callbackURL: `${OTHER}/x` } }),
     ).rejects.toMatchObject({ statusCode: 403, body: { code: "INVALID_CALLBACK_URL" } });
+  });
+
+  it("ties PASSWORD_MAX_LENGTH to core's length rule through core's real sign-up (final review L-7)", async () => {
+    const { auth } = app();
+    // Code points, not UTF-16 units: every second one is an emoji of two units.
+    const of = (n: number) =>
+      Array.from({ length: n }, (_, i) => (i % 2 ? "\u{1F600}" : "a")).join("");
+    const signUp = (email: string, n: number) =>
+      auth.api.signUpEmail({ body: { email, password: of(n), name: "L" } });
+    expect((await signUp("max@example.com", 128)).user.email).toBe("max@example.com");
+    await expect(signUp("over@example.com", 129)).rejects.toMatchObject({
+      statusCode: 400,
+      body: { code: "PASSWORD_TOO_LONG" },
+    });
+    // The constant itself: core accepts its length and refuses one more.
+    expect((await signUp("at@example.com", PASSWORD_MAX_LENGTH)).user.email).toBe("at@example.com");
+    await expect(signUp("past@example.com", PASSWORD_MAX_LENGTH + 1)).rejects.toMatchObject({
+      statusCode: 400,
+      body: { code: "PASSWORD_TOO_LONG" },
+    });
   });
 
   it("signs up through api.signUpEmail and mails the verify link through sendVerificationEmail", async () => {

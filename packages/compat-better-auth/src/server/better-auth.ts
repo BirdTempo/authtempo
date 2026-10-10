@@ -61,9 +61,7 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
   const magicLinkPath = `${basePath}/magic-link/`;
   return async (request) => {
     const { pathname } = new URL(request.url);
-    if (pathname !== basePath && !pathname.startsWith(`${basePath}/`)) {
-      return Response.json({ error: "not_found" }, { status: 404 });
-    }
+    // Core answers 404 outside basePath: one source for that rule (Task 7 ruling).
     // Core always mounts the magic link routes. Better Auth serves them only with the plugin.
     if (!plugins.has("magic-link") && pathname.startsWith(magicLinkPath)) {
       return Response.json({ error: "not_found" }, { status: 404 });

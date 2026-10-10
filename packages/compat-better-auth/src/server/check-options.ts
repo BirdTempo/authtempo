@@ -262,7 +262,7 @@ const TOP: Record<string, Rule> = {
           note(
             out,
             p,
-            "accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket",
+            "accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
           );
         else if (v !== false) refuse(out, p, "expected a boolean");
       },
@@ -362,6 +362,15 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     }
   }
   const org = pluginOf(options, "organization")?.options;
+  // Better Auth 1.7.2 applies both limits when the option is absent
+  // (crud-members.mjs and crud-invites.mjs, read 2026-10-10). Core has none,
+  // so say so at start: no option is ignored in silence (final review I-2).
+  if (org)
+    note(
+      out,
+      "plugins[organization]",
+      "Better Auth's default limits of 100 members and 100 pending invitations per organization do not apply: core has no count limit",
+    );
   if (org && typeof org.sendInvitationEmail !== "function") {
     refuse(
       out,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import readme from "../README.md?raw";
 import { COMPAT_PLUGIN, passkey } from "../src/plugins.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { consumerc, consumere, consumerb, consumerd, consumeri } from "../typetest/options.js";
@@ -23,6 +24,10 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "advanced.database.generateId",
       "advanced.ipAddress.disableIpTracking",
     ]);
+    // The note names what the trade costs (final review L-11).
+    expect(c.notes.find((n) => n.startsWith("advanced.ipAddress.disableIpTracking"))).toContain(
+      "one caller can try one password on many addresses, bounded only by each address's limit",
+    );
   });
 
   it("refuses exactly these consumer-i options", () => {
@@ -38,46 +43,77 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "rateLimit.max",
       "rateLimit.window",
     ]);
-    expect(paths(c.notes)).toEqual(["session.cookieCache"]);
+    expect(paths(c.notes)).toEqual(["plugins[organization]", "session.cookieCache"]);
+    // Better Auth's absent-option defaults, said at start (final review I-2).
+    expect(c.notes).toContain(
+      "plugins[organization]: Better Auth's default limits of 100 members and 100 pending invitations per organization do not apply: core has no count limit",
+    );
   });
 
-  it("refuses the consumerc, consumerd, and consumerb features the README names", () => {
-    expect(paths(checkOptions(consumerc).refusals)).toEqual(
-      expect.arrayContaining([
-        "databaseHooks",
-        "hooks",
-        "plugins[organization].ac",
-        "plugins[organization].roles",
-        "plugins[organization].dynamicAccessControl",
-        "plugins[organization].organizationHooks",
-        "socialProviders.apple",
-        "socialProviders.apple.clientSecret",
-      ]),
-    );
-    expect(paths(checkOptions(consumerd).refusals)).toEqual(
-      expect.arrayContaining([
-        "hooks",
-        "plugins[admin]",
-        "plugins[email-otp]",
-        "plugins[anonymous]",
-        "plugins[organization].teams",
-        "plugins[organization].membershipLimit",
-        "session.freshAge",
-        "session.deferSessionRefresh",
-        "rateLimit.customStorage",
-      ]),
-    );
-    expect(paths(checkOptions(consumerb).refusals)).toEqual(
-      expect.arrayContaining([
-        "plugins[admin]",
-        "plugins[api-key]",
-        "plugins[jwt]",
-        "plugins[mcp]",
-        "plugins[cimd]",
-        "emailAndPassword.requireEmailVerification",
-        "advanced.defaultCookieAttributes.secure",
-      ]),
-    );
+  // The exact lists, so a key accepted in silence fails here (final review L-6).
+  const EXACT = {
+    consumerc: [
+      "databaseHooks",
+      "hooks",
+      "plugins[expo]",
+      "plugins[organization].ac",
+      "plugins[organization].dynamicAccessControl",
+      "plugins[organization].organizationHooks",
+      "plugins[organization].roles",
+      "plugins[organization].sendInvitationEmail",
+      "socialProviders.apple.clientSecret",
+      "socialProviders.apple",
+    ],
+    consumerd: [
+      "baseURL",
+      "hooks",
+      "plugins[admin]",
+      "plugins[anonymous]",
+      "plugins[email-otp]",
+      "plugins[organization].ac",
+      "plugins[organization].disableOrganizationDeletion",
+      "plugins[organization].membershipLimit",
+      "plugins[organization].organizationHooks",
+      "plugins[organization].organizationLimit",
+      "plugins[organization].roles",
+      "plugins[organization].teams",
+      "plugins[passkey].origin",
+      "rateLimit.customStorage",
+      "secret",
+      "session.deferSessionRefresh",
+      "session.freshAge",
+    ],
+    consumerb: [
+      "advanced.defaultCookieAttributes.secure",
+      "emailAndPassword.requireEmailVerification",
+      "emailAndPassword.sendResetPassword",
+      "emailVerification.expiresIn",
+      "plugins[admin]",
+      "plugins[api-key]",
+      "plugins[cimd]",
+      "plugins[jwt]",
+      "plugins[mcp]",
+      "plugins[organization].ac",
+      "plugins[organization].organizationHooks",
+      "plugins[organization].roles",
+      "plugins[organization].sendInvitationEmail",
+      "plugins[passkey].origin",
+    ],
+  };
+
+  it("refuses exactly these consumerc, consumerd, and consumerb options, and the README lists the same", () => {
+    const apps = { consumerc, consumerd, consumerb };
+    for (const [name, list] of Object.entries(EXACT)) {
+      const c = checkOptions(apps[name as keyof typeof apps]);
+      expect({ name, refusals: paths(c.refusals) }).toEqual({ name, refusals: list });
+      const line = readme
+        .split("\n")
+        .find((l, i, all) => all[i - 1]?.startsWith(`${name} (`) && l.startsWith("The factory"));
+      expect({ name, readme: line }).toEqual({
+        name,
+        readme: `The factory refuses exactly these: ${list.map((k) => `\`${k}\``).join(", ")}.`,
+      });
+    }
   });
 });
 

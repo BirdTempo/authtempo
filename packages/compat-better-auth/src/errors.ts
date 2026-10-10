@@ -38,8 +38,26 @@ export const BETTER_AUTH_CODES = {
   cancelled: "AUTH_CANCELLED",
 } as const satisfies { readonly [C in ClientCode]: string };
 
+/**
+ * The shim's own codes, with their status: the cases that no core or client
+ * code names (plan 9 final review M-5). The server `api`, the client, and a
+ * README test read this one table. The names are Better Auth 1.7.2's where
+ * one exists. Status 0 means that no HTTP response exists: a client with no
+ * base sends no request, and a server outage must not look the same.
+ */
+export const COMPAT_CODES = {
+  INVALID_CALLBACK_URL: 403,
+  INVALID_REDIRECT_URL: 403,
+  NO_ACTIVE_ORGANIZATION: 400,
+  INVITATION_NOT_FOUND: 404,
+  NOT_SUPPORTED: 501,
+  BASE_URL_REQUIRED: 0,
+} as const;
+
+export type CompatCode = keyof typeof COMPAT_CODES;
+
 /** The code of a call that tempo-auth does not serve, with HTTP status 501. */
-export const NOT_SUPPORTED = "NOT_SUPPORTED";
+export const NOT_SUPPORTED = "NOT_SUPPORTED" satisfies CompatCode;
 
 const STATUS_NAMES: Record<number, string> = {
   400: "BAD_REQUEST",
@@ -110,6 +128,16 @@ export class APIError extends Error {
 
 export function apiError(code: ClientCode, status: number): APIError {
   return new APIError(status, BETTER_AUTH_CODES[code]);
+}
+
+/** The server `APIError` of one of the shim's own codes, with the table's status. */
+export function compatApiError(code: CompatCode, message?: string): APIError {
+  return new APIError(COMPAT_CODES[code], code, message);
+}
+
+/** The client error of one of the shim's own codes, with the table's status. */
+export function compatClientError(code: CompatCode, message?: string): CompatClientError {
+  return clientError(code, COMPAT_CODES[code], message);
 }
 
 export function clientError(

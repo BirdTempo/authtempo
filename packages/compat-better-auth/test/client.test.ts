@@ -7,6 +7,7 @@ import {
 } from "@tempo-auth/core";
 import { SoftAuthenticator } from "@tempo-auth/core/testing";
 import { describe, expect, it, vi } from "vitest";
+import readme from "../README.md?raw";
 import {
   CLIENT_SESSION_KEYS,
   CLIENT_USER_KEYS,
@@ -14,6 +15,7 @@ import {
   expoClient,
   organizationClient,
 } from "../src/client/index.js";
+import { COMPAT_CODES } from "../src/errors.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, magicLink, organization, passkey } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -635,5 +637,53 @@ describe("createAuthClient: fix round 1", () => {
       rememberMe: true,
     });
     expect(accepted.error).toBeNull();
+  });
+});
+
+describe("the shim's own codes (plan 9 final review M-4, M-5)", () => {
+  const counted = () => {
+    const calls: string[] = [];
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: {
+        customFetchImpl: async (input) => {
+          calls.push(String(input));
+          return new Response(null, { status: 500 });
+        },
+      },
+    });
+    return { c, calls };
+  };
+
+  it("answers BASE_URL_REQUIRED with status 0: no HTTP response exists", async () => {
+    const r = await createAuthClient().signIn.email({ email: "a@example.com", password: PASSWORD });
+    expect(r.error).toMatchObject({ code: "BASE_URL_REQUIRED", status: 0, statusText: "" });
+  });
+
+  it("answers NOT_SUPPORTED (501) for callbackURL on signIn.email and signUp.email and sends no request", async () => {
+    const { c, calls } = counted();
+    const signIn = await c.signIn.email({
+      email: "pat@example.com",
+      password: PASSWORD,
+      callbackURL: "/welcome",
+    });
+    const signUp = await c.signUp.email({
+      email: "pat@example.com",
+      password: PASSWORD,
+      name: "Pat",
+      callbackURL: "/welcome",
+    });
+    for (const r of [signIn, signUp])
+      expect(r).toMatchObject({ data: null, error: { code: "NOT_SUPPORTED", status: 501 } });
+    expect(calls).toEqual([]);
+  });
+
+  it("lists every code of the table with its status in the README", () => {
+    for (const [code, status] of Object.entries(COMPAT_CODES))
+      expect({ code, row: readme.includes(`| \`${code}\` | ${status} |`) }).toEqual({
+        code,
+        row: true,
+      });
   });
 });

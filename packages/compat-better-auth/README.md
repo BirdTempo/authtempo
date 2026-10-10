@@ -151,8 +151,9 @@ Call arguments that core cannot keep: on the server, `api.signUpEmail` with
 `rememberMe: false`, throw `APIError` `NOT_SUPPORTED` with status 501. Core's
 verify link lands on the app origin, and every session lives
 `session.expiresIn`. `rememberMe: true` is Better Auth's default and is
-accepted. On the client, `callbackURL` on `signUp.email` and `rememberMe` have
-no effect.
+accepted. The client answers the same `NOT_SUPPORTED` (501) for `callbackURL`
+on `signIn.email` and `signUp.email` and for `rememberMe: false`, and sends no
+request.
 
 An invitation has two ids. The mail id (`data.id` in `sendInvitationEmail`)
 accepts the invitation, and the row id (from `api.createInvitation`) cancels it.
@@ -249,9 +250,25 @@ does not call it.
 | No network answer | `NETWORK_ERROR` | 0 |
 | The person cancels a passkey or sign-in prompt | `AUTH_CANCELLED` | 0 |
 | The handoff redirect does not match | `INVALID_REDIRECT_URL` | 0 |
+| An answer that the client cannot read, or a passkey prompt that fails in the browser | `UNEXPECTED_RESPONSE` | the HTTP status, or 0 for the browser failure |
+| A call with no `baseURL` and no page location | `BASE_URL_REQUIRED` | 0 |
 
 Status 0 means that no HTTP response exists. Do not test `status >= 400` alone
 for these.
+
+The shim's own codes name the cases that no core code names. The server `api`
+throws them as `APIError` with this status, and the client answers them as
+`error.code` with this status. `COMPAT_CODES` holds this table, and a test
+checks each row here.
+
+| Code | Status | Case |
+| --- | --- | --- |
+| `INVALID_CALLBACK_URL` | 403 | A `callbackURL` on an origin that is not `appURL` |
+| `INVALID_REDIRECT_URL` | 403 | A `redirectTo` on an origin that is not `appURL` |
+| `NO_ACTIVE_ORGANIZATION` | 400 | An invitation with no `organizationId` and no active organization |
+| `INVITATION_NOT_FOUND` | 404 | `api.cancelInvitation` with an unknown row id |
+| `NOT_SUPPORTED` | 501 | An argument or call that core does not serve |
+| `BASE_URL_REQUIRED` | 0 | A client call with no `baseURL` and no page location; no request goes out |
 
 On Expo, pass `expo-secure-store` as `storage`. The client accepts any object
 with `getItem` and `setItem`, as Better Auth does. With a plain store, such as
@@ -292,7 +309,10 @@ consumer-i (small edits):
 - Add the `passkey` table. Migration 0001 adds and fills `account.issuer` on Postgres (consumer-i's tables are from before Better Auth 1.7).
 
 consumerc (follow-ups first): `hooks`, `databaseHooks`, and `organizationHooks` (plan 9d); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts`; the `getSchema()` test.
+The factory refuses exactly these: `databaseHooks`, `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].organizationHooks`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
 consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (plan 9d), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, `membershipLimit`, the rate limit storage.
+The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[email-otp]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].membershipLimit`, `plugins[organization].organizationHooks`, `plugins[organization].organizationLimit`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
 
 consumerb (follow-ups first): API keys (plan 8b), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes.
+The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.requireEmailVerification`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].organizationHooks`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
