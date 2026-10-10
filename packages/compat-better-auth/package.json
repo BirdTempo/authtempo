@@ -1,0 +1,92 @@
+{
+  "name": "@tempo-auth/compat-better-auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./plugins": {
+      "types": "./dist/plugins.d.ts",
+      "default": "./dist/plugins.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./client/plugins": {
+      "types": "./dist/client/plugins.d.ts",
+      "default": "./dist/client/plugins.js"
+    },
+    "./expo-client": {
+      "types": "./dist/client/expo.d.ts",
+      "default": "./dist/client/expo.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./next-js": {
+      "types": "./dist/next-js.d.ts",
+      "default": "./dist/next-js.js"
+    },
+    "./adapters/drizzle": {
+      "types": "./dist/adapters/drizzle.d.ts",
+      "default": "./dist/adapters/drizzle.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p typetest/tsconfig.json && tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0"
+  },
+  "peerDependencies": {
+    "@tempo-auth/adapter-d1": "workspace:*",
+    "@tempo-auth/adapter-postgres": "workspace:*",
+    "@tempo-auth/client": "workspace:*",
+    "@tempo-auth/core": "workspace:*",
+    "@tempo-auth/handoff": "workspace:*",
+    "postgres": "^3.4.9",
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "postgres": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "@cloudflare/workers-types": "5.20261007.1",
+    "@tempo-auth/adapter-d1": "workspace:*",
+    "@tempo-auth/adapter-postgres": "workspace:*",
+    "@tempo-auth/client": "workspace:*",
+    "@tempo-auth/core": "workspace:*",
+    "@tempo-auth/handoff": "workspace:*",
+    "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "postgres": "3.4.9",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}

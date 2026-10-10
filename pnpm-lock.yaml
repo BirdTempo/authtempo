@@ -276,6 +276,64 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
 
+  packages/compat-better-auth:
+    dependencies:
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
+    devDependencies:
+      '@cloudflare/vitest-plugin':
+        specifier: 1.4.0
+        version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)))
+      '@cloudflare/workers-types':
+        specifier: 5.20261007.1
+        version: 5.20261007.1
+      '@tempo-auth/adapter-d1':
+        specifier: workspace:*
+        version: link:../adapter-d1
+      '@tempo-auth/adapter-postgres':
+        specifier: workspace:*
+        version: link:../adapter-postgres
+      '@tempo-auth/client':
+        specifier: workspace:*
+        version: link:../client
+      '@tempo-auth/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tempo-auth/handoff':
+        specifier: workspace:*
+        version: link:../handoff
+      '@types/node':
+        specifier: 24.19.1
+        version: 24.19.1
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
+      react:
+        specifier: 19.3.0
+        version: 19.3.0
+      react-dom:
+        specifier: 19.3.0
+        version: 19.3.0(react@19.3.0)
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.3.3
+        version: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
+
   packages/core:
     dependencies:
       '@simplewebauthn/server':
@@ -1087,6 +1145,10 @@ packages:
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
 
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
+
   '@oxc-project/types@0.153.0':
     resolution: {integrity: sha512-jSNrRIyvPVLL5E1z/tS5zLAprosGz/FuI1PWwEOz59j3E4TTTzSpqKb/RDGqJhhW0QHYISGXxq582wGx6T11Tw==}
 
@@ -1310,6 +1372,14 @@ packages:
   '@types/node@24.19.1':
     resolution: {integrity: sha512-aS3/DG0oM05K0RIXXP+hKjinGG5IgSSVGzswZxW3O0sS3pH4/fycXundUC9XsszgKCk4gHXylTEK6hyFxVxnoQ==}
 
+  '@types/react-dom@19.3.0':
+    resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
+    peerDependencies:
+      '@types/react': ^19.3.0
+
+  '@types/react@19.3.0':
+    resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
     engines: {node: '>=16.20.0'}
@@ -1465,6 +1535,9 @@ packages:
   cookie@1.1.1:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
     engines: {node: '>=18'}
+
+  csstype@3.2.3:
+    resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -1664,6 +1737,15 @@ packages:
     resolution: {integrity: sha512-BbubeCEyTuQjVMakvJQ/Sxbc93F2pwmbsxONT/ZRrwU7Ua38d8unYTwXpTVLAKJ4BDuH9IGztCjQcd/N/39Dvg==}
     engines: {node: '>=16.0.0'}
 
+  react-dom@19.3.0:
+    resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
+    peerDependencies:
+      react: ^19.3.0
+
+  react@19.3.0:
+    resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
+    engines: {node: '>=0.10.0'}
+
   reflect-metadata@0.2.2:
     resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
 
@@ -1671,6 +1753,9 @@ packages:
     resolution: {integrity: sha512-/5apOkwWxtACcQtZ5WlrAsKS4JwXVThQPJZ3RqIruRY9UG9M8e0VlXN068xum/JRKA4aIUoJ13ghe/kGCvidiQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  scheduler@0.28.0:
+    resolution: {integrity: sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw==}
 
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
@@ -2370,6 +2455,8 @@ snapshots:
 
   '@levischuck/tiny-cbor@0.2.11': {}
 
+  '@noble/hashes@2.4.0': {}
+
   '@oxc-project/types@0.153.0': {}
 
   '@peculiar/asn1-android@2.10.0':
@@ -2595,6 +2682,14 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  '@types/react-dom@19.3.0(@types/react@19.3.0)':
+    dependencies:
+      '@types/react': 19.3.0
+
+  '@types/react@19.3.0':
+    dependencies:
+      csstype: 3.2.3
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -2655,7 +2750,7 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vitest/mocker@5.0.3(vite@8.3.3)':
+  '@vitest/mocker@5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.3
@@ -2681,6 +2776,8 @@ snapshots:
   cjs-module-lexer@1.2.3: {}
 
   cookie@1.1.1: {}
+
+  csstype@3.2.3: {}
 
   debug@4.4.3(supports-color@10.2.2):
     dependencies:
@@ -2890,6 +2987,13 @@ snapshots:
 
   pvutils@1.2.0: {}
 
+  react-dom@19.3.0(react@19.3.0):
+    dependencies:
+      react: 19.3.0
+      scheduler: 0.28.0
+
+  react@19.3.0: {}
+
   reflect-metadata@0.2.2: {}
 
   rolldown@1.2.13:
@@ -2912,6 +3016,8 @@ snapshots:
       '@rolldown/binding-openharmony-arm64': 1.2.13
       '@rolldown/binding-win32-arm64-msvc': 1.2.13
       '@rolldown/binding-win32-x64-msvc': 1.2.13
+
+  scheduler@0.28.0: {}
 
   semver@7.8.5: {}
 
@@ -3065,7 +3171,7 @@ snapshots:
   vitest@5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.3(vite@8.3.3)
+      '@vitest/mocker': 5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
