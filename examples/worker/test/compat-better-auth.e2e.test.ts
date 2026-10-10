@@ -29,6 +29,17 @@ async function me(headers: Record<string, string>) {
         : null,
   };
 }
+/** Confirms an address by its mailed link, as a person does. Answers the session cookie the verify route sets. */
+async function confirmByLink(link: string): Promise<string> {
+  const res = await SELF.fetch(`${BASE}/api/auth/password/verify`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+    body: new URLSearchParams({ token: new URL(link).searchParams.get("token") ?? "" }).toString(),
+  });
+  expect(res.status).toBe(302);
+  return /tempo_session=[^;]+/.exec(res.headers.get("set-cookie") ?? "")?.[0] ?? "";
+}
 async function sha256Hex(text: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -106,15 +117,7 @@ it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer h
   expect((await me({ cookie: mobile.getCookie() })).body?.email).toBe("robin@example.com");
 
   // Confirm the address by the mailed link, as a person does, so organization writes are allowed.
-  const verify = new URL(await lastLink());
-  const confirmed = await SELF.fetch(`${BASE}/api/auth/password/verify`, {
-    method: "POST",
-    redirect: "manual",
-    headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
-    body: new URLSearchParams({ token: verify.searchParams.get("token") ?? "" }).toString(),
-  });
-  expect(confirmed.status).toBe(302);
-  const cookie = /tempo_session=[^;]+/.exec(confirmed.headers.get("set-cookie") ?? "")?.[0] ?? "";
+  const cookie = await confirmByLink(await lastLink());
   expect(cookie).toMatch(/^tempo_session=ts_/);
 
   const dashboard = createAuthClient({
@@ -138,17 +141,58 @@ it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer h
     role: "member",
     status: "pending",
   });
-  expect((await lastLink()).startsWith("invitation:inv_")).toBe(true);
+  // The mail callback's data.id is the token, the accept capability. inviteMember answers the row id.
+  const mailed = await lastLink();
+  expect(mailed.startsWith("invitation:inv_")).toBe(true);
+  const invitationToken = mailed.slice("invitation:".length);
+  expect(invitationToken).not.toBe(invited.data?.id);
   const rows = await env.BA_DB.prepare(
     `SELECT "id", "status", "taTokenHash" FROM "invitation"`,
   ).all<{ id: string; status: string; taTokenHash: string }>();
-  // The app sees the row id; the mail callback alone holds the token, and the row holds its hash.
+  // The row holds the token hash, never the token.
   expect(rows.results).toEqual([
-    {
-      id: invited.data?.id,
-      status: "pending",
-      taTokenHash: await sha256Hex((await lastLink()).slice("invitation:".length)),
-    },
+    { id: invited.data?.id, status: "pending", taTokenHash: await sha256Hex(invitationToken) },
+  ]);
+
+  // The invited person signs up, confirms the address, and accepts with the id from the mail.
+  const invitee = createAuthClient({
+    baseURL: BASE,
+    basePath: "/api/auth",
+    fetchOptions: { customFetchImpl },
+  });
+  const inviteeUp = await invitee.signUp.email({
+    name: "Sam",
+    email: "new@example.com",
+    password: PASSWORD,
+  });
+  expect(inviteeUp.error).toBeNull();
+  const inviteeCookie = await confirmByLink(await lastLink());
+  const inviteeDashboard = createAuthClient({
+    baseURL: BASE,
+    basePath: "/api/auth",
+    plugins: [organizationClient()],
+    fetchOptions: { customFetchImpl, headers: { cookie: inviteeCookie } },
+  });
+  const accepted = await inviteeDashboard.organization.acceptInvitation({
+    invitationId: invitationToken,
+  });
+  expect(accepted.error).toBeNull();
+  expect(accepted.data).toMatchObject({
+    member: { organizationId: orgId, userId: inviteeUp.data?.user.id, role: "member" },
+    organization: { id: orgId, name: "Front Desk", slug: "front-desk" },
+  });
+  const after = await env.BA_DB.prepare(`SELECT "status" FROM "invitation" WHERE "id" = ?`)
+    .bind(invited.data?.id ?? "")
+    .first<{ status: string }>();
+  expect(after?.status).toBe("accepted");
+  const members = await env.BA_DB.prepare(
+    `SELECT "userId", "role" FROM "member" WHERE "organizationId" = ? ORDER BY "role"`,
+  )
+    .bind(orgId)
+    .all<{ userId: string; role: string }>();
+  expect(members.results).toEqual([
+    { userId: inviteeUp.data?.user.id, role: "member" },
+    { userId: up.data?.user.id, role: "owner" },
   ]);
 
   await mobile.signOut();
