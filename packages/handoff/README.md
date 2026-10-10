@@ -85,6 +85,8 @@ const handoff = createHandoff({
   session keeps no cookies. The social binding cookie then dies between
   the provider start and its callback, and the flow fails with
   `invalid_token`. Do not change this option.
+  Unconfirmed on 2026-10-10: no phone has tested this claim. Step 8 of
+  `docs/superpowers/runbooks/2026-10-10-expo-cookie-proof.md` settles it.
 - `expoCrypto` is required on Hermes. Hermes has no `crypto.subtle`.
 
 ## Electron
@@ -169,6 +171,20 @@ async function main() {
   report no encryption, and `set` throws.
 - The token stays in the main process. A renderer asks the main process
   to make requests. The renderer never holds the token.
+- Proven at 2026-10-09T21:11:30Z on macOS 27.0 with Electron 44.7.0:
+  `open-url` and `second-instance` both
+  delivered the code, the token store kept the token encrypted, and the
+  opener dropped a URL off the redirect. The proof used a copy of the
+  Electron bundle with the scheme in `Info.plist` and `lsregister -f`.
+  `second-instance` is proven on macOS only. The path for Windows and
+  Linux is not proven. The record is
+  `examples/electron/proof/results/electron-macos.json`. A run leaves a
+  LaunchServices handler preference for `example-app` after the bundle
+  is gone; the proof records it.
+- Observation on 2026-10-10: the plain unpackaged app also received
+  `open-url` on macOS 27.0. The Electron 44.7.0 docs say it should fail.
+  Every Electron development binary shares one bundle id, so do not rely on
+  this path. Declare the scheme in the bundle.
 
 ## Development
 
@@ -177,6 +193,11 @@ Core admits a development redirect only when the API sets
 a web or desktop test it is a loopback URL, for example
 `http://127.0.0.1:8081/auth`. Core refuses any `http` or `https` URL
 that is not on a loopback host.
+
+The handoff confirm page adds the source of the matched dev redirect to
+`form-action`: its scheme (`exp:`), or the origin of a loopback URL
+(`http://127.0.0.1:8081`). A dev redirect on `[::1]` cannot be listed.
+Use `127.0.0.1`.
 
 ## Failure codes
 

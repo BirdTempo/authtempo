@@ -124,8 +124,14 @@ The continue is a consent step. A signed-in browser sees a page that names the a
 In development `devRedirectPattern` admits a full redirect URL, for
 example `/^exp:\/\/[\d.]+:\d+\/--\/auth$/` for Expo Go. Core refuses a
 pattern with the `g` or `y` flag, and refuses any admitted `http` or
-`https` URL that is not on a loopback host. `signInPage`
-replaces the page; the function gets the base path, the continue path,
+`https` URL that is not on a loopback host.
+
+The handoff confirm page adds the source of the matched dev redirect to
+`form-action`: its scheme (`exp:`), or the origin of a loopback URL
+(`http://127.0.0.1:8081`). A dev redirect on `[::1]` cannot be listed.
+Use `127.0.0.1`.
+
+`signInPage` replaces the page; the function gets the base path, the continue path,
 the enabled methods, and the script nonce, and must put the nonce on its
 script tag. The `methods` input has the flags `magicLink`, `google`,
 `apple`, `passkey`, and `password`. `password` is true when the config

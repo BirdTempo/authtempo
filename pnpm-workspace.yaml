@@ -10,3 +10,4 @@ minimumReleaseAge: 1440
 allowBuilds:
   esbuild: true # postinstall "node install.js" checks the platform binary runs and links it over the JS shim; it fetches from npm only if the optional binary package is missing (read 2026-10-09, 0.28.1)
   workerd: true # postinstall "node install.js" does the same for the workerd binary that the Workers test pool and wrangler dev run (read 2026-10-09, 1.20261006.1)
+  # electron: no entry. 44.7.0 has no install script; it downloads its binary on the first require (read 2026-10-10).

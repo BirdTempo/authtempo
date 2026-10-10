@@ -1,0 +1,2 @@
+# The Electron proof builds a temporary app bundle here (proof/run.mjs) and removes it.
+/.proof-bundle-*/

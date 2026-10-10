@@ -4,6 +4,8 @@ interface Env {
   TEST_MODE: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** Development only: the source of a RegExp for an Expo Go redirect, for example ^exp://192\.168\.1\.20:8081/--/auth$. */
+  DEV_REDIRECT_PATTERN?: string;
   DB: D1Database;
 }
 

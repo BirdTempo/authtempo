@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // An app, not a library: no declaration files.
+    "declaration": false,
+    // main.ts imports node:fs and node:path. electron.d.ts also references these types.
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
