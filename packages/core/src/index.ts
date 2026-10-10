@@ -7,7 +7,7 @@ export type {
   OrganizationsConfig,
   PasswordConfig,
 } from "./config.js";
-export { ConfigError } from "./config.js";
+export { ConfigError, isAppScheme } from "./config.js";
 export { type Auth, type AuthApi, createAuth, type PasswordApi } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { InvitationSummary } from "./engine/invitations.js";

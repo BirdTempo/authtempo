@@ -215,6 +215,13 @@ describe("magicLink()", () => {
     );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not_found" });
+    // Core also mounts GET and POST /magic-link/verify (core http/routes/magic-link.ts).
+    const getVerify = await auth.handler(new Request(`${BASE}/api/auth/magic-link/verify?token=x`));
+    expect([getVerify.status, await getVerify.json()]).toEqual([404, { error: "not_found" }]);
+    const postVerify = await auth.handler(
+      new Request(`${BASE}/api/auth/magic-link/verify`, json({ token: "x" }, { origin: APP })),
+    );
+    expect([postVerify.status, await postVerify.json()]).toEqual([404, { error: "not_found" }]);
     await expect(
       auth.api.signInMagicLink({ body: { email: "pat@example.com" } }),
     ).rejects.toMatchObject({ statusCode: 404 });
@@ -293,6 +300,47 @@ describe("expo()", () => {
     expect((await without.handler(request())).status).toBe(401);
   });
 
+  it("passes a trusted expo-origin to core's Origin check", async () => {
+    const auth = betterAuth(base({ plugins: [expo()] }));
+    const res = await auth.handler(
+      new Request(
+        `${BASE}/api/auth/password/sign-in`,
+        json(
+          { email: "pat@example.com", password: "correct horse battery" },
+          { "expo-origin": "reception://" },
+        ),
+      ),
+    );
+    // Past the Origin check: the route runs and refuses the unknown address.
+    expect([res.status, await res.json()]).toEqual([401, { error: "invalid_credentials" }]);
+  });
+
+  it("keeps a real Origin header over expo-origin", async () => {
+    const auth = betterAuth(base({ plugins: [expo()] }));
+    const res = await auth.handler(
+      new Request(
+        `${BASE}/api/auth/password/sign-in`,
+        json(
+          { email: "pat@example.com", password: "correct horse battery" },
+          { origin: APP, "expo-origin": "evil://" },
+        ),
+      ),
+    );
+    expect([res.status, await res.json()]).toEqual([401, { error: "invalid_credentials" }]);
+  });
+
+  it("refuses expo() when the system-browser page would have no sign-in method", () => {
+    const noMethod = base({ emailAndPassword: { enabled: false }, plugins: [expo()] });
+    expect(checkOptions(noMethod).refusals).toEqual([
+      "plugins[expo]: the system-browser page has no sign-in method; add magicLink, emailAndPassword, a social provider, or passkey",
+    ]);
+    const withPasskey = base({
+      emailAndPassword: { enabled: false },
+      plugins: [expo(), passkey({ rpID: "example.com", rpName: "Ex", origin: APP })],
+    });
+    expect(checkOptions(withPasskey).refusals).toEqual([]);
+  });
+
   it("offers the magic link on the system-browser page only with the magicLink plugin", () => {
     const input = {
       basePath: "/api/auth",
@@ -311,6 +359,21 @@ describe("expo()", () => {
       mapOptions(base({ plugins: [expo(), magicLink({ sendMagicLink: async () => {} })] })).config
         .handoff?.signInPage,
     ).toBeUndefined();
+  });
+});
+
+describe("a plugin given twice", () => {
+  it("is refused by name in the one refusal list", () => {
+    const twice = base({
+      plugins: [
+        magicLink({ sendMagicLink: async () => {} }),
+        magicLink({ expiresIn: 3600, sendMagicLink: async () => {} }),
+      ],
+    });
+    expect(checkOptions(twice).refusals).toEqual(["plugins[magic-link]: given twice; pass one"]);
+    expect(() => betterAuth(twice)).toThrowError(
+      /\n- plugins\[magic-link\]: given twice; pass one$/,
+    );
   });
 });
 

@@ -179,7 +179,8 @@ These are every path that Better Auth 1.7.2 defines in `better-auth`
 Auth request and answer shapes. It answers 404 for each, with two exceptions
 that are core's own routes (core `http/routes`, read 2026-10-10): `POST
 /sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
-core's magic link route, so a Better Auth-era link answers `invalid_token`.
+core's magic link route. With the `magicLink` plugin, a Better Auth-era link
+answers `invalid_token`. Without the plugin, it answers 404.
 
 - Core: `/account-info`, `/callback/:id`, `/change-email`, `/change-password`,
   `/delete-user`, `/delete-user/callback`, `/error`, `/get-access-token`,
@@ -229,34 +230,6 @@ token in `storage` and sends it as the bearer header. `getCookie()` answers
 need `webBrowser` (the `expo-web-browser` module) and `crypto` (the
 `expo-crypto` module) in `expoClient`; without them they answer `NOT_SUPPORTED`.
 
-`createAuthClient()` with no `baseURL` does not throw when the module loads.
-This matters for a Next server render of a client module. The client reads the
-base at the first call: `baseURL`, else the page's `location.origin`. A call
-with neither answers the error code `BASE_URL_REQUIRED`.
-
-`signIn.email` with `rememberMe: false` answers `NOT_SUPPORTED` (501): core
-keeps no short session. `rememberMe: true` works.
-
-`fetchOptions.onSuccess` runs once per call, with the last successful
-response. A failed sub-request of a call that sends several (for example the
-invitation list for a member below admin) never reaches it. The session read
-that `inviteMember` and `getFullOrganization` make for the active organization
-does not call it.
-
-| Client-only error | `error.code` | `error.status` |
-| --- | --- | --- |
-| No network answer | `NETWORK_ERROR` | 0 |
-| The person cancels a passkey or sign-in prompt | `AUTH_CANCELLED` | 0 |
-| The handoff redirect does not match | `INVALID_REDIRECT_URL` | 0 |
-
-Status 0 means that no HTTP response exists. Do not test `status >= 400` alone
-for these.
-
-On Expo, pass `expo-secure-store` as `storage`. The client accepts any object
-with `getItem` and `setItem`, as Better Auth does. With a plain store, such as
-`localStorage`, the session token lies readable at rest, and any script on the
-page can read it.
-
 ## Plugins
 
 | Plugin | What it does on tempo-auth |
@@ -265,7 +238,11 @@ page can read it.
 | `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. Without the plugin the magic link paths answer 404. |
 | `bearer` | Core reads `Authorization: Bearer` on every route already. The plugin adds `set-auth-token` to every response that sets the session cookie. |
-| `expo` | Core's handoff for the system browser. `trustedOrigins` must hold the app scheme, for example `reception://`. `expo-origin` becomes `origin` when a request has none. On Expo, `signIn.social` and `signIn.magicLink` open core's sign-in page, which lists every method this server serves: the magic link form only with the `magicLink` plugin, the password form with `emailAndPassword`, a social button per provider, and the passkey button with the `passkey` plugin. The provider is not chosen in advance. |
+| `expo` | Core's handoff for the system browser. `trustedOrigins` must hold the app scheme, for example `reception://`. `expo-origin` becomes `origin` when a request has none. On Expo, `signIn.social` and `signIn.magicLink` open core's sign-in page, which lists every method this server serves: the magic link form only with the `magicLink` plugin, the password form with `emailAndPassword`, a social button per provider, and the passkey button with the `passkey` plugin. The provider is not chosen in advance. A config with `expo` and none of these methods is refused at start. |
+
+Give each plugin once. A second entry with the same id is refused at start, because the server reads only the first.
+
+Only `auth.handler` keeps the plugin behavior in this table: the magic link 404, `set-auth-token`, and the `expo-origin` rule. `auth.tempo.handle` serves core's routes directly, without them.
 
 ## The five Better Auth apps
 

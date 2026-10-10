@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveConfig } from "../src/config.js";
+import { isAppScheme, resolveConfig } from "../src/config.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -201,6 +201,24 @@ describe("appURL, cookie, handoff config", () => {
     );
     expect(() => resolveConfig({ ...base, handoff: { schemes: ["Notes Mine://"] } })).toThrow(
       /handoff.schemes/,
+    );
+  });
+  it("names an app scheme with isAppScheme, the one copy of the rule (plan 9)", () => {
+    expect(["reception://", "com.example.app://", "a+b.c-d://"].map(isAppScheme)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    const refused = [
+      "http://",
+      "https://",
+      "Reception://",
+      "reception:",
+      "https://app.example.com",
+    ];
+    expect(refused.map(isAppScheme)).toEqual([false, false, false, false, false]);
+    expect(() => resolveConfig({ ...base, handoff: { schemes: ["http://"] } })).toThrow(
+      "handoff.schemes must not hold http://",
     );
   });
 });

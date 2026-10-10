@@ -1,3 +1,4 @@
+import { isAppScheme } from "@tempo-auth/core";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
 import { type BetterAuthOptions, COMPAT_PLUGIN, type CompatPlugin } from "../types.js";
 
@@ -136,9 +137,16 @@ const plugins: Rule = (v, p, out) => {
     refuse(out, p, "expected a list");
     return;
   }
+  // pluginOf and the mapping read only the first entry of an id, so a second one would be dropped in silence.
+  const seen = new Set<string>();
   for (const plugin of v as { kind?: unknown; id?: unknown; options?: unknown }[]) {
     const id = typeof plugin?.id === "string" ? plugin.id : "unknown";
     const path = `plugins[${id}]`;
+    if (seen.has(id)) {
+      refuse(out, path, "given twice; pass one");
+      continue;
+    }
+    seen.add(id);
     const rule = PLUGIN_RULES[id];
     if (plugin?.kind === COMPAT_PLUGIN && rule) rule(plugin.options ?? {}, path, out);
     else refuse(out, path, FOREIGN_PLUGINS[id] ?? "tempo-auth has no such plugin");
@@ -313,14 +321,7 @@ export function pluginOf<I extends CompatPlugin["id"]>(
   return null;
 }
 
-/** An app scheme in trustedOrigins (`reception://`). The one copy: the check and the mapping use it. */
-const APP_SCHEME = /^[a-z][a-z0-9+.-]*:\/\/$/;
-/** An app scheme entry, not a bare http:// or https://. The exact-origin rule and appSchemes use it. */
-function isAppScheme(x: string): boolean {
-  return APP_SCHEME.test(x) && x !== "http://" && x !== "https://";
-}
-
-/** The app schemes of trustedOrigins, which core's handoff redirects to. */
+/** The app schemes of trustedOrigins, which core's handoff redirects to. Core's isAppScheme is the one copy of the rule. */
 export function appSchemes(options: BetterAuthOptions): string[] {
   const list = Array.isArray(options.trustedOrigins) ? options.trustedOrigins : [];
   return list.filter((o) => typeof o === "string" && isAppScheme(o));
@@ -397,6 +398,20 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
   }
   if (pluginOf(options, "expo") && appSchemes(options).length === 0) {
     refuse(out, "plugins[expo]", "needs the app scheme, for example myapp://, in trustedOrigins");
+  }
+  // The methods core's system-browser page lists (map-options.ts pluginConfig, core sign-in-page.ts).
+  const pageHasMethod =
+    pluginOf(options, "magic-link") !== null ||
+    options.emailAndPassword?.enabled === true ||
+    options.socialProviders?.google !== undefined ||
+    options.socialProviders?.apple !== undefined ||
+    pluginOf(options, "passkey") !== null;
+  if (pluginOf(options, "expo") && !pageHasMethod) {
+    refuse(
+      out,
+      "plugins[expo]",
+      "the system-browser page has no sign-in method; add magicLink, emailAndPassword, a social provider, or passkey",
+    );
   }
   out.refusals.sort();
   out.notes.sort();

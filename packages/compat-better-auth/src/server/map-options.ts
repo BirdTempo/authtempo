@@ -103,8 +103,11 @@ function clientIpOf(options: BetterAuthOptions): ((request: Request) => string |
   };
 }
 
-function pluginConfig(options: BetterAuthOptions): Partial<AuthConfig> {
-  const out: Partial<AuthConfig> = {};
+/** Spread last into the config, so the type keeps it to the three plugin sections. */
+type PluginConfig = Pick<AuthConfig, "organizations" | "passkey" | "handoff">;
+
+function pluginConfig(options: BetterAuthOptions): PluginConfig {
+  const out: PluginConfig = {};
   const org = pluginOf(options, "organization");
   if (org) {
     out.organizations = {
