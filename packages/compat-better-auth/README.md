@@ -55,3 +55,34 @@ row until that sign-in rehashes it. So during the migration window the
 response time shows which accounts are not yet migrated. Each account loses
 this tell at its first right sign-in. At most two scrypt derives run at once
 per isolate; the others wait, and no sign-in is refused.
+
+## Storage: in place on the Better Auth tables
+
+`drizzleAdapter(db, { provider: "pg", schema })` and
+`betterAuthSchemaStorage({ dialect: "postgres", sql })` answer core's storage
+port and the owned limiter over the app's existing Better Auth 1.7 tables.
+Postgres needs a postgres.js client; with Drizzle that is
+`drizzle-orm/postgres-js`. Other drivers are refused.
+
+Run the migration once per deploy, before the first request:
+
+```ts
+await betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate();
+```
+
+What the migration does (`0001_compat_better_auth`, append-only):
+
+- It adds two tables, `ta_meta` and `ta_limit`, and no other table.
+- It adds nullable `ta` columns for core fields with no Better Auth column, and fills them for existing rows: `session.taLastSeenAt`, `account.taLinkedAt`, `verification.taPurpose`, `taValueHash`, `taConsumedAt`, `taData`, `passkey.taUpdatedAt`, `organization.taUpdatedAt`, `member.taUpdatedAt`, `invitation.taTokenHash`, `taAcceptedAt`, `taUpdatedAt`.
+- It adds the unique keys core needs: `verification (taValueHash)`, `passkey (credentialID)`, `member (organizationId, userId)`, `invitation (taTokenHash)`, and `account (issuer, accountId)` when the table has no unique index on these two columns under any name (Better Auth 1.7 has `account_issuer_accountId_uidx`).
+- `account.issuer` on both dialects: on Postgres it adds the column when it is missing (a table from before Better Auth 1.7, such as consumer-i's) and fills every row that has none from `providerId`. On D1 a static file cannot test for a column, so two files ship: `migrations/d1/` for 1.7 tables (it fills only) and `migrations/d1-before-1.7/` (it adds the column and the unique index, then fills). Point `migrations_dir` at the one that fits the tables.
+- It stops with "every Better Auth date column must be timestamptz" when a date column has no time zone.
+- It needs every table in the list, also when the plugin is off: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, `passkey`. Create a missing table with Better Auth's own SQL for it. Core's claim rule deletes passkey rows on every app, and the sweep deletes invitations.
+
+What changes at cutover:
+
+- The `session.token` column holds the SHA-256 hex of the token, never the raw token. Better Auth-era sessions end: every person signs in again once. App SQL that reads `session.token` reads a hash.
+- Better Auth-era verification rows and invitations stay in the table and core never reads them. Send pending invitations again.
+- Users, Google and Apple accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
+- The `ta_meta` and `ta_limit` tables go in the first schema of the search path, also when the Better Auth tables sit in another schema.
+- A passkey counter above 2147483647 fails: Better Auth's `counter` column is `integer`.
