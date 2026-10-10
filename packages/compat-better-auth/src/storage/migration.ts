@@ -33,6 +33,33 @@ const ADDED: readonly {
   { table: "invitation", field: "taUpdatedAt", type: "date", from: "createdAt" },
 ];
 
+/** The added dates that migration 0001 fills from a Better Auth column. The SQLite statements read `from` when the added column is null. */
+export const FILLED_DATES = ADDED.filter(
+  (a): a is (typeof ADDED)[number] & { from: string } => a.from !== undefined,
+);
+
+/** SQLite: a date as the ISO millisecond text core writes (toISOString), from either SQLite text form. */
+export const sqliteIsoText = (col: string) => `strftime('%Y-%m-%dT%H:%M:%fZ', ${col})`;
+
+/**
+ * The Better Auth date columns that core reads, per table. On SQLite each
+ * must hold date text. A Drizzle schema with integer timestamps stores
+ * numbers, which sort before every text and do not read as a date.
+ */
+const BETTER_AUTH_DATES: Readonly<Record<BetterAuthTable, readonly string[]>> = {
+  user: ["createdAt", "updatedAt"],
+  session: ["expiresAt", "createdAt", "updatedAt"],
+  account: ["createdAt", "updatedAt"],
+  verification: ["expiresAt", "createdAt", "updatedAt"],
+  organization: ["createdAt"],
+  member: ["createdAt"],
+  invitation: ["expiresAt", "createdAt"],
+  passkey: ["createdAt"],
+};
+
+/** The name of the CHECK that refuses a date that is not text. SQLite and D1 put it in the error text. */
+export const SQLITE_DATE_CHECK = "tempo_auth_compat_every_better_auth_date_must_be_text";
+
 /** The keys core's conformance suite needs and Better Auth lacks, plus core's two lookup indexes. (issuer, accountId) is separate: see SqliteVariant. */
 const INDEXES: readonly {
   name: string;
@@ -151,14 +178,34 @@ export function compatMigrationSql(
       `UPDATE ${T("passkey")} SET ${C("passkey", "createdAt")} = ${MS_NOW} WHERE ${C("passkey", "createdAt")} IS NULL;`,
     );
   } else {
+    // A static file cannot raise an error, so a CHECK refuses the run: the
+    // INSERT writes 0 when any Better Auth date is not text that SQLite reads
+    // as a date. D1 refuses TEMP tables (SQLITE_AUTH, probed 2026-10-10), so
+    // the check table is a plain one that the next statement drops.
+    // One EXISTS per table, joined with OR: D1 refuses a compound SELECT
+    // (UNION ALL) of this many terms ("too many terms", run 2026-10-10).
+    const notDate = BETTER_AUTH_TABLES.map((t) => {
+      const bad = BETTER_AUTH_DATES[t]
+        .map((f) => C(t, f))
+        .map((c) => `(${c} IS NOT NULL AND (typeof(${c}) <> 'text' OR julianday(${c}) IS NULL))`)
+        .join(" OR ");
+      return `EXISTS (SELECT 1 FROM ${T(t)} WHERE ${bad})`;
+    }).join(" OR ");
+    // The statements that fail on the wrong variant (issuer) come before the
+    // first CREATE TABLE, and the CREATE TABLE ta_limit that fails on a second
+    // run comes after only idempotent fills. So a runner that does not roll
+    // back a failed file (a plain `d1 execute --file`) is left with no change.
     lines.push(
-      "CREATE TABLE ta_limit (key TEXT PRIMARY KEY NOT NULL, window_start INTEGER NOT NULL, count INTEGER NOT NULL, expires_at INTEGER NOT NULL);",
+      `CREATE TABLE IF NOT EXISTS ta_date_check (ok INTEGER CONSTRAINT ${SQLITE_DATE_CHECK} CHECK (ok = 1));`,
+      `INSERT INTO ta_date_check (ok) SELECT NOT (${notDate});`,
+      "DROP TABLE ta_date_check;",
       ...(variant === "before-1.7"
         ? [`ALTER TABLE ${T("account")} ADD COLUMN ${issuer} TEXT;`]
         : []),
       fillIssuer,
       ...(variant === "before-1.7" ? [issuerIndex] : []),
-      `UPDATE ${T("passkey")} SET ${C("passkey", "createdAt")} = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE ${C("passkey", "createdAt")} IS NULL;`,
+      `UPDATE ${T("passkey")} SET ${C("passkey", "createdAt")} = ${sqliteIsoText("'now'")} WHERE ${C("passkey", "createdAt")} IS NULL;`,
+      "CREATE TABLE ta_limit (key TEXT PRIMARY KEY NOT NULL, window_start INTEGER NOT NULL, count INTEGER NOT NULL, expires_at INTEGER NOT NULL);",
     );
   }
   lines.push("CREATE INDEX ix_ta_limit__expires_at ON ta_limit (expires_at);");
@@ -170,8 +217,10 @@ export function compatMigrationSql(
     // schema_mismatch on that row. The value is cut to milliseconds, the
     // precision core reads back (to_char ... MS): a guard that compares a
     // read value with `eq` (ownerWrite on organization.updatedAt) then
-    // matches. SQLite stores ISO text with milliseconds, and its ALTER TABLE
-    // takes no expression default.
+    // matches. SQLite's ALTER TABLE takes no expression default: its fill
+    // writes the ISO millisecond text core writes, from either SQLite date
+    // form, and the SQLite statements read the `from` column when the added
+    // one is null (statements.ts, `value`).
     const def = pg && a.from ? ` DEFAULT ${MS_NOW}` : "";
     lines.push(
       `ALTER TABLE ${T(a.table)} ADD COLUMN ${C(a.table, a.field)} ${a.type === "date" ? date : pg ? "text" : "TEXT"}${def};`,
@@ -179,7 +228,7 @@ export function compatMigrationSql(
     if (a.from) {
       const from = C(a.table, a.from);
       lines.push(
-        `UPDATE ${T(a.table)} SET ${C(a.table, a.field)} = ${pg ? `date_trunc('milliseconds', ${from})` : from};`,
+        `UPDATE ${T(a.table)} SET ${C(a.table, a.field)} = ${pg ? `date_trunc('milliseconds', ${from})` : sqliteIsoText(from)};`,
       );
     }
   }
@@ -284,11 +333,19 @@ export function postgresCompatReady(sql: Sql): () => Promise<void> {
 interface D1Readable {
   prepare(query: string): {
     bind(...values: unknown[]): { first(column: string): Promise<unknown> };
+    all(): Promise<{ results: Record<string, unknown>[] }>;
   };
 }
 
-/** Only "no such table" reads as "no version"; any other D1 error passes through. */
-export function d1CompatReady(db: unknown): () => Promise<void> {
+/**
+ * Only "no such table" reads as "no version"; any other D1 error passes
+ * through. The 1.7 file adds no (issuer, accountId) index: it trusts
+ * Better Auth's own. So the check also needs a unique, non-partial index on
+ * exactly these two columns, by any name. Without it two OAuth callbacks
+ * for one subject both insert, and two users own one identity. The check
+ * runs once per storage; a failed check is not kept.
+ */
+export function d1CompatReady(db: unknown, names: Names): () => Promise<void> {
   const d1 = db as D1Readable;
   const read = async (key: string) => {
     try {
@@ -302,8 +359,44 @@ export function d1CompatReady(db: unknown): () => Promise<void> {
       throw e;
     }
   };
-  return compatVersionGate(
+  const version = compatVersionGate(
     () => read(SCHEMA_VERSION_KEY),
     () => read(COMPAT_META_KEY),
   );
+  // SQLite matches names without case, so the compare does too.
+  const want = [names.rawColumn("account", "issuer"), names.rawColumn("account", "accountId")]
+    .map((c) => c.toLowerCase())
+    .sort()
+    .join(",");
+  const quote = (s: string) => `"${s.replaceAll('"', '""')}"`;
+  const hasIssuerKey = async () => {
+    const list = await d1.prepare(`PRAGMA index_list(${quote(names.rawTable("account"))})`).all();
+    for (const i of list.results) {
+      if (i.unique !== 1 || i.partial !== 0) continue;
+      const cols = await d1.prepare(`PRAGMA index_info(${quote(String(i.name))})`).all();
+      const got = cols.results
+        .map((c) => String(c.name).toLowerCase())
+        .sort()
+        .join(",");
+      if (got === want) return true;
+    }
+    return false;
+  };
+  let checked: Promise<void> | null = null;
+  return () => {
+    checked ??= (async () => {
+      try {
+        await version();
+        if (!(await hasIssuerKey())) {
+          const e = new StorageError("schema_mismatch", "identity", ["provider", "subject"]);
+          e.message = `${e.message}: no unique index on ${names.rawTable("account")} (${names.rawColumn("account", "issuer")}, ${names.rawColumn("account", "accountId")})`;
+          throw e;
+        }
+      } catch (e) {
+        checked = null;
+        throw e;
+      }
+    })();
+    return checked;
+  };
 }

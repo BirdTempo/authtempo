@@ -69,7 +69,7 @@ export function betterAuthSchemaStorage(
       storage: createD1AdapterOn(db, {
         statements: st,
         toStorageError: st.toStorageError,
-        ready: d1CompatReady(options.db),
+        ready: d1CompatReady(options.db, names),
       }),
       limiter: createD1Limiter(db),
       migrationSql: (variant?: SqliteVariant) => compatMigrationSql("sqlite", names, variant),

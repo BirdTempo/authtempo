@@ -81,6 +81,24 @@ export function namesFromDrizzle(
   };
 }
 
+// drizzle-orm 0.45.2 gives integer({ mode: "timestamp" }) and
+// integer({ mode: "timestamp_ms" }) the columnType "SQLiteTimestamp"
+// (sqlite-core/columns/integer.js, read 2026-10-10).
+const SQLITE_TIMESTAMP = "SQLiteTimestamp";
+
+/** `<model>.<field>` of each Drizzle SQLite column that stores a date as an integer. */
+function integerTimestampColumns(schema: Record<string, unknown> | undefined): string[] {
+  const found: string[] = [];
+  for (const t of BETTER_AUTH_TABLES) {
+    const table = schema?.[t] as Record<symbol, unknown> | undefined;
+    const cols = table?.[COLUMNS] as Record<string, { columnType?: unknown }> | undefined;
+    for (const [f, c] of Object.entries(cols ?? {})) {
+      if (c?.columnType === SQLITE_TIMESTAMP) found.push(`${t}.${f}`);
+    }
+  }
+  return found;
+}
+
 function isD1(c: unknown): c is D1DatabaseLike {
   return (
     typeof c === "object" &&
@@ -126,6 +144,15 @@ export function drizzleAdapter(
       throw new BetterAuthCompatError([
         "database: drizzleAdapter needs a Drizzle database on D1 (drizzle-orm/d1); other SQLite drivers are refused",
       ]);
+    }
+    const integerDates = integerTimestampColumns(config.schema);
+    if (integerDates.length > 0) {
+      throw new BetterAuthCompatError(
+        integerDates.map(
+          (c) =>
+            `database.schema.${c}: an integer timestamp column is refused; on D1 tempo-auth reads Better Auth's dates as ISO 8601 text`,
+        ),
+      );
     }
     const { pgSchema: _, ...d1Naming } = naming;
     return betterAuthSchemaStorage({ dialect: "d1", db: db.$client, ...d1Naming });

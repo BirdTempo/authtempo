@@ -77,7 +77,7 @@ What the migration does (`0001_compat_better_auth`, append-only):
 - It fills the date columns `session.taLastSeenAt`, `account.taLinkedAt`, and the four `taUpdatedAt` columns for existing rows from the nearest Better Auth date (`session.updatedAt`, else `createdAt`), cut to milliseconds. On Postgres these columns also get the default `date_trunc('milliseconds', now())`, so a row that another writer adds later (an old replica during the deploy, the app's own SQL) has a value. Without a value core cannot read the row. The milliseconds matter: core reads dates with millisecond precision, and the organization owner guard compares the read value for equality.
 - The other `ta` columns stay null on rows that tempo-auth did not write. Core reads only verification rows with a `taPurpose` and invitations with a `taTokenHash`.
 - It adds the unique keys core needs: `verification (taValueHash)`, `passkey (credentialID)`, `member (organizationId, userId)`, `invitation (taTokenHash)`, and `account (issuer, accountId)` when the table has no unique index on these two columns under any name (Better Auth 1.7 has `account_issuer_accountId_uidx`).
-- `account.issuer` on both dialects: on Postgres it adds the column when it is missing (a table from before Better Auth 1.7, such as consumer-i's) and fills every row that has none from `providerId`. On D1 a static file cannot test for a column, so two files ship: `migrations/d1/` for 1.7 tables (it fills only) and `migrations/d1-before-1.7/` (it adds the column and the unique index, then fills). Point `migrations_dir` at the one that fits the tables.
+- `account.issuer` on both dialects: on Postgres it adds the column when it is missing (a table from before Better Auth 1.7, such as consumer-i's) and fills every row that has none from `providerId`. On D1 a static file cannot test for a column, so two files ship: `migrations/d1/` for 1.7 tables (it fills only) and `migrations/d1-before-1.7/` (it adds the column and the unique index, then fills). Copy the one that fits the tables, as the D1 steps below say.
 - It stops with "every Better Auth date column must be timestamptz" when a date column has no time zone.
 - It needs every table in the list, also when the plugin is off: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, `passkey`. Create a missing table with Better Auth's own SQL for it. Core's claim rule deletes passkey rows on every app, and the sweep deletes invitations.
 
@@ -91,14 +91,39 @@ What changes at cutover:
 
 On D1, `drizzleAdapter(db, { provider: "sqlite" })` needs `drizzle-orm/d1`, and
 `betterAuthSchemaStorage({ dialect: "d1", db: env.DB })` takes the binding.
-Copy `node_modules/@tempo-auth/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`
-into the app's `migrations_dir` after the Better Auth table migration. For
-tables from before Better Auth 1.7 (no `account.issuer` column), copy the file
-of the same name from `migrations/d1-before-1.7/` instead. For tables with
-other names, write the file from `storage.migrationSql()` or
-`storage.migrationSql("before-1.7")`. Dates are
-ISO 8601 text and booleans are 1 and 0, as Better Auth's Kysely adapter writes
-them. A Drizzle SQLite schema with integer timestamps is not supported.
+
+The one D1 step: copy the compat file into the app's `migrations_dir`, and
+rename it to the app's next migration number, for example
+`0007_compat_better_auth.sql` after `0006_...`. Then run
+`wrangler d1 migrations apply`. wrangler applies the files in name order. A
+number lower than the Better Auth table migration makes every new database
+(CI, a preview database, `--local`) fail at the compat file with
+`no such table`.
+
+- Better Auth 1.7 tables: copy `node_modules/@tempo-auth/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`.
+- Tables from before Better Auth 1.7 (no `account.issuer` column): copy the file of the same name from `migrations/d1-before-1.7/`.
+- Tables with other names: write the file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`.
+
+`wrangler d1 migrations apply` rolls back a file that fails (wrangler
+4.148.0, read 2026-10-10), so a refused file changes nothing. A runner that
+does not roll back, such as `wrangler d1 execute --file`, can keep the empty
+`ta_date_check` table of a refused date check. The next run uses that table
+and drops it. The errors that a refused file gives:
+
+- `no such column: issuer`: the 1.7 file on tables from before 1.7. Use the `d1-before-1.7` file.
+- `duplicate column name: issuer`: the `d1-before-1.7` file on 1.7 tables. Use the `d1` file.
+- `table ta_limit already exists`: the compat migration ran already.
+- `CHECK constraint failed: tempo_auth_compat_every_better_auth_date_must_be_text`: a Better Auth date column holds a number (a Drizzle `integer({ mode: "timestamp" })` schema) or text that is not a date. tempo-auth on D1 reads dates as ISO 8601 text only.
+
+Dates are ISO 8601 text and booleans are 1 and 0, as Better Auth's Kysely
+adapter writes them. The migration fills the added dates as ISO text with
+milliseconds, also from SQLite's `YYYY-MM-DD HH:MM:SS` form. SQLite gives an
+added column no computed default, so when another writer adds a row later,
+the storage reads `createdAt` (`updatedAt` for a session) in place of the
+added date. `drizzleAdapter` refuses a Drizzle SQLite schema with integer
+timestamp columns. The storage also refuses every call with `schema_mismatch`
+while `account` has no unique index on (issuer, accountId): the 1.7 file uses
+Better Auth's own index and adds none.
 
 ## What fails at start
 

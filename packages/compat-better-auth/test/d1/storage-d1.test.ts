@@ -1,145 +1,46 @@
-import { env } from "cloudflare:test";
-import { runAdapterConformance } from "@tempo-auth/core/conformance";
+import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { drizzleAdapter } from "../../src/adapters/drizzle.js";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import { d1CompatReady } from "../../src/storage/migration.js";
+import { resolveNames } from "../../src/storage/names.js";
+import { BETTER_AUTH_SQLITE, withoutForeignKeys } from "../fixtures.js";
+import { at, d1MappingSuite, eq, sqlNames } from "./mapping-suite.js";
+import { execD1 } from "./schema.js";
 
-const TABLES = [
-  "passkey",
-  "invitation",
-  "member",
-  "organization",
-  "verification",
-  "account",
-  "session",
-  "user",
-  "ta_limit",
-];
-async function truncate(): Promise<void> {
-  await env.DB.batch(TABLES.map((t) => env.DB.prepare(`DELETE FROM "${t}"`)));
-}
+// Better Auth's own SQLite SQL without the foreign keys (core's conformance
+// suite writes rows with no parent), then the shipped compat migration.
+await execD1(withoutForeignKeys(BETTER_AUTH_SQLITE));
+await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
 
-runAdapterConformance("Better Auth tables on D1 (Better Auth's own SQLite SQL)", async () => {
-  await truncate();
-  return {
-    adapter: betterAuthSchemaStorage({ dialect: "d1", db: env.DB }).storage,
-    close: truncate,
-  };
-});
+d1MappingSuite("Better Auth's own SQLite SQL", {});
 
-const at = new Date("2026-10-10T00:00:00.000Z");
-const eq = <F extends string>(field: F, value: unknown) => ({ field, op: "eq" as const, value });
-
-describe("the Better Auth mapping on D1", () => {
+describe("the Better Auth storage on D1, default names", () => {
+  const { truncate } = sqlNames({});
   beforeEach(truncate);
   const db = () => betterAuthSchemaStorage({ dialect: "d1", db: env.DB }).storage;
-
-  it("keeps a user row that another request verified inside the open transaction (Task 4's undo on Better Auth's columns)", async () => {
-    const s = db();
-    await expect(
-      s.transaction(async (tx) => {
-        await tx.create("user", {
-          id: "u1",
-          email: "a@example.com",
-          emailVerified: false,
-          name: null,
-          image: null,
-          createdAt: at,
-          updatedAt: at,
-        });
-        // Another request, outside this transaction: an owner's claim verifies the row.
-        await s.update("user", [eq("id", "u1")], { emailVerified: true });
-        throw new Error("boom");
-      }),
-    ).rejects.toThrow("boom");
-    expect((await s.findOne("user", [eq("id", "u1")]))?.emailVerified).toBe(true);
+  const user = (id: string, email: string) => ({
+    id,
+    email,
+    emailVerified: true,
+    name: null,
+    image: null,
+    createdAt: at,
+    updatedAt: at,
   });
-
-  it("stores dates as ISO text and booleans as 1, so Better Auth-era rows compare in order", async () => {
-    await env.DB.prepare(
-      `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES ('ba-u','Bea','bea@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z')`,
-    ).run();
-    await db().create("user", {
-      id: "u1",
-      email: "a@example.com",
-      emailVerified: true,
-      name: null,
-      image: null,
-      createdAt: at,
-      updatedAt: at,
-    });
-    const raw = await env.DB.prepare(
-      `SELECT "createdAt", "emailVerified", "name" FROM "user" WHERE "id" = 'u1'`,
-    ).first();
-    expect(raw).toEqual({ createdAt: "2026-10-10T00:00:00.000Z", emailVerified: 1, name: "" });
-    const older = await db().findMany("user", [
-      { field: "createdAt", op: "lt", value: new Date("2026-10-01T00:00:00.000Z") },
-    ]);
-    expect(older.map((r) => r.id)).toEqual(["ba-u"]);
-    expect(older[0]?.emailVerified).toBe(true);
-  });
-
-  it("converts the passkey key and reads Better Auth's empty transports as null", async () => {
-    const s = db();
-    await s.create("passkey", {
-      id: "k1",
-      userId: "u1",
-      credentialId: "c1",
-      publicKey: "-_-_AQ",
-      counter: 0,
-      transports: null,
-      deviceType: "multiDevice",
-      backedUp: true,
-      name: null,
-      createdAt: at,
-      updatedAt: at,
-    });
-    expect(
-      await env.DB.prepare(`SELECT "publicKey" FROM "passkey" WHERE "id" = 'k1'`).first(
-        "publicKey",
-      ),
-    ).toBe("+/+/AQ==");
-    await env.DB.prepare(
-      `INSERT INTO "passkey" ("id","name","publicKey","userId","credentialID","counter","deviceType","backedUp","transports","createdAt","aaguid","taUpdatedAt") VALUES ('ba-p','Laptop','+/+/AQ==','u1','ba-cred-id',3,'singleDevice',0,'','2026-09-01T00:00:00.000Z',NULL,'2026-09-01T00:00:00.000Z')`,
-    ).run();
-    expect(await s.findOne("passkey", [eq("credentialId", "ba-cred-id")])).toMatchObject({
-      publicKey: "-_-_AQ",
-      transports: null,
-      backedUp: false,
-    });
-  });
-
-  it("reverses a delete inside a transaction with every Better Auth column, also the ones core does not know", async () => {
-    await env.DB.prepare(
-      `INSERT INTO "account" ("id","issuer","accountId","providerId","userId","accessToken","createdAt","updatedAt","taLinkedAt") VALUES ('a1','https://accounts.google.com','g-sub','google','u1','at-1','2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z')`,
-    ).run();
-    const s = db();
-    await expect(
-      s.transaction(async (tx) => {
-        await tx.update("identity", [eq("id", "a1")], { updatedAt: at });
-        await tx.delete("identity", [eq("id", "a1")]);
-        throw new Error("boom");
-      }),
-    ).rejects.toThrow("boom");
-    const row = await env.DB.prepare(
-      `SELECT "accessToken", "updatedAt" FROM "account" WHERE "id" = 'a1'`,
-    ).first();
-    expect(row).toEqual({ accessToken: "at-1", updatedAt: "2026-09-01T00:00:00.000Z" });
+  /** A stand-in for a Drizzle SQLite table: the name and columns symbols of drizzle-orm 0.45.2. */
+  const drizzleTable = (
+    name: string,
+    columns: Record<string, { name: string; columnType: string }>,
+  ) => ({
+    [Symbol.for("drizzle:Name")]: name,
+    [Symbol.for("drizzle:Columns")]: columns,
   });
 
   it("answers drizzleAdapter for a Drizzle D1 database with the same storage", async () => {
     const database = drizzleAdapter({ $client: env.DB }, { provider: "sqlite" });
     expect(database.dialect).toBe("d1");
-    await database.storage.create("user", {
-      id: "u9",
-      email: "z@example.com",
-      emailVerified: false,
-      name: "Zed",
-      image: null,
-      createdAt: at,
-      updatedAt: at,
-    });
+    await database.storage.create("user", { ...user("u9", "z@example.com"), name: "Zed" });
     expect(await env.DB.prepare(`SELECT "name" FROM "user" WHERE "id" = 'u9'`).first("name")).toBe(
       "Zed",
     );
@@ -148,6 +49,25 @@ describe("the Better Auth mapping on D1", () => {
     );
     expect(() => drizzleAdapter({ $client: env.DB }, { provider: "mysql" })).toThrow(
       /"mysql" is refused/,
+    );
+  });
+
+  it("refuses a Drizzle SQLite schema with an integer timestamp column (I-3)", () => {
+    const schema = {
+      user: drizzleTable("user", {
+        id: { name: "id", columnType: "SQLiteText" },
+        createdAt: { name: "createdAt", columnType: "SQLiteTimestamp" },
+        updatedAt: { name: "updatedAt", columnType: "SQLiteText" },
+      }),
+    };
+    expect(() => drizzleAdapter({ $client: env.DB }, { provider: "sqlite", schema })).toThrow(
+      /database\.schema\.user\.createdAt: an integer timestamp column is refused/,
+    );
+    const text = {
+      user: drizzleTable("user", { createdAt: { name: "createdAt", columnType: "SQLiteText" } }),
+    };
+    expect(drizzleAdapter({ $client: env.DB }, { provider: "sqlite", schema: text }).dialect).toBe(
+      "d1",
     );
   });
 
@@ -175,7 +95,63 @@ describe("the Better Auth mapping on D1", () => {
     }
     await expect(db().findOne("user", [eq("id", "x")])).resolves.toBeNull();
     const outage = new Error("D1_ERROR: network connection lost");
-    const down = { prepare: () => ({ bind: () => ({ first: () => Promise.reject(outage) }) }) };
-    await expect(d1CompatReady(down)()).rejects.toBe(outage);
+    const down = {
+      prepare: () => ({
+        bind: () => ({ first: () => Promise.reject(outage) }),
+        all: () => Promise.reject(outage),
+      }),
+    };
+    await expect(d1CompatReady(down, resolveNames())()).rejects.toBe(outage);
+  });
+
+  it("refuses every call with schema_mismatch while account has no unique index on (issuer, accountId) (I-2)", async () => {
+    await env.DB.prepare('DROP INDEX "account_issuer_accountId_uidx"').run();
+    try {
+      await expect(db().findOne("user", [eq("id", "x")])).rejects.toMatchObject({
+        code: "schema_mismatch",
+        model: "identity",
+        message: expect.stringMatching(/no unique index on account \(issuer, accountId\)/),
+      });
+      // A partial index and a plain index on the two columns do not count.
+      await env.DB.prepare(
+        'CREATE UNIQUE INDEX "partial_issuer" ON "account" ("issuer", "accountId") WHERE "issuer" IS NOT NULL',
+      ).run();
+      await env.DB.prepare(
+        'CREATE INDEX "plain_issuer" ON "account" ("issuer", "accountId")',
+      ).run();
+      await expect(db().findOne("user", [eq("id", "x")])).rejects.toMatchObject({
+        code: "schema_mismatch",
+      });
+      // Any name, and any case of the column names, counts.
+      await env.DB.prepare(
+        'CREATE UNIQUE INDEX "other_name" ON "account" ("ISSUER", "accountid")',
+      ).run();
+      await expect(db().findOne("user", [eq("id", "x")])).resolves.toBeNull();
+    } finally {
+      for (const i of ["partial_issuer", "plain_issuer", "other_name"])
+        await env.DB.prepare(`DROP INDEX IF EXISTS "${i}"`).run();
+      await env.DB.prepare(
+        'CREATE UNIQUE INDEX "account_issuer_accountId_uidx" ON "account" ("issuer", "accountId")',
+      ).run();
+    }
+  });
+
+  it("reports the right field and restores the right row when a configured name differs in case from the table (M-3)", async () => {
+    // SQLite matches names without case, so every statement runs; the lookups of the names must match too.
+    const naming = { columns: { user: { id: "ID", email: "EMAIL" } } };
+    const s = betterAuthSchemaStorage({ dialect: "d1", db: env.DB, ...naming }).storage;
+    await s.create("user", user("u1", "a@example.com"));
+    await expect(s.create("user", user("u2", "a@example.com"))).rejects.toMatchObject({
+      code: "unique_violation",
+      model: "user",
+      fields: ["email"],
+    });
+    await expect(
+      s.transaction(async (tx) => {
+        await tx.update("user", [eq("id", "u1")], { name: "Changed" });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect((await s.findOne("user", [eq("id", "u1")]))?.name).toBeNull();
   });
 });

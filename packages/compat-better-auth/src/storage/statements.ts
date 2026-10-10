@@ -10,7 +10,8 @@ import {
   undoCreateWhere,
 } from "@tempo-auth/core/sql";
 import { type AnyModelMap, MAPPING } from "./mapping.js";
-import type { Names } from "./names.js";
+import { FILLED_DATES, sqliteIsoText } from "./migration.js";
+import { type BetterAuthTable, type Names, TABLE_FIELDS } from "./names.js";
 
 type Row = Record<string, unknown>;
 type FieldType = "string" | "boolean" | "integer" | "date" | "json";
@@ -70,6 +71,34 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
   const column = (model: ModelName, field: string) =>
     names.column(MAP[model].table, MAP[model].fields[field]?.column ?? field);
   const qualified = (model: ModelName, field: string) => `${table(model)}.${column(model, field)}`;
+  /**
+   * SQLite: the value of a field in a select, a where, and a sort. A `ta`
+   * date that migration 0001 fills from a Better Auth column reads that
+   * column when it is null: SQLite's ADD COLUMN takes no expression default,
+   * so a row that another writer adds after the migration has no `ta` value.
+   * strftime gives the ISO millisecond text core writes, also for a Better
+   * Auth date in SQLite's 'YYYY-MM-DD HH:MM:SS' form. Postgres has a column
+   * default instead (migration 0001).
+   */
+  const value = (model: ModelName, field: string) => {
+    const c = column(model, field);
+    if (pg) return c;
+    const t = MAP[model].table;
+    const baField = MAP[model].fields[field]?.column ?? field;
+    const filled = FILLED_DATES.find((a) => a.table === t && a.field === baField);
+    return filled ? `COALESCE(${c}, ${sqliteIsoText(names.column(t, filled.from))})` : c;
+  };
+  /**
+   * The Better Auth field of a column name that SQLite reports. SQLite
+   * matches names without case, so a configured name and the DDL can differ
+   * in case and every statement still runs; the lookup must then match too.
+   */
+  const fieldOfRaw = (t: BetterAuthTable, raw: string): string | null =>
+    names.fieldOf(t, raw) ??
+    (pg
+      ? null
+      : (TABLE_FIELDS[t].find((f) => names.rawColumn(t, f).toLowerCase() === raw.toLowerCase()) ??
+        null));
   const quoteRaw = (c: string) => `"${c.replaceAll('"', '""')}"`;
 
   function encode(model: ModelName, field: string, value: unknown): unknown {
@@ -136,7 +165,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         );
       }
       const empty = codec === "nullAsEmpty";
-      const c = column(model, w.field);
+      const c = value(model, w.field);
       const isNull = (v: unknown) => v === null || v === undefined || (empty && v === "");
       const enc = (v: unknown) => p.add(encode(model, w.field, v), type);
       switch (w.op) {
@@ -180,7 +209,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
 
   function fieldsFor(model: ModelName, rawColumns: string[]): string[] {
     const t = MAP[model].table;
-    const baFields = rawColumns.map((c) => names.fieldOf(t, c));
+    const baFields = rawColumns.map((c) => fieldOfRaw(t, c));
     if (baFields.some((f) => f === null)) return [];
     if (
       t === "account" &&
@@ -238,14 +267,14 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       const list = Object.keys(MAP[model].fields)
         .map(
           (f) =>
-            `${pg && def(model, f).type === "date" ? pgDate(column(model, f)) : column(model, f)} AS "${f}"`,
+            `${pg && def(model, f).type === "date" ? pgDate(column(model, f)) : value(model, f)} AS "${f}"`,
         )
         .join(", ");
       let sql = `SELECT ${list} FROM ${table(model)}${w.clause}`;
       if (sorts.length > 0) {
         const terms = sorts.map((s) => {
           // Qualified, so Postgres sorts by the column and not by the output alias of the same name.
-          const raw = qualified(model, s.field);
+          const raw = pg ? qualified(model, s.field) : value(model, s.field);
           const e =
             MAP[model].fields[s.field]?.codec === "nullAsEmpty" ? `NULLIF(${raw}, '')` : raw;
           const dir = s.dir === "asc" ? "ASC" : "DESC";
@@ -303,10 +332,15 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       return s;
     },
     restoreRow(model, row) {
-      const cols = Object.keys(row).filter((c) => c !== names.rawColumn(MAP[model].table, "id"));
+      // The row comes from SELECT *, so its keys are the DDL's spelling. On
+      // SQLite that can differ in case from the configured id name.
+      const t = MAP[model].table;
+      const idKey =
+        Object.keys(row).find((c) => fieldOfRaw(t, c) === "id") ?? names.rawColumn(t, "id");
+      const cols = Object.keys(row).filter((c) => c !== idKey);
       return {
         sql: `UPDATE ${table(model)} SET ${cols.map((c, i) => `${quoteRaw(c)} = ${d.placeholder(i + 1)}`).join(", ")} WHERE ${column(model, "id")} = ${d.placeholder(cols.length + 1)}`,
-        params: [...cols.map((c) => row[c]), row[names.rawColumn(MAP[model].table, "id")]],
+        params: [...cols.map((c) => row[c]), row[idKey]],
       };
     },
     reinsertRow(model, row) {
