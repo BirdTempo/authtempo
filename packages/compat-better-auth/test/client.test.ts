@@ -477,3 +477,163 @@ describe("expoClient", () => {
     });
   });
 });
+
+describe("createAuthClient: fix round 1", () => {
+  const expoOf = (s: ReturnType<typeof server>, fetchImpl?: typeof fetch, extra: object = {}) =>
+    createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [
+        expoClient({ scheme: "reception", storagePrefix: "reception", storage: memoryStorage() }),
+      ],
+      fetchOptions: { customFetchImpl: fetchImpl ?? s.fetchImpl, ...extra },
+    });
+
+  it("makes a client with no baseURL and no location without a throw, and answers an error at the call (consumere server render)", async () => {
+    expect(typeof location).toBe("undefined");
+    let c: ReturnType<typeof createAuthClient> | undefined;
+    expect(() => {
+      c = createAuthClient();
+    }).not.toThrow();
+    const r = await c?.signIn.email({ email: "a@example.com", password: PASSWORD });
+    expect(r).toMatchObject({ data: null, error: { code: "BASE_URL_REQUIRED" } });
+    expect(r?.error?.message).toContain("Pass baseURL");
+    expect((await c?.signIn.social({ provider: "google" }))?.error?.code).toBe("BASE_URL_REQUIRED");
+  });
+
+  it("drops a session read that was in flight when the person signed out", async () => {
+    const s = server();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let held = false;
+    const slow: typeof fetch = async (input, init) => {
+      const req = new Request(input, init);
+      const res = await s.fetchImpl(req);
+      if (!held && req.method === "GET" && new URL(req.url).pathname.endsWith("/session")) {
+        held = true;
+        await gate;
+      }
+      return res;
+    };
+    const c = expoOf(s, slow);
+    await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    const stop = c.useSession.subscribe(() => {});
+    await vi.waitFor(() => expect(held).toBe(true));
+    await c.signOut();
+    release();
+    await vi.waitFor(() => expect(c.useSession.get().isPending).toBe(false));
+    await vi.waitFor(() => expect(c.useSession.get().isRefetching).toBe(false));
+    expect(c.useSession.get().data).toBeNull();
+    stop();
+  });
+
+  it("stops waiting and shows the error when an app callback throws; an unreadable store means no token", async () => {
+    const s = server();
+    await expoOf(s).signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    const token = await s.verifiedToken("pat@example.com");
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: {
+        customFetchImpl: s.fetchImpl,
+        headers: { authorization: `Bearer ${token}` },
+        onSuccess: () => {
+          throw new Error("app callback failed");
+        },
+      },
+    });
+    const stop = c.useSession.subscribe(() => {});
+    await vi.waitFor(() => expect(c.useSession.get().isPending).toBe(false));
+    expect(c.useSession.get().error).toMatchObject({ message: "app callback failed" });
+    stop();
+    const broken = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [
+        expoClient({
+          scheme: "reception",
+          storage: {
+            getItem: () => {
+              throw new Error("store locked");
+            },
+            setItem: () => {},
+          },
+        }),
+      ],
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    expect(() => broken.getCookie()).not.toThrow();
+    expect(broken.getCookie()).toBe("");
+    expect((await broken.getSession()).error).toBeNull();
+  });
+
+  it("hands onSuccess the final successful response once, never a failed sub-response or the session read", async () => {
+    const s = server();
+    const owner = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    await owner.signUp.email({ email: "owner@example.com", password: PASSWORD, name: "Owner" });
+    const ownerToken = await s.verifiedToken("owner@example.com");
+    const seen: { status: number; url: string }[] = [];
+    const o = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: {
+        customFetchImpl: s.fetchImpl,
+        headers: { authorization: `Bearer ${ownerToken}` },
+        onSuccess: (ctx) => void seen.push({ status: ctx.response.status, url: ctx.request.url }),
+      },
+    });
+    const orgId = (await o.organization.create({ name: "Acme", slug: "acme" })).data?.id ?? "";
+    await o.organization.setActive({ organizationId: orgId });
+    seen.length = 0;
+    // No organizationId: the client reads the session first. That read stays silent.
+    await o.organization.inviteMember({ email: "new@example.com", role: "member" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.url).toContain("/organizations/invite");
+    await owner.signUp.email({ email: "new@example.com", password: PASSWORD, name: "New" });
+    const newToken = await s.verifiedToken("new@example.com");
+    const seenMember: { status: number }[] = [];
+    const n = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: {
+        customFetchImpl: s.fetchImpl,
+        headers: { authorization: `Bearer ${newToken}` },
+        onSuccess: (ctx) => void seenMember.push({ status: ctx.response.status }),
+      },
+    });
+    await n.organization.acceptInvitation({ invitationId: s.invitations[0]?.id ?? "" });
+    seenMember.length = 0;
+    // A member below admin gets 403 from the invitations list inside this call.
+    const full = await n.organization.getFullOrganization({ organizationId: orgId });
+    expect(full.data?.invitations).toEqual([]);
+    expect(seenMember).toEqual([{ status: 200 }]);
+  });
+
+  it("answers NOT_SUPPORTED for rememberMe: false and accepts true", async () => {
+    const s = server();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    const refused = await c.signIn.email({
+      email: "pat@example.com",
+      password: PASSWORD,
+      rememberMe: false,
+    });
+    expect(refused).toMatchObject({ data: null, error: { code: "NOT_SUPPORTED", status: 501 } });
+    const accepted = await c.signIn.email({
+      email: "pat@example.com",
+      password: PASSWORD,
+      rememberMe: true,
+    });
+    expect(accepted.error).toBeNull();
+  });
+});

@@ -120,18 +120,32 @@ const notSupported = <T>(message: string): CompatClientResult<T> => ({
 });
 
 /** Better Auth's baseURL may carry the path (consumerc: ".../api/auth"); it becomes basePath when basePath is absent. */
-function split(options: ClientOptions): { origin: string; basePath: string } {
+function split(options: ClientOptions): { origin: string; basePath: string } | null {
   const raw = options.baseURL ?? (typeof location !== "undefined" ? location.origin : undefined);
-  if (raw === undefined)
-    throw new Error("tempo-auth compat: createAuthClient needs baseURL outside a browser");
+  if (raw === undefined) return null;
   const u = new URL(raw);
   const path = u.pathname.replace(/\/+$/, "");
   return { origin: u.origin, basePath: options.basePath ?? (path || "/api/auth") };
 }
 
+const NO_BASE =
+  "tempo-auth compat: this call has no baseURL and no page location. Pass baseURL to createAuthClient.";
+
 /** Better Auth's `createAuthClient` on `@tempo-auth/client`. Nothing throws for an answer. */
 export function createAuthClient(options: ClientOptions = {}): AuthClient {
-  const { origin, basePath } = split(options);
+  // The base is resolved at the first call, not here. consumere makes its client at module
+  // scope with no baseURL, and Next runs that module on the server, where there is no location.
+  // A throw here would fail every page that imports the client. The first call in a browser
+  // finds location. A call with neither answers an error. An answered base stays for later calls.
+  let base: { origin: string; basePath: string } | null = null;
+  const resolveBase = () => {
+    base ??= split(options);
+    return base;
+  };
+  const noBase = (): CompatClientResult<never> => ({
+    data: null,
+    error: clientError("BASE_URL_REQUIRED", 500, NO_BASE),
+  });
   const fo = options.fetchOptions ?? {};
   const baseFetch: typeof fetch =
     fo.customFetchImpl ?? ((input, init) => globalThis.fetch(input, init));
@@ -139,7 +153,14 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
   const expo: ExpoClientOptions | null =
     expoPlugin && "options" in expoPlugin ? expoPlugin.options : null;
   const storageKey = expo ? `${expo.storagePrefix ?? "better-auth"}_${COOKIE_NAME}` : null;
-  const readStored = () => (expo && storageKey ? expo.storage.getItem(storageKey) || null : null);
+  // An unreadable store means no token: the call goes out without one.
+  const readStored = () => {
+    try {
+      return expo && storageKey ? expo.storage.getItem(storageKey) || null : null;
+    } catch {
+      return null;
+    }
+  };
   const keepToken = (token: string) => {
     if (expo && storageKey) expo.storage.setItem(storageKey, token);
   };
@@ -151,14 +172,22 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     op: (c: Client) => Promise<ClientResult<T>>,
     map: (v: T) => V,
     code?: (f: ClientFailure) => string | undefined,
+    quiet = false,
   ): Promise<CompatClientResult<V>> {
-    let last = null as { response: Response; request: { url: string; method: string } } | null;
+    const resolved = resolveBase();
+    if (!resolved) return noBase();
+    const { origin, basePath } = resolved;
+    type Seen = { response: Response; request: { url: string; method: string } };
+    let last = null as Seen | null;
+    // The newest response with status 2xx. A failed sub-request of a composite call never reaches onSuccess.
+    let lastOk = null as Seen | null;
     const recording: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
       for (const [k, v] of Object.entries(fo.headers ?? {})) headers.set(k, v);
       const res = await baseFetch(input, { ...init, headers });
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       last = { response: res.clone(), request: { url, method: init?.method ?? "GET" } };
+      if (res.ok) lastOk = last;
       return res;
     };
     const client = createClient({
@@ -172,8 +201,9 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     const r = await op(client);
     if (r.ok) {
       const data = map(r.value);
-      if (fo.onSuccess && last)
-        await fo.onSuccess({ data, response: last.response, request: last.request });
+      const ok = lastOk as Seen | null;
+      if (fo.onSuccess && ok && !quiet)
+        await fo.onSuccess({ data, response: ok.response, request: ok.request });
       return { data, error: null };
     }
     // The server's handler names the length case of a policy refusal by its minPasswordLength (withPolicyCode).
@@ -199,16 +229,22 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     return { data: null, error };
   }
 
-  const getSession = () =>
+  const readSession = (quiet: boolean) =>
     run(
       (c) => c.session(),
       (v) => (v ? toClientSession(v) : null),
+      undefined,
+      quiet,
     );
+  const getSession = () => readSession(false);
   const store = createSessionStore(getSession);
 
   async function systemBrowser(): Promise<CompatClientResult<{ url: string; redirect: boolean }>> {
     if (!expo?.webBrowser)
       return notSupported("a system-browser sign-in on Expo needs expoClient({ webBrowser })");
+    const resolved = resolveBase();
+    if (!resolved) return noBase();
+    const { origin, basePath } = resolved;
     const handoff = createHandoff({
       baseURL: origin,
       basePath,
@@ -233,11 +269,14 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
   }
 
   const activeOrganization = async (): Promise<string | null> =>
-    (await getSession()).data?.session.activeOrganizationId ?? null;
+    (await readSession(true)).data?.session.activeOrganizationId ?? null;
 
   const api: AuthClient = {
     signIn: {
-      async email({ email, password }) {
+      async email({ email, password, rememberMe }) {
+        // Core keeps no short session. true is the only behavior core has, so it is accepted.
+        if (rememberMe === false)
+          return notSupported("core takes no rememberMe: every session lives session.expiresIn");
         const r = await run(
           (c) => c.password.signIn({ email, password }),
           (v) => {
@@ -252,6 +291,9 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         if (expo) return systemBrowser();
         const next = toNext(callbackURL, pageOrigin());
         if (next === null) return { data: null, error: clientError("INVALID_CALLBACK_URL", 403) };
+        const resolved = resolveBase();
+        if (!resolved) return noBase();
+        const { origin, basePath } = resolved;
         const url = `${origin}${basePath}/social/${encodeURIComponent(provider)}/start${next !== undefined ? `?next=${encodeURIComponent(next)}` : ""}`;
         const go = disableRedirect !== true && typeof location !== "undefined";
         if (go) location.href = url;

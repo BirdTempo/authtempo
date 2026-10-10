@@ -1,3 +1,4 @@
+import { clientError } from "../errors.js";
 import type {
   ClientSession,
   ClientUser,
@@ -16,18 +17,44 @@ export function createSessionStore(
   const listeners = new Set<() => void>();
   let started = false;
   let inFlight: Promise<void> | null = null;
+  // A read asked for while another runs. The running read may carry the state from before the
+  // change that asked (a sign-out), so its answer is dropped and one newer read runs.
+  let dirty = false;
   const set = (next: SessionState) => {
     state = next;
     for (const l of listeners) l();
   };
+  const read = async (): ReturnType<typeof fetchSession> => {
+    try {
+      return await fetchSession();
+    } catch (e) {
+      // A storage read or an app callback threw. The store shows the error and stops waiting.
+      return { data: null, error: clientError("UNEXPECTED_RESPONSE", 0, messageOfError(e)) };
+    }
+  };
   const refetch = (): Promise<void> => {
-    inFlight ??= (async () => {
-      if (!state.isPending) set({ ...state, isRefetching: true });
-      const r = await fetchSession();
-      set({ data: r.error ? null : r.data, error: r.error, isPending: false, isRefetching: false });
-    })().finally(() => {
-      inFlight = null;
-    });
+    if (inFlight) {
+      dirty = true;
+      return inFlight;
+    }
+    inFlight = (async () => {
+      try {
+        do {
+          dirty = false;
+          if (!state.isPending) set({ ...state, isRefetching: true });
+          const r = await read();
+          if (dirty) continue;
+          set({
+            data: r.error ? null : r.data,
+            error: r.error,
+            isPending: false,
+            isRefetching: false,
+          });
+        } while (dirty);
+      } finally {
+        inFlight = null;
+      }
+    })();
     return inFlight;
   };
   return {
@@ -48,3 +75,6 @@ export function createSessionStore(
     },
   };
 }
+
+const messageOfError = (e: unknown): string =>
+  e instanceof Error ? e.message : "the session read failed";
