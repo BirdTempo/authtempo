@@ -29,6 +29,17 @@ const RESET_PER_EMAIL = { seconds: 900, max: 5 };
 const RESET_POST_PER_IP = { seconds: 900, max: 20 };
 // Per 15 minutes. A stolen session must not run an unlimited guess of the current password.
 const CHANGE_PER_USER = { seconds: 900, max: 10 };
+/**
+ * The marker on the stored hash string of a sign-up's password row until
+ * the sign-up proved the user still unverified. The row is unusable until
+ * then: on D1 an owner's claim can verify the user before the password
+ * create, so `claimEmail` finds no row to delete, and a claimant sign-in
+ * must not prove the sign-up password on the owner's verified user (plan 9
+ * Task 4 review I-1, 2026-10-10). The sign-in treats a marked row as no
+ * row. No seam's stored string starts with it (PBKDF2 starts with
+ * `pbkdf2-sha256$`).
+ */
+export const PENDING_HASH_PREFIX = "pending$";
 
 export interface PasswordSession {
   token: string;
@@ -127,9 +138,10 @@ export async function passwordSignUp(
 
 /**
  * One transaction. The new-user guard is the plan 6b one: on D1 a claim
- * (the owner's magic link) can find this user before the commit, so the
- * last statement is a conditional update of the user row where
- * `emailVerified` is false.
+ * (the owner's magic link) can find this user before the commit, so a
+ * conditional update of the user row where `emailVerified` is false runs
+ * after the session insert. The last statement activates the password row,
+ * which the sign-up wrote pending (`PENDING_HASH_PREFIX`).
  */
 function insertSignUp(
   config: ResolvedConfig,
@@ -164,10 +176,12 @@ function insertSignUp(
       createdAt: now,
       updatedAt: now,
     });
+    // Pending until the guard below passed: see `PENDING_HASH_PREFIX`.
+    const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
     const password = await tx.create("password", {
       id: newId(now),
       userId: user.id,
-      hash: row.hash,
+      hash: pending,
       createdAt: now,
       updatedAt: now,
     });
@@ -181,18 +195,33 @@ function insertSignUp(
     // owner's now. A throw would undo the password create, and the D1 undo
     // deletes that row by id: after an owner's reset it holds the owner's
     // hash. So delete the own session and the own password row by id and
-    // hash, and commit. When it matches one row it is the last statement, so
-    // no undo runs after it, and a later claim deletes the password row and
-    // the session. Checked 2026-10-10.
-    // The password delete also matches the hash this sign-up wrote. An
+    // hash, and commit. Checked 2026-10-10.
+    // The password delete matches the pending string this sign-up wrote. An
     // owner's reset keeps this row id and writes the owner's hash into it,
     // and that row must stay.
     if (!(await userStillUnverified(tx, user.id, now))) {
       await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
       await tx.delete("password", [
         { field: "id", op: "eq", value: password.id },
-        { field: "hash", op: "eq", value: row.hash },
+        { field: "hash", op: "eq", value: pending },
       ]);
+      return fail("email_taken_unverified");
+    }
+    // The last statement: activate the row, conditional on the id and the
+    // pending string. Zero rows means a claim deleted the row or a reset
+    // wrote the owner's hash into it since the guard. Then delete the own
+    // session by id, commit, and answer as for a claim. One row means no
+    // undo runs after it, and a later claim deletes the row and the session.
+    const active = await tx.update(
+      "password",
+      [
+        { field: "id", op: "eq", value: password.id },
+        { field: "hash", op: "eq", value: pending },
+      ],
+      { hash: row.hash, updatedAt: now },
+    );
+    if (active === 0) {
+      await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
       return fail("email_taken_unverified");
     }
     return ok({ signedIn: { token: s.token, user, session: s.session }, passwordId: password.id });
@@ -228,9 +257,10 @@ async function sendVerifyMail(
 
 /**
  * Every failure after the limits answers `invalid_credentials` after one
- * `verify`: an unknown address, a malformed address, and a user with no
- * password row verify against the seam's `dummy()`. So the answer and its
- * CPU are the same as for a wrong password.
+ * `verify`: an unknown address, a malformed address, a user with no
+ * password row, and a row a sign-up still holds pending
+ * (`PENDING_HASH_PREFIX`) verify against the seam's `dummy()`. So the
+ * answer and its CPU are the same as for a wrong password.
  */
 export async function passwordSignIn(
   config: ResolvedConfig,
@@ -253,7 +283,9 @@ export async function passwordSignIn(
   const row = user
     ? await config.storage.findOne("password", [{ field: "userId", op: "eq", value: user.id }])
     : null;
-  if (!user || !row) {
+  // A pending row counts as no row. The re-check below matches the proved
+  // hash, so it never matches a pending row either.
+  if (!user || !row || row.hash.startsWith(PENDING_HASH_PREFIX)) {
     await pw.hash.verify(input.password, await pw.hash.dummy());
     return fail("invalid_credentials");
   }
