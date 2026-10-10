@@ -34,6 +34,9 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
     async signUpEmail({ body, headers }) {
       if (body.image !== undefined)
         throw new APIError(501, NOT_SUPPORTED, "core takes no image at sign-up");
+      // Core's verify link lands on the app origin; a callbackURL would be dropped in silence.
+      if (body.callbackURL !== undefined)
+        throw new APIError(501, NOT_SUPPORTED, "core takes no callbackURL at sign-up");
       const req = requestOf(headers);
       const r = await passwords().signUp({
         email: body.email,
@@ -48,6 +51,16 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
       return { token: v.token, user: toUser(v.user) };
     },
     async signInEmail({ body, headers }) {
+      // Each would be dropped in silence: core answers a token, not a redirect,
+      // and every session lives session.expiresIn.
+      if (body.callbackURL !== undefined)
+        throw new APIError(501, NOT_SUPPORTED, "core takes no callbackURL at sign-in");
+      if (body.rememberMe !== undefined)
+        throw new APIError(
+          501,
+          NOT_SUPPORTED,
+          "core takes no rememberMe: every session lives session.expiresIn",
+        );
       const req = requestOf(headers);
       const v = unwrap(
         await passwords().signIn({

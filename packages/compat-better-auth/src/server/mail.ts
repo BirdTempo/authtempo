@@ -42,8 +42,13 @@ export function compatMail(routes: MailRoutes): MailPort {
   const prefix = `${routes.origin}${routes.basePath}`;
   const userByEmail = async (email: string) => {
     const u = await routes.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
-    if (!u) throw new Error(`tempo-auth compat: no user for the mail to ${email}`);
-    return toUser(u);
+    return u ? toUser(u) : null;
+  };
+  // The verify mail follows a sign-up, so its user row exists; a missing row is a bug.
+  const knownUser = async (email: string) => {
+    const u = await userByEmail(email);
+    if (!u) throw new Error("tempo-auth compat: no user for the verify mail");
+    return u;
   };
   return {
     async send(message) {
@@ -85,7 +90,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         if (!routes.sendVerificationEmail)
           throw new Error("tempo-auth compat: no sendVerificationEmail");
         await routes.sendVerificationEmail({
-          user: await userByEmail(message.to),
+          user: await knownUser(message.to),
           url: link,
           token,
         });
@@ -93,7 +98,13 @@ export function compatMail(routes: MailRoutes): MailPort {
       }
       if (link.startsWith(`${prefix}/password/reset?`)) {
         if (!routes.sendResetPassword) throw new Error("tempo-auth compat: no sendResetPassword");
-        await routes.sendResetPassword({ user: await userByEmail(message.to), url: link, token });
+        // Core mails a reset link to every address and answers 200 for each,
+        // so the answer tells no one which address has an account. With no
+        // user row, send nothing and do not throw: a throw answers 500, and
+        // that difference is the tell. Better Auth also sends nothing here.
+        const user = await userByEmail(message.to);
+        if (!user) return;
+        await routes.sendResetPassword({ user, url: link, token });
         return;
       }
       if (link.startsWith(`${prefix}/magic-link/verify?`)) {

@@ -238,10 +238,12 @@ export interface BetterAuthOptions {
 
 export interface CompatServerApi {
   getSession(input: { headers: Headers }): Promise<{ session: Session; user: User } | null>;
+  /** `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
   signUpEmail(input: {
     body: { email: string; password: string; name: string; image?: string; callbackURL?: string };
     headers?: Headers;
   }): Promise<{ token: string; user: User }>;
+  /** `callbackURL` and `rememberMe` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
   signInEmail(input: {
     body: { email: string; password: string; callbackURL?: string; rememberMe?: boolean };
     headers?: Headers;

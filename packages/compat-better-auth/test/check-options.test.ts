@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { COMPAT_PLUGIN, passkey } from "../src/plugins.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { consumerc, consumere, consumerb, consumerd, consumeri } from "../typetest/options.js";
 
@@ -171,5 +172,17 @@ describe("checkOptions: the allow list fails closed", () => {
         checkOptions({ ...base, emailAndPassword: { resetPasswordTokenExpiresIn: 90 } }).refusals,
       ),
     ).toEqual(["emailAndPassword.resetPasswordTokenExpiresIn"]);
+  });
+
+  it("refuses a magic link plugin with no sendMagicLink and a passkey plugin with no rpID, rpName, or origin (M-7)", () => {
+    const noSend = { kind: COMPAT_PLUGIN, id: "magic-link", options: {} } as never;
+    expect(checkOptions({ ...base, plugins: [noSend] }).refusals).toEqual([
+      "plugins[magic-link].sendMagicLink: required",
+    ]);
+    expect(checkOptions({ ...base, plugins: [passkey({})] }).refusals).toEqual([
+      "plugins[passkey].origin: required",
+      "plugins[passkey].rpID: required",
+      "plugins[passkey].rpName: required",
+    ]);
   });
 });

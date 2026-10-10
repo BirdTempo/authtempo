@@ -329,3 +329,120 @@ describe("betterAuth", () => {
     expect(await res.json()).toEqual({ error: "password_policy", code: "PASSWORD_TOO_SHORT" });
   });
 });
+
+const json = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  new Request(`${BASE}/api/auth${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE, ...headers },
+    body: JSON.stringify(body),
+  });
+
+describe("the mail routes through compatMail (fix round 1: I-1, M-7)", () => {
+  it("answers 200 for a reset request to an unknown address and calls no callback (I-1)", async () => {
+    const { auth, sent } = app();
+    const res = await auth.handler(
+      json("/password/reset/request", { email: "nobody@example.com" }),
+    );
+    expect(res.status).toBe(200);
+    expect(sent).toEqual([]);
+  });
+
+  it("mails a reset link through sendResetPassword with the user, the URL, and the token", async () => {
+    const { auth, sent } = app();
+    await auth.api.signUpEmail({
+      body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+    });
+    const res = await auth.handler(json("/password/reset/request", { email: "a@example.com" }));
+    expect(res.status).toBe(200);
+    const reset = sent.filter((m) => m.kind === "reset");
+    expect(reset).toHaveLength(1);
+    const data = reset[0]?.data;
+    expect(data?.user.email).toBe("a@example.com");
+    expect(data?.url.startsWith(`${BASE}/api/auth/password/reset?token=`)).toBe(true);
+    expect(data?.token).not.toBe("");
+    expect(new URL(data?.url ?? BASE).searchParams.get("token")).toBe(data?.token);
+  });
+
+  it("mails a magic link through sendMagicLink with the email, the URL, and the token", async () => {
+    const links: { email: string; url: string; token: string }[] = [];
+    const { auth } = app({
+      plugins: [
+        magicLink({
+          sendMagicLink: async (d) => {
+            links.push(d);
+          },
+        }),
+      ],
+    });
+    await auth.api.signInMagicLink({ body: { email: "m@example.com" } });
+    expect(links).toHaveLength(1);
+    expect(links[0]?.email).toBe("m@example.com");
+    expect(links[0]?.url.startsWith(`${BASE}/api/auth/magic-link/verify?token=`)).toBe(true);
+    expect(new URL(links[0]?.url ?? BASE).searchParams.get("token")).toBe(links[0]?.token);
+  });
+});
+
+describe("withPolicyCode on the reset and change routes (M-7)", () => {
+  it("adds the length code on /password/reset (field password)", async () => {
+    const { auth, sent } = app();
+    await auth.api.signUpEmail({
+      body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+    });
+    await auth.handler(json("/password/reset/request", { email: "a@example.com" }));
+    const token = sent.find((m) => m.kind === "reset")?.data.token ?? "";
+    const res = await auth.handler(json("/password/reset", { token, password: "ten chars!" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "password_policy", code: "PASSWORD_TOO_SHORT" });
+  });
+
+  it("adds the length code on /password/change (field newPassword)", async () => {
+    const { auth, sent } = app();
+    await auth.api.signUpEmail({
+      body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+    });
+    // Core changes a password only for a verified address. The verify ends the
+    // sign-up session and sets a new session cookie: the change uses that one.
+    const verifyToken = sent.find((m) => m.kind === "verify")?.data.token ?? "";
+    const verified = await auth.handler(json("/password/verify", { token: verifyToken }));
+    expect(verified.status).toBe(200);
+    const session =
+      /tempo_session=([^;]+)/.exec(verified.headers.get("set-cookie") ?? "")?.[1] ?? "";
+    const res = await auth.handler(
+      json(
+        "/password/change",
+        { currentPassword: "correct horse battery", newPassword: "x".repeat(129) },
+        { authorization: `Bearer ${session}` },
+      ),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "password_policy", code: "PASSWORD_TOO_LONG" });
+  });
+});
+
+describe("api refuses the arguments core cannot keep (M-3)", () => {
+  it("answers 501 NOT_SUPPORTED for callbackURL at sign-up, and callbackURL or rememberMe at sign-in", async () => {
+    const { auth } = app();
+    const notSupported = { statusCode: 501, body: { code: "NOT_SUPPORTED" } };
+    await expect(
+      auth.api.signUpEmail({
+        body: {
+          email: "a@example.com",
+          password: "correct horse battery",
+          name: "A",
+          callbackURL: "/x",
+        },
+      }),
+    ).rejects.toMatchObject(notSupported);
+    await auth.api.signUpEmail({
+      body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+    });
+    const body = { email: "a@example.com", password: "correct horse battery" };
+    await expect(
+      auth.api.signInEmail({ body: { ...body, callbackURL: "/x" } }),
+    ).rejects.toMatchObject(notSupported);
+    await expect(
+      auth.api.signInEmail({ body: { ...body, rememberMe: false } }),
+    ).rejects.toMatchObject(notSupported);
+    await expect(auth.api.signInEmail({ body })).resolves.toMatchObject({ redirect: false });
+  });
+});
