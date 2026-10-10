@@ -46,3 +46,12 @@ refuses its plugin by id at construction.
 | `@better-auth/expo/client` | `./client` (`expoClient`) |
 | `@better-auth/passkey` | `.` (`passkey`) |
 | `@better-auth/passkey/client` | `./client` (`passkeyClient`) |
+
+## Passwords from Better Auth
+
+`betterAuthPasswordHash` verifies a Better Auth scrypt hash and rewrites it as
+PBKDF2 on the first right sign-in. A legacy row verifies slower than a PBKDF2
+row until that sign-in rehashes it. So during the migration window the
+response time shows which accounts are not yet migrated. Each account loses
+this tell at its first right sign-in. At most two scrypt derives run at once
+per isolate; the others wait, and no sign-in is refused.

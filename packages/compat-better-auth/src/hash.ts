@@ -22,11 +22,46 @@ export type ScryptFn = (password: Uint8Array, salt: Uint8Array) => Promise<Uint8
 export const nobleScrypt: ScryptFn = (password, salt) =>
   scryptAsync(password, salt, { ...SCRYPT, maxmem: MAXMEM });
 
+/**
+ * Memory gate. One derive holds 128 * r * N = 32 MiB (N=16384, r=16). A Workers
+ * isolate has 128 MiB for all its requests (Workers limits page, checked
+ * 2026-10-10). The derive yields between blocks, so derives from concurrent
+ * sign-ins overlap, and four of them can end the isolate. That end is not a
+ * throw, so no catch sees it. At most MAX_CONCURRENT derives run at once per
+ * isolate (this module state). The rest wait in order. The gate never
+ * refuses: a refusal would answer invalid_credentials to a right password
+ * under load.
+ */
+const MAX_CONCURRENT = 2;
+let running = 0;
+const waiting: Array<() => void> = [];
+
+async function gated<T>(run: () => Promise<T>): Promise<T> {
+  if (running >= MAX_CONCURRENT) {
+    // The finishing derive hands its slot to the next waiter, so `running` stays at the limit.
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  } else {
+    running++;
+  }
+  try {
+    return await run();
+  } finally {
+    const next = waiting.shift();
+    if (next) next();
+    else running--;
+  }
+}
+
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Constant time for equal lengths. Both inputs are 128 hex characters here. */
+/**
+ * Constant time for equal lengths. Both inputs are 128 hex characters here.
+ * Core has a `constantTimeEqual` (core/src/primitives/crypto.ts), but the
+ * core package index does not export it (checked 2026-10-10). This copy
+ * stays until core exports it. Then use core's: one source for one fact.
+ */
 function equalHex(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -40,6 +75,10 @@ function equalHex(a: string, b: string): boolean {
  * header first, then Better Auth's scrypt format, and answers `rehash: true`
  * on a scrypt match, so plan 8's sign-in writes PBKDF2. Any other stored
  * text, and an empty password, answers ok false with no derive.
+ *
+ * Timing trade: a scrypt row verifies slower than the PBKDF2 `dummy()` that
+ * an unknown address costs, so the response time shows an account that is not
+ * yet migrated. The tell ends for each account at its first right sign-in.
  */
 export function betterAuthPasswordHash(
   options: { pbkdf2?: PasswordHashSeam; scrypt?: ScryptFn } = {},
@@ -55,7 +94,9 @@ export function betterAuthPasswordHash(
       const m = BETTER_AUTH_RE.exec(stored);
       if (!m || plain.length === 0) return { ok: false, rehash: false };
       try {
-        const key = await scrypt(utf8.encode(plain.normalize("NFKC")), utf8.encode(m[1] ?? ""));
+        const key = await gated(() =>
+          scrypt(utf8.encode(plain.normalize("NFKC")), utf8.encode(m[1] ?? "")),
+        );
         const ok = equalHex(toHex(key), m[2] ?? "");
         return { ok, rehash: ok };
       } catch {

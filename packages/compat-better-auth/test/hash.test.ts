@@ -18,6 +18,16 @@ const NFKC_VECTOR = {
   hash: "8035e0b72d4e9e1dbde9672966b75154:5b46cb96f3e2047e54bf118e4e86b4d9d5b66f256204d0dd291eae7ccd116e18a698c05e08d71b615d483c09c13abe8cbdc506a83b5c4c14f498160e678cd57e",
 };
 
+// Same algorithm, derived on 2026-10-10 with node:crypto scryptSync (the call
+// under @better-auth/utils password.node.mjs) from the NFKC form of
+// "\uFB01nd the horse" (the U+FB01 ligature). NFKC gives "find the horse";
+// NFC keeps the ligature, so an NFC normalize derives another key.
+const LIGATURE_VECTOR = {
+  hashedFrom: "\uFB01nd the horse",
+  verifiedWith: "find the horse",
+  hash: "0123456789abcdef0123456789abcdef:156d837a0848a752d0626f4b497aa9b7e495bdda79f95a3d1967eaf9c72dc0cc5562a66d0abbb41c83b807e6054d9b6e1e4109587c8b35d1ebc2effd50288643",
+};
+
 const fast = createPbkdf2PasswordHash({ iterations: 1000 });
 
 describe("betterAuthPasswordHash", () => {
@@ -44,6 +54,53 @@ describe("betterAuthPasswordHash", () => {
       ok: true,
       rehash: true,
     });
+  });
+
+  it("uses NFKC, not NFC: a compatibility ligature folds to its letters", async () => {
+    const seam = betterAuthPasswordHash({ pbkdf2: fast });
+    expect(await seam.verify(LIGATURE_VECTOR.verifiedWith, LIGATURE_VECTOR.hash)).toEqual({
+      ok: true,
+      rehash: true,
+    });
+    expect(await seam.verify(LIGATURE_VECTOR.hashedFrom, LIGATURE_VECTOR.hash)).toEqual({
+      ok: true,
+      rehash: true,
+    });
+  });
+
+  it("runs at most two derives at once and finishes the rest in order", async () => {
+    const started: number[] = [];
+    const finish: Array<() => void> = [];
+    let active = 0;
+    let peak = 0;
+    const scrypt = vi.fn((_pw: Uint8Array, _salt: Uint8Array) => {
+      const id = started.length;
+      started.push(id);
+      active++;
+      peak = Math.max(peak, active);
+      return new Promise<Uint8Array>((resolve) => {
+        finish[id] = () => {
+          active--;
+          resolve(new Uint8Array(64));
+        };
+      });
+    });
+    const seam = betterAuthPasswordHash({ pbkdf2: fast, scrypt });
+    const done: number[] = [];
+    const runs = [0, 1, 2, 3, 4, 5].map((i) =>
+      seam.verify("pw", VECTOR.hash).then(() => done.push(i)),
+    );
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    expect(peak).toBe(2);
+    for (let i = 0; i < 6; i++) {
+      await vi.waitFor(() => expect(started.length).toBeGreaterThan(i));
+      finish[i]?.();
+      await vi.waitFor(() => expect(done).toHaveLength(i + 1));
+      expect(peak).toBeLessThanOrEqual(2);
+    }
+    await Promise.all(runs);
+    expect(done).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(scrypt).toHaveBeenCalledTimes(6);
   });
 
   it("hashes and verifies new passwords through the PBKDF2 seam", async () => {
