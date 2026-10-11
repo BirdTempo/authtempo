@@ -249,7 +249,7 @@ async function planUser(
   const rows = userRows(source, r, id, email, o);
   if (rows === null) return { kind: "skip", reason: "duplicate_passkey" };
   const found = await db.findOne("user", [{ field: "id", op: "eq", value: id }]);
-  if (found) return existingUser(db, found.emailVerified, r, rows);
+  if (found) return existingUser(db, rows);
   if (
     planned.emails.has(email) ||
     (await db.findOne("user", [{ field: "email", op: "eq", value: email }]))
@@ -324,7 +324,6 @@ function userRows(
     identities.push(i);
   }
   let passkeys = r.passkeys;
-  if (new Set(passkeys.map((p) => p.credentialId)).size !== passkeys.length) return null;
   if (source.name !== "authjs") {
     // Only the Auth.js reader confirms the relying party id a passkey binds to.
     for (const _ of passkeys) dropped.push("passkey:not_authjs");
@@ -338,6 +337,8 @@ function userRows(
     for (const _ of passkeys) dropped.push("passkey:unverified");
     passkeys = [];
   }
+  // After both drops: a record is skipped only for a passkey it would write.
+  if (new Set(passkeys.map((p) => p.credentialId)).size !== passkeys.length) return null;
   return {
     id,
     email,
@@ -354,19 +355,12 @@ function userRows(
 
 /**
  * A user that exists by its import id. It is never written again. When it
- * lacks a row its record maps to, a run stopped inside the record (spec 6:
- * on D1 an isolate that dies does not roll back), and the report lists it as
- * `partial`. A claim sets `emailVerified` and then deletes the claimant's
- * credentials, so a stored flag that differs from the record's means the app
- * changed the user since, and the rows are no longer the import's to check.
+ * lacks a row its record maps to, the report lists it as `partial` with each
+ * missing row kind. The importer cannot tell why a row is missing (see
+ * `ImportReport.partial`), so it has no rule that turns a missing row into
+ * `exists`: the operator checks the user in the app.
  */
-async function existingUser(
-  db: StorageAdapter,
-  storedVerified: boolean,
-  r: ImportUser,
-  rows: UserRows,
-): Promise<Plan<UserRows>> {
-  if (storedVerified !== r.emailVerified) return { kind: "exists" };
+async function existingUser(db: StorageAdapter, rows: UserRows): Promise<Plan<UserRows>> {
   const missing: string[] = [];
   const own = rows.verified
     ? [{ provider: "email", subject: rows.email }, ...rows.identities]

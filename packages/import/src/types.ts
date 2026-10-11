@@ -178,12 +178,20 @@ export interface ImportReport {
   /** The number of `skipped` entries whose reason `isRefusal` names. */
   refusals: number;
   /**
-   * A record whose id exists but whose rows are not all there: a run that
-   * stopped inside a record on D1 (an isolate that dies does not roll back,
-   * spec 6). `missing` names each absent row, for example `password` or
-   * `identity:email`. The importer never repairs it and never counts it as
-   * `exists`; a person must look, and the CLI exits 1 on any entry (Task 13).
-   * After cut-over a user can remove a passkey, so a re-run then lists it too.
+   * A record whose id exists but whose rows are not all the rows the record
+   * maps to. `missing` names each absent row kind, for example `password`,
+   * `identity:email`, `passkey`, or `member`. Three causes give the same entry,
+   * and the importer cannot tell them apart:
+   * - A run that stopped inside the record on D1 (an isolate that dies does
+   *   not roll back, spec 6).
+   * - A claim since the first run: it deletes the claimant's password, social
+   *   identities, and passkeys.
+   * - Another app change since the first run (a removed password or passkey),
+   *   or a newer export or other options (for example a row the source now
+   *   states as verified, so the record maps to an `email` identity).
+   * The importer never repairs an entry and never counts it as `exists`. The
+   * operator checks that user in the app before any repair. The CLI exits 1
+   * on any entry (Task 13).
    */
   partial: { kind: "user" | "organization"; sourceId: string; missing: string[] }[];
 }

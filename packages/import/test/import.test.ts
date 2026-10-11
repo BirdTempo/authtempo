@@ -133,9 +133,10 @@ describe("importUsers", () => {
     });
     const again = await importUsers(db, listSource(records()), { now });
     expect(await db.findMany("password", [{ field: "userId", op: "eq", value: u2 }])).toEqual([]);
-    // The app changed the user since the first run, so it is not a half record.
-    expect(again.partial).toEqual([]);
-    expect(again.exists.user).toBe(3);
+    // The importer cannot tell a claim from a half record: it lists the
+    // missing row for the operator, and it never answers exists for it.
+    expect(again.partial).toEqual([{ kind: "user", sourceId: "u2", missing: ["password"] }]);
+    expect(again.exists.user).toBe(2);
   });
 
   it("never rewrites a password row that a sign-in rehashed since the first run", async () => {

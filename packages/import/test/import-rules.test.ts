@@ -114,6 +114,32 @@ describe("importUsers: passkeys (I-2)", () => {
     expect(await other.findMany("passkey", [])).toEqual([]);
   });
 
+  it("imports an unverified user whose dropped passkeys repeat a verified user's credential", async () => {
+    const db = createMemoryAdapter();
+    const r = await importUsers(
+      db,
+      named("authjs", [
+        user("w", {
+          emailVerified: false,
+          password: { hash: BCRYPT },
+          passkeys: [passkey("P1"), passkey("P1")],
+        }),
+        user("v", { passkeys: [passkey("P1")] }),
+      ]),
+      { now },
+    );
+    expect(r.skipped).toEqual([]);
+    expect(r.created).toMatchObject({ user: 2, passkey: 1 });
+    expect(r.dropped).toEqual([
+      { sourceId: "w", item: "passkey:unverified" },
+      { sourceId: "w", item: "passkey:unverified" },
+    ]);
+    const v = await importId("user", "authjs", "v");
+    expect((await db.findMany("passkey", [])).map((p) => [p.userId, p.credentialId])).toEqual([
+      [v, "P1"],
+    ]);
+  });
+
   it("skips a record that holds one credential twice, and the run goes on", async () => {
     const records = () =>
       named("authjs", [user("d", { passkeys: [passkey("P1"), passkey("P1")] }), user("e")]);
