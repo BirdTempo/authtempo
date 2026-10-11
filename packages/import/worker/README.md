@@ -42,7 +42,7 @@ Run every command from `packages/import/worker`.
 
    ```bash
    tempo-auth-import supabase --users users.csv --identities identities.csv \
-     --d1-bundle input/import.local.json --dry-run
+     --formats bcrypt,argon2id --d1-bundle input/import.local.json --dry-run
    ```
 
 4. Start the Worker. The build fails until `input/import.local.json` exists.
@@ -60,15 +60,22 @@ Run every command from `packages/import/worker`.
    curl "http://127.0.0.1:8787/__scheduled"
    ```
 
-   Read the report: one line `{"tempoAuthImport": {...}}` in the first
-   terminal. A run without `--var LOCAL_IMPORT:1` prints an error and writes
-   nothing.
+   Read the report: one line `{"tempoAuthImport": {...}, "status": 0}` in
+   the first terminal. `status` is the CLI's exit status: 1 means a person
+   must look at the report. A run without `--var LOCAL_IMPORT:1` prints an
+   error and writes nothing.
 6. When the dry run report is correct, run step 3 again without `--dry-run`.
    Do not stop wrangler dev: it rebuilds when the input file changes. Wait for
    the rebuild line, then run step 5 again. A second real run changes zero
    rows, and its report lists each user as `exists`.
 7. WARNING: Delete `input/import.local.json` when you finish. It holds the
-   password hashes.
+   password hashes. After a rehearsal on the local copy, also delete
+   `.wrangler/state`: the local database in it holds the imported hashes.
+
+The Worker writes core's tables only, through core's D1 adapter. It runs
+with Node.js compatibility off: `proof/bundle-no-node.mjs` bundles it with
+both flags and fails on any `node:` module, and the package's `test` script
+runs it.
 
 Unverified (the owner runbook): a run against the real database with
 `"remote": true`, and a run with an input file of tens of megabytes.

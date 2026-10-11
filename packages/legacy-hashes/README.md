@@ -8,7 +8,7 @@ import { createPbkdf2PasswordHash } from "@tempo-auth/core";
 import { createLegacyPasswordHash } from "@tempo-auth/legacy-hashes";
 
 const hash = createLegacyPasswordHash({
-  formats: ["bcrypt"], // only what your import brought
+  formats: ["bcrypt"], // only what your import brought; give the importer the same --formats
   next: createPbkdf2PasswordHash(),
 });
 createAuth({ ..., password: { hash } });
@@ -18,7 +18,7 @@ createAuth({ ..., password: { hash } });
 | --- | --- | --- |
 | `bcrypt` | `$2a$` or `$2b$`, cost 4 to 12 | Supabase, Clerk, Auth0, an Auth.js app's own password column |
 | `argon2id` | `$argon2id$v=19$m=..,t=..,p=..$salt$hash` | Supabase |
-| `pbkdf2-sha256` | `$pbkdf2-sha256$i=..,l=..$salt$hash` | Ory, Keycloak exports |
+| `pbkdf2-sha256` | `$pbkdf2-sha256$i=..,l=..$salt$hash` | Ory, Keycloak exports (after a rewrite to this form) |
 | `scrypt` | `$scrypt$n=<log2 N>,r=..,p=..$salt$hash` | Ory exports (rewrite Ory's `ln=N` as `n=log2 N`) |
 | `firescrypt` | `$firescrypt$n=<mem_cost>,r=<rounds>,p=1$salt$hash` | Firebase; pass `firebase: { signerKey, saltSeparator }` from the console |
 
@@ -103,7 +103,9 @@ password: {
   response, so a `timeout` report can be lost.
 - `timeoutMs` is 100 to 30000, default 5000. While `legacyVerify` is set,
   every failed password sign-in waits until `timeoutMs` after its check
-  began, so a migrated and an unmigrated address look the same. Cognito gets
+  began. So a migrated and an unmigrated address look the same. Set it longer
+  than the seam's dummy verify plus Cognito's round trip; else every check
+  times out. Cognito gets
   `timeoutMs` minus core's lookup time. Set a low `timeoutMs`; remove
   `legacyVerify` when the migration ends.
 - After the import, sign in once with a known Cognito user before the

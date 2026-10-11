@@ -47,13 +47,14 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
 - A magic link is single use. Two clicks race for one conditional update.
 - A compatibility package never widens a promise of core: an option that core cannot keep stops the factory at construction, and the one error lists every such option.
 - A `next` path must start with `/` and not `//`. Anything else becomes `/`.
-- Core, the D1 adapter, the compatibility package, and legacy-hashes run on
-  Workers with Node.js compatibility off. Workers turn it on by default from
-  compatibility date 2026-08-04, so the example Worker and every Worker
-  config of plan 9b set `no_nodejs_compat` and `no_nodejs_compat_v2` (the
-  adapter-d1 test config sets none; its comment says why). The example's test
-  bundles it and fails on any `node:` import, and legacy-hashes runs its
-  vectors in a proof Worker with both flags. The vitest pool cannot show
+- Core, the D1 adapter, the compatibility package, legacy-hashes, and the
+  import D1 Worker run on Workers with Node.js compatibility off. Workers turn
+  it on by default from compatibility date 2026-08-04. So the example Worker
+  and every Worker config of plan 9b set `no_nodejs_compat` and
+  `no_nodejs_compat_v2`. The adapter-d1 test config sets none, and its comment
+  says why. The example's test and the import package's test bundle their
+  Worker and fail on any `node:` import. legacy-hashes runs its vectors in a
+  proof Worker with both flags. The vitest pool cannot show
   this: it turns Node.js modules on for its own runner. The Postgres adapter
   needs `nodejs_compat`, and the import CLI runs on Node.
 - An importer writes only rows that a core flow writes. An unverified source
