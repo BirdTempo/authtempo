@@ -8,6 +8,7 @@ import {
   removeMember,
   updateMemberRole,
   updateOrganization,
+  validOrganizationName,
 } from "../src/engine/organizations.js";
 import { createSession } from "../src/engine/sessions.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -715,5 +716,20 @@ describe("stale reads and removal (Review I-2, I-3, M-1)", () => {
       await removeMember(after.config, { user: ghost, organizationId: org.id, userId: ghost.id }),
     ).toEqual({ ok: true, value: { ok: true } });
     expect(await roleOf(after, org.id, ghost.id)).toBeNull();
+  });
+});
+
+describe("validOrganizationName (exported for the importer, plan 9b)", () => {
+  it("holds 1 to 120 characters with no control character", () => {
+    const controls = [
+      ...Array.from({ length: 0x20 }, (_, c) => String.fromCharCode(c)),
+      String.fromCharCode(0x7f),
+    ];
+    expect(validOrganizationName("a")).toBe(true);
+    expect(validOrganizationName("a".repeat(120))).toBe(true);
+    expect(validOrganizationName("Acme Ünïcode")).toBe(true);
+    expect(validOrganizationName("")).toBe(false);
+    expect(validOrganizationName("a".repeat(121))).toBe(false);
+    for (const c of controls) expect(validOrganizationName(`Acme${c}x`)).toBe(false);
   });
 });

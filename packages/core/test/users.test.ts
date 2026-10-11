@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { claimEmail, findOrCreateUserByEmail, normalizeEmail } from "../src/engine/users.js";
+import {
+  claimEmail,
+  findOrCreateUserByEmail,
+  normalizeEmail,
+  validUserName,
+} from "../src/engine/users.js";
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -378,5 +383,20 @@ describe("claimEmail and the password row (plan 8)", () => {
     const password = order.indexOf("delete:password");
     expect(password).toBeGreaterThan(0);
     expect(password).toBeLessThan(order.indexOf("delete:session"));
+  });
+});
+
+describe("validUserName (exported for the importer, plan 9b)", () => {
+  it("holds 1 to 200 characters with no control character", () => {
+    const controls = [
+      ...Array.from({ length: 0x20 }, (_, c) => String.fromCharCode(c)),
+      String.fromCharCode(0x7f),
+    ];
+    expect(validUserName("a")).toBe(true);
+    expect(validUserName("a".repeat(200))).toBe(true);
+    expect(validUserName("Ada Lövelace")).toBe(true);
+    expect(validUserName("")).toBe(false);
+    expect(validUserName("a".repeat(201))).toBe(false);
+    for (const c of controls) expect(validUserName(`Ada${c}x`)).toBe(false);
   });
 });

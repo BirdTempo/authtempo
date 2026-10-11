@@ -131,6 +131,27 @@ export interface PasswordConfig {
   resetTtlMinutes?: number;
   /** The HTML of the reset page. The default is `defaultResetPage`. */
   resetPage?: (input: ResetPageInput) => string;
+  /**
+   * The old system's password check, for users that an importer moved with
+   * no exportable hash (Cognito; spec 17.4). Core calls `verify` only for a
+   * user whose password row holds `LEGACY_VERIFY_HASH`, after the sign-in
+   * limits, with the normalized email. `true` writes this config's hash over
+   * the marker and signs in through the normal path. `false`, a throw, or no
+   * answer within `timeoutMs` answers `invalid_credentials`. `verify` must
+   * stop its call when `signal` aborts.
+   */
+  legacyVerify?: LegacyVerifyConfig;
+}
+
+export interface LegacyVerifyConfig {
+  verify: (email: string, password: string, signal: AbortSignal) => Promise<boolean>;
+  /**
+   * 100 to 30000. Default 5000. While `legacyVerify` is set, every failed
+   * password sign-in answers no earlier than this many milliseconds after its
+   * check began, so a legacy row's network time does not tell an address with
+   * a legacy row from an unknown one.
+   */
+  timeoutMs?: number;
 }
 
 export interface OrganizationsConfig {
@@ -187,6 +208,7 @@ export interface ResolvedConfig {
     breachCheck: ((plain: string) => Promise<boolean>) | null;
     resetTtlMinutes: number;
     resetPage: (input: ResetPageInput) => string;
+    legacyVerify: Required<LegacyVerifyConfig> | null;
   } | null;
 }
 
@@ -200,7 +222,8 @@ export function workersClientIp(request: Request): string | null {
 }
 
 const DEFAULT_RANKS = { viewer: 1, member: 2, admin: 3, owner: 4 };
-const DEFAULT_RESERVED_SLUGS = [
+/** Exported for the importer (plan 9b), which refuses the same slugs. One list for both. */
+export const DEFAULT_RESERVED_SLUGS: readonly string[] = [
   "admin",
   "api",
   "auth",
@@ -410,12 +433,24 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     const resetTtlMinutes = p.resetTtlMinutes ?? 15;
     if (!Number.isSafeInteger(resetTtlMinutes) || resetTtlMinutes < 1 || resetTtlMinutes > 1440)
       throw new ConfigError("password.resetTtlMinutes must be an integer from 1 to 1440");
+    let legacyVerify: Required<LegacyVerifyConfig> | null = null;
+    if (p.legacyVerify) {
+      const timeoutMs = p.legacyVerify.timeoutMs ?? 5000;
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 30_000)
+        throw new ConfigError(
+          "password.legacyVerify.timeoutMs must be an integer from 100 to 30000",
+        );
+      if (typeof p.legacyVerify.verify !== "function")
+        throw new ConfigError("password.legacyVerify.verify must be a function");
+      legacyVerify = { verify: p.legacyVerify.verify, timeoutMs };
+    }
     password = {
       hash: p.hash ?? createPbkdf2PasswordHash(),
       minLength,
       breachCheck: p.breachCheck ?? null,
       resetTtlMinutes,
       resetPage: p.resetPage ?? defaultResetPage,
+      legacyVerify,
     };
   }
   return {

@@ -1,8 +1,19 @@
 import { newId } from "../primitives/ids.js";
+import { hasControlChar } from "../primitives/text.js";
 import type { UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
+const USER_NAME_MAX = 200;
+
+/**
+ * The user name rule: 1 to 200 UTF-16 code units, no control character.
+ * The password sign-up applies it, and the importer (plan 9b) applies it
+ * too, so one rule holds for both.
+ */
+export function validUserName(name: string): boolean {
+  return name.length >= 1 && name.length <= USER_NAME_MAX && !hasControlChar(name);
+}
 
 /**
  * Lowercase, trimmed, and shaped like an address, or null. The shape check

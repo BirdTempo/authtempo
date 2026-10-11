@@ -2,17 +2,19 @@ export const VERSION = "0.0.0";
 
 export type {
   AuthConfig,
+  LegacyVerifyConfig,
   MailMessage,
   MailPort,
   OrganizationsConfig,
   PasswordConfig,
 } from "./config.js";
-export { ConfigError, isAppScheme } from "./config.js";
+export { ConfigError, DEFAULT_RESERVED_SLUGS, isAppScheme } from "./config.js";
 export { type Auth, type AuthApi, createAuth, type PasswordApi } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
+export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
   PasswordChange,
@@ -24,10 +26,12 @@ export type {
   PasswordVerified,
   PasswordVerify,
 } from "./engine/password.js";
+export { LEGACY_VERIFY_HASH, PENDING_HASH_PREFIX } from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export { type PublicSession, type ResolvedSession, readSessionToken } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
+export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export {
@@ -44,6 +48,7 @@ export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js"
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
 export { type Clock, systemClock } from "./primitives/clock.js";
+export { newId } from "./primitives/ids.js";
 export type { Result } from "./result.js";
 export {
   type IdentityRow,

@@ -38,8 +38,12 @@ export interface MemberSummary {
 
 const NAME_MAX = 120;
 
-/** The name goes into a mail subject; a CR or LF would inject a header. */
-function validName(name: string): boolean {
+/**
+ * The organization name rule: 1 to 120 UTF-16 code units, no control
+ * character. The name goes into a mail subject; a CR or LF would inject a
+ * header. Exported for the importer (plan 9b), so one rule holds for both.
+ */
+export function validOrganizationName(name: string): boolean {
   return name.length >= 1 && name.length <= NAME_MAX && !hasControlChar(name);
 }
 
@@ -189,7 +193,7 @@ export async function createOrganization(
   const v = verified(input.user);
   if (!v.ok) return v;
   const slug = normalizeSlug(input.slug);
-  if (slug === null || !validName(input.name)) return fail("invalid_body");
+  if (slug === null || !validOrganizationName(input.name)) return fail("invalid_body");
   if (o.reservedSlugs.has(slug)) return fail("slug_reserved");
   const now = config.clock.now();
   const organization: OrganizationRow = {
@@ -277,7 +281,7 @@ export async function updateOrganization(
   if (!s.ok) return s;
   const data: Partial<OrganizationRow> = {};
   if (input.name !== undefined) {
-    if (!validName(input.name)) return fail("invalid_body");
+    if (!validOrganizationName(input.name)) return fail("invalid_body");
     data.name = input.name;
   }
   if (input.metadata !== undefined) data.metadata = input.metadata;
