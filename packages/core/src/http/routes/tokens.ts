@@ -20,7 +20,8 @@ const createBody = z.object({
   // The engine refuses more than 80 code units; this cap only bounds the body.
   name: z.string().max(200),
   expiresInDays: z.number().int().min(1).max(3650).nullable().optional(),
-  organizationId: z.string().min(1).max(64).optional(),
+  // `null` means no organization, the same as absent: the engine type takes both.
+  organizationId: z.string().min(1).max(64).nullable().optional(),
 });
 const revokeBody = z.object({ id: z.string().min(1).max(64) });
 
@@ -54,7 +55,9 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
           user: s.user,
           name: body.value.name,
           expiresInDays: body.value.expiresInDays,
-          organizationId: body.value.organizationId,
+          ...(body.value.organizationId == null
+            ? {}
+            : { organizationId: body.value.organizationId }),
         });
         return send(respond(r), s.renewed);
       },

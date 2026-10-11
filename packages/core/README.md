@@ -281,6 +281,11 @@ const c = await auth.caller(request);
 if (!c) return Response.json({ error: "unauthorized" }, { status: 401 });
 // c.kind === "session": c.user, c.session, c.refreshed
 // c.kind === "token":   c.user, c.apiToken, c.activeOrganizationId
+const res = Response.json({ id: c.user.id });
+// After a sliding refresh, renew the cookie or the browser drops it early.
+const renewed = c.kind === "session" ? auth.sessionCookie(request, c) : null;
+if (renewed) res.headers.set("set-cookie", renewed);
+return res;
 ```
 
 - `auth.session(request)` resolves sessions only. Every route that calls
@@ -291,7 +296,8 @@ if (!c) return Response.json({ error: "unauthorized" }, { status: 401 });
   characters after `tk_`, so a list tells the tokens apart.
 - `name` is 1 to 80 characters with no control character. `expiresInDays`
   is an integer from 1 to 3650, default 90. `null` means no expiry.
-- `organizationId` names one organization the user is a member of. Core
+- `organizationId` may be omitted or `null`, for no organization. Else it
+  names one organization the user is a member of. Core
   checks the membership at create and at each use. When the membership is
   gone, `caller` answers null, and the token stays in the list.
 - A user holds at most 50 tokens (`token_limit`). Create is limited to 20
@@ -414,6 +420,7 @@ the limit windows that ended. It answers five counts:
 and `limits`. It is an `api` function and not a route. Call it from a
 scheduled handler. It is safe to run at any time. A replayed token
 answers `invalid_token` after the sweep because its row is gone.
+
 Since plan 8b it also deletes API tokens past their expiry and answers a sixth count, `apiTokens`. A token with no expiry stays.
 
 ```ts

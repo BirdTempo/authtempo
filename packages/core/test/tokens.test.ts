@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAuth } from "../src/create-auth.js";
 import { addMember, createOrganization, removeMember } from "../src/engine/organizations.js";
-import { createSession } from "../src/engine/sessions.js";
+import { createSession, renewedSessionCookie } from "../src/engine/sessions.js";
 import {
   API_TOKEN_CAP,
   callerFromRequest,
@@ -17,7 +17,7 @@ import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 
-/** A user with a session and an unverified address: a password sign-up whose link was not used. */
+/** A user with an unverified address and no session: a password sign-up whose link was not used. */
 async function unverifiedUser(auth: ReturnType<typeof makeAuth>) {
   const now = auth.clock.now();
   return auth.storage.create("user", {
@@ -317,6 +317,27 @@ describe("callerFromRequest", () => {
       ),
     ).toBeNull();
     expect(await callerFromRequest(auth.config, request({}))).toBeNull();
+  });
+
+  it("answers refreshed:true for a cookie session past the refresh window, and a cookie to send", async () => {
+    const auth = makeAuth();
+    const ada = await auth.seedUser("ada@example.com");
+    const { token } = await createSession(auth.config, {
+      userId: ada.id,
+      ip: null,
+      userAgent: null,
+    });
+    const req = request({ cookie: `tempo_session=${token}` });
+    const fresh = await callerFromRequest(auth.config, req);
+    if (fresh?.kind !== "session") throw new Error("no session caller");
+    expect(fresh.refreshed).toBe(false);
+    expect(renewedSessionCookie(auth.config, req, fresh)).toBeNull();
+    auth.clock.advance(auth.config.session.slidingRefreshDays * DAY);
+    const caller = await callerFromRequest(auth.config, req);
+    if (caller?.kind !== "session") throw new Error("no session caller");
+    expect(caller.refreshed).toBe(true);
+    // Without this cookie the browser drops the session at its old Max-Age.
+    expect(renewedSessionCookie(auth.config, req, caller)).toContain(`tempo_session=${token}`);
   });
 
   it("keeps auth.session session-only and serves auth.caller and api.tokens", async () => {

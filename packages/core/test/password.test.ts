@@ -505,6 +505,8 @@ describe("passwordSignIn", () => {
     if (!first.ok) throw new Error(`the first sign-in answered ${first.code}`);
     if (!other?.ok) throw new Error("the second sign-in did not sign in");
     expect(calls.hash).toBe(2);
+    // Two first verifies, and one more on the sign-in that loses the rehash.
+    expect(calls.verify).toHaveLength(3);
     const row = await auth.storage.findOne("password", [
       { field: "id", op: "eq", value: before.id },
     ]);
@@ -1503,6 +1505,19 @@ describe("resendPasswordVerification (plan 8b)", () => {
     });
     auth.clock.advance(16 * 60_000);
     expect((await resend(auth, EMAIL, "9.9.9.9")).ok).toBe(true);
+  });
+
+  it("checks the IP key before the email key", async () => {
+    const auth = pwAuth();
+    const keys: string[] = [];
+    const allow = auth.config.limiter.allow.bind(auth.config.limiter);
+    const spy = vi.spyOn(auth.config.limiter, "allow").mockImplementation((key, window) => {
+      keys.push(key);
+      return allow(key, window);
+    });
+    await resend(auth, EMAIL, "4.4.4.4");
+    spy.mockRestore();
+    expect(keys).toEqual(["password-resend:ip:4.4.4.4", `password-resend:email:${EMAIL}`]);
   });
 
   it("answers not_found with no password config", async () => {

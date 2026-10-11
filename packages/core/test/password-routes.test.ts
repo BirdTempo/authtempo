@@ -256,6 +256,22 @@ describe("password resend route (plan 8b)", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("answers 429 rate_limited for the 21st resend from one IP", async () => {
+    const h = pwHandle({ hash: FAST });
+    const ip = { "cf-connecting-ip": "7.7.7.7" };
+    for (let i = 0; i < 20; i++) {
+      const r = await h.auth.handle(
+        post("/auth/password/verify/resend", { email: `x${i}@example.com` }, ip),
+      );
+      expect(r.status).toBe(200);
+    }
+    const res = await h.auth.handle(
+      post("/auth/password/verify/resend", { email: "y@example.com" }, ip),
+    );
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "rate_limited" });
+  });
+
   it("answers 404 with no password config", async () => {
     const h = pwHandle(undefined);
     const res = await h.auth.handle(post("/auth/password/verify/resend", { email: EMAIL }));

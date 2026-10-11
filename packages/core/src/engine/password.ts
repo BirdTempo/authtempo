@@ -286,7 +286,10 @@ export interface PasswordResend {
  * links of the address go first, so one link at a time is live. A call
  * that mails takes longer than one that does not; the time can tell that
  * an address has an unverified password account. The mail goes after the
- * row is written, never inside a transaction.
+ * row is written, never inside a transaction. The old links go before the
+ * send, so a mail throw leaves no live link and answers 500; the next
+ * resend repairs it. Two parallel resends can leave two live links, within
+ * the per-email limit of 3.
  */
 export async function resendPasswordVerification(
   config: ResolvedConfig,

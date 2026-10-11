@@ -88,6 +88,8 @@ export async function createApiToken(
   const days = input.expiresInDays === undefined ? DEFAULT_EXPIRES_IN_DAYS : input.expiresInDays;
   if (days !== null && (!Number.isSafeInteger(days) || days < 1 || days > MAX_EXPIRES_IN_DAYS))
     return fail("invalid_body");
+  // The limiter runs before every storage read, in every flow. So a flood with
+  // a wrong organization costs one read per request at most, not one per try.
   if (!(await config.limiter.allow(`token-create:user:${user.id}`, CREATE_PER_USER)))
     return fail("rate_limited");
   const organizationId = input.organizationId ?? null;

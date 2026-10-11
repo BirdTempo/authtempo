@@ -243,11 +243,12 @@ export interface Auth {
   /**
    * The caller as a session or as an API token, or null. Use it in a route
    * that a script may call. `session(request)` stays session-only, so every
-   * route that calls it answers 401 to a token.
+   * route that calls it answers 401 to a token. For a session caller, send
+   * `sessionCookie(request, caller)`, or the browser drops the cookie at its old Max-Age.
    */
   caller(request: Request): Promise<Caller | null>;
   /**
-   * The Set-Cookie value to send after `session(request)` when it moved the
+   * The Set-Cookie value to send after `session(request)` or `caller(request)` when it moved the
    * expiry forward, else null. Send it on the response, or a browser drops
    * the cookie at its old Max-Age while the session row is still valid.
    * Null for a bearer request.

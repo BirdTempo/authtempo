@@ -47,6 +47,53 @@ async function mint(h: ReturnType<typeof tokenHandle>, session: string, name = "
 }
 
 describe("token routes", () => {
+  it("POST /tokens takes organizationId null as no organization (M-1)", async () => {
+    const h = tokenHandle();
+    const ada = await signedIn(h, "ada@example.com");
+    const res = await h.auth.handle(
+      post("/auth/tokens", { name: "x", organizationId: null }, bearer(ada.session)),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { apiToken: { organizationId: string | null } };
+    expect(body.apiToken.organizationId).toBeNull();
+  });
+
+  it("POST /tokens expires in 90 days when expiresInDays is absent (M-8)", async () => {
+    const h = tokenHandle();
+    const ada = await signedIn(h, "ada@example.com");
+    const res = await h.auth.handle(post("/auth/tokens", { name: "x" }, bearer(ada.session)));
+    const body = (await res.json()) as { apiToken: { expiresAt: string } };
+    expect(body.apiToken.expiresAt).toBe(
+      new Date(h.clock.now().getTime() + 90 * 86_400_000).toISOString(),
+    );
+  });
+
+  it("refuses an unverified user on GET /tokens and POST /tokens/revoke (M-8)", async () => {
+    const h = tokenHandle();
+    const pat = await signedIn(h, "pat@example.com", false);
+    const list = await h.auth.handle(get("/auth/tokens", bearer(pat.session)));
+    expect(list.status).toBe(403);
+    expect(await list.json()).toEqual({ error: "email_unverified" });
+    const revoke = await h.auth.handle(
+      post("/auth/tokens/revoke", { id: "x" }, bearer(pat.session)),
+    );
+    expect(revoke.status).toBe(403);
+    expect(await revoke.json()).toEqual({ error: "email_unverified" });
+  });
+
+  it("refuses a number organizationId and a revoke body with no id (M-8)", async () => {
+    const h = tokenHandle();
+    const ada = await signedIn(h, "ada@example.com");
+    const number = await h.auth.handle(
+      post("/auth/tokens", { name: "x", organizationId: 5 }, bearer(ada.session)),
+    );
+    expect(number.status).toBe(400);
+    expect(await number.json()).toEqual({ error: "invalid_body" });
+    const noId = await h.auth.handle(post("/auth/tokens/revoke", {}, bearer(ada.session)));
+    expect(noId.status).toBe(400);
+    expect(await noId.json()).toEqual({ error: "invalid_body" });
+  });
+
   it("POST /tokens answers the clear token once, and GET /tokens never shows it", async () => {
     const h = tokenHandle();
     const ada = await signedIn(h, "ada@example.com");

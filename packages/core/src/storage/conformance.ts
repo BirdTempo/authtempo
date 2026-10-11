@@ -16,13 +16,13 @@ export interface ConformanceTarget {
 
 export interface ConformanceOptions {
   /**
-   * Models this storage does not hold. For each, the suite checks the
-   * contract of a model with no table: a read answers empty, as for a where
-   * that never matches, and a create throws `unknown_model`. Only `apiToken`
-   * has that contract today: the Better Auth compatibility package holds no
-   * API token until its api-key plan (plan 8b).
+   * Models this storage does not hold. Only `apiToken` is allowed: the
+   * Better Auth compatibility package holds no API token until its api-key
+   * plan (plan 8b). The suite then checks the contract of a model with no
+   * table: a read answers empty, as for a where that never matches, and a
+   * create throws `unknown_model`.
    */
-  unmapped?: readonly ModelName[];
+  unmapped?: readonly "apiToken"[];
 }
 
 function user(id: string, email: string, at: Date): UserRow {

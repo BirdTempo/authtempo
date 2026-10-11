@@ -48,6 +48,7 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   const sessions = await storage.delete("session", [{ field: "expiresAt", op: "lt", value: now }]);
   // An expired token goes on its own only when a script presents it again.
   // A null expiry never matches lt (port.ts null rules), so it stays.
+  // A row at exactly `expiresAt` is refused by `resolveApiToken` (`<=`) and goes at the next sweep.
   const apiTokens = await storage.delete("apiToken", [
     { field: "expiresAt", op: "lt", value: now },
   ]);
