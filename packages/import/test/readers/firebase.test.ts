@@ -78,5 +78,92 @@ describe("firebaseSource", () => {
     expect((await db.findMany("password", [])).map((p) => p.hash)).toEqual([FIRESCRYPT]);
     expect(report.skipped).toEqual([{ kind: "user", sourceId: "fbuid2", reason: "disabled" }]);
     expect(report.created.user).toBe(2);
+    expect(report.dropped).toContainEqual({ sourceId: "fbuid1", item: "identity:facebook" });
+  });
+});
+
+// Edge rows (review I-1, I-2, M-2 to M-5), same fields and date as above.
+const HASH =
+  "lSrfV15cpx95/sZS2W9c9Kp6i/LVgQNDNC/qzrCnh1SAyZvqmZqAjTdn3aoItz+VHjoZilo78198JAdRuid5lQ==";
+const CONFIG = { rounds: 8, memCost: 14 };
+const EDGE = JSON.stringify({
+  users: [
+    { localId: "dis_str", email: "ds@example.com", emailVerified: true, disabled: "true" },
+    { localId: "dis_num", email: "dn@example.com", emailVerified: true, disabled: 1 },
+    { localId: "nosalt", email: "ns@example.com", emailVerified: true, passwordHash: HASH },
+    { localId: "nohash", email: "nh@example.com", emailVerified: true, salt: "42xEC+ixf3L2lw==" },
+    {
+      localId: "urlsafe",
+      email: "us@example.com",
+      emailVerified: true,
+      passwordHash: HASH.replace(/\+/g, "-").replace(/\//g, "_"),
+      salt: "42xEC+ixf3L2lw==",
+    },
+    { localId: "phone", phoneNumber: "+15550100", providerUserInfo: [] },
+    {
+      localId: "goog",
+      email: "goog@example.com",
+      emailVerified: true,
+      providerUserInfo: [{ providerId: "google.com", rawId: "g-9" }, { providerId: "github.com" }],
+    },
+  ],
+});
+
+describe("firebaseSource edge rows", () => {
+  it("fails a disable closed, refuses a half hash, and lists an entry with no rawId", async () => {
+    const r = await all(firebaseSource({ users: EDGE, hashConfig: CONFIG }));
+    const by = (id: string) => r.find((x) => x.kind === "user" && x.sourceId === id);
+    expect(by("dis_str")).toMatchObject({ skip: "disabled" });
+    expect(by("dis_num")).toMatchObject({ skip: "disabled" });
+    expect(by("nosalt")).toMatchObject({ password: { refused: "firescrypt (no salt)" } });
+    expect(by("nohash")).toMatchObject({ password: { refused: "firescrypt (no hash)" } });
+    expect(by("goog")).toMatchObject({
+      identities: [{ provider: "google", subject: "g-9" }],
+      dropped: ["identity:github:no_subject"],
+    });
+  });
+
+  it("reports every refusal path through the importer", async () => {
+    const db = createMemoryAdapter();
+    const report = await importUsers(db, firebaseSource({ users: EDGE, hashConfig: CONFIG }), {
+      now,
+    });
+    expect(await db.findMany("password", [])).toEqual([]);
+    expect(report.refusedHashes).toEqual([
+      { sourceId: "nosalt", format: "firescrypt (no salt)" },
+      { sourceId: "nohash", format: "firescrypt (no hash)" },
+      { sourceId: "urlsafe", format: "firescrypt (malformed or out of bounds)" },
+    ]);
+    for (const [id, reason] of [
+      ["dis_str", "disabled"],
+      ["dis_num", "disabled"],
+      ["phone", "no_email"],
+    ])
+      expect(report.skipped).toContainEqual({ kind: "user", sourceId: id, reason });
+    expect(report.dropped).toContainEqual({ sourceId: "goog", item: "identity:github:no_subject" });
+    expect(
+      (await db.findMany("identity", []))
+        .filter((i) => i.provider === "google")
+        .map((i) => i.subject),
+    ).toEqual(["g-9"]);
+  });
+
+  it("throws on a file with no users array and on a hashConfig out of the grammar's bounds", async () => {
+    await expect(
+      all(firebaseSource({ users: JSON.stringify({ accounts: [] }), hashConfig: CONFIG })),
+    ).rejects.toThrow("the firebase export has no users array");
+    for (const bad of [
+      { rounds: 8, memCost: 17 },
+      { rounds: 8, memCost: 0 },
+      { rounds: 0, memCost: 14 },
+      { rounds: 8.5, memCost: 14 },
+    ])
+      expect(() => firebaseSource({ users: EDGE, hashConfig: bad })).toThrow(
+        "firebase hashConfig rounds and memCost must be integers of at least 1",
+      );
+    // 2^15 * 8 is the bound itself.
+    expect(() =>
+      firebaseSource({ users: EDGE, hashConfig: { rounds: 8, memCost: 15 } }),
+    ).not.toThrow();
   });
 });
