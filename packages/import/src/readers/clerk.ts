@@ -32,10 +32,9 @@ const PROVIDERS: Record<string, string> = { oauth_google: "google", oauth_apple:
 
 /**
  * The skip for an id that one file holds twice. No copy wins: an older row
- * last in the file would bring back an old password. `unmatched_row` is a
- * conflict (the CLI exits 1) until `SkipReason` has `duplicate_row`.
+ * last in the file would bring back an old password. A conflict: the CLI exits 1.
  */
-const DUPLICATE: SkipReason = "unmatched_row";
+const DUPLICATE: SkipReason = "duplicate_row";
 
 /**
  * Clerk's docs do not state the unit of `created_at` (unverified; owner

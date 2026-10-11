@@ -33,10 +33,9 @@ const BCRYPT = /^\$2[ab]\$\d{2}\$/;
 /**
  * The skip for a user id that the export holds twice. No line wins: the
  * address check would compare against one line and the importer write the
- * other. `unmatched_row` is a conflict (the CLI exits 1) until `SkipReason`
- * has `duplicate_row`.
+ * other. A conflict: the CLI exits 1.
  */
-const DUPLICATE: SkipReason = "unmatched_row";
+const DUPLICATE: SkipReason = "duplicate_row";
 
 function oid(v: unknown): string | null {
   return str(v) ?? str(asRecord(v).$oid);

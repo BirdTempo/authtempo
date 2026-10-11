@@ -212,11 +212,11 @@ describe("clerkSource edge rows", () => {
     const r = await all(clerkSource({ csv: EDGE_CSV, users: EDGE_USERS }));
     const by = (id: string) => r.filter((x) => x.kind === "user" && x.sourceId === id);
     expect(by("dup_csv")).toEqual([
-      expect.objectContaining({ skip: "unmatched_row", password: null }),
+      expect.objectContaining({ skip: "duplicate_row", password: null }),
     ]);
     expect(by("dup_api")).toEqual([
-      expect.objectContaining({ skip: "unmatched_row", password: null }),
-      expect.objectContaining({ skip: "unmatched_row", password: null }),
+      expect.objectContaining({ skip: "duplicate_row", password: null }),
+      expect.objectContaining({ skip: "duplicate_row", password: null }),
     ]);
     expect(by("nodigest")).toEqual([
       expect.objectContaining({ password: { refused: "missing (the CSV row has no digest)" } }),
@@ -243,6 +243,12 @@ describe("clerkSource edge rows", () => {
       { sourceId: "nodigest", format: "missing (the CSV row has no digest)" },
     ]);
     expect(report.skipped).toContainEqual({ kind: "user", sourceId: "noid", reason: "no_email" });
+    for (const id of ["dup_csv", "dup_api"])
+      expect(report.skipped).toContainEqual({
+        kind: "user",
+        sourceId: id,
+        reason: "duplicate_row",
+      });
   });
 
   it("refuses a users or organizations value that is not an array", async () => {

@@ -171,7 +171,7 @@ describe("auth0Source edge rows", () => {
     const r = await all(auth0Source({ users: EDGE_USERS, hashes: EDGE_HASHES }));
     const by = (id: string) => r.filter((x) => x.kind === "user" && x.sourceId === id);
     expect(by("auth0|dup1")).toEqual([
-      expect.objectContaining({ skip: "unmatched_row", password: null }),
+      expect.objectContaining({ skip: "duplicate_row", password: null }),
     ]);
     expect(by("auth0|argo")).toEqual([
       expect.objectContaining({ password: { refused: "argon2id" } }),
@@ -198,7 +198,7 @@ describe("auth0Source edge rows", () => {
     expect(report.skipped).toContainEqual({
       kind: "user",
       sourceId: "auth0|dup1",
-      reason: "unmatched_row",
+      reason: "duplicate_row",
     });
     const badt = await db.findOne("user", [
       { field: "email", op: "eq", value: "badt@example.com" },
