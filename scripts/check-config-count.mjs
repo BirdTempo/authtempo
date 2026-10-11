@@ -3,8 +3,9 @@
 // would otherwise pass with no file checked.
 import { execFileSync } from "node:child_process";
 
-// Counted 2026-10-11. Raise this number when a package adds a vitest config.
-const MINIMUM = 10;
+// Counted 2026-10-11: 11 with packages/import/vitest.d1.config.ts (plan 9b
+// Task 14). Raise this number when a package adds a vitest config.
+const MINIMUM = 11;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

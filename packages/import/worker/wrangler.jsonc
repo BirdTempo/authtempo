@@ -1,0 +1,23 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "tempo-auth-import-d1",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  // The import code runs without Node.js modules, as the app's Worker does.
+  // Every Worker config sets both flags: Workers turn nodejs_compat on by
+  // default from compatibility date 2026-08-04 (Cloudflare changelog, read
+  // 2026-10-11), and these two turn it off. Remove them and a bundle of a
+  // node: import builds without a warning.
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      // Set both to the app's database (the values in the app's wrangler config).
+      // `wrangler dev` runs on the local copy in .wrangler/state unless the
+      // entry also sets "remote": true (worker/README.md, owner runbook).
+      "database_name": "REPLACE_WITH_THE_APP_DATABASE_NAME",
+      "database_id": "REPLACE_WITH_THE_APP_DATABASE_ID",
+      "migrations_dir": "../../adapter-d1/migrations"
+    }
+  ]
+}

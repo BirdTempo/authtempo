@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "provider": "supabase",
+    "files": {
+      "users": "id,email,encrypted_password,email_confirmed_at,raw_user_meta_data,created_at,is_anonymous,deleted_at,banned_until,is_sso_user\n",
+      "identities": "provider,provider_id,user_id\n"
+    }
+  },
+  "options": { "dryRun": true }
+}
