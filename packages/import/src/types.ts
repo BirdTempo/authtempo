@@ -23,6 +23,11 @@ export type SkipReason =
   | "reserved_slug"
   | "slug_taken"
   | "no_owner"
+  /**
+   * One record holds a passkey `credentialId` twice, or a concurrent write took
+   * a passkey on both attempts of a record. Core keeps one row per credential.
+   */
+  | "duplicate_passkey"
   | "user_not_imported"
   | "user_unverified";
 
@@ -33,8 +38,18 @@ export const CONFLICT_REASONS: ReadonlySet<SkipReason> = new Set<SkipReason>([
   "identity_taken",
   "slug_taken",
   "no_owner",
+  "duplicate_passkey",
   "user_not_imported",
 ]);
+
+/**
+ * A skip that the importer's rules refuse, as opposed to one the export
+ * states (`deleted`) or a conflict. The report counts these in `refusals`, and
+ * the CLI exits 1 when the count is above zero (Task 13).
+ */
+export function isRefusal(reason: SkipReason): boolean {
+  return reason.startsWith("invalid_") || reason.startsWith("reserved_");
+}
 
 export interface ImportPasskey {
   /** base64url, as core stores it. */
@@ -59,6 +74,12 @@ export interface ImportUser {
   /** As the source states. Never true unless the source says the address is verified. */
   emailVerified: boolean;
   name: string | null;
+  /**
+   * The importer keeps only an `https:` URL of at most 2048 characters. Any
+   * other value is dropped and listed as `image:invalid`: a source such as
+   * Supabase's user metadata lets the user write it, and core writes an image
+   * only from a verified ID token.
+   */
   image: string | null;
   /** Null when the export has no created date; the import time is used. */
   createdAt: Date | null;
@@ -69,6 +90,12 @@ export interface ImportUser {
    * format the reader knows it cannot import, or no password.
    */
   password: { hash: string } | { refused: string } | null;
+  /**
+   * Only the Auth.js reader sets passkeys, and only when the operator states
+   * that the relying party id is unchanged (a passkey binds to it). The
+   * importer drops a passkey from any other source (`passkey:not_authjs`) and
+   * from an unverified user (`passkey:unverified`).
+   */
   passkeys: ImportPasskey[];
   /** Set by the reader for a user the export marks as not active. */
   skip?: SkipReason;
@@ -116,8 +143,20 @@ export interface ImportOptions {
   legacyVerify?: boolean;
   /** Source role to core role. Wins over the reader's map. */
   roleMap?: Readonly<Record<string, ImportRole>>;
-  /** The app's `organizations.reservedSlugs`. Default core's list. */
+  /**
+   * The app's `organizations.reservedSlugs`. The importer reserves these in
+   * addition to core's `DEFAULT_RESERVED_SLUGS`, so a list that leaves out a
+   * default never frees it. An entry that is not a slug is an error.
+   */
   reservedSlugs?: readonly string[];
+  /**
+   * The app's `organizations.platformOrganization`. Core reserves that slug,
+   * because the app seeds the platform organization and the platform role
+   * trusts its members. Without it here, an imported organization could take
+   * the slug before the app seeds it, and its owner would hold the platform
+   * organization. Not a slug is an error.
+   */
+  platformSlug?: string;
   /** For tests. Default the system time. */
   now?: () => Date;
 }
@@ -131,6 +170,17 @@ export interface ImportReport {
   refusedHashes: { sourceId: string; format: string }[];
   /** What the importer left out of a record it wrote, for example `identity:github` or `role:billing->member`. */
   dropped: { sourceId: string; item: string }[];
+  /** The number of `skipped` entries whose reason `isRefusal` names. */
+  refusals: number;
+  /**
+   * A record whose id exists but whose rows are not all there: a run that
+   * stopped inside a record on D1 (an isolate that dies does not roll back,
+   * spec 6). `missing` names each absent row, for example `password` or
+   * `identity:email`. The importer never repairs it and never counts it as
+   * `exists`; a person must look, and the CLI exits 1 on any entry (Task 13).
+   * After cut-over a user can remove a passkey, so a re-run then lists it too.
+   */
+  partial: { kind: "user" | "organization"; sourceId: string; missing: string[] }[];
 }
 
 /** `onEmailTaken: "fail"` met a taken address or identity. The report holds every record before it. */

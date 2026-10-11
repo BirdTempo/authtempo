@@ -115,9 +115,27 @@ describe("importUsers", () => {
     const db = createMemoryAdapter();
     await importUsers(db, listSource(records()), { now });
     const u2 = await importId("user", "supabase", "u2");
+    // A claim of the unverified u2, as core's claimEmail writes it: the flag
+    // first, then the claimant's credentials go, then the owner's email identity.
+    await db.update("user", [{ field: "id", op: "eq", value: u2 }], {
+      emailVerified: true,
+      updatedAt: AT,
+    });
     await db.delete("password", [{ field: "userId", op: "eq", value: u2 }]);
-    await importUsers(db, listSource(records()), { now });
+    await db.create("identity", {
+      id: "claim-email",
+      userId: u2,
+      provider: "email",
+      subject: "u2@example.com",
+      linkedAt: AT,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+    const again = await importUsers(db, listSource(records()), { now });
     expect(await db.findMany("password", [{ field: "userId", op: "eq", value: u2 }])).toEqual([]);
+    // The app changed the user since the first run, so it is not a half record.
+    expect(again.partial).toEqual([]);
+    expect(again.exists.user).toBe(3);
   });
 
   it("never rewrites a password row that a sign-in rehashed since the first run", async () => {

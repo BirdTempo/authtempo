@@ -18,6 +18,7 @@ import {
   type ImportReport,
   type ImportRole,
   type ImportUser,
+  isRefusal,
   type SkipReason,
   type Source,
 } from "./types.js";
@@ -25,13 +26,27 @@ import {
 /** Core's social providers (spec 8.3). Plan 9c adds others; until then their identities are dropped and listed. */
 const SOCIAL = new Set(["google", "apple"]);
 const RANK: Record<ImportRole, number> = { member: 1, admin: 2, owner: 3 };
+/** The longest image URL the importer keeps (M-4 of the Task 5 review). */
+const IMAGE_MAX = 2048;
+/**
+ * The skip for a record whose write meets a unique_violation on both
+ * attempts, by the model the error names. The second plan reads every key
+ * again, so only a write that raced the import twice gets here.
+ */
+const RACE_REASON: ReadonlyMap<string, SkipReason> = new Map<string, SkipReason>([
+  ["user", "email_taken"],
+  ["identity", "identity_taken"],
+  ["passkey", "duplicate_passkey"],
+  ["organization", "slug_taken"],
+]);
 
 interface Resolved {
   onEmailTaken: "skip" | "fail";
   dryRun: boolean;
   formats: ReadonlySet<LegacyFormat>;
   legacyVerify: boolean;
-  roles: Readonly<Record<string, ImportRole>>;
+  /** A Map, not an object: a source role named `constructor` or `__proto__` must miss. */
+  roles: ReadonlyMap<string, ImportRole>;
   reserved: ReadonlySet<string>;
   now: () => Date;
 }
@@ -52,6 +67,7 @@ interface Planned {
 
 type Plan<T> =
   | { kind: "exists" }
+  | { kind: "partial"; missing: string[] }
   | { kind: "skip"; reason: SkipReason }
   | { kind: "write"; rows: T };
 
@@ -59,6 +75,7 @@ interface UserRows {
   id: string;
   email: string;
   name: string | null;
+  image: string | null;
   verified: boolean;
   identities: { provider: string; subject: string }[];
   password: string | null;
@@ -85,7 +102,66 @@ function emptyReport(source: Source, dryRun: boolean): ImportReport {
     skipped: [],
     refusedHashes: [],
     dropped: [],
+    refusals: 0,
+    partial: [],
   };
+}
+
+function skip(
+  report: ImportReport,
+  kind: "user" | "organization" | "member",
+  sourceId: string,
+  reason: SkipReason,
+): void {
+  report.skipped.push({ kind, sourceId, reason });
+  if (isRefusal(reason)) report.refusals++;
+}
+
+/** Each slug normalized as core does. A value that is not a slug is an error, as core's config makes it. */
+function reservedSet(options: ImportOptions): Set<string> {
+  const out = new Set<string>();
+  const all = [
+    ...DEFAULT_RESERVED_SLUGS,
+    ...(options.reservedSlugs ?? []),
+    ...(options.platformSlug !== undefined ? [options.platformSlug] : []),
+  ];
+  for (const s of all) {
+    const n = normalizeSlug(s);
+    if (n === null)
+      throw new Error(`tempo-auth import: a reserved or platform slug is not a slug: ${s}`);
+    out.add(n);
+  }
+  return out;
+}
+
+/** Core's own names map to themselves; the reader's map, then the caller's, win over them. */
+function roleMap(source: Source, options: ImportOptions): Map<string, ImportRole> {
+  const out = new Map<string, ImportRole>([
+    ["owner", "owner"],
+    ["admin", "admin"],
+    ["member", "member"],
+  ]);
+  for (const map of [source.roles, options.roleMap ?? {}]) {
+    for (const [from, to] of Object.entries(map)) {
+      // The CLI reads the map from text, so a value outside core's three names is an error.
+      if (!Object.hasOwn(RANK, to))
+        throw new Error(
+          `tempo-auth import: role ${from} maps to ${to}, not owner, admin, or member`,
+        );
+      out.set(from, to);
+    }
+  }
+  return out;
+}
+
+/** An `https:` URL of at most IMAGE_MAX characters, or null. */
+function validImage(image: string): boolean {
+  if (image.length > IMAGE_MAX) return false;
+  try {
+    return new URL(image).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /** The format name a report gives a hash it refuses: the tag, or "unknown". */
@@ -116,11 +192,15 @@ export function formatName(hash: string): string {
  * - An organization only with an owner.
  * - A name only inside core's rule: an organization with an invalid name is
  *   skipped (`invalid_name`), and an invalid user name is dropped and listed.
+ * - An image only as an `https:` URL of at most 2048 characters.
+ * - A slug outside core's reserved set, the app's `reservedSlugs`, and the
+ *   app's platform organization slug.
  * Each record is one transaction. The key is the id `importId` derives from
  * the source id, so a second run of the same export finds every record and
  * writes nothing. A user that exists by that id is never written again, even
  * when its rows changed since: a claim may have removed a claimant's
- * credentials, and a re-run must not restore them.
+ * credentials, and a re-run must not restore them. A record whose id exists
+ * without all its rows is reported in `partial`, never repaired.
  */
 export async function importUsers(
   storage: StorageAdapter,
@@ -132,17 +212,8 @@ export async function importUsers(
     dryRun: options.dryRun ?? false,
     formats: new Set(options.formats ?? LEGACY_FORMATS),
     legacyVerify: options.legacyVerify ?? false,
-    // Core's own names map to themselves; the reader's map and the caller's win over them.
-    roles: {
-      owner: "owner",
-      admin: "admin",
-      member: "member",
-      ...source.roles,
-      ...(options.roleMap ?? {}),
-    },
-    reserved: new Set(
-      (options.reservedSlugs ?? DEFAULT_RESERVED_SLUGS).map((s) => normalizeSlug(s) ?? s),
-    ),
+    roles: roleMap(source, options),
+    reserved: reservedSet(options),
     now: options.now ?? (() => new Date()),
   };
   const report = emptyReport(source, o.dryRun);
@@ -174,13 +245,52 @@ async function planUser(
   const email = r.email === null ? null : normalizeEmail(r.email);
   if (email === null) return { kind: "skip", reason: "no_email" };
   const id = await importId("user", source.name, r.sourceId);
-  if (planned.users.has(id) || (await db.findOne("user", [{ field: "id", op: "eq", value: id }])))
-    return { kind: "exists" };
+  if (planned.users.has(id)) return { kind: "exists" };
+  const rows = userRows(source, r, id, email, o);
+  if (rows === null) return { kind: "skip", reason: "duplicate_passkey" };
+  const found = await db.findOne("user", [{ field: "id", op: "eq", value: id }]);
+  if (found) return existingUser(db, found.emailVerified, r, rows);
   if (
     planned.emails.has(email) ||
     (await db.findOne("user", [{ field: "email", op: "eq", value: email }]))
   )
     return { kind: "skip", reason: "email_taken" };
+  const own = [...rows.identities];
+  if (rows.verified) own.push({ provider: "email", subject: email });
+  for (const i of own) {
+    if (
+      planned.identities.has(key(i.provider, i.subject)) ||
+      (await db.findOne("identity", [
+        { field: "provider", op: "eq", value: i.provider },
+        { field: "subject", op: "eq", value: i.subject },
+      ]))
+    )
+      return { kind: "skip", reason: "identity_taken" };
+  }
+  const kept: ImportUser["passkeys"] = [];
+  for (const p of rows.passkeys) {
+    if (
+      planned.credentials.has(p.credentialId) ||
+      (await db.findOne("passkey", [{ field: "credentialId", op: "eq", value: p.credentialId }]))
+    )
+      rows.dropped.push("passkey:taken");
+    else kept.push(p);
+  }
+  return { kind: "write", rows: { ...rows, passkeys: kept } };
+}
+
+/**
+ * The rows the record maps to, before any read: the same answer for a new
+ * user and for one that exists by its id. Null when the record holds one
+ * passkey `credentialId` twice; core keeps one row per credential.
+ */
+function userRows(
+  source: Source,
+  r: ImportUser,
+  id: string,
+  email: string,
+  o: Resolved,
+): UserRows | null {
   const dropped: string[] = [...(r.dropped ?? [])];
   // Core's sign-up refuses a name outside its rule, and a user with no name is
   // a state core reaches, so the importer keeps the user and drops the name.
@@ -188,6 +298,11 @@ async function planUser(
   if (name !== null && !validUserName(name)) {
     dropped.push("name:invalid");
     name = null;
+  }
+  let image = r.image;
+  if (image !== null && !validImage(image)) {
+    dropped.push("image:invalid");
+    image = null;
   }
   let password: string | null = null;
   let refused: string | null = null;
@@ -209,6 +324,12 @@ async function planUser(
     identities.push(i);
   }
   let passkeys = r.passkeys;
+  if (new Set(passkeys.map((p) => p.credentialId)).size !== passkeys.length) return null;
+  if (source.name !== "authjs") {
+    // Only the Auth.js reader confirms the relying party id a passkey binds to.
+    for (const _ of passkeys) dropped.push("passkey:not_authjs");
+    passkeys = [];
+  }
   if (!r.emailVerified) {
     // One credential at most: the password, else the first social identity.
     const keep = password !== null ? 0 : 1;
@@ -217,41 +338,60 @@ async function planUser(
     for (const _ of passkeys) dropped.push("passkey:unverified");
     passkeys = [];
   }
-  const own = [...identities];
-  if (r.emailVerified) own.push({ provider: "email", subject: email });
-  for (const i of own) {
-    if (
-      planned.identities.has(key(i.provider, i.subject)) ||
-      (await db.findOne("identity", [
-        { field: "provider", op: "eq", value: i.provider },
-        { field: "subject", op: "eq", value: i.subject },
-      ]))
-    )
-      return { kind: "skip", reason: "identity_taken" };
-  }
-  const kept: ImportUser["passkeys"] = [];
-  for (const p of passkeys) {
-    if (
-      planned.credentials.has(p.credentialId) ||
-      (await db.findOne("passkey", [{ field: "credentialId", op: "eq", value: p.credentialId }]))
-    )
-      dropped.push("passkey:taken");
-    else kept.push(p);
-  }
   return {
-    kind: "write",
-    rows: {
-      id,
-      email,
-      name,
-      verified: r.emailVerified,
-      identities,
-      password,
-      passkeys: kept,
-      refused,
-      dropped,
-    },
+    id,
+    email,
+    name,
+    image,
+    verified: r.emailVerified,
+    identities,
+    password,
+    passkeys,
+    refused,
+    dropped,
   };
+}
+
+/**
+ * A user that exists by its import id. It is never written again. When it
+ * lacks a row its record maps to, a run stopped inside the record (spec 6:
+ * on D1 an isolate that dies does not roll back), and the report lists it as
+ * `partial`. A claim sets `emailVerified` and then deletes the claimant's
+ * credentials, so a stored flag that differs from the record's means the app
+ * changed the user since, and the rows are no longer the import's to check.
+ */
+async function existingUser(
+  db: StorageAdapter,
+  storedVerified: boolean,
+  r: ImportUser,
+  rows: UserRows,
+): Promise<Plan<UserRows>> {
+  if (storedVerified !== r.emailVerified) return { kind: "exists" };
+  const missing: string[] = [];
+  const own = rows.verified
+    ? [{ provider: "email", subject: rows.email }, ...rows.identities]
+    : rows.identities;
+  for (const i of own) {
+    const row = await db.findOne("identity", [
+      { field: "userId", op: "eq", value: rows.id },
+      { field: "provider", op: "eq", value: i.provider },
+      { field: "subject", op: "eq", value: i.subject },
+    ]);
+    if (!row) missing.push(`identity:${i.provider}`);
+  }
+  if (
+    rows.password !== null &&
+    !(await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }]))
+  )
+    missing.push("password");
+  for (const p of rows.passkeys) {
+    const row = await db.findOne("passkey", [
+      { field: "credentialId", op: "eq", value: p.credentialId },
+    ]);
+    // A credential another user holds was dropped as `passkey:taken` on the first run.
+    if (!row) missing.push("passkey");
+  }
+  return missing.length > 0 ? { kind: "partial", missing } : { kind: "exists" };
 }
 
 async function writeUser(
@@ -266,7 +406,7 @@ async function writeUser(
     email: rows.email,
     emailVerified: rows.verified,
     name: rows.name,
-    image: r.image,
+    image: rows.image,
     createdAt: r.createdAt ?? now,
     updatedAt: now,
   });
@@ -338,16 +478,20 @@ async function importUser(
             return p;
           });
     } catch (err) {
-      if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
-      throw err;
+      plan = afterViolation(err, attempt);
+      if (plan === null) continue;
     }
   }
   if (plan.kind === "exists") {
     report.exists.user++;
     return;
   }
+  if (plan.kind === "partial") {
+    report.partial.push({ kind: "user", sourceId: r.sourceId, missing: plan.missing });
+    return;
+  }
   if (plan.kind === "skip") {
-    report.skipped.push({ kind: "user", sourceId: r.sourceId, reason: plan.reason });
+    skip(report, "user", r.sourceId, plan.reason);
     if (
       o.onEmailTaken === "fail" &&
       (plan.reason === "email_taken" || plan.reason === "identity_taken")
@@ -365,6 +509,21 @@ async function importUser(
   for (const i of rows.identities) planned.identities.add(key(i.provider, i.subject));
   if (rows.verified) planned.identities.add(key("email", rows.email));
   for (const p of rows.passkeys) planned.credentials.add(p.credentialId);
+}
+
+/**
+ * The catch outside the transaction. A first unique_violation (an app write
+ * raced the import) answers null: plan the record once more, and the second
+ * plan sees the winner's row. A second one skips the record by the model the
+ * error names, so the run goes on and the report stays whole. Any other error
+ * stops the run.
+ */
+function afterViolation<T>(err: unknown, attempt: number): Plan<T> | null {
+  if (!(err instanceof StorageError) || err.code !== "unique_violation") throw err;
+  if (attempt === 0) return null;
+  const reason = RACE_REASON.get(err.model);
+  if (reason === undefined) throw err;
+  return { kind: "skip", reason };
 }
 
 /** A slug from a name: NFKC, lower case, every run of other characters a hyphen, at most 64 characters. */
@@ -385,15 +544,21 @@ async function planOrganization(
   planned: Planned,
 ): Promise<Plan<OrgRows>> {
   const id = await importId("organization", source.name, r.sourceId);
-  if (
-    planned.orgs.has(id) ||
-    (await db.findOne("organization", [{ field: "id", op: "eq", value: id }]))
-  )
-    return { kind: "exists" };
+  if (planned.orgs.has(id)) return { kind: "exists" };
+  if (await db.findOne("organization", [{ field: "id", op: "eq", value: id }])) {
+    // Core reaches no organization with no member (the last-owner rule), so
+    // one with none is a run that stopped between the organization row and
+    // its members.
+    const member = await db.findOne("member", [{ field: "organizationId", op: "eq", value: id }]);
+    return member ? { kind: "exists" } : { kind: "partial", missing: ["member"] };
+  }
   // Core's organization create refuses a name outside its rule, so no import makes one.
   const name = r.name;
   if (name === null || !validOrganizationName(name))
     return { kind: "skip", reason: "invalid_name" };
+  // The source's slug when the export has one, else one from the name. A
+  // name with no ASCII letter or digit gives none: the skip is a refusal, so
+  // the CLI exits 1 and a person sets the slug.
   const slug = normalizeSlug(r.slug ?? slugFrom(name));
   if (slug === null) return { kind: "skip", reason: "invalid_slug" };
   if (o.reserved.has(slug)) return { kind: "skip", reason: "reserved_slug" };
@@ -423,7 +588,7 @@ async function planOrganization(
     if (members.some((x) => x.userId === userId)) continue;
     let role: ImportRole | null = null;
     for (const sourceRole of m.roles) {
-      const mapped = o.roles[sourceRole];
+      const mapped = o.roles.get(sourceRole);
       if (!mapped) dropped.push(`role:${sourceRole}->member`);
       const rank = mapped ?? "member";
       if (role === null || RANK[rank] > RANK[role]) role = rank;
@@ -481,21 +646,25 @@ async function importOrganization(
             return p;
           });
     } catch (err) {
-      if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
-      throw err;
+      plan = afterViolation(err, attempt);
+      if (plan === null) continue;
     }
   }
   if (plan.kind === "exists") {
     report.exists.organization++;
     return;
   }
+  if (plan.kind === "partial") {
+    report.partial.push({ kind: "organization", sourceId: r.sourceId, missing: plan.missing });
+    return;
+  }
   if (plan.kind === "skip") {
-    report.skipped.push({ kind: "organization", sourceId: r.sourceId, reason: plan.reason });
+    skip(report, "organization", r.sourceId, plan.reason);
     return;
   }
   report.created.organization++;
   report.created.member += plan.rows.members.length;
-  for (const s of plan.rows.skippedMembers) report.skipped.push({ kind: "member", ...s });
+  for (const s of plan.rows.skippedMembers) skip(report, "member", s.sourceId, s.reason);
   for (const item of plan.rows.dropped) report.dropped.push({ sourceId: r.sourceId, item });
   planned.orgs.add(plan.rows.id);
   planned.slugs.add(plan.rows.slug);
