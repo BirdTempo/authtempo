@@ -211,3 +211,34 @@ describe("password change route", () => {
     ]);
   });
 });
+
+describe("the reset page and code points (plan 8b)", () => {
+  it("takes a 128-code-point password of astral characters through the reset form and refuses 129", async () => {
+    const h = pwHandle({ hash: FAST });
+    await h.auth.handle(post("/auth/password/reset/request", { email: EMAIL }));
+    const token = lastToken(h, "Reset");
+    const page = await (await h.auth.handle(get(`/auth/password/reset?token=${token}`))).text();
+    expect(page).not.toMatch(/minlength|maxlength/);
+    // U+1D11E is two UTF-16 code units: 128 code points are 256 units.
+    const clef = "\u{1D11E}";
+    const refused = await h.auth.handle(
+      form(
+        "/auth/password/reset",
+        `token=${token}&password=${encodeURIComponent(clef.repeat(129))}`,
+      ),
+    );
+    expect(refused.status).toBe(302);
+    expect(refused.headers.get("location")).toBe(
+      `https://api.example.com/auth/password/reset?token=${token}&error=password_policy`,
+    );
+    const accepted = await h.auth.handle(
+      form(
+        "/auth/password/reset",
+        `token=${token}&password=${encodeURIComponent(clef.repeat(128))}`,
+      ),
+    );
+    expect(accepted.status).toBe(302);
+    expect(accepted.headers.get("location")).toBe("https://api.example.com/");
+    expect(accepted.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+  });
+});
