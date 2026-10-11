@@ -69,6 +69,7 @@ interface UserRows {
 
 interface OrgRows {
   id: string;
+  name: string;
   slug: string;
   members: { userId: string; role: ImportRole }[];
   dropped: string[];
@@ -390,8 +391,10 @@ async function planOrganization(
   )
     return { kind: "exists" };
   // Core's organization create refuses a name outside its rule, so no import makes one.
-  if (!validOrganizationName(r.name)) return { kind: "skip", reason: "invalid_name" };
-  const slug = normalizeSlug(r.slug ?? slugFrom(r.name));
+  const name = r.name;
+  if (name === null || !validOrganizationName(name))
+    return { kind: "skip", reason: "invalid_name" };
+  const slug = normalizeSlug(r.slug ?? slugFrom(name));
   if (slug === null) return { kind: "skip", reason: "invalid_slug" };
   if (o.reserved.has(slug)) return { kind: "skip", reason: "reserved_slug" };
   if (
@@ -419,9 +422,9 @@ async function planOrganization(
     }
     if (members.some((x) => x.userId === userId)) continue;
     let role: ImportRole | null = null;
-    for (const name of m.roles) {
-      const mapped = o.roles[name];
-      if (!mapped) dropped.push(`role:${name}->member`);
+    for (const sourceRole of m.roles) {
+      const mapped = o.roles[sourceRole];
+      if (!mapped) dropped.push(`role:${sourceRole}->member`);
       const rank = mapped ?? "member";
       if (role === null || RANK[rank] > RANK[role]) role = rank;
     }
@@ -437,7 +440,7 @@ async function planOrganization(
     first.role = "owner";
     dropped.push(`promoted_owner:${first.userId}`);
   }
-  return { kind: "write", rows: { id, slug, members, dropped, skippedMembers } };
+  return { kind: "write", rows: { id, name, slug, members, dropped, skippedMembers } };
 }
 
 async function importOrganization(
@@ -460,7 +463,7 @@ async function importOrganization(
             await tx.create("organization", {
               id: p.rows.id,
               slug: p.rows.slug,
-              name: r.name,
+              name: p.rows.name,
               metadata: null,
               createdAt: r.createdAt ?? now,
               updatedAt: now,

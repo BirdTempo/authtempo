@@ -83,7 +83,11 @@ export interface ImportUser {
 export interface ImportOrganization {
   kind: "organization";
   sourceId: string;
-  name: string;
+  /**
+   * As the export states it, never defaulted. Null when the export has no
+   * name: the importer then skips the organization with `invalid_name`.
+   */
+  name: string | null;
   /** Null: the importer makes a slug from the name. */
   slug: string | null;
   createdAt: Date | null;
