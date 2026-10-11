@@ -1,0 +1,10 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "tempo-auth-legacy-hashes-proof",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-30",
+  // Workers turn nodejs_compat on by default from compatibility date
+  // 2026-08-04 (Cloudflare changelog, read 2026-10-11). These two flags turn
+  // it off, so this Worker has no Node.js module and no `process` global.
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"]
+}

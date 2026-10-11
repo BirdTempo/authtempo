@@ -8,7 +8,7 @@
     "proof:dev-check": "node proof/dev-check.mjs",
     "proof:webauthn": "node proof/webauthn.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run && node proof/bundle-no-node.mjs"
   },
   "dependencies": {
     "@tempo-auth/adapter-d1": "workspace:*",

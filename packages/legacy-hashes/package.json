@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run && node proof/no-node.mjs"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",
