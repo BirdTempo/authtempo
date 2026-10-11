@@ -172,6 +172,19 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
     });
   }
 
+  it("keeps a user created unverified when another request adds a session row inside the open transaction", async () => {
+    const db = createD1Adapter(env.DB);
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.create("user", user("u1", false));
+        // Another request, outside this transaction.
+        await childRows.session?.(db);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await db.findOne("user", byId("u1"))).not.toBeNull();
+  });
+
   it("still deletes a user whose only child rows are the transaction's own", async () => {
     const db = createD1Adapter(env.DB);
     await expect(

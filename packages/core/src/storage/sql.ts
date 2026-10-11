@@ -399,11 +399,15 @@ export function schemaVersionGate(read: () => Promise<string | null>): () => Pro
  * The rows the D1 undo of a create may delete: the created row by id. A
  * user created unverified is deleted only while `emailVerified` is still
  * false. On D1 another request can claim that user inside the open
- * transaction: an owner's magic link or reset verifies it and links the
- * owner's identity, session, and password to it, and the undo must keep
- * that row. A row created verified keeps the delete by id, because no claim
- * changes it. `whileNoChildRow` adds the child rule on top (plan 8b). The memory adapter runs one transaction at a time and Postgres
- * isolates it, so neither runs this. Plan 9 Task 4, 2026-10-10.
+ * transaction. An owner's magic link or reset verifies it and links the
+ * owner's identity, session, and password to it. The undo must keep that
+ * row.
+ *
+ * A row created verified has no such claim to guard against, so this rule
+ * deletes it by id. Every user create also gets the child rule of
+ * `whileNoChildRow` (plan 8b). The memory adapter runs one transaction at a
+ * time and Postgres isolates it, so neither runs this. Plan 9 Task 4,
+ * 2026-10-10.
  */
 export function undoCreateWhere<M extends ModelName>(model: M, data: Models[M]): Where<M>[] {
   const byId = { field: "id", op: "eq", value: (data as { id: string }).id } as Where<M>;
@@ -426,9 +430,10 @@ export const USER_CHILD_MODELS: readonly ModelName[] = MODEL_NAMES.filter(
  * delete matches only while no row names the user. On D1 another request
  * can add a session, an identity, or any other child row for a user inside
  * the open transaction that created the user; the undo must keep that user,
- * or the child row points at nothing. The undo log runs in reverse, so the
- * transaction's own child rows are gone before this delete runs. `children`
- * holds the table and the user id column as the statement set names them.
+ * or the child row points at nothing. The undo log runs in reverse.
+ * The transaction's own child rows are gone before this delete runs.
+ * `children` holds the table and the user id column as the statement set
+ * names them.
  */
 export function whileNoChildRow(
   d: Dialect,

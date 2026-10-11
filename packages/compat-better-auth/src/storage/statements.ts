@@ -393,6 +393,8 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       // one term. An unmapped model has no table to check.
       const children = new Map<string, string>();
       for (const m of USER_CHILD_MODELS) {
+        // The skip is safe only while the models that share a table map `userId`
+        // to the same column. Identity and password do today.
         if (UNMAPPED_MODELS.has(m) || children.has(table(m))) continue;
         children.set(table(m), column(m, "userId"));
       }

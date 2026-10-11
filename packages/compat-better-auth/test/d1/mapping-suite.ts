@@ -121,6 +121,36 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       expect(await s.findOne("session", [eq("id", "s1")])).not.toBeNull();
     });
 
+    it("keeps a user created verified when another request links an identity inside the open transaction, the account table (plan 8b)", async () => {
+      const s = db();
+      await expect(
+        s.transaction(async (tx) => {
+          await tx.create("user", {
+            id: "u1",
+            email: "a@example.com",
+            emailVerified: true,
+            name: null,
+            image: null,
+            createdAt: at,
+            updatedAt: at,
+          });
+          // Another request, outside this transaction: a social claim of that user.
+          await s.create("identity", {
+            id: "i1",
+            userId: "u1",
+            provider: "google",
+            subject: "g-1",
+            linkedAt: at,
+            createdAt: at,
+            updatedAt: at,
+          });
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      expect(await s.findOne("user", [eq("id", "u1")])).not.toBeNull();
+      expect(await s.findOne("identity", [eq("id", "i1")])).not.toBeNull();
+    });
+
     it("stores dates as ISO text and booleans as 1, so Better Auth-era rows compare in order", async () => {
       await run(
         `INSERT INTO ${T("user")} (${cols("user", ["id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt"])}) VALUES ('ba-u','Bea','bea@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z')`,
