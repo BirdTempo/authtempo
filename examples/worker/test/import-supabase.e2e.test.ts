@@ -70,6 +70,8 @@ it("imports a Supabase export on D1, signs in with the bcrypt password, and reha
   // A wrong password fails on the bcrypt row and writes nothing.
   const wrong = await signIn("allminE");
   expect(wrong.status).toBe(401);
+  // The same body as any wrong password: it must not tell an imported row apart.
+  expect(await wrong.json()).toEqual({ error: "invalid_credentials" });
   expect(await hashOf()).toBe(ADA_BCRYPT);
 
   const right = await signIn("allmine");
@@ -83,7 +85,9 @@ it("imports a Supabase export on D1, signs in with the bcrypt password, and reha
   expect(await me.json()).toMatchObject({ email: "ada@example.com" });
 
   // A wrong password fails on the PBKDF2 row too and writes nothing.
-  expect((await signIn("allminE")).status).toBe(401);
+  const wrongAgain = await signIn("allminE");
+  expect(wrongAgain.status).toBe(401);
+  expect(await wrongAgain.json()).toEqual({ error: "invalid_credentials" });
   expect(await hashOf()).toBe(rehashed);
   // The second sign-in verifies the PBKDF2 row and does not hash again.
   expect((await signIn("allmine")).status).toBe(200);

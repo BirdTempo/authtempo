@@ -58,8 +58,9 @@ function getAuth(env: Env): Auth {
     // Workers Paid. In TEST_MODE only, use 1000 iterations so the end-to-end
     // test does not pay the full cost for each hash. Production keeps the default.
     // The legacy seam comes first (plan 9b): a user imported from Supabase,
-    // Clerk, or Auth0 signs in with the old bcrypt hash once, and the sign-in
-    // writes PBKDF2 over it. Every new hash is PBKDF2. The formats are in
+    // Clerk, or Auth0 signs in with the old bcrypt hash once, or until a
+    // sign-in with a password of at most 72 bytes, and that sign-in writes
+    // PBKDF2 over it. A longer password stays bcrypt (BCRYPT_MAX_PASSWORD_BYTES). Every new hash is PBKDF2. The formats are in
     // legacy-formats.ts, which the import test reads too.
     password: {
       hash: createLegacyPasswordHash({
