@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { namesFromDrizzle } from "../src/adapters/drizzle.js";
 import { resolveNames, snake } from "../src/storage/names.js";
-import { BETTER_AUTH_PG, countForeignKeys, CONSUMER_I_PG } from "./fixtures.js";
+import {
+  BETTER_AUTH_PG,
+  BETTER_AUTH_SQLITE,
+  countForeignKeys,
+  CONSUMER_I_PG,
+} from "./fixtures.js";
 
 const NAME = Symbol.for("drizzle:Name");
 const SCHEMA = Symbol.for("drizzle:Schema");
@@ -96,11 +101,12 @@ describe("names", () => {
 });
 
 describe("fixtures", () => {
-  it("hold seven foreign keys: five name user, two name organization", () => {
+  it("hold seven foreign keys each: five name user, two name organization", () => {
     // session, account, member, invitation inviter, and passkey name "user"; member and invitation name "organization".
+    // All three fixtures: the two Postgres ones and the SQLite one (D1), 7 keys each.
     const clauses = (text: string, table: string) =>
       text.split(` references "${table}" ("id") on delete cascade`).length - 1;
-    for (const text of [BETTER_AUTH_PG, CONSUMER_I_PG]) {
+    for (const text of [BETTER_AUTH_PG, CONSUMER_I_PG, BETTER_AUTH_SQLITE]) {
       expect(countForeignKeys(text)).toBe(7);
       expect([clauses(text, "user"), clauses(text, "organization")]).toEqual([5, 2]);
     }

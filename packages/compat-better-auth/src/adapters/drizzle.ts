@@ -179,7 +179,7 @@ export function drizzleAdapter(
   refused.push(
     `database.provider: "${config.provider}" is refused; tempo-auth runs on Postgres and D1`,
   );
-  // "postgres" is a placeholder: a refused database never reaches a working
-  // database, and the refusal text above names the provider it saw.
+  // "postgres" is a placeholder: a refused database is never used as storage,
+  // and the refusal text above names the provider it saw.
   return refusedDatabase("postgres", refused);
 }
