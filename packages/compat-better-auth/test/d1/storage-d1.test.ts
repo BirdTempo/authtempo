@@ -4,17 +4,15 @@ import { drizzleAdapter } from "../../src/adapters/drizzle.js";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import { d1CompatReady } from "../../src/storage/migration.js";
 import { resolveNames } from "../../src/storage/names.js";
-import { BETTER_AUTH_SQLITE, withoutForeignKeys } from "../fixtures.js";
-import { at, d1MappingSuite, eq, sqlNames } from "./mapping-suite.js";
+import { BETTER_AUTH_SQLITE } from "../fixtures.js";
+import { at, eq, sqlNames } from "./mapping-suite.js";
 import { execD1 } from "./schema.js";
 
-// Better Auth's own SQLite SQL without the foreign keys (the suites here also
-// run on tables with no keys; the keyed files run with them), then the
-// shipped compat migration.
-await execD1(withoutForeignKeys(BETTER_AUTH_SQLITE));
+// Better Auth's own SQLite SQL as recorded, with its seven foreign keys, then
+// the shipped compat migration. Core's conformance suite and the mapping tests
+// on these tables run in storage-d1-conformance-keyed.test.ts.
+await execD1(BETTER_AUTH_SQLITE);
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
-
-d1MappingSuite("Better Auth's own SQLite SQL", {});
 
 describe("the Better Auth storage on D1, default names", () => {
   const { truncate } = sqlNames({});
