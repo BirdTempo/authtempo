@@ -322,7 +322,7 @@ export async function passwordSignIn(
     // Conditional on the id and the old hash. A reset or a change that wrote
     // a new hash since the read keeps its hash. A claim that deleted the row
     // since the read makes this match zero rows, and an update writes no row
-    // then. Zero rows means the proved hash is gone: answer the failure now.
+    // then.
     const n = await config.storage.update(
       "password",
       [
@@ -331,8 +331,26 @@ export async function passwordSignIn(
       ],
       { hash: fresh, updatedAt: now },
     );
-    if (n === 0) return refuse();
-    proved = fresh;
+    if (n === 1) {
+      proved = fresh;
+    } else {
+      // Zero rows: the row changed or is gone. Another right sign-in may have
+      // rehashed it first (plan 8b): read it again, and verify this password
+      // against its new hash. One more derive, on this path only, still
+      // before the transaction. A row a reset or a change wrote holds another
+      // password and fails the verify; a claim leaves no row.
+      const current = await config.storage.findOne("password", [
+        { field: "id", op: "eq", value: row.id },
+      ]);
+      if (
+        !current ||
+        current.userId !== user.id ||
+        current.hash.startsWith(PENDING_HASH_PREFIX) ||
+        !(await pw.hash.verify(input.password, current.hash)).ok
+      )
+        return refuse();
+      proved = current.hash;
+    }
   }
   const signedIn = await config.storage.transaction(
     async (tx): Promise<Result<PasswordSession>> => {

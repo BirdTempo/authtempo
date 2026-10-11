@@ -475,6 +475,44 @@ describe("passwordSignIn", () => {
     ).toBe(after?.hash);
   });
 
+  it("signs in both of two right sign-ins that race one rehash (plan 8b, Review Focus 4)", async () => {
+    // Reachable: a verified user at cost 1000, then the deployer raises the
+    // cost to 2000. Two devices sign in at once: both read the old hash, and
+    // the second finishes its rehash while the first derives its new hash.
+    const auth = pwAuth();
+    const before = await signUpAndVerify(auth);
+    let race: () => Promise<void> = async () => {};
+    const { calls, seam } = counting(createPbkdf2PasswordHash({ iterations: 2000 }), () => race());
+    const raised = withSeam(auth.config, seam);
+    let second: Awaited<ReturnType<typeof passwordSignIn>> | null = null;
+    race = async () => {
+      race = async () => {};
+      second = await passwordSignIn(raised, {
+        email: EMAIL,
+        password: PW,
+        ip: "2.2.2.2",
+        userAgent: "ua",
+      });
+    };
+    const first = await passwordSignIn(raised, {
+      email: EMAIL,
+      password: PW,
+      ip: "1.1.1.1",
+      userAgent: "ua",
+    });
+    const other = second as Awaited<ReturnType<typeof passwordSignIn>> | null;
+    if (!first.ok) throw new Error(`the first sign-in answered ${first.code}`);
+    if (!other?.ok) throw new Error("the second sign-in did not sign in");
+    expect(calls.hash).toBe(2);
+    const row = await auth.storage.findOne("password", [
+      { field: "id", op: "eq", value: before.id },
+    ]);
+    expect(row?.hash).toMatch(/^pbkdf2-sha256\$2000\$/);
+    const ids = (await auth.storage.findMany("session", [])).map((s) => s.id);
+    expect(ids).toContain(first.value.session.id);
+    expect(ids).toContain(other.value.session.id);
+    expect(first.value.session.id).not.toBe(other.value.session.id);
+  });
   it("keeps the hash and no session when a change lands between the verify and the rehash", async () => {
     const auth = pwAuth();
     const before = await signUpAndVerify(auth);
