@@ -29,9 +29,15 @@ export const SCHEMA_VERSION_KEY = "schema_version";
 
 const MODEL_NAMES = Object.keys(schema) as ModelName[];
 
-/** The one source for table names. */
+/**
+ * The one source for table names: `ta_` plus the model name in snake case,
+ * the column rule. Every model before plan 8b is one lower-case word, so its
+ * name does not change; `apiToken` is `ta_api_token`. Postgres folds an
+ * unquoted `ta_apiToken` to lower case, so the camel form would name another
+ * table than the migration.
+ */
 export const TABLES: Record<ModelName, string> = Object.fromEntries(
-  MODEL_NAMES.map((m) => [m, `ta_${m}`]),
+  MODEL_NAMES.map((m) => [m, `ta_${columnName(m)}`]),
 ) as Record<ModelName, string>;
 
 export function columnName(field: string): string {
@@ -393,17 +399,54 @@ export function schemaVersionGate(read: () => Promise<string | null>): () => Pro
  * The rows the D1 undo of a create may delete: the created row by id. A
  * user created unverified is deleted only while `emailVerified` is still
  * false. On D1 another request can claim that user inside the open
- * transaction: an owner's magic link or reset verifies it and links the
- * owner's identity, session, and password to it, and the undo must keep
- * that row. A row created verified keeps the delete by id, because no claim
- * changes it. The memory adapter runs one transaction at a time and Postgres
- * isolates it, so neither runs this. Plan 9 Task 4, 2026-10-10.
+ * transaction. An owner's magic link or reset verifies it and links the
+ * owner's identity, session, and password to it. The undo must keep that
+ * row.
+ *
+ * A row created verified has no such claim to guard against, so this rule
+ * deletes it by id. Every user create also gets the child rule of
+ * `whileNoChildRow` (plan 8b). The memory adapter runs one transaction at a
+ * time and Postgres isolates it, so neither runs this. Plan 9 Task 4,
+ * 2026-10-10.
  */
 export function undoCreateWhere<M extends ModelName>(model: M, data: Models[M]): Where<M>[] {
   const byId = { field: "id", op: "eq", value: (data as { id: string }).id } as Where<M>;
   if (model === "user" && (data as Models["user"]).emailVerified === false)
     return [byId, { field: "emailVerified", op: "eq", value: false } as Where<M>];
   return [byId];
+}
+
+/**
+ * The models whose rows name a user in `userId`, in schema order. One
+ * source: the schema. The D1 undo of a user create reads it (plan 8b), so a
+ * new model with a `userId` field joins the rule with no edit here.
+ */
+export const USER_CHILD_MODELS: readonly ModelName[] = MODEL_NAMES.filter(
+  (m) => m !== "user" && Object.hasOwn(schema[m].fields, "userId"),
+);
+
+/**
+ * Appends one `NOT EXISTS` term per child table to a user delete, so the
+ * delete matches only while no row names the user. On D1 another request
+ * can add a child row for a user inside the open transaction that created
+ * the user. The undo must keep that user. Else the child row points at
+ * nothing. The undo log runs in reverse.
+ * The transaction's own child rows are gone before this delete runs.
+ * `children` holds the table and the user id column as the statement set
+ * names them.
+ */
+export function whileNoChildRow(
+  d: Dialect,
+  s: Statement,
+  userId: string,
+  children: readonly { table: string; column: string }[],
+): Statement {
+  const params = [...s.params];
+  const terms = children.map((c) => {
+    params.push(userId);
+    return ` AND NOT EXISTS (SELECT 1 FROM ${c.table} WHERE ${c.column} = ${d.placeholder(params.length)})`;
+  });
+  return { sql: s.sql + terms.join(""), params };
 }
 
 /**
@@ -433,7 +476,8 @@ export interface SqlStatements {
    * D1 undo of a create. `data` is the row the create wrote. The delete keeps
    * the rule of `undoCreateWhere`: a user created unverified is deleted only
    * while it is still unverified (plan 9 Task 4). A statement for another
-   * table set must keep the same rule.
+   * table set must keep the same rule. Every user create, verified or not, is
+   * deleted only while no row of `USER_CHILD_MODELS` names it (plan 8b).
    */
   undoCreate<M extends ModelName>(model: M, data: Models[M]): Statement;
   /**
@@ -480,7 +524,13 @@ export function coreStatements(d: Dialect): SqlStatements {
     undoCreate(model, data) {
       const s = deleteStatement(d, model, undoCreateWhere(model, data));
       if (!s) throw new Error("undoCreate: an eq filter always compiles");
-      return s;
+      if (model !== "user") return s;
+      return whileNoChildRow(
+        d,
+        s,
+        (data as Models["user"]).id,
+        USER_CHILD_MODELS.map((m) => ({ table: TABLES[m], column: columnName("userId") })),
+      );
     },
     restoreRow(model, row, data) {
       // Only the columns the update set, through the same field-to-column

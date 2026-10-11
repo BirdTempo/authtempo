@@ -27,6 +27,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
+  { unmapped: ["apiToken"] },
 );
 
 runAdapterConformance(
@@ -37,6 +38,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
+  { unmapped: ["apiToken"] },
 );
 
 /** Rows as Better Auth 1.7 writes them, inserted before the migration, on the fixture with its foreign keys. */
@@ -76,7 +78,7 @@ describe("the Better Auth mapping on postgres", () => {
     pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     await pg.sql.unsafe(BETTER_AUTH_ERA);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    expect(await s.migrate()).toEqual(["0001_compat_better_auth"]);
+    expect(await s.migrate()).toEqual(["0001_compat_better_auth", "0002_compat_schema_v5"]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
   });
@@ -84,8 +86,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 4; a new core version needs migration 0002 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(4);
+  it("serves core schema version 5; a new core version needs migration 0003 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(5);
   });
 
   it("names only columns the table field list knows", () => {
@@ -459,8 +461,8 @@ describe("the compat migration on postgres", () => {
         .sort();
       expect(added).toEqual(["ta_limit", "ta_meta"]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "1" },
-        { key: "schema_version", value: "4" },
+        { key: "compat_better_auth", value: "2" },
+        { key: "schema_version", value: "5" },
       ]);
     } finally {
       await pg.close();
@@ -517,17 +519,46 @@ describe("the compat undo of a created user", () => {
     expect(await ids()).toEqual([]);
   });
 
-  it("names the emailVerified column of the table, in both dialects", () => {
+  it("names the emailVerified column and the child tables of the naming, in both dialects (plan 8b)", () => {
     const data = { ...user("u4", "x@example.com"), emailVerified: false };
     const snakeNames = resolveNames({ casing: "snake" });
     expect(compatStatements("sqlite", snakeNames).undoCreate("user", data)).toEqual({
-      sql: 'DELETE FROM "user" WHERE "id" = ? AND "email_verified" = ?',
-      params: ["u4", 0],
+      sql:
+        'DELETE FROM "user" WHERE "id" = ? AND "email_verified" = ?' +
+        ' AND NOT EXISTS (SELECT 1 FROM "account" WHERE "user_id" = ?)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "user_id" = ?)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "user_id" = ?)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "user_id" = ?)',
+      params: ["u4", 0, "u4", "u4", "u4", "u4"],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
-      sql: 'DELETE FROM "user" WHERE "id" = $1',
-      params: ["u5"],
+      sql:
+        'DELETE FROM "user" WHERE "id" = $1' +
+        ' AND NOT EXISTS (SELECT 1 FROM "account" WHERE "userId" = $2)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "userId" = $3)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "userId" = $4)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "userId" = $5)',
+      params: ["u5", "u5", "u5", "u5", "u5"],
     });
+  });
+
+  it("keeps a verified user that a session names on Better Auth's tables (plan 8b)", async () => {
+    const kept = user("u6", "kept@example.com");
+    await db.create("user", kept);
+    await db.create("session", {
+      id: "s6",
+      userId: "u6",
+      tokenHash: "h-s6",
+      expiresAt: later,
+      lastSeenAt: at,
+      ip: null,
+      userAgent: null,
+      activeOrganizationId: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    expect(await undo(kept)).toBe(0);
+    expect(await ids()).toEqual(["u6"]);
   });
 });
 

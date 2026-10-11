@@ -67,22 +67,33 @@ export function defaultPasswordVerifyPage(input: PasswordVerifyPageInput): strin
   );
 }
 
+const POLICY = (i: ResetPageInput) =>
+  `Use ${i.minLength} to ${i.maxLength} characters, no control characters, and not your email address.`;
+
 const RESET_ERRORS = {
-  password_policy: (i: ResetPageInput) =>
-    `Use ${i.minLength} to ${i.maxLength} characters, no control characters, and not your email address.`,
+  password_policy: POLICY,
   password_breached: () => "This password is in a known data breach. Choose a different password.",
 } as const;
 
-/** The page the reset mail opens. No script; the form posts the token and the new password. */
+/**
+ * The page the reset mail opens. No script; the form posts the token and the
+ * new password. The input has no `minlength` or `maxlength`: both count
+ * UTF-16 code units, and the policy counts code points, so a browser would
+ * refuse a valid password of 128 astral characters (256 units). The page's
+ * policy permits no script, so the server's policy is the one check; the
+ * page shows the rule before the first post (plan 8b).
+ */
 export function defaultResetPage(input: ResetPageInput): string {
   const error = input.error
     ? `<p class="error">${escapeHtml(RESET_ERRORS[input.error](input))}</p>\n`
     : "";
+  // The rule once: a policy refusal already shows it as the error.
+  const rule = input.error === "password_policy" ? "" : `<p>${escapeHtml(POLICY(input))}</p>\n`;
   return page(
     `Choose a new password for ${escapeHtml(input.appName)}`,
-    `${error}<form method="post" action="${escapeHtml(input.action)}">
+    `${error}${rule}<form method="post" action="${escapeHtml(input.action)}">
 <input type="hidden" name="token" value="${escapeHtml(input.token)}">
-<input type="password" name="password" minlength="${input.minLength}" maxlength="${input.maxLength}" autocomplete="new-password" required>
+<input type="password" name="password" autocomplete="new-password" required>
 <button type="submit">Set password</button>
 </form>`,
   );

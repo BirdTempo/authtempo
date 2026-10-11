@@ -8,6 +8,7 @@ import {
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
+  resendPasswordVerification,
   resetPassword,
   verifyPasswordEmail,
 } from "../../engine/password.js";
@@ -41,6 +42,8 @@ const resetRequestBody = z.object({
   email: z.string().max(320),
   next: z.string().max(2048).optional(),
 });
+
+const resendBody = z.object({ email: z.string().max(320) });
 
 const resetBody = z.object({
   token: z.string().max(64),
@@ -143,6 +146,18 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         const res = jsonCaller ? json({ verified: true }) : redirect(resolveNext(config, "/"));
         if (r.value.signedIn) res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
         return res;
+      },
+    },
+    {
+      // A new verify link (plan 8b). No session: the person may have none.
+      method: "POST",
+      path: "/password/verify/resend",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, resendBody);
+        if (!body.ok) return respond(body);
+        return respond(
+          await resendPasswordVerification(config, { email: body.value.email, ip: ctx.ip }),
+        );
       },
     },
     {

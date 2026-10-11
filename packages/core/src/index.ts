@@ -9,7 +9,13 @@ export type {
   PasswordConfig,
 } from "./config.js";
 export { ConfigError, DEFAULT_RESERVED_SLUGS, isAppScheme } from "./config.js";
-export { type Auth, type AuthApi, createAuth, type PasswordApi } from "./create-auth.js";
+export {
+  type Auth,
+  type AuthApi,
+  createAuth,
+  type PasswordApi,
+  type TokensApi,
+} from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
@@ -18,6 +24,7 @@ export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
   PasswordChange,
+  PasswordResend,
   PasswordReset,
   PasswordResetRequest,
   PasswordSession,
@@ -31,6 +38,13 @@ export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export { type PublicSession, type ResolvedSession, readSessionToken } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
+export {
+  API_TOKEN_PREFIX,
+  type ApiTokenCreate,
+  type ApiTokenSummary,
+  type Caller,
+  type ResolvedApiToken,
+} from "./engine/tokens.js";
 export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
@@ -51,6 +65,7 @@ export { type Clock, systemClock } from "./primitives/clock.js";
 export { newId } from "./primitives/ids.js";
 export type { Result } from "./result.js";
 export {
+  type ApiTokenRow,
   type IdentityRow,
   type InvitationRow,
   type MemberRow,

@@ -88,10 +88,12 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
         throw ctx.toStorageError(model, e) ?? e;
       }
       if (ctx.undo) {
-        // The undo keeps the rule of `undoCreateWhere`: a user created
-        // unverified is deleted only while it is still unverified, so an
-        // owner's claim inside this open transaction keeps its row (plan 8
-        // I-1, plan 9 Task 4).
+        // The undo of a user create deletes the row only while no row of
+        // `USER_CHILD_MODELS` names it. An unverified create is also deleted
+        // only while `emailVerified` is false. Another request can claim the
+        // user or add a child row inside this open transaction, and the undo
+        // must keep that user (plan 9 Task 4, plan 8b). The rule lives in
+        // `whileNoChildRow` in core's `sql.ts`.
         ctx.undo.push({ model, op: "create", ...st.undoCreate(model, data) });
       }
       return structuredClone(data);

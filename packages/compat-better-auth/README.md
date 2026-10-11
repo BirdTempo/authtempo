@@ -91,6 +91,8 @@ What the migration does (`0001_compat_better_auth`, append-only):
 - It stops with "every Better Auth date column must be timestamptz" when a date column has no time zone.
 - It needs every table in the list, also when the plugin is off: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, `passkey`. Create a missing table with Better Auth's own SQL for it. Core's claim rule deletes passkey rows on every app, and the sweep deletes invitations.
 
+Migration `0002_compat_schema_v5` (plan 8b) moves `schema_version` to 5 and `compat_better_auth` to 2. It changes no table: core 5 adds API tokens, and this package does not hold them until its api-key plan. Core's routes under `/tokens` answer 404 here. `tempo.api.tokens.*` is not usable on this storage: `create` throws `unknown_model`, and the reads answer empty. `migrate()` runs both migrations. On D1, copy `0002_compat_schema_v5.sql` after the 0001 file, for both variants and every naming: it touches `ta_meta` only. Without it the storage refuses to start with `schema_mismatch`.
+
 What changes at cutover:
 
 - The `session.token` column holds the SHA-256 hex of the token, never the raw token. Better Auth-era sessions end: every person signs in again once. App SQL that reads `session.token` reads a hash.
@@ -115,6 +117,7 @@ number lower than the Better Auth table migration makes every new database
 
 - Better Auth 1.7 tables: copy `node_modules/@tempo-auth/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`.
 - Tables from before Better Auth 1.7 (no `account.issuer` column): copy the file of the same name from `migrations/d1-before-1.7/`.
+- Every app: then copy `0002_compat_schema_v5.sql` from the same directory and give it the next number.
 - Tables with other names: write the file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`.
 
 `wrangler d1 migrations apply` rolls back a file that fails (wrangler
@@ -163,7 +166,7 @@ Better Auth defaults that core does not keep:
 
 | Better Auth default | tempo-auth |
 | --- | --- |
-| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, and the reset request, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
+| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, the reset request, and the verify mail resend, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
 | An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `tempoAuth.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
@@ -182,8 +185,10 @@ request.
 An invitation has two ids. The mail id (`data.id` in `sendInvitationEmail`)
 accepts the invitation, and the row id (from `api.createInvitation`) cancels it.
 
-`api.sendVerificationEmail` and `authClient.sendVerificationEmail` answer
-`NOT_SUPPORTED` with status 501: core has no resend route until plan 8b.
+`api.sendVerificationEmail` and `authClient.sendVerificationEmail` send a new
+verify link through core's resend route (plan 8b). The earlier link of the
+address stops working. A `callbackURL` answers `NOT_SUPPORTED` (501): core lands
+the link on the app origin.
 
 Errors: `APIError` on the server and `error` on the client carry Better Auth's
 code (`body.code`, `error.code`) and core's HTTP status. The table is
@@ -322,10 +327,10 @@ factory prints without them.
 
 consumere (small edits):
 - Remove `secondaryStorage` and `session.storeSessionInDatabase: false`. Sessions move into a `session` table. Create it, and the `organization`, `member`, `invitation`, and `passkey` tables, with Better Auth's own SQL before migration 0001.
-- Remove `databaseHooks`. To store no IP, keep `advanced.ipAddress.disableIpTracking: true`; the factory logs a note. For a request with no client IP, only the password sign-in, the magic link, and the reset request skip the per-IP limit and keep the per-email limit. Every other flow keeps core's shared bucket. Core stores the user agent; the hook that dropped it has no replacement until plan 9d.
+- Remove `databaseHooks`. To store no IP, keep `advanced.ipAddress.disableIpTracking: true`; the factory logs a note. For a request with no client IP, only the password sign-in, the magic link, the reset request, and the verify mail resend skip the per-IP limit and keep the per-email limit. Every other flow keeps core's shared bucket. Core stores the user agent; the hook that dropped it has no replacement until plan 9d.
 - Remove GitHub and LinkedIn from `socialProviders` until plan 9c.
 - Run Drizzle on postgres.js (`drizzle-orm/postgres-js`), not on Neon's driver.
-- `sendVerificationEmail` answers NOT_SUPPORTED until plan 8b.
+- `sendVerificationEmail` with a `callbackURL` answers NOT_SUPPORTED; leave the `callbackURL` out.
 
 consumer-i (small edits):
 - Add `emailAndPassword.sendResetPassword` and `emailVerification.sendVerificationEmail`, and `sendInvitationEmail` in `organization()`.
@@ -340,5 +345,5 @@ The factory refuses exactly these: `databaseHooks`, `hooks`, `plugins[expo]`, `p
 consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (plan 9d), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, `membershipLimit`, the rate limit storage.
 The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[email-otp]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].membershipLimit`, `plugins[organization].organizationHooks`, `plugins[organization].organizationLimit`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
 
-consumerb (follow-ups first): API keys (plan 8b), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.requireEmailVerification`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].organizationHooks`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.

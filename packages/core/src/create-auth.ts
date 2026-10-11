@@ -44,6 +44,7 @@ import {
 import {
   changePassword,
   type PasswordChange,
+  type PasswordResend,
   type PasswordReset,
   type PasswordResetRequest,
   type PasswordSession,
@@ -54,6 +55,7 @@ import {
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
+  resendPasswordVerification,
   resetPassword,
   verifyPasswordEmail,
 } from "./engine/password.js";
@@ -73,6 +75,17 @@ import {
   startSocial,
 } from "./engine/social.js";
 import { type SweepResult, sweepExpired } from "./engine/sweep.js";
+import {
+  type ApiTokenCreate,
+  type ApiTokenSummary,
+  type Caller,
+  callerFromRequest,
+  createApiToken,
+  currentApiToken,
+  listApiTokens,
+  type ResolvedApiToken,
+  revokeApiToken,
+} from "./engine/tokens.js";
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
 import { handoffRoutes } from "./http/routes/handoff.js";
@@ -82,6 +95,7 @@ import { passkeyRoutes } from "./http/routes/passkeys.js";
 import { passwordRoutes } from "./http/routes/password.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
+import { tokenRoutes } from "./http/routes/tokens.js";
 import type { Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import type {
@@ -94,9 +108,20 @@ export interface PasswordApi {
   signUp(input: PasswordSignUp): Promise<Result<PasswordSession>>;
   signIn(input: PasswordSignIn): Promise<Result<PasswordSession>>;
   verifyEmail(input: PasswordVerify): Promise<Result<PasswordVerified>>;
+  /** A new verify link for an unverified user with a password. Always `{ sent: true }`, except `rate_limited`. */
+  resendVerification(input: PasswordResend): Promise<Result<{ sent: true }>>;
   requestReset(input: PasswordResetRequest): Promise<Result<{ sent: true }>>;
   reset(input: PasswordReset): Promise<Result<PasswordSession & { next: string }>>;
   change(input: PasswordChange): Promise<Result<{ ok: true }>>;
+}
+
+/** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
+export interface TokensApi {
+  create(input: ApiTokenCreate): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>>;
+  list(input: { user: UserRow }): Promise<Result<ApiTokenSummary[]>>;
+  revoke(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
+  /** The token's user and summary, or `unauthorized`. A `ts_` token answers `unauthorized`. */
+  current(input: { token: string }): Promise<Result<ResolvedApiToken>>;
 }
 
 export interface AuthApi {
@@ -206,6 +231,7 @@ export interface AuthApi {
   }): Promise<Result<PublicSession>>;
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
+  tokens: TokensApi;
   password?: PasswordApi;
 }
 
@@ -215,7 +241,14 @@ export interface Auth {
   /** The caller's session from the cookie or the bearer header, or null. */
   session(request: Request): Promise<ResolvedSession | null>;
   /**
-   * The Set-Cookie value to send after `session(request)` when it moved the
+   * The caller as a session or as an API token, or null. Use it in a route
+   * that a script may call. `session(request)` stays session-only, so every
+   * route that calls it answers 401 to a token. For a session caller, send
+   * `sessionCookie(request, caller)`, or the browser drops the cookie at its old Max-Age.
+   */
+  caller(request: Request): Promise<Caller | null>;
+  /**
+   * The Set-Cookie value to send after `session(request)` or `caller(request)` when it moved the
    * expiry forward, else null. Send it on the response, or a browser drops
    * the cookie at its old Max-Age while the session row is still valid.
    * Null for a bearer request.
@@ -236,10 +269,12 @@ export function createAuth(input: AuthConfig): Auth {
     ...passwordRoutes(config),
     ...handoffRoutes(config),
     ...organizationRoutes(config),
+    ...tokenRoutes(config),
   ]);
   return {
     handle,
     session: (request) => sessionFromRequest(config, request),
+    caller: (request) => callerFromRequest(config, request),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     api: {
       sweepExpired: () => sweepExpired(config),
@@ -272,12 +307,19 @@ export function createAuth(input: AuthConfig): Auth {
       setActiveOrganization: (i) => setActiveOrganization(config, i),
       getSession: (token) => resolveSession(config, token),
       signOut: (token) => destroySession(config, token),
+      tokens: {
+        create: (i) => createApiToken(config, i),
+        list: (i) => listApiTokens(config, i),
+        revoke: (i) => revokeApiToken(config, i),
+        current: (i) => currentApiToken(config, i),
+      },
       ...(config.password
         ? {
             password: {
               signUp: (i) => passwordSignUp(config, i),
               signIn: (i) => passwordSignIn(config, i),
               verifyEmail: (i) => verifyPasswordEmail(config, i),
+              resendVerification: (i) => resendPasswordVerification(config, i),
               requestReset: (i) => requestPasswordReset(config, i),
               reset: (i) => resetPassword(config, i),
               change: (i) => changePassword(config, i),

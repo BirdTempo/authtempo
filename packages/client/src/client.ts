@@ -1,4 +1,5 @@
 import type {
+  ApiTokenSummary,
   InvitationSummary,
   MemberSummary,
   OrganizationSummary,
@@ -18,6 +19,14 @@ export type OrganizationJSON = Omit<OrganizationSummary, "createdAt"> & { create
 export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string };
 export type InvitationJSON = Omit<InvitationSummary, "expiresAt" | "createdAt"> & {
   expiresAt: string;
+  createdAt: string;
+};
+export type ApiTokenSummaryJSON = Omit<
+  ApiTokenSummary,
+  "expiresAt" | "lastUsedAt" | "createdAt"
+> & {
+  expiresAt: string | null;
+  lastUsedAt: string | null;
   createdAt: string;
 };
 
@@ -68,6 +77,10 @@ export interface Client {
       email: string;
       password: string;
     }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
+    resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
+    /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
+    verifyEmail(input: { token: string }): Promise<ClientResult<{ verified: true }>>;
     requestReset(input: {
       email: string;
       next?: string | undefined;
@@ -132,6 +145,23 @@ export interface Client {
     };
     /** Answers the session, so the caller reads `session.activeOrganizationId` from it. `null` clears it. */
     setActive(input: { organizationId: string | null }): Promise<ClientResult<PublicSession>>;
+  };
+  /**
+   * API tokens for scripts and CLIs. `create`, `list`, and `revoke` need a
+   * session: a token answers `unauthorized` there. `current` needs a token:
+   * a CLI passes `token: () => "tk_…"` to `createClient`.
+   */
+  tokens: {
+    create(input: {
+      name: string;
+      expiresInDays?: number | null | undefined;
+      organizationId?: string | undefined;
+    }): Promise<ClientResult<{ token: string; apiToken: ApiTokenSummaryJSON }>>;
+    list(): Promise<ClientResult<ApiTokenSummaryJSON[]>>;
+    revoke(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    current(): Promise<
+      ClientResult<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>
+    >;
   };
   errors: typeof ERRORS;
 }
@@ -207,6 +237,8 @@ export function createClient(options: ClientOptions): Client {
         }),
       signIn: (input) =>
         call<{ token: string } & PublicSession>("POST", "/password/sign-in", input),
+      resendVerification: (input) => call<{ sent: true }>("POST", "/password/verify/resend", input),
+      verifyEmail: (input) => call<{ verified: true }>("POST", "/password/verify", input),
       requestReset: ({ next, ...rest }) =>
         call<{ sent: true }>("POST", "/password/reset/request", {
           ...rest,
@@ -290,6 +322,24 @@ export function createClient(options: ClientOptions): Client {
         decline: (input) => call<{ ok: true }>("POST", "/organizations/invitations/decline", input),
       },
       setActive: (input) => call<PublicSession>("POST", "/organizations/active", input),
+    },
+    tokens: {
+      create: ({ expiresInDays, organizationId, ...rest }) =>
+        call<{ token: string; apiToken: ApiTokenSummaryJSON }>("POST", "/tokens", {
+          ...rest,
+          ...(expiresInDays !== undefined ? { expiresInDays } : {}),
+          ...(organizationId !== undefined ? { organizationId } : {}),
+        }),
+      async list() {
+        const r = await call<{ tokens: ApiTokenSummaryJSON[] }>("GET", "/tokens");
+        return r.ok ? ok(r.value.tokens) : r;
+      },
+      revoke: (input) => call<{ ok: true }>("POST", "/tokens/revoke", input),
+      current: () =>
+        call<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>(
+          "GET",
+          "/tokens/current",
+        ),
     },
     errors: ERRORS,
   };

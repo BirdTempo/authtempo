@@ -7,7 +7,9 @@ import {
   SQLITE,
   type SqlStatements,
   type Statement,
+  USER_CHILD_MODELS,
   undoCreateWhere,
+  whileNoChildRow,
 } from "@tempo-auth/core/sql";
 import { type AnyModelMap, MAPPING } from "./mapping.js";
 import { FILLED_DATES, sqliteIsoText } from "./migration.js";
@@ -47,6 +49,55 @@ const SQLITE_UNIQUE_RE = /UNIQUE constraint failed: ((?:[\w"]+\.[\w"]+)(?:, [\w"
 
 export interface CompatStatements extends SqlStatements {
   toStorageError(model: ModelName, err: unknown): StorageError | null;
+}
+
+/**
+ * The core models with no Better Auth table: `MappedModel` in mapping.ts
+ * leaves them out. This storage holds no row of them. A read answers empty,
+ * as for a where that never matches, so `sweepExpired` counts 0 and
+ * `caller` answers null for a `tk_` bearer. A create throws `unknown_model`,
+ * so a write never vanishes in silence. Plan 8b, 2026-10-11.
+ */
+export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>(["apiToken"]);
+
+function withoutUnmapped(st: CompatStatements): CompatStatements {
+  const none = (model: ModelName) => UNMAPPED_MODELS.has(model);
+  const refuse = (model: ModelName): never => {
+    throw new StorageError("unknown_model", model);
+  };
+  return {
+    ...st,
+    insert(model, data) {
+      return none(model) ? refuse(model) : st.insert(model, data);
+    },
+    select(model, where, opts) {
+      return none(model) ? null : st.select(model, where, opts);
+    },
+    update(model, where, data) {
+      return none(model) ? null : st.update(model, where, data);
+    },
+    delete(model, where) {
+      return none(model) ? null : st.delete(model, where);
+    },
+    decode(model, row) {
+      return none(model) ? refuse(model) : st.decode(model, row);
+    },
+    undoSelect(model, where) {
+      return none(model) ? null : st.undoSelect(model, where);
+    },
+    undoCreate(model, data) {
+      return none(model) ? refuse(model) : st.undoCreate(model, data);
+    },
+    restoreRow(model, row, data) {
+      return none(model) ? refuse(model) : st.restoreRow(model, row, data);
+    },
+    reinsertRow(model, row) {
+      return none(model) ? refuse(model) : st.reinsertRow(model, row);
+    },
+    deleteReturning(model, where) {
+      return none(model) ? null : st.deleteReturning(model, where);
+    },
+  };
 }
 
 /**
@@ -336,7 +387,23 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       // it is still unverified, so a claim's verified row survives the undo.
       const s = st.delete(model, undoCreateWhere(model, data));
       if (!s) throw new Error("undoCreate: an eq filter always compiles");
-      return s;
+      if (model !== "user") return s;
+      // Core's rule (plan 8b): only while no child row names the user. The
+      // account table holds both the identity and the password rows, so it is
+      // one term. An unmapped model has no table to check.
+      const children = new Map<string, string>();
+      for (const m of USER_CHILD_MODELS) {
+        // The skip is safe only while the models that share a table map `userId`
+        // to the same column. Identity and password do today.
+        if (UNMAPPED_MODELS.has(m) || children.has(table(m))) continue;
+        children.set(table(m), column(m, "userId"));
+      }
+      return whileNoChildRow(
+        d,
+        s,
+        (data as { id: string }).id,
+        [...children].map(([t, c]) => ({ table: t, column: c })),
+      );
     },
     restoreRow(model, row, data) {
       // The row comes from SELECT *, so its keys are the DDL's spelling. On
@@ -392,7 +459,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       return new StorageError("unique_violation", model, fieldsFor(model, raw));
     },
   };
-  return st;
+  return withoutUnmapped(st);
 }
 
 export type { Statement };

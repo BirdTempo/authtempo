@@ -33,6 +33,12 @@ export const BETTER_AUTH_CODES = {
   password_policy: "INVALID_PASSWORD",
   password_breached: "PASSWORD_COMPROMISED",
   email_taken: "USER_ALREADY_EXISTS",
+  // tempo-auth's own name: no Better Auth source is in this repo, so no Better
+  // Auth code was checked. On the compat storage `tempo.api.tokens.create`
+  // never answers `token_limit`: it throws `unknown_model` after it takes a
+  // limiter slot, because the model is unmapped (spec 8.8 item 9). Only core's
+  // api.tokens on its own storage can answer `token_limit`.
+  token_limit: "TOKEN_LIMIT_REACHED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

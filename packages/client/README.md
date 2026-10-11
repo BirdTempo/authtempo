@@ -93,6 +93,8 @@ without the `password` config.
 | --- | --- | --- |
 | `client.password.signUp({ email, password, name? })` | `POST /password/sign-up` | `ClientResult<{ token } & PublicSession>` |
 | `client.password.signIn({ email, password })` | `POST /password/sign-in` | `ClientResult<{ token } & PublicSession>` |
+| `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `ClientResult<{ sent: true }>` |
+| `client.password.verifyEmail({ token })` | `POST /password/verify` | `ClientResult<{ verified: true }>`; the cookie is set when the address was unverified |
 | `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `ClientResult<{ sent: true }>` |
 | `client.password.reset({ token, password })` | `POST /password/reset` | `ClientResult<{ token } & PublicSession>` |
 | `client.password.change({ currentPassword?, newPassword })` | `POST /password/change` | `ClientResult<{ ok: true }>` |
@@ -104,6 +106,23 @@ from the `token` option. An Electron app can use `createTokenStore` from
 `@tempo-auth/handoff`.
 
 The password goes in the request body only. It never goes in a URL.
+
+## API tokens
+
+A CLI or a script uses an API token that a person made in the app.
+`create`, `list`, and `revoke` need a session; a token answers
+`unauthorized` there, so a token cannot mint a token. `current` needs a
+token. The clear token appears once, in the `create` answer.
+
+| Operation | Route | Answer type |
+| --- | --- | --- |
+| `client.tokens.create({ name, expiresInDays?, organizationId? })` | `POST /tokens` | `ClientResult<{ token, apiToken: ApiTokenSummaryJSON }>` |
+| `client.tokens.list()` | `GET /tokens` | `ClientResult<ApiTokenSummaryJSON[]>` |
+| `client.tokens.revoke({ id })` | `POST /tokens/revoke` | `ClientResult<{ ok: true }>` |
+| `client.tokens.current()` | `GET /tokens/current` | `ClientResult<{ user, apiToken }>` |
+
+A CLI passes the token as the bearer: `createClient({ baseURL, credentials: "omit", token: () => process.env.TEMPO_TOKEN ?? null })`.
+`expiresInDays` is 1 to 3650, default 90; `null` means no expiry.
 
 ## Organizations
 

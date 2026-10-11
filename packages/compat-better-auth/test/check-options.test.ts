@@ -108,6 +108,8 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       // consumerd fails the weak-type rule (TS2559: its rateLimit has no key in common with the type); the runtime check is what this test pins.
       const c = checkOptions(apps[name as keyof typeof apps] as BetterAuthOptions);
       expect({ name, refusals: paths(c.refusals) }).toEqual({ name, refusals: list });
+      if (name === "consumerb")
+        expect(c.refusals).toContain("plugins[api-key]: not mapped; see the plan index");
       const line = readme
         .split("\n")
         .find((l, i, all) => all[i - 1]?.startsWith(`${name} (`) && l.startsWith("The factory"));

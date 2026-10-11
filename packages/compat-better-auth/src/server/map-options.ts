@@ -50,13 +50,14 @@ export interface Mapped {
  * none, so that one bucket holds every such caller and one person could
  * lock every sign-in. The wrapper skips that key only for the flows that
  * also have a per-email limit: `password` (sign-in, `password:email:`),
- * `magic-link` (`magic-link:email:`), and `password-reset` (the reset
- * request, `password-reset:email:`). Every other flow (sign-up, the reset
+ * `magic-link` (`magic-link:email:`), `password-reset` (the reset
+ * request, `password-reset:email:`), and `password-resend` (the verify mail
+ * resend, `password-resend:email:`, plan 8b). Every other flow (sign-up, the reset
  * POST, invitation accept, handoff, passkey, social start) has only the
  * per-IP limit, so it keeps core's shared unknown bucket: without it such a
  * flow has no limit at all (review I-2).
  */
-const NO_IP_KEY = /^(password|magic-link|password-reset):ip:unknown$/;
+const NO_IP_KEY = /^(password|magic-link|password-reset|password-resend):ip:unknown$/;
 
 export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
   const sweep = limiter.sweep?.bind(limiter);

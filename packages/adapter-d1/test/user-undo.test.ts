@@ -8,7 +8,7 @@ import {
   type MailMessage,
   type StorageAdapter,
 } from "@tempo-auth/core";
-import { TABLES } from "@tempo-auth/core/sql";
+import { TABLES, USER_CHILD_MODELS } from "@tempo-auth/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 
@@ -63,6 +63,139 @@ describe("the D1 undo of a user create (plan 9 Task 4)", () => {
       }),
     ).rejects.toThrow("boom");
     expect(await db.findOne("user", byId("u1"))).toBeNull();
+  });
+});
+
+/**
+ * Plan 8b: a user created verified (a social claim, a reset of an unknown
+ * address) had an undo by id. On D1 another request can add a row that names
+ * the user inside the open transaction, and a throw then deleted the user
+ * under it. The undo now deletes the user only while no child row names it.
+ */
+describe("the D1 undo of a user that a child row names (plan 8b)", () => {
+  const day = new Date(t0.getTime() + 86_400_000);
+  const childRows: Record<string, (db: StorageAdapter) => Promise<unknown>> = {
+    identity: (db) =>
+      db.create("identity", {
+        id: "c1",
+        userId: "u1",
+        provider: "google",
+        subject: "g-1",
+        linkedAt: t0,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
+    session: (db) =>
+      db.create("session", {
+        id: "c1",
+        userId: "u1",
+        tokenHash: "h-c1",
+        expiresAt: day,
+        lastSeenAt: t0,
+        ip: null,
+        userAgent: null,
+        activeOrganizationId: null,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
+    passkey: (db) =>
+      db.create("passkey", {
+        id: "c1",
+        userId: "u1",
+        credentialId: "cred-c1",
+        publicKey: "pk",
+        counter: 0,
+        transports: null,
+        deviceType: "singleDevice",
+        backedUp: false,
+        name: null,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
+    member: async (db) => {
+      await db.create("organization", {
+        id: "o1",
+        slug: "o1",
+        name: "O1",
+        metadata: null,
+        createdAt: t0,
+        updatedAt: t0,
+      });
+      return db.create("member", {
+        id: "c1",
+        organizationId: "o1",
+        userId: "u1",
+        role: "member",
+        createdAt: t0,
+        updatedAt: t0,
+      });
+    },
+    password: (db) =>
+      db.create("password", {
+        id: "c1",
+        userId: "u1",
+        hash: "pbkdf2-sha256$1000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        createdAt: t0,
+        updatedAt: t0,
+      }),
+    apiToken: (db) =>
+      db.create("apiToken", {
+        id: "c1",
+        userId: "u1",
+        name: "ci",
+        tokenHash: "h-c1",
+        hint: "abcdefgh",
+        expiresAt: null,
+        lastUsedAt: null,
+        organizationId: null,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
+  };
+
+  it("covers every child model of the schema", () => {
+    expect(Object.keys(childRows).sort()).toEqual([...USER_CHILD_MODELS].sort());
+  });
+
+  for (const [model, add] of Object.entries(childRows)) {
+    it(`keeps a user created verified when another request adds a ${model} row inside the open transaction`, async () => {
+      const db = createD1Adapter(env.DB);
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.create("user", user("u1", true));
+          // Another request, outside this transaction.
+          await add(db);
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      expect(await db.findOne("user", byId("u1"))).not.toBeNull();
+    });
+  }
+
+  it("keeps a user created unverified when another request adds a session row inside the open transaction", async () => {
+    const db = createD1Adapter(env.DB);
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.create("user", user("u1", false));
+        // Another request, outside this transaction.
+        await childRows.session?.(db);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await db.findOne("user", byId("u1"))).not.toBeNull();
+  });
+
+  it("still deletes a user whose only child rows are the transaction's own", async () => {
+    const db = createD1Adapter(env.DB);
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.create("user", user("u1", true));
+        await childRows.session?.(tx);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await db.findOne("user", byId("u1"))).toBeNull();
+    expect(await db.findOne("session", byId("c1"))).toBeNull();
   });
 });
 

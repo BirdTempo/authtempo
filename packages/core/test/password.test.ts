@@ -7,6 +7,7 @@ import {
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
+  resendPasswordVerification,
   resetPassword,
   verifyPasswordEmail,
 } from "../src/engine/password.js";
@@ -475,6 +476,46 @@ describe("passwordSignIn", () => {
     ).toBe(after?.hash);
   });
 
+  it("signs in both of two right sign-ins that race one rehash (plan 8b, Review Focus 4)", async () => {
+    // Reachable: a verified user at cost 1000, then the deployer raises the
+    // cost to 2000. Two devices sign in at once: both read the old hash, and
+    // the second finishes its rehash while the first derives its new hash.
+    const auth = pwAuth();
+    const before = await signUpAndVerify(auth);
+    let race: () => Promise<void> = async () => {};
+    const { calls, seam } = counting(createPbkdf2PasswordHash({ iterations: 2000 }), () => race());
+    const raised = withSeam(auth.config, seam);
+    let second: Awaited<ReturnType<typeof passwordSignIn>> | null = null;
+    race = async () => {
+      race = async () => {};
+      second = await passwordSignIn(raised, {
+        email: EMAIL,
+        password: PW,
+        ip: "2.2.2.2",
+        userAgent: "ua",
+      });
+    };
+    const first = await passwordSignIn(raised, {
+      email: EMAIL,
+      password: PW,
+      ip: "1.1.1.1",
+      userAgent: "ua",
+    });
+    const other = second as Awaited<ReturnType<typeof passwordSignIn>> | null;
+    if (!first.ok) throw new Error(`the first sign-in answered ${first.code}`);
+    if (!other?.ok) throw new Error("the second sign-in did not sign in");
+    expect(calls.hash).toBe(2);
+    // Two first verifies, and one more on the sign-in that loses the rehash.
+    expect(calls.verify).toHaveLength(3);
+    const row = await auth.storage.findOne("password", [
+      { field: "id", op: "eq", value: before.id },
+    ]);
+    expect(row?.hash).toMatch(/^pbkdf2-sha256\$2000\$/);
+    const ids = (await auth.storage.findMany("session", [])).map((s) => s.id);
+    expect(ids).toContain(first.value.session.id);
+    expect(ids).toContain(other.value.session.id);
+    expect(first.value.session.id).not.toBe(other.value.session.id);
+  });
   it("keeps the hash and no session when a change lands between the verify and the rehash", async () => {
     const auth = pwAuth();
     const before = await signUpAndVerify(auth);
@@ -1412,5 +1453,74 @@ describe("fix round 1: the verify link of a verified user", () => {
       await auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]),
     ).toEqual(before.user);
     expect((await signIn(auth, { password: "owner password 1" })).ok).toBe(true);
+  });
+});
+
+describe("resendPasswordVerification (plan 8b)", () => {
+  const resend = (
+    auth: ReturnType<typeof makeAuth>,
+    email = EMAIL,
+    ip: string | null = "1.1.1.1",
+  ) => resendPasswordVerification(auth.config, { email, ip });
+
+  it("mails a new link to an unverified user with a password and ends the earlier link", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    const first = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    expect(await resend(auth, " Ada@Example.com ")).toEqual({ ok: true, value: { sent: true } });
+    expect(auth.mail).toHaveLength(2);
+    expect(auth.mail[1]?.to).toBe(EMAIL);
+    expect(auth.mail[1]?.subject).toBe("Confirm your email for api.example.com");
+    const second = tokenFromMail(auth.mail[1]?.text ?? "");
+    expect(second).not.toBe(first);
+    expect(
+      await auth.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "password-verify" },
+      ]),
+    ).toHaveLength(1);
+    expect(
+      await verifyPasswordEmail(auth.config, { token: first, ip: null, userAgent: null }),
+    ).toMatchObject({ ok: false, code: "invalid_token" });
+    const v = await verifyPasswordEmail(auth.config, { token: second, ip: null, userAgent: null });
+    expect(v.ok && v.value.user.emailVerified).toBe(true);
+  });
+
+  it("answers sent and mails nothing for an unknown, a malformed, or a verified address", async () => {
+    const auth = pwAuth();
+    await signUpAndVerify(auth);
+    const mails = auth.mail.length;
+    for (const email of ["nobody@example.com", "not an address", EMAIL])
+      expect(await resend(auth, email)).toEqual({ ok: true, value: { sent: true } });
+    expect(auth.mail).toHaveLength(mails);
+  });
+
+  it("limits each address to 3 and each IP to 20 per 15 minutes", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    for (let i = 0; i < 3; i++) expect((await resend(auth, EMAIL, `9.9.9.${i}`)).ok).toBe(true);
+    expect(await resend(auth, EMAIL, "9.9.9.9")).toMatchObject({ ok: false, code: "rate_limited" });
+    for (let i = 0; i < 20; i++) await resend(auth, `x${i}@example.com`, "8.8.8.8");
+    expect(await resend(auth, "y@example.com", "8.8.8.8")).toMatchObject({
+      code: "rate_limited",
+    });
+    auth.clock.advance(16 * 60_000);
+    expect((await resend(auth, EMAIL, "9.9.9.9")).ok).toBe(true);
+  });
+
+  it("checks the IP key before the email key", async () => {
+    const auth = pwAuth();
+    const keys: string[] = [];
+    const allow = auth.config.limiter.allow.bind(auth.config.limiter);
+    const spy = vi.spyOn(auth.config.limiter, "allow").mockImplementation((key, window) => {
+      keys.push(key);
+      return allow(key, window);
+    });
+    await resend(auth, EMAIL, "4.4.4.4");
+    spy.mockRestore();
+    expect(keys).toEqual(["password-resend:ip:4.4.4.4", `password-resend:email:${EMAIL}`]);
+  });
+
+  it("answers not_found with no password config", async () => {
+    expect(await resend(makeAuth())).toMatchObject({ code: "not_found", status: 404 });
   });
 });

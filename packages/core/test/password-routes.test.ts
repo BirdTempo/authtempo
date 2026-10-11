@@ -199,15 +199,82 @@ describe("password change route", () => {
     expect(h.auth.api.password).toBeUndefined();
   });
 
-  it("has the four new methods on api.password", () => {
+  it("has every method on api.password", () => {
     const h = pwHandle({ hash: FAST });
     expect(Object.keys(h.auth.api.password ?? {}).sort()).toEqual([
       "change",
       "requestReset",
+      "resendVerification",
       "reset",
       "signIn",
       "signUp",
       "verifyEmail",
     ]);
+  });
+});
+
+describe("the reset page and code points (plan 8b)", () => {
+  it("takes a 128-code-point password of astral characters through the reset form and refuses 129", async () => {
+    const h = pwHandle({ hash: FAST });
+    await h.auth.handle(post("/auth/password/reset/request", { email: EMAIL }));
+    const token = lastToken(h, "Reset");
+    const page = await (await h.auth.handle(get(`/auth/password/reset?token=${token}`))).text();
+    expect(page).not.toMatch(/minlength|maxlength/);
+    // U+1D11E is two UTF-16 code units: 128 code points are 256 units.
+    const clef = "\u{1D11E}";
+    const refused = await h.auth.handle(
+      form(
+        "/auth/password/reset",
+        `token=${token}&password=${encodeURIComponent(clef.repeat(129))}`,
+      ),
+    );
+    expect(refused.status).toBe(302);
+    expect(refused.headers.get("location")).toBe(
+      `https://api.example.com/auth/password/reset?token=${token}&error=password_policy`,
+    );
+    const accepted = await h.auth.handle(
+      form(
+        "/auth/password/reset",
+        `token=${token}&password=${encodeURIComponent(clef.repeat(128))}`,
+      ),
+    );
+    expect(accepted.status).toBe(302);
+    expect(accepted.headers.get("location")).toBe("https://api.example.com/");
+    expect(accepted.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+  });
+});
+
+describe("password resend route (plan 8b)", () => {
+  it("POST /password/verify/resend answers sent and mails a new link", async () => {
+    const h = pwHandle({ hash: FAST });
+    await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
+    const res = await h.auth.handle(post("/auth/password/verify/resend", { email: EMAIL }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ sent: true });
+    expect(h.mails.filter((m) => m.subject.startsWith("Confirm"))).toHaveLength(2);
+    const bad = await h.auth.handle(post("/auth/password/verify/resend", { email: 5 }));
+    expect(bad.status).toBe(400);
+  });
+
+  it("answers 429 rate_limited for the 21st resend from one IP", async () => {
+    const h = pwHandle({ hash: FAST });
+    const ip = { "cf-connecting-ip": "7.7.7.7" };
+    for (let i = 0; i < 20; i++) {
+      const r = await h.auth.handle(
+        post("/auth/password/verify/resend", { email: `x${i}@example.com` }, ip),
+      );
+      expect(r.status).toBe(200);
+    }
+    const res = await h.auth.handle(
+      post("/auth/password/verify/resend", { email: "y@example.com" }, ip),
+    );
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "rate_limited" });
+  });
+
+  it("answers 404 with no password config", async () => {
+    const h = pwHandle(undefined);
+    const res = await h.auth.handle(post("/auth/password/verify/resend", { email: EMAIL }));
+    expect(res.status).toBe(404);
   });
 });

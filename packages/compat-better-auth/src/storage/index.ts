@@ -22,7 +22,7 @@ export type PostgresSchemaStorage = CompatDatabase & {
   readonly names: Names;
   /** The text of migration 0001 for these names. */
   migrationSql(): string;
-  /** Runs migration 0001 when the database does not hold it. Safe on every deploy. */
+  /** Runs migrations 0001 and 0002 when the database does not hold them. Safe on every deploy. */
   migrate(): Promise<string[]>;
 };
 
@@ -42,7 +42,8 @@ export type D1SchemaStorage = CompatDatabase & {
   /**
    * The text of migration 0001 for these names. Save it in the app's
    * migrations directory when the names are not Better Auth's defaults.
-   * "before-1.7" for tables with no `account.issuer` column.
+   * "before-1.7" for tables with no `account.issuer` column. Apply the
+   * shipped 0002 file after it: 0002 is the same for every naming.
    */
   migrationSql(variant?: SqliteVariant): string;
 };

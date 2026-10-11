@@ -24,8 +24,11 @@ describe("password pages", () => {
     const reset = defaultResetPage({ ...base, error: null });
     expect(reset).toContain("<title>Choose a new password for A&lt;b&gt;</title>");
     expect(reset).toContain(`<form method="post" action="/auth/password/reset">`);
+    // No minlength or maxlength: both count UTF-16 code units, and the policy counts code points (plan 8b).
+    expect(reset).toContain(`name="password" autocomplete="new-password" required`);
+    expect(reset).not.toMatch(/minlength|maxlength/);
     expect(reset).toContain(
-      `name="password" minlength="8" maxlength="128" autocomplete="new-password" required`,
+      "<p>Use 8 to 128 characters, no control characters, and not your email address.</p>",
     );
     expect(reset).toContain(`value="pr_x&quot;&lt;y"`);
     expect(reset).not.toContain("<script");
@@ -39,5 +42,8 @@ describe("password pages", () => {
     expect(defaultResetPage({ ...base, error: "password_breached" })).toContain(
       "This password is in a known data breach. Choose a different password.",
     );
+    // The policy refusal shows the rule once, as the error.
+    const refused = defaultResetPage({ ...base, error: "password_policy" });
+    expect(refused.split("Use 8 to 128 characters").length - 1).toBe(1);
   });
 });

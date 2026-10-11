@@ -128,6 +128,23 @@ describe("createAuthClient", () => {
     expect(s.seen.at(-1)?.headers.get("authorization")).toBe(`Bearer ${signedIn.data?.token}`);
   });
 
+  it("resends the verify mail through sendVerificationEmail (plan 8b)", async () => {
+    const s = server();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    expect(await c.sendVerificationEmail({ email: "pat@example.com" })).toMatchObject({
+      data: { status: true },
+      error: null,
+    });
+    expect(
+      s.mails.filter((m) => m.kind === "verify" && m.email === "pat@example.com"),
+    ).toHaveLength(2);
+  });
+
   it("answers Better Auth's error shape with core's status (Review Focus 5)", async () => {
     const s = server();
     const onError = vi.fn();

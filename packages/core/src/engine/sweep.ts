@@ -6,6 +6,8 @@ export interface SweepResult {
   invitations: number;
   /** Session rows past `expiresAt`. */
   sessions: number;
+  /** API token rows past `expiresAt`. A token with no expiry is never swept. */
+  apiTokens: number;
   /** Limiter windows that ended. 0 when the limiter has no sweep. */
   limits: number;
 }
@@ -44,6 +46,12 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   // after the expiry. A row that nobody presents again keeps its IP address
   // and user agent with no limit (final review M-2, 2026-10-10).
   const sessions = await storage.delete("session", [{ field: "expiresAt", op: "lt", value: now }]);
+  // An expired token goes on its own only when a script presents it again.
+  // A null expiry never matches lt (port.ts null rules), so it stays.
+  // A row at exactly `expiresAt` is refused by `resolveApiToken` (`<=`) and goes at the next sweep.
+  const apiTokens = await storage.delete("apiToken", [
+    { field: "expiresAt", op: "lt", value: now },
+  ]);
   // The owned limiters keep one row per key and window. Without this sweep
   // every address and IP that reached a limiter stays in ta_limit forever.
   const limits = (await config.limiter.sweep?.(now)) ?? 0;
@@ -52,6 +60,7 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     verificationConsumed,
     invitations: accepted + expired,
     sessions,
+    apiTokens,
     limits,
   };
 }
