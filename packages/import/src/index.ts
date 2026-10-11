@@ -7,4 +7,5 @@ export { CLERK_ROLES, type ClerkExport, clerkSource } from "./readers/clerk.js";
 export { type CognitoExport, cognitoSource } from "./readers/cognito.js";
 export { type FirebaseExport, firebaseSource } from "./readers/firebase.js";
 export { type SupabaseExport, supabasePassword, supabaseSource } from "./readers/supabase.js";
+export { type ImportBundle, PROVIDER_FILES, sourceOf } from "./sources.js";
 export * from "./types.js";
