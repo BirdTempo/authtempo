@@ -1,7 +1,7 @@
 import type { FirebaseHashConfig } from "@tempo-auth/legacy-hashes";
 import { csvRecords } from "../csv.js";
 import type { ImportUser, Source } from "../types.js";
-import { parseTime } from "./common.js";
+import { asRecord, parseTime } from "./common.js";
 
 /**
  * Supabase Auth: two CSV files from the project's Postgres, made with the
@@ -9,9 +9,24 @@ import { parseTime } from "./common.js";
  * `auth.identities`). The select fixes the column names, so a column that
  * Supabase adds later does not change this reader. Columns checked in the
  * supabase/auth migrations on 2026-10-11.
+ *
+ * Columns the select leaves out, so they do not move (research 1a):
+ * - `auth.users.phone`, `phone_confirmed_at`: core has no phone sign-in. A
+ *   phone-only user has no email and is skipped as `no_email`.
+ * - `auth.users.confirmed_at`: generated as LEAST(email, phone); it is not the
+ *   email flag. `email_confirmed_at` is.
+ * - `auth.users.raw_app_meta_data`: holds `provider` and `providers`, which
+ *   the identities file gives row by row.
+ * - `auth.users.updated_at`, `last_sign_in_at`: core sets its own times.
+ * - `auth.identities.id`, `created_at`, `updated_at`, `last_sign_in_at`: core
+ *   makes its own identity id and times.
+ * - `auth.identities.identity_data`, `email`: the reader links an identity by
+ *   `user_id`, never by an address, so the identity email is not used.
+ * - `auth.webauthn_credentials`: the `public_key` encoding is unverified
+ *   (spec 17.5).
  */
 export interface SupabaseExport {
-  /** Columns: id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, is_anonymous, deleted_at, banned_until. */
+  /** Columns: id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, is_anonymous, deleted_at, banned_until, is_sso_user. */
   users: string;
   /** Columns: provider, provider_id, user_id. */
   identities: string;
@@ -50,6 +65,17 @@ export function supabasePassword(
 
 const truthy = (v: string | undefined) => v === "t" || v === "true";
 
+/**
+ * Fail closed: a ban is the source's promise. Any value that is not a time in
+ * the past counts as banned, so `infinity` and a timestamp in a DateStyle
+ * that `parseTime` does not read keep the user out. An expired ban imports.
+ */
+function bannedNow(text: string | undefined, now: Date): boolean {
+  if (!text) return false;
+  const until = parseTime(text);
+  return until === null || until.getTime() > now.getTime();
+}
+
 export function supabaseSource(input: SupabaseExport): Source {
   const now = input.now ?? (() => new Date());
   return {
@@ -65,15 +91,17 @@ export function supabaseSource(input: SupabaseExport): Source {
         byUser.set(i.user_id, list);
       }
       for (const u of csvRecords(input.users)) {
+        const dropped: string[] = [];
+        // A jsonb null, or any value that is not an object, gives no name and no image.
         let meta: Record<string, unknown> = {};
         try {
-          meta = u.raw_user_meta_data
-            ? (JSON.parse(u.raw_user_meta_data) as Record<string, unknown>)
-            : {};
-        } catch {}
+          meta = u.raw_user_meta_data ? asRecord(JSON.parse(u.raw_user_meta_data)) : {};
+        } catch {
+          // Postgres writes valid JSON; a file edited by hand can break it.
+          dropped.push("meta:invalid");
+        }
         const text = (k: string) =>
           typeof meta[k] === "string" && meta[k] ? (meta[k] as string) : null;
-        const banned = parseTime(u.banned_until);
         const record: ImportUser = {
           kind: "user",
           sourceId: u.id ?? "",
@@ -87,9 +115,15 @@ export function supabaseSource(input: SupabaseExport): Source {
           password: supabasePassword(u.encrypted_password ?? "", input.firebase),
           passkeys: [],
         };
+        if (dropped.length > 0) record.dropped = dropped;
         if (truthy(u.is_anonymous)) record.skip = "anonymous";
         else if (u.deleted_at) record.skip = "deleted";
-        else if (banned && banned.getTime() > now().getTime()) record.skip = "banned";
+        else if (bannedNow(u.banned_until, now())) record.skip = "banned";
+        // tempo-auth has no SAML mapping. The email unique index skips SSO users
+        // (users_email_partial_key, migration 20221215195500, read 2026-10-11),
+        // so an SSO user can share an address with a password user, and CSV
+        // order must not decide who owns it.
+        else if (truthy(u.is_sso_user)) record.skip = "sso_user";
         yield record;
       }
     },
