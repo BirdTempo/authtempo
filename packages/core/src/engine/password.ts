@@ -310,7 +310,7 @@ export async function passwordSignIn(
   }
   const checked =
     row.hash === LEGACY_VERIFY_HASH
-      ? await legacyCheck(pw, user.email, input.password)
+      ? await legacyCheck(pw, user.email, input.password, started)
       : await pw.hash.verify(input.password, row.hash);
   if (!checked.ok) return refuse();
   const now = config.clock.now();
@@ -378,12 +378,17 @@ export async function passwordSignIn(
  * match is `rehash: true`: the sign-in writes this config's hash over the
  * marker by the conditional update on the marker, then signs in as for any
  * other row. Only a boolean `true` is a match. A throw, any other answer, or
- * no answer within `timeoutMs` is a failure; the timeout aborts the call.
+ * no answer by the floor's deadline is a failure; the timeout aborts the call.
+ * The deadline is `started + timeoutMs`, the same as the floor's, not
+ * `timeoutMs` from the call: the lookups and the dummy verify run first, and
+ * a timer from the call would answer late by their time. That delay would
+ * tell a legacy row from an unknown address.
  */
 async function legacyCheck(
   pw: Resolved,
   email: string,
   password: string,
+  started: number,
 ): Promise<{ ok: boolean; rehash: boolean }> {
   await pw.hash.verify(password, await pw.hash.dummy());
   const lv = pw.legacyVerify;
@@ -391,10 +396,13 @@ async function legacyCheck(
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<false>((resolve) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      resolve(false);
-    }, lv.timeoutMs);
+    timer = setTimeout(
+      () => {
+        controller.abort();
+        resolve(false);
+      },
+      Math.max(0, lv.timeoutMs - (Date.now() - started)),
+    );
   });
   try {
     const answer = await Promise.race([lv.verify(email, password, controller.signal), timeout]);

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { ConfigError, type LegacyVerifyConfig, resolveConfig } from "../src/config.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
-import { LEGACY_VERIFY_HASH, passwordSignIn } from "../src/engine/password.js";
+import {
+  LEGACY_VERIFY_HASH,
+  passwordSignIn,
+  requestPasswordReset,
+  resetPassword,
+} from "../src/engine/password.js";
 import { newId } from "../src/primitives/ids.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, pwAuth } from "./password-helpers.js";
@@ -285,6 +290,99 @@ describe("password.legacyVerify (spec 17.4)", () => {
     // The claimant who knew the old system's password does not get in.
     expect(await signIn(auth, EMAIL, PW)).toMatchObject({ ok: false, code: "invalid_credentials" });
     expect(old.verify).not.toHaveBeenCalled();
+  });
+
+  it("ends a silent old system at the floor, not timeoutMs after the call (Review I-1)", async () => {
+    // A hash seam whose verify takes 100 ms: the lookups and the dummy
+    // verify run before the old system is asked, as on a real deployment.
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const slow = {
+      hash: (plain: string) => FAST.hash(plain),
+      verify: async (plain: string, stored: string) => {
+        await sleep(100);
+        return FAST.verify(plain, stored);
+      },
+      dummy: () => FAST.dummy(),
+    };
+    const auth = pwAuth({
+      hash: slow,
+      legacyVerify: { verify: () => new Promise<boolean>(() => {}), timeoutMs: 300 },
+    });
+    await importedUser(auth);
+    const t0 = Date.now();
+    expect(await signIn(auth, EMAIL, PW)).toMatchObject({ ok: false, code: "invalid_credentials" });
+    const took = Date.now() - t0;
+    // At the floor: an unknown address answers at 300 ms too. A timer from
+    // the call would answer at about 400 ms.
+    expect(took).toBeGreaterThanOrEqual(295);
+    expect(took).toBeLessThan(350);
+  });
+
+  it("commits no session when the owner claims the address while the old system answers (Review M-1)", async () => {
+    const auth = legacyAuth({
+      verify: async (_e, _p, signal) => {
+        // The mailbox owner's magic link, while the claimant's check runs.
+        await requestMagicLink(auth.config, { email: EMAIL, ip: null });
+        const ml = await verifyMagicLink(auth.config, {
+          token: tokenFromMail(auth.mail.at(-1)?.text ?? ""),
+          ip: null,
+          userAgent: null,
+        });
+        if (!ml.ok) throw new Error(ml.code);
+        answered = !signal.aborted;
+        return true;
+      },
+      timeoutMs: 1000,
+    });
+    let answered = false;
+    await importedUser(auth, false);
+    expect(await signIn(auth, EMAIL, PW)).toMatchObject({ ok: false, code: "invalid_credentials" });
+    // The old system answered true before the timeout; the refusal is the row check.
+    expect(answered).toBe(true);
+    expect(await auth.storage.findMany("password", [])).toHaveLength(0);
+    // Only the owner's magic-link session.
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions).toHaveLength(1);
+    expect(await auth.storage.findMany("identity", [])).toMatchObject([
+      { provider: "email", subject: EMAIL, userId: sessions[0]?.userId },
+    ]);
+  });
+
+  it("keeps the owner's reset when it lands while the old system answers (Review M-1)", async () => {
+    let resetSession: string | null = null;
+    let answered = false;
+    const auth = legacyAuth({
+      verify: async (_e, _p, signal) => {
+        // The owner's reset, while the claimant's check runs.
+        await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+        const r = await resetPassword(auth.config, {
+          token: tokenFromMail(
+            auth.mail.filter((m) => m.subject.startsWith("Reset")).at(-1)?.text ?? "",
+          ),
+          password: "the owner's new password",
+          ip: null,
+          userAgent: null,
+        });
+        if (!r.ok) throw new Error(r.code);
+        resetSession = r.value.session.id;
+        answered = !signal.aborted;
+        return true;
+      },
+      timeoutMs: 1000,
+    });
+    const { row } = await importedUser(auth);
+    expect(await signIn(auth, EMAIL, PW)).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect(answered).toBe(true);
+    // The row holds the reset's hash, not the claimant's old password.
+    const after = await auth.storage.findOne("password", [
+      { field: "id", op: "eq", value: row.id },
+    ]);
+    expect(after?.hash).toMatch(/^pbkdf2-sha256\$1000\$/);
+    expect((await FAST.verify("the owner's new password", after?.hash ?? "")).ok).toBe(true);
+    expect((await FAST.verify(PW, after?.hash ?? "")).ok).toBe(false);
+    // Only the reset's session.
+    const sessions = await auth.storage.findMany("session", []);
+    expect(sessions.map((s) => s.id)).toEqual([resetSession]);
   });
 
   it("refuses a timeoutMs outside 100 to 30000", () => {

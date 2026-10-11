@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAppScheme, resolveConfig } from "../src/config.js";
+import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -243,5 +243,16 @@ describe("password config (plan 8)", () => {
         /password.resetTtlMinutes/,
       );
     }
+  });
+});
+
+describe("DEFAULT_RESERVED_SLUGS", () => {
+  it("is frozen, so no caller can empty core's default", () => {
+    const list = DEFAULT_RESERVED_SLUGS as string[];
+    expect(() => list.push("x")).toThrow(TypeError);
+    expect(() => {
+      list.length = 0;
+    }).toThrow(TypeError);
+    expect(DEFAULT_RESERVED_SLUGS).toContain("admin");
   });
 });

@@ -149,7 +149,9 @@ export interface LegacyVerifyConfig {
    * 100 to 30000. Default 5000. While `legacyVerify` is set, every failed
    * password sign-in answers no earlier than this many milliseconds after its
    * check began, so a legacy row's network time does not tell an address with
-   * a legacy row from an unknown one.
+   * a legacy row from an unknown one. The old system's deadline is the same
+   * time, not `timeoutMs` from its call: core's lookups and dummy verify run
+   * first, so `verify` gets a little less than `timeoutMs`.
    */
   timeoutMs?: number;
 }
@@ -222,8 +224,12 @@ export function workersClientIp(request: Request): string | null {
 }
 
 const DEFAULT_RANKS = { viewer: 1, member: 2, admin: 3, owner: 4 };
-/** Exported for the importer (plan 9b), which refuses the same slugs. One list for both. */
-export const DEFAULT_RESERVED_SLUGS: readonly string[] = [
+/**
+ * Exported for the importer (plan 9b), which refuses the same slugs. One list
+ * for both. Frozen: `resolveConfig` reads it on every call, so a caller that
+ * empties it would let an organization take `admin` or `auth`.
+ */
+export const DEFAULT_RESERVED_SLUGS: readonly string[] = Object.freeze([
   "admin",
   "api",
   "auth",
@@ -233,7 +239,7 @@ export const DEFAULT_RESERVED_SLUGS: readonly string[] = [
   "platform",
   "system",
   "www",
-];
+]);
 
 const APP_NAME_MAX = 80;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\/$/;
