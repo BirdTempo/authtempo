@@ -29,9 +29,31 @@ if (existsSync(out) && readdirSync(out).length > 0) {
   console.error(`${out} is not empty`);
   process.exit(2);
 }
-mkdirSync(out, { recursive: true });
 
 const root = resolve(import.meta.dirname, "..");
+// The consumer records the HEAD commit beside the hashes as the source of the tarballs.
+// A changed file under these paths would ship in a tarball, but HEAD would not hold it.
+// So refuse a dirty tree. Then the same commit always gives the same hashes.
+const dirty = execFileSync(
+  "git",
+  [
+    "status",
+    "--porcelain",
+    "--",
+    "packages",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "package.json",
+  ],
+  { cwd: root, encoding: "utf8" },
+)
+  .split("\n")
+  .filter(Boolean);
+if (dirty.length > 0) {
+  console.error(`the tree is not clean: ${dirty[0].slice(3)} has an uncommitted change`);
+  process.exit(1);
+}
+mkdirSync(out, { recursive: true });
 const expected = DIRS.map((dir) => {
   const pkg = JSON.parse(readFileSync(join(root, "packages", dir, "package.json"), "utf8"));
   // pnpm pack names @scope/name at version v as scope-name-v.tgz.
@@ -93,9 +115,17 @@ const PROTOCOLS = ["workspace:", "catalog:", "link:"];
 for (const p of expected) {
   if (!found.includes(p.file)) continue;
   const path = join(out, p.file);
-  const manifest = JSON.parse(
-    execFileSync("tar", ["-xzOf", path, "package/package.json"], { encoding: "utf8" }),
-  );
+  let manifest;
+  let files;
+  try {
+    manifest = JSON.parse(
+      execFileSync("tar", ["-xzOf", path, "package/package.json"], { encoding: "utf8" }),
+    );
+    files = new Set(execFileSync("tar", ["-tzf", path], { encoding: "utf8" }).split("\n"));
+  } catch {
+    console.error(`${p.name}: cannot read ${p.file}`);
+    process.exit(1);
+  }
   // pnpm pack turns workspace:* into the version. A range that stays cannot install.
   for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
     for (const [dep, range] of Object.entries(manifest[field] ?? {})) {
@@ -105,7 +135,6 @@ for (const p of expected) {
       }
     }
   }
-  const files = new Set(execFileSync("tar", ["-tzf", path], { encoding: "utf8" }).split("\n"));
   for (const target of p.needed) {
     const inTarball = `package/${target.replace(/^\.\//, "")}`;
     if (!files.has(inTarball)) {
@@ -115,6 +144,8 @@ for (const p of expected) {
   }
 }
 if (failed) process.exit(1);
+const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+console.error(`HEAD ${head}`);
 for (const p of expected) {
   const hex = createHash("sha256")
     .update(readFileSync(join(out, p.file)))
