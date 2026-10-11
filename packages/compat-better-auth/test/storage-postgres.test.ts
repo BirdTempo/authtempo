@@ -519,17 +519,46 @@ describe("the compat undo of a created user", () => {
     expect(await ids()).toEqual([]);
   });
 
-  it("names the emailVerified column of the table, in both dialects", () => {
+  it("names the emailVerified column and the child tables of the naming, in both dialects (plan 8b)", () => {
     const data = { ...user("u4", "x@example.com"), emailVerified: false };
     const snakeNames = resolveNames({ casing: "snake" });
     expect(compatStatements("sqlite", snakeNames).undoCreate("user", data)).toEqual({
-      sql: 'DELETE FROM "user" WHERE "id" = ? AND "email_verified" = ?',
-      params: ["u4", 0],
+      sql:
+        'DELETE FROM "user" WHERE "id" = ? AND "email_verified" = ?' +
+        ' AND NOT EXISTS (SELECT 1 FROM "account" WHERE "user_id" = ?)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "user_id" = ?)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "user_id" = ?)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "user_id" = ?)',
+      params: ["u4", 0, "u4", "u4", "u4", "u4"],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
-      sql: 'DELETE FROM "user" WHERE "id" = $1',
-      params: ["u5"],
+      sql:
+        'DELETE FROM "user" WHERE "id" = $1' +
+        ' AND NOT EXISTS (SELECT 1 FROM "account" WHERE "userId" = $2)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "userId" = $3)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "userId" = $4)' +
+        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "userId" = $5)',
+      params: ["u5", "u5", "u5", "u5", "u5"],
     });
+  });
+
+  it("keeps a verified user that a session names on Better Auth's tables (plan 8b)", async () => {
+    const kept = user("u6", "kept@example.com");
+    await db.create("user", kept);
+    await db.create("session", {
+      id: "s6",
+      userId: "u6",
+      tokenHash: "h-s6",
+      expiresAt: later,
+      lastSeenAt: at,
+      ip: null,
+      userAgent: null,
+      activeOrganizationId: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    expect(await undo(kept)).toBe(0);
+    expect(await ids()).toEqual(["u6"]);
   });
 });
 

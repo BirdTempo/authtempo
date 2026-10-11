@@ -7,7 +7,9 @@ import {
   SQLITE,
   type SqlStatements,
   type Statement,
+  USER_CHILD_MODELS,
   undoCreateWhere,
+  whileNoChildRow,
 } from "@tempo-auth/core/sql";
 import { type AnyModelMap, MAPPING } from "./mapping.js";
 import { FILLED_DATES, sqliteIsoText } from "./migration.js";
@@ -385,7 +387,21 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       // it is still unverified, so a claim's verified row survives the undo.
       const s = st.delete(model, undoCreateWhere(model, data));
       if (!s) throw new Error("undoCreate: an eq filter always compiles");
-      return s;
+      if (model !== "user") return s;
+      // Core's rule (plan 8b): only while no child row names the user. The
+      // account table holds both the identity and the password rows, so it is
+      // one term. An unmapped model has no table to check.
+      const children = new Map<string, string>();
+      for (const m of USER_CHILD_MODELS) {
+        if (UNMAPPED_MODELS.has(m) || children.has(table(m))) continue;
+        children.set(table(m), column(m, "userId"));
+      }
+      return whileNoChildRow(
+        d,
+        s,
+        (data as { id: string }).id,
+        [...children].map(([t, c]) => ({ table: t, column: c })),
+      );
     },
     restoreRow(model, row, data) {
       // The row comes from SELECT *, so its keys are the DDL's spelling. On

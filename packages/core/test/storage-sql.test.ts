@@ -6,6 +6,7 @@ import {
   assertModel,
   columnName,
   columnsOf,
+  coreStatements,
   decodeRow,
   deleteStatement,
   encodeValue,
@@ -18,6 +19,7 @@ import {
   schemaVersionGate,
   selectStatement,
   TABLES,
+  USER_CHILD_MODELS,
   uniqueIndexName,
   updateStatement,
 } from "../src/storage/sql.js";
@@ -460,5 +462,69 @@ describe("schemaVersionGate", () => {
     });
     await expect(gate()).rejects.toBe(boom);
     await expect(gate()).resolves.toBeUndefined();
+  });
+});
+
+describe("the D1 undo of a user create (plan 8b)", () => {
+  const user = (emailVerified: boolean) => ({
+    id: "u1",
+    email: "a@example.com",
+    emailVerified,
+    name: null,
+    image: null,
+    createdAt: t0,
+    updatedAt: t0,
+  });
+  const children =
+    " AND NOT EXISTS (SELECT 1 FROM ta_identity WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_session WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_passkey WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_member WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_password WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_api_token WHERE user_id = ?)";
+
+  it("lists every model with a userId field as a child, from the schema", () => {
+    expect(USER_CHILD_MODELS).toEqual([
+      "identity",
+      "session",
+      "passkey",
+      "member",
+      "password",
+      "apiToken",
+    ]);
+  });
+
+  it("deletes a created user only while no child row names it, verified or not", () => {
+    const st = coreStatements(SQLITE);
+    expect(st.undoCreate("user", user(true))).toEqual({
+      sql: `DELETE FROM ta_user WHERE id = ?${children}`,
+      params: ["u1", "u1", "u1", "u1", "u1", "u1", "u1"],
+    });
+    expect(st.undoCreate("user", user(false))).toEqual({
+      sql: `DELETE FROM ta_user WHERE id = ? AND email_verified = ?${children}`,
+      params: ["u1", 0, "u1", "u1", "u1", "u1", "u1", "u1"],
+    });
+  });
+
+  it("numbers the Postgres placeholders after the where", () => {
+    const s = coreStatements(POSTGRES).undoCreate("user", user(true));
+    expect(s.sql.endsWith("FROM ta_api_token WHERE user_id = $7)")).toBe(true);
+    expect(s.params).toHaveLength(7);
+  });
+
+  it("keeps the undo of any other model a delete by id", () => {
+    const s = coreStatements(SQLITE).undoCreate("session", {
+      id: "s1",
+      userId: "u1",
+      tokenHash: "h",
+      expiresAt: t0,
+      lastSeenAt: t0,
+      ip: null,
+      userAgent: null,
+      activeOrganizationId: null,
+      createdAt: t0,
+      updatedAt: t0,
+    });
+    expect(s).toEqual({ sql: "DELETE FROM ta_session WHERE id = ?", params: ["s1"] });
   });
 });
