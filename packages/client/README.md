@@ -107,6 +107,23 @@ from the `token` option. An Electron app can use `createTokenStore` from
 
 The password goes in the request body only. It never goes in a URL.
 
+## API tokens
+
+A CLI or a script uses an API token that a person made in the app.
+`create`, `list`, and `revoke` need a session; a token answers
+`unauthorized` there, so a token cannot mint a token. `current` needs a
+token. The clear token appears once, in the `create` answer.
+
+| Operation | Route | Answer type |
+| --- | --- | --- |
+| `client.tokens.create({ name, expiresInDays?, organizationId? })` | `POST /tokens` | `ClientResult<{ token, apiToken: ApiTokenSummaryJSON }>` |
+| `client.tokens.list()` | `GET /tokens` | `ClientResult<ApiTokenSummaryJSON[]>` |
+| `client.tokens.revoke({ id })` | `POST /tokens/revoke` | `ClientResult<{ ok: true }>` |
+| `client.tokens.current()` | `GET /tokens/current` | `ClientResult<{ user, apiToken }>` |
+
+A CLI passes the token as the bearer: `createClient({ baseURL, credentials: "omit", token: () => process.env.TEMPO_TOKEN ?? null })`.
+`expiresInDays` is 1 to 3650, default 90; `null` means no expiry.
+
 ## Organizations
 
 The server must set `organizations: {}` in `createAuth`. Without it, each

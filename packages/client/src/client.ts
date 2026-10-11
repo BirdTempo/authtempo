@@ -1,4 +1,5 @@
 import type {
+  ApiTokenSummary,
   InvitationSummary,
   MemberSummary,
   OrganizationSummary,
@@ -18,6 +19,14 @@ export type OrganizationJSON = Omit<OrganizationSummary, "createdAt"> & { create
 export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string };
 export type InvitationJSON = Omit<InvitationSummary, "expiresAt" | "createdAt"> & {
   expiresAt: string;
+  createdAt: string;
+};
+export type ApiTokenSummaryJSON = Omit<
+  ApiTokenSummary,
+  "expiresAt" | "lastUsedAt" | "createdAt"
+> & {
+  expiresAt: string | null;
+  lastUsedAt: string | null;
   createdAt: string;
 };
 
@@ -136,6 +145,23 @@ export interface Client {
     };
     /** Answers the session, so the caller reads `session.activeOrganizationId` from it. `null` clears it. */
     setActive(input: { organizationId: string | null }): Promise<ClientResult<PublicSession>>;
+  };
+  /**
+   * API tokens for scripts and CLIs. `create`, `list`, and `revoke` need a
+   * session: a token answers `unauthorized` there. `current` needs a token:
+   * a CLI passes `token: () => "tk_…"` to `createClient`.
+   */
+  tokens: {
+    create(input: {
+      name: string;
+      expiresInDays?: number | null | undefined;
+      organizationId?: string | undefined;
+    }): Promise<ClientResult<{ token: string; apiToken: ApiTokenSummaryJSON }>>;
+    list(): Promise<ClientResult<ApiTokenSummaryJSON[]>>;
+    revoke(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    current(): Promise<
+      ClientResult<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>
+    >;
   };
   errors: typeof ERRORS;
 }
@@ -296,6 +322,24 @@ export function createClient(options: ClientOptions): Client {
         decline: (input) => call<{ ok: true }>("POST", "/organizations/invitations/decline", input),
       },
       setActive: (input) => call<PublicSession>("POST", "/organizations/active", input),
+    },
+    tokens: {
+      create: ({ expiresInDays, organizationId, ...rest }) =>
+        call<{ token: string; apiToken: ApiTokenSummaryJSON }>("POST", "/tokens", {
+          ...rest,
+          ...(expiresInDays !== undefined ? { expiresInDays } : {}),
+          ...(organizationId !== undefined ? { organizationId } : {}),
+        }),
+      async list() {
+        const r = await call<{ tokens: ApiTokenSummaryJSON[] }>("GET", "/tokens");
+        return r.ok ? ok(r.value.tokens) : r;
+      },
+      revoke: (input) => call<{ ok: true }>("POST", "/tokens/revoke", input),
+      current: () =>
+        call<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>(
+          "GET",
+          "/tokens/current",
+        ),
     },
     errors: ERRORS,
   };

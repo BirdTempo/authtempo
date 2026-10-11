@@ -1,5 +1,6 @@
 export { ERRORS, type ErrorCode } from "@tempo-auth/core/errors";
 export {
+  type ApiTokenSummaryJSON,
   type Client,
   type ClientOptions,
   createClient,
