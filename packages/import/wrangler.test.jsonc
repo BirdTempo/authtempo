@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tempo-auth-import-test",
+  "compatibility_date": "2026-09-30",
+  // Every Worker config sets both flags: Workers turn nodejs_compat on by
+  // default from compatibility date 2026-08-04 (Cloudflare changelog, read
+  // 2026-10-11), and these two turn it off. Without them a config states the
+  // opposite of the rule. The pool ignores them: @cloudflare/vitest-plugin
+  // 1.4.0 turns Node.js modules on for its runner whatever the flags say
+  // (dist/pool/index.mjs, read 2026-10-11), so this config cannot show that
+  // the import runs without nodejs_compat. worker/proof/bundle-no-node.mjs
+  // shows that: it bundles worker/wrangler.jsonc with both flags and fails on
+  // any node: module. The package's test script runs it after the two vitest runs.
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  "d1_databases": [
+    // A placeholder: the Workers test pool runs D1 locally and never reads it.
+    {
+      "binding": "DB",
+      "database_name": "tempo-auth-import-test",
+      "database_id": "tempo-auth-import-test"
+    }
+  ]
+}

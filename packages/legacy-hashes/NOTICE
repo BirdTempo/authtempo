@@ -1,0 +1,9 @@
+@tempo-auth/legacy-hashes ships with two third-party packages as runtime dependencies.
+
+bcryptjs 3.0.3, BSD-3-Clause license.
+Copyright (c) 2012 Nevins Bartolomeo <nevins.bartolomeo@gmail.com>
+Copyright (c) 2012 Shane Girish <shaneGirish@gmail.com>
+Copyright (c) 2025 Daniel Wirtz <dcode@dcode.io>
+The full license text is in node_modules/bcryptjs/LICENSE.
+
+@noble/hashes 2.4.0, MIT license. Copyright (c) 2022 Paul Miller (https://paulmillr.com).

@@ -41,14 +41,19 @@ refuses its plugin by id at construction.
 | `better-auth/client/plugins` | `./client/plugins` |
 | `better-auth/adapters/drizzle`, `@better-auth/drizzle-adapter` | `./adapters/drizzle` and `.` |
 | `better-auth/node` | `./node` |
+| `better-auth/api` | `./api` (`APIError`) |
 | `better-auth/next-js` | `./next-js` |
 | `@better-auth/expo` | `.` (`expo`) |
 | `@better-auth/expo/client` | `./client` (`expoClient`) |
 | `@better-auth/passkey` | `.` (`passkey`) |
 | `@better-auth/passkey/client` | `./client` (`passkeyClient`) |
 
-The package exports no other subpath. An import of `better-auth/api`,
-`better-auth/db`, `better-auth/types`, `better-auth/plugins/access`, or
+`better-auth/api` maps to `./api`, which exports `APIError` only (plan 9b).
+An import of another name from it, such as `createAuthMiddleware`, fails at
+build: it needs hooks (plan 9d).
+
+The package exports no other subpath. An import of `better-auth/db`,
+`better-auth/types`, `better-auth/plugins/access`, or
 `better-auth/plugins/organization/access` fails at build. consumerc, consumerd,
 and consumerb import some of them: remove those imports first.
 
@@ -268,12 +273,14 @@ does not call it.
 | --- | --- | --- |
 | No network answer | `NETWORK_ERROR` | 0 |
 | The person cancels a passkey or sign-in prompt | `AUTH_CANCELLED` | 0 |
-| The handoff redirect does not match | `INVALID_REDIRECT_URL` | 0 |
+| The handoff redirect does not match | `INVALID_REDIRECT_URL` | 403 |
 | An answer that the client cannot read, or a passkey prompt that fails in the browser | `UNEXPECTED_RESPONSE` | the HTTP status, or 0 for the browser failure |
 | A call with no `baseURL` and no page location | `BASE_URL_REQUIRED` | 0 |
 
 Status 0 means that no HTTP response exists. Do not test `status >= 400` alone
-for these.
+for these. The handoff mismatch also has no HTTP response, but it answers 403:
+`INVALID_REDIRECT_URL` has one status everywhere, the one in the table below
+(plan 9b).
 
 The shim's own codes name the cases that no core code names. The server `api`
 throws them as `APIError` with this status, and the client answers them as

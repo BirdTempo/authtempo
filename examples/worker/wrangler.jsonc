@@ -3,9 +3,13 @@
   "name": "tempo-auth-example",
   "main": "src/index.ts",
   // Checked against the consumera research of 2026-09-30: workerd supports
-  // 2026-09-30. No compatibility_flags on purpose: the core must run
-  // without nodejs_compat, and this Worker proves it.
+  // 2026-09-30. From compatibility date 2026-08-04 Workers turn nodejs_compat
+  // on by default (Cloudflare changelog, read 2026-10-11), so a date alone
+  // proves nothing. The two flags turn it off, and the packages must run
+  // without it. The proof is `node proof/bundle-no-node.mjs` (in `test`),
+  // not the vitest pool, which turns Node.js modules on for its runner.
   "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
   "vars": {
     "BASE_URL": "https://example.test",
     "TEST_MODE": "0"

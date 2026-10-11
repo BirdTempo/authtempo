@@ -1,0 +1,3 @@
+# The D1 Worker's input. The CLI's --d1-bundle writes it, and it holds the
+# password hashes and any Firebase signer key. It must never enter git.
+worker/input/import.local.json

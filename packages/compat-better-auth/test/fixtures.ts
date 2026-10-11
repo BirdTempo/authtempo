@@ -9,16 +9,12 @@ export const CONSUMER_I_PG = pgSnake;
 const FOREIGN_KEY = / references "\w+" \("id"\) on delete cascade/g;
 
 /**
- * Core's conformance suite writes rows whose parents do not exist (an
- * identity of user "u1" with no user row), because the storage port has no
- * foreign keys. The suite runs on the fixture with the seven REFERENCES
- * clauses removed. The mapping tests and the end-to-end test run on the
- * fixture as recorded, with the foreign keys.
+ * Each fixture has seven REFERENCES clauses: five name "user" and two name
+ * "organization" (names.test.ts counts them). Every suite runs on the
+ * fixtures as recorded, with the keys: since plan 9b core's conformance suite
+ * and the D1 mapping tests create each parent row first, so no test needs
+ * the tables without the keys, and none removes them.
  */
-export function withoutForeignKeys(text: string): string {
-  return text.replace(FOREIGN_KEY, "");
-}
-
 export function countForeignKeys(text: string): number {
   return text.match(FOREIGN_KEY)?.length ?? 0;
 }

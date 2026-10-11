@@ -1,0 +1,41 @@
+{
+  "name": "@tempo-auth/import",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "tempo-auth-import": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "worker"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.d1.json",
+    "test": "vitest run && vitest run -c vitest.d1.config.ts && node worker/proof/bundle-no-node.mjs"
+  },
+  "dependencies": {
+    "@tempo-auth/adapter-postgres": "workspace:*",
+    "@tempo-auth/compat-better-auth": "workspace:*",
+    "@tempo-auth/core": "workspace:*",
+    "@tempo-auth/legacy-hashes": "workspace:*",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "@cloudflare/workers-types": "5.20261007.1",
+    "@tempo-auth/adapter-d1": "workspace:*",
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}

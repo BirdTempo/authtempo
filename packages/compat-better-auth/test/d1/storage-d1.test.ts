@@ -4,16 +4,15 @@ import { drizzleAdapter } from "../../src/adapters/drizzle.js";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import { d1CompatReady } from "../../src/storage/migration.js";
 import { resolveNames } from "../../src/storage/names.js";
-import { BETTER_AUTH_SQLITE, withoutForeignKeys } from "../fixtures.js";
-import { at, d1MappingSuite, eq, sqlNames } from "./mapping-suite.js";
+import { BETTER_AUTH_SQLITE } from "../fixtures.js";
+import { at, eq, sqlNames } from "./mapping-suite.js";
 import { execD1 } from "./schema.js";
 
-// Better Auth's own SQLite SQL without the foreign keys (core's conformance
-// suite writes rows with no parent), then the shipped compat migration.
-await execD1(withoutForeignKeys(BETTER_AUTH_SQLITE));
+// Better Auth's own SQLite SQL as recorded, with its seven foreign keys, then
+// the shipped compat migration. Core's conformance suite and the mapping tests
+// on these tables run in storage-d1-conformance-keyed.test.ts.
+await execD1(BETTER_AUTH_SQLITE);
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
-
-d1MappingSuite("Better Auth's own SQLite SQL", {});
 
 describe("the Better Auth storage on D1, default names", () => {
   const { truncate } = sqlNames({});
@@ -44,12 +43,16 @@ describe("the Better Auth storage on D1, default names", () => {
     expect(await env.DB.prepare(`SELECT "name" FROM "user" WHERE "id" = 'u9'`).first("name")).toBe(
       "Zed",
     );
-    expect(() => drizzleAdapter({ $client: {} }, { provider: "sqlite" })).toThrow(
-      /needs a Drizzle database on D1/,
-    );
-    expect(() => drizzleAdapter({ $client: env.DB }, { provider: "mysql" })).toThrow(
-      /"mysql" is refused/,
-    );
+    // The refusals ride on the database and join betterAuth's one list (plan 9b).
+    expect(drizzleAdapter({ $client: {} }, { provider: "sqlite" }).refusals).toEqual([
+      "database: drizzleAdapter needs a Drizzle database on D1 (drizzle-orm/d1); other SQLite drivers are refused",
+    ]);
+    const mysql = drizzleAdapter({ $client: env.DB }, { provider: "mysql" });
+    expect(mysql.refusals?.[0]).toMatch(/"mysql" is refused/);
+    expect(mysql.refusals).toEqual([
+      'database.provider: "mysql" is refused; tempo-auth runs on Postgres and D1',
+    ]);
+    expect(() => mysql.storage.findOne("user", [])).toThrow(/"mysql" is refused/);
   });
 
   it("refuses a Drizzle SQLite schema with an integer timestamp column (I-3)", () => {
@@ -60,9 +63,9 @@ describe("the Better Auth storage on D1, default names", () => {
         updatedAt: { name: "updatedAt", columnType: "SQLiteText" },
       }),
     };
-    expect(() => drizzleAdapter({ $client: env.DB }, { provider: "sqlite", schema })).toThrow(
-      /database\.schema\.user\.createdAt: an integer timestamp column is refused/,
-    );
+    expect(drizzleAdapter({ $client: env.DB }, { provider: "sqlite", schema }).refusals).toEqual([
+      "database.schema.user.createdAt: an integer timestamp column is refused; on D1 tempo-auth reads Better Auth's dates as ISO 8601 text",
+    ]);
     const text = {
       user: drizzleTable("user", { createdAt: { name: "createdAt", columnType: "SQLiteText" } }),
     };

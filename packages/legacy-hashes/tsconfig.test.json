@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    // TypeScript 7 loads no @types package unless "types" names it. No file
+    // here reads a Node.js module, and proof/worker.ts (plan 9b Task 3) runs
+    // in a Worker with no Node.js. With no Node types, a Node.js global in
+    // one of these files is a type error.
+    "types": []
+  },
+  // proof/worker.ts is here only so that this typecheck covers it. The proof
+  // script proof/no-node.mjs runs it in workerd; vitest does not.
+  "include": ["src", "test", "proof/worker.ts"]
+}

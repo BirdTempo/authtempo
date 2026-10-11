@@ -3,6 +3,7 @@
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
     "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["^build"], "cache": false }
+    "test": { "dependsOn": ["^build"], "cache": false },
+    "//#typecheck:configs": { "cache": false }
   }
 }

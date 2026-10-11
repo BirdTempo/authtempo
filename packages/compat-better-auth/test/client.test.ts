@@ -686,4 +686,39 @@ describe("the shim's own codes (plan 9 final review M-4, M-5)", () => {
         row: true,
       });
   });
+
+  it("gives each shim code the table's status in every README row that names it (plan 9b)", () => {
+    // Every table row with a cell that is exactly a COMPAT_CODES code: the next cell is its status.
+    const rows: { code: string; status: string }[] = [];
+    for (const line of readme.split("\n").filter((l) => l.startsWith("|"))) {
+      const cells = line.split("|").map((c) => c.trim());
+      cells.forEach((c, i) => {
+        const code = /^`([A-Z_]+)`$/.exec(c)?.[1];
+        if (code && Object.hasOwn(COMPAT_CODES, code))
+          rows.push({ code, status: cells[i + 1] ?? "" });
+      });
+    }
+    // The codes table names each code once; the client-only table names two again.
+    expect(rows.map((r) => r.code).sort()).toEqual(
+      [...Object.keys(COMPAT_CODES), "INVALID_REDIRECT_URL", "BASE_URL_REQUIRED"].sort(),
+    );
+    for (const r of rows)
+      expect(r).toEqual({
+        code: r.code,
+        status: String(COMPAT_CODES[r.code as keyof typeof COMPAT_CODES]),
+      });
+  });
+});
+
+describe("one status per code (plan 9b)", () => {
+  it("answers INVALID_REDIRECT_URL with the table's 403 for the handoff mismatch, as the server does", async () => {
+    const { handoffError } = await import("../src/client/create-auth-client.js");
+    const { COMPAT_CODES } = await import("../src/errors.js");
+    expect(handoffError({ code: "redirect_mismatch", status: 0 })).toEqual({
+      code: "INVALID_REDIRECT_URL",
+      message: "Invalid redirect url",
+      status: COMPAT_CODES.INVALID_REDIRECT_URL,
+      statusText: "Forbidden",
+    });
+  });
 });

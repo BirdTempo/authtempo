@@ -75,6 +75,8 @@ export interface CompatDatabase {
   readonly storage: StorageAdapter;
   /** The owned limiter on the same database, in `ta_limit`. */
   readonly limiter: LimiterPort;
+  /** Set by `drizzleAdapter` for a database it refuses. `betterAuth` lists these with its own refusals. */
+  readonly refusals?: readonly string[];
 }
 
 export interface EmailCallbackData {
@@ -106,14 +108,12 @@ export interface OrganizationOptions {
   requireEmailVerificationOnInvitation?: boolean;
   cancelPendingInvitationsOnReInvite?: boolean;
   sendInvitationEmail?: (data: InvitationEmailData, request?: Request) => Promise<void> | void;
-  [key: string]: unknown;
 }
 
 export interface PasskeyOptions {
   rpID?: string;
   rpName?: string;
   origin?: string | string[] | null;
-  [key: string]: unknown;
 }
 
 export interface MagicLinkOptions {
@@ -124,17 +124,14 @@ export interface MagicLinkOptions {
   expiresIn?: number;
   disableSignUp?: boolean;
   storeToken?: unknown;
-  [key: string]: unknown;
 }
 
 export interface BearerOptions {
   requireSignature?: boolean;
-  [key: string]: unknown;
 }
 
-export interface ExpoOptions {
-  [key: string]: unknown;
-}
+/** `expo()` takes no option that tempo-auth maps. */
+export type ExpoOptions = Record<string, never>;
 
 interface Marker<I extends string, O> {
   readonly kind: typeof COMPAT_PLUGIN;
@@ -162,9 +159,18 @@ export interface ForeignPlugin {
 export type BetterAuthPlugin = CompatPlugin | ForeignPlugin;
 
 /**
- * Better Auth 1.7's option object. The keys that tempo-auth maps have their
- * types. Every other key is `unknown`, so an app's real auth.ts compiles and
- * then fails at construction with the full list (spec 16.1).
+ * Better Auth 1.7's option object, with the keys tempo-auth maps. Since plan
+ * 9b no option type has an index signature, so a refused key in an object
+ * literal of a plugin's options, or of an object that `satisfies` this type,
+ * fails the compile. `betterAuth(options)` infers its type parameter from the
+ * literal, so TypeScript does not check that literal for extra keys. One
+ * check stays: the weak-type rule (TS2559; TS2353 for a literal). Each nested
+ * option type has only optional keys, so a nested object with no key in
+ * common with its type stops the compile, for example consumerd's
+ * `rateLimit: { customStorage }`. Then the compile shows that one key, not the
+ * full list. The runtime allow list (spec 16.1) stays the one complete
+ * control, and it lists every refused key at construction. typetest/options.ts
+ * pins both rules.
  */
 export interface BetterAuthOptions {
   appName?: string;
@@ -183,47 +189,40 @@ export interface BetterAuthOptions {
     revokeSessionsOnPasswordReset?: boolean;
     resetPasswordTokenExpiresIn?: number;
     sendResetPassword?: SendEmail;
-    [key: string]: unknown;
   };
   emailVerification?: {
     sendVerificationEmail?: SendEmail;
     sendOnSignUp?: boolean;
     autoSignInAfterVerification?: boolean;
     expiresIn?: number;
-    [key: string]: unknown;
   };
   socialProviders?: {
-    google?: { clientId: string; clientSecret: string; [key: string]: unknown };
+    google?: { clientId: string; clientSecret: string };
     apple?: {
       clientId: string;
       teamId?: string;
       keyId?: string;
       privateKey?: string;
       clientSecret?: string;
-      [key: string]: unknown;
     };
-    [provider: string]: unknown;
   };
   session?: {
     expiresIn?: number;
     updateAge?: number;
-    cookieCache?: { enabled?: boolean; maxAge?: number; [key: string]: unknown };
+    cookieCache?: { enabled?: boolean; maxAge?: number };
     storeSessionInDatabase?: boolean;
-    [key: string]: unknown;
   };
   advanced?: {
     ipAddress?: {
       ipAddressHeaders?: string[];
       disableIpTracking?: boolean;
-      [key: string]: unknown;
     };
-    defaultCookieAttributes?: { sameSite?: string; [key: string]: unknown };
-    database?: { generateId?: unknown; [key: string]: unknown };
-    [key: string]: unknown;
+    defaultCookieAttributes?: { sameSite?: string };
+    database?: { generateId?: unknown };
   };
-  rateLimit?: { enabled?: boolean; [key: string]: unknown };
+  rateLimit?: { enabled?: boolean };
   plugins?: readonly BetterAuthPlugin[];
-  telemetry?: { enabled?: boolean; [key: string]: unknown };
+  telemetry?: { enabled?: boolean };
   /**
    * The one key that is not Better Auth's. `passwordHash` replaces
    * `betterAuthPasswordHash()`, for example with a low cost in tests.
@@ -233,7 +232,6 @@ export interface BetterAuthOptions {
    * this origin, because core lands every sign-in on it.
    */
   tempoAuth?: { passwordHash?: PasswordHashSeam; appURL?: string };
-  [key: string]: unknown;
 }
 
 export interface CompatServerApi {
@@ -339,7 +337,6 @@ export interface ClientFetchOptions {
   onSuccess?: (ctx: SuccessContext) => void | Promise<void>;
   onError?: (ctx: ErrorContext) => void | Promise<void>;
   customFetchImpl?: typeof fetch;
-  [key: string]: unknown;
 }
 
 /** The part of `expo-secure-store` the Expo plugin calls. Pass the module itself. */
@@ -356,7 +353,6 @@ export interface ExpoClientOptions {
   webBrowser?: ExpoWebBrowserLike;
   /** `expo-crypto`, for the handoff's PKCE on Hermes. */
   crypto?: ExpoCryptoLike<unknown>;
-  [key: string]: unknown;
 }
 
 export const COMPAT_CLIENT_PLUGIN = "tempo-auth-compat-client-plugin";
@@ -379,7 +375,6 @@ export interface ClientOptions {
   plugins?: readonly ClientPlugin[];
   /** The one key that is not Better Auth's. `webauthn` replaces the browser's WebAuthn, for example with a soft authenticator in tests. */
   tempoAuth?: { webauthn?: BrowserWebAuthn };
-  [key: string]: unknown;
 }
 
 export interface SessionState {

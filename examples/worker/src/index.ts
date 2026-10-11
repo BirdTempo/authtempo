@@ -1,7 +1,9 @@
 import { createD1Adapter, createD1Limiter } from "@tempo-auth/adapter-d1";
 import { type Auth, createAuth, createPbkdf2PasswordHash } from "@tempo-auth/core";
+import { createLegacyPasswordHash } from "@tempo-auth/legacy-hashes";
 import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
+import { LEGACY_FORMATS } from "./legacy-formats.js";
 
 let lastLink: string | null = null;
 let auth: Auth | null = null;
@@ -55,7 +57,20 @@ function getAuth(env: Env): Auth {
     // hash. That needs more CPU than Workers Free allows, so a deployment needs
     // Workers Paid. In TEST_MODE only, use 1000 iterations so the end-to-end
     // test does not pay the full cost for each hash. Production keeps the default.
-    password: env.TEST_MODE === "1" ? { hash: createPbkdf2PasswordHash({ iterations: 1000 }) } : {},
+    // The legacy seam comes first (plan 9b): a user imported from Supabase,
+    // Clerk, or Auth0 signs in with the old bcrypt hash once, or until a
+    // sign-in with a password of at most 72 bytes, and that sign-in writes
+    // PBKDF2 over it. A longer password stays bcrypt (BCRYPT_MAX_PASSWORD_BYTES). Every new hash is PBKDF2. The formats are in
+    // legacy-formats.ts, which the import test reads too.
+    password: {
+      hash: createLegacyPasswordHash({
+        formats: LEGACY_FORMATS,
+        next:
+          env.TEST_MODE === "1"
+            ? createPbkdf2PasswordHash({ iterations: 1000 })
+            : createPbkdf2PasswordHash(),
+      }),
+    },
   });
   return auth;
 }

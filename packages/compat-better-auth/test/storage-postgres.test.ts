@@ -13,7 +13,7 @@ import { type AnyModelMap, issuerFor, MAPPING } from "../src/storage/mapping.js"
 import { compatMigrationSql } from "../src/storage/migration.js";
 import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
-import { BETTER_AUTH_PG, CONSUMER_I_PG, withoutForeignKeys } from "./fixtures.js";
+import { BETTER_AUTH_PG, CONSUMER_I_PG } from "./fixtures.js";
 import { freshBetterAuthSchema } from "./pg.js";
 
 const VECTOR_HASH =
@@ -22,7 +22,7 @@ const VECTOR_HASH =
 runAdapterConformance(
   "Better Auth tables on postgres, camelCase (Better Auth's own SQL)",
   async () => {
-    const pg = await freshBetterAuthSchema(withoutForeignKeys(BETTER_AUTH_PG));
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
@@ -32,7 +32,7 @@ runAdapterConformance(
 runAdapterConformance(
   "Better Auth tables on postgres, snake_case (consumer-i's tables)",
   async () => {
-    const pg = await freshBetterAuthSchema(withoutForeignKeys(CONSUMER_I_PG));
+    const pg = await freshBetterAuthSchema(CONSUMER_I_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, casing: "snake" });
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };

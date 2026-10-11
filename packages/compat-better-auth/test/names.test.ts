@@ -3,9 +3,9 @@ import { namesFromDrizzle } from "../src/adapters/drizzle.js";
 import { resolveNames, snake } from "../src/storage/names.js";
 import {
   BETTER_AUTH_PG,
+  BETTER_AUTH_SQLITE,
   countForeignKeys,
   CONSUMER_I_PG,
-  withoutForeignKeys,
 } from "./fixtures.js";
 
 const NAME = Symbol.for("drizzle:Name");
@@ -101,14 +101,14 @@ describe("names", () => {
 });
 
 describe("fixtures", () => {
-  it("hold seven foreign keys, and withoutForeignKeys removes exactly those", () => {
-    expect(countForeignKeys(BETTER_AUTH_PG)).toBe(7);
-    expect(countForeignKeys(CONSUMER_I_PG)).toBe(7);
-    expect(countForeignKeys(withoutForeignKeys(BETTER_AUTH_PG))).toBe(0);
-    // Five clauses name "user" (session, account, member, invitation inviter, passkey); two name "organization".
-    const removed = BETTER_AUTH_PG.length - withoutForeignKeys(BETTER_AUTH_PG).length;
-    const userClause = ' references "user" ("id") on delete cascade'.length;
-    const orgClause = ' references "organization" ("id") on delete cascade'.length;
-    expect(removed).toBe(5 * userClause + 2 * orgClause);
+  it("hold seven foreign keys each: five name user, two name organization", () => {
+    // session, account, member, invitation inviter, and passkey name "user"; member and invitation name "organization".
+    // All three fixtures: the two Postgres ones and the SQLite one (D1), 7 keys each.
+    const clauses = (text: string, table: string) =>
+      text.split(` references "${table}" ("id") on delete cascade`).length - 1;
+    for (const text of [BETTER_AUTH_PG, CONSUMER_I_PG, BETTER_AUTH_SQLITE]) {
+      expect(countForeignKeys(text)).toBe(7);
+      expect([clauses(text, "user"), clauses(text, "organization")]).toEqual([5, 2]);
+    }
   });
 });

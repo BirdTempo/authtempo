@@ -1,0 +1,19 @@
+{
+  // Plan 9b: the one typecheck of every vitest config in the repo. A package's
+  // own tsconfig includes src and test only, so no package checked its config.
+  // The glob covers a new package with no edit here.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    // TypeScript 7 loads no @types package unless "types" names it. The configs read node:url.
+    "types": ["node"]
+  },
+  "include": [
+    "packages/**/vitest*.config.ts",
+    "packages/**/vitest*.config.mts",
+    "examples/**/vitest*.config.ts",
+    "examples/**/vitest*.config.mts"
+  ]
+}

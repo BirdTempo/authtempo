@@ -2,13 +2,18 @@ import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
-import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import { createSession, type ResolvedSession } from "./sessions.js";
-import { claimEmail, ensureEmailIdentity, normalizeEmail, userStillUnverified } from "./users.js";
+import {
+  claimEmail,
+  ensureEmailIdentity,
+  normalizeEmail,
+  userStillUnverified,
+  validUserName,
+} from "./users.js";
 import { consumeVerification } from "./verification.js";
 
 export const PASSWORD_VERIFY_PREFIX = "pv_";
@@ -17,7 +22,6 @@ export const PASSWORD_RESET_PREFIX = "pr_";
 export const PASSWORD_RESET_TOKEN_RE = /^pr_[A-Za-z0-9_-]{43}$/;
 // 10 per hour per IP: a person makes one account; a script that makes many is slowed.
 const SIGN_UP_PER_IP = { seconds: 3600, max: 10 };
-const NAME_MAX = 200;
 // Per 15 minutes. The email limit stops a guess run on one account from many
 // addresses; the IP limit stops one address that tries many accounts.
 const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
@@ -40,6 +44,15 @@ const CHANGE_PER_USER = { seconds: 900, max: 10 };
  * `pbkdf2-sha256$`).
  */
 export const PENDING_HASH_PREFIX = "pending$";
+/**
+ * The stored hash string of a password row that an importer wrote for a
+ * user whose old system exports no hash (Cognito; spec 17.4). No seam
+ * parses it, so `verify` fails on it. The sign-in asks
+ * `password.legacyVerify` instead, and on `true` writes a real hash over it.
+ * It is a password row, so a claim deletes it (`claimEmail`) and a reset
+ * overwrites it: a verified proof revokes the old system's password too.
+ */
+export const LEGACY_VERIFY_HASH = "legacy-verify$";
 
 export interface PasswordSession {
   token: string;
@@ -101,8 +114,7 @@ export async function passwordSignUp(
   const email = normalizeEmail(input.email);
   if (email === null) return fail("invalid_body");
   const name = input.name;
-  if (name !== undefined && (name.length < 1 || name.length > NAME_MAX || hasControlChar(name)))
-    return fail("invalid_body");
+  if (name !== undefined && !validUserName(name)) return fail("invalid_body");
   const refused = await screen(pw, input.password, email);
   if (refused) return fail(refused);
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
@@ -276,6 +288,13 @@ export async function passwordSignIn(
     return fail("rate_limited");
   // The length is the caller's own input, so this refusal tells nothing about an account. It bounds the CPU.
   if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
+  // The floor of every failure from here on (spec 17.4). Date.now, not the
+  // injected clock: the floor is real time that a caller measures.
+  const started = Date.now();
+  const refuse = async (): Promise<Result<PasswordSession>> => {
+    await legacyFloor(pw, started);
+    return fail("invalid_credentials");
+  };
   const user =
     email === null
       ? null
@@ -287,10 +306,13 @@ export async function passwordSignIn(
   // hash, so it never matches a pending row either.
   if (!user || !row || row.hash.startsWith(PENDING_HASH_PREFIX)) {
     await pw.hash.verify(input.password, await pw.hash.dummy());
-    return fail("invalid_credentials");
+    return refuse();
   }
-  const checked = await pw.hash.verify(input.password, row.hash);
-  if (!checked.ok) return fail("invalid_credentials");
+  const checked =
+    row.hash === LEGACY_VERIFY_HASH
+      ? await legacyCheck(pw, user.email, input.password, started)
+      : await pw.hash.verify(input.password, row.hash);
+  if (!checked.ok) return refuse();
   const now = config.clock.now();
   // The hash this sign-in proved. The session is valid only while the row still holds it.
   let proved = row.hash;
@@ -309,40 +331,100 @@ export async function passwordSignIn(
       ],
       { hash: fresh, updatedAt: now },
     );
-    if (n === 0) return fail("invalid_credentials");
+    if (n === 0) return refuse();
     proved = fresh;
   }
-  return config.storage.transaction(async (tx): Promise<Result<PasswordSession>> => {
-    const s = await createSession(
-      config,
-      { userId: user.id, ip: input.ip, userAgent: input.userAgent },
-      tx,
+  const signedIn = await config.storage.transaction(
+    async (tx): Promise<Result<PasswordSession>> => {
+      const s = await createSession(
+        config,
+        { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+        tx,
+      );
+      // For every user, verified or not. Between the verify and this point a
+      // reset or a change can write a new hash and delete the sessions, and a
+      // claim (the owner's magic link) can delete the row and the sessions.
+      // Each of them writes or deletes the password row before it deletes the
+      // sessions (claimEmail does; the reset and the change must keep that
+      // order). So this conditional update by id and the proved hash is the
+      // last statement: one row means that session delete has not run and
+      // still removes this session; zero rows means the row changed or is
+      // gone, so delete the own session by id, commit, and answer the failure
+      // (a throw would reach the caller as a 500). A conditional update, not a
+      // read, so that it sees the other flow's statements on D1.
+      const n = await tx.update(
+        "password",
+        [
+          { field: "id", op: "eq", value: row.id },
+          { field: "hash", op: "eq", value: proved },
+        ],
+        { updatedAt: now },
+      );
+      if (n === 0) {
+        await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+        return fail("invalid_credentials");
+      }
+      return ok({ token: s.token, user, session: s.session });
+    },
+  );
+  // After the commit, never inside: the floor must not hold a Postgres connection.
+  if (!signedIn.ok) await legacyFloor(pw, started);
+  return signedIn;
+}
+
+/**
+ * The old system's answer for a row that holds `LEGACY_VERIFY_HASH`. The
+ * dummy verify first, so the CPU is the same as for a wrong password. A
+ * match is `rehash: true`: the sign-in writes this config's hash over the
+ * marker by the conditional update on the marker, then signs in as for any
+ * other row. Only a boolean `true` is a match. A throw, any other answer, or
+ * no answer by the floor's deadline is a failure; the timeout aborts the call.
+ * The deadline is `started + timeoutMs`, the same as the floor's, not
+ * `timeoutMs` from the call: the lookups and the dummy verify run first, and
+ * a timer from the call would answer late by their time. That delay would
+ * tell a legacy row from an unknown address.
+ */
+async function legacyCheck(
+  pw: Resolved,
+  email: string,
+  password: string,
+  started: number,
+): Promise<{ ok: boolean; rehash: boolean }> {
+  await pw.hash.verify(password, await pw.hash.dummy());
+  const lv = pw.legacyVerify;
+  if (!lv) return { ok: false, rehash: false };
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(
+      () => {
+        controller.abort();
+        resolve(false);
+      },
+      Math.max(0, lv.timeoutMs - (Date.now() - started)),
     );
-    // For every user, verified or not. Between the verify and this point a
-    // reset or a change can write a new hash and delete the sessions, and a
-    // claim (the owner's magic link) can delete the row and the sessions.
-    // Each of them writes or deletes the password row before it deletes the
-    // sessions (claimEmail does; the reset and the change must keep that
-    // order). So this conditional update by id and the proved hash is the
-    // last statement: one row means that session delete has not run and
-    // still removes this session; zero rows means the row changed or is
-    // gone, so delete the own session by id, commit, and answer the failure
-    // (a throw would reach the caller as a 500). A conditional update, not a
-    // read, so that it sees the other flow's statements on D1.
-    const n = await tx.update(
-      "password",
-      [
-        { field: "id", op: "eq", value: row.id },
-        { field: "hash", op: "eq", value: proved },
-      ],
-      { updatedAt: now },
-    );
-    if (n === 0) {
-      await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
-      return fail("invalid_credentials");
-    }
-    return ok({ token: s.token, user, session: s.session });
   });
+  try {
+    const answer = await Promise.race([lv.verify(email, password, controller.signal), timeout]);
+    return answer === true ? { ok: true, rehash: true } : { ok: false, rehash: false };
+  } catch {
+    return { ok: false, rehash: false };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * While `legacyVerify` is set, a failed sign-in waits until `timeoutMs`
+ * after its check began. A legacy row's failure costs the old system's
+ * round trip, and an unknown address costs none; the floor hides the
+ * difference. Without `legacyVerify` there is no floor.
+ */
+async function legacyFloor(pw: Resolved, started: number): Promise<void> {
+  const lv = pw.legacyVerify;
+  if (!lv) return;
+  const left = lv.timeoutMs - (Date.now() - started);
+  if (left > 0) await new Promise((resolve) => setTimeout(resolve, left));
 }
 
 export interface PasswordVerify {
