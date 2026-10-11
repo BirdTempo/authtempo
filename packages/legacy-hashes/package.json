@@ -9,8 +9,8 @@
       "default": "./dist/index.js"
     },
     "./testing": {
-      "types": "./test/vectors.ts",
-      "default": "./test/vectors.ts"
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
     }
   },
   "files": [

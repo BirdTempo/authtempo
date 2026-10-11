@@ -9,6 +9,16 @@ import {
 import { gated } from "./gate.js";
 import { LEGACY_FORMATS, type LegacyFormat, parseLegacyHash } from "./grammar.js";
 
+/**
+ * bcrypt reads only the first 72 bytes of the UTF-8 password (bcryptjs
+ * 3.0.3 `truncates`, read 2026-10-11). A longer password matches with any
+ * text after byte 72. A rehash would then write a hash of the text the user
+ * typed this time, and the password the user knows would stop working if
+ * the tail had an error. So a match on a longer password keeps the bcrypt
+ * row: it answers `{ ok: true, rehash: false }`.
+ */
+export const BCRYPT_MAX_PASSWORD_BYTES = 72;
+
 export interface LegacyPasswordHashOptions {
   /** The formats this app verifies. A stored string in another format verifies against the dummy and fails. */
   formats: readonly LegacyFormat[];
@@ -31,8 +41,22 @@ export interface LegacyPasswordHashOptions {
  *   a format not enabled, a malformed segment) answers `{ ok: false,
  *   rehash: false }` after one `next.verify` against `next.dummy()`, with
  *   no legacy derive. So it costs what a wrong password costs.
+ * - A `firescrypt` hash whose length is not the signer key's length cannot
+ *   match. It costs the dummy as a malformed string does.
+ * - A bcrypt match on a password longer than 72 bytes answers
+ *   `rehash: false` (see `BCRYPT_MAX_PASSWORD_BYTES`).
  * - A throw in a derive is a failed sign-in, not a server error.
  * `hash` and `dummy` are `next`'s, so no new row is ever a legacy format.
+ *
+ * The password goes to the derive as its raw UTF-8 bytes, with no Unicode
+ * normalization. Of the sources, only Better Auth applies NFKC (its seam is
+ * plan 9's). Supabase (Go bcrypt), Firebase (firebase/scrypt), and Ory hash
+ * the raw bytes, so NFKC here would refuse a right password.
+ *
+ * The gate is per seam. Chained with `betterAuthPasswordHash()` as `next`,
+ * the two seams have two gates of two each, so up to four derives (128 MiB
+ * at the worst) can run at once in one isolate. One shared gate is an input
+ * for a later plan.
  */
 export function createLegacyPasswordHash(options: LegacyPasswordHashOptions): PasswordHashSeam {
   const enabled = new Set<LegacyFormat>();
@@ -52,13 +76,21 @@ export function createLegacyPasswordHash(options: LegacyPasswordHashOptions): Pa
     async verify(plain, stored) {
       if (!stored.startsWith("$")) return next.verify(plain, stored);
       const parsed = parseLegacyHash(stored);
-      if (!parsed || !enabled.has(parsed.format) || plain.length === 0) {
+      if (
+        !parsed ||
+        !enabled.has(parsed.format) ||
+        plain.length === 0 ||
+        (parsed.format === "firescrypt" && parsed.hash.length !== firebase?.signerKey.length)
+      ) {
         await next.verify(plain, await next.dummy());
         return { ok: false, rehash: false };
       }
       try {
         const ok = await gated(() => verifyParsed(derives, plain, parsed, firebase));
-        return { ok, rehash: ok };
+        const truncated =
+          parsed.format === "bcrypt" &&
+          new TextEncoder().encode(plain).length > BCRYPT_MAX_PASSWORD_BYTES;
+        return { ok, rehash: ok && !truncated };
       } catch {
         return { ok: false, rehash: false };
       }

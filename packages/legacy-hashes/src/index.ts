@@ -14,4 +14,8 @@ export {
   SCRYPT_MAX_N_TIMES_R,
   SCRYPT_MAX_P,
 } from "./grammar.js";
-export { createLegacyPasswordHash, type LegacyPasswordHashOptions } from "./seam.js";
+export {
+  BCRYPT_MAX_PASSWORD_BYTES,
+  createLegacyPasswordHash,
+  type LegacyPasswordHashOptions,
+} from "./seam.js";

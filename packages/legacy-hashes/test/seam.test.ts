@@ -5,11 +5,17 @@ import {
   createPbkdf2PasswordHash,
   type PasswordHashSeam,
 } from "@tempo-auth/core";
+import bcrypt from "bcryptjs";
 import { describe, expect, it, vi } from "vitest";
 import { type Derives, NOBLE_DERIVES } from "../src/derive.js";
 import { gated, gateRunning, MAX_CONCURRENT } from "../src/gate.js";
-import { LEGACY_FORMATS, type LegacyFormat, parseLegacyHash } from "../src/grammar.js";
-import { createLegacyPasswordHash } from "../src/seam.js";
+import {
+  encodeBase64,
+  LEGACY_FORMATS,
+  type LegacyFormat,
+  parseLegacyHash,
+} from "../src/grammar.js";
+import { BCRYPT_MAX_PASSWORD_BYTES, createLegacyPasswordHash } from "../src/seam.js";
 import { FIREBASE, VECTORS } from "./vectors.js";
 
 const fast = createPbkdf2PasswordHash({ iterations: 1000 });
@@ -120,6 +126,10 @@ describe("one format per string (Review Focus 1)", () => {
 
 describe("a malformed or refused string costs the dummy and no derive (Review Focus 1)", () => {
   const { bcrypt2a, argon2id: a2, pbkdf2: pb, scrypt: sc, firescrypt: fs } = VECTORS;
+  // A hash of 65 bytes: one byte above the 16 to 64 byte bound of every format.
+  const long = encodeBase64(new Uint8Array(65).fill(7));
+  // 32 bytes: in the bound, but not the 64 bytes of the Firebase signer key.
+  const short = encodeBase64(new Uint8Array(32).fill(7));
   const cases: [string, string][] = [
     ["bcrypt cost 13", bcrypt2a.stored.replace("$10$", "$13$")],
     ["bcrypt cost 03", bcrypt2a.stored.replace("$10$", "$03$")],
@@ -129,6 +139,8 @@ describe("a malformed or refused string costs the dummy and no derive (Review Fo
     ["argon2id m above the bound", a2.stored.replace("m=19456", "m=65536")],
     ["argon2id m below 8 per lane", a2.stored.replace("m=19456,t=2,p=1", "m=8,t=2,p=4")],
     ["argon2id t=0", a2.stored.replace("t=2", "t=0")],
+    ["argon2id t=11, above the bound", a2.stored.replace("t=2", "t=11")],
+    ["argon2id a 65-byte hash", a2.stored.replace(/\$[^$]+$/, `$${long}`)],
     ["argon2id p=5", a2.stored.replace("p=1", "p=5")],
     ["argon2id with no salt", a2.stored.replace("$dGVtcG8tYXV0aC1zYWx0IQ", "")],
     ["argon2i", a2.stored.replace("$argon2id$", "$argon2i$")],
@@ -136,11 +148,17 @@ describe("a malformed or refused string costs the dummy and no derive (Review Fo
     ["pbkdf2 i above the bound", pb.stored.replace("i=80000", "i=600001")],
     ["pbkdf2 l that does not match the hash", pb.stored.replace("l=64", "l=32")],
     ["pbkdf2-sha512", pb.stored.replace("pbkdf2-sha256", "pbkdf2-sha512")],
+    [
+      "pbkdf2 a 65-byte hash with l=65",
+      pb.stored.replace("l=64", "l=65").replace(/\$[^$]+$/, `$${long}`),
+    ],
     ["scrypt N times r above 2^18", sc.stored.replace("n=10,r=8", "n=16,r=8")],
     ["scrypt p=17", sc.stored.replace("p=16", "p=17")],
     ["scrypt Ory's ln", sc.stored.replace("n=10", "ln=1024")],
+    ["scrypt a 65-byte hash", sc.stored.replace(/\$[^$]+$/, `$${long}`)],
     ["firescrypt p=2", fs.stored.replace("p=1", "p=2")],
     ["firescrypt with a bad base64 character", fs.stored.replace("42xEC+", "42xEC*")],
+    ["firescrypt a hash shorter than the signer key", fs.stored.replace(/\$[^$]+$/, `$${short}`)],
     [
       "Supabase's own fbscrypt tag",
       fs.stored.replace("$firescrypt$n=14,r=8,p=1", "$fbscrypt$v=1,n=14,r=8,p=1"),
@@ -189,6 +207,35 @@ describe("a malformed or refused string costs the dummy and no derive (Review Fo
   });
 });
 
+describe("bcrypt's 72-byte limit (bcryptjs truncates)", () => {
+  // Cost 4 keeps the test fast and is inside the 4 to 12 bound.
+  const seam = createLegacyPasswordHash({ formats: ["bcrypt"], next: fast });
+
+  it("asks for a rehash at 72 bytes, and counts bytes, not characters", async () => {
+    expect(BCRYPT_MAX_PASSWORD_BYTES).toBe(72);
+    const ascii = "a".repeat(72);
+    expect(await seam.verify(ascii, bcrypt.hashSync(ascii, 4))).toEqual({ ok: true, rehash: true });
+    // 36 characters of two UTF-8 bytes each: 72 bytes.
+    const two = "\u00e9".repeat(36);
+    expect(await seam.verify(two, bcrypt.hashSync(two, 4))).toEqual({ ok: true, rehash: true });
+  });
+
+  it("matches above 72 bytes with any tail and keeps the bcrypt row", async () => {
+    // 37 characters, 74 bytes: above the limit by bytes, under it by characters.
+    const two = "\u00e9".repeat(37);
+    expect(await seam.verify(two, bcrypt.hashSync(two, 4))).toEqual({ ok: true, rehash: false });
+    const typed = `${"b".repeat(72)}the tail the user knows`;
+    const stored = bcrypt.hashSync(typed, 4);
+    expect(await seam.verify(typed, stored)).toEqual({ ok: true, rehash: false });
+    // bcrypt reads only 72 bytes, so a wrong tail matches. This pins bcryptjs's
+    // behaviour, so a change in it shows here. No rehash writes the wrong tail.
+    expect(await seam.verify(`${"b".repeat(72)}a wrong tail`, stored)).toEqual({
+      ok: true,
+      rehash: false,
+    });
+  });
+});
+
 describe("construction", () => {
   it("refuses firescrypt without the firebase option, an unknown format, and a bad signer key", () => {
     expect(() => createLegacyPasswordHash({ formats: ["firescrypt"], next: fast })).toThrow(
@@ -224,6 +271,40 @@ describe("the gate", () => {
       release.shift()?.();
     }
     expect(await Promise.all(jobs)).toEqual([0, 1, 2, 3, 4]);
+    expect(peak).toBe(MAX_CONCURRENT);
+    expect(gateRunning()).toBe(0);
+  });
+});
+
+describe("the seam runs its derives through the gate", () => {
+  it(`runs at most ${MAX_CONCURRENT} of four concurrent Argon2id verifies at once`, async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const release: Array<() => void> = [];
+    const derives: Derives = {
+      ...NOBLE_DERIVES,
+      argon2id: async (plain, salt, o) => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise<void>((r) => release.push(r));
+        inFlight--;
+        return NOBLE_DERIVES.argon2id(plain, salt, o);
+      },
+    };
+    const seam = createLegacyPasswordHash({ formats: ["argon2id"], next: fast, derives });
+    const v = VECTORS.argon2id;
+    const answers = Array.from({ length: 4 }, () => seam.verify(v.password, v.stored));
+    while (release.length < MAX_CONCURRENT) await new Promise((r) => setTimeout(r, 1));
+    // Time for a third derive to start if the gate did not hold it.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(inFlight).toBe(MAX_CONCURRENT);
+    for (let done = 0; done < 4; done++) {
+      while (release.length === 0) await new Promise((r) => setTimeout(r, 1));
+      release.shift()?.();
+    }
+    expect(await Promise.all(answers)).toEqual(
+      Array.from({ length: 4 }, () => ({ ok: true, rehash: true })),
+    );
     expect(peak).toBe(MAX_CONCURRENT);
     expect(gateRunning()).toBe(0);
   });
