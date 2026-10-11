@@ -45,12 +45,13 @@ describe("the Better Auth storage on D1, default names", () => {
     expect(await env.DB.prepare(`SELECT "name" FROM "user" WHERE "id" = 'u9'`).first("name")).toBe(
       "Zed",
     );
-    expect(() => drizzleAdapter({ $client: {} }, { provider: "sqlite" })).toThrow(
-      /needs a Drizzle database on D1/,
-    );
-    expect(() => drizzleAdapter({ $client: env.DB }, { provider: "mysql" })).toThrow(
-      /"mysql" is refused/,
-    );
+    // The refusals ride on the database and join betterAuth's one list (plan 9b).
+    expect(drizzleAdapter({ $client: {} }, { provider: "sqlite" }).refusals).toEqual([
+      "database: drizzleAdapter needs a Drizzle database on D1 (drizzle-orm/d1); other SQLite drivers are refused",
+    ]);
+    const mysql = drizzleAdapter({ $client: env.DB }, { provider: "mysql" });
+    expect(mysql.refusals?.[0]).toMatch(/"mysql" is refused/);
+    expect(() => mysql.storage.findOne("user", [])).toThrow(/"mysql" is refused/);
   });
 
   it("refuses a Drizzle SQLite schema with an integer timestamp column (I-3)", () => {
@@ -61,9 +62,9 @@ describe("the Better Auth storage on D1, default names", () => {
         updatedAt: { name: "updatedAt", columnType: "SQLiteText" },
       }),
     };
-    expect(() => drizzleAdapter({ $client: env.DB }, { provider: "sqlite", schema })).toThrow(
-      /database\.schema\.user\.createdAt: an integer timestamp column is refused/,
-    );
+    expect(drizzleAdapter({ $client: env.DB }, { provider: "sqlite", schema }).refusals).toEqual([
+      "database.schema.user.createdAt: an integer timestamp column is refused; on D1 tempo-auth reads Better Auth's dates as ISO 8601 text",
+    ]);
     const text = {
       user: drizzleTable("user", { createdAt: { name: "createdAt", columnType: "SQLiteText" } }),
     };

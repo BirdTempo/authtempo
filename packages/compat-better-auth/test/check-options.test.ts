@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import readme from "../README.md?raw";
 import { COMPAT_PLUGIN, passkey } from "../src/plugins.js";
 import { checkOptions } from "../src/server/check-options.js";
+import type { BetterAuthOptions } from "../src/types.js";
 import { consumerc, consumere, consumerb, consumerd, consumeri } from "../typetest/options.js";
 
 const paths = (refusals: string[]) => refusals.map((r) => r.slice(0, r.indexOf(":")));
@@ -104,7 +105,8 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
   it("refuses exactly these consumerc, consumerd, and consumerb options, and the README lists the same", () => {
     const apps = { consumerc, consumerd, consumerb };
     for (const [name, list] of Object.entries(EXACT)) {
-      const c = checkOptions(apps[name as keyof typeof apps]);
+      // An app object holds keys the type does not name; the runtime check is what this test pins.
+      const c = checkOptions(apps[name as keyof typeof apps] as BetterAuthOptions);
       expect({ name, refusals: paths(c.refusals) }).toEqual({ name, refusals: list });
       const line = readme
         .split("\n")

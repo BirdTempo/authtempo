@@ -7,6 +7,7 @@ import {
   systemClock,
 } from "@tempo-auth/core";
 import { describe, expect, it, vi } from "vitest";
+import { type DrizzleAdapterConfig, drizzleAdapter } from "../src/adapters/drizzle.js";
 import {
   APIError,
   BETTER_AUTH_CODES,
@@ -18,7 +19,7 @@ import { magicLink } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { BETTER_AUTH_DEFAULTS, mapOptions } from "../src/server/map-options.js";
 import { SESSION_KEYS, toNext, USER_KEYS } from "../src/server/shapes.js";
-import type { CompatDatabase, EmailCallbackData } from "../src/types.js";
+import type { BetterAuthOptions, CompatDatabase, EmailCallbackData } from "../src/types.js";
 
 const BASE = "https://api.example.com";
 const APP = "https://app.example.com";
@@ -71,6 +72,33 @@ describe("betterAuth", () => {
     ).toThrowError(
       "tempo-auth compat: this config uses 2 items that tempo-auth cannot keep:\n- hooks: plan 9d (hooks on organizations and sessions) is not written yet\n- secondaryStorage: core keeps sessions in the session table; secondary storage is refused",
     );
+  });
+
+  it("lists drizzleAdapter's refusals in the same one error (plan 9b)", () => {
+    const database = drizzleAdapter({ $client: {} }, {
+      provider: "pg",
+      casing: "snake",
+    } as unknown as DrizzleAdapterConfig);
+    expect(() =>
+      betterAuth({
+        baseURL: BASE,
+        secret: "x".repeat(32),
+        database,
+        hooks: {},
+      } as BetterAuthOptions),
+    ).toThrowError(
+      "tempo-auth compat: this config uses 3 items that tempo-auth cannot keep:\n- database.casing: drizzleAdapter accepts provider, schema, usePlural, transaction, and debugLogs only\n- database: drizzleAdapter needs a Drizzle database on postgres.js (drizzle-orm/postgres-js); other drivers are refused\n- hooks: plan 9d (hooks on organizations and sessions) is not written yet",
+    );
+  });
+
+  it("answers better-auth/api at ./api with APIError only (plan 9b)", async () => {
+    const pkg = JSON.parse((await import("../package.json?raw")).default) as {
+      exports: Record<string, unknown>;
+    };
+    expect(pkg.exports["./api"]).toEqual({ types: "./dist/api.d.ts", default: "./dist/api.js" });
+    const api = await import("../src/api.js");
+    expect(Object.keys(api)).toEqual(["APIError"]);
+    expect(api.APIError).toBe(APIError);
   });
 
   it("turns a core ConfigError into the same error", () => {

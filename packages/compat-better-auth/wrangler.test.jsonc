@@ -2,11 +2,16 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tempo-auth-compat-better-auth-test",
   "compatibility_date": "2026-09-30",
-  // No compatibility_flags: @cloudflare/vitest-plugin 1.4.0 turns Node.js
-  // modules on for its runner whatever the flags say (dist/pool/index.mjs,
-  // read 2026-10-11), so this config cannot show that the package runs
-  // without nodejs_compat. The example Worker's proof/bundle-no-node.mjs
-  // bundles this package with nodejs_compat off (plan 9b).
+  // Every Worker config sets both flags: Workers turn nodejs_compat on by
+  // default from compatibility date 2026-08-04 (Cloudflare changelog, read
+  // 2026-10-11), and these two turn it off. Without them a config states the
+  // opposite of the rule. The pool ignores them: @cloudflare/vitest-plugin
+  // 1.4.0 turns Node.js modules on for its runner whatever the flags say
+  // (dist/pool/index.mjs, read 2026-10-11), so this config cannot show that
+  // the package runs without nodejs_compat. The example Worker's
+  // proof/bundle-no-node.mjs bundles this package with nodejs_compat off
+  // (plan 9b).
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
   "d1_databases": [
     {
       "binding": "DB",

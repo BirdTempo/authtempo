@@ -11,7 +11,7 @@ import {
 import type { PublicSession } from "@tempo-auth/core";
 import { createHandoff } from "@tempo-auth/handoff";
 import { expoCrypto, expoOpener } from "@tempo-auth/handoff/expo";
-import { BETTER_AUTH_CODES, type CompatCode, clientError, compatClientError } from "../errors.js";
+import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
 import { COOKIE_NAME, toNext } from "../server/shapes.js";
 import type {
   AuthClient,
@@ -19,6 +19,7 @@ import type {
   ClientPasskey,
   ClientSession,
   ClientUser,
+  CompatClientError,
   CompatClientResult,
   ExpoClientOptions,
   Invitation,
@@ -257,14 +258,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     if (!r.ok) {
       return {
         data: null,
-        error: clientError(
-          // The code from the shim's table. The status stays the handoff's
-          // 0: the mismatch is found in the app, with no HTTP response.
-          r.code === "redirect_mismatch"
-            ? ("INVALID_REDIRECT_URL" satisfies CompatCode)
-            : BETTER_AUTH_CODES[r.code],
-          r.status,
-        ),
+        error: handoffError(r),
       };
     }
     keepToken(r.value.token);
@@ -491,4 +485,19 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     $Infer: {} as AuthClient["$Infer"],
   };
   return api;
+}
+
+/**
+ * The client error of a failed handoff sign-in. One status per code (plan
+ * 9b): the redirect mismatch answers `INVALID_REDIRECT_URL` with the status
+ * the shim's table gives it, 403, the same as the server's refusal, though
+ * the app finds the mismatch with no HTTP response.
+ */
+export function handoffError(r: {
+  code: keyof typeof BETTER_AUTH_CODES | "redirect_mismatch";
+  status: number;
+}): CompatClientError {
+  return r.code === "redirect_mismatch"
+    ? compatClientError("INVALID_REDIRECT_URL")
+    : clientError(BETTER_AUTH_CODES[r.code], r.status);
 }

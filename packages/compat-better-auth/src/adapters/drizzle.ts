@@ -25,7 +25,6 @@ export interface DrizzleAdapterConfig {
   transaction?: boolean;
   /** Accepted: logs only. */
   debugLogs?: unknown;
-  [key: string]: unknown;
 }
 
 /** Table names, column names, the casing, and the Postgres schema, read from Drizzle table objects. */
@@ -118,6 +117,25 @@ function isPostgresJs(c: unknown): c is Sql {
 
 const ACCEPTED_CONFIG = new Set(["provider", "schema", "usePlural", "transaction", "debugLogs"]);
 
+/**
+ * A database that only carries its refusals. `betterAuth` puts them in its
+ * one list (spec 16.1), so an app sees every refusal in one run. Any use
+ * outside `betterAuth` throws the same error.
+ */
+function refusedDatabase(dialect: "postgres" | "d1", refusals: string[]): CompatDatabase {
+  const fail = () => {
+    throw new BetterAuthCompatError(refusals);
+  };
+  const refuse = new Proxy({}, { get: () => fail });
+  return {
+    kind: "tempo-auth-compat-database",
+    dialect,
+    storage: refuse as CompatDatabase["storage"],
+    limiter: refuse as CompatDatabase["limiter"],
+    refusals,
+  };
+}
+
 /** Better Auth's `drizzleAdapter(db, config)`, answered with the Better Auth schema storage. */
 export function drizzleAdapter(
   db: { $client?: unknown },
@@ -129,35 +147,37 @@ export function drizzleAdapter(
       (k) =>
         `database.${k}: drizzleAdapter accepts provider, schema, usePlural, transaction, and debugLogs only`,
     );
-  if (refused.length > 0) throw new BetterAuthCompatError(refused);
-  const naming = namesFromDrizzle(config.schema, config.usePlural === true);
+  let naming: NamingOptions | null = null;
+  try {
+    naming = namesFromDrizzle(config.schema, config.usePlural === true);
+  } catch (e) {
+    if (!(e instanceof BetterAuthCompatError)) throw e;
+    refused.push(...e.refusals);
+  }
   if (config.provider === "pg") {
-    if (!isPostgresJs(db.$client)) {
-      throw new BetterAuthCompatError([
+    if (!isPostgresJs(db.$client))
+      refused.push(
         "database: drizzleAdapter needs a Drizzle database on postgres.js (drizzle-orm/postgres-js); other drivers are refused",
-      ]);
-    }
+      );
+    if (refused.length > 0 || !naming || !isPostgresJs(db.$client))
+      return refusedDatabase("postgres", refused);
     return betterAuthSchemaStorage({ dialect: "postgres", sql: db.$client, ...naming });
   }
   if (config.provider === "sqlite") {
-    if (!isD1(db.$client)) {
-      throw new BetterAuthCompatError([
+    if (!isD1(db.$client))
+      refused.push(
         "database: drizzleAdapter needs a Drizzle database on D1 (drizzle-orm/d1); other SQLite drivers are refused",
-      ]);
-    }
-    const integerDates = integerTimestampColumns(config.schema);
-    if (integerDates.length > 0) {
-      throw new BetterAuthCompatError(
-        integerDates.map(
-          (c) =>
-            `database.schema.${c}: an integer timestamp column is refused; on D1 tempo-auth reads Better Auth's dates as ISO 8601 text`,
-        ),
       );
-    }
+    for (const c of integerTimestampColumns(config.schema))
+      refused.push(
+        `database.schema.${c}: an integer timestamp column is refused; on D1 tempo-auth reads Better Auth's dates as ISO 8601 text`,
+      );
+    if (refused.length > 0 || !naming || !isD1(db.$client)) return refusedDatabase("d1", refused);
     const { pgSchema: _, ...d1Naming } = naming;
     return betterAuthSchemaStorage({ dialect: "d1", db: db.$client, ...d1Naming });
   }
-  throw new BetterAuthCompatError([
+  refused.push(
     `database.provider: "${config.provider}" is refused; tempo-auth runs on Postgres and D1`,
-  ]);
+  );
+  return refusedDatabase("postgres", refused);
 }

@@ -1,6 +1,6 @@
 import type { LimiterPort, StorageAdapter } from "@tempo-auth/core";
 import { bearer, expo, magicLink, organization, passkey } from "../src/plugins.js";
-import type { BetterAuthOptions, CompatDatabase } from "../src/types.js";
+import type { CompatDatabase } from "../src/types.js";
 
 // Real values, not `declare const`: test/check-options.test.ts (Task 7) imports
 // these objects at run time. The check never calls the storage or the limiter.
@@ -51,7 +51,7 @@ export const consumere = {
     github: { clientId: "h", clientSecret: "h" },
     linkedin: { clientId: "l", clientSecret: "l" },
   },
-} satisfies BetterAuthOptions;
+};
 
 // consumer-i apps/api/src/auth/auth.ts, read 2026-10-10.
 export const consumeri = {
@@ -85,12 +85,13 @@ export const consumeri = {
       allowUserToCreateOrganization: true,
       organizationLimit: 5,
       creatorRole: "owner",
+      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (organizationHooks)
       organizationHooks: {
         afterCreateOrganization: async (_: { organization: { id: string } }) => {},
       },
     }),
   ],
-} satisfies BetterAuthOptions;
+};
 
 // consumerc services/identity/src/auth.ts, read through the usage report 2026-10-10.
 export const consumerc = {
@@ -110,6 +111,7 @@ export const consumerc = {
   plugins: [
     organization({
       creatorRole: "owner",
+      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (ac)
       ac: {},
       roles: {},
       dynamicAccessControl: { enabled: true },
@@ -119,7 +121,7 @@ export const consumerc = {
     magicLink({ expiresIn: 600, sendMagicLink: async (_: { email: string; url: string }) => {} }),
     expo(),
   ],
-} satisfies BetterAuthOptions;
+};
 
 // consumerd apps/api/src/auth/create-auth.ts and packages/db/src/auth-options.ts, through the usage report.
 export const consumerd = {
@@ -142,6 +144,7 @@ export const consumerd = {
   hooks: { before: async () => {}, after: async () => {} },
   plugins: [
     organization({
+      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (teams)
       teams: { enabled: true },
       creatorRole: "owner",
       membershipLimit: 50,
@@ -160,7 +163,7 @@ export const consumerd = {
     { id: "anonymous", emailDomainName: "anon.consumerd.app" },
     passkey({ rpID: "consumerd.app", rpName: "Consumerd" }),
   ],
-} satisfies BetterAuthOptions;
+};
 
 // consumerb apps/api/src/auth.ts, through the usage report.
 export const consumerb = {
@@ -183,6 +186,7 @@ export const consumerb = {
     organization({
       creatorRole: "owner",
       requireEmailVerificationOnInvitation: true,
+      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (ac)
       ac: {},
       roles: {},
       organizationHooks: {},
@@ -195,4 +199,4 @@ export const consumerb = {
     { id: "mcp", loginPage: "/login" },
     { id: "cimd" },
   ],
-} satisfies BetterAuthOptions;
+};

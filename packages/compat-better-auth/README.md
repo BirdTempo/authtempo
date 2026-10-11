@@ -41,14 +41,19 @@ refuses its plugin by id at construction.
 | `better-auth/client/plugins` | `./client/plugins` |
 | `better-auth/adapters/drizzle`, `@better-auth/drizzle-adapter` | `./adapters/drizzle` and `.` |
 | `better-auth/node` | `./node` |
+| `better-auth/api` | `./api` (`APIError`) |
 | `better-auth/next-js` | `./next-js` |
 | `@better-auth/expo` | `.` (`expo`) |
 | `@better-auth/expo/client` | `./client` (`expoClient`) |
 | `@better-auth/passkey` | `.` (`passkey`) |
 | `@better-auth/passkey/client` | `./client` (`passkeyClient`) |
 
-The package exports no other subpath. An import of `better-auth/api`,
-`better-auth/db`, `better-auth/types`, `better-auth/plugins/access`, or
+`better-auth/api` maps to `./api`, which exports `APIError` only (plan 9b).
+An import of another name from it, such as `createAuthMiddleware`, fails at
+build: it needs hooks (plan 9d).
+
+The package exports no other subpath. An import of `better-auth/db`,
+`better-auth/types`, `better-auth/plugins/access`, or
 `better-auth/plugins/organization/access` fails at build. consumerc, consumerd,
 and consumerb import some of them: remove those imports first.
 

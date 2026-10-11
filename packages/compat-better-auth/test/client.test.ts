@@ -687,3 +687,16 @@ describe("the shim's own codes (plan 9 final review M-4, M-5)", () => {
       });
   });
 });
+
+describe("one status per code (plan 9b)", () => {
+  it("answers INVALID_REDIRECT_URL with the table's 403 for the handoff mismatch, as the server does", async () => {
+    const { handoffError } = await import("../src/client/create-auth-client.js");
+    const { COMPAT_CODES } = await import("../src/errors.js");
+    expect(handoffError({ code: "redirect_mismatch", status: 0 })).toEqual({
+      code: "INVALID_REDIRECT_URL",
+      message: "Invalid redirect url",
+      status: COMPAT_CODES.INVALID_REDIRECT_URL,
+      statusText: "Forbidden",
+    });
+  });
+});

@@ -195,6 +195,9 @@ const TOP: Record<string, Rule> = {
     });
   },
   database: (v, p, out) => {
+    // drizzleAdapter's own refusals join this one list (plan 9b), each already a `<path>: <reason>`.
+    for (const r of (v as { refusals?: readonly string[] } | null)?.refusals ?? [])
+      out.refusals.push(r);
     if ((v as { kind?: unknown } | null)?.kind !== "tempo-auth-compat-database") {
       refuse(
         out,
