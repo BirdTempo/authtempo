@@ -17,6 +17,15 @@ export type SkipReason =
   | "unmatched_row"
   /** One export file holds the same user id twice; no copy of it is imported. */
   | "duplicate_row"
+  /** A Cognito user whose UserStatus is not CONFIRMED or EXTERNAL_PROVIDER; the reason names the status. */
+  | "status_unconfirmed"
+  | "status_force_change_password"
+  | "status_reset_required"
+  | "status_compromised"
+  | "status_archived"
+  | "status_unknown"
+  /** The record has no provider id (Cognito sub), so it has no import key. */
+  | "no_source_id"
   // The importer finds these.
   | "no_email"
   /** An organization name outside core's rule (1 to 120 characters, no control character). */
@@ -39,6 +48,9 @@ export type SkipReason =
 export const CONFLICT_REASONS: ReadonlySet<SkipReason> = new Set<SkipReason>([
   "unmatched_row",
   "duplicate_row",
+  "status_compromised",
+  "status_unknown",
+  "no_source_id",
   "email_taken",
   "identity_taken",
   "slug_taken",
