@@ -37,13 +37,17 @@ describe("cognitoSource", () => {
       },
       {
         Username: "off",
-        Attributes: [{ Name: "email", Value: "off@example.com" }],
+        Attributes: [
+          { Name: "sub", Value: "sub-3" },
+          { Name: "email", Value: "off@example.com" },
+        ],
         Enabled: false,
         UserStatus: "CONFIRMED",
       },
       {
         Username: "fed-bad",
         Attributes: [
+          { Name: "sub", Value: "sub-4" },
           { Name: "email", Value: "fed@example.com" },
           { Name: "identities", Value: "not json" },
         ],
@@ -68,9 +72,9 @@ describe("cognitoSource", () => {
       password: null,
       createdAt: new Date("2023-11-14T22:13:20.000Z"),
     });
-    expect(r[2]).toMatchObject({ sourceId: "off", skip: "disabled" });
+    expect(r[2]).toMatchObject({ sourceId: "sub-3", skip: "disabled" });
     expect(r[3]).toMatchObject({
-      sourceId: "fed-bad",
+      sourceId: "sub-4",
       identities: [],
       password: null,
       dropped: ["identity:unreadable"],
@@ -88,5 +92,128 @@ describe("cognitoSource", () => {
       now,
     });
     expect(refused.refusedHashes).toEqual([{ sourceId: "sub-1", format: "legacy-verify" }]);
+  });
+});
+
+// Edge rows (review I-1, I-2, M-1 to M-7, N-3), same fields and date as above.
+const user = (
+  username: string,
+  attrs: Record<string, string>,
+  over: Record<string, unknown> = {},
+) => ({
+  Username: username,
+  Attributes: Object.entries(attrs).map(([Name, Value]) => ({ Name, Value })),
+  Enabled: true,
+  UserStatus: "CONFIRMED",
+  ...over,
+});
+const verified = (sub: string) => ({
+  sub,
+  email: `${sub}@example.com`,
+  email_verified: "true",
+});
+const STATUSES = [
+  "UNCONFIRMED",
+  "FORCE_CHANGE_PASSWORD",
+  "RESET_REQUIRED",
+  "COMPROMISED",
+  "ARCHIVED",
+];
+const EDGE = JSON.stringify({
+  Users: [
+    ...STATUSES.map((st) => user(st, verified(`st-${st}`), { UserStatus: st })),
+    user("nostatus", verified("st-none"), { UserStatus: undefined }),
+    user("enabled-str", verified("en-str"), {
+      Enabled: "false",
+      UserCreateDate: "November 14 2023",
+    }),
+    user("enabled-none", verified("en-none"), { Enabled: undefined }),
+    // A native user an admin linked to Apple, and a custom provider named "Apple" (review I-2, M-2).
+    user(
+      "linked",
+      {
+        ...verified("linked"),
+        identities: JSON.stringify([
+          { providerName: "SignInWithApple", userId: "a-1" },
+          { providerName: "Apple", userId: "x-1" },
+          { providerName: "Google" },
+        ]),
+      },
+      { UserCreateDate: "2023-11-14T22:13:20.000000+00:00" },
+    ),
+    user("fed-none", verified("fed-none"), { UserStatus: "EXTERNAL_PROVIDER" }),
+    user(
+      "fed-obj",
+      { ...verified("fed-obj"), identities: '{"a":1}' },
+      { UserStatus: "EXTERNAL_PROVIDER" },
+    ),
+    user("nosub", { email: "nosub@example.com", email_verified: "true" }),
+    user("dup-a", verified("dup")),
+    user("dup-b", verified("dup")),
+  ],
+});
+
+describe("cognitoSource edge rows", () => {
+  it("writes the marker only for CONFIRMED and skips every other status", async () => {
+    const r = await all(cognitoSource({ users: EDGE }));
+    const by = (id: string) => r.find((x) => x.kind === "user" && x.sourceId === id);
+    for (const st of STATUSES)
+      expect(by(`st-${st}`)).toMatchObject({
+        password: null,
+        skip: "disabled",
+        dropped: [`status:${st}`],
+      });
+    expect(by("st-none")).toMatchObject({ skip: "disabled", dropped: ["status:missing"] });
+    expect(by("linked")).toMatchObject({ password: { hash: LEGACY_VERIFY_HASH } });
+    expect(by("linked")).not.toHaveProperty("skip");
+  });
+
+  it("fails Enabled closed, maps only the built-in providers, and lists every unreadable identity", async () => {
+    const r = await all(cognitoSource({ users: EDGE }));
+    const by = (id: string) => r.find((x) => x.kind === "user" && x.sourceId === id);
+    // A loose date is unreadable, not read as local time (review M-7).
+    expect(by("en-str")).toMatchObject({ skip: "disabled", createdAt: null });
+    expect(by("en-none")).toMatchObject({ skip: "disabled" });
+    expect(by("linked")).toMatchObject({
+      identities: [
+        { provider: "apple", subject: "a-1" },
+        { provider: "cognito:Apple", subject: "x-1" },
+      ],
+      dropped: ["identity:unreadable"],
+      createdAt: new Date("2023-11-14T22:13:20.000Z"),
+    });
+    expect(by("fed-none")).toMatchObject({ identities: [], dropped: ["identity:unreadable"] });
+    expect(by("fed-obj")).toMatchObject({ identities: [], dropped: ["identity:unreadable"] });
+  });
+
+  it("skips a record with no sub and every copy of a duplicate sub", async () => {
+    const r = await all(cognitoSource({ users: EDGE }));
+    expect(r.filter((x) => x.kind === "user" && x.sourceId === "username:nosub")).toEqual([
+      expect.objectContaining({ skip: "unmatched_row" }),
+    ]);
+    expect(r.filter((x) => x.kind === "user" && x.sourceId === "dup")).toEqual([
+      expect.objectContaining({ skip: "duplicate_row" }),
+      expect.objectContaining({ skip: "duplicate_row" }),
+    ]);
+  });
+
+  it("imports the linked user with the Apple identity and lists the custom provider", async () => {
+    const db = createMemoryAdapter();
+    const report = await importUsers(db, cognitoSource({ users: EDGE }), {
+      now,
+      legacyVerify: true,
+    });
+    expect((await db.findMany("user", [])).map((u) => u.email).sort()).toEqual([
+      "fed-none@example.com",
+      "fed-obj@example.com",
+      "linked@example.com",
+    ]);
+    expect(
+      (await db.findMany("identity", []))
+        .filter((i) => i.provider === "apple")
+        .map((i) => i.subject),
+    ).toEqual(["a-1"]);
+    expect(report.dropped).toContainEqual({ sourceId: "linked", item: "identity:cognito:Apple" });
+    expect(report.created.password).toBe(1);
   });
 });
