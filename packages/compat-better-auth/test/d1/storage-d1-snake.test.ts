@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
+import { COMPAT_MIGRATION_0002_SQL } from "../../src/storage/migration.js";
 import type { NamingOptions } from "../../src/storage/names.js";
 import { BETTER_AUTH_SQLITE } from "../fixtures.js";
 import { d1MappingSuite } from "./mapping-suite.js";
@@ -12,7 +13,7 @@ import { before17, renamed } from "./sql.js";
 // table names. Built from Better Auth's own SQLite SQL with its seven foreign
 // keys, renamed (plan 9b: every suite here creates each parent row first).
 // The migration is the before-1.7 text for these names, from
-// migrationSql("before-1.7").
+// migrationSql("before-1.7"), then 0002, which is the same for every naming.
 const naming = {
   casing: "snake",
   tables: {
@@ -32,6 +33,7 @@ await execD1(tables);
 await execD1(
   betterAuthSchemaStorage({ dialect: "d1", db: env.DB, ...naming }).migrationSql("before-1.7"),
 );
+await execD1(COMPAT_MIGRATION_0002_SQL);
 
 it("builds the tables with snake_case columns and plural names", async () => {
   const cols = await env.DB.prepare(

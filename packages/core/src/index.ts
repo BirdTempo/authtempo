@@ -51,6 +51,7 @@ export { type Clock, systemClock } from "./primitives/clock.js";
 export { newId } from "./primitives/ids.js";
 export type { Result } from "./result.js";
 export {
+  type ApiTokenRow,
   type IdentityRow,
   type InvitationRow,
   type MemberRow,

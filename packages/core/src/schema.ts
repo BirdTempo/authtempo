@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export interface BaseRow {
   id: string;
@@ -90,6 +90,22 @@ export interface PasswordRow extends BaseRow {
   hash: string;
 }
 
+export interface ApiTokenRow extends BaseRow {
+  userId: string;
+  /** 1 to 80 UTF-16 code units, no control character. */
+  name: string;
+  /** SHA-256 hex of the clear token. The clear token is never stored. */
+  tokenHash: string;
+  /** The 8 characters after `tk_`, so a list tells the tokens apart. */
+  hint: string;
+  /** Null: the token never expires. */
+  expiresAt: Date | null;
+  /** Written at most once per hour. */
+  lastUsedAt: Date | null;
+  /** The one organization the token acts in, or null. */
+  organizationId: string | null;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -100,6 +116,7 @@ export interface Models {
   member: MemberRow;
   invitation: InvitationRow;
   password: PasswordRow;
+  apiToken: ApiTokenRow;
 }
 
 export type ModelName = keyof Models;
@@ -236,5 +253,20 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["userId"]],
     indexes: [],
+  },
+  // plan 8b: one row per API token. The table holds the hash, never the token.
+  apiToken: {
+    fields: {
+      ...base,
+      userId: { type: "string" },
+      name: { type: "string" },
+      tokenHash: { type: "string" },
+      hint: { type: "string" },
+      expiresAt: { type: "date", nullable: true },
+      lastUsedAt: { type: "date", nullable: true },
+      organizationId: { type: "string", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    indexes: [["userId"]],
   },
 };

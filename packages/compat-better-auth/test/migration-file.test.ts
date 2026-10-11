@@ -1,8 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
+import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
-import { compatMigrationSql } from "../src/storage/migration.js";
+import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
+import { COMPAT_MIGRATION_0002_SQL, compatMigrationSql } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { before17 } from "./d1/sql.js";
 import { BETTER_AUTH_SQLITE } from "./fixtures.js";
@@ -163,5 +165,22 @@ describe("migration 0001", () => {
       v: "2026-09-06T01:02:03.456Z",
     });
     expect(db.prepare(`SELECT "taUpdatedAt" AS v FROM "member"`).all()).toEqual([]);
+  });
+});
+
+describe("migration 0002 (plan 8b)", () => {
+  it("ships both D1 files as the one constant's text", () => {
+    expect(normalize(shipped0002)).toBe(normalize(COMPAT_MIGRATION_0002_SQL));
+    expect(normalize(shipped0002Before17)).toBe(normalize(COMPAT_MIGRATION_0002_SQL));
+  });
+
+  it("moves the stored versions after 0001 on Better Auth 1.7 tables", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    db.exec(shipped);
+    db.exec(shipped0002);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "2" },
+      { key: "schema_version", value: "5" },
+    ]);
   });
 });

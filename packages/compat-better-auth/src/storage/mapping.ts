@@ -77,7 +77,15 @@ function notCredential(provider: string): string {
   return issuerFor(provider);
 }
 
-export const MAPPING: { [M in ModelName]: ModelMap<M> } = {
+/**
+ * Core's models that have a Better Auth table. Core's `apiToken` (plan 8b)
+ * has none yet: the plan that maps Better Auth's api-key plugin puts it on
+ * the `apikey` table, so that the keys an app already holds keep working.
+ * `UNMAPPED_MODELS` in statements.ts is the runtime half of this rule.
+ */
+export type MappedModel = Exclude<ModelName, "apiToken">;
+
+export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
   user: {
     table: "user",
     fields: {

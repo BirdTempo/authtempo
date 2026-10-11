@@ -1,10 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { IdentityRow, PasskeyRow, UserRow, VerificationRow } from "../schema.js";
+import type {
+  ApiTokenRow,
+  IdentityRow,
+  ModelName,
+  PasskeyRow,
+  UserRow,
+  VerificationRow,
+} from "../schema.js";
 import { type StorageAdapter, StorageError } from "./port.js";
 
 export interface ConformanceTarget {
   adapter: StorageAdapter;
   close(): Promise<void>;
+}
+
+export interface ConformanceOptions {
+  /**
+   * Models this storage does not hold. For each, the suite checks the
+   * contract of a model with no table: a read answers empty, as for a where
+   * that never matches, and a create throws `unknown_model`. Only `apiToken`
+   * has that contract today: the Better Auth compatibility package holds no
+   * API token until its api-key plan (plan 8b).
+   */
+  unmapped?: readonly ModelName[];
 }
 
 function user(id: string, email: string, at: Date): UserRow {
@@ -52,6 +70,7 @@ function passkey(id: string, counter: number, at: Date): PasskeyRow {
 export function runAdapterConformance(
   name: string,
   factory: () => Promise<ConformanceTarget>,
+  options: ConformanceOptions = {},
 ): void {
   describe(`storage conformance: ${name}`, () => {
     let target: ConformanceTarget;
@@ -619,5 +638,68 @@ export function runAdapterConformance(
       expect(row?.hash.startsWith("pbkdf2-sha256$1000$")).toBe(true);
       expect(row?.createdAt.getTime()).toBe(at.getTime());
     });
+
+    const apiToken = (at: Date): ApiTokenRow => ({
+      id: "t1",
+      userId: "u1",
+      name: "ci",
+      tokenHash: "h1",
+      hint: "abcdefgh",
+      expiresAt: null,
+      lastUsedAt: null,
+      organizationId: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+
+    if (options.unmapped?.includes("apiToken")) {
+      it("holds no apiToken row: reads answer empty and a create throws unknown_model (plan 8b)", async () => {
+        const at = new Date("2026-10-11T00:00:00.000Z");
+        await db.create("user", user("u1", "a@example.com", at));
+        const byUser = [{ field: "userId" as const, op: "eq" as const, value: "u1" }];
+        await expect(db.create("apiToken", apiToken(at))).rejects.toMatchObject({
+          code: "unknown_model",
+        });
+        expect(await db.findOne("apiToken", byUser)).toBeNull();
+        expect(await db.findMany("apiToken", byUser)).toEqual([]);
+        expect(await db.update("apiToken", byUser, { lastUsedAt: at })).toBe(0);
+        expect(await db.delete("apiToken", byUser)).toBe(0);
+        expect(await db.transaction((tx) => tx.delete("apiToken", byUser))).toBe(0);
+      });
+    } else {
+      it("round-trips the version 5 apiToken model and keeps its unique key (plan 8b)", async () => {
+        const at = new Date("2026-10-11T00:00:00.000Z");
+        await db.create("user", user("u1", "a@example.com", at));
+        const row = apiToken(at);
+        await db.create("apiToken", row);
+        await expect(db.create("apiToken", { ...row, id: "t2" })).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["tokenHash"],
+        });
+        const later = new Date(at.getTime() + 3_600_000);
+        expect(
+          await db.update("apiToken", [{ field: "id", op: "eq", value: "t1" }], {
+            lastUsedAt: later,
+            expiresAt: later,
+            organizationId: "o1",
+          }),
+        ).toBe(1);
+        const back = await db.findOne("apiToken", [{ field: "tokenHash", op: "eq", value: "h1" }]);
+        expect(back).toEqual({
+          ...row,
+          lastUsedAt: later,
+          expiresAt: later,
+          organizationId: "o1",
+        });
+        // A null expiry never matches lt, so the sweep keeps a token with no expiry.
+        await db.create("apiToken", { ...apiToken(at), id: "t3", tokenHash: "h3" });
+        expect(
+          await db.delete("apiToken", [
+            { field: "expiresAt", op: "lt", value: new Date(later.getTime() + 1) },
+          ]),
+        ).toBe(1);
+        expect((await db.findMany("apiToken", [])).map((r) => r.id)).toEqual(["t3"]);
+      });
+    }
   });
 }

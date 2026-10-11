@@ -57,6 +57,25 @@ describe("names", () => {
     expect(fieldsFromColumns("user", ["email"])).toEqual(["email"]);
     expect(fieldsFromColumns("identity", ["provider", "subject"])).toEqual(["provider", "subject"]);
   });
+
+  it("names a camel-case model's table in snake case (plan 8b)", () => {
+    expect(TABLES.apiToken).toBe("ta_api_token");
+    expect(uniqueIndexName("apiToken", ["tokenHash"])).toBe("ux_ta_api_token__token_hash");
+    expect(fieldsFromUniqueIndex("apiToken", "ta_api_token_pkey")).toEqual(["id"]);
+    expect(fieldsFromUniqueIndex("apiToken", "ux_ta_api_token__token_hash")).toEqual(["tokenHash"]);
+    // The earlier names do not change.
+    expect(Object.values(TABLES).slice(0, 9)).toEqual([
+      "ta_user",
+      "ta_identity",
+      "ta_session",
+      "ta_verification",
+      "ta_passkey",
+      "ta_organization",
+      "ta_member",
+      "ta_invitation",
+      "ta_password",
+    ]);
+  });
   it("rejects unknown models and fields", () => {
     expect(() => assertModel("nope")).toThrow(/unknown_model/);
     expect(() => assertModel("toString")).toThrow(/unknown_model/);

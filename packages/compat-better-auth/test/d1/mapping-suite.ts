@@ -55,10 +55,14 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       updatedAt: at,
     });
 
-  runAdapterConformance(`Better Auth tables on D1, ${label}`, async () => {
-    await truncate();
-    return { adapter: db(), close: truncate };
-  });
+  runAdapterConformance(
+    `Better Auth tables on D1, ${label}`,
+    async () => {
+      await truncate();
+      return { adapter: db(), close: truncate };
+    },
+    { unmapped: ["apiToken"] },
+  );
 
   describe(`the Better Auth mapping on D1, ${label}`, () => {
     beforeEach(truncate);

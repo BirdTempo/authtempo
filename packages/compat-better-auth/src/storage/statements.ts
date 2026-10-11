@@ -50,6 +50,55 @@ export interface CompatStatements extends SqlStatements {
 }
 
 /**
+ * The core models with no Better Auth table: `MappedModel` in mapping.ts
+ * leaves them out. This storage holds no row of them. A read answers empty,
+ * as for a where that never matches, so `sweepExpired` counts 0 and
+ * `caller` answers null for a `tk_` bearer. A create throws `unknown_model`,
+ * so a write never vanishes in silence. Plan 8b, 2026-10-11.
+ */
+export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>(["apiToken"]);
+
+function withoutUnmapped(st: CompatStatements): CompatStatements {
+  const none = (model: ModelName) => UNMAPPED_MODELS.has(model);
+  const refuse = (model: ModelName): never => {
+    throw new StorageError("unknown_model", model);
+  };
+  return {
+    ...st,
+    insert(model, data) {
+      return none(model) ? refuse(model) : st.insert(model, data);
+    },
+    select(model, where, opts) {
+      return none(model) ? null : st.select(model, where, opts);
+    },
+    update(model, where, data) {
+      return none(model) ? null : st.update(model, where, data);
+    },
+    delete(model, where) {
+      return none(model) ? null : st.delete(model, where);
+    },
+    decode(model, row) {
+      return none(model) ? refuse(model) : st.decode(model, row);
+    },
+    undoSelect(model, where) {
+      return none(model) ? null : st.undoSelect(model, where);
+    },
+    undoCreate(model, data) {
+      return none(model) ? refuse(model) : st.undoCreate(model, data);
+    },
+    restoreRow(model, row, data) {
+      return none(model) ? refuse(model) : st.restoreRow(model, row, data);
+    },
+    reinsertRow(model, row) {
+      return none(model) ? refuse(model) : st.reinsertRow(model, row);
+    },
+    deleteReturning(model, where) {
+      return none(model) ? null : st.deleteReturning(model, where);
+    },
+  };
+}
+
+/**
  * The statements for core's models on the Better Auth tables. They keep
  * every rule of the storage port (port.ts): the null rules, the sort rules,
  * the write rules, the argument rules. Core's conformance suite is the check.
@@ -392,7 +441,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       return new StorageError("unique_violation", model, fieldsFor(model, raw));
     },
   };
-  return st;
+  return withoutUnmapped(st);
 }
 
 export type { Statement };

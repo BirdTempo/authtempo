@@ -27,6 +27,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
+  { unmapped: ["apiToken"] },
 );
 
 runAdapterConformance(
@@ -37,6 +38,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
+  { unmapped: ["apiToken"] },
 );
 
 /** Rows as Better Auth 1.7 writes them, inserted before the migration, on the fixture with its foreign keys. */
@@ -76,7 +78,7 @@ describe("the Better Auth mapping on postgres", () => {
     pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     await pg.sql.unsafe(BETTER_AUTH_ERA);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    expect(await s.migrate()).toEqual(["0001_compat_better_auth"]);
+    expect(await s.migrate()).toEqual(["0001_compat_better_auth", "0002_compat_schema_v5"]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
   });
@@ -84,8 +86,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 4; a new core version needs migration 0002 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(4);
+  it("serves core schema version 5; a new core version needs migration 0003 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(5);
   });
 
   it("names only columns the table field list knows", () => {
@@ -459,8 +461,8 @@ describe("the compat migration on postgres", () => {
         .sort();
       expect(added).toEqual(["ta_limit", "ta_meta"]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "1" },
-        { key: "schema_version", value: "4" },
+        { key: "compat_better_auth", value: "2" },
+        { key: "schema_version", value: "5" },
       ]);
     } finally {
       await pg.close();

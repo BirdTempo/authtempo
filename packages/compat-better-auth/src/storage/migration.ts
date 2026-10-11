@@ -4,10 +4,27 @@ import type { Sql } from "postgres";
 import { ISSUERS } from "./mapping.js";
 import { BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
 
-/** The mapping version in ta_meta. A mapping change that needs new columns is migration 0002 and the value 2. */
+/**
+ * The lowest `compat_better_auth` value this code reads. Migration 0002
+ * writes 2 so that the Postgres runner applies it once; the mapping itself
+ * does not change in 0002, so the floor stays 1. Core's gate on
+ * `schema_version` is the check that needs 0002.
+ */
 export const COMPAT_SCHEMA_VERSION = 1;
 export const COMPAT_META_KEY = "compat_better_auth";
 export const MIGRATION_NAME = "0001_compat_better_auth";
+export const MIGRATION_0002_NAME = "0002_compat_schema_v5";
+
+/**
+ * Migration 0002 (plan 8b): core's schema version 5. Core 5 adds the
+ * `apiToken` model, which this package does not map (`UNMAPPED_MODELS`), so
+ * no table changes. Core's gate compares `schema_version` with
+ * SCHEMA_VERSION, so without this file the storage refuses to start. The
+ * text is the same for both dialects, both D1 variants, and every naming: it
+ * touches ta_meta only. Append-only.
+ */
+export const COMPAT_MIGRATION_0002_SQL =
+  "UPDATE ta_meta SET value = '5' WHERE key = 'schema_version';\nUPDATE ta_meta SET value = '2' WHERE key = 'compat_better_auth';\n";
 
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
@@ -122,8 +139,9 @@ export type SqliteVariant = "1.7" | "before-1.7";
  * never change the text a shipped name produces. The two added tables are
  * ta_limit (core schema version 3's shape) and ta_meta, last, so a failed
  * run leaves no version row. schema_version is the literal '4', the core
- * version this mapping serves; it is not read from SCHEMA_VERSION, because
- * a shipped migration never changes. `variant` applies to SQLite only.
+ * version when 0001 shipped; migration 0002 moves it to 5. It is not read
+ * from SCHEMA_VERSION, because a shipped migration never changes. `variant`
+ * applies to SQLite only.
  */
 export function compatMigrationSql(
   dialect: "postgres" | "sqlite",
@@ -258,6 +276,7 @@ const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migration
 export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): Promise<string[]> {
   const migrations = [
     { version: 1, name: MIGRATION_NAME, text: compatMigrationSql("postgres", names) },
+    { version: 2, name: MIGRATION_0002_NAME, text: COMPAT_MIGRATION_0002_SQL },
   ];
   const applied: string[] = [];
   for (const m of migrations) {

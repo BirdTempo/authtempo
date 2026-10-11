@@ -29,9 +29,15 @@ export const SCHEMA_VERSION_KEY = "schema_version";
 
 const MODEL_NAMES = Object.keys(schema) as ModelName[];
 
-/** The one source for table names. */
+/**
+ * The one source for table names: `ta_` plus the model name in snake case,
+ * the column rule. Every model before plan 8b is one lower-case word, so its
+ * name does not change; `apiToken` is `ta_api_token`. Postgres folds an
+ * unquoted `ta_apiToken` to lower case, so the camel form would name another
+ * table than the migration.
+ */
 export const TABLES: Record<ModelName, string> = Object.fromEntries(
-  MODEL_NAMES.map((m) => [m, `ta_${m}`]),
+  MODEL_NAMES.map((m) => [m, `ta_${columnName(m)}`]),
 ) as Record<ModelName, string>;
 
 export function columnName(field: string): string {
