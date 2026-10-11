@@ -62,6 +62,27 @@ const FIRESCRYPT_RE = new RegExp(
   `^\\$firescrypt\\$n=(\\d{1,2}),r=(\\d{1,2}),p=1\\$${B64}\\$${B64}$`,
 );
 
+/** `n` (log2 N) and `r` of `$scrypt$` and `$firescrypt$`: the two digits that SCRYPT_RE and FIRESCRYPT_RE read. */
+const SCRYPT_PARAM_MAX = 99;
+
+/**
+ * True when `n` (log2 N) and `r` are inside this grammar's bounds for a
+ * scrypt or firescrypt string: integers of 1 to 99 (two digits) with
+ * 2^n * r at most SCRYPT_MAX_N_TIMES_R. The parser and the Firebase reader
+ * of the importer both use it, so the two bounds cannot drift.
+ */
+export function firescryptParamsValid(n: number, r: number): boolean {
+  return (
+    Number.isInteger(n) &&
+    Number.isInteger(r) &&
+    n >= 1 &&
+    r >= 1 &&
+    n <= SCRYPT_PARAM_MAX &&
+    r <= SCRYPT_PARAM_MAX &&
+    2 ** n * r <= SCRYPT_MAX_N_TIMES_R
+  );
+}
+
 /** Standard base64 with or without padding, strict: a stray character or a bad length answers null. */
 export function decodeBase64(text: string): Uint8Array | null {
   const bare = text.replace(/=+$/, "");
@@ -132,8 +153,7 @@ export function parseLegacyHash(stored: string): ParsedLegacyHash | null {
     const p = format === "firescrypt" ? 1 : int(m[3]);
     const salt = decodeBase64(m[format === "firescrypt" ? 3 : 4] ?? "");
     const hash = decodeBase64(m[format === "firescrypt" ? 4 : 5] ?? "");
-    if (n < 1 || r < 1 || p < 1 || p > SCRYPT_MAX_P) return null;
-    if (2 ** n * r > SCRYPT_MAX_N_TIMES_R) return null;
+    if (!firescryptParamsValid(n, r) || p < 1 || p > SCRYPT_MAX_P) return null;
     if (!within(salt, SALT_MIN, SALT_MAX) || !within(hash, KEY_MIN, KEY_MAX)) return null;
     return { format, n, r, p, salt, hash };
   }

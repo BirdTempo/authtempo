@@ -53,10 +53,11 @@ export interface LegacyPasswordHashOptions {
  * plan 9's). Supabase (Go bcrypt), Firebase (firebase/scrypt), and Ory hash
  * the raw bytes, so NFKC here would refuse a right password.
  *
- * The gate is per seam. Chained with `betterAuthPasswordHash()` as `next`,
- * the two seams have two gates of two each, so up to four derives (128 MiB
- * at the worst) can run at once in one isolate. One shared gate is an input
- * for a later plan.
+ * The gate is per isolate (module state in `gate.ts`), and every seam of
+ * this package shares it. The Better Auth seam of plan 9 has its own gate.
+ * Chained with `betterAuthPasswordHash()` as `next`, the two gates of two
+ * each let up to four derives (128 MiB at the worst) run at once in one
+ * isolate. One shared gate is an input for a later plan.
  */
 export function createLegacyPasswordHash(options: LegacyPasswordHashOptions): PasswordHashSeam {
   const enabled = new Set<LegacyFormat>();

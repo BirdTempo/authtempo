@@ -6,6 +6,7 @@ export {
   BCRYPT_MAX_COST,
   decodeBase64,
   encodeBase64,
+  firescryptParamsValid,
   LEGACY_FORMATS,
   type LegacyFormat,
   type ParsedLegacyHash,

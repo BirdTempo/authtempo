@@ -11,6 +11,7 @@ import { type Derives, NOBLE_DERIVES } from "../src/derive.js";
 import { gated, gateRunning, MAX_CONCURRENT } from "../src/gate.js";
 import {
   encodeBase64,
+  firescryptParamsValid,
   LEGACY_FORMATS,
   type LegacyFormat,
   parseLegacyHash,
@@ -124,6 +125,15 @@ describe("one format per string (Review Focus 1)", () => {
   });
 });
 
+describe("firescryptParamsValid, the one n and r bound of the grammar", () => {
+  it("accepts Firebase's usual n=14, r=8", () => {
+    expect(firescryptParamsValid(14, 8)).toBe(true);
+  });
+  it("refuses r=100, three digits, which the grammar cannot read", () => {
+    expect(firescryptParamsValid(1, 100)).toBe(false);
+  });
+});
+
 describe("a malformed or refused string costs the dummy and no derive (Review Focus 1)", () => {
   const { bcrypt2a, argon2id: a2, pbkdf2: pb, scrypt: sc, firescrypt: fs } = VECTORS;
   // A hash of 65 bytes: one byte above the 16 to 64 byte bound of every format.
@@ -143,6 +153,11 @@ describe("a malformed or refused string costs the dummy and no derive (Review Fo
     ["argon2id a 65-byte hash", a2.stored.replace(/\$[^$]+$/, `$${long}`)],
     ["argon2id p=5", a2.stored.replace("p=1", "p=5")],
     ["argon2id with no salt", a2.stored.replace("$dGVtcG8tYXV0aC1zYWx0IQ", "")],
+    // RFC 9106 section 3.1: an Argon2 salt is at least 8 bytes. 7 is one below.
+    [
+      "argon2id a 7-byte salt",
+      a2.stored.replace("$dGVtcG8tYXV0aC1zYWx0IQ", `$${encodeBase64(new Uint8Array(7).fill(9))}`),
+    ],
     ["argon2i", a2.stored.replace("$argon2id$", "$argon2i$")],
     ["pbkdf2 i=0", pb.stored.replace("i=80000", "i=0")],
     ["pbkdf2 i above the bound", pb.stored.replace("i=80000", "i=600001")],

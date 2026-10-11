@@ -55,9 +55,10 @@ export interface CognitoLegacyVerifyOptions {
    *
    * It runs after the answer, on a timer of 0 ms, so a slow callback cannot
    * move the answer time past core's floor, and the answer never waits for
-   * it. A throw or a rejected promise from it is dropped. Core's floor holds
-   * a failed sign-in open for `timeoutMs`, so the timer fires before the
-   * request ends (Workers may drop a timer after the response).
+   * it. A throw or a rejected promise from it is dropped. On a "timeout",
+   * core answers at once, so the timer can run after the response, and
+   * Workers can drop a timer after the response. So a "timeout" callback
+   * can be lost.
    */
   // The return is `unknown`, not `void | Promise<void>`: that union refuses
   // a callback such as `(r) => list.push(r)`, which returns a number.
