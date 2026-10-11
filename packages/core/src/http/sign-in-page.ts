@@ -74,6 +74,7 @@ ${
 <input type="email" name="email" placeholder="you@example.com" autocomplete="username" required>
 <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
 <button type="submit">Sign in with password</button>
+<button id="sign-up" type="button">Create account</button>
 <button id="forgot" type="button">Forgot password</button>
 </form>`
     : ""
@@ -123,6 +124,34 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
         else if (res.status === 429) say("Too many requests. Try again later.");
         else say("The request was not accepted.");
       }).catch(function () { say("Could not reach the server. Try again."); });
+    });
+    // Plan 10: sign-up on the page. The sign-up answer sets the session cookie, so success
+    // goes to the continue path as the sign-in does. The codes come from core's ERRORS table.
+    // reportValidity runs the type=email check and the required attributes, as the
+    // submit button does, so an empty field never posts. The button stays disabled
+    // while the request runs so that a second click does not post twice. The form's
+    // submit button is disabled too, so a Sign in click or the Enter key cannot post
+    // a sign-in during the sign-up. Every failure path enables both again. Success
+    // navigates away, so they stay disabled.
+    var signUp = document.getElementById("sign-up");
+    var signInButton = pwForm.querySelector('button[type="submit"]');
+    signUp.addEventListener("click", function () {
+      if (!pwForm.reportValidity()) return;
+      function fail(text) { signUp.disabled = false; signInButton.disabled = false; say(text); }
+      signUp.disabled = true;
+      signInButton.disabled = true;
+      say("");
+      postJson("/password/sign-up", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
+        if (res.ok) { location.href = cont; return; }
+        if (res.status === 429) { fail("Too many attempts. Try again later."); return; }
+        return res.json().then(function (body) {
+          var code = body && body.error;
+          if (code === "email_taken" || code === "email_taken_unverified") fail("An account with this address exists. Sign in instead.");
+          else if (code === "password_policy") fail("The password is too short, too long, has a control character, or equals your email address.");
+          else if (code === "password_breached") fail("This password is in a known data breach. Choose another one.");
+          else fail("The request was not accepted.");
+        }, function () { fail("The request was not accepted."); });
+      }).catch(function () { fail("Could not reach the server. Try again."); });
     });
   }
   var passkey = document.getElementById("passkey");

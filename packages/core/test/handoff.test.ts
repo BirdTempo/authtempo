@@ -489,6 +489,47 @@ describe("handoff routes", () => {
     expect(await redeem.json()).toMatchObject({ user: { email: "ada@example.com" } });
   });
 
+  it("creates an account on the sign-in page and continues the handoff to a redeem (plan 10)", async () => {
+    const auth = handoffAuth({
+      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) },
+    });
+    const handle = createRouter(auth.config, [
+      ...handoffRoutes(auth.config),
+      ...passwordRoutes(auth.config),
+    ]);
+    const { verifier, q } = await challenge();
+    const h = await startedId(handle, q);
+    const pageHtml = await (await handle(get(`/auth/handoff/continue?h=${h}`))).text();
+    expect(pageHtml).toContain(`<button id="sign-up" type="button">Create account</button>`);
+    // What the Create account handler sends: the form's two fields, as JSON.
+    const up = await handle(
+      post("/auth/password/sign-up", {
+        email: "new@example.com",
+        password: "correct horse battery",
+      }),
+    );
+    expect(up.status).toBe(200);
+    const cookie = (up.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    const confirm = await handle(get(`/auth/handoff/continue?h=${h}`, { cookie }));
+    expect(await confirm.text()).toContain("Signed in as <strong>new@example.com</strong>");
+    const res = await handle(formPost(h, { origin: BASE_URL, cookie }));
+    const code = new URL(res.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    const redeem = await handle(post("/auth/handoff/redeem", { code, verifier }));
+    expect(redeem.status).toBe(200);
+    expect(await redeem.json()).toMatchObject({
+      user: { email: "new@example.com", emailVerified: false },
+    });
+    // A second Create account on the same address: the code the handler turns into "Sign in instead".
+    const again = await handle(
+      post("/auth/password/sign-up", {
+        email: "new@example.com",
+        password: "correct horse battery",
+      }),
+    );
+    expect(again.status).toBe(409);
+    expect(await again.json()).toEqual({ error: "email_taken" });
+  });
+
   it("shows no password form without a password config", async () => {
     const auth = handoffAuth();
     const handle = createRouter(auth.config, handoffRoutes(auth.config));
