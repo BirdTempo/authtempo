@@ -49,7 +49,9 @@ describe("the Better Auth storage on D1, default names", () => {
     ]);
     const mysql = drizzleAdapter({ $client: env.DB }, { provider: "mysql" });
     expect(mysql.refusals?.[0]).toMatch(/"mysql" is refused/);
-    expect(mysql.dialect).toBe("mysql");
+    expect(mysql.refusals).toEqual([
+      'database.provider: "mysql" is refused; tempo-auth runs on Postgres and D1',
+    ]);
     expect(() => mysql.storage.findOne("user", [])).toThrow(/"mysql" is refused/);
   });
 

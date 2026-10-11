@@ -71,8 +71,7 @@ export interface Invitation {
 /** What `drizzleAdapter` and `betterAuthSchemaStorage` answer. `betterAuth` refuses any other `database`. */
 export interface CompatDatabase {
   readonly kind: "tempo-auth-compat-database";
-  /** `"mysql"` only on a database that `drizzleAdapter` refuses: the provider it saw. */
-  readonly dialect: "postgres" | "d1" | "mysql";
+  readonly dialect: "postgres" | "d1";
   readonly storage: StorageAdapter;
   /** The owned limiter on the same database, in `ta_limit`. */
   readonly limiter: LimiterPort;
