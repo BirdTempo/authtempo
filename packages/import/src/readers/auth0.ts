@@ -1,6 +1,7 @@
 import { normalizeEmail } from "@tempo-auth/core";
-import type { ImportOrganization, ImportUser, Source } from "../types.js";
-import { asArray, asRecord, ndjson, str } from "./common.js";
+import { formatName } from "../import.js";
+import type { ImportOrganization, ImportUser, SkipReason, Source } from "../types.js";
+import { asArray, asRecord, ndjson, parseTime, str } from "./common.js";
 
 /**
  * Auth0: the bulk user export (`POST /api/v2/jobs/users-exports` with
@@ -10,8 +11,10 @@ import { asArray, asRecord, ndjson, str } from "./common.js";
  * 2026-10-11. The hash file's fields come from the support article, not the
  * official docs: check them against the real file (README step).
  * Unverified, checked by owner runbook item 4: the hash algorithm (`$2b$10$`
- * in every sample; the importer refuses any other format by name), the hash
- * file's field list, and whether `user_id` carries `_id` or `alt_id`.
+ * in every sample), the hash file's field list, and whether `user_id`
+ * carries `_id` or `alt_id`. Auth0 stores bcrypt only, so this reader
+ * accepts only a `$2a$` or `$2b$` string and refuses any other by its
+ * format name: a hash in another format is not a password Auth0 issued.
  */
 export interface Auth0Export {
   /** NDJSON, one user per line: user_id, email, email_verified, created_at, name, picture, identities, blocked. */
@@ -24,6 +27,17 @@ export interface Auth0Export {
 
 const PROVIDERS: Record<string, string> = { "google-oauth2": "google", apple: "apple" };
 
+/** Auth0 stores bcrypt only (research 1c). */
+const BCRYPT = /^\$2[ab]\$\d{2}\$/;
+
+/**
+ * The skip for a user id that the export holds twice. No line wins: the
+ * address check would compare against one line and the importer write the
+ * other. `unmatched_row` is a conflict (the CLI exits 1) until `SkipReason`
+ * has `duplicate_row`.
+ */
+const DUPLICATE: SkipReason = "unmatched_row";
+
 function oid(v: unknown): string | null {
   return str(v) ?? str(asRecord(v).$oid);
 }
@@ -34,7 +48,14 @@ export function auth0Source(input: Auth0Export): Source {
     roles: {},
     async *records() {
       const users = ndjson(input.users).map(asRecord);
-      const byId = new Map(users.map((u) => [str(u.user_id) ?? "", u]));
+      const byId = new Map<string, Record<string, unknown>>();
+      const duplicates = new Set<string>();
+      for (const u of users) {
+        const id = str(u.user_id);
+        if (!id) continue;
+        if (byId.has(id)) duplicates.add(id);
+        byId.set(id, u);
+      }
       // The hash line names the database user by `_id` or `alt_id`; the user export by `auth0|<id>`.
       // Which one Auth0 writes into user_id is not documented, so try both, and accept the line only
       // when exactly one user matches and its address equals the line's address (Review Focus 5).
@@ -49,18 +70,49 @@ export function auth0Source(input: Auth0Export): Source {
           continue;
         }
         const userId = matches[0] as string;
+        // Two lines for one user: no line wins, the user gets no password, and the report names it.
+        if (hashOf.has(userId)) {
+          hashOf.set(userId, { refused: "duplicate_hash_line" });
+          continue;
+        }
         const userEmail = normalizeEmail(str(byId.get(userId)?.email) ?? "");
         const lineEmail = normalizeEmail(str(line.email) ?? "");
         hashOf.set(
           userId,
-          userEmail !== null && userEmail === lineEmail
-            ? { hash }
-            : { refused: "hash_email_mismatch" },
+          userEmail === null || userEmail !== lineEmail
+            ? { refused: "hash_email_mismatch" }
+            : BCRYPT.test(hash)
+              ? { hash }
+              : { refused: formatName(hash) },
         );
       }
+      const yielded = new Set<string>();
       for (const u of users) {
         const id = str(u.user_id);
         if (!id) continue;
+        if (duplicates.has(id)) {
+          // One record for every copy of the id, with no hash.
+          if (yielded.has(id)) continue;
+          yielded.add(id);
+          yield {
+            kind: "user",
+            sourceId: id,
+            email: str(u.email),
+            emailVerified: false,
+            name: null,
+            image: null,
+            createdAt: null,
+            identities: [],
+            password: null,
+            passkeys: [],
+            skip: DUPLICATE,
+          } satisfies ImportUser;
+          continue;
+        }
+        const dropped: string[] = [];
+        const created = str(u.created_at);
+        const createdAt = parseTime(created);
+        if (created !== null && createdAt === null) dropped.push("created_at:unreadable");
         const record: ImportUser = {
           kind: "user",
           sourceId: id,
@@ -68,7 +120,7 @@ export function auth0Source(input: Auth0Export): Source {
           emailVerified: u.email_verified === true,
           name: str(u.name),
           image: str(u.picture),
-          createdAt: str(u.created_at) ? new Date(str(u.created_at) as string) : null,
+          createdAt,
           identities: asArray(u.identities)
             .map(asRecord)
             // The database connection is the password, not a social identity.
@@ -83,8 +135,10 @@ export function auth0Source(input: Auth0Export): Source {
             .filter((i) => i.subject.length > 0),
           password: hashOf.get(id) ?? null,
           passkeys: [],
+          dropped,
         };
-        if (u.blocked === true) record.skip = "banned";
+        // Fail closed: a block in any form but `false` skips the user.
+        if (u.blocked !== undefined && u.blocked !== false) record.skip = "banned";
         yield record;
       }
       for (const h of unmatched) {

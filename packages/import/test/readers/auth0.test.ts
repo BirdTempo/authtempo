@@ -1,4 +1,5 @@
 import { createMemoryAdapter } from "@tempo-auth/core";
+import { VECTORS } from "@tempo-auth/legacy-hashes/testing";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { auth0Source } from "../../src/readers/auth0.js";
@@ -29,7 +30,10 @@ const AUTH0_USERS = [
     email: "gus@example.com",
     email_verified: true,
     created_at: "2023-05-02T10:00:00.000Z",
-    identities: [{ provider: "google-oauth2", user_id: "1035", isSocial: true }],
+    identities: [
+      { provider: "google-oauth2", user_id: "1035", isSocial: true },
+      { provider: "github", user_id: "99", isSocial: true },
+    ],
   },
   {
     user_id: "auth0|b10c",
@@ -62,6 +66,8 @@ const AUTH0_ORGS = JSON.stringify([
     members: [
       { user_id: "auth0|o7p6", roles: [{ id: "rol_1", name: "owner" }] },
       { user_id: "auth0|e9e9", roles: [{ id: "rol_2", name: "Editor" }] },
+      // A verified member with a role core does not name (review M-3).
+      { user_id: "google-oauth2|1035", roles: [{ id: "rol_2", name: "Editor" }] },
     ],
   },
   // No display_name and no name: the reader passes no default (ruling I-5).
@@ -80,7 +86,10 @@ describe("auth0Source", () => {
       password: { hash: expect.stringMatching(/^\$2b\$10\$/) },
     });
     expect(r[1]).toMatchObject({
-      identities: [{ provider: "google", subject: "1035" }],
+      identities: [
+        { provider: "google", subject: "1035" },
+        { provider: "github", subject: "99" },
+      ],
       password: null,
     });
     expect(r[2]).toMatchObject({ skip: "banned" });
@@ -124,5 +133,76 @@ describe("auth0Source", () => {
       reason: "invalid_name",
     });
     expect((await db.findMany("organization", [])).map((o) => o.name)).toEqual(["Acme Co"]);
+    expect((await db.findMany("member", [])).map((m) => m.role).sort()).toEqual([
+      "member",
+      "owner",
+    ]);
+    expect(report.dropped).toContainEqual({ sourceId: "org_a", item: "role:Editor->member" });
+    expect(report.dropped).toContainEqual({
+      sourceId: "google-oauth2|1035",
+      item: "identity:github",
+    });
+  });
+});
+
+// Edge rows (review I-1 to I-3, M-1, M-2), same shapes and date as above.
+const EDGE_USERS = [
+  { user_id: "auth0|dup1", email: "old@example.com", email_verified: true },
+  { user_id: "auth0|dup1", email: "new@example.com", email_verified: true },
+  { user_id: "auth0|argo", email: "argo@example.com", email_verified: true },
+  { user_id: "auth0|twoh", email: "twoh@example.com", email_verified: true },
+  { user_id: "auth0|blk", email: "blk@example.com", email_verified: true, blocked: "true" },
+  { user_id: "auth0|badt", email: "badt@example.com", email_verified: true, created_at: "soon" },
+]
+  .map((u) => JSON.stringify(u))
+  .join("\n");
+const EDGE_HASHES = [
+  { _id: "dup1", email: "new@example.com", passwordHash: HASH },
+  // A valid Argon2id string: not a password Auth0 issued (review I-1).
+  { _id: "argo", email: "argo@example.com", passwordHash: VECTORS.argon2id.stored },
+  { _id: "twoh", email: "twoh@example.com", passwordHash: HASH },
+  { _id: "twoh", email: "twoh@example.com", passwordHash: VECTORS.bcrypt2a.stored },
+]
+  .map((u) => JSON.stringify(u))
+  .join("\n");
+
+describe("auth0Source edge rows", () => {
+  it("skips a duplicate user, refuses a non-bcrypt hash and a second hash line, and fails a block closed", async () => {
+    const r = await all(auth0Source({ users: EDGE_USERS, hashes: EDGE_HASHES }));
+    const by = (id: string) => r.filter((x) => x.kind === "user" && x.sourceId === id);
+    expect(by("auth0|dup1")).toEqual([
+      expect.objectContaining({ skip: "unmatched_row", password: null }),
+    ]);
+    expect(by("auth0|argo")).toEqual([
+      expect.objectContaining({ password: { refused: "argon2id" } }),
+    ]);
+    expect(by("auth0|twoh")).toEqual([
+      expect.objectContaining({ password: { refused: "duplicate_hash_line" } }),
+    ]);
+    expect(by("auth0|blk")).toEqual([expect.objectContaining({ skip: "banned" })]);
+    expect(by("auth0|badt")).toEqual([
+      expect.objectContaining({ createdAt: null, dropped: ["created_at:unreadable"] }),
+    ]);
+  });
+
+  it("writes no password row for any of them and reports each refusal", async () => {
+    const db = createMemoryAdapter();
+    const report = await importUsers(db, auth0Source({ users: EDGE_USERS, hashes: EDGE_HASHES }), {
+      now,
+    });
+    expect(await db.findMany("password", [])).toEqual([]);
+    expect(report.refusedHashes).toEqual([
+      { sourceId: "auth0|argo", format: "argon2id" },
+      { sourceId: "auth0|twoh", format: "duplicate_hash_line" },
+    ]);
+    expect(report.skipped).toContainEqual({
+      kind: "user",
+      sourceId: "auth0|dup1",
+      reason: "unmatched_row",
+    });
+    const badt = await db.findOne("user", [
+      { field: "email", op: "eq", value: "badt@example.com" },
+    ]);
+    expect(badt?.createdAt).toEqual(now());
   });
 });
