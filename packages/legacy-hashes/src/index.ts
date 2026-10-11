@@ -1,4 +1,3 @@
-export { type CognitoLegacyVerifyOptions, createCognitoLegacyVerify } from "./cognito.js";
 export { type Derives, type FirebaseHashConfig, NOBLE_DERIVES } from "./derive.js";
 export {
   ARGON2_MAX_MEMORY_KIB,
