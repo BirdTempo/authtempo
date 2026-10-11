@@ -1,7 +1,10 @@
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createMemoryAdapter, type StorageAdapter } from "@tempo-auth/core";
 import { describe, expect, it } from "vitest";
-import { type CliIo, exitCode, runCli } from "../src/cli.js";
-import type { ImportReport } from "../src/types.js";
+import { type CliIo, exitCode, runCli, writePrivate } from "../src/cli.js";
+import { CONFLICT_REASONS, type ImportReport } from "../src/types.js";
 import identities from "./fixtures/supabase-identities.csv?raw";
 import users from "./fixtures/supabase-users.csv?raw";
 import { FIRESCRYPT } from "./readers/all.js";
@@ -11,10 +14,12 @@ function io(files: Record<string, string>, storage: StorageAdapter = createMemor
   const err: string[] = [];
   const written: Record<string, string> = {};
   const opened: { url: string; betterAuth: boolean }[] = [];
+  const reads: string[] = [];
   const value: CliIo = {
     out: (l) => out.push(l),
     err: (l) => err.push(l),
     readFile: (p) => {
+      reads.push(p);
       const f = files[p];
       if (f === undefined) throw new Error(`ENOENT: ${p}`);
       return f;
@@ -27,7 +32,7 @@ function io(files: Record<string, string>, storage: StorageAdapter = createMemor
       return { storage, close: async () => {} };
     },
   };
-  return { value, out, err, written, opened, storage };
+  return { value, out, err, written, opened, reads, storage };
 }
 
 const FILES = { "u.csv": users, "i.csv": identities };
@@ -197,11 +202,15 @@ describe("tempo-auth-import", () => {
       [...BASE, "--firebase-signer-key", "k"],
       [...BASE, "--password-column", "pw"],
       [...BASE, "--reserved-slugs", ""],
+      [...BASE, "--platform-slug", "Not A Slug!"],
+      ["supabase", "--users", "missing.csv", "--postgres", "x"],
     ]) {
       const t = io(FILES);
       expect(await runCli(argv, t.value), argv.join(" ")).toBe(2);
       expect(t.err.at(-1)).toMatch(/^tempo-auth-import <provider>/);
       expect(t.opened).toEqual([]);
+      // Every flag check runs before the first file read (review M-1).
+      expect(t.reads, argv.join(" ")).toEqual([]);
     }
   });
 
@@ -230,22 +239,119 @@ describe("tempo-auth-import", () => {
     // The Clerk reader reads organizations after it yields the users: without
     // the read-first pass, the users would be written before the error.
     const t = io({ "c.csv": CLERK_CSV, "u.json": CLERK_USERS, "o.json": "{}" });
-    expect(await runCli([...CLERK, "--organizations", "o.json"], t.value)).toBe(2);
-    expect(t.err[0]).toMatch(/Clerk organizations input is not a JSON array/);
+    expect(
+      await runCli([...CLERK, "--organizations", "o.json", "--report", "r.json"], t.value),
+    ).toBe(2);
+    expect(t.err).toHaveLength(1);
+    expect(t.err[0]).toMatch(
+      /^stopped: .*Clerk organizations input is not a JSON array.*; nothing was written$/,
+    );
     expect(t.opened).toEqual([]);
     expect(await t.storage.findMany("user", [])).toEqual([]);
+    // The report file says the run stopped, so an older file cannot pass for this run.
+    expect(JSON.parse(t.written["r.json"] ?? "{}")).toMatchObject({ report: null });
+    expect(JSON.parse(t.written["r.json"] ?? "{}").stopped).toMatch(/Clerk organizations/);
   });
 
-  it("exits 1 on a partial record and on a duplicate_row skip, and 0 on a policy skip", () => {
+  it("stops with exit 2 before storage opens on an out-of-bounds Firebase hashConfig", async () => {
+    const t = io({ "f.json": JSON.stringify({ users: [] }) });
+    const argv = [
+      "firebase",
+      "--users",
+      "f.json",
+      "--firebase-rounds",
+      "8",
+      "--firebase-mem-cost",
+      "99",
+      "--postgres",
+      "x",
+    ];
+    expect(await runCli(argv, t.value)).toBe(2);
+    expect(t.err).toEqual([
+      expect.stringMatching(/^stopped: .*firebase hashConfig rounds and memCost/),
+    ]);
+    expect(t.opened).toEqual([]);
+  });
+
+  it("prints one stopped line and writes the report on a storage error", async () => {
+    const t = io(FILES);
+    t.value.openStorage = async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5439");
+    };
+    expect(await runCli([...BASE, "--report", "r.json"], t.value)).toBe(2);
+    expect(t.err).toEqual([
+      "stopped: storage: connect ECONNREFUSED 127.0.0.1:5439; nothing was written",
+    ]);
+    expect(JSON.parse(t.written["r.json"] ?? "{}")).toMatchObject({ report: null });
+
+    const mid = io(FILES);
+    mid.storage.transaction = async () => {
+      throw new Error("terminating connection");
+    };
+    expect(await runCli(BASE, mid.value)).toBe(2);
+    expect(mid.err).toEqual([
+      "stopped: storage: terminating connection; records before it may be written; run again",
+    ]);
+  });
+
+  it("writes the report file on a conflict stop", async () => {
+    const storage = createMemoryAdapter();
+    const at = new Date();
+    await storage.create("user", {
+      id: "app",
+      email: "ada@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const t = io(FILES, storage);
+    const argv = [...BASE, "--on-email-taken", "fail", "--report", "r.json"];
+    expect(await runCli(argv, t.value)).toBe(2);
+    const r = JSON.parse(t.written["r.json"] ?? "{}");
+    expect(r.stopped).toMatch(/email_taken for source record 11111111/);
+    expect(r.report).toMatchObject({ source: "supabase" });
+  });
+
+  it("exits 0 on a Supabase SSO user, and the report lists it", async () => {
+    const rows = users.split("\n");
+    const sso = rows.find((l) => l.startsWith("aaaaaaaa-"));
+    expect(sso).toBeDefined();
+    const t = io({ "u.csv": [...rows.slice(0, 3), sso].join("\n"), "i.csv": identities });
+    expect(await runCli(BASE, t.value)).toBe(0);
+    expect(t.out).toContain("skipped user aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa: sso_user");
+    expect(t.out).toContain("refusals: 0");
+  });
+
+  it("exits 1 on a partial record and on every conflict reason, and 0 on a policy skip", () => {
     expect(
       exitCode(report({ partial: [{ kind: "user", sourceId: "u", missing: ["password"] }] })),
     ).toBe(1);
-    expect(
-      exitCode(report({ skipped: [{ kind: "user", sourceId: "u", reason: "duplicate_row" }] })),
-    ).toBe(1);
-    expect(exitCode(report({ skipped: [{ kind: "user", sourceId: "u", reason: "banned" }] }))).toBe(
-      0,
-    );
+    expect(CONFLICT_REASONS.has("duplicate_row")).toBe(true);
+    for (const reason of CONFLICT_REASONS)
+      expect(exitCode(report({ skipped: [{ kind: "user", sourceId: "u", reason }] })), reason).toBe(
+        1,
+      );
+    for (const reason of ["banned", "deleted", "anonymous", "disabled", "sso_user"] as const)
+      expect(exitCode(report({ skipped: [{ kind: "user", sourceId: "u", reason }] })), reason).toBe(
+        0,
+      );
+  });
+
+  it("writes the bundle and the report file with mode 0600, also over a wider file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tempo-auth-cli-"));
+    try {
+      const path = join(dir, "bundle.json");
+      writeFileSync(path, "old", { mode: 0o644 });
+      writePrivate(path, "secret");
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(readFileSync(path, "utf8")).toBe("secret");
+      writePrivate(join(dir, "new.json"), "x");
+      expect(statSync(join(dir, "new.json")).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   describe("each provider's inputs reach its reader", () => {

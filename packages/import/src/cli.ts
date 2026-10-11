@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createPostgresAdapter } from "@tempo-auth/adapter-postgres";
@@ -47,7 +48,10 @@ options:
 
 exit status: 0 clean; 1 a hash was refused, a record was refused (invalid_ or reserved_),
 a record needs a person (a conflict), or a record is partial; 2 a usage error, a malformed
-input file, or a stop.`;
+input file, or a stop.
+
+The D1 bundle and the report file are written with mode 0600. The bundle holds every
+password hash and, for supabase, the Firebase signer key: delete it after the Worker run.`;
 
 export interface CliIo {
   out(line: string): void;
@@ -140,13 +144,23 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     return 2;
   }
   const { bundle, values } = parsed;
+  /**
+   * One "stopped:" line, and the report file when --report is given. Without
+   * the file, an older report from a previous run stays on disk, and a script
+   * that reads it takes the old run for this one.
+   */
+  const stop = (reason: string, report: ImportReport | null): 2 => {
+    io.err(`stopped: ${reason}`);
+    if (values.report)
+      io.writeFile(values.report, JSON.stringify({ stopped: reason, report }, null, 2));
+    return 2;
+  };
+  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
   let source: Source;
   try {
     source = await readFirst(bundle);
   } catch (e) {
-    io.err((e as Error).message);
-    io.err("the run stopped before any write");
-    return 2;
+    return stop(`${message(e)}; nothing was written`, null);
   }
   if (bundle.provider === "auth0" && bundle.files.hashes === undefined)
     io.out("auth0: no --hashes file; no password is imported");
@@ -157,7 +171,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     );
     return 0;
   }
-  const target = await io.openStorage(values.postgres as string, values["better-auth"] === true);
+  let target: Awaited<ReturnType<CliIo["openStorage"]>>;
+  try {
+    target = await io.openStorage(values.postgres as string, values["better-auth"] === true);
+  } catch (e) {
+    return stop(`storage: ${message(e)}; nothing was written`, null);
+  }
   try {
     const report = await importUsers(target.storage, source, parsed.options);
     for (const l of summary(report)) io.out(l);
@@ -166,10 +185,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   } catch (e) {
     if (e instanceof ImportConflictError) {
       for (const l of summary(e.report)) io.out(l);
-      io.err(e.message);
-      return 2;
+      return stop(e.message, e.report);
     }
-    throw e;
+    // Each record commits alone, so the records before the failing one may be
+    // written. A re-run finds them by import id and counts them as exists.
+    return stop(`storage: ${message(e)}; records before it may be written; run again`, null);
   } finally {
     await target.close();
   }
@@ -222,17 +242,19 @@ function parse(argv: string[], io: CliIo) {
   for (const [flag, owner] of Object.entries(FLAG_PROVIDER))
     if (values[flag as keyof typeof FLAG_PROVIDER] !== undefined && owner !== provider)
       throw new Error(`${provider} takes no --${flag}`);
+  // Every flag check runs before the first file read: an export can be gigabytes,
+  // and a typo in a later flag must not cost that read (review M-1).
   const spec = PROVIDER_FILES[provider];
-  const files: ImportBundle["files"] = {};
+  const paths: [keyof ImportBundle["files"], string][] = [];
   for (const name of ["users", "identities", "csv", "hashes", "organizations", "tables"] as const) {
     const path = values[name];
     if (path === undefined) continue;
     if (!spec.needs.includes(name) && !spec.may.includes(name))
       throw new Error(`${provider} takes no --${name}`);
-    files[name] = io.readFile(path);
+    paths.push([name, path]);
   }
   for (const name of spec.needs)
-    if (files[name as keyof typeof files] === undefined)
+    if (values[name as keyof typeof values] === undefined)
       throw new Error(`${provider} needs --${name}`);
   const onEmailTaken = values["on-email-taken"] ?? "skip";
   if (onEmailTaken !== "skip" && onEmailTaken !== "fail")
@@ -265,6 +287,8 @@ function parse(argv: string[], io: CliIo) {
     throw new Error("give both --firebase-signer-key and --firebase-salt-separator, or neither");
   const rounds = int(values["firebase-rounds"], "--firebase-rounds");
   const memCost = int(values["firebase-mem-cost"], "--firebase-mem-cost");
+  const files: ImportBundle["files"] = {};
+  for (const [name, path] of paths) files[name] = io.readFile(path);
   const bundle: ImportBundle = {
     provider,
     files,
@@ -298,12 +322,29 @@ function parse(argv: string[], io: CliIo) {
   return { bundle, options, values };
 }
 
+/**
+ * Writes a file that only its owner can read (mode 0600). The text goes to a
+ * new file in the same directory and is renamed over the target, so a target
+ * that exists with a wider mode never holds the new text: writeFileSync's mode
+ * applies only to a file it creates (review M-2).
+ */
+export function writePrivate(path: string, text: string): void {
+  const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmp, text, { mode: 0o600, flag: "wx" });
+    renameSync(tmp, path);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
 /** The real io: files on disk, and Postgres through postgres.js. */
 const nodeIo: CliIo = {
   out: (l) => console.log(l),
   err: (l) => console.error(l),
   readFile: (p) => readFileSync(p, "utf8"),
-  writeFile: (p, t) => writeFileSync(p, t),
+  writeFile: writePrivate,
   async openStorage(url, betterAuth) {
     const sql = postgres(url, { max: 2, onnotice: () => {} });
     const storage = betterAuth
