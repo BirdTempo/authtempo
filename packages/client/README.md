@@ -93,6 +93,8 @@ without the `password` config.
 | --- | --- | --- |
 | `client.password.signUp({ email, password, name? })` | `POST /password/sign-up` | `ClientResult<{ token } & PublicSession>` |
 | `client.password.signIn({ email, password })` | `POST /password/sign-in` | `ClientResult<{ token } & PublicSession>` |
+| `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `ClientResult<{ sent: true }>` |
+| `client.password.verifyEmail({ token })` | `POST /password/verify` | `ClientResult<{ verified: true }>`; the cookie is set when the address was unverified |
 | `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `ClientResult<{ sent: true }>` |
 | `client.password.reset({ token, password })` | `POST /password/reset` | `ClientResult<{ token } & PublicSession>` |
 | `client.password.change({ currentPassword?, newPassword })` | `POST /password/change` | `ClientResult<{ ok: true }>` |

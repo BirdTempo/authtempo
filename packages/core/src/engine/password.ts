@@ -33,6 +33,10 @@ const RESET_PER_EMAIL = { seconds: 900, max: 5 };
 const RESET_POST_PER_IP = { seconds: 900, max: 20 };
 // Per 15 minutes. A stolen session must not run an unlimited guess of the current password.
 const CHANGE_PER_USER = { seconds: 900, max: 10 };
+// Per 15 minutes. Each resend sends one mail from the app's sender, so the
+// product owns this limit (plan 8b).
+const RESEND_PER_IP = { seconds: 900, max: 20 };
+const RESEND_PER_EMAIL = { seconds: 900, max: 3 };
 /**
  * The marker on the stored hash string of a sign-up's password row until
  * the sign-up proved the user still unverified. The row is unusable until
@@ -265,6 +269,50 @@ async function sendVerifyMail(
     subject: `Confirm your email for ${config.appName}`,
     text: `Open this link to confirm your email address. It is valid for ${config.magicLink.ttlMinutes} minutes.\n\n${link}\n\nIf you did not create an account, ignore this message.`,
   });
+}
+
+export interface PasswordResend {
+  email: string;
+  ip: string | null;
+}
+
+/**
+ * A new verify link (plan 8b). A mail failure after the sign-up commit
+ * leaves an account with no link; this sends one. Always `sent` for a
+ * well-formed call, as the reset request, so the answer does not tell
+ * whether an address has an account; `rate_limited` is the one visible
+ * failure. A mail goes only to a user that exists, is unverified, and has
+ * an active password row (not `PENDING_HASH_PREFIX`). The other pending
+ * links of the address go first, so one link at a time is live. A call
+ * that mails takes longer than one that does not; the time can tell that
+ * an address has an unverified password account. The mail goes after the
+ * row is written, never inside a transaction.
+ */
+export async function resendPasswordVerification(
+  config: ResolvedConfig,
+  input: PasswordResend,
+): Promise<Result<{ sent: true }>> {
+  if (!config.password) return fail("not_found");
+  // Before any limit key: both keys trust a normalized address.
+  const email = normalizeEmail(input.email);
+  if (email === null) return ok({ sent: true });
+  if (!(await config.limiter.allow(`password-resend:ip:${input.ip ?? "unknown"}`, RESEND_PER_IP)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`password-resend:email:${email}`, RESEND_PER_EMAIL)))
+    return fail("rate_limited");
+  const user = await config.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (!user || user.emailVerified) return ok({ sent: true });
+  const row = await config.storage.findOne("password", [
+    { field: "userId", op: "eq", value: user.id },
+  ]);
+  if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) return ok({ sent: true });
+  await config.storage.delete("verification", [
+    { field: "purpose", op: "eq", value: "password-verify" },
+    { field: "identifier", op: "eq", value: email },
+    { field: "consumedAt", op: "eq", value: null },
+  ]);
+  await sendVerifyMail(config, email, row.id, config.clock.now());
+  return ok({ sent: true });
 }
 
 /**

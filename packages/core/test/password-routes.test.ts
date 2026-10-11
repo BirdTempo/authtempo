@@ -199,11 +199,12 @@ describe("password change route", () => {
     expect(h.auth.api.password).toBeUndefined();
   });
 
-  it("has the four new methods on api.password", () => {
+  it("has every method on api.password", () => {
     const h = pwHandle({ hash: FAST });
     expect(Object.keys(h.auth.api.password ?? {}).sort()).toEqual([
       "change",
       "requestReset",
+      "resendVerification",
       "reset",
       "signIn",
       "signUp",
@@ -240,5 +241,24 @@ describe("the reset page and code points (plan 8b)", () => {
     expect(accepted.status).toBe(302);
     expect(accepted.headers.get("location")).toBe("https://api.example.com/");
     expect(accepted.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+  });
+});
+
+describe("password resend route (plan 8b)", () => {
+  it("POST /password/verify/resend answers sent and mails a new link", async () => {
+    const h = pwHandle({ hash: FAST });
+    await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
+    const res = await h.auth.handle(post("/auth/password/verify/resend", { email: EMAIL }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ sent: true });
+    expect(h.mails.filter((m) => m.subject.startsWith("Confirm"))).toHaveLength(2);
+    const bad = await h.auth.handle(post("/auth/password/verify/resend", { email: 5 }));
+    expect(bad.status).toBe(400);
+  });
+
+  it("answers 404 with no password config", async () => {
+    const h = pwHandle(undefined);
+    const res = await h.auth.handle(post("/auth/password/verify/resend", { email: EMAIL }));
+    expect(res.status).toBe(404);
   });
 });

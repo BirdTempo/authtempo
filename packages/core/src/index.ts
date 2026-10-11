@@ -24,6 +24,7 @@ export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
   PasswordChange,
+  PasswordResend,
   PasswordReset,
   PasswordResetRequest,
   PasswordSession,

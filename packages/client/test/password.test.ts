@@ -94,4 +94,28 @@ describe("password", () => {
       status: 404,
     });
   });
+
+  it("resends the verify mail and confirms the address with verifyEmail (plan 8b)", async () => {
+    const server = makeServer({ password: { hash: FAST } });
+    const { fetch } = inProcessFetch(server.auth);
+    const client = createClient({ baseURL: BASE_URL, fetch });
+    await client.password.signUp({ email: EMAIL, password: PW });
+    expect(await client.password.resendVerification({ email: EMAIL })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(server.mail).toHaveLength(2);
+    const token = tokenFromMail(server.mail.at(-1)?.text ?? "");
+    expect(await client.password.verifyEmail({ token })).toEqual({
+      ok: true,
+      value: { verified: true },
+    });
+    const s = await client.session();
+    expect(s.ok && s.value?.user.emailVerified).toBe(true);
+    expect(await client.password.verifyEmail({ token })).toEqual({
+      ok: false,
+      code: "invalid_token",
+      status: 400,
+    });
+  });
 });

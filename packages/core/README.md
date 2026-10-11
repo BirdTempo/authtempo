@@ -38,6 +38,7 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
+| POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link of the address stops working |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
 | POST | `/password/reset` | form or JSON `token`, `password` | form body: 302 to `next` with the cookie, or back to the form on `password_policy` or `password_breached`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited` |
@@ -254,6 +255,8 @@ The limits, in the same limiter as the other routes:
 | `password-reset:ip:<ip>` | 20 per 15 minutes |
 | `password-reset:email:<email>` | 5 per 15 minutes |
 | `password-reset-post:ip:<ip>` | 20 per 15 minutes |
+| `password-resend:ip:<ip>` | 20 per 15 minutes |
+| `password-resend:email:<email>` | 3 per 15 minutes |
 | `password-change:user:<userId>` | 10 per 15 minutes |
 
 The `password:email` limit is a trade-off: 10 wrong tries from anyone stop

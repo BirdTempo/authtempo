@@ -68,6 +68,10 @@ export interface Client {
       email: string;
       password: string;
     }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
+    resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
+    /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
+    verifyEmail(input: { token: string }): Promise<ClientResult<{ verified: true }>>;
     requestReset(input: {
       email: string;
       next?: string | undefined;
@@ -207,6 +211,8 @@ export function createClient(options: ClientOptions): Client {
         }),
       signIn: (input) =>
         call<{ token: string } & PublicSession>("POST", "/password/sign-in", input),
+      resendVerification: (input) => call<{ sent: true }>("POST", "/password/verify/resend", input),
+      verifyEmail: (input) => call<{ verified: true }>("POST", "/password/verify", input),
       requestReset: ({ next, ...rest }) =>
         call<{ sent: true }>("POST", "/password/reset/request", {
           ...rest,

@@ -7,6 +7,7 @@ import {
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
+  resendPasswordVerification,
   resetPassword,
   verifyPasswordEmail,
 } from "../src/engine/password.js";
@@ -1450,5 +1451,61 @@ describe("fix round 1: the verify link of a verified user", () => {
       await auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]),
     ).toEqual(before.user);
     expect((await signIn(auth, { password: "owner password 1" })).ok).toBe(true);
+  });
+});
+
+describe("resendPasswordVerification (plan 8b)", () => {
+  const resend = (
+    auth: ReturnType<typeof makeAuth>,
+    email = EMAIL,
+    ip: string | null = "1.1.1.1",
+  ) => resendPasswordVerification(auth.config, { email, ip });
+
+  it("mails a new link to an unverified user with a password and ends the earlier link", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    const first = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    expect(await resend(auth, " Ada@Example.com ")).toEqual({ ok: true, value: { sent: true } });
+    expect(auth.mail).toHaveLength(2);
+    expect(auth.mail[1]?.to).toBe(EMAIL);
+    expect(auth.mail[1]?.subject).toBe("Confirm your email for api.example.com");
+    const second = tokenFromMail(auth.mail[1]?.text ?? "");
+    expect(second).not.toBe(first);
+    expect(
+      await auth.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "password-verify" },
+      ]),
+    ).toHaveLength(1);
+    expect(
+      await verifyPasswordEmail(auth.config, { token: first, ip: null, userAgent: null }),
+    ).toMatchObject({ ok: false, code: "invalid_token" });
+    const v = await verifyPasswordEmail(auth.config, { token: second, ip: null, userAgent: null });
+    expect(v.ok && v.value.user.emailVerified).toBe(true);
+  });
+
+  it("answers sent and mails nothing for an unknown, a malformed, or a verified address", async () => {
+    const auth = pwAuth();
+    await signUpAndVerify(auth);
+    const mails = auth.mail.length;
+    for (const email of ["nobody@example.com", "not an address", EMAIL])
+      expect(await resend(auth, email)).toEqual({ ok: true, value: { sent: true } });
+    expect(auth.mail).toHaveLength(mails);
+  });
+
+  it("limits each address to 3 and each IP to 20 per 15 minutes", async () => {
+    const auth = pwAuth();
+    await signUp(auth);
+    for (let i = 0; i < 3; i++) expect((await resend(auth, EMAIL, `9.9.9.${i}`)).ok).toBe(true);
+    expect(await resend(auth, EMAIL, "9.9.9.9")).toMatchObject({ ok: false, code: "rate_limited" });
+    for (let i = 0; i < 20; i++) await resend(auth, `x${i}@example.com`, "8.8.8.8");
+    expect(await resend(auth, "y@example.com", "8.8.8.8")).toMatchObject({
+      code: "rate_limited",
+    });
+    auth.clock.advance(16 * 60_000);
+    expect((await resend(auth, EMAIL, "9.9.9.9")).ok).toBe(true);
+  });
+
+  it("answers not_found with no password config", async () => {
+    expect(await resend(makeAuth())).toMatchObject({ code: "not_found", status: 404 });
   });
 });
