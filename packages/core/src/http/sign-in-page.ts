@@ -129,13 +129,17 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
     // goes to the continue path as the sign-in does. The codes come from core's ERRORS table.
     // reportValidity runs the type=email check and the required attributes, as the
     // submit button does, so an empty field never posts. The button stays disabled
-    // while the request runs so that a second click does not post twice; every
-    // failure path enables it again. Success navigates away, so it stays disabled.
+    // while the request runs so that a second click does not post twice. The form's
+    // submit button is disabled too, so a Sign in click or the Enter key cannot post
+    // a sign-in during the sign-up. Every failure path enables both again. Success
+    // navigates away, so they stay disabled.
     var signUp = document.getElementById("sign-up");
+    var signInButton = pwForm.querySelector('button[type="submit"]');
     signUp.addEventListener("click", function () {
       if (!pwForm.reportValidity()) return;
-      function fail(text) { signUp.disabled = false; say(text); }
+      function fail(text) { signUp.disabled = false; signInButton.disabled = false; say(text); }
       signUp.disabled = true;
+      signInButton.disabled = true;
       say("");
       postJson("/password/sign-up", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
         if (res.ok) { location.href = cont; return; }
@@ -143,7 +147,7 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
         return res.json().then(function (body) {
           var code = body && body.error;
           if (code === "email_taken" || code === "email_taken_unverified") fail("An account with this address exists. Sign in instead.");
-          else if (code === "password_policy") fail("The password is too short, too long, or equal to your email address.");
+          else if (code === "password_policy") fail("The password is too short, too long, has a control character, or equals your email address.");
           else if (code === "password_breached") fail("This password is in a known data breach. Choose another one.");
           else fail("The request was not accepted.");
         }, function () { fail("The request was not accepted."); });

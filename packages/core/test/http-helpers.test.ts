@@ -447,6 +447,17 @@ describe("sign-in page", () => {
     expect(handler).toContain(`if (res.ok) { location.href = cont; return; }`);
     expect(handler).toContain(`fail("An account with this address exists. Sign in instead.");`);
     expect(handler).toContain(`fail("Too many attempts. Try again later.");`);
+    // The click handler, from its first line to the post: the form check and the lock
+    // run before the post, and the failure helper unlocks both buttons (plan 10 final review L2, L3).
+    const click = on.indexOf(`signUp.addEventListener("click"`);
+    expect(click).toBeGreaterThan(-1);
+    const beforePost = on.slice(click, start);
+    expect(beforePost).toContain(`if (!pwForm.reportValidity()) return;`);
+    expect(beforePost).toContain(`signUp.disabled = true;`);
+    expect(beforePost).toContain(`signInButton.disabled = true;`);
+    expect(beforePost).toContain(
+      `function fail(text) { signUp.disabled = false; signInButton.disabled = false; say(text); }`,
+    );
     // Every code the handler names is a real core code, so a renamed code fails here.
     const codes = [...handler.matchAll(/code === "([a-z_]+)"/g)].map((m) => m[1]);
     expect(codes.sort()).toEqual([
