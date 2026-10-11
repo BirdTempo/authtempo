@@ -148,6 +148,9 @@ const EDGE = JSON.stringify({
       { UserStatus: "EXTERNAL_PROVIDER" },
     ),
     user("nosub", { email: "nosub@example.com", email_verified: "true" }),
+    // Compromised and disabled: the conflict reason wins (re-review R-M1).
+    user("comp-off", verified("comp-off"), { UserStatus: "COMPROMISED", Enabled: false }),
+    user("nosub-off", { email: "nosub-off@example.com" }, { Enabled: false }),
     user("dup-a", verified("dup")),
     user("dup-b", verified("dup")),
   ],
@@ -219,6 +222,8 @@ describe("cognitoSource edge rows", () => {
       ["st-COMPROMISED", "status_compromised"],
       ["st-none", "status_unknown"],
       ["username:nosub", "no_source_id"],
+      ["comp-off", "status_compromised"],
+      ["username:nosub-off", "no_source_id"],
     ])
       expect(report.skipped).toContainEqual({ kind: "user", sourceId, reason });
   });

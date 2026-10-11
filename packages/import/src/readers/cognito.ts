@@ -126,9 +126,13 @@ export function cognitoSource(input: CognitoExport): Source {
           passkeys: [],
           dropped,
         };
-        if (!federated && status !== "CONFIRMED") record.skip = statusSkip(status);
+        // The skips are set from the weakest to the strongest reason, and the last one
+        // set is kept: a status reason (status_compromised is a conflict) wins over
+        // disabled, and no_source_id or duplicate_row wins over both, so a disabled
+        // compromised user still makes the CLI exit 1.
         // Fail closed: only the boolean true is an enabled user.
         if (u.Enabled !== true) record.skip = "disabled";
+        if (!federated && status !== "CONFIRMED") record.skip = statusSkip(status);
         // No sub: no import key.
         if (sub === null) record.skip = "no_source_id";
         else if ((subCount.get(sub) ?? 0) > 1) record.skip = "duplicate_row";
