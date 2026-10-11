@@ -9,12 +9,11 @@ import { normalizeSlug, type StorageAdapter } from "@tempo-auth/core";
 import { LEGACY_FORMATS, type LegacyFormat } from "@tempo-auth/legacy-hashes";
 import postgres from "postgres";
 import { importUsers } from "./import.js";
-import { type ImportBundle, PROVIDER_FILES, sourceOf } from "./sources.js";
+import { type ImportBundle, PROVIDER_FILES, readSource } from "./sources.js";
 import {
   CONFLICT_REASONS,
   ImportConflictError,
   type ImportOptions,
-  type ImportRecord,
   type ImportReport,
   type ImportRole,
   type Source,
@@ -114,26 +113,6 @@ export function summary(r: ImportReport): string[] {
   return lines;
 }
 
-/**
- * Reads every record before the run opens storage or writes a bundle. A
- * reader can throw on a malformed file after it yields some records (the
- * Clerk reader reads organizations after users), so without this pass the
- * importer would write those users first. The input files are in memory
- * already, so the list costs no more than the text.
- */
-async function readFirst(bundle: ImportBundle): Promise<Source> {
-  const source = sourceOf(bundle);
-  const list: ImportRecord[] = [];
-  for await (const r of source.records()) list.push(r);
-  return {
-    name: source.name,
-    roles: source.roles,
-    async *records() {
-      yield* list;
-    },
-  };
-}
-
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
   let parsed: ReturnType<typeof parse>;
   try {
@@ -158,7 +137,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
   let source: Source;
   try {
-    source = await readFirst(bundle);
+    source = await readSource(bundle);
   } catch (e) {
     return stop(`${message(e)}; nothing was written`, null);
   }

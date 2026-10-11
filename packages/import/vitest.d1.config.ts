@@ -14,6 +14,15 @@ export default defineConfig(async () => {
         miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
       }),
     ],
+    // The Worker's input module is the git-ignored input/import.local.json in
+    // wrangler (worker/wrangler.jsonc). The tests read the tracked sample.
+    resolve: {
+      alias: {
+        "tempo-auth-import-input": fileURLToPath(
+          new URL("./worker/input/import.json", import.meta.url),
+        ),
+      },
+    },
     test: { include: ["test/d1/**/*.test.ts"] },
   };
 });

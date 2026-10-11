@@ -5,8 +5,6 @@
     "rootDir": ".",
     // workers-types declares the same globals as DOM and conflicts with it.
     "lib": ["ES2023"],
-    // worker/src/index.ts reads its input from worker/input/import.json.
-    "resolveJsonModule": true,
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
   "include": ["test/d1", "worker/src", "test/raw.d.ts"]
