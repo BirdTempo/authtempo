@@ -23,6 +23,11 @@ export default {
       };
     }
     const g = globalThis as Record<string, unknown>;
-    return Response.json({ process: typeof g.process, Buffer: typeof g.Buffer, results });
+    return Response.json({
+      process: typeof g.process,
+      Buffer: typeof g.Buffer,
+      expected: Object.keys(VECTORS).length,
+      results,
+    });
   },
 };

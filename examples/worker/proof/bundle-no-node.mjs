@@ -11,11 +11,14 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const out = mkdtempSync(join(tmpdir(), "tempo-auth-bundle-"));
 try {
   const run = spawnSync("pnpm", ["exec", "wrangler", "deploy", "--dry-run", "--outdir", out], {
     encoding: "utf8",
+    // Pin the directory: wrangler reads wrangler.jsonc from here.
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
     env: { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
   });
   const log = `${run.stdout}\n${run.stderr}`;
@@ -23,9 +26,14 @@ try {
   if (run.status !== 0) failures.push(`wrangler exited ${run.status}`);
   if (/is built into node/.test(log))
     failures.push("wrangler warned that a module is built into node");
-  for (const f of readdirSync(out).filter((n) => n.endsWith(".js"))) {
+  // Count what was scanned: a bundle in another file name or folder must not pass unseen.
+  const files = readdirSync(out).filter((n) => /\.m?js$/.test(n));
+  if (!files.includes("index.js"))
+    failures.push("index.js is not in the output; scanned 0 entry files");
+  for (const f of files) {
     const text = readFileSync(join(out, f), "utf8");
-    if (/(?:from\s*|import\s*\(\s*|require\s*\(\s*)["']node:/.test(text))
+    // from "node:x", import "node:x", import("node:x"), require("node:x")
+    if (/(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']node:/.test(text))
       failures.push(`${f} imports a node: module`);
   }
   if (failures.length > 0) {
@@ -34,7 +42,7 @@ try {
     process.exit(1);
   }
   console.log(
-    "bundle-no-node: PASS, the Worker bundles with no_nodejs_compat and imports no node: module",
+    `bundle-no-node: PASS, ${files.length} bundle file(s) scanned, the Worker bundles with no_nodejs_compat and imports no node: module`,
   );
 } finally {
   rmSync(out, { recursive: true, force: true });
