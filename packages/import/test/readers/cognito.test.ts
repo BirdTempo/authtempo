@@ -160,10 +160,9 @@ describe("cognitoSource edge rows", () => {
     for (const st of STATUSES)
       expect(by(`st-${st}`)).toMatchObject({
         password: null,
-        skip: "disabled",
-        dropped: [`status:${st}`],
+        skip: `status_${st.toLowerCase()}`,
       });
-    expect(by("st-none")).toMatchObject({ skip: "disabled", dropped: ["status:missing"] });
+    expect(by("st-none")).toMatchObject({ password: null, skip: "status_unknown" });
     expect(by("linked")).toMatchObject({ password: { hash: LEGACY_VERIFY_HASH } });
     expect(by("linked")).not.toHaveProperty("skip");
   });
@@ -189,7 +188,7 @@ describe("cognitoSource edge rows", () => {
   it("skips a record with no sub and every copy of a duplicate sub", async () => {
     const r = await all(cognitoSource({ users: EDGE }));
     expect(r.filter((x) => x.kind === "user" && x.sourceId === "username:nosub")).toEqual([
-      expect.objectContaining({ skip: "unmatched_row" }),
+      expect.objectContaining({ skip: "no_source_id" }),
     ]);
     expect(r.filter((x) => x.kind === "user" && x.sourceId === "dup")).toEqual([
       expect.objectContaining({ skip: "duplicate_row" }),
@@ -215,5 +214,12 @@ describe("cognitoSource edge rows", () => {
     ).toEqual(["a-1"]);
     expect(report.dropped).toContainEqual({ sourceId: "linked", item: "identity:cognito:Apple" });
     expect(report.created.password).toBe(1);
+    // The status reaches the report through the reason.
+    for (const [sourceId, reason] of [
+      ["st-COMPROMISED", "status_compromised"],
+      ["st-none", "status_unknown"],
+      ["username:nosub", "no_source_id"],
+    ])
+      expect(report.skipped).toContainEqual({ kind: "user", sourceId, reason });
   });
 });

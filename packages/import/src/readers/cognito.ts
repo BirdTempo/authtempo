@@ -26,12 +26,22 @@ const PROVIDERS: Record<string, string> = { Google: "google", SignInWithApple: "
  * The skip for a user whose `UserStatus` is not `CONFIRMED` or
  * `EXTERNAL_PROVIDER`: the marker would not sign in (UNCONFIRMED,
  * FORCE_CHANGE_PASSWORD, RESET_REQUIRED), or the export says not to trust
- * the password (COMPROMISED, ARCHIVED, unknown, missing). `disabled` until
- * `SkipReason` names each status; the record's `dropped` names it meanwhile.
+ * the password (COMPROMISED, ARCHIVED). Any other or missing value is
+ * `status_unknown`.
  */
-const STATUS_SKIP: SkipReason = "disabled";
-/** The skip for a record with no `sub`: it has no import key. `unmatched_row` until `SkipReason` has `no_source_id`. */
-const NO_SUB: SkipReason = "unmatched_row";
+const STATUS_SKIP: Readonly<Record<string, SkipReason>> = {
+  UNCONFIRMED: "status_unconfirmed",
+  FORCE_CHANGE_PASSWORD: "status_force_change_password",
+  RESET_REQUIRED: "status_reset_required",
+  COMPROMISED: "status_compromised",
+  ARCHIVED: "status_archived",
+};
+
+function statusSkip(status: string | null): SkipReason {
+  return status !== null && Object.hasOwn(STATUS_SKIP, status)
+    ? (STATUS_SKIP[status] as SkipReason)
+    : "status_unknown";
+}
 
 /** The `identities` attribute: JSON text of `[{ providerName, userId }]`. Every entry it cannot read is listed. */
 function readIdentities(text: string | undefined, dropped: string[]): ImportUser["identities"] {
@@ -116,13 +126,11 @@ export function cognitoSource(input: CognitoExport): Source {
           passkeys: [],
           dropped,
         };
-        if (!federated && status !== "CONFIRMED") {
-          dropped.push(`status:${status ?? "missing"}`);
-          record.skip = STATUS_SKIP;
-        }
+        if (!federated && status !== "CONFIRMED") record.skip = statusSkip(status);
         // Fail closed: only the boolean true is an enabled user.
         if (u.Enabled !== true) record.skip = "disabled";
-        if (sub === null) record.skip = NO_SUB;
+        // No sub: no import key.
+        if (sub === null) record.skip = "no_source_id";
         else if ((subCount.get(sub) ?? 0) > 1) record.skip = "duplicate_row";
         yield record;
       }
