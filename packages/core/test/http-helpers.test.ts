@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { resolveConfig } from "../src/config.js";
+import { ERRORS } from "../src/errors.js";
 import { isJsonRequest, readBody } from "../src/http/body.js";
 import { defaultConfirmPage, escapeHtml } from "../src/http/confirm-page.js";
 import {
@@ -422,6 +423,41 @@ describe("sign-in page", () => {
     const off = defaultSignInPage({ ...pw, methods: { ...pw.methods, password: false } });
     expect(off).not.toContain(`id="password"`);
     expect(off).not.toContain(`id="forgot"`);
+  });
+  it("offers Create account beside Sign in only when methods.password is true, and posts it to the sign-up route (plan 10)", () => {
+    const pw = {
+      basePath: "/auth",
+      continuePath: "/auth/handoff/continue?h=hs_1",
+      methods: {
+        magicLink: true as const,
+        google: false,
+        apple: false,
+        passkey: false,
+        password: true,
+      },
+      nonce: "n1",
+      appName: "Acme",
+    };
+    const on = defaultSignInPage(pw);
+    expect(on).toContain(`<button id="sign-up" type="button">Create account</button>`);
+    const start = on.indexOf(`postJson("/password/sign-up"`);
+    expect(start).toBeGreaterThan(-1);
+    const handler = on.slice(start, on.indexOf(".catch(", start));
+    // The same success path as the sign-in: the sign-up answer sets the cookie (spec 8.7 item 1).
+    expect(handler).toContain(`if (res.ok) { location.href = cont; return; }`);
+    expect(handler).toContain(`say("An account with this address exists. Sign in instead.");`);
+    expect(handler).toContain(`say("Too many attempts. Try again later.");`);
+    // Every code the handler names is a real core code, so a renamed code fails here.
+    const codes = [...handler.matchAll(/code === "([a-z_]+)"/g)].map((m) => m[1]);
+    expect(codes.sort()).toEqual([
+      "email_taken",
+      "email_taken_unverified",
+      "password_breached",
+      "password_policy",
+    ]);
+    for (const c of codes) expect(Object.hasOwn(ERRORS, c as string)).toBe(true);
+    const off = defaultSignInPage({ ...pw, methods: { ...pw.methods, password: false } });
+    expect(off).not.toContain(`id="sign-up"`);
   });
   it("shows the magic link form only when methods.magicLink is true, and its script checks for it (plan 9)", () => {
     const off = defaultSignInPage({ ...input, methods: { ...input.methods, magicLink: false } });

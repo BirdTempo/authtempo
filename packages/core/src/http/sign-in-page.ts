@@ -74,6 +74,7 @@ ${
 <input type="email" name="email" placeholder="you@example.com" autocomplete="username" required>
 <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
 <button type="submit">Sign in with password</button>
+<button id="sign-up" type="button">Create account</button>
 <button id="forgot" type="button">Forgot password</button>
 </form>`
     : ""
@@ -122,6 +123,25 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
         if (res.ok) say("Check your email for a link to reset your password.");
         else if (res.status === 429) say("Too many requests. Try again later.");
         else say("The request was not accepted.");
+      }).catch(function () { say("Could not reach the server. Try again."); });
+    });
+    // Plan 10: sign-up on the page. The sign-up answer sets the session cookie, so success
+    // goes to the continue path as the sign-in does. The codes come from core's ERRORS table.
+    document.getElementById("sign-up").addEventListener("click", function () {
+      var email = pwForm.elements.email.value;
+      var password = pwForm.elements.password.value;
+      if (!email || !password) { say("Type your email and a password first."); return; }
+      say("");
+      postJson("/password/sign-up", { email: email, password: password }).then(function (res) {
+        if (res.ok) { location.href = cont; return; }
+        if (res.status === 429) { say("Too many attempts. Try again later."); return; }
+        return res.json().then(function (body) {
+          var code = body && body.error;
+          if (code === "email_taken" || code === "email_taken_unverified") say("An account with this address exists. Sign in instead.");
+          else if (code === "password_policy") say("Use a longer password that is not your email address.");
+          else if (code === "password_breached") say("This password is in a known data breach. Choose another one.");
+          else say("The request was not accepted.");
+        }, function () { say("The request was not accepted."); });
       }).catch(function () { say("Could not reach the server. Try again."); });
     });
   }
