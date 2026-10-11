@@ -39,6 +39,8 @@ Version 3 (plan 6b, 2026-10-10) adds `ta_limit` for the owned limiter (with the 
 
 Version 4 (plan 8, 2026-10-10) adds `ta_password`, one row per user, with a unique index on the user. Apply `0004_schema_v4` before you deploy a core at version 4; the adapter refuses a database at version 3.
 
+Version 5 (plan 8b, 2026-10-11) adds `ta_api_token`, one row per API token, with a unique index on the token hash and an index on the user. Apply `0005_schema_v5` before you deploy a core at version 5; the adapter refuses a database at version 4.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

@@ -93,6 +93,7 @@ import { passkeyRoutes } from "./http/routes/passkeys.js";
 import { passwordRoutes } from "./http/routes/password.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
+import { tokenRoutes } from "./http/routes/tokens.js";
 import type { Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import type {
@@ -263,6 +264,7 @@ export function createAuth(input: AuthConfig): Auth {
     ...passwordRoutes(config),
     ...handoffRoutes(config),
     ...organizationRoutes(config),
+    ...tokenRoutes(config),
   ]);
   return {
     handle,

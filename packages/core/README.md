@@ -46,10 +46,14 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
 | POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
 | POST | `/handoff/redeem` | `{ code, verifier }` | `{ token, user, session }` as a bearer answer, no cookie; 400 `invalid_body`, `invalid_token`, `token_expired`; 429 `rate_limited` |
+| POST | `/tokens` | session, `{ name, expiresInDays?, organizationId? }` | `{ token, apiToken }`, the clear token once; 400 `invalid_body`; 401 without a session (a `tk_` bearer too); 403 `email_unverified`; 404 `not_found` for an organization the user is not a member of; 409 `token_limit` at 50 tokens; 429 `rate_limited` |
+| GET | `/tokens` | session | `{ tokens: [{ id, name, hint, expiresAt, lastUsedAt, organizationId, createdAt }] }`, newest first, never a token or its hash; 401; 403 `email_unverified` |
+| POST | `/tokens/revoke` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `email_unverified`; 404 `not_found` for another user's token |
+| GET | `/tokens/current` | `Authorization: Bearer tk_…` only | `{ user, apiToken }`; 401 for a session cookie, a `ts_` bearer, or no credential |
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
-Without a `password` config none of the password routes exist, and the router answers 404.
+Without a `password` config none of the password routes exist, and the router answers 404. The token routes exist in every deployment.
 
 The organization routes follow.
 
@@ -262,6 +266,41 @@ The reset POST checks its limit, then reads the link row, then the policy,
 then the breach check, then hashes. A transaction consumes the link first.
 A spent or expired link costs no breach call and no hash.
 
+## API tokens
+
+A script or a CLI signs in with an API token, not with a password. A
+person with a session creates the token. The clear token appears once, in
+the create answer, and core stores its SHA-256 only.
+
+```ts
+// A route that a script may call: a session or a token.
+const c = await auth.caller(request);
+if (!c) return Response.json({ error: "unauthorized" }, { status: 401 });
+// c.kind === "session": c.user, c.session, c.refreshed
+// c.kind === "token":   c.user, c.apiToken, c.activeOrganizationId
+```
+
+- `auth.session(request)` resolves sessions only. Every route that calls
+  it, core's and the app's, answers 401 to a `tk_` bearer. Core's own
+  routes call it, except `GET /tokens/current`. So a token cannot create a
+  token, change a password, or touch passkeys or organizations.
+- A token is `tk_` plus 43 base64url characters. `hint` holds the 8
+  characters after `tk_`, so a list tells the tokens apart.
+- `name` is 1 to 80 characters with no control character. `expiresInDays`
+  is an integer from 1 to 3650, default 90. `null` means no expiry.
+- `organizationId` names one organization the user is a member of. Core
+  checks the membership at create and at each use. When the membership is
+  gone, `caller` answers null, and the token stays in the list.
+- A user holds at most 50 tokens (`token_limit`). Create is limited to 20
+  per user per hour. An expired token goes at its next use and at the
+  sweep, and it does not count against the cap.
+- `lastUsedAt` is written at most once per hour.
+- A `tk_` value counts only in the `Authorization` header, never in a
+  cookie. A CLI passes `token: () => "tk_…"` to `createClient`.
+- A password reset, a password change, and a sign-out delete no token. Revoke
+  a token from the list.
+- In process: `auth.api.tokens.create`, `list`, `revoke`, and `current`.
+
 ## Organizations
 
 Set `organizations: {}` to turn the feature on. Without it, the organization
@@ -372,6 +411,7 @@ the limit windows that ended. It answers five counts:
 and `limits`. It is an `api` function and not a route. Call it from a
 scheduled handler. It is safe to run at any time. A replayed token
 answers `invalid_token` after the sweep because its row is gone.
+Since plan 8b it also deletes API tokens past their expiry and answers a sixth count, `apiTokens`. A token with no expiry stays.
 
 ```ts
 export default {
@@ -442,6 +482,7 @@ Without a trigger, expired rows stay in the database.
   setting, and workerd prints nothing.
 - Invitation accept is limited to 20 per IP per 15 minutes, in the same per-isolate limiter.
 - Core at version 4 needs the `0004_schema_v4` migration in both adapters. Version 4 adds the password table.
+- Core at version 5 needs the `0005_schema_v5` migration in both adapters. Version 5 adds the API token table, `ta_api_token`.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start
