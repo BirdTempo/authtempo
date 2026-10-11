@@ -28,6 +28,38 @@ function checkWith(answer: { status: number; body: unknown } | { status: number;
 }
 
 const TOKENS = { AuthenticationResult: { AccessToken: "t" } };
+
+/** onFailure runs on a 0 ms timer after the answer; a later timer runs after it. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+/**
+ * Node's process, typed here because the test tsconfig loads no Node types
+ * (tsconfig.test.json, "types": []). Vitest runs these tests in Node.
+ */
+const nodeProcess = (
+  globalThis as unknown as {
+    process: {
+      on(
+        event: "unhandledRejection" | "uncaughtException",
+        listener: (reason: unknown) => void,
+      ): void;
+      off(
+        event: "unhandledRejection" | "uncaughtException",
+        listener: (reason: unknown) => void,
+      ): void;
+    };
+  }
+).process;
+
+function refusing(onFailure: (reason: string) => unknown) {
+  const c = fakeCognito({ status: 400, body: { __type: "NotAuthorizedException" } });
+  return createCognitoLegacyVerify({
+    region: "eu-west-1",
+    clientId: "abc",
+    onFailure,
+    fetch: c.fetch,
+  });
+}
 const signal = new AbortController().signal;
 
 describe("createCognitoLegacyVerify", () => {
@@ -46,6 +78,7 @@ describe("createCognitoLegacyVerify", () => {
       AuthParameters: { USERNAME: "ada@example.com", PASSWORD: "pw" },
     });
     expect(c.seen[0]?.init.signal).toBe(signal);
+    await settle();
     expect(c.reasons).toEqual([]);
   });
 
@@ -85,6 +118,7 @@ describe("createCognitoLegacyVerify", () => {
     ]) {
       const c = checkWith({ status: 400, body: { __type: type, message: "no" } });
       expect(await c.verify("ada@example.com", "pw", signal)).toBe(false);
+      await settle();
       expect(c.reasons).toEqual([reason]);
     }
   });
@@ -98,6 +132,7 @@ describe("createCognitoLegacyVerify", () => {
       },
     });
     expect(await c.verify("ada@example.com", "pw-secret", signal)).toBe(false);
+    await settle();
     expect(c.reasons).toEqual(["InvalidParameterException"]);
   });
 
@@ -110,6 +145,7 @@ describe("createCognitoLegacyVerify", () => {
     ] as const) {
       const c = checkWith(answer);
       expect(await c.verify("ada@example.com", "pw", signal)).toBe(false);
+      await settle();
       expect(c.reasons).toEqual([reason]);
     }
   });
@@ -124,6 +160,7 @@ describe("createCognitoLegacyVerify", () => {
     ]) {
       const c = checkWith({ status: 200, body });
       expect(await c.verify("ada@example.com", "pw", signal)).toBe(false);
+      await settle();
       expect(c.reasons).toEqual(["challenge"]);
     }
   });
@@ -142,6 +179,7 @@ describe("createCognitoLegacyVerify", () => {
     ]) {
       const c = checkWith(answer);
       expect(await c.verify("ada@example.com", "pw", signal)).toBe(false);
+      await settle();
       expect(c.reasons).toEqual(["malformed"]);
     }
   });
@@ -158,6 +196,7 @@ describe("createCognitoLegacyVerify", () => {
       fetch,
     });
     expect(await verify("ada@example.com", "pw", signal)).toBe(false);
+    await settle();
     expect(reasons).toEqual(["network"]);
   });
 
@@ -182,6 +221,7 @@ describe("createCognitoLegacyVerify", () => {
     // A signal that aborted before the call answers false and sends no request.
     expect(await verify("ada@example.com", "pw", controller.signal)).toBe(false);
     expect(calls).toBe(1);
+    await settle();
     expect(reasons).toEqual(["timeout", "timeout"]);
   }, 1000);
 
@@ -206,17 +246,77 @@ describe("createCognitoLegacyVerify", () => {
     expect(calls).toBe(0);
   });
 
-  it("keeps the answer when onFailure throws", async () => {
-    const c = fakeCognito({ status: 400, body: { __type: "NotAuthorizedException" } });
-    const verify = createCognitoLegacyVerify({
-      region: "eu-west-1",
-      clientId: "abc",
-      onFailure: () => {
+  it("keeps the answer when onFailure throws, with no uncaught exception", async () => {
+    const uncaught: unknown[] = [];
+    const listener = (error: unknown) => uncaught.push(error);
+    nodeProcess.on("uncaughtException", listener);
+    try {
+      let called = 0;
+      const verify = refusing(() => {
+        called += 1;
         throw new Error("owner bug");
-      },
-      fetch: c.fetch,
-    });
+      });
+      expect(await verify("ada@example.com", "pw", signal)).toBe(false);
+      await settle();
+      expect(called).toBe(1);
+      expect(uncaught).toEqual([]);
+    } finally {
+      nodeProcess.off("uncaughtException", listener);
+    }
+  });
+
+  it("drops a rejection from an async onFailure, with no unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    nodeProcess.on("unhandledRejection", listener);
+    try {
+      let called = 0;
+      const verify = refusing(async () => {
+        called += 1;
+        throw new Error("log store down");
+      });
+      expect(await verify("ada@example.com", "pw", signal)).toBe(false);
+      // Node reports an unhandled rejection after the microtasks of a turn; wait a few turns.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(called).toBe(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      nodeProcess.off("unhandledRejection", listener);
+    }
+  });
+
+  it("answers before an async onFailure that resolves after 200 ms", async () => {
+    let done = false;
+    const verify = refusing(
+      () =>
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            done = true;
+            resolve();
+          }, 200),
+        ),
+    );
+    const started = Date.now();
     expect(await verify("ada@example.com", "pw", signal)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(100);
+    expect(done).toBe(false);
+  });
+
+  it("answers before a synchronous onFailure that blocks for 200 ms", async () => {
+    let ran = false;
+    const verify = refusing(() => {
+      const end = Date.now() + 200;
+      while (Date.now() < end) {
+        // Block the thread, as a slow synchronous logger does.
+      }
+      ran = true;
+    });
+    const started = Date.now();
+    expect(await verify("ada@example.com", "pw", signal)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(100);
+    expect(ran).toBe(false);
+    await settle();
+    expect(ran).toBe(true);
   });
 
   it("refuses a bad region and an empty client id at construction", () => {

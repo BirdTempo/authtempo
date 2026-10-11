@@ -51,10 +51,17 @@ export interface CognitoLegacyVerifyOptions {
    * without ALLOW_USER_PASSWORD_AUTH), or one of "timeout", "network",
    * "malformed", "challenge". It never gets the username or the password.
    * Why: every failure answers false, and core turns a throw into the same
-   * invalid_credentials, so a wrong setup is silent without this callback. A
-   * throw from the callback is ignored.
+   * invalid_credentials, so a wrong setup is silent without this callback.
+   *
+   * It runs after the answer, on a timer of 0 ms, so a slow callback cannot
+   * move the answer time past core's floor, and the answer never waits for
+   * it. A throw or a rejected promise from it is dropped. Core's floor holds
+   * a failed sign-in open for `timeoutMs`, so the timer fires before the
+   * request ends (Workers may drop a timer after the response).
    */
-  onFailure?: (reason: string) => void;
+  // The return is `unknown`, not `void | Promise<void>`: that union refuses
+  // a callback such as `(r) => list.push(r)`, which returns a number.
+  onFailure?: (reason: string) => unknown;
   /** Default: the global fetch. Tests inject one. */
   fetch?: typeof fetch;
 }
@@ -76,7 +83,12 @@ async function secretHash(secret: string, message: string): Promise<string> {
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
 
-/** Resolves when `signal` aborts, so a fetch that ignores the signal cannot hold the check. */
+/**
+ * Resolves when `signal` aborts later, so a fetch that ignores the signal
+ * cannot hold the check. It never resolves for a signal that aborted before
+ * the call: the abort event does not fire again. `ask` covers that case with
+ * its `signal.aborted` check before the fetch, so do not remove that check.
+ */
 function onAbort(signal: AbortSignal): { aborted: Promise<void>; stop: () => void } {
   let stop = () => {};
   const aborted = new Promise<void>((resolve) => {
@@ -112,11 +124,18 @@ export function createCognitoLegacyVerify(
   const url = `https://cognito-idp.${options.region}.${domain}/`;
   const fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
   const report = (reason: string) => {
-    try {
-      options.onFailure?.(reason);
-    } catch {
-      // The callback is the owner's; its error must not change the answer.
-    }
+    const onFailure = options.onFailure;
+    if (onFailure === undefined) return;
+    // A timer, not a microtask: the caller's continuation after the answer
+    // runs first. The callback is the owner's; its error must not change the
+    // answer or become an unhandled rejection.
+    setTimeout(() => {
+      try {
+        Promise.resolve(onFailure(reason)).catch(() => {});
+      } catch {
+        // A synchronous throw.
+      }
+    }, 0);
   };
 
   /** `true`, or the failure reason. */
