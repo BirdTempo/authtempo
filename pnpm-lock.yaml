@@ -375,6 +375,49 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
 
+  packages/import:
+    dependencies:
+      '@tempo-auth/adapter-postgres':
+        specifier: workspace:*
+        version: link:../adapter-postgres
+      '@tempo-auth/compat-better-auth':
+        specifier: workspace:*
+        version: link:../compat-better-auth
+      '@tempo-auth/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tempo-auth/legacy-hashes':
+        specifier: workspace:*
+        version: link:../legacy-hashes
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
+    devDependencies:
+      '@cloudflare/vitest-plugin':
+        specifier: 1.4.0
+        version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)))
+      '@cloudflare/workers-types':
+        specifier: 5.20261007.1
+        version: 5.20261007.1
+      '@tempo-auth/adapter-d1':
+        specifier: workspace:*
+        version: link:../adapter-d1
+      '@types/node':
+        specifier: 24.19.1
+        version: 24.19.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.3.3
+        version: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
+
   packages/legacy-hashes:
     dependencies:
       '@noble/hashes':
