@@ -122,7 +122,7 @@ const ACCEPTED_CONFIG = new Set(["provider", "schema", "usePlural", "transaction
  * one list (spec 16.1), so an app sees every refusal in one run. Any use
  * outside `betterAuth` throws the same error.
  */
-function refusedDatabase(dialect: "postgres" | "d1", refusals: string[]): CompatDatabase {
+function refusedDatabase(dialect: CompatDatabase["dialect"], refusals: string[]): CompatDatabase {
   const fail = () => {
     throw new BetterAuthCompatError(refusals);
   };
@@ -179,5 +179,5 @@ export function drizzleAdapter(
   refused.push(
     `database.provider: "${config.provider}" is refused; tempo-auth runs on Postgres and D1`,
   );
-  return refusedDatabase("postgres", refused);
+  return refusedDatabase(config.provider === "mysql" ? "mysql" : "postgres", refused);
 }

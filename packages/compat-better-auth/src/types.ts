@@ -71,7 +71,8 @@ export interface Invitation {
 /** What `drizzleAdapter` and `betterAuthSchemaStorage` answer. `betterAuth` refuses any other `database`. */
 export interface CompatDatabase {
   readonly kind: "tempo-auth-compat-database";
-  readonly dialect: "postgres" | "d1";
+  /** `"mysql"` only on a database that `drizzleAdapter` refuses: the provider it saw. */
+  readonly dialect: "postgres" | "d1" | "mysql";
   readonly storage: StorageAdapter;
   /** The owned limiter on the same database, in `ta_limit`. */
   readonly limiter: LimiterPort;
@@ -163,9 +164,14 @@ export type BetterAuthPlugin = CompatPlugin | ForeignPlugin;
  * 9b no option type has an index signature, so a refused key in an object
  * literal of a plugin's options, or of an object that `satisfies` this type,
  * fails the compile. `betterAuth(options)` infers its type parameter from the
- * literal, so TypeScript does not check that literal for extra keys: the
- * runtime allow list (spec 16.1) stays the control there, and it lists every
- * refused key at construction.
+ * literal, so TypeScript does not check that literal for extra keys. One
+ * check stays: the weak-type rule (TS2559; TS2353 for a literal). Each nested
+ * option type has only optional keys, so a nested object with no key in
+ * common with its type stops the compile, for example consumerd's
+ * `rateLimit: { customStorage }`. Then the compile shows that one key, not the
+ * full list. The runtime allow list (spec 16.1) stays the one complete
+ * control, and it lists every refused key at construction. typetest/options.ts
+ * pins both rules.
  */
 export interface BetterAuthOptions {
   appName?: string;

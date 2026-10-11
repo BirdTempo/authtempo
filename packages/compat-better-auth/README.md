@@ -273,12 +273,14 @@ does not call it.
 | --- | --- | --- |
 | No network answer | `NETWORK_ERROR` | 0 |
 | The person cancels a passkey or sign-in prompt | `AUTH_CANCELLED` | 0 |
-| The handoff redirect does not match | `INVALID_REDIRECT_URL` | 0 |
+| The handoff redirect does not match | `INVALID_REDIRECT_URL` | 403 |
 | An answer that the client cannot read, or a passkey prompt that fails in the browser | `UNEXPECTED_RESPONSE` | the HTTP status, or 0 for the browser failure |
 | A call with no `baseURL` and no page location | `BASE_URL_REQUIRED` | 0 |
 
 Status 0 means that no HTTP response exists. Do not test `status >= 400` alone
-for these.
+for these. The handoff mismatch also has no HTTP response, but it answers 403:
+`INVALID_REDIRECT_URL` has one status everywhere, the one in the table below
+(plan 9b).
 
 The shim's own codes name the cases that no core code names. The server `api`
 throws them as `APIError` with this status, and the client answers them as

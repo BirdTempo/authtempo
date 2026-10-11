@@ -1,6 +1,9 @@
 import type { LimiterPort, StorageAdapter } from "@tempo-auth/core";
+import type { DrizzleAdapterConfig } from "../src/adapters/drizzle.js";
+import { expoClient } from "../src/client/expo.js";
 import { bearer, expo, magicLink, organization, passkey } from "../src/plugins.js";
-import type { CompatDatabase } from "../src/types.js";
+import { betterAuth } from "../src/server/better-auth.js";
+import type { BetterAuthOptions, ClientOptions, CompatDatabase } from "../src/types.js";
 
 // Real values, not `declare const`: test/check-options.test.ts (Task 7) imports
 // these objects at run time. The check never calls the storage or the limiter.
@@ -200,3 +203,164 @@ export const consumerb = {
     { id: "cimd" },
   ],
 };
+
+// One guard per option type that lost its index signature in plan 9b. Each
+// line below the directive holds a key the type does not name. If an index
+// signature comes back on that type, the key compiles, the directive is
+// unused, and the typecheck fails (TS2578). The four organization() literals
+// above guard OrganizationOptions.
+export const strictOptionGuards = [
+  passkey({
+    rpID: "example.com",
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  }),
+  magicLink({
+    sendMagicLink: async () => {},
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  }),
+  bearer({
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  }),
+  expo({
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  }),
+  {
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  } satisfies BetterAuthOptions,
+  {
+    emailAndPassword: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      notMapped: true,
+    },
+  } satisfies BetterAuthOptions,
+  {
+    emailVerification: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      notMapped: true,
+    },
+  } satisfies BetterAuthOptions,
+  {
+    socialProviders: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      github: { clientId: "h", clientSecret: "h" },
+    },
+  } satisfies BetterAuthOptions,
+  {
+    socialProviders: {
+      google: {
+        clientId: "g",
+        clientSecret: "g",
+        // @ts-expect-error since plan 9b a refused key fails the compile
+        notMapped: true,
+      },
+    },
+  } satisfies BetterAuthOptions,
+  {
+    socialProviders: {
+      apple: {
+        clientId: "a",
+        // @ts-expect-error since plan 9b a refused key fails the compile
+        notMapped: true,
+      },
+    },
+  } satisfies BetterAuthOptions,
+  {
+    session: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      notMapped: true,
+    },
+  } satisfies BetterAuthOptions,
+  {
+    session: {
+      cookieCache: {
+        // @ts-expect-error since plan 9b a refused key fails the compile
+        notMapped: true,
+      },
+    },
+  } satisfies BetterAuthOptions,
+  {
+    advanced: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      notMapped: true,
+    },
+  } satisfies BetterAuthOptions,
+  {
+    advanced: {
+      ipAddress: {
+        // @ts-expect-error since plan 9b a refused key fails the compile
+        notMapped: true,
+      },
+    },
+  } satisfies BetterAuthOptions,
+  {
+    advanced: {
+      defaultCookieAttributes: {
+        // @ts-expect-error since plan 9b a refused key fails the compile
+        notMapped: true,
+      },
+    },
+  } satisfies BetterAuthOptions,
+  {
+    advanced: {
+      database: {
+        // @ts-expect-error since plan 9b a refused key fails the compile
+        notMapped: true,
+      },
+    },
+  } satisfies BetterAuthOptions,
+  {
+    rateLimit: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      notMapped: true,
+    },
+  } satisfies BetterAuthOptions,
+  {
+    telemetry: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      notMapped: true,
+    },
+  } satisfies BetterAuthOptions,
+  {
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  } satisfies ClientOptions,
+  {
+    fetchOptions: {
+      // @ts-expect-error since plan 9b a refused key fails the compile
+      notMapped: true,
+    },
+  } satisfies ClientOptions,
+  expoClient({
+    scheme: "app",
+    storage: { getItem: () => null, setItem: () => {} },
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  }),
+  {
+    provider: "pg",
+    // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  } satisfies DrizzleAdapterConfig,
+];
+
+// The weak-type rule (TS2559, under TS2345 for an argument). `betterAuth`
+// infers its type parameter, so TypeScript does not check its argument for
+// extra keys. It still refuses a nested object that has no key in common with
+// its type, because each nested option type has only optional keys: consumerd's
+// `rateLimit: { customStorage }` stops the compile, and a literal
+// `rateLimit: { max: 1 }` stops it with TS2353. These functions never run.
+export const weakTypeGuards = [
+  // @ts-expect-error weak type: consumerd's rateLimit has no key in common with { enabled?: boolean }
+  () => betterAuth(consumerd),
+  () =>
+    betterAuth({
+      database,
+      // @ts-expect-error weak type: { max: 1 } has no key in common with { enabled?: boolean }
+      rateLimit: { max: 1 },
+    }),
+];

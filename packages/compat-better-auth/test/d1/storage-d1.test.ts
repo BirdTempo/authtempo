@@ -49,6 +49,7 @@ describe("the Better Auth storage on D1, default names", () => {
     ]);
     const mysql = drizzleAdapter({ $client: env.DB }, { provider: "mysql" });
     expect(mysql.refusals?.[0]).toMatch(/"mysql" is refused/);
+    expect(mysql.dialect).toBe("mysql");
     expect(() => mysql.storage.findOne("user", [])).toThrow(/"mysql" is refused/);
   });
 

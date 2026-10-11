@@ -105,7 +105,7 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
   it("refuses exactly these consumerc, consumerd, and consumerb options, and the README lists the same", () => {
     const apps = { consumerc, consumerd, consumerb };
     for (const [name, list] of Object.entries(EXACT)) {
-      // An app object holds keys the type does not name; the runtime check is what this test pins.
+      // consumerd fails the weak-type rule (TS2559: its rateLimit has no key in common with the type); the runtime check is what this test pins.
       const c = checkOptions(apps[name as keyof typeof apps] as BetterAuthOptions);
       expect({ name, refusals: paths(c.refusals) }).toEqual({ name, refusals: list });
       const line = readme
