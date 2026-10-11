@@ -6,7 +6,7 @@ import { CONFLICT_REASONS } from "../src/types.js";
  * The README names the conflicts by hand. This test ties that list to
  * `CONFLICT_REASONS`, so the two cannot drift in silence.
  */
-export function readmeConflicts(text: string): string[] {
+function readmeConflicts(text: string): string[] {
   const start = text.indexOf("The conflicts are ");
   const end = text.indexOf("(`CONFLICT_REASONS`", start);
   if (start === -1 || end === -1) throw new Error("the README has no conflict list");
