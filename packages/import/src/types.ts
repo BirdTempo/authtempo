@@ -15,6 +15,8 @@ export type SkipReason =
   | "sso_user"
   /** Two export files of one provider disagree on this id (Clerk CSV and API, Auth0 users and hashes). */
   | "unmatched_row"
+  /** One export file holds the same user id twice; no copy of it is imported. */
+  | "duplicate_row"
   // The importer finds these.
   | "no_email"
   /** An organization name outside core's rule (1 to 120 characters, no control character). */
@@ -36,6 +38,7 @@ export type SkipReason =
 /** The skips that mean "a person must look": the CLI exits 1 on any of them. */
 export const CONFLICT_REASONS: ReadonlySet<SkipReason> = new Set<SkipReason>([
   "unmatched_row",
+  "duplicate_row",
   "email_taken",
   "identity_taken",
   "slug_taken",
