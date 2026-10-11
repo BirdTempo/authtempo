@@ -325,6 +325,8 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
         org("o3", [{ userSourceId: "a", roles: ["owner"] }], { name: "Admin" }),
         org("o4", [{ userSourceId: "b", roles: ["owner"] }], { name: "Lost" }),
         org("o5", [{ userSourceId: "a", roles: ["owner"] }], { name: "Tempo", slug: "tempo" }),
+        // A reader that finds no name in the export gives null, never "".
+        org("o6", [{ userSourceId: "a", roles: ["owner"] }], { name: null, slug: "six" }),
       ]),
       { now },
     );
@@ -334,8 +336,9 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
       { kind: "organization", sourceId: "o2", reason: "invalid_name" },
       { kind: "organization", sourceId: "o3", reason: "reserved_slug" },
       { kind: "organization", sourceId: "o4", reason: "no_owner" },
+      { kind: "organization", sourceId: "o6", reason: "invalid_name" },
     ]);
-    expect(r.refusals).toBe(3);
+    expect(r.refusals).toBe(4);
     expect((await db.findMany("organization", [])).map((o) => o.slug)).toEqual(["tempo"]);
   });
 });

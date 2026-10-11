@@ -11,6 +11,8 @@ export type SkipReason =
   | "deleted"
   | "disabled"
   | "banned"
+  /** Supabase `is_sso_user` true: a SAML user, which tempo-auth has no mapping for. */
+  | "sso_user"
   /** Two export files of one provider disagree on this id (Clerk CSV and API, Auth0 users and hashes). */
   | "unmatched_row"
   // The importer finds these.
