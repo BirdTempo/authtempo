@@ -146,6 +146,27 @@ describe("auth0Source", () => {
   });
 });
 
+describe("auth0Source roles", () => {
+  it("maps a source role through the role map: Editor to admin, the owner kept", async () => {
+    const db = createMemoryAdapter();
+    await importUsers(
+      db,
+      auth0Source({ users: AUTH0_USERS, hashes: AUTH0_HASHES, organizations: AUTH0_ORGS }),
+      { formats: LEGACY_FORMATS, now, roleMap: { Editor: "admin" } },
+    );
+    const idOf = async (email: string) =>
+      (await db.findOne("user", [{ field: "email", op: "eq", value: email }]))?.id;
+    const roleOf = async (email: string) => {
+      const userId = await idOf(email);
+      return (await db.findMany("member", [])).find((m) => m.userId === userId)?.role;
+    };
+    // The owner stays the owner, so no admin is promoted and the line below pins the map alone.
+    expect(await roleOf("ann@example.com")).toBe("owner");
+    // google-oauth2|1035, verified, with the source role Editor.
+    expect(await roleOf("gus@example.com")).toBe("admin");
+  });
+});
+
 // Edge rows (review I-1 to I-3, M-1, M-2), same shapes and date as above.
 const EDGE_USERS = [
   { user_id: "auth0|dup1", email: "old@example.com", email_verified: true },

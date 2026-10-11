@@ -16,6 +16,7 @@ import {
   PASSKEY,
   PASSKEY_PUBLIC_KEY_STD,
 } from "./fixtures/matrix.js";
+import { SUPABASE_FIXTURE_CREATED } from "./fixtures/supabase-counts.js";
 import identities from "./fixtures/supabase-identities.csv?raw";
 import users from "./fixtures/supabase-users.csv?raw";
 import { freshSchema } from "./pg.js";
@@ -230,9 +231,8 @@ for (const [label, open] of targets) {
       try {
         const source = () => supabaseSource({ users, identities, now });
         const first = await runTwice(t, source, { formats: LEGACY_FORMATS, now });
-        // Floors, so a run that imports nothing does not pass against an empty reference.
-        expect(first.created.user).toBeGreaterThanOrEqual(4);
-        expect(first.created.password).toBeGreaterThanOrEqual(2);
+        // Exact counts, so a run that imports nothing does not pass against an empty reference.
+        expect(first.created).toMatchObject(SUPABASE_FIXTURE_CREATED);
         const ada = await t.read.userId("ada@example.com");
         expect(await t.read.hashes(ada)).toEqual([HASHES.ada]);
       } finally {

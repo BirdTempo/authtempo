@@ -6,6 +6,7 @@ import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { type CliIo, exitCode, runCli, writePrivate } from "../src/cli.js";
 import { CONFLICT_REASONS, type ImportReport } from "../src/types.js";
+import { SUPABASE_FIXTURE_CREATED } from "./fixtures/supabase-counts.js";
 import identities from "./fixtures/supabase-identities.csv?raw";
 import users from "./fixtures/supabase-users.csv?raw";
 import { FIRESCRYPT } from "./readers/all.js";
@@ -113,8 +114,9 @@ describe("tempo-auth-import", () => {
     const t = io(FILES);
     expect(await runCli(BASE, t.value)).toBe(1);
     expect(t.out[0]).toBe("supabase");
+    const c = SUPABASE_FIXTURE_CREATED;
     expect(t.out).toContain(
-      "created: user 7, identity 9, password 2, passkey 0, organization 0, member 0",
+      `created: user ${c.user}, identity ${c.identity}, password ${c.password}, passkey 0, organization 0, member 0`,
     );
     expect(t.out.filter((l) => l.startsWith("refused hash ")).length).toBe(2);
     expect(t.opened).toEqual([{ url: "postgres://x", betterAuth: false }]);
