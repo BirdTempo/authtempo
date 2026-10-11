@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type {
-  ApiTokenRow,
-  IdentityRow,
-  ModelName,
-  PasskeyRow,
-  UserRow,
-  VerificationRow,
-} from "../schema.js";
+import type { ApiTokenRow, IdentityRow, PasskeyRow, UserRow, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "./port.js";
 
 export interface ConformanceTarget {
