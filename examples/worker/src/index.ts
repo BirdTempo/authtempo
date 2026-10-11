@@ -89,6 +89,14 @@ export default {
       if (renewed) res.headers.set("set-cookie", renewed);
       return res;
     }
+    // A route that a script may call with an API token (plan 8b). `caller`
+    // resolves the session cookie, a `ts_` bearer, or a `tk_` bearer. `/me`
+    // above calls `session`, so it stays session-only and answers 401 to a token.
+    if (url.pathname === "/whoami") {
+      const c = await a.caller(request);
+      if (!c) return Response.json({ error: "unauthorized" }, { status: 401 });
+      return Response.json({ kind: c.kind, id: c.user.id, email: c.user.email });
+    }
     if (url.pathname === "/__test/last-link") {
       if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
       return Response.json({ link: lastLink });
