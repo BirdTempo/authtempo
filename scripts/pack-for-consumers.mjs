@@ -31,21 +31,35 @@ if (existsSync(out) && readdirSync(out).length > 0) {
 }
 
 const root = resolve(import.meta.dirname, "..");
+// Runs git in the repo. A failure prints one line and exits 1, with no stack trace.
+function git(...args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const line = String(error.stderr ?? "").split("\n")[0] || "not a git checkout";
+    console.error(`git ${args[0]} failed: ${line}`);
+    process.exit(1);
+  }
+}
+
 // The consumer records the HEAD commit beside the hashes as the source of the tarballs.
 // A changed file under these paths would ship in a tarball, but HEAD would not hold it.
 // So refuse a dirty tree. Then the same commit always gives the same hashes.
-const dirty = execFileSync(
-  "git",
-  [
-    "status",
-    "--porcelain",
-    "--",
-    "packages",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
-    "package.json",
-  ],
-  { cwd: root, encoding: "utf8" },
+// tsconfig.base.json is in the list because every packed package extends it. It sets
+// the emit options, so an uncommitted edit changes dist and the hashes.
+const dirty = git(
+  "status",
+  "--porcelain",
+  "--",
+  "packages",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "package.json",
+  "tsconfig.base.json",
 )
   .split("\n")
   .filter(Boolean);
@@ -144,7 +158,7 @@ for (const p of expected) {
   }
 }
 if (failed) process.exit(1);
-const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+const head = git("rev-parse", "HEAD").trim();
 console.error(`HEAD ${head}`);
 for (const p of expected) {
   const hex = createHash("sha256")
