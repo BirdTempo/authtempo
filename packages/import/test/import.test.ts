@@ -1,4 +1,9 @@
-import { createMemoryAdapter, LEGACY_VERIFY_HASH, type StorageAdapter } from "@tempo-auth/core";
+import {
+  createMemoryAdapter,
+  createPbkdf2PasswordHash,
+  LEGACY_VERIFY_HASH,
+  type StorageAdapter,
+} from "@tempo-auth/core";
 import { describe, expect, it } from "vitest";
 import { importId } from "../src/ids.js";
 import { importUsers } from "../src/import.js";
@@ -113,6 +118,44 @@ describe("importUsers", () => {
     await db.delete("password", [{ field: "userId", op: "eq", value: u2 }]);
     await importUsers(db, listSource(records()), { now });
     expect(await db.findMany("password", [{ field: "userId", op: "eq", value: u2 }])).toEqual([]);
+  });
+
+  it("never rewrites a password row that a sign-in rehashed since the first run", async () => {
+    const db = createMemoryAdapter();
+    const export_ = () => [
+      user("m", { password: { hash: LEGACY_VERIFY_HASH } }),
+      user("b", { password: { hash: BCRYPT } }),
+    ];
+    await importUsers(db, listSource(export_()), { now, legacyVerify: true });
+    // A sign-in (the legacy check, or a bcrypt match) rehashes each row to PBKDF2.
+    const ids = [await importId("user", "supabase", "m"), await importId("user", "supabase", "b")];
+    const seam = createPbkdf2PasswordHash();
+    for (const userId of ids) {
+      await db.update("password", [{ field: "userId", op: "eq", value: userId }], {
+        hash: await seam.hash("the user's password"),
+        updatedAt: AT,
+      });
+    }
+    const before = await db.findMany("password", []);
+    expect(before.map((p) => p.hash.startsWith("$"))).toEqual([false, false]);
+    const again = await importUsers(db, listSource(export_()), { now, legacyVerify: true });
+    expect(again.exists.user).toBe(2);
+    expect(again.created.password).toBe(0);
+    expect(await db.findMany("password", [])).toEqual(before);
+  });
+
+  it("never writes a password over an app user that holds the address", async () => {
+    const db = createMemoryAdapter();
+    // A password sign-up of the app: the user row and its PBKDF2 password row.
+    await appUser(db, "app-1", "u1@example.com", false);
+    const before = await db.findMany("password", []);
+    const r = await importUsers(
+      db,
+      listSource([user("u1", { password: { hash: LEGACY_VERIFY_HASH } })]),
+      { now, legacyVerify: true },
+    );
+    expect(r.skipped).toEqual([{ kind: "user", sourceId: "u1", reason: "email_taken" }]);
+    expect(await db.findMany("password", [])).toEqual(before);
   });
 
   it("writes nothing on a dry run, and reports what a real run reports", async () => {
