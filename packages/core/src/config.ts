@@ -151,7 +151,9 @@ export interface LegacyVerifyConfig {
    * check began, so a legacy row's network time does not tell an address with
    * a legacy row from an unknown one. The old system's deadline is the same
    * time, not `timeoutMs` from its call: core's lookups and dummy verify run
-   * first, so `verify` gets a little less than `timeoutMs`.
+   * first, so `verify` gets a little less than `timeoutMs`. Set it longer
+   * than the seam's dummy verify plus the old system's round trip; else
+   * every check times out and every user gets `invalid_credentials`.
    */
   timeoutMs?: number;
 }
