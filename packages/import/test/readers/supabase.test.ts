@@ -1,4 +1,5 @@
 import { createMemoryAdapter } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { parseCsv } from "../../src/csv.js";
 import { importUsers } from "../../src/import.js";
@@ -104,6 +105,30 @@ describe("supabaseSource", () => {
     expect(r2[4]).toMatchObject({ skip: "banned" });
   });
 
+  it("reads is_sso_user and is_anonymous as false only for f or false, and skips on TRUE or 1", async () => {
+    // Both columns are NOT NULL booleans. psql writes t or f; another tool can
+    // write TRUE or 1, and a reader that misses them imports an SSO user.
+    const header = users.slice(0, users.indexOf("\n") + 1);
+    const row = (id: string, anon: string, sso: string) =>
+      `${id},${id}@example.com,,,{},2024-02-02 08:00:00+00,${anon},,,${sso}\n`;
+    const csv =
+      header +
+      row("sso-upper", "f", "TRUE") +
+      row("sso-one", "f", "1") +
+      row("anon-upper", "TRUE", "f") +
+      row("anon-one", "1", "f") +
+      row("plain", "false", "false");
+    const r = await all(
+      supabaseSource({ users: csv, identities: "provider,provider_id,user_id\n", now }),
+    );
+    const skipOf = (id: string) => r.find((x) => x.sourceId === id)?.skip;
+    expect(skipOf("sso-upper")).toBe("sso_user");
+    expect(skipOf("sso-one")).toBe("sso_user");
+    expect(skipOf("anon-upper")).toBe("anonymous");
+    expect(skipOf("anon-one")).toBe("anonymous");
+    expect(skipOf("plain")).toBeUndefined();
+  });
+
   it("reads a jsonb null in raw_user_meta_data as no name and goes on", async () => {
     const r = await all(supabaseSource({ users, identities, now }));
     expect(r[10]).toMatchObject({
@@ -172,7 +197,7 @@ describe("supabaseSource", () => {
     const report = await importUsers(
       db,
       supabaseSource({ users, identities, firebase: FIREBASE, now }),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     // Users: ada, bob, fire, argon, paroled, nullmeta, twogoogle.
     // Identities (9): ada's email and google (2); the email identity of fire,

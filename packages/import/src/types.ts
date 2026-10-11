@@ -24,7 +24,10 @@ export type SkipReason =
   | "status_compromised"
   | "status_archived"
   | "status_unknown"
-  /** The record has no provider id (Cognito sub), so it has no import key. */
+  /**
+   * The record has no provider id (a Cognito sub, a Clerk or Auth0 user or
+   * organization id), so it has no import key. Users and organizations.
+   */
   | "no_source_id"
   // The importer finds these.
   | "no_email"
@@ -137,6 +140,8 @@ export interface ImportOrganization {
   createdAt: Date | null;
   /** In the source's order. The first admin becomes owner when no member maps to owner. */
   members: { userSourceId: string; roles: string[] }[];
+  /** Set by the reader: only `no_source_id`, for an organization with no id. */
+  skip?: SkipReason;
 }
 
 export type ImportRecord = ImportUser | ImportOrganization;
@@ -154,8 +159,14 @@ export interface ImportOptions {
   onEmailTaken?: "skip" | "fail";
   /** Reads only. The report is the one a real run on the same database would give. */
   dryRun?: boolean;
-  /** The formats the app's `createLegacyPasswordHash` verifies. Default all five. A hash in another format is refused. */
-  formats?: readonly LegacyFormat[];
+  /**
+   * The formats the app's `createLegacyPasswordHash` verifies: the seam's own
+   * `formats` list. Required, with no default (spec 17.1): a hash imports only
+   * in a format the app's seam verifies, and only the operator knows that
+   * list. A hash in another format is refused and listed. An empty list
+   * refuses every hash.
+   */
+  formats: readonly LegacyFormat[];
   /** True when the app sets `password.legacyVerify` (Cognito). Default false: the marker is refused. */
   legacyVerify?: boolean;
   /** Source role to core role. Wins over the reader's map. */

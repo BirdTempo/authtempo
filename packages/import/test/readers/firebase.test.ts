@@ -1,4 +1,5 @@
 import { createMemoryAdapter } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { firebaseSource } from "../../src/readers/firebase.js";
@@ -70,7 +71,7 @@ describe("firebaseSource", () => {
     const report = await importUsers(
       db,
       firebaseSource({ users: USERS, hashConfig: { rounds: 8, memCost: 14 } }),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(
       (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
@@ -126,6 +127,7 @@ describe("firebaseSource edge rows", () => {
   it("reports every refusal path through the importer", async () => {
     const db = createMemoryAdapter();
     const report = await importUsers(db, firebaseSource({ users: EDGE, hashConfig: CONFIG }), {
+      formats: LEGACY_FORMATS,
       now,
     });
     expect(await db.findMany("password", [])).toEqual([]);
@@ -157,9 +159,11 @@ describe("firebaseSource edge rows", () => {
       { rounds: 8, memCost: 0 },
       { rounds: 0, memCost: 14 },
       { rounds: 8.5, memCost: 14 },
+      // r has two digits in the grammar, so 100 is out of bounds though 2^1 * 100 is small.
+      { rounds: 100, memCost: 1 },
     ])
       expect(() => firebaseSource({ users: EDGE, hashConfig: bad })).toThrow(
-        "firebase hashConfig rounds and memCost must be integers of at least 1",
+        "firebase hashConfig rounds and memCost must be integers of 1 to 99",
       );
     // 2^15 * 8 is the bound itself.
     expect(() =>

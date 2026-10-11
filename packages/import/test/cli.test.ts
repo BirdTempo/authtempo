@@ -1,13 +1,17 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMemoryAdapter, type StorageAdapter } from "@tempo-auth/core";
+import { createMemoryAdapter, type StorageAdapter, StorageError } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { type CliIo, exitCode, runCli, writePrivate } from "../src/cli.js";
 import { CONFLICT_REASONS, type ImportReport } from "../src/types.js";
 import identities from "./fixtures/supabase-identities.csv?raw";
 import users from "./fixtures/supabase-users.csv?raw";
 import { FIRESCRYPT } from "./readers/all.js";
+
+/** Every format: the tests below that do not test --formats pass all five. */
+const ALL = LEGACY_FORMATS.join(",");
 
 function io(files: Record<string, string>, storage: StorageAdapter = createMemoryAdapter()) {
   const out: string[] = [];
@@ -44,6 +48,8 @@ const BASE = [
   "i.csv",
   "--postgres",
   "postgres://x",
+  "--formats",
+  ALL,
 ];
 
 const BCRYPT = "$2b$10$U4C0ZY8OG8y41F9LusfKyu3HRMBL0rCZcKBVsXhgr.n8Ou6FPhzO2";
@@ -75,7 +81,17 @@ const clerkOrg = (slug: string) =>
       memberships: [{ role: "org:admin", public_user_data: { user_id: "user_2a" } }],
     },
   ]);
-const CLERK = ["clerk", "--csv", "c.csv", "--users", "u.json", "--postgres", "postgres://x"];
+const CLERK = [
+  "clerk",
+  "--csv",
+  "c.csv",
+  "--users",
+  "u.json",
+  "--postgres",
+  "postgres://x",
+  "--formats",
+  ALL,
+];
 
 function report(over: Partial<ImportReport>): ImportReport {
   return {
@@ -151,6 +167,8 @@ describe("tempo-auth-import", () => {
           "billing,help",
           "--platform-slug",
           "staff",
+          "--formats",
+          "bcrypt,argon2id",
         ],
         t.value,
       ),
@@ -163,6 +181,7 @@ describe("tempo-auth-import", () => {
       dryRun: false,
       reservedSlugs: ["billing", "help"],
       platformSlug: "staff",
+      formats: ["bcrypt", "argon2id"],
     });
     expect(t.opened).toEqual([]);
   });
@@ -265,6 +284,8 @@ describe("tempo-auth-import", () => {
       "99",
       "--postgres",
       "x",
+      "--formats",
+      "firescrypt",
     ];
     expect(await runCli(argv, t.value)).toBe(2);
     expect(t.err).toEqual([
@@ -284,14 +305,62 @@ describe("tempo-auth-import", () => {
     ]);
     expect(JSON.parse(t.written["r.json"] ?? "{}")).toMatchObject({ report: null });
 
+    // "storage:" only for a StorageError; any other error is the importer's own.
     const mid = io(FILES);
     mid.storage.transaction = async () => {
-      throw new Error("terminating connection");
+      throw new StorageError("schema_mismatch", "user");
     };
     expect(await runCli(BASE, mid.value)).toBe(2);
     expect(mid.err).toEqual([
-      "stopped: storage: terminating connection; records before it may be written; run again",
+      "stopped: storage: schema_mismatch on user; records before it may be written; run again",
     ]);
+    const other = io(FILES);
+    other.storage.transaction = async () => {
+      throw new Error("terminating connection");
+    };
+    expect(await runCli(BASE, other.value)).toBe(2);
+    expect(other.err).toEqual([
+      "stopped: import: terminating connection; records before it may be written; run again",
+    ]);
+  });
+
+  it("refuses firebase with no --firebase-rounds: exit 2, the usage text, no file read", async () => {
+    const t = io({ "f.json": JSON.stringify({ users: [] }) });
+    for (const argv of [
+      ["firebase", "--users", "f.json", "--firebase-mem-cost", "14"],
+      ["firebase", "--users", "f.json", "--firebase-rounds", "8"],
+    ]) {
+      expect(await runCli([...argv, "--postgres", "x", "--formats", "firescrypt"], t.value)).toBe(
+        2,
+      );
+      expect(t.err.at(-2)).toBe("firebase needs --firebase-rounds and --firebase-mem-cost");
+      expect(t.err.at(-1)).toMatch(/^tempo-auth-import <provider>/);
+    }
+    expect(t.reads).toEqual([]);
+  });
+
+  it("refuses a provider with no --formats: exit 2, the usage text, no file read", async () => {
+    // Spec 17.1: only the operator knows the seam's list, so there is no default.
+    const t = io(FILES);
+    const noFormats = BASE.slice(0, BASE.indexOf("--formats"));
+    expect(await runCli(noFormats, t.value)).toBe(2);
+    expect(t.err[0]).toBe(
+      "supabase needs --formats: the formats list of the app's createLegacyPasswordHash, or none",
+    );
+    expect(t.err.at(-1)).toMatch(/^tempo-auth-import <provider>/);
+    expect(t.reads).toEqual([]);
+    expect(t.opened).toEqual([]);
+  });
+
+  it("takes --formats none as the empty list: every hash is refused and listed", async () => {
+    const t = io(FILES);
+    const none = [...BASE.slice(0, BASE.indexOf("--formats")), "--formats", "none"];
+    expect(await runCli(none, t.value)).toBe(1);
+    expect(await t.storage.findMany("password", [])).toEqual([]);
+    // The fixture holds four hashes. The run with every format refuses two (an
+    // fbscrypt row of no known project and an argon2i string). With none, the
+    // two bcrypt hashes are refused too.
+    expect(t.out.filter((l) => l.startsWith("refused hash ")).length).toBe(4);
   });
 
   it("writes the report file on a conflict stop", async () => {
@@ -377,7 +446,17 @@ describe("tempo-auth-import", () => {
           passwordHash: BCRYPT,
         }),
       });
-      const argv = ["auth0", "--users", "u.ndjson", "--hashes", "h.ndjson", "--postgres", "x"];
+      const argv = [
+        "auth0",
+        "--users",
+        "u.ndjson",
+        "--hashes",
+        "h.ndjson",
+        "--postgres",
+        "x",
+        "--formats",
+        "bcrypt",
+      ];
       expect(await runCli(argv, t.value)).toBe(0);
       expect(t.out).toContain(
         "created: user 1, identity 1, password 1, passkey 0, organization 0, member 0",
@@ -409,6 +488,8 @@ describe("tempo-auth-import", () => {
         "14",
         "--postgres",
         "x",
+        "--formats",
+        "firescrypt",
       ];
       expect(await runCli(argv, t.value)).toBe(0);
       const [pw] = await t.storage.findMany("password", []);
@@ -452,6 +533,8 @@ describe("tempo-auth-import", () => {
         "--same-passkey-rp-id",
         "--postgres",
         "x",
+        "--formats",
+        "bcrypt",
       ];
       expect(await runCli(argv, t.value)).toBe(0);
       expect(t.out).toContain(
@@ -484,6 +567,18 @@ describe("tempo-auth-import", () => {
       );
       const off = io(files);
       expect(await runCli(argv, off.value)).toBe(1);
+    });
+
+    it("cognito: a bare Users array (list-users --query Users) stops with exit 2, nothing written", async () => {
+      const t = io({ "c.json": "[]" });
+      const argv = ["cognito", "--users", "c.json", "--postgres", "x", "--legacy-verify"];
+      expect(await runCli(argv, t.value)).toBe(2);
+      expect(t.err).toEqual([
+        expect.stringMatching(
+          /^stopped: tempo-auth import: the Cognito users input has no Users array.*; nothing was written$/,
+        ),
+      ]);
+      expect(t.opened).toEqual([]);
     });
   });
 });

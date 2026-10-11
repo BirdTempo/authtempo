@@ -1,5 +1,6 @@
 import { applyD1Migrations, createScheduledController, env } from "cloudflare:test";
 import { createD1Adapter } from "@tempo-auth/adapter-d1";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { FIREBASE } from "@tempo-auth/legacy-hashes/testing";
 import { describe, expect, it, vi } from "vitest";
 import { type ImportBundle, sourceOf } from "../../src/sources.js";
@@ -50,8 +51,34 @@ describe("the D1 import (worker/src/run.ts on core's D1 adapter)", () => {
       expect(log).toHaveBeenCalledTimes(1);
       const line = JSON.parse(String(log.mock.calls[0]?.[0]));
       expect(line.tempoAuthImport).toMatchObject({ dryRun: true, created: NONE });
+      // The CLI's exit status beside the report: 0, because the sample refuses nothing.
+      expect(line.status).toBe(0);
     } finally {
       log.mockRestore();
+    }
+    expect(await everyRow()).toEqual(start);
+  });
+
+  it("logs status 1 beside the report when a person must look (a refused hash)", async () => {
+    // The sample input gives status 0, so this test swaps the input module for
+    // a dry run that refuses every hash (formats: []). A fixed status in the
+    // log line fails here.
+    const start = await everyRow();
+    vi.resetModules();
+    vi.doMock("tempo-auth-import-input", () => ({
+      default: { bundle, options: { dryRun: true, formats: [] } },
+    }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const fresh = (await import("../../worker/src/index.js")).default;
+      await fresh.scheduled(createScheduledController(), { ...env, LOCAL_IMPORT: "1" });
+      const line = JSON.parse(String(log.mock.calls[0]?.[0]));
+      expect(line.tempoAuthImport.refusedHashes.length).toBeGreaterThan(0);
+      expect(line.status).toBe(1);
+    } finally {
+      log.mockRestore();
+      vi.doUnmock("tempo-auth-import-input");
+      vi.resetModules();
     }
     expect(await everyRow()).toEqual(start);
   });
@@ -97,7 +124,7 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
     ]);
     const clerk = (organizations: string): D1Bundle => ({
       bundle: { provider: "clerk", files: { csv, users: clerkUsers, organizations } },
-      options: {},
+      options: { formats: LEGACY_FORMATS },
     });
     await expect(runImport(env.DB, clerk(JSON.stringify({ data: [] })))).rejects.toThrow(
       "tempo-auth import: the Clerk organizations input is not a JSON array",
@@ -105,7 +132,10 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
     expect(await everyRow()).toEqual(start);
     // The same bundle with valid organizations writes the user: the refusal
     // above came from the organizations, not from the user.
-    const dry = await runImport(env.DB, { ...clerk("[]"), options: { dryRun: true } });
+    const dry = await runImport(env.DB, {
+      ...clerk("[]"),
+      options: { dryRun: true, formats: LEGACY_FORMATS },
+    });
     expect(dry.created.user).toBe(1);
     expect(await everyRow()).toEqual(start);
   });
@@ -116,40 +146,58 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
       [null, "the D1 input field (root) is not an object"],
       [{ bundle }, "the D1 input field options is not an object"],
       [
-        { bundle, options: { dryRun: "false" } },
+        { bundle, options: { dryRun: "false", formats: LEGACY_FORMATS } },
         "the D1 input field options.dryRun is not true or false",
       ],
-      [{ bundle: [], options: {} }, "the bundle field bundle is not an object"],
       [
-        { bundle: { ...bundle, provider: "okta" }, options: {} },
+        { bundle: [], options: { formats: LEGACY_FORMATS } },
+        "the bundle field bundle is not an object",
+      ],
+      [
+        { bundle: { ...bundle, provider: "okta" }, options: { formats: LEGACY_FORMATS } },
         "the bundle field provider is not one of supabase, clerk, auth0, firebase, authjs, cognito",
       ],
       [
-        { bundle: { ...bundle, files: null }, options: {} },
+        { bundle: { ...bundle, files: null }, options: { formats: LEGACY_FORMATS } },
         "the bundle field files is not an object",
       ],
       [
-        { bundle: { ...bundle, files: { users: 7, identities } }, options: {} },
+        {
+          bundle: { ...bundle, files: { users: 7, identities } },
+          options: { formats: LEGACY_FORMATS },
+        },
         "the bundle field files.users is not text",
       ],
       [
-        { bundle: { ...bundle, files: { users, identities, csv: "" } }, options: {} },
+        {
+          bundle: { ...bundle, files: { users, identities, csv: "" } },
+          options: { formats: LEGACY_FORMATS },
+        },
         "the bundle field files.csv is not a supabase file",
       ],
       [
-        { bundle: { provider: "supabase", files: { users } }, options: {} },
+        {
+          bundle: { provider: "supabase", files: { users } },
+          options: { formats: LEGACY_FORMATS },
+        },
         "the bundle field files.identities is missing; supabase needs it",
       ],
       [
-        { bundle: { ...bundle, firebase: { signerKey: "k" } }, options: {} },
+        {
+          bundle: { ...bundle, firebase: { signerKey: "k" } },
+          options: { formats: LEGACY_FORMATS },
+        },
         "the bundle field firebase.saltSeparator is not text",
       ],
       [
-        { bundle: { ...bundle, firebase: { ...FIREBASE, rounds: "8" } }, options: {} },
+        {
+          bundle: { ...bundle, firebase: { ...FIREBASE, rounds: "8" } },
+          options: { formats: LEGACY_FORMATS },
+        },
         "the bundle field firebase.rounds is not an integer",
       ],
       [
-        { bundle: { ...bundle, samePasskeyRpId: "yes" }, options: {} },
+        { bundle: { ...bundle, samePasskeyRpId: "yes" }, options: { formats: LEGACY_FORMATS } },
         "the bundle field samePasskeyRpId is not true or false",
       ],
     ];
@@ -162,13 +210,52 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
     expect(await everyRow()).toEqual(start);
   });
 
+  it("checks every option value by type: a truthy string imports no Cognito marker", async () => {
+    const start = await everyRow();
+    const cognito = {
+      provider: "cognito",
+      files: {
+        users: JSON.stringify({
+          Users: [
+            {
+              Username: "c0ffee",
+              Attributes: [
+                { Name: "sub", Value: "sub-1" },
+                { Name: "email", Value: "cara@example.com" },
+                { Name: "email_verified", Value: "true" },
+              ],
+              Enabled: true,
+              UserStatus: "CONFIRMED",
+            },
+          ],
+        }),
+      },
+    };
+    const cases: [unknown, string][] = [
+      [{ formats: [], legacyVerify: "false" }, "options.legacyVerify is not true or false"],
+      [{ formats: "bcrypt" }, "options.formats is not a list; the app's seam names it"],
+      [{ formats: ["md5"] }, 'options.formats holds "md5", not a known format'],
+      [{}, "options.formats is not a list; the app's seam names it"],
+      [{ formats: [], onEmailTaken: "merge" }, "options.onEmailTaken is not skip or fail"],
+      [{ formats: [], roleMap: { billing: 1 } }, "options.roleMap.billing is not text"],
+      [{ formats: [], reservedSlugs: "help" }, "options.reservedSlugs is not a list of text"],
+      [{ formats: [], platformSlug: 7 }, "options.platformSlug is not text"],
+    ];
+    for (const [options, message] of cases)
+      await expect(runImport(env.DB, { bundle: cognito, options })).rejects.toThrow(
+        `tempo-auth import: the D1 input field ${message}`,
+      );
+    // No row at all, so no marker row either.
+    expect(await everyRow()).toEqual(start);
+  });
+
   it("refuses a malformed bundle and writes nothing", async () => {
     const start = await everyRow();
     const noColumn = users.replace(",is_sso_user", "");
     await expect(
       runImport(env.DB, {
         bundle: { ...bundle, files: { users: noColumn, identities } },
-        options: {},
+        options: { formats: LEGACY_FORMATS },
       }),
     ).rejects.toThrow("tempo-auth import: the Supabase users file has no is_sso_user column");
     expect(await everyRow()).toEqual(start);
@@ -178,9 +265,12 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
     const db = createD1Adapter(env.DB);
     const empty = await everyRow();
     expect(empty.ta_user).toEqual([]);
-    const dry = await runImport(env.DB, { bundle, options: { dryRun: true } });
+    const dry = await runImport(env.DB, {
+      bundle,
+      options: { dryRun: true, formats: LEGACY_FORMATS },
+    });
     expect(await everyRow()).toEqual(empty);
-    const first = await runImport(env.DB, { bundle, options: {} });
+    const first = await runImport(env.DB, { bundle, options: { formats: LEGACY_FORMATS } });
     // The fixture as in test/readers/supabase.test.ts: seven users, three
     // passwords (two bcrypt, one Firebase scrypt), nine identities.
     expect(first.created).toEqual({ ...NONE, user: 7, identity: 9, password: 3 });
@@ -190,7 +280,7 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
     expect(before.ta_user).toHaveLength(7);
     expect(before.ta_identity).toHaveLength(9);
     expect(before.ta_password).toHaveLength(3);
-    const second = await runImport(env.DB, { bundle, options: {} });
+    const second = await runImport(env.DB, { bundle, options: { formats: LEGACY_FORMATS } });
     expect(second.exists.user).toBe(7);
     expect(second.created).toEqual(NONE);
     expect(await everyRow()).toEqual(before);

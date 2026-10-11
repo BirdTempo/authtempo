@@ -79,7 +79,16 @@ export function cognitoSource(input: CognitoExport): Source {
     name: "cognito",
     roles: {},
     async *records() {
-      const list = asArray(asRecord(JSON.parse(input.users)).Users).map(asRecord);
+      // A misshaped top level is an error, never an empty list. `aws
+      // cognito-idp list-users --query Users` prints a bare array, and that
+      // run would import nothing and exit 0.
+      const top = JSON.parse(input.users) as unknown;
+      const users = asRecord(top).Users;
+      if (Array.isArray(top) || !Array.isArray(users))
+        throw new Error(
+          'tempo-auth import: the Cognito users input has no Users array (save the whole list-users output, as { "Users": [...] })',
+        );
+      const list = users.map(asRecord);
       const attrs = list.map(
         (u) =>
           new Map(
@@ -132,7 +141,14 @@ export function cognitoSource(input: CognitoExport): Source {
         // compromised user still makes the CLI exit 1.
         // Fail closed: only the boolean true is an enabled user.
         if (u.Enabled !== true) record.skip = "disabled";
-        if (!federated && status !== "CONFIRMED") record.skip = statusSkip(status);
+        if (!federated && status !== "CONFIRMED") {
+          record.skip = statusSkip(status);
+          // The reason alone does not say which value Cognito sent.
+          if (record.skip === "status_unknown")
+            dropped.push(
+              `status:${typeof u.UserStatus === "string" ? u.UserStatus : (JSON.stringify(u.UserStatus) ?? "(none)")}`,
+            );
+        }
         // No sub: no import key.
         if (sub === null) record.skip = "no_source_id";
         else if ((subCount.get(sub) ?? 0) > 1) record.skip = "duplicate_row";

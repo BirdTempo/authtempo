@@ -1,7 +1,7 @@
 import { normalizeEmail } from "@tempo-auth/core";
 import { formatName } from "../import.js";
 import type { ImportOrganization, ImportUser, SkipReason, Source } from "../types.js";
-import { asArray, asRecord, ndjson, parseTime, str } from "./common.js";
+import { asArray, asRecord, ndjson, noSourceIdUser, parseTime, str } from "./common.js";
 
 /**
  * Auth0: the bulk user export (`POST /api/v2/jobs/users-exports` with
@@ -46,6 +46,18 @@ export function auth0Source(input: Auth0Export): Source {
     name: "auth0",
     roles: {},
     async *records() {
+      // Read first, so a misshaped organizations file throws before any
+      // record. Any value but a JSON array is an error, never an empty list:
+      // a saved `{ "organizations": [...] }` page would lose every organization.
+      let organizations: unknown[] = [];
+      if (input.organizations) {
+        const v = JSON.parse(input.organizations) as unknown;
+        if (!Array.isArray(v))
+          throw new Error(
+            "tempo-auth import: the Auth0 organizations input is not a JSON array (save the organizations array, not the page object)",
+          );
+        organizations = v;
+      }
       const users = ndjson(input.users).map(asRecord);
       const byId = new Map<string, Record<string, unknown>>();
       const duplicates = new Set<string>();
@@ -86,9 +98,13 @@ export function auth0Source(input: Auth0Export): Source {
         );
       }
       const yielded = new Set<string>();
-      for (const u of users) {
+      for (const [n, u] of users.entries()) {
         const id = str(u.user_id);
-        if (!id) continue;
+        // ndjson numbers a line among the non-empty lines, as its errors do.
+        if (!id) {
+          yield noSourceIdUser(`users line ${n + 1}`);
+          continue;
+        }
         if (duplicates.has(id)) {
           // One record for every copy of the id, with no hash.
           if (yielded.has(id)) continue;
@@ -155,12 +171,14 @@ export function auth0Source(input: Auth0Export): Source {
           skip: "unmatched_row",
         } satisfies ImportUser;
       }
-      if (!input.organizations) return;
-      for (const raw of asArray(JSON.parse(input.organizations))) {
+      for (const [n, raw] of organizations.entries()) {
         const o = asRecord(raw);
+        const id = str(o.id);
         yield {
           kind: "organization",
-          sourceId: str(o.id) ?? "",
+          // No id: no import key. Two such organizations would share one importId.
+          sourceId: id ?? `(none) organizations item ${n + 1}`,
+          ...(id === null ? { skip: "no_source_id" as const } : {}),
           // As the export states it, never defaulted; the importer checks it (ruling I-5).
           name: str(o.display_name) ?? str(o.name),
           // Auth0's `name` is the organization's own identifier, lower case with hyphens.

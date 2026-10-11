@@ -4,6 +4,7 @@ import {
   LEGACY_VERIFY_HASH,
   type StorageAdapter,
 } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importId } from "../src/ids.js";
 import { importUsers } from "../src/import.js";
@@ -54,7 +55,7 @@ const records = () => [
 describe("importUsers", () => {
   it("writes the rows a sign-up or a claim writes, and lists what it left out", async () => {
     const db = createMemoryAdapter();
-    const report = await importUsers(db, listSource(records()), { now });
+    const report = await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     expect(report.created).toEqual({
       user: 3,
       identity: 3,
@@ -94,9 +95,10 @@ describe("importUsers", () => {
 
   it("changes zero rows on a second run of the same export", async () => {
     const db = createMemoryAdapter();
-    await importUsers(db, listSource(records()), { now });
+    await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     const before = await snapshot(db);
     const again = await importUsers(db, listSource(records()), {
+      formats: LEGACY_FORMATS,
       now: () => new Date("2026-10-12T00:00:00.000Z"),
     });
     expect(again.created).toEqual({
@@ -113,7 +115,7 @@ describe("importUsers", () => {
 
   it("does not restore a credential that a claim removed since the first run", async () => {
     const db = createMemoryAdapter();
-    await importUsers(db, listSource(records()), { now });
+    await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     const u2 = await importId("user", "supabase", "u2");
     // A claim of the unverified u2, as core's claimEmail writes it: the flag
     // first, then the claimant's credentials go, then the owner's email identity.
@@ -131,7 +133,7 @@ describe("importUsers", () => {
       createdAt: AT,
       updatedAt: AT,
     });
-    const again = await importUsers(db, listSource(records()), { now });
+    const again = await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     expect(await db.findMany("password", [{ field: "userId", op: "eq", value: u2 }])).toEqual([]);
     // The importer cannot tell a claim from a half record: it lists the
     // missing row for the operator, and it never answers exists for it.
@@ -145,7 +147,11 @@ describe("importUsers", () => {
       user("m", { password: { hash: LEGACY_VERIFY_HASH } }),
       user("b", { password: { hash: BCRYPT } }),
     ];
-    await importUsers(db, listSource(export_()), { now, legacyVerify: true });
+    await importUsers(db, listSource(export_()), {
+      formats: LEGACY_FORMATS,
+      now,
+      legacyVerify: true,
+    });
     // A sign-in (the legacy check, or a bcrypt match) rehashes each row to PBKDF2.
     const ids = [await importId("user", "supabase", "m"), await importId("user", "supabase", "b")];
     const seam = createPbkdf2PasswordHash();
@@ -157,7 +163,11 @@ describe("importUsers", () => {
     }
     const before = await db.findMany("password", []);
     expect(before.map((p) => p.hash.startsWith("$"))).toEqual([false, false]);
-    const again = await importUsers(db, listSource(export_()), { now, legacyVerify: true });
+    const again = await importUsers(db, listSource(export_()), {
+      formats: LEGACY_FORMATS,
+      now,
+      legacyVerify: true,
+    });
     expect(again.exists.user).toBe(2);
     expect(again.created.password).toBe(0);
     expect(await db.findMany("password", [])).toEqual(before);
@@ -171,7 +181,7 @@ describe("importUsers", () => {
     const r = await importUsers(
       db,
       listSource([user("u1", { password: { hash: LEGACY_VERIFY_HASH } })]),
-      { now, legacyVerify: true },
+      { formats: LEGACY_FORMATS, now, legacyVerify: true },
     );
     expect(r.skipped).toEqual([{ kind: "user", sourceId: "u1", reason: "email_taken" }]);
     expect(await db.findMany("password", [])).toEqual(before);
@@ -179,16 +189,20 @@ describe("importUsers", () => {
 
   it("writes nothing on a dry run, and reports what a real run reports", async () => {
     const db = createMemoryAdapter();
-    const dry = await importUsers(db, listSource(records()), { now, dryRun: true });
+    const dry = await importUsers(db, listSource(records()), {
+      formats: LEGACY_FORMATS,
+      now,
+      dryRun: true,
+    });
     expect(await snapshot(db)).toEqual(await snapshot(createMemoryAdapter()));
-    const real = await importUsers(db, listSource(records()), { now });
+    const real = await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     expect({ ...dry, dryRun: false }).toEqual(real);
   });
 
   it("skips a taken address and never merges, or stops the run with onEmailTaken fail", async () => {
     const db = createMemoryAdapter();
     await appUser(db, "app-1", "u1@example.com", true);
-    const skip = await importUsers(db, listSource(records()), { now });
+    const skip = await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     expect(skip.skipped[0]).toEqual({ kind: "user", sourceId: "u1", reason: "email_taken" });
     // The app user keeps only the identity it had: nothing from u1 is merged into it.
     expect(
@@ -202,6 +216,7 @@ describe("importUsers", () => {
     const fresh = createMemoryAdapter();
     await appUser(fresh, "app-1", "u2@example.com", true);
     const err = await importUsers(fresh, listSource(records()), {
+      formats: LEGACY_FORMATS,
       now,
       onEmailTaken: "fail",
     }).catch((e) => e);
@@ -215,7 +230,7 @@ describe("importUsers", () => {
     const db = createMemoryAdapter();
     // A social sign-in of the app: the user row first, then its identities.
     await appUser(db, "app-1", "app-1@example.com", true, [{ provider: "google", subject: "g-1" }]);
-    const r = await importUsers(db, listSource(records()), { now });
+    const r = await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     expect(r.skipped[0]).toEqual({ kind: "user", sourceId: "u1", reason: "identity_taken" });
     expect(r.skipped.find((s) => s.kind === "organization")).toEqual({
       kind: "organization",
@@ -231,11 +246,23 @@ describe("importUsers", () => {
       listSource([
         user("u7", { emailVerified: false, identities: [{ provider: "google", subject: "g-7" }] }),
       ]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     const u = await db.findMany("user", []);
     expect(u.map((x) => x.emailVerified)).toEqual([false]);
     expect((await db.findMany("identity", [])).map((i) => i.provider)).toEqual(["google"]);
+  });
+
+  it("refuses every hash under formats: [], lists it, and writes the user with no password", async () => {
+    // Spec 17.1: the list is the app seam's. An empty list is an app with no legacy format.
+    const db = createMemoryAdapter();
+    const r = await importUsers(db, listSource([user("a", { password: { hash: BCRYPT } })]), {
+      now,
+      formats: [],
+    });
+    expect(r.refusedHashes).toEqual([{ sourceId: "a", format: "bcrypt" }]);
+    expect(r.created.user).toBe(1);
+    expect(await db.findMany("password", [])).toEqual([]);
   });
 
   it("refuses a hash format the app does not verify, and the marker unless the app sets legacyVerify", async () => {
@@ -256,7 +283,7 @@ describe("importUsers", () => {
     const ok = await importUsers(
       createMemoryAdapter(),
       listSource([user("b", { password: { hash: LEGACY_VERIFY_HASH } })]),
-      { now, legacyVerify: true },
+      { formats: LEGACY_FORMATS, now, legacyVerify: true },
     );
     expect(ok.created.password).toBe(1);
   });
@@ -278,7 +305,7 @@ describe("importUsers", () => {
         ],
         { "org:admin": "admin", "org:member": "member" },
       ),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     const b = await importId("user", "supabase", "b");
     expect(
@@ -320,7 +347,7 @@ describe("importUsers", () => {
         return db.transaction(fn);
       },
     };
-    const r = await importUsers(racing, listSource([user("u1")]), { now });
+    const r = await importUsers(racing, listSource([user("u1")]), { formats: LEGACY_FORMATS, now });
     expect(r.skipped).toEqual([{ kind: "user", sourceId: "u1", reason: "email_taken" }]);
     expect((await db.findMany("user", [])).map((u) => u.id)).toEqual(["app-1"]);
   });
@@ -338,7 +365,7 @@ describe("importUsers", () => {
         org("o3", [{ userSourceId: "a", roles: ["owner"] }], { name: "Tab\there", slug: "three" }),
         org("o4", [{ userSourceId: "a", roles: ["owner"] }], { name: "z".repeat(120) }),
       ]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     const names = await Promise.all(
       ["a", "b", "c"].map(async (s) => {

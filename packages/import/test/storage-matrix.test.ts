@@ -1,6 +1,7 @@
 import { applyPostgresMigrations, createPostgresAdapter } from "@tempo-auth/adapter-postgres";
 import { betterAuthSchemaStorage } from "@tempo-auth/compat-better-auth";
 import { createMemoryAdapter, type StorageAdapter } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import type { Sql } from "postgres";
 import { describe, expect, it } from "vitest";
 import betterAuthPg from "../../compat-better-auth/test/fixtures/better-auth-1.7.2.postgres.sql?raw";
@@ -228,7 +229,7 @@ for (const [label, open] of targets) {
       const t = await open();
       try {
         const source = () => supabaseSource({ users, identities, now });
-        const first = await runTwice(t, source, { now });
+        const first = await runTwice(t, source, { formats: LEGACY_FORMATS, now });
         // Floors, so a run that imports nothing does not pass against an empty reference.
         expect(first.created.user).toBeGreaterThanOrEqual(4);
         expect(first.created.password).toBeGreaterThanOrEqual(2);
@@ -242,7 +243,11 @@ for (const [label, open] of targets) {
     it("writes each record kind as its tables store it: tagged hashes, the marker, identities, a passkey, an organization and its members", async () => {
       const t = await open();
       try {
-        const first = await runTwice(t, matrixSource, { now, legacyVerify: true });
+        const first = await runTwice(t, matrixSource, {
+          formats: LEGACY_FORMATS,
+          now,
+          legacyVerify: true,
+        });
         expect(first.created).toEqual({
           user: 5,
           identity: 5,

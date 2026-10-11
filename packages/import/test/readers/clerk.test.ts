@@ -1,4 +1,5 @@
 import { createMemoryAdapter } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { clerkSource } from "../../src/readers/clerk.js";
@@ -118,7 +119,7 @@ describe("clerkSource", () => {
     const report = await importUsers(
       db,
       clerkSource({ csv: CLERK_CSV, users: CLERK_USERS, organizations: CLERK_ORGS }),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect((await db.findMany("member", [])).map((m) => m.role)).toEqual(["owner"]);
     expect(report.skipped).toContainEqual({
@@ -232,6 +233,7 @@ describe("clerkSource edge rows", () => {
   it("imports none of them but the missing-digest user, and reports the refusal", async () => {
     const db = createMemoryAdapter();
     const report = await importUsers(db, clerkSource({ csv: EDGE_CSV, users: EDGE_USERS }), {
+      formats: LEGACY_FORMATS,
       now,
     });
     expect((await db.findMany("user", [])).map((u) => u.email).sort()).toEqual([
@@ -259,5 +261,45 @@ describe("clerkSource edge rows", () => {
     await expect(
       all(clerkSource({ csv: EDGE_CSV, users: EDGE_USERS, organizations: wrapped })),
     ).rejects.toThrow("the Clerk organizations input is not a JSON array");
+  });
+
+  it("skips a CSV row, a user, and an organization with no id as no_source_id, never in silence", async () => {
+    const csv = `${EDGE_CSV},stray@example.com,,\n`;
+    const users = JSON.stringify([
+      ...JSON.parse(EDGE_USERS),
+      { primary_email_address_id: null, email_addresses: [] },
+    ]);
+    const organizations = JSON.stringify([
+      { name: "first", memberships: [] },
+      { name: "second", memberships: [] },
+    ]);
+    const report = await importUsers(
+      createMemoryAdapter(),
+      clerkSource({ csv, users, organizations }),
+      { formats: LEGACY_FORMATS, now },
+    );
+    const noId = report.skipped.filter((x) => x.reason === "no_source_id");
+    expect(noId).toEqual([
+      { kind: "user", sourceId: "(none) users item 8", reason: "no_source_id" },
+      // csvRecords numbers a row as its index plus 2: the header is row 1.
+      { kind: "user", sourceId: "(none) csv row 9", reason: "no_source_id" },
+      { kind: "organization", sourceId: "(none) organizations item 1", reason: "no_source_id" },
+      { kind: "organization", sourceId: "(none) organizations item 2", reason: "no_source_id" },
+    ]);
+    expect(report.exists.organization).toBe(0);
+  });
+
+  it("reads a created_at of 0 or below as no date, not 1970", async () => {
+    const users = JSON.stringify(
+      [0, -5].map((created_at, n) => ({
+        id: `t${n}`,
+        primary_email_address_id: `idn_t${n}@example.com`,
+        email_addresses: verified(`t${n}@example.com`),
+        created_at,
+      })),
+    );
+    const csv = "id,primary_email_address,password_digest,password_hasher\nt0,,,\nt1,,,\n";
+    const r = await all(clerkSource({ csv, users }));
+    expect(r.map((x) => (x.kind === "user" ? x.createdAt : "org"))).toEqual([null, null]);
   });
 });

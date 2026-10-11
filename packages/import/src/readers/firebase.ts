@@ -1,4 +1,4 @@
-import { SCRYPT_MAX_N_TIMES_R } from "@tempo-auth/legacy-hashes";
+import { firescryptParamsValid, SCRYPT_MAX_N_TIMES_R } from "@tempo-auth/legacy-hashes";
 import type { ImportUser, Source } from "../types.js";
 import { asArray, asRecord, parseMillis, str } from "./common.js";
 
@@ -33,16 +33,11 @@ function provider(id: string): string {
 export function firebaseSource(input: FirebaseExport): Source {
   const { rounds, memCost } = input.hashConfig;
   // The grammar's own bound (legacy-hashes), checked once before any read:
-  // out of it, every hash would be refused one by one.
-  if (
-    !Number.isInteger(rounds) ||
-    !Number.isInteger(memCost) ||
-    rounds < 1 ||
-    memCost < 1 ||
-    2 ** memCost * rounds > SCRYPT_MAX_N_TIMES_R
-  )
+  // out of it, every hash would be refused one by one. memCost is the
+  // grammar's n (log2 N) and rounds its r, so one function holds both bounds.
+  if (!firescryptParamsValid(memCost, rounds))
     throw new Error(
-      `tempo-auth import: firebase hashConfig rounds and memCost must be integers of at least 1 with 2^memCost * rounds at most ${SCRYPT_MAX_N_TIMES_R}`,
+      `tempo-auth import: firebase hashConfig rounds and memCost must be integers of 1 to 99 with 2^memCost * rounds at most ${SCRYPT_MAX_N_TIMES_R}`,
     );
   return {
     name: "firebase",

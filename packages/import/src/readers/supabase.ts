@@ -26,7 +26,7 @@ import { asRecord, parseTime } from "./common.js";
  *   (spec 17.5).
  */
 export interface SupabaseExport {
-  /** Columns: id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, is_anonymous, deleted_at, banned_until, is_sso_user. */
+  /** The columns of `SUPABASE_USER_COLUMNS`. */
   users: string;
   /** Columns: provider, provider_id, user_id. */
   identities: string;
@@ -63,7 +63,17 @@ export function supabasePassword(
   return { hash: `$firescrypt$n=${n},r=${r},p=${p}$${salt}$${hash}` };
 }
 
-const truthy = (v: string | undefined) => v === "t" || v === "true";
+/**
+ * A Postgres boolean as `psql` writes it: `t` or `true`, `f` or `false`.
+ * Null for any other text, such as `TRUE` or `1` from another tool. Both
+ * columns it reads are NOT NULL, so only `f` or `false` is a proven false,
+ * and the reader skips the user on null (fail closed, spec 17.3).
+ */
+function pgBool(v: string | undefined): boolean | null {
+  if (v === "t" || v === "true") return true;
+  if (v === "f" || v === "false") return false;
+  return null;
+}
 
 /**
  * Fail closed: a ban is the source's promise. Any value that is not a time in
@@ -148,14 +158,14 @@ export function supabaseSource(input: SupabaseExport): Source {
           passkeys: [],
         };
         if (dropped.length > 0) record.dropped = dropped;
-        if (truthy(u.is_anonymous)) record.skip = "anonymous";
+        if (pgBool(u.is_anonymous) !== false) record.skip = "anonymous";
         else if (u.deleted_at) record.skip = "deleted";
         else if (bannedNow(u.banned_until, now())) record.skip = "banned";
         // tempo-auth has no SAML mapping. The email unique index skips SSO users
         // (users_email_partial_key, migration 20221215195500, read 2026-10-11),
         // so an SSO user can share an address with a password user, and CSV
         // order must not decide who owns it.
-        else if (truthy(u.is_sso_user)) record.skip = "sso_user";
+        else if (pgBool(u.is_sso_user) !== false) record.skip = "sso_user";
         yield record;
       }
     },

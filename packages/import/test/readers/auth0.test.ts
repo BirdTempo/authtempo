@@ -1,4 +1,5 @@
 import { createMemoryAdapter } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { VECTORS } from "@tempo-auth/legacy-hashes/testing";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
@@ -113,7 +114,7 @@ describe("auth0Source", () => {
     const report = await importUsers(
       db,
       auth0Source({ users: AUTH0_USERS, hashes: AUTH0_HASHES, organizations: AUTH0_ORGS }),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(
       (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
@@ -188,6 +189,7 @@ describe("auth0Source edge rows", () => {
   it("writes no password row for any of them and reports each refusal", async () => {
     const db = createMemoryAdapter();
     const report = await importUsers(db, auth0Source({ users: EDGE_USERS, hashes: EDGE_HASHES }), {
+      formats: LEGACY_FORMATS,
       now,
     });
     expect(await db.findMany("password", [])).toEqual([]);
@@ -204,5 +206,46 @@ describe("auth0Source edge rows", () => {
       { field: "email", op: "eq", value: "badt@example.com" },
     ]);
     expect(badt?.createdAt).toEqual(now());
+  });
+
+  it("throws on an organizations value that is not a JSON array, before any record", async () => {
+    // The GET /api/v2/organizations?include_totals=true page is { "organizations": [...] }.
+    const source = auth0Source({
+      users: EDGE_USERS,
+      organizations: JSON.stringify({ organizations: [] }),
+    });
+    await expect(source.records()[Symbol.asyncIterator]().next()).rejects.toThrow(
+      "tempo-auth import: the Auth0 organizations input is not a JSON array",
+    );
+  });
+
+  it("skips a user line and an organization with no id as no_source_id, never in silence", async () => {
+    const users = `${EDGE_USERS}\n${JSON.stringify({ email: "noid@example.com", email_verified: true })}`;
+    const organizations = JSON.stringify([
+      { name: "first", members: [{ user_id: "auth0|argo", roles: [{ name: "owner" }] }] },
+      { name: "second", members: [{ user_id: "auth0|argo", roles: [{ name: "owner" }] }] },
+    ]);
+    const report = await importUsers(createMemoryAdapter(), auth0Source({ users, organizations }), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toContainEqual({
+      kind: "user",
+      sourceId: "(none) users line 7",
+      reason: "no_source_id",
+    });
+    // Two organizations with no id would share one importId: the second would read as exists.
+    expect(report.skipped).toContainEqual({
+      kind: "organization",
+      sourceId: "(none) organizations item 1",
+      reason: "no_source_id",
+    });
+    expect(report.skipped).toContainEqual({
+      kind: "organization",
+      sourceId: "(none) organizations item 2",
+      reason: "no_source_id",
+    });
+    expect(report.exists.organization).toBe(0);
+    expect(report.created.organization).toBe(0);
   });
 });

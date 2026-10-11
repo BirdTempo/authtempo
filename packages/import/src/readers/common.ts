@@ -1,3 +1,5 @@
+import type { ImportUser } from "../types.js";
+
 /** Postgres text output of a timestamptz, `2024-01-15 10:30:00.123456+00`, or ISO 8601. Null when empty or unreadable. */
 export function parseTime(text: string | null | undefined): Date | null {
   if (!text) return null;
@@ -53,4 +55,26 @@ export function asRecord(v: unknown): Record<string, unknown> {
 
 export function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
+}
+
+/**
+ * The record for a user row with no provider id. It has no import key, so it
+ * is skipped as `no_source_id`, a conflict (the CLI exits 1), and never
+ * dropped in silence. `where` names the row, for example "csv row 3", so the
+ * operator can find it: the sourceId is "(none) " plus `where`.
+ */
+export function noSourceIdUser(where: string): ImportUser {
+  return {
+    kind: "user",
+    sourceId: `(none) ${where}`,
+    email: null,
+    emailVerified: false,
+    name: null,
+    image: null,
+    createdAt: null,
+    identities: [],
+    password: null,
+    passkeys: [],
+    skip: "no_source_id",
+  };
 }

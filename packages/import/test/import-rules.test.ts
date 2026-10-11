@@ -1,4 +1,5 @@
 import { createMemoryAdapter, type StorageAdapter } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importId } from "../src/ids.js";
 import { importUsers } from "../src/import.js";
@@ -31,9 +32,13 @@ function passkey(credentialId: string): ImportPasskey {
 
 /** A dry run on a fresh database, then a real run on another: the two reports must agree. */
 async function dryAndReal(source: () => Source) {
-  const dry = await importUsers(createMemoryAdapter(), source(), { now, dryRun: true });
+  const dry = await importUsers(createMemoryAdapter(), source(), {
+    formats: LEGACY_FORMATS,
+    now,
+    dryRun: true,
+  });
   const db = createMemoryAdapter();
-  const real = await importUsers(db, source(), { now });
+  const real = await importUsers(db, source(), { formats: LEGACY_FORMATS, now });
   return { dry, real, db };
 }
 
@@ -46,7 +51,7 @@ describe("importUsers: reserved slugs (I-1, M-3)", () => {
         org("o1", [{ userSourceId: "a", roles: ["owner"] }], { name: "Staff" }),
         org("o2", [{ userSourceId: "a", roles: ["owner"] }], { name: "Other", slug: "STAFF" }),
       ]),
-      { now, platformSlug: "Staff" },
+      { formats: LEGACY_FORMATS, now, platformSlug: "Staff" },
     );
     expect(r.skipped).toEqual([
       { kind: "organization", sourceId: "o1", reason: "reserved_slug" },
@@ -65,7 +70,7 @@ describe("importUsers: reserved slugs (I-1, M-3)", () => {
         org("o2", [{ userSourceId: "a", roles: ["owner"] }], { name: "Admin" }),
         org("o3", [{ userSourceId: "a", roles: ["owner"] }], { name: "Free" }),
       ]),
-      { now, reservedSlugs: ["acme"] },
+      { formats: LEGACY_FORMATS, now, reservedSlugs: ["acme"] },
     );
     expect(r.skipped).toEqual([
       { kind: "organization", sourceId: "o1", reason: "reserved_slug" },
@@ -76,10 +81,18 @@ describe("importUsers: reserved slugs (I-1, M-3)", () => {
 
   it("stops before any read when a reserved or platform slug is not a slug", async () => {
     await expect(
-      importUsers(createMemoryAdapter(), listSource([]), { now, platformSlug: "not a slug" }),
+      importUsers(createMemoryAdapter(), listSource([]), {
+        formats: LEGACY_FORMATS,
+        now,
+        platformSlug: "not a slug",
+      }),
     ).rejects.toThrow(/not a slug: not a slug/);
     await expect(
-      importUsers(createMemoryAdapter(), listSource([]), { now, reservedSlugs: ["a b"] }),
+      importUsers(createMemoryAdapter(), listSource([]), {
+        formats: LEGACY_FORMATS,
+        now,
+        reservedSlugs: ["a b"],
+      }),
     ).rejects.toThrow(/not a slug: a b/);
   });
 });
@@ -94,7 +107,7 @@ describe("importUsers: passkeys (I-2)", () => {
         user("w", { emailVerified: false, password: { hash: BCRYPT }, passkeys: [passkey("P2")] }),
         user("x", { passkeys: [passkey("P1")] }),
       ]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(r.created.passkey).toBe(1);
     expect(r.dropped).toEqual([
@@ -108,6 +121,7 @@ describe("importUsers: passkeys (I-2)", () => {
 
     const other = createMemoryAdapter();
     const s = await importUsers(other, listSource([user("v", { passkeys: [passkey("P1")] })]), {
+      formats: LEGACY_FORMATS,
       now,
     });
     expect(s.dropped).toEqual([{ sourceId: "v", item: "passkey:not_authjs" }]);
@@ -126,7 +140,7 @@ describe("importUsers: passkeys (I-2)", () => {
         }),
         user("v", { passkeys: [passkey("P1")] }),
       ]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(r.skipped).toEqual([]);
     expect(r.created).toMatchObject({ user: 2, passkey: 1 });
@@ -183,7 +197,7 @@ describe("importUsers: passkeys (I-2)", () => {
     const r = await importUsers(
       racing,
       named("authjs", [user("p", { passkeys: [passkey("P1"), passkey("P2")] }), user("q")]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(r.skipped).toEqual([{ kind: "user", sourceId: "p", reason: "duplicate_passkey" }]);
     expect(r.created.user).toBe(1);
@@ -209,20 +223,24 @@ describe("importUsers: a half record (I-3)", () => {
       createdAt: AT,
       updatedAt: AT,
     });
-    const r = await importUsers(db, listSource([record]), { now });
+    const r = await importUsers(db, listSource([record]), { formats: LEGACY_FORMATS, now });
     expect(r.partial).toEqual([
       { kind: "user", sourceId: "u1", missing: ["identity:email", "identity:google", "password"] },
     ]);
     expect(r.exists.user).toBe(0);
     expect(await db.findMany("identity", [])).toEqual([]);
     expect(await db.findMany("password", [])).toEqual([]);
-    const dry = await importUsers(db, listSource([record]), { now, dryRun: true });
+    const dry = await importUsers(db, listSource([record]), {
+      formats: LEGACY_FORMATS,
+      now,
+      dryRun: true,
+    });
     expect(dry.partial).toEqual(r.partial);
   });
 
   it("lists an organization with no member row as partial", async () => {
     const db = createMemoryAdapter();
-    await importUsers(db, listSource([user("a")]), { now });
+    await importUsers(db, listSource([user("a")]), { formats: LEGACY_FORMATS, now });
     await db.create("organization", {
       id: await importId("organization", "supabase", "o1"),
       slug: "org-o1",
@@ -234,7 +252,7 @@ describe("importUsers: a half record (I-3)", () => {
     const r = await importUsers(
       db,
       listSource([user("a"), org("o1", [{ userSourceId: "a", roles: ["owner"] }])]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(r.partial).toEqual([{ kind: "organization", sourceId: "o1", missing: ["member"] }]);
     expect(r.exists).toEqual({ user: 1, organization: 0 });
@@ -255,7 +273,7 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
           { userSourceId: "b", roles: ["constructor", "__proto__"] },
         ]),
       ]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(r.dropped).toEqual([
       { sourceId: "o1", item: "role:constructor->member" },
@@ -270,6 +288,7 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
   it("stops before any read when a role map names a role core does not have", async () => {
     await expect(
       importUsers(createMemoryAdapter(), listSource([]), {
+        formats: LEGACY_FORMATS,
         now,
         roleMap: JSON.parse('{"org:boss": "superuser"}'),
       }),
@@ -301,7 +320,7 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
     const r = await importUsers(
       db,
       listSource([user("f", { password: { refused: "firebase-scrypt (no project key given)" } })]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(r.refusedHashes).toEqual([
       { sourceId: "f", format: "firebase-scrypt (no project key given)" },
@@ -323,7 +342,7 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
         user("e", { image: "javascript:alert(1)" }),
         user("f", { image: "not a url" }),
       ]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     const images = await Promise.all(
       ["a", "b", "c", "d", "e", "f"].map(async (s) => {
@@ -354,7 +373,7 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
         // A reader that finds no name in the export gives null, never "".
         org("o6", [{ userSourceId: "a", roles: ["owner"] }], { name: null, slug: "six" }),
       ]),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(r.skipped).toEqual([
       { kind: "user", sourceId: "t", reason: "email_taken" },

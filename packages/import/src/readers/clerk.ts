@@ -1,6 +1,6 @@
 import { csvRecords } from "../csv.js";
 import type { ImportOrganization, ImportUser, SkipReason, Source } from "../types.js";
-import { asArray, asRecord, parseMillis, str } from "./common.js";
+import { asArray, asRecord, noSourceIdUser, parseMillis, str } from "./common.js";
 
 /**
  * Clerk: two files, joined on the user id. The dashboard CSV (Settings,
@@ -43,7 +43,9 @@ const DUPLICATE: SkipReason = "duplicate_row";
  */
 function clerkTime(v: unknown): Date | null {
   const d = parseMillis(v);
-  if (d === null || d.getTime() >= 1e11) return d;
+  // 0 or below is 1970 or earlier, before Clerk existed: no date, not a guess.
+  if (d === null || d.getTime() <= 0) return null;
+  if (d.getTime() >= 1e11) return d;
   return new Date(d.getTime() * 1000);
 }
 
@@ -64,8 +66,14 @@ export function clerkSource(input: ClerkExport): Source {
     async *records() {
       const rows = new Map<string, Record<string, string>>();
       const duplicates = new Set<string>();
-      for (const r of csvRecords(input.csv)) {
-        if (!r.id) continue;
+      // A row with no id is listed, never dropped in silence (yielded below).
+      const noIdRows: string[] = [];
+      for (const [n, r] of csvRecords(input.csv).entries()) {
+        if (!r.id) {
+          // csvRecords numbers a row as its index plus 2 (the header is row 1).
+          noIdRows.push(`csv row ${n + 2}`);
+          continue;
+        }
         if (rows.has(r.id)) duplicates.add(r.id);
         rows.set(r.id, r);
       }
@@ -77,9 +85,12 @@ export function clerkSource(input: ClerkExport): Source {
         if (seen.has(id)) duplicates.add(id);
         seen.add(id);
       }
-      for (const u of users) {
+      for (const [n, u] of users.entries()) {
         const id = str(u.id);
-        if (!id) continue;
+        if (!id) {
+          yield noSourceIdUser(`users item ${n + 1}`);
+          continue;
+        }
         // Exact ids: no trim and no case fold (Review Focus 5).
         const row = duplicates.has(id) ? undefined : rows.get(id);
         const primaryId = str(u.primary_email_address_id);
@@ -146,12 +157,16 @@ export function clerkSource(input: ClerkExport): Source {
           skip: duplicates.has(id) ? DUPLICATE : "unmatched_row",
         } satisfies ImportUser;
       }
+      for (const where of noIdRows) yield noSourceIdUser(where);
       if (!input.organizations) return;
-      for (const raw of jsonArray(input.organizations, "organizations")) {
+      for (const [n, raw] of jsonArray(input.organizations, "organizations").entries()) {
         const o = asRecord(raw);
+        const id = str(o.id);
         yield {
           kind: "organization",
-          sourceId: str(o.id) ?? "",
+          // No id: no import key. Two such organizations would share one importId.
+          sourceId: id ?? `(none) organizations item ${n + 1}`,
+          ...(id === null ? { skip: "no_source_id" as const } : {}),
           // As the export states it; the importer checks it (ruling I-5).
           name: typeof o.name === "string" ? o.name : null,
           slug: str(o.slug),

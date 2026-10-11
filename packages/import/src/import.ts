@@ -9,7 +9,7 @@ import {
   validOrganizationName,
   validUserName,
 } from "@tempo-auth/core";
-import { LEGACY_FORMATS, type LegacyFormat, parseLegacyHash } from "@tempo-auth/legacy-hashes";
+import { type LegacyFormat, parseLegacyHash } from "@tempo-auth/legacy-hashes";
 import { importId } from "./ids.js";
 import {
   ImportConflictError,
@@ -205,12 +205,13 @@ export function formatName(hash: string): string {
 export async function importUsers(
   storage: StorageAdapter,
   source: Source,
-  options: ImportOptions = {},
+  options: ImportOptions,
 ): Promise<ImportReport> {
   const o: Resolved = {
     onEmailTaken: options.onEmailTaken ?? "skip",
     dryRun: options.dryRun ?? false,
-    formats: new Set(options.formats ?? LEGACY_FORMATS),
+    // No default (spec 17.1): the list is the app seam's, and only the caller knows it.
+    formats: new Set(options.formats),
     legacyVerify: options.legacyVerify ?? false,
     roles: roleMap(source, options),
     reserved: reservedSet(options),
@@ -486,6 +487,9 @@ async function importUser(
   }
   if (plan.kind === "skip") {
     skip(report, "user", r.sourceId, plan.reason);
+    // What the reader left out, also for a skipped user: for example the raw
+    // Cognito status of a status_unknown user, which the operator must see.
+    for (const item of r.dropped ?? []) report.dropped.push({ sourceId: r.sourceId, item });
     if (
       o.onEmailTaken === "fail" &&
       (plan.reason === "email_taken" || plan.reason === "identity_taken")
@@ -537,6 +541,8 @@ async function planOrganization(
   o: Resolved,
   planned: Planned,
 ): Promise<Plan<OrgRows>> {
+  // A reader skip (no_source_id): with no id there is no import key.
+  if (r.skip) return { kind: "skip", reason: r.skip };
   const id = await importId("organization", source.name, r.sourceId);
   if (planned.orgs.has(id)) return { kind: "exists" };
   if (await db.findOne("organization", [{ field: "id", op: "eq", value: id }])) {

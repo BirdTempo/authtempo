@@ -1,4 +1,5 @@
 import { createMemoryAdapter } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { authjsSource } from "../../src/readers/authjs.js";
@@ -82,7 +83,7 @@ describe("authjsSource", () => {
     const report = await importUsers(
       db,
       authjsSource({ tables: TABLES, passwordColumn: "passwordHash", samePasskeyRpId: true }),
-      { now },
+      { formats: LEGACY_FORMATS, now },
     );
     expect(
       (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
@@ -165,6 +166,49 @@ describe("authjsSource edge rows", () => {
       passkeys: [],
       dropped: ["passkey:duplicate_credential_id", "email_verified:unreadable"],
     });
+  });
+
+  it("counts a credential id by its base64url form: AQ== and AQ are one credential", async () => {
+    const tables = JSON.stringify({
+      users: [
+        { id: "a", email: "a@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+        { id: "b", email: "b@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+      ],
+      authenticators: [key("AQ==", "a"), key("AQ", "b")],
+    });
+    const r = await all(authjsSource({ tables, samePasskeyRpId: true }));
+    for (const u of r)
+      expect(u).toMatchObject({ passkeys: [], dropped: ["passkey:duplicate_credential_id"] });
+  });
+
+  it("refuses a counter above 2^32 - 1, the WebAuthn signCount range", async () => {
+    const tables = JSON.stringify({
+      users: [{ id: "a", email: "a@example.com", emailVerified: "2024-01-01T00:00:00.000Z" }],
+      authenticators: [
+        key("AQID", "a", { counter: 2 ** 32 - 1 }),
+        key("BAUG", "a", { counter: 2 ** 32 }),
+      ],
+    });
+    const [u] = await all(authjsSource({ tables, samePasskeyRpId: true }));
+    expect(u).toMatchObject({
+      passkeys: [expect.objectContaining({ credentialId: "AQID", counter: 2 ** 32 - 1 })],
+      dropped: ["passkey:invalid_counter"],
+    });
+  });
+
+  it("throws on a misshaped top level, never an empty list", async () => {
+    const cases: [string, string][] = [
+      ["[]", "the Auth.js tables input is not a JSON object"],
+      ["{}", "the Auth.js tables input has no users array"],
+      ['{"users":{}}', "the Auth.js tables input has no users array"],
+      ['{"users":[],"accounts":{}}', "the Auth.js tables input field accounts is not an array"],
+      [
+        '{"users":[],"authenticators":null}',
+        "the Auth.js tables input field authenticators is not an array",
+      ],
+    ];
+    for (const [tables, message] of cases)
+      await expect(all(authjsSource({ tables }))).rejects.toThrow(`tempo-auth import: ${message}`);
   });
 
   it("throws on a password column that no row has", async () => {

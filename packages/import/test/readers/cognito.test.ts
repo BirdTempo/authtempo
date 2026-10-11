@@ -1,4 +1,5 @@
 import { createMemoryAdapter, LEGACY_VERIFY_HASH } from "@tempo-auth/core";
+import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { cognitoSource } from "../../src/readers/cognito.js";
@@ -83,12 +84,17 @@ describe("cognitoSource", () => {
 
   it("writes the marker only under legacyVerify, and the email identity only for the verified user", async () => {
     const db = createMemoryAdapter();
-    await importUsers(db, cognitoSource({ users: USERS }), { now, legacyVerify: true });
+    await importUsers(db, cognitoSource({ users: USERS }), {
+      formats: LEGACY_FORMATS,
+      now,
+      legacyVerify: true,
+    });
     expect((await db.findMany("password", [])).map((p) => p.hash)).toEqual([LEGACY_VERIFY_HASH]);
     expect(
       (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
     ).toEqual(["email:cara@example.com", "google:123"]);
     const refused = await importUsers(createMemoryAdapter(), cognitoSource({ users: USERS }), {
+      formats: LEGACY_FORMATS,
       now,
     });
     expect(refused.refusedHashes).toEqual([{ sourceId: "sub-1", format: "legacy-verify" }]);
@@ -123,6 +129,7 @@ const EDGE = JSON.stringify({
   Users: [
     ...STATUSES.map((st) => user(st, verified(`st-${st}`), { UserStatus: st })),
     user("nostatus", verified("st-none"), { UserStatus: undefined }),
+    user("weird", verified("st-weird"), { UserStatus: "WEIRD" }),
     user("enabled-str", verified("en-str"), {
       Enabled: "false",
       UserCreateDate: "November 14 2023",
@@ -188,6 +195,28 @@ describe("cognitoSource edge rows", () => {
     expect(by("fed-obj")).toMatchObject({ identities: [], dropped: ["identity:unreadable"] });
   });
 
+  it("reports the raw status of a status_unknown user, though the user is skipped", async () => {
+    const report = await importUsers(createMemoryAdapter(), cognitoSource({ users: EDGE }), {
+      formats: [],
+      now,
+      legacyVerify: true,
+    });
+    expect(report.skipped).toContainEqual({
+      kind: "user",
+      sourceId: "st-weird",
+      reason: "status_unknown",
+    });
+    expect(report.dropped).toContainEqual({ sourceId: "st-weird", item: "status:WEIRD" });
+  });
+
+  it("throws on an input with no Users array, never an empty list", async () => {
+    // `aws cognito-idp list-users --query Users` prints a bare array.
+    for (const users of ["[]", "{}", '{"Users":{}}'])
+      await expect(all(cognitoSource({ users }))).rejects.toThrow(
+        "tempo-auth import: the Cognito users input has no Users array",
+      );
+  });
+
   it("skips a record with no sub and every copy of a duplicate sub", async () => {
     const r = await all(cognitoSource({ users: EDGE }));
     expect(r.filter((x) => x.kind === "user" && x.sourceId === "username:nosub")).toEqual([
@@ -202,6 +231,7 @@ describe("cognitoSource edge rows", () => {
   it("imports the linked user with the Apple identity and lists the custom provider", async () => {
     const db = createMemoryAdapter();
     const report = await importUsers(db, cognitoSource({ users: EDGE }), {
+      formats: LEGACY_FORMATS,
       now,
       legacyVerify: true,
     });

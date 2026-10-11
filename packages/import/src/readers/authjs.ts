@@ -37,16 +37,30 @@ function canonicalBase64Url(v: unknown): string | null {
 }
 
 const DEVICE_TYPES = new Set(["singleDevice", "multiDevice"]);
+/** WebAuthn's signCount is an unsigned 32-bit integer (WebAuthn Level 3, authenticator data). */
+const SIGN_COUNT_MAX = 4_294_967_295;
 
 export function authjsSource(input: AuthjsExport): Source {
   return {
     name: "authjs",
     roles: {},
     async *records() {
-      const t = asRecord(JSON.parse(input.tables));
+      // A misshaped top level is an error, never an empty list: the run would
+      // import nothing and exit 0.
+      const top = JSON.parse(input.tables) as unknown;
+      if (typeof top !== "object" || top === null || Array.isArray(top))
+        throw new Error("tempo-auth import: the Auth.js tables input is not a JSON object");
+      const t = top as Record<string, unknown>;
+      if (!Array.isArray(t.users))
+        throw new Error("tempo-auth import: the Auth.js tables input has no users array");
+      for (const table of ["accounts", "authenticators"] as const)
+        if (t[table] !== undefined && !Array.isArray(t[table]))
+          throw new Error(
+            `tempo-auth import: the Auth.js tables input field ${table} is not an array`,
+          );
       const accounts = asArray(t.accounts).map(asRecord);
       const keys = asArray(t.authenticators).map(asRecord);
-      const users = asArray(t.users).map(asRecord);
+      const users = t.users.map(asRecord);
       const column = input.passwordColumn;
       // A column name that no row has is a typo, not "no passwords".
       if (column !== undefined && users.length > 0 && !users.some((u) => Object.hasOwn(u, column)))
@@ -54,9 +68,16 @@ export function authjsSource(input: AuthjsExport): Source {
           `tempo-auth import: no Auth.js user row has the password column "${column}"`,
         );
       // A credential id on two rows has no known owner: neither row imports.
+      // The count is by the base64url form core stores, so `AQ==` and `AQ`
+      // are one credential. A value that does not decode counts by its raw text.
+      const idKey = (v: unknown): string | null => {
+        const cid = str(v);
+        if (cid === null) return null;
+        return canonicalBase64Url(cid) ?? `raw:${cid}`;
+      };
       const idCount = new Map<string, number>();
       for (const k of keys) {
-        const cid = str(k.credentialID);
+        const cid = idKey(k.credentialID);
         if (cid !== null) idCount.set(cid, (idCount.get(cid) ?? 0) + 1);
       }
       for (const u of users) {
@@ -68,7 +89,7 @@ export function authjsSource(input: AuthjsExport): Source {
             dropped.push("passkey:rp_id_not_confirmed");
             continue;
           }
-          if ((idCount.get(str(k.credentialID) ?? "") ?? 0) > 1) {
+          if ((idCount.get(idKey(k.credentialID) ?? "") ?? 0) > 1) {
             dropped.push("passkey:duplicate_credential_id");
             continue;
           }
@@ -78,8 +99,14 @@ export function authjsSource(input: AuthjsExport): Source {
           const deviceType = str(k.credentialDeviceType);
           if (credentialId === null) dropped.push("passkey:invalid_credential_id");
           else if (publicKey === null) dropped.push("passkey:invalid_public_key");
-          // The counter is the only clone signal: never a default.
-          else if (typeof counter !== "number" || !Number.isSafeInteger(counter) || counter < 0)
+          // The counter is the only clone signal: never a default. WebAuthn's
+          // signCount is 32 bits, so a value above 2^32 - 1 is not one.
+          else if (
+            typeof counter !== "number" ||
+            !Number.isSafeInteger(counter) ||
+            counter < 0 ||
+            counter > SIGN_COUNT_MAX
+          )
             dropped.push("passkey:invalid_counter");
           else if (
             deviceType === null ||

@@ -5,13 +5,17 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createPostgresAdapter } from "@tempo-auth/adapter-postgres";
 import { betterAuthSchemaStorage } from "@tempo-auth/compat-better-auth";
-import { normalizeSlug, type StorageAdapter } from "@tempo-auth/core";
+import { normalizeSlug, type StorageAdapter, StorageError } from "@tempo-auth/core";
 import { LEGACY_FORMATS, type LegacyFormat } from "@tempo-auth/legacy-hashes";
 import postgres from "postgres";
 import { importUsers } from "./import.js";
 import { type ImportBundle, PROVIDER_FILES, readSource } from "./sources.js";
+
+// The Worker reads these from report.ts, which imports no Node.js module.
+export { exitCode, summary };
+
+import { exitCode, summary } from "./report.js";
 import {
-  CONFLICT_REASONS,
   ImportConflictError,
   type ImportOptions,
   type ImportReport,
@@ -38,7 +42,8 @@ target:
 options:
   --dry-run               read only; print the report a real run would print
   --on-email-taken <m>    skip (default) or fail
-  --formats <list>        the hash formats the app verifies, comma-separated (default: all five)
+  --formats <list>        required, except for cognito: the formats list of the app's
+                          createLegacyPasswordHash, comma-separated, or none; no default
   --legacy-verify         the app sets password.legacyVerify (needed for cognito)
   --role-map <list>       source role to core role, for example billing=member,lead=admin
   --reserved-slugs <list> the app's organizations.reservedSlugs, comma-separated (core's defaults stay reserved)
@@ -80,38 +85,6 @@ const FLAG_PROVIDER = {
   "password-column": "authjs",
   "same-passkey-rp-id": "authjs",
 } as const satisfies Record<string, SourceName>;
-
-/**
- * The CLI's exit status for a finished report: 1 when a person must look.
- * That is a refused hash, a refusal (`report.refusals`, the skips that
- * `isRefusal` names), a conflict (`CONFLICT_REASONS`), or a partial record.
- * A policy skip that the export states (deleted, banned) does not count.
- */
-export function exitCode(report: ImportReport): 0 | 1 {
-  return report.refusedHashes.length > 0 ||
-    report.refusals > 0 ||
-    report.partial.length > 0 ||
-    report.skipped.some((s) => CONFLICT_REASONS.has(s.reason))
-    ? 1
-    : 0;
-}
-
-export function summary(r: ImportReport): string[] {
-  const lines = [
-    `${r.source}${r.dryRun ? " (dry run, nothing written)" : ""}`,
-    `created: ${Object.entries(r.created)
-      .map(([k, v]) => `${k} ${v}`)
-      .join(", ")}`,
-    `exists: user ${r.exists.user}, organization ${r.exists.organization}`,
-    `refusals: ${r.refusals}`,
-  ];
-  for (const s of r.skipped) lines.push(`skipped ${s.kind} ${s.sourceId}: ${s.reason}`);
-  for (const h of r.refusedHashes) lines.push(`refused hash ${h.sourceId}: ${h.format}`);
-  for (const p of r.partial)
-    lines.push(`partial ${p.kind} ${p.sourceId}: missing ${p.missing.join(", ")}`);
-  for (const d of r.dropped) lines.push(`dropped ${d.sourceId}: ${d.item}`);
-  return lines;
-}
 
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
   let parsed: ReturnType<typeof parse>;
@@ -168,7 +141,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     }
     // Each record commits alone, so the records before the failing one may be
     // written. A re-run finds them by import id and counts them as exists.
-    return stop(`storage: ${message(e)}; records before it may be written; run again`, null);
+    // "storage:" only for a storage error; any other is the importer's own.
+    const label = e instanceof StorageError ? "storage" : "import";
+    return stop(`${label}: ${message(e)}; records before it may be written; run again`, null);
   } finally {
     await target.close();
   }
@@ -238,8 +213,19 @@ function parse(argv: string[], io: CliIo) {
   const onEmailTaken = values["on-email-taken"] ?? "skip";
   if (onEmailTaken !== "skip" && onEmailTaken !== "fail")
     throw new Error("--on-email-taken is skip or fail");
-  const formats = list(values.formats, "--formats") as LegacyFormat[] | undefined;
-  for (const f of formats ?? [])
+  // Spec 17.1: a hash imports only in a format the app's seam verifies. Only
+  // the operator knows the seam's list, so the flag has no default: a default
+  // of all five imports a format the seam refuses, and those users cannot
+  // sign in, with exit 0. Cognito exports no hash, so it may leave it out.
+  if (values.formats === undefined && provider !== "cognito")
+    throw new Error(
+      `${provider} needs --formats: the formats list of the app's createLegacyPasswordHash, or none`,
+    );
+  const formats =
+    values.formats === undefined || values.formats === "none"
+      ? []
+      : (list(values.formats, "--formats") as LegacyFormat[]);
+  for (const f of formats)
     if (!LEGACY_FORMATS.includes(f)) throw new Error(`--formats: unknown format ${f}`);
   // Built from entries, so a source role such as __proto__ is an own key, not the prototype.
   const pairs: [string, ImportRole][] = [];
@@ -266,6 +252,9 @@ function parse(argv: string[], io: CliIo) {
     throw new Error("give both --firebase-signer-key and --firebase-salt-separator, or neither");
   const rounds = int(values["firebase-rounds"], "--firebase-rounds");
   const memCost = int(values["firebase-mem-cost"], "--firebase-mem-cost");
+  // Before the file read, so a missing flag costs no read and prints the usage.
+  if (provider === "firebase" && (rounds === undefined || memCost === undefined))
+    throw new Error("firebase needs --firebase-rounds and --firebase-mem-cost");
   const files: ImportBundle["files"] = {};
   for (const [name, path] of paths) files[name] = io.readFile(path);
   const bundle: ImportBundle = {
@@ -294,7 +283,7 @@ function parse(argv: string[], io: CliIo) {
     dryRun: values["dry-run"] === true,
     legacyVerify: values["legacy-verify"] === true,
     roleMap,
-    ...(formats !== undefined ? { formats } : {}),
+    formats,
     ...(reservedSlugs !== undefined ? { reservedSlugs } : {}),
     ...(platformSlug !== undefined ? { platformSlug } : {}),
   };

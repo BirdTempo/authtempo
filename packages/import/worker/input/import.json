@@ -6,5 +6,5 @@
       "identities": "provider,provider_id,user_id\n"
     }
   },
-  "options": { "dryRun": true }
+  "options": { "dryRun": true, "formats": [] }
 }
