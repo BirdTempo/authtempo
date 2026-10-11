@@ -217,6 +217,12 @@ importers:
       '@tempo-auth/handoff':
         specifier: workspace:*
         version: link:../../packages/handoff
+      '@tempo-auth/import':
+        specifier: workspace:*
+        version: link:../../packages/import
+      '@tempo-auth/legacy-hashes':
+        specifier: workspace:*
+        version: link:../../packages/legacy-hashes
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0

@@ -16,7 +16,9 @@
     "@tempo-auth/client": "workspace:*",
     "@tempo-auth/compat-better-auth": "workspace:*",
     "@tempo-auth/core": "workspace:*",
-    "@tempo-auth/handoff": "workspace:*"
+    "@tempo-auth/handoff": "workspace:*",
+    "@tempo-auth/import": "workspace:*",
+    "@tempo-auth/legacy-hashes": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",
