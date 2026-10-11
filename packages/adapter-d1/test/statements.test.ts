@@ -85,4 +85,67 @@ describe("the D1 statements seam", () => {
     });
     expect(seen).toHaveLength(1);
   });
+
+  it("maps a unique violation on update through the given toStorageError, outside and inside a transaction (plan 9 Task 3 M-1)", async () => {
+    const seen: unknown[] = [];
+    const db = createD1AdapterOn(env.DB, {
+      statements: coreStatements(SQLITE),
+      toStorageError: (model, err) => {
+        seen.push(err);
+        return new StorageError("unique_violation", model, ["marker"]);
+      },
+      ready: async () => {},
+    });
+    await db.create("user", user("u1", "a@example.com"));
+    await db.create("user", user("u2", "b@example.com"));
+    const clash = (tx: typeof db) =>
+      tx.update("user", [{ field: "id", op: "eq", value: "u2" }], { email: "a@example.com" });
+    await expect(clash(db)).rejects.toMatchObject({ code: "unique_violation", fields: ["marker"] });
+    await expect(db.transaction(clash)).rejects.toMatchObject({ fields: ["marker"] });
+    expect(seen).toHaveLength(2);
+  });
+
+  it("runs ready before every method, and its throw stops the method before any statement (M-2)", async () => {
+    const { statements, counts } = counting();
+    const db = createD1AdapterOn(env.DB, {
+      statements,
+      toStorageError,
+      ready: async () => {
+        throw new StorageError("schema_mismatch", "meta");
+      },
+    });
+    for (const call of [
+      () => db.create("user", user("u1", "a@example.com")),
+      () => db.findOne("user", [{ field: "id", op: "eq", value: "u1" }]),
+      () => db.findMany("user", []),
+      () => db.update("user", [{ field: "id", op: "eq", value: "u1" }], { name: "x" }),
+      () => db.delete("user", [{ field: "id", op: "eq", value: "u1" }]),
+      () => db.transaction(async () => 1),
+    ]) {
+      await expect(call()).rejects.toMatchObject({ code: "schema_mismatch" });
+    }
+    expect(Object.values(counts).every((n) => n === 0)).toBe(true);
+  });
+
+  it("reverses only a nested transaction's own writes when it throws and the outer one goes on (M-3, M-4)", async () => {
+    const db = createD1AdapterOn(env.DB, {
+      statements: coreStatements(SQLITE),
+      toStorageError,
+      ready: async () => {},
+    });
+    await db.transaction(async (tx) => {
+      await tx.create("user", user("u1", "a@example.com"));
+      await expect(
+        tx.transaction(async (inner) => {
+          await inner.create("user", user("u2", "b@example.com"));
+          throw new Error("inner");
+        }),
+      ).rejects.toThrow("inner");
+      await tx.create("user", user("u3", "c@example.com"));
+    });
+    const ids = (await db.findMany("user", [], { sort: { field: "id", dir: "asc" } })).map(
+      (u) => u.id,
+    );
+    expect(ids).toEqual(["u1", "u3"]);
+  });
 });
