@@ -4,6 +4,7 @@ export { formatName, importUsers } from "./import.js";
 export { type Auth0Export, auth0Source } from "./readers/auth0.js";
 export { type AuthjsExport, authjsSource } from "./readers/authjs.js";
 export { CLERK_ROLES, type ClerkExport, clerkSource } from "./readers/clerk.js";
+export { type CognitoExport, cognitoSource } from "./readers/cognito.js";
 export { type FirebaseExport, firebaseSource } from "./readers/firebase.js";
 export { type SupabaseExport, supabasePassword, supabaseSource } from "./readers/supabase.js";
 export * from "./types.js";
