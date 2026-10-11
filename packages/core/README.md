@@ -111,7 +111,11 @@ verifier and its S256 challenge, then opens the system browser at
 `GET /auth/handoff/start?challenge=<c>&redirect=consumera://auth`. Core
 shows the sign-in page: a magic link form, the configured social
 buttons, a passkey button, and, with a `password` config, an email and
-password form with a Forgot password button. Every method ends by visiting
+password form with a Forgot password button.
+With a `password` config the form also has a Create account button. It
+posts the email and the password to `POST /auth/password/sign-up`; that
+answer sets the session cookie, and the page goes on to the continue
+path. Every method ends by visiting
 `/auth/handoff/continue?h=<id>` on the API origin, which shows a confirm
 page. When the person presses the button, core mints a one-time code and
 redirects to `consumera://auth?code=<code>`. The app

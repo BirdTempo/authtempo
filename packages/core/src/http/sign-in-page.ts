@@ -127,22 +127,27 @@ ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
     });
     // Plan 10: sign-up on the page. The sign-up answer sets the session cookie, so success
     // goes to the continue path as the sign-in does. The codes come from core's ERRORS table.
-    document.getElementById("sign-up").addEventListener("click", function () {
-      var email = pwForm.elements.email.value;
-      var password = pwForm.elements.password.value;
-      if (!email || !password) { say("Type your email and a password first."); return; }
+    // reportValidity runs the type=email check and the required attributes, as the
+    // submit button does, so an empty field never posts. The button stays disabled
+    // while the request runs so that a second click does not post twice; every
+    // failure path enables it again. Success navigates away, so it stays disabled.
+    var signUp = document.getElementById("sign-up");
+    signUp.addEventListener("click", function () {
+      if (!pwForm.reportValidity()) return;
+      function fail(text) { signUp.disabled = false; say(text); }
+      signUp.disabled = true;
       say("");
-      postJson("/password/sign-up", { email: email, password: password }).then(function (res) {
+      postJson("/password/sign-up", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
         if (res.ok) { location.href = cont; return; }
-        if (res.status === 429) { say("Too many attempts. Try again later."); return; }
+        if (res.status === 429) { fail("Too many attempts. Try again later."); return; }
         return res.json().then(function (body) {
           var code = body && body.error;
-          if (code === "email_taken" || code === "email_taken_unverified") say("An account with this address exists. Sign in instead.");
-          else if (code === "password_policy") say("Use a longer password that is not your email address.");
-          else if (code === "password_breached") say("This password is in a known data breach. Choose another one.");
-          else say("The request was not accepted.");
-        }, function () { say("The request was not accepted."); });
-      }).catch(function () { say("Could not reach the server. Try again."); });
+          if (code === "email_taken" || code === "email_taken_unverified") fail("An account with this address exists. Sign in instead.");
+          else if (code === "password_policy") fail("The password is too short, too long, or equal to your email address.");
+          else if (code === "password_breached") fail("This password is in a known data breach. Choose another one.");
+          else fail("The request was not accepted.");
+        }, function () { fail("The request was not accepted."); });
+      }).catch(function () { fail("Could not reach the server. Try again."); });
     });
   }
   var passkey = document.getElementById("passkey");

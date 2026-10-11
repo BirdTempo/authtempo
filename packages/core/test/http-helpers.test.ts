@@ -445,8 +445,8 @@ describe("sign-in page", () => {
     const handler = on.slice(start, on.indexOf(".catch(", start));
     // The same success path as the sign-in: the sign-up answer sets the cookie (spec 8.7 item 1).
     expect(handler).toContain(`if (res.ok) { location.href = cont; return; }`);
-    expect(handler).toContain(`say("An account with this address exists. Sign in instead.");`);
-    expect(handler).toContain(`say("Too many attempts. Try again later.");`);
+    expect(handler).toContain(`fail("An account with this address exists. Sign in instead.");`);
+    expect(handler).toContain(`fail("Too many attempts. Try again later.");`);
     // Every code the handler names is a real core code, so a renamed code fails here.
     const codes = [...handler.matchAll(/code === "([a-z_]+)"/g)].map((m) => m[1]);
     expect(codes.sort()).toEqual([
