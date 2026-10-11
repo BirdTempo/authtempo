@@ -1,8 +1,9 @@
 import { env } from "cloudflare:test";
-import { StorageError } from "@tempo-auth/core";
+import { SCHEMA_VERSION, StorageError } from "@tempo-auth/core";
 import { coreStatements, SQLITE, type SqlStatements, TABLES } from "@tempo-auth/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1AdapterOn, toStorageError } from "../src/index.js";
+import { schemaVersionCheck } from "../src/schema-version.js";
 
 type Counts = Record<keyof SqlStatements, number>;
 
@@ -81,6 +82,7 @@ describe("the D1 statements seam", () => {
     await db.create("user", user("u1", "a@example.com"));
     await expect(db.create("user", user("u2", "a@example.com"))).rejects.toMatchObject({
       code: "unique_violation",
+      model: "user",
       fields: ["marker"],
     });
     expect(seen).toHaveLength(1);
@@ -100,31 +102,65 @@ describe("the D1 statements seam", () => {
     await db.create("user", user("u2", "b@example.com"));
     const clash = (tx: typeof db) =>
       tx.update("user", [{ field: "id", op: "eq", value: "u2" }], { email: "a@example.com" });
-    await expect(clash(db)).rejects.toMatchObject({ code: "unique_violation", fields: ["marker"] });
-    await expect(db.transaction(clash)).rejects.toMatchObject({ fields: ["marker"] });
+    const mapped = { code: "unique_violation", model: "user", fields: ["marker"] };
+    await expect(clash(db)).rejects.toMatchObject(mapped);
+    await expect(db.transaction(clash)).rejects.toMatchObject(mapped);
     expect(seen).toHaveLength(2);
   });
 
   it("runs ready before every method, and its throw stops the method before any statement (M-2)", async () => {
-    const { statements, counts } = counting();
+    // The real check on a database whose schema version is older than core's.
+    await env.DB.prepare("UPDATE ta_meta SET value = '0' WHERE key = 'schema_version'").run();
+    try {
+      const { statements, counts } = counting();
+      const db = createD1AdapterOn(env.DB, {
+        statements,
+        toStorageError,
+        ready: schemaVersionCheck(env.DB),
+      });
+      for (const call of [
+        () => db.create("user", user("u1", "a@example.com")),
+        () => db.findOne("user", [{ field: "id", op: "eq", value: "u1" }]),
+        () => db.findMany("user", []),
+        () => db.update("user", [{ field: "id", op: "eq", value: "u1" }], { name: "x" }),
+        () => db.delete("user", [{ field: "id", op: "eq", value: "u1" }]),
+        () => db.transaction(async () => 1),
+      ]) {
+        await expect(call()).rejects.toMatchObject({
+          code: "schema_mismatch",
+          model: "meta",
+          fields: ["0"],
+        });
+      }
+      expect(Object.values(counts).every((n) => n === 0)).toBe(true);
+    } finally {
+      await env.DB.prepare("UPDATE ta_meta SET value = ? WHERE key = 'schema_version'")
+        .bind(String(SCHEMA_VERSION))
+        .run();
+    }
+  });
+
+  it("runs ready again in a nested transaction, before its function (M-2)", async () => {
+    let calls = 0;
     const db = createD1AdapterOn(env.DB, {
-      statements,
+      statements: coreStatements(SQLITE),
       toStorageError,
+      // The outer transaction's check passes; the nested one's throws.
       ready: async () => {
-        throw new StorageError("schema_mismatch", "meta");
+        calls++;
+        if (calls > 1) throw new StorageError("schema_mismatch", "meta", ["0"]);
       },
     });
-    for (const call of [
-      () => db.create("user", user("u1", "a@example.com")),
-      () => db.findOne("user", [{ field: "id", op: "eq", value: "u1" }]),
-      () => db.findMany("user", []),
-      () => db.update("user", [{ field: "id", op: "eq", value: "u1" }], { name: "x" }),
-      () => db.delete("user", [{ field: "id", op: "eq", value: "u1" }]),
-      () => db.transaction(async () => 1),
-    ]) {
-      await expect(call()).rejects.toMatchObject({ code: "schema_mismatch" });
-    }
-    expect(Object.values(counts).every((n) => n === 0)).toBe(true);
+    let ran = false;
+    await expect(
+      db.transaction((tx) =>
+        tx.transaction(async () => {
+          ran = true;
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "schema_mismatch", model: "meta", fields: ["0"] });
+    expect(calls).toBe(2);
+    expect(ran).toBe(false);
   });
 
   it("reverses only a nested transaction's own writes when it throws and the outer one goes on (M-3, M-4)", async () => {

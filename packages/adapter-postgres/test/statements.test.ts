@@ -2,7 +2,8 @@ import { StorageError } from "@tempo-auth/core";
 import { coreStatements, POSTGRES, type SqlStatements } from "@tempo-auth/core/sql";
 import { describe, expect, it } from "vitest";
 import { createPostgresAdapterOn, toStorageError } from "../src/index.js";
-import { freshDatabase } from "./db.js";
+import { schemaVersionCheck } from "../src/schema-version.js";
+import { freshDatabase, freshSchema } from "./db.js";
 
 describe("the Postgres statements seam", () => {
   it("routes every statement through the given statements", async () => {
@@ -72,7 +73,7 @@ describe("the Postgres statements seam", () => {
     updatedAt: at,
   });
 
-  it("maps a unique violation on update through the given toStorageError (plan 9 Task 3 M-1)", async () => {
+  it("maps a unique violation on update through the given toStorageError, outside and inside a transaction (plan 9 Task 3 M-1)", async () => {
     const pg = await freshDatabase();
     try {
       const seen: unknown[] = [];
@@ -86,17 +87,20 @@ describe("the Postgres statements seam", () => {
       });
       await db.create("user", user("u1", "a@example.com"));
       await db.create("user", user("u2", "b@example.com"));
-      await expect(
-        db.update("user", [{ field: "id", op: "eq", value: "u2" }], { email: "a@example.com" }),
-      ).rejects.toMatchObject({ code: "unique_violation", fields: ["marker"] });
-      expect(seen).toHaveLength(1);
+      const clash = (tx: typeof db) =>
+        tx.update("user", [{ field: "id", op: "eq", value: "u2" }], { email: "a@example.com" });
+      const mapped = { code: "unique_violation", model: "user", fields: ["marker"] };
+      await expect(clash(db)).rejects.toMatchObject(mapped);
+      await expect(db.transaction(clash)).rejects.toMatchObject(mapped);
+      expect(seen).toHaveLength(2);
     } finally {
       await pg.close();
     }
   });
 
   it("runs ready before every method, and its throw stops the method before any statement (M-2)", async () => {
-    const pg = await freshDatabase();
+    // The real check on a schema with no migration: ta_meta does not exist.
+    const pg = await freshSchema();
     try {
       const base = coreStatements(POSTGRES);
       let built = 0;
@@ -109,12 +113,10 @@ describe("the Postgres statements seam", () => {
           },
         ]),
       ) as unknown as SqlStatements;
-      const db = createPostgresAdapterOn(pg.sql, {
+      const db = createPostgresAdapterOn(pg.a, {
         statements,
         toStorageError,
-        ready: async () => {
-          throw new StorageError("schema_mismatch", "meta");
-        },
+        ready: schemaVersionCheck(pg.a),
       });
       for (const call of [
         () => db.create("user", user("u1", "a@example.com")),
@@ -124,9 +126,41 @@ describe("the Postgres statements seam", () => {
         () => db.delete("user", [{ field: "id", op: "eq", value: "u1" }]),
         () => db.transaction(async () => 1),
       ]) {
-        await expect(call()).rejects.toMatchObject({ code: "schema_mismatch" });
+        await expect(call()).rejects.toMatchObject({
+          code: "schema_mismatch",
+          model: "meta",
+          fields: ["none"],
+        });
       }
       expect(built).toBe(0);
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("runs ready again in a nested transaction, before its function (M-2)", async () => {
+    const pg = await freshDatabase();
+    try {
+      let calls = 0;
+      const db = createPostgresAdapterOn(pg.sql, {
+        statements: coreStatements(POSTGRES),
+        toStorageError,
+        // The outer transaction's check passes; the nested one's throws.
+        ready: async () => {
+          calls++;
+          if (calls > 1) throw new StorageError("schema_mismatch", "meta", ["0"]);
+        },
+      });
+      let ran = false;
+      await expect(
+        db.transaction((tx) =>
+          tx.transaction(async () => {
+            ran = true;
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "schema_mismatch", model: "meta", fields: ["0"] });
+      expect(calls).toBe(2);
+      expect(ran).toBe(false);
     } finally {
       await pg.close();
     }
