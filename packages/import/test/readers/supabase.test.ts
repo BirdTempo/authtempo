@@ -1,11 +1,28 @@
 import { createMemoryAdapter } from "@tempo-auth/core";
 import { describe, expect, it } from "vitest";
+import { parseCsv } from "../../src/csv.js";
 import { importUsers } from "../../src/import.js";
 import { parseTime } from "../../src/readers/common.js";
 import { supabaseSource } from "../../src/readers/supabase.js";
 import identities from "../fixtures/supabase-identities.csv?raw";
 import users from "../fixtures/supabase-users.csv?raw";
 import { all, FIREBASE, FIRESCRYPT, now } from "./all.js";
+
+/** The CSV text with one column taken out, quoted again as psql writes it. */
+function withoutColumn(text: string, column: string): string {
+  const rows = parseCsv(text);
+  const at = rows[0]?.indexOf(column) ?? -1;
+  if (at === -1) throw new Error(`fixture has no ${column} column`);
+  const quote = (f: string) => (/[",\r\n]/.test(f) ? `"${f.replace(/"/g, '""')}"` : f);
+  return `${rows
+    .map((r) =>
+      r
+        .filter((_, i) => i !== at)
+        .map(quote)
+        .join(","),
+    )
+    .join("\n")}\n`;
+}
 
 describe("parseTime", () => {
   it("reads Postgres timestamptz text", () => {
@@ -132,6 +149,22 @@ describe("supabaseSource", () => {
     expect(otherSeparator[5]).toMatchObject({
       password: { refused: "fbscrypt (not this import's Firebase project)" },
     });
+  });
+
+  it("refuses an export with no banned_until, is_sso_user, or provider_id column, before it reads a record", () => {
+    // The helper gives a well-formed CSV: every row has the nine other fields.
+    expect(parseCsv(withoutColumn(users, "banned_until")).map((r) => r.length)).toEqual(
+      Array(13).fill(9),
+    );
+    expect(() =>
+      supabaseSource({ users: withoutColumn(users, "banned_until"), identities, now }),
+    ).toThrow("tempo-auth import: the Supabase users file has no banned_until column");
+    expect(() =>
+      supabaseSource({ users: withoutColumn(users, "is_sso_user"), identities, now }),
+    ).toThrow("tempo-auth import: the Supabase users file has no is_sso_user column");
+    expect(() =>
+      supabaseSource({ users, identities: withoutColumn(identities, "provider_id"), now }),
+    ).toThrow("tempo-auth import: the Supabase identities file has no provider_id column");
   });
 
   it("imports the fixture: the bcrypt and Firebase rows, a refused argon2i, the github identity dropped", async () => {

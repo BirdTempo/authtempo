@@ -1,5 +1,5 @@
 import type { FirebaseHashConfig } from "@tempo-auth/legacy-hashes";
-import { csvRecords } from "../csv.js";
+import { csvRecords, parseCsv } from "../csv.js";
 import type { ImportUser, Source } from "../types.js";
 import { asRecord, parseTime } from "./common.js";
 
@@ -76,7 +76,39 @@ function bannedNow(text: string | undefined, now: Date): boolean {
   return until === null || until.getTime() > now.getTime();
 }
 
+/** The columns of the README's two selects. One source for the check and the doc comments above. */
+export const SUPABASE_USER_COLUMNS = [
+  "id",
+  "email",
+  "encrypted_password",
+  "email_confirmed_at",
+  "raw_user_meta_data",
+  "created_at",
+  "is_anonymous",
+  "deleted_at",
+  "banned_until",
+  "is_sso_user",
+] as const;
+export const SUPABASE_IDENTITY_COLUMNS = ["provider", "provider_id", "user_id"] as const;
+
+/**
+ * Fail closed: a missing column reads as empty, and an empty `banned_until`
+ * or `is_sso_user` imports a banned or SSO user. So every column must be in
+ * the header, and the check runs before any record is read.
+ */
+function requireColumns(file: string, text: string, columns: readonly string[]): void {
+  const end = text.search(/\r?\n/);
+  const header = parseCsv(end === -1 ? text : text.slice(0, end))[0] ?? [];
+  for (const c of columns)
+    if (!header.includes(c))
+      throw new Error(
+        `tempo-auth import: the Supabase ${file} file has no ${c} column; run the README's select`,
+      );
+}
+
 export function supabaseSource(input: SupabaseExport): Source {
+  requireColumns("users", input.users, SUPABASE_USER_COLUMNS);
+  requireColumns("identities", input.identities, SUPABASE_IDENTITY_COLUMNS);
   const now = input.now ?? (() => new Date());
   return {
     name: "supabase",
