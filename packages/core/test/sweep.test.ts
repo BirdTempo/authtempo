@@ -53,6 +53,19 @@ describe("sweepExpired", () => {
         createdAt: now,
         updatedAt: now,
       });
+    const token = (id: string, expiresAt: Date | null) =>
+      storage.create("apiToken", {
+        id,
+        userId: "u1",
+        name: id,
+        tokenHash: `t-${id}`,
+        hint: "abcdefgh",
+        expiresAt,
+        lastUsedAt: null,
+        organizationId: null,
+        createdAt: now,
+        updatedAt: now,
+      });
 
     // Each row is one the product can write. A consumed row was consumed
     // before its expiry.
@@ -68,6 +81,9 @@ describe("sweepExpired", () => {
     await inv("i-accepted-expired", at(-HOUR), at(-2 * HOUR));
     await session("s-expired", at(-HOUR));
     await session("s-live", at(DAY));
+    await token("t-expired", at(-HOUR));
+    await token("t-live", at(DAY));
+    await token("t-forever", null);
     // A limit window that ends before the sweep, and one that is still live.
     await config.limiter.allow("ended", { seconds: 60, max: 3 });
     await config.limiter.allow("live", { seconds: 3600, max: 3 });
@@ -79,6 +95,7 @@ describe("sweepExpired", () => {
       verificationConsumed: 1,
       invitations: 3,
       sessions: 1,
+      apiTokens: 1,
       limits: 1,
     });
 
@@ -88,12 +105,15 @@ describe("sweepExpired", () => {
     expect(invIds).toEqual(["i-pending"]);
     const sessionIds = (await storage.findMany("session", [])).map((r) => r.id);
     expect(sessionIds).toEqual(["s-live"]);
+    const tokenIds = (await storage.findMany("apiToken", [])).map((r) => r.id).sort();
+    expect(tokenIds).toEqual(["t-forever", "t-live"]);
 
     expect(await sweepExpired(config)).toEqual({
       verificationExpired: 0,
       verificationConsumed: 0,
       invitations: 0,
       sessions: 0,
+      apiTokens: 0,
       limits: 0,
     });
   });

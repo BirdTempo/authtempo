@@ -9,7 +9,13 @@ export type {
   PasswordConfig,
 } from "./config.js";
 export { ConfigError, DEFAULT_RESERVED_SLUGS, isAppScheme } from "./config.js";
-export { type Auth, type AuthApi, createAuth, type PasswordApi } from "./create-auth.js";
+export {
+  type Auth,
+  type AuthApi,
+  createAuth,
+  type PasswordApi,
+  type TokensApi,
+} from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
@@ -31,6 +37,13 @@ export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export { type PublicSession, type ResolvedSession, readSessionToken } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
+export {
+  API_TOKEN_PREFIX,
+  type ApiTokenCreate,
+  type ApiTokenSummary,
+  type Caller,
+  type ResolvedApiToken,
+} from "./engine/tokens.js";
 export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";

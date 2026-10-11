@@ -97,6 +97,12 @@ export async function destroySession(config: ResolvedConfig, token: string): Pro
   ]);
 }
 
+/** The value of `Authorization: Bearer <value>`, or null. The one copy of the bearer rule. */
+export function readBearer(request: Pick<Request, "headers">): string | null {
+  const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");
+  return m?.[1] ?? null;
+}
+
 /**
  * The cookie wins over the bearer header, so a web page cannot be overridden by a stray header.
  * Public from `@tempo-auth/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
@@ -109,8 +115,7 @@ export function readSessionToken(
 ): string | null {
   const cookie = readCookie(request, config.cookieName);
   if (cookie) return cookie;
-  const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");
-  return m?.[1] ?? null;
+  return readBearer(request);
 }
 
 /** The caller's session from the cookie or the bearer header, or null. */
@@ -146,26 +151,31 @@ export function renewedSessionCookie(
   );
 }
 
+/** The public shape of a user. Never an internal field. */
+export function publicUser(user: UserRow): {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  name: string | null;
+  image: string | null;
+} {
+  return {
+    id: user.id,
+    email: user.email,
+    emailVerified: user.emailVerified,
+    name: user.name,
+    image: user.image,
+  };
+}
+
 /** The public shape of a session. Never the hash, never internal ids a client does not need. */
 export function publicSession(resolved: ResolvedSession): {
-  user: {
-    id: string;
-    email: string;
-    emailVerified: boolean;
-    name: string | null;
-    image: string | null;
-  };
+  user: ReturnType<typeof publicUser>;
   session: { id: string; expiresAt: string; activeOrganizationId: string | null };
 } {
   const { user, session } = resolved;
   return {
-    user: {
-      id: user.id,
-      email: user.email,
-      emailVerified: user.emailVerified,
-      name: user.name,
-      image: user.image,
-    },
+    user: publicUser(user),
     session: {
       id: session.id,
       expiresAt: session.expiresAt.toISOString(),

@@ -27,6 +27,8 @@ export const ERRORS = {
   password_policy: 400,
   password_breached: 400,
   email_taken: 409,
+  // plan 8b: a user holds API_TOKEN_CAP tokens
+  token_limit: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

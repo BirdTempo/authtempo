@@ -33,6 +33,10 @@ export const BETTER_AUTH_CODES = {
   password_policy: "INVALID_PASSWORD",
   password_breached: "PASSWORD_COMPROMISED",
   email_taken: "USER_ALREADY_EXISTS",
+  // tempo-auth's own name: no Better Auth source is in this repo, so no Better
+  // Auth code was checked. The package serves no token route (plan 8b), so
+  // only core's api.tokens can answer it.
+  token_limit: "TOKEN_LIMIT_REACHED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",
