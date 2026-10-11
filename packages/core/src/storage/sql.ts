@@ -428,9 +428,9 @@ export const USER_CHILD_MODELS: readonly ModelName[] = MODEL_NAMES.filter(
 /**
  * Appends one `NOT EXISTS` term per child table to a user delete, so the
  * delete matches only while no row names the user. On D1 another request
- * can add a session, an identity, or any other child row for a user inside
- * the open transaction that created the user; the undo must keep that user,
- * or the child row points at nothing. The undo log runs in reverse.
+ * can add a child row for a user inside the open transaction that created
+ * the user. The undo must keep that user. Else the child row points at
+ * nothing. The undo log runs in reverse.
  * The transaction's own child rows are gone before this delete runs.
  * `children` holds the table and the user id column as the statement set
  * names them.
