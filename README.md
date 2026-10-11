@@ -44,6 +44,7 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
 - A POST with an `Origin` header not in `trustedOrigins` gets 403.
 - Every token is stored as a SHA-256 hash. The clear token appears once.
 - A password row is a credential under the claim rule: a proof of an unverified address deletes it, except the row the verify link confirms.
+- An API token is a credential of one verified user, never a session. Only a session creates or revokes one, and `auth.session` answers null to a token, so every route that needs a session refuses a token.
 - A magic link is single use. Two clicks race for one conditional update.
 - A compatibility package never widens a promise of core: an option that core cannot keep stops the factory at construction, and the one error lists every such option.
 - A `next` path must start with `/` and not `//`. Anything else becomes `/`.
