@@ -10,7 +10,7 @@ import { before17, renamed } from "./sql.js";
 // The SQLite counterpart of the Postgres consumer-i fixture: snake_case
 // columns, no account.issuer (tables from before 1.7), and here also plural
 // table names. Built from Better Auth's own SQLite SQL, without the foreign
-// keys (core's conformance suite writes rows with no parent). The migration
+// keys (the suites here also run on tables with no keys). The migration
 // is the before-1.7 text for these names, from migrationSql("before-1.7").
 const naming = {
   casing: "snake",

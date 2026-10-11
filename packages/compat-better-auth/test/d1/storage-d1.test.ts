@@ -8,8 +8,9 @@ import { BETTER_AUTH_SQLITE, withoutForeignKeys } from "../fixtures.js";
 import { at, d1MappingSuite, eq, sqlNames } from "./mapping-suite.js";
 import { execD1 } from "./schema.js";
 
-// Better Auth's own SQLite SQL without the foreign keys (core's conformance
-// suite writes rows with no parent), then the shipped compat migration.
+// Better Auth's own SQLite SQL without the foreign keys (the suites here also
+// run on tables with no keys; the keyed files run with them), then the
+// shipped compat migration.
 await execD1(withoutForeignKeys(BETTER_AUTH_SQLITE));
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
 

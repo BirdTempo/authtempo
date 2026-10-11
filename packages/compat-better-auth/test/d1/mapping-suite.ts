@@ -43,6 +43,17 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
   const db = () => betterAuthSchemaStorage({ dialect: "d1", db: env.DB, ...naming }).storage;
   const run = (sql: string) => env.DB.prepare(sql).run();
   const cols = (t: BetterAuthTable, fields: string[]) => fields.map((f) => C(t, f)).join(",");
+  // Each child row gets its parent first (plan 9b), so no test seeds a state the product cannot reach.
+  const parentUser = (id: string) =>
+    db().create("user", {
+      id,
+      email: `${id}@example.com`,
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: at,
+      updatedAt: at,
+    });
 
   runAdapterConformance(`Better Auth tables on D1, ${label}`, async () => {
     await truncate();
@@ -99,6 +110,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
 
     it("converts the passkey key and reads Better Auth's empty transports as null", async () => {
       const s = db();
+      await parentUser("u1");
       await s.create("passkey", {
         id: "k1",
         userId: "u1",
@@ -128,6 +140,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
     });
 
     it("reverses a delete inside a transaction with every Better Auth column, also the ones core does not know", async () => {
+      await parentUser("u1");
       await run(
         `INSERT INTO ${T("account")} (${cols("account", ["id", "issuer", "accountId", "providerId", "userId", "accessToken", "createdAt", "updatedAt", "taLinkedAt"])}) VALUES ('a1','https://accounts.google.com','g-sub','google','u1','at-1','2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z')`,
       );
@@ -148,6 +161,15 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
     it("reads a member row and an account row that another writer adds after the migration, also in SQLite's date form", async () => {
       // An old replica during the deploy, or the app's own SQL, writes Better Auth's columns only.
       // SQLite's ADD COLUMN takes no expression default, so the ta dates stay null here.
+      await parentUser("ba-u2");
+      await db().create("organization", {
+        id: "ba-o",
+        slug: "ba-o",
+        name: "BA O",
+        metadata: null,
+        createdAt: at,
+        updatedAt: at,
+      });
       await run(
         `INSERT INTO ${T("member")} (${cols("member", ["id", "organizationId", "userId", "role", "createdAt"])}) VALUES ('ba-m2','ba-o','ba-u2','member','2026-09-07 10:11:12')`,
       );

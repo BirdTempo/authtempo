@@ -396,6 +396,8 @@ export function runAdapterConformance(
     });
 
     it("enforces a composite unique key on identity", async () => {
+      // The parent first: a Better Auth table has a foreign key from account.userId (plan 9b).
+      await db.create("user", user("u1", "a@example.com", t0));
       await db.create("identity", identity("i1", "github", "42", t0));
       await db.create("identity", identity("i2", "github", "43", t0));
       await db.create("identity", identity("i3", "google", "42", t0));
@@ -409,6 +411,7 @@ export function runAdapterConformance(
     });
 
     it("round-trips an integer column", async () => {
+      await db.create("user", user("u1", "a@example.com", t0));
       await db.create("passkey", passkey("p1", 7, t0));
       const row = await db.findOne("passkey", [{ field: "id", op: "eq", value: "p1" }]);
       expect(row?.counter).toBe(7);
@@ -552,6 +555,15 @@ export function runAdapterConformance(
 
     it("round-trips the version 2 models and keeps their unique keys", async () => {
       const at = t0;
+      await db.create("user", user("u1", "a@example.com", at));
+      await db.create("organization", {
+        id: "o1",
+        slug: "o1",
+        name: "O1",
+        metadata: null,
+        createdAt: at,
+        updatedAt: at,
+      });
       await db.create("member", {
         id: "m1",
         organizationId: "o1",
@@ -592,6 +604,7 @@ export function runAdapterConformance(
 
     it("round-trips the version 4 password model and keeps its unique key (plan 8)", async () => {
       const at = new Date("2026-10-10T00:00:00.000Z");
+      await db.create("user", user("u1", "a@example.com", at));
       await db.create("password", {
         id: "p1",
         userId: "u1",
