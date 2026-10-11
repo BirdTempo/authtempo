@@ -10,7 +10,7 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck typecheck:configs",
-    "typecheck:configs": "tsc -p tsconfig.configs.json",
+    "typecheck:configs": "tsc -p tsconfig.configs.json && node scripts/check-config-count.mjs",
     "lint": "biome check .",
     "format": "biome format --write ."
   },

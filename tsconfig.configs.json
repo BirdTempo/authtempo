@@ -10,5 +10,10 @@
     // TypeScript 7 loads no @types package unless "types" names it. The configs read node:url.
     "types": ["node"]
   },
-  "include": ["packages/*/vitest*.config.ts", "examples/*/vitest*.config.ts"]
+  "include": [
+    "packages/**/vitest*.config.ts",
+    "packages/**/vitest*.config.mts",
+    "examples/**/vitest*.config.ts",
+    "examples/**/vitest*.config.mts"
+  ]
 }
