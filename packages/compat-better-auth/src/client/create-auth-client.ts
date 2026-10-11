@@ -346,8 +346,14 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
       return r;
     },
     getSession,
-    async sendVerificationEmail() {
-      return notSupported("core has no resend route for the verify mail until plan 8b");
+    async sendVerificationEmail({ email, callbackURL }) {
+      // Core's verify link lands on the app origin. The server api refuses it too.
+      if (callbackURL !== undefined)
+        return notSupported("core takes no callbackURL at the verify mail");
+      return run(
+        (c) => c.password.resendVerification({ email }),
+        () => ({ status: true as const }),
+      );
     },
     async requestPasswordReset({ email, redirectTo }) {
       const next = toNext(redirectTo, pageOrigin());

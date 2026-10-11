@@ -251,7 +251,7 @@ export interface CompatServerApi {
     body: { email: string; callbackURL?: string; name?: string };
     headers?: Headers;
   }): Promise<{ status: true }>;
-  /** Throws `APIError` NOT_SUPPORTED: core has no resend route until plan 8b. */
+  /** Core's resend route (plan 8b). A `callbackURL` throws `APIError` NOT_SUPPORTED (501): core lands the link on the app origin. */
   sendVerificationEmail(input: {
     body: { email: string; callbackURL?: string };
     headers?: Headers;
@@ -425,7 +425,7 @@ export interface AuthClient {
   };
   signOut(): Promise<CompatClientResult<{ success: true }>>;
   getSession(): Promise<CompatClientResult<{ session: ClientSession; user: ClientUser } | null>>;
-  /** Answers NOT_SUPPORTED: core has no resend route until plan 8b. */
+  /** Core's resend route (plan 8b). A `callbackURL` answers NOT_SUPPORTED: core lands the link on the app origin. */
   sendVerificationEmail(input: {
     email: string;
     callbackURL?: string;

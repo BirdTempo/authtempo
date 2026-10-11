@@ -127,7 +127,7 @@ const FOREIGN_PLUGINS: Record<string, string> = {
   cimd: PLAN_9G,
   "oidc-provider": PLAN_9G,
   "oauth-provider": PLAN_9G,
-  "api-key": "plan 8b (API tokens for scripts and CLIs) is not written yet",
+  "api-key": "not mapped; see the plan index",
   anonymous: "tempo-auth has no anonymous sign-in",
   username: "tempo-auth has no username sign-in",
 };

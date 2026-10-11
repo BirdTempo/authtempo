@@ -93,11 +93,17 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
       );
       return { status: true };
     },
-    async sendVerificationEmail() {
-      throw compatApiError(
-        "NOT_SUPPORTED",
-        "core has no resend route for the verify mail until plan 8b",
+    async sendVerificationEmail({ body, headers }) {
+      // Core's verify link lands on the app origin; a callbackURL would be dropped in silence.
+      if (body.callbackURL !== undefined)
+        throw compatApiError("NOT_SUPPORTED", "core takes no callbackURL at the verify mail");
+      unwrap(
+        await passwords().resendVerification({
+          email: body.email,
+          ip: clientIp(requestOf(headers)),
+        }),
       );
+      return { status: true };
     },
     async createInvitation({ body, headers }) {
       const s = await caller(headers);

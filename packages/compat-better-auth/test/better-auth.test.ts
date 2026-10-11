@@ -17,7 +17,7 @@ import {
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { magicLink } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
-import { BETTER_AUTH_DEFAULTS, mapOptions } from "../src/server/map-options.js";
+import { BETTER_AUTH_DEFAULTS, mapOptions, skipUnknownIp } from "../src/server/map-options.js";
 import { SESSION_KEYS, toNext, USER_KEYS } from "../src/server/shapes.js";
 import type { BetterAuthOptions, CompatDatabase, EmailCallbackData } from "../src/types.js";
 
@@ -358,9 +358,74 @@ describe("betterAuth", () => {
     await expect(
       auth.api.signUpEmail({ body: { email: "c@example.com", password: "ten chars!", name: "C" } }),
     ).rejects.toMatchObject({ statusCode: 400, body: { code: "PASSWORD_TOO_SHORT" } });
+    // Core's verify link lands on the app origin; a callbackURL would be dropped in silence.
     await expect(
-      auth.api.sendVerificationEmail({ body: { email: "a@example.com" } }),
+      auth.api.sendVerificationEmail({ body: { email: "a@example.com", callbackURL: "/x" } }),
     ).rejects.toMatchObject({ statusCode: 501, body: { code: "NOT_SUPPORTED" } });
+  });
+
+  it("resends the verify mail through api.sendVerificationEmail (plan 8b)", async () => {
+    const { auth, sent } = app();
+    await auth.api.signUpEmail({
+      body: { email: "pat@example.com", password: "correct horse battery", name: "Pat" },
+    });
+    expect(await auth.api.sendVerificationEmail({ body: { email: "Pat@Example.com" } })).toEqual({
+      status: true,
+    });
+    const verifies = sent.filter((m) => m.kind === "verify");
+    expect(verifies).toHaveLength(2);
+    const confirm = (token: string) =>
+      auth.handler(
+        new Request(`${BASE}/api/auth/password/verify`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE },
+          body: JSON.stringify({ token }),
+        }),
+      );
+    // The second link replaced the first.
+    expect((await confirm(verifies[0]?.data.token ?? "")).status).toBe(400);
+    expect((await confirm(verifies[1]?.data.token ?? "")).status).toBe(200);
+    // An unknown address answers the same and sends nothing.
+    expect(await auth.api.sendVerificationEmail({ body: { email: "nobody@example.com" } })).toEqual(
+      { status: true },
+    );
+    expect(sent.filter((m) => m.kind === "verify")).toHaveLength(2);
+  });
+
+  it("answers 404 under /tokens: the package holds no API token until its api-key plan (plan 8b)", async () => {
+    const { auth } = app();
+    for (const [method, path] of [
+      ["POST", "/tokens"],
+      ["GET", "/tokens"],
+      ["POST", "/tokens/revoke"],
+      ["GET", "/tokens/current"],
+    ] as const) {
+      const res = await auth.handler(
+        new Request(`${BASE}/api/auth${path}`, {
+          method,
+          headers: { origin: BASE, "content-type": "application/json" },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+      expect({ path, status: res.status }).toEqual({ path, status: 404 });
+    }
+    // Core under the shim has the routes: the 404 is the shim's.
+    const core = await auth.tempo.handle(new Request(`${BASE}/api/auth/tokens/current`));
+    expect(core.status).toBe(401);
+  });
+
+  it("skips the unknown-IP key of the resend, which has a per-email limit (plan 8b)", async () => {
+    const keys: string[] = [];
+    const limiter = skipUnknownIp({
+      allow: async (key) => {
+        keys.push(key);
+        return true;
+      },
+    });
+    await limiter.allow("password-resend:ip:unknown", { seconds: 900, max: 20 });
+    await limiter.allow("password-resend:email:a@example.com", { seconds: 900, max: 3 });
+    await limiter.allow("password-sign-up:ip:unknown", { seconds: 3600, max: 10 });
+    expect(keys).toEqual(["password-resend:email:a@example.com", "password-sign-up:ip:unknown"]);
   });
 
   it("maps every core and client code to one Better Auth code", () => {
