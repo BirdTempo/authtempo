@@ -53,4 +53,21 @@ describe("a Better Auth date in SQLite's space form (plan 9b2)", () => {
     expect(user.createdAt).toEqual(at);
     expect(user.updatedAt).toEqual(at);
   });
+
+  it("refuses a date of any other type, for example a boolean, with schema_mismatch (fix round 2)", () => {
+    const st = compatStatements("postgres", resolveNames());
+    for (const bad of [true, { at: 1 }]) {
+      let thrown: unknown;
+      try {
+        st.decode("user", row("2026-10-12T08:00:00.000Z", bad));
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toMatchObject({
+        code: "schema_mismatch",
+        model: "user",
+        fields: ["updatedAt"],
+      });
+    }
+  });
 });

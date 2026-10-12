@@ -204,12 +204,12 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         // Only text can be in the space form. A driver's Date or a number goes
         // to `new Date` as it is: `String(v)` would drop a Date's milliseconds
         // and make a number unreadable (M-2 of the plan 9b2 final review).
+        // Any other type (a boolean, an object) is no date: `new Date(true)`
+        // would read as 1 ms after the epoch (fix round 2).
+        if (typeof v !== "string" && typeof v !== "number" && !(v instanceof Date))
+          throw new StorageError("schema_mismatch", model, [field]);
         const space = typeof v === "string" ? SQLITE_SPACE_DATE_RE.exec(v) : null;
-        const at = new Date(
-          space
-            ? `${space[1]}T${space[2]}${(space[3] ?? "").slice(0, 4)}Z`
-            : (v as string | number | Date),
-        );
+        const at = new Date(space ? `${space[1]}T${space[2]}${(space[3] ?? "").slice(0, 4)}Z` : v);
         // A date core cannot read would compare as NaN, so an expiry would never pass.
         if (Number.isNaN(at.getTime())) throw new StorageError("schema_mismatch", model, [field]);
         v = at;
