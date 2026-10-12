@@ -134,6 +134,22 @@ const NO_BASE =
 
 /** Better Auth's `createAuthClient` on `@tempo-auth/client`. Nothing throws for an answer. */
 export function createAuthClient(options: ClientOptions = {}): AuthClient {
+  // A relative base cannot make a request URL: before plan 9b2 it rejected at the first call.
+  // One error at construction names the fix. No baseURL stays legal: the first call reads
+  // location (see below).
+  if (options.baseURL !== undefined) {
+    let absolute = false;
+    try {
+      const { protocol } = new URL(options.baseURL);
+      absolute = protocol === "http:" || protocol === "https:";
+    } catch {
+      absolute = false;
+    }
+    if (!absolute)
+      throw new Error(
+        `tempo-auth compat: baseURL must be an absolute http or https URL, for example https://api.example.com/api/auth; got ${options.baseURL}`,
+      );
+  }
   // The base is resolved at the first call, not here. consumere makes its client at module
   // scope with no baseURL, and Next runs that module on the server, where there is no location.
   // A throw here would fail every page that imports the client. The first call in a browser
@@ -201,7 +217,26 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     });
     const r = await op(client);
     if (r.ok) {
-      const data = map(r.value);
+      let data: V;
+      try {
+        data = map(r.value);
+      } catch (e) {
+        // The server answered, but the token store's setItem threw (the one step of a map that
+        // can throw). Answer it. A rejection would reach an app that awaits the call with no catch.
+        const error = clientError(
+          "UNEXPECTED_RESPONSE",
+          0,
+          `tempo-auth compat: the token store failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        const seen = lastOk as Seen | null;
+        if (fo.onError)
+          await fo.onError({
+            error,
+            response: seen?.response ?? null,
+            request: seen?.request ?? { url: `${origin}${basePath}`, method: "GET" },
+          });
+        return { data: null, error };
+      }
       const ok = lastOk as Seen | null;
       if (fo.onSuccess && ok && !quiet)
         await fo.onSuccess({ data, response: ok.response, request: ok.request });

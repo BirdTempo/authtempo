@@ -281,6 +281,15 @@ This matters for a Next server render of a client module. The client reads the
 base at the first call: `baseURL`, else the page's `location.origin`. A call
 with neither answers the error code `BASE_URL_REQUIRED`.
 
+A `baseURL` that is not an absolute `http` or `https` URL (for example
+`/api/auth`) throws one error when the client is made. A throw of the Expo
+token store's `setItem` answers `UNEXPECTED_RESPONSE` with status 0. The call
+does not reject. A `useSession` listener may call `refetch` on every notify.
+The store starts no read for a call made while it notifies, so the reads end.
+A listener that refetches later (for example in a timer or an effect) on every
+notify still reads with no end. Refetch on a change of the data, not on every
+notify.
+
 `signIn.email` with `rememberMe: false` answers `NOT_SUPPORTED` (501): core
 keeps no short session. `rememberMe: true` works.
 

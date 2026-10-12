@@ -739,3 +739,70 @@ describe("one status per code (plan 9b)", () => {
     });
   });
 });
+
+describe("createAuthClient: the residual throws (plan 9b2)", () => {
+  it("refuses a relative or non-http baseURL at construction with one error", () => {
+    expect(() => createAuthClient({ baseURL: "/api/auth" })).toThrow(
+      "tempo-auth compat: baseURL must be an absolute http or https URL, for example https://api.example.com/api/auth; got /api/auth",
+    );
+    expect(() => createAuthClient({ baseURL: "ftp://files.example.com" })).toThrow(
+      /must be an absolute http or https URL/,
+    );
+    expect(() => createAuthClient({ baseURL: `${BASE}/api/auth` })).not.toThrow();
+    // No baseURL stays legal: the base is read at the first call (consumere's server render).
+    expect(() => createAuthClient()).not.toThrow();
+  });
+
+  it("answers UNEXPECTED_RESPONSE, never a rejection, when the token store throws on write", async () => {
+    const s = server();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [
+        expoClient({
+          scheme: "reception",
+          storage: {
+            getItem: () => null,
+            setItem: () => {
+              throw new Error("store full");
+            },
+          },
+        }),
+      ],
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    const up = await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    expect(up).toMatchObject({ data: null, error: { code: "UNEXPECTED_RESPONSE", status: 0 } });
+    expect(up.error?.message).toContain("store full");
+    const signedIn = await c.signIn.email({ email: "pat@example.com", password: PASSWORD });
+    expect(signedIn).toMatchObject({ data: null, error: { code: "UNEXPECTED_RESPONSE" } });
+  });
+
+  it("ends the reads when a listener refetches on every notify", async () => {
+    const s = server();
+    let reads = 0;
+    const counting: typeof fetch = async (input, init) => {
+      const req = new Request(input, init);
+      if (req.method === "GET" && new URL(req.url).pathname.endsWith("/session")) reads++;
+      return s.fetchImpl(req);
+    };
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [
+        expoClient({ scheme: "reception", storagePrefix: "reception", storage: memoryStorage() }),
+      ],
+      fetchOptions: { customFetchImpl: counting },
+    });
+    // The listener of an app that refetches on each change it sees.
+    const stop = c.useSession.subscribe(() => void c.useSession.refetch());
+    await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    await vi.waitFor(() => expect(c.useSession.get().data?.user.email).toBe("pat@example.com"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const settled = reads;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reads).toBe(settled);
+    expect(reads).toBeLessThanOrEqual(3);
+    stop();
+  });
+});
