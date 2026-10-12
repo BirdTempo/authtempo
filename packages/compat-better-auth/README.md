@@ -97,11 +97,12 @@ What changes at cutover:
 
 - The `session.token` column holds the SHA-256 hex of the token, never the raw token. Better Auth-era sessions end: every person signs in again once. App SQL that reads `session.token` reads a hash.
 - Better Auth-era verification rows and invitations stay in the table and core never reads them. Send pending invitations again.
-- Users, Google and Apple accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
+- Users, Google, Apple, GitHub, and LinkedIn accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The `ta_meta` and `ta_limit` tables go in the first schema of the search path, also when the Better Auth tables sit in another schema.
 - A passkey counter above 2147483647 fails: Better Auth's `counter` column is `integer`.
 - The session cookie is `tempo_session`, not `better-auth.session_token`. App code, tests, and legal pages that name the old cookie must change. For example, consumer-i's site lists `__Secure-better-auth.session_token` in its cookie text (`apps/site/test/legal.test.ts`).
-- Better Auth-era `account` rows of providers that core does not serve, such as GitHub and LinkedIn, stay in the table. Core reads them as identities of their users, so a claim of the address deletes them as it deletes any identity other than the proving one.
+- Better Auth-era `account` rows of providers that the package does not map (any provider other than Google, Apple, GitHub, and LinkedIn) stay in the table. Core reads them as identities of their users, so a claim of the address deletes them as it deletes any identity other than the proving one. The factory refuses such a provider in `socialProviders` with the reason `not mapped; add it through core's social.oidc or social.oauth2`. On core's `createAuth`, a list entry whose `name` is the Better Auth provider id and whose subject is the id that Better Auth stored as `accountId` links these rows on the first sign-in.
+- GitHub and LinkedIn accounts link on the first sign-in by the id Better Auth stored: the numeric GitHub id, and LinkedIn's OpenID `sub`. LinkedIn's `sub` stays the same only while the client id stays the same.
 - A credential row (`providerId` `credential`) with a null `account.password` answers `schema_mismatch`, so sign-in and reset for that address answer 500. Better Auth 1.7.2 never writes that row. Give the row a hash or delete it before cutover. A plan 9b input.
 
 On D1, `drizzleAdapter(db, { provider: "sqlite" })` needs `drizzle-orm/d1`, and
@@ -328,7 +329,7 @@ factory prints without them.
 consumere (small edits):
 - Remove `secondaryStorage` and `session.storeSessionInDatabase: false`. Sessions move into a `session` table. Create it, and the `organization`, `member`, `invitation`, and `passkey` tables, with Better Auth's own SQL before migration 0001.
 - Remove `databaseHooks`. To store no IP, keep `advanced.ipAddress.disableIpTracking: true`; the factory logs a note. For a request with no client IP, only the password sign-in, the magic link, the reset request, and the verify mail resend skip the per-IP limit and keep the per-email limit. Every other flow keeps core's shared bucket. Core stores the user agent; the hook that dropped it has no replacement until plan 9d.
-- Remove GitHub and LinkedIn from `socialProviders` until plan 9c.
+- GitHub and LinkedIn in `socialProviders` run unchanged since plan 9c. Their Better Auth-era accounts sign in to the same users.
 - Run Drizzle on postgres.js (`drizzle-orm/postgres-js`), not on Neon's driver.
 - `sendVerificationEmail` with a `callbackURL` answers NOT_SUPPORTED; leave the `callbackURL` out.
 

@@ -164,6 +164,8 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const clientIp = clientIpOf(options);
   const google = options.socialProviders?.google;
   const apple = options.socialProviders?.apple;
+  const github = options.socialProviders?.github;
+  const linkedin = options.socialProviders?.linkedin;
   const ep = options.emailAndPassword;
   const config: AuthConfig = {
     baseURL: origin,
@@ -195,7 +197,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
         (options.session?.updateAge ?? BETTER_AUTH_DEFAULTS.sessionUpdateAge) / DAY,
     },
     magicLink: { ttlMinutes: ttlSeconds / 60 },
-    ...(google || apple
+    ...(google || apple || github || linkedin
       ? {
           social: {
             ...(google
@@ -210,6 +212,12 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
                     privateKey: apple.privateKey ?? "",
                   },
                 }
+              : {}),
+            ...(github
+              ? { github: { clientId: github.clientId, clientSecret: github.clientSecret } }
+              : {}),
+            ...(linkedin
+              ? { linkedin: { clientId: linkedin.clientId, clientSecret: linkedin.clientSecret } }
               : {}),
           },
         }

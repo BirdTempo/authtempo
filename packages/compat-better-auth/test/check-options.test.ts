@@ -10,16 +10,12 @@ const paths = (refusals: string[]) => refusals.map((r) => r.slice(0, r.indexOf("
 describe("checkOptions on the five apps (Review Focus 1)", () => {
   it("refuses exactly these consumere options", () => {
     const c = checkOptions(consumere);
+    // GitHub and LinkedIn map onto core's presets since plan 9c.
     expect(paths(c.refusals)).toEqual([
       "databaseHooks",
       "secondaryStorage",
       "session.storeSessionInDatabase",
-      "socialProviders.github",
-      "socialProviders.linkedin",
     ]);
-    expect(c.refusals).toContain(
-      "socialProviders.github: plan 9c (a generic OAuth2 and OIDC provider) is not written yet",
-    );
     // consumere sets disableIpTracking: accepted, with the note that the per-IP limits are skipped.
     expect(paths(c.notes)).toEqual([
       "advanced.database.generateId",
@@ -29,6 +25,20 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     expect(c.notes.find((n) => n.startsWith("advanced.ipAddress.disableIpTracking"))).toContain(
       "one caller can try one password on many addresses, bounded only by each address's limit",
     );
+  });
+
+  it("maps github and linkedin, refuses their unknown keys, and refuses another provider with a pointer to core's lists (plan 9c)", () => {
+    const c = checkOptions({
+      socialProviders: {
+        github: { clientId: "h", clientSecret: "h", scope: ["repo"] },
+        linkedin: { clientId: "l", clientSecret: "l" },
+        discord: { clientId: "d", clientSecret: "d" },
+      },
+    } as unknown as BetterAuthOptions);
+    expect(c.refusals.filter((r) => r.startsWith("socialProviders"))).toEqual([
+      "socialProviders.discord: not mapped; add it through core's social.oidc or social.oauth2",
+      "socialProviders.github.scope: tempo-auth has no such option",
+    ]);
   });
 
   it("refuses exactly these consumer-i options", () => {

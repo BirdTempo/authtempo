@@ -341,6 +341,16 @@ describe("expo()", () => {
     expect(checkOptions(withPasskey).refusals).toEqual([]);
   });
 
+  it("counts GitHub or LinkedIn as a method of the system-browser page (plan 9c)", () => {
+    const pair = { clientId: "x", clientSecret: "y" };
+    const off = { enabled: false };
+    for (const only of [
+      base({ emailAndPassword: off, socialProviders: { github: pair }, plugins: [expo()] }),
+      base({ emailAndPassword: off, socialProviders: { linkedin: pair }, plugins: [expo()] }),
+    ])
+      expect(checkOptions(only).refusals).toEqual([]);
+  });
+
   it("offers the magic link on the system-browser page only with the magicLink plugin", () => {
     const input = {
       basePath: "/api/auth",
