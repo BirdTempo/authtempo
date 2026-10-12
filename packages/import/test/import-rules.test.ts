@@ -753,6 +753,61 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     expect({ ...dry, dryRun: false }).toEqual(r);
   });
 
+  /** A verified Auth.js user row of `u1` with no other row: a run that stopped after it. */
+  async function halfAuthjs(db: StorageAdapter) {
+    await db.create("user", {
+      id: await importId("user", "authjs", "u1"),
+      email: "u1@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+  }
+
+  it("repairs a missing passkey row", async () => {
+    const db = createMemoryAdapter();
+    await halfAuthjs(db);
+    const r = await importUsers(db, named("authjs", [user("u1", { passkeys: [passkey("c1")] })]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(r.repaired).toEqual([
+      { kind: "user", sourceId: "u1", rows: ["identity:email", "passkey"] },
+    ]);
+    const u1 = await importId("user", "authjs", "u1");
+    expect((await db.findMany("passkey", [])).map((p) => [p.userId, p.credentialId])).toEqual([
+      [u1, "c1"],
+    ]);
+  });
+
+  it("repairs no passkey in a dry run that an earlier record takes, as in a real run", async () => {
+    const records = () => [
+      user("n1", { passkeys: [passkey("c1")] }),
+      user("u1", { passkeys: [passkey("c1")] }),
+    ];
+    const dryDb = createMemoryAdapter();
+    await halfAuthjs(dryDb);
+    const dry = await importUsers(dryDb, named("authjs", records()), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+      dryRun: true,
+    });
+    const db = createMemoryAdapter();
+    await halfAuthjs(db);
+    const r = await importUsers(db, named("authjs", records()), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    // The real run finds the credential row of n1, so u1 lacks only its email identity.
+    expect(r.repaired).toEqual([{ kind: "user", sourceId: "u1", rows: ["identity:email"] }]);
+    expect({ ...dry, dryRun: false }).toEqual(r);
+  });
+
   it("repairs nothing without the option, as before", async () => {
     const db = createMemoryAdapter();
     await halfUser(db);

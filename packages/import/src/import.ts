@@ -438,7 +438,9 @@ async function existingUser(
       { field: "credentialId", op: "eq", value: p.credentialId },
     ]);
     // A credential another user holds was dropped as `passkey:taken` on the first run.
-    if (!row) {
+    // A dry run keeps the credentials of the earlier records in `planned`, as a
+    // real run reads them from the rows it wrote.
+    if (!row && !planned.credentials.has(p.credentialId)) {
       missing.push("passkey");
       fill.passkeys.push(p);
     }
@@ -650,6 +652,10 @@ async function importUser(
  * plan sees the winner's row. A second one skips the record by the model the
  * error names, so the run goes on and the report stays whole. Any other error
  * stops the run.
+ * An organization repair that meets a unique_violation on a member row needs
+ * no other code: the second plan finds the member that the other write made,
+ * so the organization is `exists`. Only a second violation throws (`member` is
+ * not in RACE_REASON), as for a new organization.
  */
 function afterViolation<T, R>(err: unknown, attempt: number): Plan<T, R> | null {
   if (!(err instanceof StorageError) || err.code !== "unique_violation") throw err;
