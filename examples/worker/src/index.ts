@@ -4,6 +4,7 @@ import { createLegacyPasswordHash } from "@tempo-auth/legacy-hashes";
 import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 import { LEGACY_FORMATS } from "./legacy-formats.js";
+import { testProvider, testProviderFetch, testProviderRoute } from "./test-provider.js";
 
 let lastLink: string | null = null;
 let auth: Auth | null = null;
@@ -29,13 +30,16 @@ function getAuth(env: Env): Auth {
     },
     // Google sign-in is on only when both vars are set. The example has no
     // real client; the test sets fake values to prove the start route.
-    ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
-      ? {
-          social: {
-            google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET },
-          },
-        }
-      : {}),
+    // In TEST_MODE only, one oauth2 provider whose endpoints are test routes
+    // of this Worker proves the full flow on D1 (plan 9c).
+    social: {
+      ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+        ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } }
+        : {}),
+      ...(env.TEST_MODE === "1"
+        ? { oauth2: [testProvider(env.BASE_URL)], fetch: testProviderFetch(env.BASE_URL) }
+        : {}),
+    },
     // Passkeys bind to the API's own host in this example. A real app sets
     // rpID to its registrable domain and lists every web origin.
     passkey: {
@@ -100,6 +104,11 @@ export default {
       const renewed = c.kind === "session" ? a.sessionCookie(request, c) : null;
       if (renewed) res.headers.set("set-cookie", renewed);
       return res;
+    }
+    // TEST_MODE only (plan 9c): the fake provider's authorize step, which the browser visits.
+    if (url.pathname.startsWith("/__test/oauth/")) {
+      if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+      return testProviderRoute(request, url);
     }
     if (url.pathname === "/__test/last-link") {
       if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
