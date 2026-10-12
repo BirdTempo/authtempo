@@ -85,6 +85,8 @@ const REGION_RE = /^[a-z]{2}(-[a-z]+)+-\d$/;
 
 /** The default `onFailure` line, followed by one space and the reason. */
 export const COGNITO_FAILURE_LOG = "tempo-auth: cognito legacy verify failed";
+/** The longest reason from a Cognito `__type` that reaches the log (M-3 of the plan 9b2 final review). */
+const REASON_MAX = 80;
 const logFailure = (reason: string) => console.error(`${COGNITO_FAILURE_LOG} ${reason}`);
 
 async function secretHash(secret: string, message: string): Promise<string> {
@@ -170,6 +172,14 @@ export function createCognitoLegacyVerify(
     keep(done);
   };
 
+  /**
+   * The reason goes to the log line. `__type` comes from the network, so it
+   * is cut to REASON_MAX characters and loses every control character (a
+   * line break would forge a second log line).
+   */
+  const reasonOf = (type: string) =>
+    type.replace(/\p{Cc}/gu, "").slice(0, REASON_MAX) || "malformed";
+
   /** `true`, or the failure reason. */
   async function ask(email: string, password: string, signal: AbortSignal): Promise<true | string> {
     const params: Record<string, string> = { USERNAME: email, PASSWORD: password };
@@ -208,7 +218,7 @@ export function createCognitoLegacyVerify(
     if (!res.ok) {
       // `__type` may carry a namespace prefix, for example "com.amazonaws...#NotAuthorizedException".
       const type = isObject(body) && typeof body.__type === "string" ? body.__type : "";
-      return type.split("#").pop() || "malformed";
+      return reasonOf(type.split("#").pop() ?? "");
     }
     if (!isObject(body)) return "malformed";
     if (body.ChallengeName !== undefined) return "challenge";

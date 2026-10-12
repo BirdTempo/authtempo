@@ -54,7 +54,11 @@ wait in order, and the gate never refuses. The gate is core's `deriveGate`
 (plan 9b2): one gate per isolate, which every seam of this package and the
 Better Auth seam of `@tempo-auth/compat-better-auth` share. An app that chains
 both seams still runs at most two derives at once. One Argon2id or scrypt
-derive holds up to 32 MiB.
+derive holds up to 32 MiB. The share holds only with one copy of
+`@tempo-auth/core` in the app: a second copy has a second gate, and a chain
+can then run four derives. This package and the compatibility package
+declare core as a peer dependency, so a package manager warns on a version
+that does not match. Keep one version of core.
 
 ## Cognito
 
@@ -88,7 +92,8 @@ password: {
   every imported user: Cognito answers `NotAuthorizedException` when the app
   client sets `PreventUserExistenceErrors` to `ENABLED`, and
   `UserNotFoundException` when it is `LEGACY` (AWS docs, read 2026-10-12).
-  Each such failure writes the default line below.
+  Without an `onFailure` of your own, each such failure writes the default
+  line below.
 - A pool with case-sensitive user names can refuse a lower-case address for a
   user stored as `Ada@Example.com`. Unverified whether the email alias follows
   that setting. Such a user must reset the password.

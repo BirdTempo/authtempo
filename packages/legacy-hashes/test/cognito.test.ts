@@ -129,6 +129,19 @@ describe("createCognitoLegacyVerify", () => {
     }
   });
 
+  it("cuts a long __type to 80 characters and strips its control characters before the log (M-3)", async () => {
+    const forged = `Bad\nType\r\u0007\u009b${"x".repeat(200)}`;
+    const c = checkWith({ status: 400, body: { __type: `com.amazonaws#${forged}` } });
+    expect(await c.verify("ada@example.com", "pw", signal)).toBe(false);
+    await settle();
+    expect(c.reasons).toEqual([`BadType${"x".repeat(73)}`]);
+    // A __type of control characters only gives the fixed reason.
+    const only = checkWith({ status: 400, body: { __type: "\n\r\t" } });
+    expect(await only.verify("ada@example.com", "pw", signal)).toBe(false);
+    await settle();
+    expect(only.reasons).toEqual(["malformed"]);
+  });
+
   it("reports a misconfigured client by its type only, never the username or password", async () => {
     const c = checkWith({
       status: 400,
@@ -229,6 +242,34 @@ describe("createCognitoLegacyVerify", () => {
     expect(calls).toBe(1);
     await settle();
     expect(reasons).toEqual(["timeout", "timeout"]);
+  }, 1000);
+
+  it("keeps false when the fetch answers with tokens after the abort (parked Task 2 Minor)", async () => {
+    // This fetch ignores the signal and answers with tokens 30 ms after the
+    // call; the abort lands at 10 ms, so the answer is already false.
+    let late = false;
+    const fetch = (() =>
+      new Promise<Response>((resolve) =>
+        setTimeout(() => {
+          late = true;
+          resolve(Response.json(TOKENS));
+        }, 30),
+      )) as unknown as typeof globalThis.fetch;
+    const reasons: string[] = [];
+    const verify = createCognitoLegacyVerify({
+      region: "eu-west-1",
+      clientId: "abc",
+      onFailure: (reason) => reasons.push(reason),
+      fetch,
+    });
+    const controller = new AbortController();
+    const answer = verify("ada@example.com", "pw", controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    expect(await answer).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(late).toBe(true);
+    // One report, the timeout: the late true is never read.
+    expect(reasons).toEqual(["timeout"]);
   }, 1000);
 
   it("sends no request when the signal aborts during the secret hash", async () => {
@@ -412,6 +453,9 @@ describe("createCognitoLegacyVerify: the default onFailure and waitUntil (plan 9
     setTimeout(() => controller.abort(), 10);
     expect(await answer).toBe(false);
     expect(held).toHaveLength(2);
+    // The order is the code's: `keep(asked)` runs before `report(answer)`, so
+    // held[0] is the request in flight, which never settles here, and held[1]
+    // is the report.
     await held[1];
     expect(reasons).toEqual(["timeout"]);
   }, 1000);
