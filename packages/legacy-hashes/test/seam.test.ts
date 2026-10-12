@@ -3,12 +3,12 @@ import {
   createAuth,
   createMemoryAdapter,
   createPbkdf2PasswordHash,
+  deriveGate,
   type PasswordHashSeam,
 } from "@tempo-auth/core";
 import bcrypt from "bcryptjs";
 import { describe, expect, it, vi } from "vitest";
 import { type Derives, NOBLE_DERIVES } from "../src/derive.js";
-import { gated, gateRunning, MAX_CONCURRENT } from "../src/gate.js";
 import {
   encodeBase64,
   firescryptParamsValid,
@@ -269,30 +269,8 @@ describe("construction", () => {
   });
 });
 
-describe("the gate", () => {
-  it(`runs at most ${MAX_CONCURRENT} derives at once and runs every waiter`, async () => {
-    let peak = 0;
-    const release: Array<() => void> = [];
-    const jobs = Array.from({ length: 5 }, (_, i) =>
-      gated(async () => {
-        peak = Math.max(peak, gateRunning());
-        await new Promise<void>((r) => release.push(r));
-        return i;
-      }),
-    );
-    while (release.length < MAX_CONCURRENT) await Promise.resolve();
-    for (let done = 0; done < 5; done++) {
-      while (release.length === 0) await new Promise((r) => setTimeout(r, 1));
-      release.shift()?.();
-    }
-    expect(await Promise.all(jobs)).toEqual([0, 1, 2, 3, 4]);
-    expect(peak).toBe(MAX_CONCURRENT);
-    expect(gateRunning()).toBe(0);
-  });
-});
-
 describe("the seam runs its derives through the gate", () => {
-  it(`runs at most ${MAX_CONCURRENT} of four concurrent Argon2id verifies at once`, async () => {
+  it("runs at most deriveGate.max of four concurrent Argon2id verifies at once", async () => {
     let inFlight = 0;
     let peak = 0;
     const release: Array<() => void> = [];
@@ -309,10 +287,10 @@ describe("the seam runs its derives through the gate", () => {
     const seam = createLegacyPasswordHash({ formats: ["argon2id"], next: fast, derives });
     const v = VECTORS.argon2id;
     const answers = Array.from({ length: 4 }, () => seam.verify(v.password, v.stored));
-    while (release.length < MAX_CONCURRENT) await new Promise((r) => setTimeout(r, 1));
+    while (release.length < deriveGate.max) await new Promise((r) => setTimeout(r, 1));
     // Time for a third derive to start if the gate did not hold it.
     await new Promise((r) => setTimeout(r, 20));
-    expect(inFlight).toBe(MAX_CONCURRENT);
+    expect(inFlight).toBe(deriveGate.max);
     for (let done = 0; done < 4; done++) {
       while (release.length === 0) await new Promise((r) => setTimeout(r, 1));
       release.shift()?.();
@@ -320,8 +298,8 @@ describe("the seam runs its derives through the gate", () => {
     expect(await Promise.all(answers)).toEqual(
       Array.from({ length: 4 }, () => ({ ok: true, rehash: true })),
     );
-    expect(peak).toBe(MAX_CONCURRENT);
-    expect(gateRunning()).toBe(0);
+    expect(peak).toBe(deriveGate.max);
+    expect(deriveGate.running()).toBe(0);
   });
 });
 

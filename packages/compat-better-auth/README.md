@@ -63,8 +63,10 @@ and consumerb import some of them: remove those imports first.
 PBKDF2 on the first right sign-in. A legacy row verifies slower than a PBKDF2
 row until that sign-in rehashes it. So during the migration window the
 response time shows which accounts are not yet migrated. Each account loses
-this tell at its first right sign-in. At most two scrypt derives run at once
-per isolate; the others wait, and no sign-in is refused.
+this tell at its first right sign-in.
+At most two legacy derives run at once per isolate, also when the app chains
+`@tempo-auth/legacy-hashes` before this seam: both use core's `deriveGate`.
+The others wait, and no sign-in is refused.
 
 ## Storage: in place on the Better Auth tables
 

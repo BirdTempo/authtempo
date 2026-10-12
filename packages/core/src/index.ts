@@ -62,6 +62,12 @@ export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js"
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
 export { type Clock, systemClock } from "./primitives/clock.js";
+export {
+  createDeriveGate,
+  DERIVE_GATE_MAX,
+  type DeriveGate,
+  deriveGate,
+} from "./primitives/derive-gate.js";
 export { newId } from "./primitives/ids.js";
 export type { Result } from "./result.js";
 export {

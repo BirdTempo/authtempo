@@ -49,13 +49,12 @@ is base64 of 0 to 16 bytes. Another value stops the seam at construction.
 
 ## The gate
 
-At most two derives run at once per isolate; the rest wait in order, and the
-gate never refuses. The gate is module state, so every seam of this package in
-one isolate shares it. One Argon2id or scrypt derive holds up to 32 MiB.
-
-The Better Auth seam of `@tempo-auth/compat-better-auth` has its own gate of
-two. An app that chains both seams can run four derives at once, 128 MiB at
-the worst, which is the whole isolate. Chain only the seam your rows need.
+At most two derives of any legacy format run at once per isolate; the rest
+wait in order, and the gate never refuses. The gate is core's `deriveGate`
+(plan 9b2): one gate per isolate, which every seam of this package and the
+Better Auth seam of `@tempo-auth/compat-better-auth` share. An app that chains
+both seams still runs at most two derives at once. One Argon2id or scrypt
+derive holds up to 32 MiB.
 
 ## Cognito
 

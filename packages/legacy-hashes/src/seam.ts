@@ -1,4 +1,4 @@
-import type { PasswordHashSeam } from "@tempo-auth/core";
+import { deriveGate, type PasswordHashSeam } from "@tempo-auth/core";
 import {
   type Derives,
   decodeFirebase,
@@ -6,7 +6,6 @@ import {
   NOBLE_DERIVES,
   verifyParsed,
 } from "./derive.js";
-import { gated } from "./gate.js";
 import { LEGACY_FORMATS, type LegacyFormat, parseLegacyHash } from "./grammar.js";
 
 /**
@@ -53,11 +52,9 @@ export interface LegacyPasswordHashOptions {
  * plan 9's). Supabase (Go bcrypt), Firebase (firebase/scrypt), and Ory hash
  * the raw bytes, so NFKC here would refuse a right password.
  *
- * The gate is per isolate (module state in `gate.ts`), and every seam of
- * this package shares it. The Better Auth seam of plan 9 has its own gate.
- * Chained with `betterAuthPasswordHash()` as `next`, the two gates of two
- * each let up to four derives (128 MiB at the worst) run at once in one
- * isolate. One shared gate is an input for a later plan.
+ * Every derive runs through core's `deriveGate`, one gate per isolate that
+ * every legacy seam shares, also `betterAuthPasswordHash` chained as `next`.
+ * So at most two derives of any format run at once (plan 9b2).
  */
 export function createLegacyPasswordHash(options: LegacyPasswordHashOptions): PasswordHashSeam {
   const enabled = new Set<LegacyFormat>();
@@ -87,7 +84,7 @@ export function createLegacyPasswordHash(options: LegacyPasswordHashOptions): Pa
         return { ok: false, rehash: false };
       }
       try {
-        const ok = await gated(() => verifyParsed(derives, plain, parsed, firebase));
+        const ok = await deriveGate.run(() => verifyParsed(derives, plain, parsed, firebase));
         const truncated =
           parsed.format === "bcrypt" &&
           new TextEncoder().encode(plain).length > BCRYPT_MAX_PASSWORD_BYTES;
