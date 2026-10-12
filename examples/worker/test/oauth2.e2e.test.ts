@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { expect, it } from "vitest";
-import { TEST_ACCESS_TOKEN } from "../src/test-provider.js";
+import { TEST_ACCESS_TOKEN, TEST_CLIENT_SECRET } from "../src/test-provider.js";
 
 const BASE = "https://example.test";
 const ACCESS = TEST_ACCESS_TOKEN;
@@ -80,7 +80,7 @@ function tokenRequest(code: string, verifier: string): Promise<Response> {
     body: new URLSearchParams({
       code,
       code_verifier: verifier,
-      client_secret: "example-oauth-secret",
+      client_secret: TEST_CLIENT_SECRET,
     }),
   });
 }
@@ -92,7 +92,11 @@ it("the fake token endpoint refuses a wrong code_verifier (PKCE)", async () => {
 });
 
 it("the fake token endpoint spends a code once", async () => {
-  const verifier = "verifier-two-cccccccccccccccccccccccccccccccccccc";
+  // Random per run: the spent set lives as long as the isolate, so a fixed verifier would fail a second run in it.
+  const verifier = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
   const code = `ec_${await challengeOf(verifier)}`;
   const first = await tokenRequest(code, verifier);
   expect(await first.json()).toMatchObject({ access_token: TEST_ACCESS_TOKEN });

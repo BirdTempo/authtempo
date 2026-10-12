@@ -9,7 +9,7 @@ import type { OAuth2Entry, SocialProfile } from "@tempo-auth/core";
 export const TEST_PROVIDER = "example-oauth";
 export const TEST_ACCESS_TOKEN = "eat_example_access_token_0001";
 const PREFIX = "/__test/oauth";
-const CLIENT_SECRET = "example-oauth-secret";
+export const TEST_CLIENT_SECRET = "example-oauth-secret";
 // Real providers spend a code once. The fake must do the same, or the replay
 // test proves nothing about the provider. A code enters the set only after a
 // successful exchange.
@@ -22,7 +22,7 @@ export function testProvider(base: string): OAuth2Entry {
     authorizeUrl: `${base}${PREFIX}/authorize`,
     tokenUrl: `${base}${PREFIX}/token`,
     clientId: "example-oauth-client",
-    clientSecret: CLIENT_SECRET,
+    clientSecret: TEST_CLIENT_SECRET,
     scope: "profile email",
     async userinfo(accessToken, fetchFn): Promise<SocialProfile> {
       const res = await fetchFn(`${base}${PREFIX}/user`, {
@@ -73,7 +73,7 @@ export async function testProviderRoute(request: Request, url: URL): Promise<Res
     const verifier = form.get("code_verifier") ?? "";
     const code = form.get("code") ?? "";
     if (
-      form.get("client_secret") !== CLIENT_SECRET ||
+      form.get("client_secret") !== TEST_CLIENT_SECRET ||
       code !== `ec_${await s256(verifier)}` ||
       spentCodes.has(code)
     )
