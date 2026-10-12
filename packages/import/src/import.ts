@@ -23,8 +23,29 @@ import {
   type Source,
 } from "./types.js";
 
-/** Core's social providers (spec 8.3). Plan 9c adds others; until then their identities are dropped and listed. */
-const SOCIAL = new Set(["google", "apple"]);
+/**
+ * Core's social providers (spec 8.3 as amended by plan 9c), with the subject
+ * form of each, as core's preset answers it. A provider outside this map is
+ * dropped and listed as `identity:<provider>`. A subject outside its form is
+ * dropped and listed as `identity:<provider>:subject_form`: an identity that
+ * the preset can never answer would only hold the key against a real user.
+ * - github: the numeric user id as decimal text. Core's preset answers
+ *   `String(id)` for a positive safe integer (`social/github.ts`).
+ * - linkedin: LinkedIn's OIDC `sub`. It is pairwise per client id (the
+ *   discovery document's `subject_types_supported`, read 2026-10-12), so it
+ *   matches only while the app keeps the same LinkedIn client id. A reader
+ *   gives an id of the older LinkedIn API the name `linkedin_legacy`, which
+ *   this map drops.
+ */
+const SOCIAL: ReadonlyMap<string, ((subject: string) => boolean) | null> = new Map<
+  string,
+  ((subject: string) => boolean) | null
+>([
+  ["google", null],
+  ["apple", null],
+  ["github", (s) => /^[1-9][0-9]{0,15}$/.test(s) && Number.isSafeInteger(Number(s))],
+  ["linkedin", null],
+]);
 const RANK: Record<ImportRole, number> = { member: 1, admin: 2, owner: 3 };
 /** The longest image URL the importer keeps (M-4 of the Task 5 review). */
 const IMAGE_MAX = 2048;
@@ -319,6 +340,11 @@ function userRows(
   for (const i of r.identities) {
     if (!SOCIAL.has(i.provider)) {
       dropped.push(`identity:${i.provider}`);
+      continue;
+    }
+    const form = SOCIAL.get(i.provider);
+    if (form && !form(i.subject)) {
+      dropped.push(`identity:${i.provider}:subject_form`);
       continue;
     }
     if (identities.some((x) => x.provider === i.provider && x.subject === i.subject)) continue;

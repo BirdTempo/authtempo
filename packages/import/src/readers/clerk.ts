@@ -1,6 +1,6 @@
 import { csvRecords } from "../csv.js";
 import type { ImportOrganization, ImportUser, SkipReason, Source } from "../types.js";
-import { asArray, asRecord, noSourceIdUser, parseMillis, str } from "./common.js";
+import { asArray, asRecord, LINKEDIN_LEGACY, noSourceIdUser, parseMillis, str } from "./common.js";
 
 /**
  * Clerk: two files, joined on the user id. The dashboard CSV (Settings,
@@ -28,7 +28,18 @@ export interface ClerkExport {
 /** Clerk's two default roles (Clerk docs, read 2026-10-11). An org admin manages members and deletes the organization: core's owner. */
 export const CLERK_ROLES = { "org:admin": "owner", "org:member": "member" } as const;
 
-const PROVIDERS: Record<string, string> = { oauth_google: "google", oauth_apple: "apple" };
+/**
+ * Clerk's strategy names (SSO types reference, read 2026-10-12): `oauth_` and
+ * the provider. `oauth_github` becomes `github` by the prefix rule below.
+ * `oauth_linkedin_oidc` is LinkedIn's OIDC `sub`; `oauth_linkedin` is the
+ * older LinkedIn API (plan 9b2).
+ */
+const PROVIDERS: Record<string, string> = {
+  oauth_google: "google",
+  oauth_apple: "apple",
+  oauth_linkedin_oidc: "linkedin",
+  oauth_linkedin: LINKEDIN_LEGACY,
+};
 
 /**
  * The skip for an id that one file holds twice. No copy wins: an older row

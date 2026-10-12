@@ -1,6 +1,6 @@
 # @tempo-auth/import
 
-Moves users, social identities (Google and Apple), password hashes, Auth.js
+Moves users, social identities (Google, Apple, GitHub, and LinkedIn), password hashes, Auth.js
 passkeys, organizations, and members into tempo-auth (spec 17). No session
 moves from any source, and no MFA secret moves (spec 17.5). Passkeys move only
 from Auth.js. A Clerk, Supabase, Auth0, Firebase, or Cognito passkey needs a
@@ -12,8 +12,19 @@ tempo-auth-import <provider> [files] --formats <the seam's list> --postgres "$DA
 
 Run `--dry-run` first. It prints the report a real run prints. The importer
 writes only rows that a core flow writes: an address is verified only where
-the export says so, and a social identity other than Google or Apple is
-dropped and listed.
+the export says so, and a social identity other than Google, Apple, GitHub, or
+LinkedIn is dropped and listed.
+
+A GitHub identity imports only as GitHub's numeric user id; any other subject
+is dropped and listed as `identity:github:subject_form`. A LinkedIn identity
+imports only when the export marks it as LinkedIn's OpenID Connect `sub`:
+Supabase `linkedin_oidc`, Clerk `oauth_linkedin_oidc`, or an Auth.js account
+of type `oidc`. An id of the older LinkedIn API (Supabase `linkedin`, Clerk
+`oauth_linkedin`, an Auth.js account of type `oauth`, and every Auth0
+`linkedin` identity) is dropped and listed as `identity:linkedin_legacy`.
+LinkedIn's `sub` is pairwise per client id, so an imported LinkedIn identity
+links only while the app keeps the LinkedIn client id that the old system
+used. Firebase and Cognito have no built-in LinkedIn provider.
 
 `--formats` is required, and it has no default. Give it the `formats` list
 of the app's `createLegacyPasswordHash`, comma-separated, or `none` for an app
@@ -75,6 +86,9 @@ tempo-auth-import supabase --users users.csv --identities identities.csv --forma
   also a value the reader cannot read, such as `infinity`.
 - A phone-only user has no email and is skipped as `no_email`. Supabase
   passkeys do not move (spec 17.5).
+- The `github` provider imports as GitHub. The `linkedin_oidc` provider
+  imports as LinkedIn. The older `linkedin` provider is listed as
+  `identity:linkedin_legacy`.
 - Rows with Supabase's `$fbscrypt$` tag need `--firebase-signer-key` and
   `--firebase-salt-separator`, the same values as the seam's `firebase`
   option, and `firescrypt` in `--formats`. A row of another Firebase project
@@ -113,6 +127,9 @@ tempo-auth-import clerk --csv export.csv --users users.json [--organizations org
   user.
 - A user or a CSV row with no id is listed as `no_source_id`, a conflict. So
   is an organization with no id.
+- The `oauth_github` strategy imports as GitHub. The `oauth_linkedin_oidc`
+  strategy imports as LinkedIn. The older `oauth_linkedin` strategy is listed
+  as `identity:linkedin_legacy`.
 - Unverified: the unit of `created_at` (a value below 1e11 is read as
   seconds, else milliseconds), the `password_hasher` values of a real export,
   and the `banned` field (runbook item 3).
@@ -145,6 +162,9 @@ other top-level value stops the run.
   unmapped role becomes `member`. An organization with no owner gets its
   first admin as owner; with no admin it is skipped as `no_owner`.
 - A `blocked` value other than `false` skips the user as `banned`.
+- A `github` identity imports as GitHub. Every `linkedin` identity is listed
+  as `identity:linkedin_legacy`, because the export does not show whether its
+  id is the OpenID Connect `sub` (unverified on 2026-10-12).
 - A user line or an organization with no id is listed as `no_source_id`, a
   conflict.
 - Unverified: the hash algorithm (`$2b$10$` in every sample), the hash file's
@@ -169,6 +189,9 @@ tempo-auth-import firebase --users users.json --firebase-rounds 8 --firebase-mem
   sign-in with no report line. Sign in once with a known user before the
   cut-over.
 - A `disabled` value other than `false` skips the user.
+- A `github.com` provider imports as GitHub, with its `rawId`. Firebase has no
+  built-in LinkedIn provider. A custom `oidc.<name>` provider is dropped and
+  listed.
 - Unverified: the JSON type of `createdAt` and the `{ "users": [...] }`
   wrapper (runbook item 5).
 
@@ -205,6 +228,9 @@ rm tables.json
 - `--password-column` names the app's own column of `User`. A name that no
   row has stops the run.
 - Account rows other than `oauth` and `oidc` are dropped and listed.
+- A `github` account imports as GitHub. A `linkedin` account of type `oidc`
+  imports as LinkedIn. A `linkedin` account of type `oauth` is listed as
+  `identity:linkedin_legacy`.
 
 ### Cognito
 

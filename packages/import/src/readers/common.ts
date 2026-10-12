@@ -58,6 +58,15 @@ export function asArray(v: unknown): unknown[] {
 }
 
 /**
+ * The provider name a reader gives an identity of the older LinkedIn API
+ * (the `r_liteprofile` member id), as opposed to the OIDC `sub` that core's
+ * LinkedIn preset answers. No id form tells the two apart, so the reader
+ * decides by the export's provider key. The importer drops this name and
+ * lists it as `identity:linkedin_legacy` (plan 9b2).
+ */
+export const LINKEDIN_LEGACY = "linkedin_legacy";
+
+/**
  * The record for a user row with no provider id. It has no import key, so it
  * is skipped as `no_source_id`, a conflict (the CLI exits 1), and never
  * dropped in silence. `where` names the row, for example "csv row 3", so the

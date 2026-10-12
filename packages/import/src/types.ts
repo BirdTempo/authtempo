@@ -103,7 +103,7 @@ export interface ImportUser {
   image: string | null;
   /** Null when the export has no created date; the import time is used. */
   createdAt: Date | null;
-  /** Social identities. A provider other than google and apple is dropped and listed. */
+  /** Social identities. A provider other than google, apple, github, and linkedin is dropped and listed, and so is a subject outside the provider's form (plan 9b2). */
   identities: { provider: string; subject: string }[];
   /**
    * A tagged legacy hash (`$2b$...`), `LEGACY_VERIFY_HASH` (Cognito), a

@@ -1,7 +1,7 @@
 import type { FirebaseHashConfig } from "@tempo-auth/legacy-hashes";
 import { csvRecords, parseCsv } from "../csv.js";
 import type { ImportUser, Source } from "../types.js";
-import { asRecord, noSourceIdUser, parseTime } from "./common.js";
+import { asRecord, LINKEDIN_LEGACY, noSourceIdUser, parseTime } from "./common.js";
 
 /**
  * Supabase Auth: two CSV files from the project's Postgres, made with the
@@ -116,6 +116,17 @@ function requireColumns(file: string, text: string, columns: readonly string[]):
       );
 }
 
+/**
+ * Supabase provider names that differ from core's. `linkedin_oidc` is the
+ * LinkedIn provider; the older `linkedin` provider was disabled and then
+ * removed on 2024-01-04 (Supabase "Login with LinkedIn", read 2026-10-12), so
+ * its rows hold ids of the older API. `github` keeps its name.
+ */
+const PROVIDERS: Readonly<Record<string, string>> = {
+  linkedin_oidc: "linkedin",
+  linkedin: LINKEDIN_LEGACY,
+};
+
 export function supabaseSource(input: SupabaseExport): Source {
   requireColumns("users", input.users, SUPABASE_USER_COLUMNS);
   requireColumns("identities", input.identities, SUPABASE_IDENTITY_COLUMNS);
@@ -129,7 +140,11 @@ export function supabaseSource(input: SupabaseExport): Source {
         // The email identity is the user's own address; the importer writes it from the user row.
         if (i.provider === "email" || !i.user_id || !i.provider_id) continue;
         const list = byUser.get(i.user_id) ?? [];
-        list.push({ provider: i.provider ?? "", subject: i.provider_id });
+        const provider = i.provider ?? "";
+        list.push({
+          provider: Object.hasOwn(PROVIDERS, provider) ? (PROVIDERS[provider] as string) : provider,
+          subject: i.provider_id,
+        });
         byUser.set(i.user_id, list);
       }
       for (const [n, u] of csvRecords(input.users).entries()) {

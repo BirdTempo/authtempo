@@ -118,7 +118,7 @@ describe("auth0Source", () => {
     );
     expect(
       (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
-    ).toEqual(["email:ann@example.com", "email:gus@example.com", "google:1035"]);
+    ).toEqual(["email:ann@example.com", "email:gus@example.com", "github:99", "google:1035"]);
     expect(report.refusedHashes).toEqual([
       { sourceId: "auth0|e9e9", format: "hash_email_mismatch" },
     ]);
@@ -139,7 +139,7 @@ describe("auth0Source", () => {
       "owner",
     ]);
     expect(report.dropped).toContainEqual({ sourceId: "org_a", item: "role:Editor->member" });
-    expect(report.dropped).toContainEqual({
+    expect(report.dropped).not.toContainEqual({
       sourceId: "google-oauth2|1035",
       item: "identity:github",
     });
@@ -268,5 +268,26 @@ describe("auth0Source edge rows", () => {
     });
     expect(report.exists.organization).toBe(0);
     expect(report.created.organization).toBe(0);
+  });
+});
+
+describe("auth0Source: GitHub and LinkedIn (plan 9b2)", () => {
+  it("reads a numeric GitHub user_id as text and lists every LinkedIn identity as linkedin_legacy", async () => {
+    const users = JSON.stringify({
+      user_id: "github|583231",
+      email: "oc@example.com",
+      email_verified: true,
+      identities: [
+        { provider: "github", user_id: 583231, isSocial: true },
+        { provider: "linkedin", user_id: "yrZCpj2Z12", isSocial: true },
+      ],
+    });
+    const r = await all(auth0Source({ users }));
+    expect(r[0]).toMatchObject({
+      identities: [
+        { provider: "github", subject: "583231" },
+        { provider: "linkedin_legacy", subject: "yrZCpj2Z12" },
+      ],
+    });
   });
 });

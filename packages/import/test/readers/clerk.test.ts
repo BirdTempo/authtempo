@@ -142,7 +142,10 @@ describe("clerkSource", () => {
     expect(
       (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
     ).toEqual(["email:kim@example.com", "google:g-77"]);
-    expect(report.dropped).toContainEqual({ sourceId: "user_2a", item: "identity:github" });
+    expect(report.dropped).toContainEqual({
+      sourceId: "user_2a",
+      item: "identity:github:subject_form",
+    });
     expect(report.dropped).toContainEqual({ sourceId: "user_2a", item: "passkey:no_public_key" });
   });
 });
@@ -301,5 +304,36 @@ describe("clerkSource edge rows", () => {
     const csv = "id,primary_email_address,password_digest,password_hasher\nt0,,,\nt1,,,\n";
     const r = await all(clerkSource({ csv, users }));
     expect(r.map((x) => (x.kind === "user" ? x.createdAt : "org"))).toEqual([null, null]);
+  });
+});
+
+describe("clerkSource: GitHub and LinkedIn (plan 9b2)", () => {
+  it("maps oauth_github, oauth_linkedin_oidc, and the older oauth_linkedin", async () => {
+    const csv = `${CLERK_CSV.split("\n")[0]}\nuser_9,Lin,,,lin@example.com,,lin@example.com,,,,,,\n`;
+    const users = JSON.stringify([
+      {
+        id: "user_9",
+        primary_email_address_id: "idn_9",
+        email_addresses: [
+          { id: "idn_9", email_address: "lin@example.com", verification: { status: "verified" } },
+        ],
+        external_accounts: [
+          { provider: "oauth_github", provider_user_id: "583231" },
+          { provider: "oauth_linkedin_oidc", provider_user_id: "782bbtaQ" },
+          { provider: "oauth_linkedin", provider_user_id: "yrZCpj2Z12" },
+        ],
+        password_enabled: false,
+        created_at: 1700000000000,
+      },
+    ]);
+    const r = await all(clerkSource({ csv, users }));
+    expect(r[0]).toMatchObject({
+      sourceId: "user_9",
+      identities: [
+        { provider: "github", subject: "583231" },
+        { provider: "linkedin", subject: "782bbtaQ" },
+        { provider: "linkedin_legacy", subject: "yrZCpj2Z12" },
+      ],
+    });
   });
 });

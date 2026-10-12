@@ -90,7 +90,10 @@ describe("authjsSource", () => {
     ).toEqual(["email:ida@example.com", "google:g-1"]);
     expect((await db.findMany("passkey", [])).map((p) => p.credentialId)).toEqual(["AQID-_8"]);
     expect(report.created).toMatchObject({ user: 2, password: 1, passkey: 1 });
-    expect(report.dropped).toContainEqual({ sourceId: "cuid2", item: "identity:github" });
+    expect(report.dropped).toContainEqual({
+      sourceId: "cuid2",
+      item: "identity:github:subject_form",
+    });
     expect(report.dropped).toContainEqual({ sourceId: "cuid2", item: "passkey:unverified" });
     expect(report.dropped).toContainEqual({ sourceId: "cuid1", item: "account:email" });
   });
@@ -247,5 +250,26 @@ describe("authjsSource: a user with no id (plan 9b2, Review Focus 4)", () => {
     expect(report.skipped).toEqual([
       { kind: "user", sourceId: "(none) users item 1", reason: "no_source_id" },
     ]);
+  });
+});
+
+describe("authjsSource: GitHub and LinkedIn (plan 9b2)", () => {
+  it("keeps a LinkedIn account of type oidc and lists one of type oauth as linkedin_legacy", async () => {
+    const tables = JSON.stringify({
+      users: [{ id: "c9", email: "lin@example.com", emailVerified: "2024-01-01T00:00:00.000Z" }],
+      accounts: [
+        { userId: "c9", type: "oauth", provider: "github", providerAccountId: "583231" },
+        { userId: "c9", type: "oidc", provider: "linkedin", providerAccountId: "782bbtaQ" },
+        { userId: "c9", type: "oauth", provider: "linkedin", providerAccountId: "yrZCpj2Z12" },
+      ],
+    });
+    const r = await all(authjsSource({ tables }));
+    expect(r[0]).toMatchObject({
+      identities: [
+        { provider: "github", subject: "583231" },
+        { provider: "linkedin", subject: "782bbtaQ" },
+        { provider: "linkedin_legacy", subject: "yrZCpj2Z12" },
+      ],
+    });
   });
 });

@@ -24,6 +24,9 @@ export interface FirebaseExport {
   hashConfig: { rounds: number; memCost: number };
 }
 
+// `github.com` becomes `github` by the `.com` rule below (plan 9b2). Firebase
+// has no built-in LinkedIn provider; a custom OIDC provider has the id
+// `oidc.<name>`, which the importer drops and lists.
 const PROVIDERS: Record<string, string> = { "google.com": "google", "apple.com": "apple" };
 
 function provider(id: string): string {

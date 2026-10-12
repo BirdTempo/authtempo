@@ -76,7 +76,7 @@ describe("importUsers", () => {
       false,
     );
     expect(report.dropped).toEqual([
-      { sourceId: "u1", item: "identity:github" },
+      { sourceId: "u1", item: "identity:github:subject_form" },
       { sourceId: "u2", item: "unverified_extra_credential:apple" },
     ]);
     expect(report.refusedHashes).toEqual([

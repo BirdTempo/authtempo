@@ -387,3 +387,42 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
     expect((await db.findMany("organization", [])).map((o) => o.slug)).toEqual(["tempo"]);
   });
 });
+
+describe("importUsers: GitHub and LinkedIn identities (plan 9b2)", () => {
+  it("keeps a GitHub numeric id and a LinkedIn sub, and drops and lists any other form", async () => {
+    const db = createMemoryAdapter();
+    const r = await importUsers(
+      db,
+      listSource([
+        user("a", {
+          identities: [
+            { provider: "github", subject: "583231" },
+            { provider: "linkedin", subject: "782bbtaQ" },
+          ],
+        }),
+        user("b", {
+          identities: [
+            { provider: "github", subject: "octocat" },
+            { provider: "github", subject: "0583231" },
+            { provider: "github", subject: "9007199254740993" },
+            { provider: "linkedin_legacy", subject: "yrZCpj2Z12" },
+          ],
+        }),
+      ]),
+      { formats: LEGACY_FORMATS, now },
+    );
+    const a = await importId("user", "supabase", "a");
+    expect(
+      (await db.findMany("identity", [{ field: "userId", op: "eq", value: a }]))
+        .map((i) => `${i.provider}:${i.subject}`)
+        .sort(),
+    ).toEqual(["email:a@example.com", "github:583231", "linkedin:782bbtaQ"]);
+    expect(r.dropped).toEqual([
+      { sourceId: "b", item: "identity:github:subject_form" },
+      { sourceId: "b", item: "identity:github:subject_form" },
+      { sourceId: "b", item: "identity:github:subject_form" },
+      { sourceId: "b", item: "identity:linkedin_legacy" },
+    ]);
+    expect(r.created).toMatchObject({ user: 2, identity: 4 });
+  });
+});

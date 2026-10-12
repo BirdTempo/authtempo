@@ -203,3 +203,27 @@ describe("firebaseSource: a user with no localId (plan 9b2, Review Focus 4)", ()
     ]);
   });
 });
+
+describe("firebaseSource: GitHub (plan 9b2)", () => {
+  it("maps github.com with its rawId, and the importer keeps it", async () => {
+    const users = JSON.stringify({
+      users: [
+        {
+          localId: "f9",
+          email: "oc@example.com",
+          emailVerified: true,
+          providerUserInfo: [{ providerId: "github.com", rawId: "583231" }],
+        },
+      ],
+    });
+    const db = createMemoryAdapter();
+    const report = await importUsers(db, firebaseSource({ users, hashConfig: CONFIG }), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.dropped).toEqual([]);
+    expect(
+      (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
+    ).toEqual(["email:oc@example.com", "github:583231"]);
+  });
+});
