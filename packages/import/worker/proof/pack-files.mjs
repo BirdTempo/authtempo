@@ -48,15 +48,18 @@ const NEEDED = [
 
 /** Each path this check made: a file, or the first folder it made on the way. */
 const made = [];
-for (const fake of FAKES) {
-  if (existsSync(fake)) continue;
-  const dir = mkdirSync(dirname(fake), { recursive: true });
-  writeFileSync(fake, "{}\n", { flag: "wx" });
-  made.push(dir ?? fake);
-}
 const failures = [];
 let paths = [];
 try {
+  // Inside the try: a throw on the second fake still removes the first.
+  for (const fake of FAKES) {
+    if (existsSync(fake)) continue;
+    const dir = mkdirSync(dirname(fake), { recursive: true });
+    // Recorded before the write, so a failed write still removes the folder.
+    if (dir !== undefined) made.push(dir);
+    writeFileSync(fake, "{}\n", { flag: "wx" });
+    if (dir === undefined) made.push(fake);
+  }
   const run = spawnSync("pnpm", ["pack", "--dry-run", "--json"], {
     cwd: pkg,
     encoding: "utf8",

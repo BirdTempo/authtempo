@@ -17,9 +17,13 @@ The Worker writes one of two sets of tables, chosen by the `TARGET` var:
   mapping that the app's `betterAuth` serves with Better Auth's default table
   and column names. It serves the default names only. An app with custom
   names (for example snake_case columns or plural tables) has no Worker path
-  yet: its ready check refuses those tables with `schema_mismatch` before
-  any write (`test/d1/import-d1-compat-names.test.ts`). The database must
-  hold the compatibility migrations first (step 2).
+  yet; do not run `compat` on it. The ready check reads only the unique
+  index on the account table's (issuer, accountId). A custom name of that
+  table or of those columns refuses with `schema_mismatch` before any write
+  (`test/d1/import-d1-compat-names.test.ts`). Any other custom name passes
+  the check, and the run stops with a D1 error at the first statement on
+  that table: the failing record writes no row, and the records before it
+  stay. The database must hold the compatibility migrations first (step 2).
 
 Any other value stops the Worker at start, and it writes nothing.
 
@@ -115,7 +119,10 @@ bundle reads the package's `dist`. `proof/pack-files.mjs` checks the file
 list of a pack against the allowlist in `files` (`dist`, this README,
 `wrangler.jsonc`, `src`, `proof`). It fails on any other path, and on any
 path under `.wrangler/` (the local D1 copy and the dev bundle, both with the
-hashes) or `input/`. The package's `test` script runs both.
+hashes) or `input/`. The package's `test` script runs both. The proofs run
+in this repo only: `bundle-no-node.mjs` compares `dist` with `src/`, and
+`pack-files.mjs` packs the package folder, and no pack holds `src/`. They
+ship as the record of what was checked.
 
 Unverified (the owner runbook): a run against the real database with
 `"remote": true`, and a run with an input file of tens of megabytes.
