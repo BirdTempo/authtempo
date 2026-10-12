@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
+import type { OAuth2Entry } from "../src/social/oauth2.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 const base = {
@@ -99,6 +100,96 @@ describe("social config", () => {
         social: { apple: { clientId: "c", teamId: "T", keyId: "", privateKey: "pem" } },
       }),
     ).toThrow(/social.apple.keyId/);
+  });
+});
+
+describe("social.oauth2 (plan 9c)", () => {
+  const userinfo = async () => ({
+    subject: "s",
+    email: null,
+    emailVerified: false,
+    name: null,
+    image: null,
+  });
+  const entry = (over: Partial<OAuth2Entry> = {}): OAuth2Entry => ({
+    name: "acme",
+    label: "Continue with Acme",
+    authorizeUrl: "https://id.acme.example/authorize",
+    tokenUrl: "https://id.acme.example/token",
+    clientId: "c",
+    clientSecret: "s",
+    scope: "user",
+    userinfo,
+    ...over,
+  });
+  const build = (oauth2: OAuth2Entry[]) =>
+    resolveConfig({ ...base, social: { google: { clientId: "g", clientSecret: "s" }, oauth2 } });
+
+  it("builds google first, then the entries in order, each with its kind and label", () => {
+    const c = build([entry(), entry({ name: "beta-2", label: "Beta" })]);
+    expect(c.social.providers.map((p) => [p.name, p.kind, p.label])).toEqual([
+      ["google", "oidc", "Continue with Google"],
+      ["acme", "oauth2", "Continue with Acme"],
+      ["beta-2", "oauth2", "Beta"],
+    ]);
+  });
+
+  it("refuses a name that fails the rule (Review Focus 2)", () => {
+    for (const name of ["Acme", "1acme", "a_b", "a/b", "", "a".repeat(33)])
+      expect(() => build([entry({ name })])).toThrow(/social\.oauth2\[0\]\.name must match/);
+    expect(build([entry({ name: "a".repeat(32) })]).social.providers).toHaveLength(2);
+  });
+
+  it("refuses a preset name, email, credential, and a name given twice (Review Focus 2)", () => {
+    for (const name of ["google", "apple", "github", "linkedin", "email", "credential"])
+      expect(() => build([entry({ name })])).toThrow(
+        new RegExp(`social\\.oauth2\\[0\\]\\.name ${name} is reserved`),
+      );
+    expect(() => build([entry(), entry()])).toThrow(
+      /social\.oauth2\[1\]\.name acme is given twice/,
+    );
+  });
+
+  it("refuses a bad label, scope, URL, secret, userinfo, or authorize parameter", () => {
+    for (const label of ["", "x".repeat(81), "a\nb"])
+      expect(() => build([entry({ label })])).toThrow(
+        /social\.oauth2\[0\]\.label must be 1 to 80 characters with no control character/,
+      );
+    for (const scope of [" ", "user\r\nx"])
+      expect(() => build([entry({ scope })])).toThrow(
+        /social\.oauth2\[0\]\.scope must be a non-empty string with no control character/,
+      );
+    expect(() => build([entry({ authorizeUrl: "http://id.acme.example/authorize" })])).toThrow(
+      /social\.oauth2\[0\]\.authorizeUrl must be an https URL/,
+    );
+    expect(() => build([entry({ tokenUrl: "not a url" })])).toThrow(
+      /social\.oauth2\[0\]\.tokenUrl must be an https URL/,
+    );
+    expect(() => build([entry({ clientSecret: "" })])).toThrow(
+      /social\.oauth2\[0\]\.clientSecret must be a non-empty string/,
+    );
+    expect(() => build([{ ...entry(), userinfo: undefined } as unknown as OAuth2Entry])).toThrow(
+      /social\.oauth2\[0\]\.userinfo must be a function/,
+    );
+    for (const key of [
+      "client_id",
+      "redirect_uri",
+      "response_type",
+      "scope",
+      "state",
+      "nonce",
+      "code_challenge",
+      "code_challenge_method",
+    ])
+      expect(() => build([entry({ authorizeParams: { [key]: "x" } })])).toThrow(
+        new RegExp(`social\\.oauth2\\[0\\]\\.authorizeParams\\.${key} is set by core`),
+      );
+    expect(() => build([entry({ authorizeParams: { prompt: "a\nb" } })])).toThrow(
+      /social\.oauth2\[0\]\.authorizeParams\.prompt must be a string with no control character/,
+    );
+    expect(() =>
+      resolveConfig({ ...base, social: { oauth2: {} as unknown as OAuth2Entry[] } }),
+    ).toThrow(/social\.oauth2 must be a list/);
   });
 });
 

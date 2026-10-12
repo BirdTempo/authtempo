@@ -16,7 +16,14 @@ import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/passwor
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
-import type { Provider } from "./social/provider.js";
+import { type OAuth2Entry, oauth2Provider } from "./social/oauth2.js";
+import {
+  CORE_AUTHORIZE_PARAMS,
+  type ConfiguredProvider,
+  isHttpsUrl,
+  PROVIDER_NAME_RE,
+  RESERVED_PROVIDER_NAMES,
+} from "./social/provider.js";
 import type { StorageAdapter } from "./storage/port.js";
 
 export interface MailMessage {
@@ -84,7 +91,14 @@ export interface AuthConfig {
   social?: {
     google?: GoogleConfig;
     apple?: AppleConfig;
-    /** The fetch for the token exchange and the JWKS. Default: the global fetch. Tests inject one. */
+    /**
+     * Providers that issue no ID token (plan 9c). Each entry's `userinfo`
+     * answers the profile from the access token. Core refuses a name that
+     * fails `^[a-z][a-z0-9-]{0,31}$`, a preset name, `email`, `credential`,
+     * and a name given twice.
+     */
+    oauth2?: OAuth2Entry[];
+    /** The fetch for every provider call. Default: the global fetch. Tests inject one. */
     fetch?: typeof fetch;
   };
   /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
@@ -188,7 +202,7 @@ export interface ResolvedConfig {
     linkBuilder: (token: string, next: string) => string;
     confirmPage: (input: ConfirmPageInput) => string;
   };
-  social: { providers: Provider[]; fetch: typeof fetch };
+  social: { providers: ConfiguredProvider[]; fetch: typeof fetch };
   jwt: JwtSeam;
   passkey: { rpID: string; rpName: string; origins: string[] } | null;
   webauthn: WebAuthnSeam;
@@ -381,20 +395,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("basePath must start with / and not end with /");
   }
   const clock = input.clock ?? systemClock;
-  const providers: Provider[] = [];
-  if (input.social?.google) {
-    requireFields("social.google", input.social.google, ["clientId", "clientSecret"]);
-    providers.push(googleProvider(input.social.google));
-  }
-  if (input.social?.apple) {
-    requireFields("social.apple", input.social.apple, [
-      "clientId",
-      "teamId",
-      "keyId",
-      "privateKey",
-    ]);
-    providers.push(appleProvider(input.social.apple));
-  }
+  const providers = socialProviders(input.social);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
   const fetchFn = input.social?.fetch ?? globalThis.fetch.bind(globalThis);
   let passkey: ResolvedConfig["passkey"] = null;
@@ -503,4 +504,79 @@ function requireFields<T extends object>(path: string, obj: T, keys: (keyof T & 
     if (typeof v !== "string" || v.length === 0)
       throw new ConfigError(`${path}.${key} must be a non-empty string`);
   }
+}
+
+const LABEL_MAX = 80;
+
+/** `undefined` gives an empty list; anything that is not an array throws. */
+function listOf<T>(path: string, value: T[] | undefined): T[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new ConfigError(`${path} must be a list`);
+  return value;
+}
+
+/**
+ * The configured providers: google, apple, then the list entries in order.
+ * Refuses every entry that could break a flow rule (plan 9c).
+ */
+function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
+  const providers: ConfiguredProvider[] = [];
+  if (social?.google) {
+    requireFields("social.google", social.google, ["clientId", "clientSecret"]);
+    providers.push(googleProvider(social.google));
+  }
+  if (social?.apple) {
+    requireFields("social.apple", social.apple, ["clientId", "teamId", "keyId", "privateKey"]);
+    providers.push(appleProvider(social.apple));
+  }
+  const names = new Set<string>();
+  const listName = (path: string, name: unknown) => {
+    if (typeof name !== "string" || !PROVIDER_NAME_RE.test(name))
+      throw new ConfigError(`${path}.name must match ${PROVIDER_NAME_RE.source}`);
+    if (RESERVED_PROVIDER_NAMES.has(name))
+      throw new ConfigError(
+        `${path}.name ${name} is reserved: google, apple, github, and linkedin are presets, and email and credential are identity kinds`,
+      );
+    if (names.has(name)) throw new ConfigError(`${path}.name ${name} is given twice`);
+    names.add(name);
+  };
+  const label = (path: string, value: unknown) => {
+    if (
+      typeof value !== "string" ||
+      value.length < 1 ||
+      value.length > LABEL_MAX ||
+      hasControlChar(value)
+    )
+      throw new ConfigError(
+        `${path}.label must be 1 to ${LABEL_MAX} characters with no control character`,
+      );
+  };
+  const scope = (path: string, value: unknown) => {
+    if (typeof value !== "string" || value.trim().length === 0 || hasControlChar(value))
+      throw new ConfigError(`${path}.scope must be a non-empty string with no control character`);
+  };
+  const https = (path: string, value: unknown) => {
+    if (!isHttpsUrl(value)) throw new ConfigError(`${path} must be an https URL`);
+  };
+  for (const [i, e] of listOf("social.oauth2", social?.oauth2).entries()) {
+    const path = `social.oauth2[${i}]`;
+    listName(path, e.name);
+    label(path, e.label);
+    requireFields(path, e, ["clientId", "clientSecret"]);
+    scope(path, e.scope);
+    https(`${path}.authorizeUrl`, e.authorizeUrl);
+    https(`${path}.tokenUrl`, e.tokenUrl);
+    if (typeof e.userinfo !== "function")
+      throw new ConfigError(`${path}.userinfo must be a function`);
+    for (const [key, value] of Object.entries(e.authorizeParams ?? {})) {
+      if (CORE_AUTHORIZE_PARAMS.has(key))
+        throw new ConfigError(`${path}.authorizeParams.${key} is set by core`);
+      if (typeof value !== "string" || hasControlChar(value))
+        throw new ConfigError(
+          `${path}.authorizeParams.${key} must be a string with no control character`,
+        );
+    }
+    providers.push(oauth2Provider(e));
+  }
+  return providers;
 }
