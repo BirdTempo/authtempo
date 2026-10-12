@@ -15,6 +15,7 @@ import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
+import { type GitHubConfig, githubProvider } from "./social/github.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
 import { type OAuth2Entry, oauth2Provider } from "./social/oauth2.js";
 import { isIssuer, type OidcEntry, oidcProvider } from "./social/oidc.js";
@@ -92,6 +93,8 @@ export interface AuthConfig {
   social?: {
     google?: GoogleConfig;
     apple?: AppleConfig;
+    /** GitHub, an oauth2 preset with scope `read:user user:email` (plan 9c). */
+    github?: GitHubConfig;
     /**
      * OpenID Connect providers (plan 9c). An entry with no `endpoints` reads
      * `<issuer>/.well-known/openid-configuration` on its first start and
@@ -545,6 +548,10 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
   if (social?.apple) {
     requireFields("social.apple", social.apple, ["clientId", "teamId", "keyId", "privateKey"]);
     providers.push(appleProvider(social.apple));
+  }
+  if (social?.github) {
+    requireFields("social.github", social.github, ["clientId", "clientSecret"]);
+    providers.push(githubProvider(social.github));
   }
   const names = new Set<string>();
   const listName = (path: string, name: unknown) => {

@@ -104,6 +104,7 @@ export {
   type WebAuthnSeam,
 } from "./seams/webauthn.js";
 export type { AppleConfig } from "./social/apple.js";
+export type { GitHubConfig } from "./social/github.js";
 export type { GoogleConfig } from "./social/google.js";
 export type { OAuth2Entry } from "./social/oauth2.js";
 export type { OidcEntry } from "./social/oidc.js";

@@ -81,6 +81,22 @@ describe("social config", () => {
     expect(typeof c.jwt.verifyIdToken).toBe("function");
     expect(typeof c.jwt.signES256).toBe("function");
   });
+  it("builds the github preset after google and apple, and refuses an empty field (plan 9c)", () => {
+    const c = resolveConfig({
+      ...base,
+      social: {
+        github: { clientId: "h", clientSecret: "hs" },
+        google: { clientId: "g", clientSecret: "s" },
+      },
+    });
+    expect(c.social.providers.map((p) => [p.name, p.kind])).toEqual([
+      ["google", "oidc"],
+      ["github", "oauth2"],
+    ]);
+    expect(() =>
+      resolveConfig({ ...base, social: { github: { clientId: "h", clientSecret: "" } } }),
+    ).toThrow(/social\.github\.clientSecret must be a non-empty string/);
+  });
   it("builds the configured providers in order google, apple", () => {
     const c = resolveConfig({
       ...base,
