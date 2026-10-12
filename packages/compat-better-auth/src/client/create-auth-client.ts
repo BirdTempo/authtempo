@@ -181,6 +181,14 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
   const keepToken = (token: string) => {
     if (expo && storageKey) expo.storage.setItem(storageKey, token);
   };
+  // The server answered, but the token store's setItem threw. Answer it. A rejection would reach
+  // an app that awaits the call with no catch.
+  const tokenStoreError = (e: unknown) =>
+    clientError(
+      "UNEXPECTED_RESPONSE",
+      0,
+      `tempo-auth compat: the token store failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
   const dropToken = () => {
     if (expo && storageKey) expo.storage.setItem(storageKey, "");
   };
@@ -221,13 +229,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
       try {
         data = map(r.value);
       } catch (e) {
-        // The server answered, but the token store's setItem threw (the one step of a map that
-        // can throw). Answer it. A rejection would reach an app that awaits the call with no catch.
-        const error = clientError(
-          "UNEXPECTED_RESPONSE",
-          0,
-          `tempo-auth compat: the token store failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        const error = tokenStoreError(e);
         const seen = lastOk as Seen | null;
         if (fo.onError)
           await fo.onError({
@@ -296,7 +298,18 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         error: handoffError(r),
       };
     }
-    keepToken(r.value.token);
+    try {
+      keepToken(r.value.token);
+    } catch (e) {
+      const error = tokenStoreError(e);
+      if (fo.onError)
+        await fo.onError({
+          error,
+          response: null,
+          request: { url: `${origin}${basePath}/handoff/redeem`, method: "POST" },
+        });
+      return { data: null, error };
+    }
     store.refetchIfStarted();
     return { data: { url: `${origin}${basePath}/handoff/start`, redirect: false }, error: null };
   }
