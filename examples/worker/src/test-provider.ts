@@ -10,6 +10,10 @@ export const TEST_PROVIDER = "example-oauth";
 export const TEST_ACCESS_TOKEN = "eat_example_access_token_0001";
 const PREFIX = "/__test/oauth";
 const CLIENT_SECRET = "example-oauth-secret";
+// Real providers spend a code once. The fake must do the same, or the replay
+// test proves nothing about the provider. A code enters the set only after a
+// successful exchange.
+const spentCodes = new Set<string>();
 
 export function testProvider(base: string): OAuth2Entry {
   return {
@@ -67,11 +71,14 @@ export async function testProviderRoute(request: Request, url: URL): Promise<Res
   if (url.pathname === `${PREFIX}/token` && request.method === "POST") {
     const form = new URLSearchParams(await request.text());
     const verifier = form.get("code_verifier") ?? "";
+    const code = form.get("code") ?? "";
     if (
       form.get("client_secret") !== CLIENT_SECRET ||
-      form.get("code") !== `ec_${await s256(verifier)}`
+      code !== `ec_${await s256(verifier)}` ||
+      spentCodes.has(code)
     )
       return Response.json({ error: "bad_verification_code" });
+    spentCodes.add(code);
     return Response.json({ access_token: TEST_ACCESS_TOKEN, token_type: "bearer" });
   }
   if (url.pathname === `${PREFIX}/user`) {

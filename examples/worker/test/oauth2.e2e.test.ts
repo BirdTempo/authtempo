@@ -1,9 +1,9 @@
 import { env, SELF } from "cloudflare:test";
 import { expect, it } from "vitest";
+import { TEST_ACCESS_TOKEN } from "../src/test-provider.js";
 
 const BASE = "https://example.test";
-// The value of TEST_ACCESS_TOKEN in src/test-provider.ts.
-const ACCESS = "eat_example_access_token_0001";
+const ACCESS = TEST_ACCESS_TOKEN;
 // An IP of its own, so the social start limit that other e2e files use does not count here.
 const IP = { "cf-connecting-ip": "203.0.113.90" };
 
@@ -61,4 +61,41 @@ it("signs in through an oauth2 provider end to end on D1, refuses a replay, and 
     const rows = await env.DB.prepare(`SELECT * FROM "${name}"`).all();
     expect(JSON.stringify(rows.results)).not.toContain(ACCESS);
   }
+});
+
+async function challengeOf(verifier: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+  );
+  return btoa(String.fromCharCode(...digest))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function tokenRequest(code: string, verifier: string): Promise<Response> {
+  return SELF.fetch(`${BASE}/__test/oauth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      code_verifier: verifier,
+      client_secret: "example-oauth-secret",
+    }),
+  });
+}
+
+it("the fake token endpoint refuses a wrong code_verifier (PKCE)", async () => {
+  const code = `ec_${await challengeOf("verifier-one-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")}`;
+  const res = await tokenRequest(code, "a-different-verifier-bbbbbbbbbbbbbbbbbbbbbbbbbb");
+  expect(await res.json()).toEqual({ error: "bad_verification_code" });
+});
+
+it("the fake token endpoint spends a code once", async () => {
+  const verifier = "verifier-two-cccccccccccccccccccccccccccccccccccc";
+  const code = `ec_${await challengeOf(verifier)}`;
+  const first = await tokenRequest(code, verifier);
+  expect(await first.json()).toMatchObject({ access_token: TEST_ACCESS_TOKEN });
+  const second = await tokenRequest(code, verifier);
+  expect(await second.json()).toEqual({ error: "bad_verification_code" });
 });
