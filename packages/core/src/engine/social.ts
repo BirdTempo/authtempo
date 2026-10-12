@@ -13,6 +13,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import {
   buildQuery,
+  type ConfiguredProvider,
   type OAuth2Provider,
   type OidcProvider,
   PROVIDER_TIMEOUT_MS,
@@ -71,8 +72,16 @@ interface StateData {
   next: string;
 }
 
-function findProvider(config: ResolvedConfig, name: string): Provider | undefined {
+function findProvider(config: ResolvedConfig, name: string): ConfiguredProvider | undefined {
   return config.social.providers.find((p) => p.name === name);
+}
+
+/** The provider with its endpoints. A discovery entry reads them on first use (plan 9c). */
+async function resolveProvider(
+  config: ResolvedConfig,
+  entry: ConfiguredProvider,
+): Promise<Provider | null> {
+  return entry.kind === "oidc-discovery" ? entry.resolve(config.social.fetch) : entry;
 }
 
 function callbackUrl(config: ResolvedConfig, provider: { name: string }): string {
@@ -88,11 +97,14 @@ export async function startSocial(
   config: ResolvedConfig,
   input: SocialStart,
 ): Promise<Result<SocialStarted>> {
-  const provider = findProvider(config, input.provider);
-  if (!provider) return fail("not_found");
+  const entry = findProvider(config, input.provider);
+  if (!entry) return fail("not_found");
   if (!(await config.limiter.allow(`social-start:ip:${input.ip ?? "unknown"}`, START_LIMIT))) {
     return fail("rate_limited");
   }
+  // After the limit, so the limit bounds the discovery reads.
+  const provider = await resolveProvider(config, entry);
+  if (!provider) return fail("oauth_failed");
   const now = config.clock.now();
   const state = randomToken(OAUTH_STATE_PREFIX);
   const verifier = randomBase64Url(32);
@@ -139,8 +151,8 @@ export async function completeSocial(
   config: ResolvedConfig,
   input: SocialComplete,
 ): Promise<Result<{ token: string; next: string; user: UserRow }>> {
-  const provider = findProvider(config, input.provider);
-  if (!provider) return fail("not_found");
+  const entry = findProvider(config, input.provider);
+  if (!entry) return fail("not_found");
   const state = input.state ?? "";
   if (!STATE_RE.test(state)) return fail("invalid_token");
   const now = config.clock.now();
@@ -164,7 +176,7 @@ export async function completeSocial(
   }
   // From here the state is spent. Every failure below sends the person back
   // to start again, which is the safe direction.
-  if (row.identifier !== provider.name) return fail("invalid_token");
+  if (row.identifier !== entry.name) return fail("invalid_token");
   const data = row.data as StateData | null;
   if (!data || typeof data.verifier !== "string") return fail("invalid_token");
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash)) {
@@ -172,6 +184,8 @@ export async function completeSocial(
   }
   if (input.error) return fail("oauth_denied");
   if (!input.code) return fail("oauth_failed");
+  const provider = await resolveProvider(config, entry);
+  if (!provider) return fail("oauth_failed");
 
   const token = await exchangeCode(config, provider, input.code, data.verifier, now);
   if (token === null) return fail("oauth_failed");

@@ -3,6 +3,7 @@ import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/confi
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
+import type { OidcEntry } from "../src/social/oidc.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 const base = {
@@ -198,6 +199,88 @@ describe("social.oauth2 (plan 9c)", () => {
       expect(() =>
         build([entry({ authorizeParams: authorizeParams as unknown as Record<string, string> })]),
       ).toThrow(/social\.oauth2\[0\]\.authorizeParams must be an object/);
+  });
+});
+
+describe("social.oidc (plan 9c)", () => {
+  const oidc = (over: Partial<OidcEntry> = {}): OidcEntry => ({
+    name: "entra",
+    label: "Continue with Microsoft",
+    issuer: "https://login.acme.example/tenant-1/v2.0",
+    clientId: "c",
+    clientSecret: "s",
+    ...over,
+  });
+  const build = (list: OidcEntry[]) => resolveConfig({ ...base, social: { oidc: list } });
+  const endpoints = {
+    authorizeUrl: "https://login.acme.example/authorize",
+    tokenUrl: "https://login.acme.example/token",
+    jwksUrl: "https://login.acme.example/keys",
+  };
+
+  it("takes an issuer with a path or a trailing slash, and reads the kind from endpoints", () => {
+    const c = build([
+      oidc(),
+      oidc({ name: "auth0", issuer: "https://tenant.acme.example/" }),
+      oidc({ name: "fixed", endpoints }),
+    ]);
+    expect(c.social.providers.map((p) => [p.name, p.kind, p.scope])).toEqual([
+      ["entra", "oidc-discovery", "openid email profile"],
+      ["auth0", "oidc-discovery", "openid email profile"],
+      ["fixed", "oidc", "openid email profile"],
+    ]);
+  });
+
+  it("refuses an issuer that is not an https URL with no query, fragment, or credentials", () => {
+    for (const issuer of [
+      "http://login.acme.example",
+      "https://login.acme.example/?tenant=1",
+      "https://login.acme.example/#x",
+      "https://user:pass@login.acme.example",
+      "login.acme.example",
+    ])
+      expect(() => build([oidc({ issuer })])).toThrow(
+        /social\.oidc\[0\]\.issuer must be an https URL with no query, fragment, or credentials/,
+      );
+  });
+
+  it("refuses a scope without openid, an endpoint that is not https, and the name rule (Review Focus 2)", () => {
+    expect(() => build([oidc({ scope: "email profile" })])).toThrow(
+      /social\.oidc\[0\]\.scope must hold openid/,
+    );
+    expect(() =>
+      build([oidc({ endpoints: { ...endpoints, jwksUrl: "http://x.example/keys" } })]),
+    ).toThrow(/social\.oidc\[0\]\.endpoints\.jwksUrl must be an https URL/);
+    expect(() => build([oidc({ name: "linkedin" })])).toThrow(
+      /social\.oidc\[0\]\.name linkedin is reserved/,
+    );
+    expect(() => build([oidc({ label: "" })])).toThrow(/social\.oidc\[0\]\.label/);
+    expect(() =>
+      resolveConfig({
+        ...base,
+        social: {
+          oidc: [oidc()],
+          oauth2: [
+            {
+              name: "entra",
+              label: "Entra again",
+              authorizeUrl: "https://a.example/authorize",
+              tokenUrl: "https://a.example/token",
+              clientId: "c",
+              clientSecret: "s",
+              scope: "x",
+              userinfo: async () => ({
+                subject: "s",
+                email: null,
+                emailVerified: false,
+                name: null,
+                image: null,
+              }),
+            },
+          ],
+        },
+      }),
+    ).toThrow(/social\.oauth2\[0\]\.name entra is given twice/);
   });
 });
 

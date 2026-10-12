@@ -106,6 +106,7 @@ export {
 export type { AppleConfig } from "./social/apple.js";
 export type { GoogleConfig } from "./social/google.js";
 export type { OAuth2Entry } from "./social/oauth2.js";
+export type { OidcEntry } from "./social/oidc.js";
 export type { SocialProfile, SocialProviderName } from "./social/provider.js";
 export { createMemoryAdapter } from "./storage/memory.js";
 export {

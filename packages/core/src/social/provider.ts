@@ -110,8 +110,19 @@ export interface OAuth2Provider extends ProviderBase {
 
 export type Provider = OidcProvider | OAuth2Provider;
 
+/**
+ * An `oidc` list entry with no `endpoints` (plan 9c). The engine calls
+ * `resolve` on each start and callback. It reads the issuer's discovery
+ * document on the first call and keeps the provider for the life of the
+ * `createAuth` instance. A failure is not kept, so the next call reads again.
+ */
+export interface OidcDiscovery extends Omit<ProviderBase, "authorizeUrl" | "tokenUrl"> {
+  kind: "oidc-discovery";
+  resolve(fetch: typeof globalThis.fetch): Promise<OidcProvider | null>;
+}
+
 /** What the config holds for one provider. */
-export type ConfiguredProvider = Provider;
+export type ConfiguredProvider = Provider | OidcDiscovery;
 
 /**
  * A query string with `%20` for a space. `URLSearchParams` writes `+`, and

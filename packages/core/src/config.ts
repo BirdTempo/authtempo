@@ -17,6 +17,7 @@ import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js
 import { type AppleConfig, appleProvider } from "./social/apple.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
 import { type OAuth2Entry, oauth2Provider } from "./social/oauth2.js";
+import { isIssuer, type OidcEntry, oidcProvider } from "./social/oidc.js";
 import {
   CORE_AUTHORIZE_PARAMS,
   type ConfiguredProvider,
@@ -91,6 +92,12 @@ export interface AuthConfig {
   social?: {
     google?: GoogleConfig;
     apple?: AppleConfig;
+    /**
+     * OpenID Connect providers (plan 9c). An entry with no `endpoints` reads
+     * `<issuer>/.well-known/openid-configuration` on its first start and
+     * keeps it for the life of this instance. Set `endpoints` to never read it.
+     */
+    oidc?: OidcEntry[];
     /**
      * Providers that issue no ID token (plan 9c). Each entry's `userinfo`
      * answers the profile from the access token. Core refuses a name that
@@ -568,6 +575,27 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
   const https = (path: string, value: unknown) => {
     if (!isHttpsUrl(value)) throw new ConfigError(`${path} must be an https URL`);
   };
+  for (const [i, e] of listOf("social.oidc", social?.oidc).entries()) {
+    const path = `social.oidc[${i}]`;
+    listName(path, e.name);
+    label(path, e.label);
+    requireFields(path, e, ["clientId", "clientSecret"]);
+    if (!isIssuer(e.issuer))
+      throw new ConfigError(
+        `${path}.issuer must be an https URL with no query, fragment, or credentials`,
+      );
+    if (e.scope !== undefined) {
+      scope(path, e.scope);
+      if (!e.scope.split(" ").includes("openid"))
+        throw new ConfigError(`${path}.scope must hold openid, or the provider sends no ID token`);
+    }
+    if (e.endpoints !== undefined) {
+      https(`${path}.endpoints.authorizeUrl`, e.endpoints.authorizeUrl);
+      https(`${path}.endpoints.tokenUrl`, e.endpoints.tokenUrl);
+      https(`${path}.endpoints.jwksUrl`, e.endpoints.jwksUrl);
+    }
+    providers.push(oidcProvider(e));
+  }
   for (const [i, e] of listOf("social.oauth2", social?.oauth2).entries()) {
     const path = `social.oauth2[${i}]`;
     listName(path, e.name);
