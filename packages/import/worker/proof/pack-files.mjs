@@ -1,19 +1,40 @@
 // The file list of a pack of @tempo-auth/import (plan 9b2). Publication is
 // on hold; this check proves the `files` entry for the day it is not, with
 // no publish. pnpm 12.8.1 prints the list with `pnpm pack --dry-run --json`
-// and honors a `!` entry in `files` (checked 2026-10-12).
+// (checked 2026-10-12).
 //
-// It fails when the pack lacks a file that the Worker or the CLI needs, holds
-// a source or test file, or holds worker/input/import.local.json. That file
-// is git-ignored and holds every password hash of an import, and before plan
-// 9b2 a pack from a tree that had it shipped it. So the check makes the file
-// when none exists, and removes only a file it made.
+// `files` in package.json is an allowlist of the shipped paths: `dist`, the
+// Worker's README, config, and sources, and these proofs. It names no
+// folder that can hold local state. pnpm does not apply `.gitignore` inside
+// a folder that `files` names, so a `worker` entry shipped two git-ignored
+// folders (I-1 of the plan 9b2 final review):
+// - worker/.wrangler/: after a rehearsal, wrangler dev keeps the local D1
+//   copy with every imported hash in `state/`, and the dev bundle with the
+//   inlined input in `tmp/`.
+// - worker/input/: import.local.json holds every password hash of an import.
+//
+// The check fails when any packed path is outside the allowlist below, when
+// a path is under worker/.wrangler/, worker/input/, src/, or test/, or when
+// a file that the Worker or the CLI needs is absent. It makes a fake
+// worker/.wrangler/cache/cf.json and a fake worker/input/import.local.json
+// when they do not exist, so a tree with no rehearsal shows the leak too,
+// and it removes only what it made.
 import { spawnSync } from "node:child_process";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pkg = fileURLToPath(new URL("../..", import.meta.url));
-const local = fileURLToPath(new URL("../input/import.local.json", import.meta.url));
+const FAKES = [
+  fileURLToPath(new URL("../.wrangler/cache/cf.json", import.meta.url)),
+  fileURLToPath(new URL("../input/import.local.json", import.meta.url)),
+];
+/** The files a pack always holds (npm adds package.json and README.md). */
+const FILES = ["package.json", "README.md", "worker/README.md", "worker/wrangler.jsonc"];
+/** The folders whose every file ships. None of them holds local state. */
+const PREFIXES = ["dist/", "worker/src/", "worker/proof/"];
+/** Folders that must never ship. The allowlist already refuses them; the names make the failure clear. */
+const FORBIDDEN = ["worker/.wrangler/", "worker/input/", "src/", "test/"];
 const NEEDED = [
   "package.json",
   "dist/index.js",
@@ -23,11 +44,16 @@ const NEEDED = [
   "worker/src/index.ts",
   "worker/src/run.ts",
   "worker/src/input.d.ts",
-  "worker/input/import.json",
 ];
 
-const made = !existsSync(local);
-if (made) writeFileSync(local, "{}\n", { flag: "wx" });
+/** Each path this check made: a file, or the first folder it made on the way. */
+const made = [];
+for (const fake of FAKES) {
+  if (existsSync(fake)) continue;
+  const dir = mkdirSync(dirname(fake), { recursive: true });
+  writeFileSync(fake, "{}\n", { flag: "wx" });
+  made.push(dir ?? fake);
+}
 const failures = [];
 let paths = [];
 try {
@@ -44,18 +70,19 @@ try {
     for (const need of NEEDED)
       if (!paths.includes(need)) failures.push(`${need} is not in the pack`);
     for (const p of paths) {
-      if (p === "worker/input/import.local.json")
-        failures.push("the pack holds worker/input/import.local.json, the input with the hashes");
-      if (/^(src|test)\//.test(p)) failures.push(`the pack holds ${p}`);
+      const forbidden = FORBIDDEN.find((f) => p.startsWith(f));
+      if (forbidden) failures.push(`the pack holds ${p}, under ${forbidden}`);
+      else if (!FILES.includes(p) && !PREFIXES.some((f) => p.startsWith(f)))
+        failures.push(`the pack holds ${p}, outside the allowlist`);
     }
   }
 } finally {
-  if (made) rmSync(local, { force: true });
+  for (const p of made) rmSync(p, { recursive: true, force: true });
 }
 if (failures.length > 0) {
   console.error(`pack-files: FAIL: ${failures.join("; ")}`);
   process.exit(1);
 }
 console.log(
-  `pack-files: PASS, ${paths.length} packed file(s) checked, no input file and no source file`,
+  `pack-files: PASS, ${paths.length} packed file(s) checked, each inside the allowlist, no local state`,
 );

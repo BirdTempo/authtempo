@@ -128,15 +128,18 @@ describe("the D1 Worker's TARGET (plan 9b2)", () => {
       },
     });
     // Ada's row holds the Go bcrypt test vector, whose password is "allmine".
+    // The import wrote it as it is, so the sign-in below runs the legacy
+    // check and the rehash, not a PBKDF2 match.
+    const adaPassword = () =>
+      env.DB.prepare(
+        `SELECT a."password" FROM "account" a JOIN "user" u ON u."id" = a."userId" WHERE a."providerId" = 'credential' AND u."email" = 'ada@example.com'`,
+      ).first("password");
+    expect(await adaPassword()).toMatch(/^\$2a\$10\$/);
     const signedIn = await auth.api.signInEmail({
       body: { email: "ada@example.com", password: VECTORS.bcrypt2a.password },
     });
     expect(signedIn.token).toMatch(/^ts_/);
-    expect(
-      await env.DB.prepare(
-        `SELECT a."password" FROM "account" a JOIN "user" u ON u."id" = a."userId" WHERE a."providerId" = 'credential' AND u."email" = 'ada@example.com'`,
-      ).first("password"),
-    ).toMatch(/^pbkdf2-sha256\$1000\$/);
+    expect(await adaPassword()).toMatch(/^pbkdf2-sha256\$1000\$/);
     const second = await runImport(env.DB, { ...supabase, options }, "compat");
     expect(second.created).toEqual(NONE);
     expect(second.exists.user).toBe(7);

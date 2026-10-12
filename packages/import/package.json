@@ -14,8 +14,10 @@
   },
   "files": [
     "dist",
-    "worker",
-    "!worker/input/import.local.json"
+    "worker/README.md",
+    "worker/wrangler.jsonc",
+    "worker/src",
+    "worker/proof"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

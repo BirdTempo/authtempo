@@ -44,6 +44,12 @@ function newest(dir) {
   return max;
 }
 
+// The build must be newer than the change. The compare of modification times
+// holds because the package's `tsc -p tsconfig.json` runs with no
+// `incremental` setting (tsconfig.json and tsconfig.base.json, checked
+// 2026-10-12): each build writes every file of dist again, so dist/index.js
+// gets a new time on each build. With `incremental` on, tsc can skip an
+// unchanged file, and an old dist/index.js would read as stale.
 const distIndex = join(pkgDir, "dist", "index.js");
 let distTime = 0;
 try {
@@ -101,8 +107,8 @@ try {
   } catch {
     failures.push("wrangler wrote no metafile; scanned 0 inputs");
   }
-  const fromSrc = inputs.filter((p) => p.startsWith(join(pkgDir, "src") + "/"));
-  const fromDist = inputs.filter((p) => p.startsWith(join(pkgDir, "dist") + "/"));
+  const fromSrc = inputs.filter((p) => p.startsWith(`${join(pkgDir, "src")}/`));
+  const fromDist = inputs.filter((p) => p.startsWith(`${join(pkgDir, "dist")}/`));
   for (const p of fromSrc) failures.push(`the bundle reads ${p}, not the package entry`);
   if (fromDist.length === 0)
     failures.push("the bundle reads no file of dist; scanned 0 dist inputs");

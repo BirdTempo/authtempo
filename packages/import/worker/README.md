@@ -1,7 +1,8 @@
 # The D1 import
 
-Runs `importUsers` against a D1 database through core's D1 adapter, on your
-own machine. The Worker has no fetch handler, so it serves no route.
+Runs `importUsers` against a D1 database on your own machine: through
+core's D1 adapter for `TARGET=core`, or through the compatibility package's
+D1 storage for `TARGET=compat`. The Worker has no fetch handler, so it serves no route.
 
 WARNING: Do not deploy this Worker. A deploy uploads the input file, with the
 password hashes, to Cloudflare. The config sets no workers.dev URL, no preview
@@ -13,8 +14,12 @@ The Worker writes one of two sets of tables, chosen by the `TARGET` var:
 - `core` (the default): core's tables, through core's D1 adapter.
 - `compat`: an app's Better Auth 1.7 tables, through
   `@tempo-auth/compat-better-auth` (`betterAuthSchemaStorage`), the same
-  mapping that the app's `betterAuth` serves. The database must hold the
-  compatibility migrations first (step 2).
+  mapping that the app's `betterAuth` serves with Better Auth's default table
+  and column names. It serves the default names only. An app with custom
+  names (for example snake_case columns or plural tables) has no Worker path
+  yet: its ready check refuses those tables with `schema_mismatch` before
+  any write (`test/d1/import-d1-compat-names.test.ts`). The database must
+  hold the compatibility migrations first (step 2).
 
 Any other value stops the Worker at start, and it writes nothing.
 
@@ -54,9 +59,12 @@ Run every command from `packages/import/worker`.
      refuses with `schema_mismatch` until they are applied.
 
 3. Write the input as a dry run. Use the same flags as a Postgres run, with
-   `--d1-bundle` in place of `--postgres`:
+   `--d1-bundle` in place of `--postgres`. A pack of the package holds no
+   `input` folder (it can hold the hashes), and the CLI does not make one, so
+   make it first in an installed copy:
 
    ```bash
+   mkdir -p input
    tempo-auth-import supabase --users users.csv --identities identities.csv \
      --formats bcrypt,argon2id --d1-bundle input/import.local.json --dry-run
    ```
@@ -82,10 +90,15 @@ Run every command from `packages/import/worker`.
    curl "http://127.0.0.1:8787/__scheduled"
    ```
 
-   Read the report: one line `{"tempoAuthImport": {...}, "target": "core", "status": 0}` in
-   the first terminal. `target` is `core` or `compat`. `status` is the CLI's exit status: 1 means a person
-   must look at the report. A run without `--var LOCAL_IMPORT:1` prints an
-   error and writes nothing.
+   Read the report in the first terminal. It is one line:
+
+   ```text
+   {"tempoAuthImport": {...}, "target": "core", "status": 0}
+   ```
+
+   `target` is `core` or `compat`. `status` is the CLI's exit status: 1
+   means a person must look at the report. A run without
+   `--var LOCAL_IMPORT:1` prints an error and writes nothing.
 6. When the dry run report is correct, run step 3 again without `--dry-run`.
    Do not stop wrangler dev: it rebuilds when the input file changes. Wait for
    the rebuild line, then run step 5 again. A second real run changes zero
@@ -99,8 +112,10 @@ D1 adapter, so it builds the same from this repo and from an installed
 package. It runs with Node.js compatibility off: `proof/bundle-no-node.mjs`
 bundles it with both flags, fails on any `node:` module, and fails unless the
 bundle reads the package's `dist`. `proof/pack-files.mjs` checks the file
-list of a pack, and fails if it holds `input/import.local.json`. The
-package's `test` script runs both.
+list of a pack against the allowlist in `files` (`dist`, this README,
+`wrangler.jsonc`, `src`, `proof`). It fails on any other path, and on any
+path under `.wrangler/` (the local D1 copy and the dev bundle, both with the
+hashes) or `input/`. The package's `test` script runs both.
 
 Unverified (the owner runbook): a run against the real database with
 `"remote": true`, and a run with an input file of tens of megabytes.
