@@ -115,7 +115,11 @@ export type { GoogleConfig } from "./social/google.js";
 export type { LinkedInConfig } from "./social/linkedin.js";
 export type { OAuth2Entry } from "./social/oauth2.js";
 export type { OidcEndpoints, OidcEntry } from "./social/oidc.js";
-export type { SocialProfile, SocialProviderName } from "./social/provider.js";
+export {
+  PROVIDER_NAME_RE,
+  type SocialProfile,
+  type SocialProviderName,
+} from "./social/provider.js";
 export { createMemoryAdapter } from "./storage/memory.js";
 export {
   type FindManyOptions,

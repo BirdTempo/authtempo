@@ -146,8 +146,20 @@ while `account` has no unique index on (issuer, accountId): the 1.7 file uses
 Better Auth's own index and adds none.
 
 A Better Auth date in SQLite's `YYYY-MM-DD HH:MM:SS` form has no time zone.
-On Workers it reads as UTC. Off Workers, for example in a Node test of the
-same code, it reads as local time.
+The storage reads it as UTC, as SQLite's date functions do, on Workers and
+off them (plan 9b2). A where clause and a sort still compare the stored text,
+so a row in that form sorts before an ISO row of the same second. A date text
+that is not a date answers `schema_mismatch`.
+
+A `credential` account row with a null `password` (Better Auth never writes
+one) reads as no password row: the sign-in answers `invalid_credentials`
+after the dummy verify, a reset writes a real hash, and the storage logs one
+line, `tempo-auth compat: a credential account row has no password; it reads
+as no password row (account <id>)`.
+
+On D1, do not delete a user or an organization inside a `transaction` of
+your own while its child rows exist: the foreign keys delete them, and a
+rollback does not bring them back (`@tempo-auth/adapter-d1` README).
 
 These D1 facts come from the local Workers pool only and are not verified on
 a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound

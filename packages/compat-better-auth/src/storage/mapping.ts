@@ -63,7 +63,14 @@ export const ISSUERS: Readonly<Record<string, string>> = {
   apple: "https://appleid.apple.com",
 };
 
-/** The issuer of a provider id. A provider with no named issuer is `local:oauth:<id>`. */
+/**
+ * The issuer of a provider id. A provider with no named issuer is
+ * `local:oauth:<id>` with the id through encodeURIComponent, as Better Auth
+ * 1.7 writes it. The SQL fill of migration 0001 writes the id raw. The two
+ * agree for every id that core's provider name rule allows
+ * (`PROVIDER_NAME_RE`, /^[a-z][a-z0-9-]{0,31}$/), because encodeURIComponent
+ * changes none of its characters. test/issuer.test.ts pins it (plan 9b2).
+ */
 export function issuerFor(provider: string): string {
   return Object.hasOwn(ISSUERS, provider)
     ? (ISSUERS[provider] as string)
