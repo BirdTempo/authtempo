@@ -8,6 +8,16 @@ password hashes, to Cloudflare. The config sets no workers.dev URL, no preview
 URL, and no route, and the Worker refuses to run without `--var
 LOCAL_IMPORT:1`. These limit a deploy. They do not stop the upload.
 
+The Worker writes one of two sets of tables, chosen by the `TARGET` var:
+
+- `core` (the default): core's tables, through core's D1 adapter.
+- `compat`: an app's Better Auth 1.7 tables, through
+  `@tempo-auth/compat-better-auth` (`betterAuthSchemaStorage`), the same
+  mapping that the app's `betterAuth` serves. The database must hold the
+  compatibility migrations first (step 2).
+
+Any other value stops the Worker at start, and it writes nothing.
+
 The Worker reads `input/import.local.json`. That file is git-ignored, because
 it holds the password hashes and any Firebase signer key. The tracked
 `input/import.json` is a sample with no user in it: a dry run of an empty
@@ -37,6 +47,12 @@ Run every command from `packages/import/worker`.
      pnpm exec wrangler d1 migrations apply <database_name> --local
      ```
 
+   - For `TARGET=compat`, apply the compatibility package's migrations in the
+     app's folder, not core's: `migrations/d1/` of
+     `@tempo-auth/compat-better-auth` for Better Auth 1.7 tables, or
+     `migrations/d1-before-1.7/` for older tables (its README). The Worker
+     refuses with `schema_mismatch` until they are applied.
+
 3. Write the input as a dry run. Use the same flags as a Postgres run, with
    `--d1-bundle` in place of `--postgres`:
 
@@ -51,6 +67,12 @@ Run every command from `packages/import/worker`.
    pnpm exec wrangler dev --test-scheduled --ip 127.0.0.1 --var LOCAL_IMPORT:1
    ```
 
+   For the Better Auth tables, add `--var TARGET:compat`:
+
+   ```bash
+   pnpm exec wrangler dev --test-scheduled --ip 127.0.0.1 --var LOCAL_IMPORT:1 --var TARGET:compat
+   ```
+
    WARNING: Do not set `--ip 0.0.0.0`. Any machine on your network can then
    start the import.
 
@@ -60,8 +82,8 @@ Run every command from `packages/import/worker`.
    curl "http://127.0.0.1:8787/__scheduled"
    ```
 
-   Read the report: one line `{"tempoAuthImport": {...}, "status": 0}` in
-   the first terminal. `status` is the CLI's exit status: 1 means a person
+   Read the report: one line `{"tempoAuthImport": {...}, "target": "core", "status": 0}` in
+   the first terminal. `target` is `core` or `compat`. `status` is the CLI's exit status: 1 means a person
    must look at the report. A run without `--var LOCAL_IMPORT:1` prints an
    error and writes nothing.
 6. When the dry run report is correct, run step 3 again without `--dry-run`.

@@ -279,9 +279,9 @@ Cognito exports no hash, so this command needs no `--formats`.
   tables (`@tempo-auth/compat-better-auth`).
 - D1: `--d1-bundle <file>`, then the Worker script. `worker/README.md`
   names the bundle path and every step. The Worker prints the report and
-  the CLI's exit status. It writes core's tables only, through core's D1
-  adapter. An app that keeps the Better Auth tables on D1 has no import path
-  yet (a plan 9c input).
+  the CLI's exit status. It writes core's tables (`TARGET=core`, the
+  default), or an app's Better Auth 1.7 tables on D1 with `--var
+  TARGET:compat` (plan 9b2).
 
 CAUTION: the D1 bundle holds every password hash and, for Supabase, the
 Firebase signer key. The CLI writes it with mode 0600. Do not commit it, and
