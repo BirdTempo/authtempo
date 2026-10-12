@@ -943,6 +943,55 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     expect(await db.findMany("password", [])).toEqual([]);
   });
 
+  it("deletes its own rows when the pending password row is gone before the activation (round 3)", async () => {
+    const db = createMemoryAdapter();
+    await halfAuthjs(db);
+    const u1 = await importId("user", "authjs", "u1");
+    const before = await db.findMany("user", []);
+    // The guards and the conditional user update pass. Then a claim deletes
+    // the claimant's password rows, the pending one too, outside the
+    // transaction, before the activation statement runs.
+    let deleted = 0;
+    const view: StorageAdapter = {
+      ...db,
+      transaction: (fn) =>
+        db.transaction((tx) =>
+          fn({
+            ...tx,
+            update: async (model, where, data) => {
+              const n = await tx.update(model, where, data);
+              if (model === "user")
+                deleted = await db.delete("password", [{ field: "userId", op: "eq", value: u1 }]);
+              return n;
+            },
+          }),
+        ),
+    };
+    const record = user("u1", {
+      identities: [{ provider: "google", subject: "g-1" }],
+      password: { hash: BCRYPT },
+      passkeys: [passkey("c1")],
+    });
+    const r = await importUsers(view, named("authjs", [record]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(deleted).toBe(1);
+    expect(r.partial).toEqual([
+      {
+        kind: "user",
+        sourceId: "u1",
+        missing: ["identity:email", "identity:google", "password", "passkey"],
+        repairRefused: "claimed",
+      },
+    ]);
+    expect(r.repaired).toEqual([]);
+    expect(await rowsOf(db)).toEqual({ identity: [], password: [] });
+    expect(await db.findMany("passkey", [])).toEqual([]);
+    expect(await db.findMany("user", [])).toEqual(before);
+  });
+
   it("activates the repaired password row as its last statement", async () => {
     const db = createMemoryAdapter();
     await halfUser(db, false);
