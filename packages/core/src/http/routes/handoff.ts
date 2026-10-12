@@ -27,6 +27,10 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     apple: config.social.providers.some((p) => p.name === "apple"),
     passkey: config.passkey !== null,
     password: config.password !== null,
+    // Plan 9c: GitHub, LinkedIn, and each list entry, with the label the config gives.
+    providers: config.social.providers
+      .filter((p) => p.name !== "google" && p.name !== "apple")
+      .map((p) => ({ name: p.name, label: p.label })),
   };
   const page = (handoffId: string): Response => {
     const nonce = randomBase64Url(16);

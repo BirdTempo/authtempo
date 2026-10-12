@@ -342,6 +342,7 @@ describe("appName on the pages", () => {
         apple: false,
         passkey: false,
         password: false,
+        providers: [],
       },
       nonce: "n0nce",
       appName,
@@ -374,10 +375,36 @@ describe("sign-in page", () => {
       apple: false,
       passkey: true,
       password: false,
+      providers: [],
     },
     nonce: "n0nce",
     appName: "App",
   };
+  it("renders one button per list provider, with the name encoded in the path and the label escaped (plan 9c)", () => {
+    const html = defaultSignInPage({
+      ...input,
+      methods: {
+        ...input.methods,
+        providers: [
+          { name: "github", label: "Continue with GitHub" },
+          { name: "acme", label: `<img src=x onerror=alert(1)> & "Acme"` },
+          { name: `a b"`, label: "Odd" },
+        ],
+      },
+    });
+    const next = "next=%2Fauth%2Fhandoff%2Fcontinue%3Fh%3Dhs_abc";
+    expect(html).toContain(
+      `<a class="button" href="/auth/social/github/start?${next}">Continue with GitHub</a>`,
+    );
+    expect(html).toContain(
+      `<a class="button" href="/auth/social/acme/start?${next}">&lt;img src=x onerror=alert(1)&gt; &amp; &quot;Acme&quot;</a>`,
+    );
+    expect(html).toContain(`href="/auth/social/a%20b%22/start?${next}"`);
+    expect(html).not.toContain("<img");
+    // Google keeps its own flag and its place before the list.
+    expect(html.indexOf("/social/google/start")).toBeLessThan(html.indexOf("/social/github/start"));
+  });
+
   it("renders the enabled methods with the nonce and escaped values", () => {
     const html = defaultSignInPage(input);
     expect(html.startsWith("<!doctype html>")).toBe(true);
@@ -406,6 +433,7 @@ describe("sign-in page", () => {
         apple: false,
         passkey: false,
         password: true,
+        providers: [],
       },
       nonce: "n1",
       appName: "Acme",
@@ -434,6 +462,7 @@ describe("sign-in page", () => {
         apple: false,
         passkey: false,
         password: true,
+        providers: [],
       },
       nonce: "n1",
       appName: "Acme",
@@ -495,7 +524,14 @@ describe("sign-in page", () => {
     const html = defaultSignInPage({
       ...input,
       continuePath: `/auth/x"><script>`,
-      methods: { magicLink: true, google: false, apple: true, passkey: false, password: false },
+      methods: {
+        magicLink: true,
+        google: false,
+        apple: true,
+        passkey: false,
+        password: false,
+        providers: [],
+      },
     });
     expect(html).toContain(`data-continue="/auth/x&quot;&gt;&lt;script&gt;"`);
     expect(html).not.toContain(`<script>`);

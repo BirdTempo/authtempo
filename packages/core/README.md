@@ -26,6 +26,7 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/social/google/start`, `/social/apple/start` | `?next=` | 302 to the provider with a binding cookie; 302 to `/?auth_error=rate_limited` when limited. A route exists only for a configured provider |
 | GET | `/social/google/callback` | `?code&state` | 302 to `next` with the session cookie; 302 to `/?auth_error=<code>` on failure |
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
+| GET | `/social/<name>/start`, `/social/<name>/callback` | `?next=`; `?code&state` | the same answers as the Google routes, for `github`, `linkedin`, and each `social.oidc` and `social.oauth2` entry |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401 |
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
 | POST | `/passkey/register/options` | session | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified` |
@@ -143,7 +144,9 @@ Use `127.0.0.1`.
 `signInPage` replaces the page; the function gets the base path, the continue path,
 the enabled methods, and the script nonce, and must put the nonce on its
 script tag. The `methods` input has the flags `magicLink`, `google`,
-`apple`, `passkey`, and `password`. `password` is true when the config
+`apple`, `passkey`, and `password`, and `providers`, a list of
+`{ name, label }` for every configured provider other than Google and Apple.
+`password` is true when the config
 has a `password` section. `@tempo-auth/handoff` (plan 5b) does the app side.
 
 ## Social sign-in
@@ -154,6 +157,87 @@ Configure `social.google` with `{ clientId, clientSecret }` and
 developer portal. Core signs a five-minute Apple client secret on every
 token exchange, so nothing stored expires. Rotate the key in the portal
 and change `privateKey`.
+
+GitHub and LinkedIn are presets: `social.github` and `social.linkedin` each
+take `{ clientId, clientSecret }`. GitHub issues no ID token, so core reads
+`GET https://api.github.com/user` and `GET https://api.github.com/user/emails`
+with the access token, under the scope `read:user user:email`. The subject is
+the numeric GitHub id. The address counts as verified only when the primary
+address has `verified: true`. A person whose primary address is unverified
+gets a new unverified account, or `email_taken_unverified` when the address
+has an account. Core never links it. LinkedIn: core reads
+`GET https://api.linkedin.com/v2/userinfo` with the access token, under the
+scope `openid profile email`, as Better Auth does. The subject is LinkedIn's
+`sub`. Core ignores LinkedIn's ID token. Add the product "Sign In with
+LinkedIn using OpenID Connect" to the LinkedIn app.
+
+Any other provider is a list entry. `social.oidc` takes OpenID Connect
+providers, and `social.oauth2` takes providers that issue no ID token. A
+`name` matches `^[a-z][a-z0-9-]{0,31}$`, is unique across both lists, and is
+not `google`, `apple`, `github`, `linkedin`, `email`, or `credential`. The
+`label` is the button text on the sign-in page. An `oidc` entry reads
+`<issuer>/.well-known/openid-configuration` on its first start and keeps the
+endpoints for the life of the `createAuth` instance. The document's `issuer`
+must equal `issuer` exactly. Set `endpoints` and core never reads the
+document, so a sign-in does not depend on the provider's discovery at
+request time.
+
+```ts
+social: {
+  github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET },
+  oidc: [
+    {
+      name: "microsoft",
+      label: "Continue with Microsoft",
+      issuer: `https://login.microsoftonline.com/${env.ENTRA_TENANT_ID}/v2.0`,
+      clientId: env.ENTRA_CLIENT_ID,
+      clientSecret: env.ENTRA_CLIENT_SECRET,
+    },
+  ],
+  oauth2: [
+    {
+      name: "discord",
+      label: "Continue with Discord",
+      authorizeUrl: "https://discord.com/oauth2/authorize",
+      tokenUrl: "https://discord.com/api/oauth2/token",
+      clientId: env.DISCORD_CLIENT_ID,
+      clientSecret: env.DISCORD_CLIENT_SECRET,
+      scope: "identify email",
+      async userinfo(accessToken, fetch) {
+        const res = await fetch("https://discord.com/api/users/@me", {
+          headers: { authorization: `Bearer ${accessToken}` },
+        });
+        if (!res.ok) throw new Error(`discord answered ${res.status}`);
+        const u = (await res.json()) as {
+          id: string;
+          email?: string | null;
+          verified?: boolean;
+          global_name?: string | null;
+        };
+        return {
+          subject: u.id,
+          email: u.email ?? null,
+          emailVerified: u.verified === true,
+          name: u.global_name ?? null,
+          image: null,
+        };
+      },
+    },
+  ],
+},
+```
+
+The Microsoft and Discord entries are examples. Core does not test them.
+Check each endpoint and claim in the provider's documentation on the day you
+configure it. Microsoft Entra ID sends no `email_verified` claim by default,
+so an Entra sign-in never links to an existing account by its address.
+
+`userinfo` gets the access token and a fetch. Call the provider with that
+fetch: core puts a 10 s limit on it, and the whole step stops at 10 s.
+Answer `emailVerified: true` only when the provider says that this person
+proved the address. Core counts no other value as verified. Core never
+stores or logs the access token, and a failure logs the error name, never
+its message.
 
 Register `<baseURL><basePath>/social/<provider>/callback` as the redirect
 URI at the provider. The flow sends `state`, `nonce`, and a PKCE S256
@@ -452,8 +536,11 @@ Without a trigger, expired rows stay in the database.
 - The social binding cookie is `SameSite=None`, limited to the social
   path, 10 minutes. Apple posts its callback cross-site, and a Lax cookie
   is not sent on that post.
-- Social start is limited to 30 per IP per 15 minutes, in the same
-  per-isolate limiter as the magic link.
+- Social start is limited to 30 per IP per 15 minutes for every provider,
+  in the same per-isolate limiter as the magic link. An `oidc` entry reads
+  its discovery document after this limit.
+- Every call to a provider (the token exchange, the user info step, the
+  discovery read) stops after 10 s and answers `oauth_failed`.
 - The confirm page has no script, so a double click on its button sends
   two posts. The first consumes the token and sets the cookie. If the
   browser drops the first answer, the second answers `invalid_token`, and

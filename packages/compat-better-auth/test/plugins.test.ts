@@ -345,7 +345,14 @@ describe("expo()", () => {
     const input = {
       basePath: "/api/auth",
       continuePath: "/api/auth/handoff/continue?h=hs_1",
-      methods: { magicLink: true, google: false, apple: false, passkey: false, password: true },
+      methods: {
+        magicLink: true,
+        google: false,
+        apple: false,
+        passkey: false,
+        password: true,
+        providers: [],
+      },
       nonce: "n",
       appName: "App",
     };

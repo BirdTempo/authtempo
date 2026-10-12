@@ -18,6 +18,12 @@ export interface SignInPageInput {
     apple: boolean;
     passkey: boolean;
     password: boolean;
+    /**
+     * Every configured provider other than Google and Apple, in config order
+     * (plan 9c): GitHub, LinkedIn, and each list entry. The page escapes the
+     * label and encodes the name.
+     */
+    providers: Array<{ name: string; label: string }>;
   };
   /** The script nonce the policy header names. */
   nonce: string;
@@ -38,7 +44,7 @@ export function defaultSignInPage(input: SignInPageInput): string {
   const appName = escapeHtml(input.appName);
   const nextParam = encodeURIComponent(input.continuePath);
   const social = (name: string, label: string) =>
-    `<a class="button" href="${base}/social/${name}/start?next=${escapeHtml(nextParam)}">${label}</a>`;
+    `<a class="button" href="${base}/social/${escapeHtml(encodeURIComponent(name))}/start?next=${escapeHtml(nextParam)}">${escapeHtml(label)}</a>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -82,6 +88,7 @@ ${
 ${input.methods.passkey ? `<button id="passkey" type="button">Sign in with a passkey</button>` : ""}
 ${input.methods.google ? social("google", "Continue with Google") : ""}
 ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
+${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
 <p class="status" id="status"></p>
 </main>
 <script nonce="${escapeHtml(input.nonce)}">

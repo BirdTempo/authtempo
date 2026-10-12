@@ -426,6 +426,40 @@ describe("handoff routes", () => {
     expect(html).toContain(`id="passkey"`);
   });
 
+  it("lists every configured provider other than Google and Apple on the page (plan 9c)", async () => {
+    const auth = handoffAuth({
+      social: {
+        github: { clientId: "h", clientSecret: "s" },
+        oauth2: [
+          {
+            name: "acme",
+            label: "Continue with <Acme>",
+            authorizeUrl: "https://id.acme.example/authorize",
+            tokenUrl: "https://id.acme.example/token",
+            clientId: "c",
+            clientSecret: "s",
+            scope: "user",
+            userinfo: async () => ({
+              subject: "s",
+              email: null,
+              emailVerified: false,
+              name: null,
+              image: null,
+            }),
+          },
+        ],
+      },
+    });
+    const handle = createRouter(auth.config, handoffRoutes(auth.config));
+    const { q } = await challenge();
+    const html = await (await handle(get(`/auth/handoff/start?${q}`))).text();
+    expect(html).toContain("/social/github/start");
+    expect(html).toContain(">Continue with GitHub</a>");
+    expect(html).toContain("/social/acme/start");
+    expect(html).toContain(">Continue with &lt;Acme&gt;</a>");
+    expect(html).not.toContain("/social/google/start");
+  });
+
   async function signedIn(auth: ReturnType<typeof makeAuth>) {
     const user = await auth.seedUser("ada@example.com");
     const { token } = await createSession(auth.config, {
