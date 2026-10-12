@@ -129,6 +129,33 @@ describe("the github preset (plan 9c)", () => {
       await expect(githubUserinfo(ACCESS, f.fetchFn)).rejects.toThrow(/github/);
     }
   });
+
+  it("throws on a /user body that is not JSON, has no id, or is null", async () => {
+    const bodies: Array<() => Response> = [
+      () => new Response("<html>oops</html>", { status: 200 }),
+      () => Response.json({ login: "octo-ada" }),
+      () => Response.json(null),
+    ];
+    for (const user of bodies) {
+      const f = githubFetch(user, () => Response.json(EMAILS));
+      await expect(githubUserinfo(ACCESS, f.fetchFn)).rejects.toThrow();
+    }
+  });
+
+  it("gives the public address, unverified, for a /user/emails body that is not an array or has no primary address", async () => {
+    const answers: Array<() => Response> = [
+      () => Response.json({ message: "not a list" }),
+      () => Response.json([{ email: "old@example.com", primary: false, verified: true }]),
+      () => Response.json([{ email: "", primary: true, verified: true }, null, "x"]),
+    ];
+    for (const emails of answers) {
+      const f = githubFetch(() => Response.json({ ...USER, email: "public@example.com" }), emails);
+      expect(await githubUserinfo(ACCESS, f.fetchFn)).toMatchObject({
+        email: "public@example.com",
+        emailVerified: false,
+      });
+    }
+  });
 });
 
 describe("GitHub through the engine (plan 9c)", () => {

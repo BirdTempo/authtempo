@@ -85,7 +85,7 @@ function githubHeaders(accessToken: string): Record<string, string> {
   return {
     authorization: `Bearer ${accessToken}`,
     accept: "application/vnd.github+json",
-    // The version of the shapes above. GitHub keeps a version for at least 24 months after its successor.
+    // The version of the shapes above. GitHub keeps a version for at least 24 months after its successor (docs, read 2026-10-12).
     "x-github-api-version": "2022-11-28",
     // GitHub refuses a REST request with no User-Agent (docs, read 2026-10-12).
     "user-agent": "tempo-auth",

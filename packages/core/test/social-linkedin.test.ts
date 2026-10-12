@@ -107,6 +107,7 @@ describe("the linkedin preset (plan 9c)", () => {
       () => new Response("{}", { status: 401 }),
       () => Response.json([SAMPLE]),
       () => Response.json({ ...SAMPLE, sub: "" }),
+      () => Response.json({ ...SAMPLE, sub: 782 }),
       () => new Response("not json", { status: 200 }),
     ]) {
       const f = linkedinFetch(answer);
@@ -160,7 +161,7 @@ describe("LinkedIn through the engine (plan 9c)", () => {
   });
 
   it("never links an address that LinkedIn does not report as verified (Review Focus 1)", async () => {
-    const auth = linkedinAuth(() => Response.json({ ...SAMPLE, email_verified: false }));
+    const auth = linkedinAuth(() => Response.json({ ...SAMPLE, email_verified: "true" }));
     const owner = await auth.seedUser("doe@email.com");
     expect(await signIn(auth)).toMatchObject({ ok: false, code: "email_taken_unverified" });
     expect(
