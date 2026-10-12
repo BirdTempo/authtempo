@@ -265,7 +265,7 @@ describe("social.oidc (plan 9c)", () => {
 
   it("refuses endpoints that is null or not an object with a ConfigError, not a TypeError", () => {
     for (const bad of [null, "https://x.example", 7, []])
-      expect(() => build([oidc({ endpoints: bad as unknown as OidcEntry["endpoints"] })])).toThrow(
+      expect(() => build([oidc({ endpoints: bad as never })])).toThrow(
         /social\.oidc\[0\]\.endpoints must be an object/,
       );
   });
