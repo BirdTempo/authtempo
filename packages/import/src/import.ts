@@ -460,6 +460,9 @@ async function repairRefusal(
 ): Promise<RepairRefusal | null> {
   const found = await db.findOne("user", [{ field: "id", op: "eq", value: rows.id }]);
   if (!found || found.emailVerified !== rows.verified) return "verified_since_import";
+  // Both addresses are normalized: the record's by userRows, the row's by core.
+  if (found.email !== rows.email && fill.identities.some((i) => i.provider === "email"))
+    return "email_changed";
   if (!rows.verified) {
     const held =
       (await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }])) ??
@@ -481,6 +484,15 @@ async function repairRefusal(
       ]));
     if (held) return "identity_taken";
   }
+  // The importer stores no state from the first run, so it cannot tell a claim
+  // from a newer export. A claim always writes the `email` identity, so a
+  // verified user that holds it gets no credential back from a repair.
+  if (
+    found.emailVerified &&
+    !fill.identities.some((i) => i.provider === "email") &&
+    (fill.password !== null || fill.passkeys.length > 0 || fill.identities.length > 0)
+  )
+    return "claimed";
   return null;
 }
 
@@ -604,6 +616,8 @@ async function importUser(
     // A dry run plans the next records against these rows, as a real run reads them.
     for (const i of plan.rows.identities) planned.identities.add(key(i.provider, i.subject));
     for (const p of plan.rows.passkeys) planned.credentials.add(p.credentialId);
+    // A second record with this id is `exists`, in a dry run as in a real run.
+    planned.users.set(plan.rows.userId, { verified: r.emailVerified });
     return;
   }
   if (plan.kind === "skip") {

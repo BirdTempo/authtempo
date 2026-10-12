@@ -204,15 +204,24 @@ export interface ImportOptions {
  * - `verified_since_import`: the user's `emailVerified` differs from the
  *   record's. A claim verifies an unverified user and deletes the claimant's
  *   credentials (core `claimEmail`); a repair would give them back.
+ * - `email_changed`: the user's address differs from the record's, and the
+ *   repair would write an `email` identity for the old address.
  * - `credential_exists`: the record is unverified and the user holds a
  *   credential now. Core reaches no unverified user with two (spec 17.1).
  * - `identity_taken`: another user holds an identity the record maps to.
+ * - `claimed`: the user is verified and holds its `email` identity, and the
+ *   repair would write a password, a passkey, or a social identity. A claim
+ *   always writes that identity, and the importer cannot tell a claim from a
+ *   newer export, so a verified user's missing credential is an operator
+ *   action.
  * - `no_owner`: an organization with no member, whose members map to no owner.
  */
 export type RepairRefusal =
   | "verified_since_import"
+  | "email_changed"
   | "credential_exists"
   | "identity_taken"
+  | "claimed"
   | "no_owner";
 
 export interface ImportReport {

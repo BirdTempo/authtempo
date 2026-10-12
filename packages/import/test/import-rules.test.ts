@@ -659,6 +659,100 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     expect({ ...dry, dryRun: false }).toEqual(r);
   });
 
+  it("refuses a credential for a verified user that holds its email identity (a claim)", async () => {
+    const db = createMemoryAdapter();
+    await importUsers(
+      db,
+      listSource([user("u2", { emailVerified: false, password: { hash: BCRYPT } })]),
+      { formats: LEGACY_FORMATS, now },
+    );
+    const u2 = await importId("user", "supabase", "u2");
+    // A claim, as core's claimEmail writes it (see the test above).
+    await db.update("user", [{ field: "id", op: "eq", value: u2 }], {
+      emailVerified: true,
+      updatedAt: AT,
+    });
+    await db.delete("password", [{ field: "userId", op: "eq", value: u2 }]);
+    await db.create("identity", {
+      id: "claim-email",
+      userId: u2,
+      provider: "email",
+      subject: "u2@example.com",
+      linkedAt: AT,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+    // A newer export that states the user verified, with the claimant's hash.
+    const r = await importUsers(db, listSource([user("u2", { password: { hash: BCRYPT } })]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "u2", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    expect(r.repaired).toEqual([]);
+    expect(await db.findMany("password", [])).toEqual([]);
+  });
+
+  it("refuses the old email identity of a user whose address changed in the app", async () => {
+    const db = createMemoryAdapter();
+    const record = () => [user("u5", { email: "a@example.com" })];
+    await importUsers(db, listSource(record()), { formats: LEGACY_FORMATS, now });
+    const u5 = await importId("user", "supabase", "u5");
+    // An address change, as the app writes it.
+    await db.update("user", [{ field: "id", op: "eq", value: u5 }], {
+      email: "b@example.com",
+      updatedAt: AT,
+    });
+    await db.delete("identity", [
+      { field: "userId", op: "eq", value: u5 },
+      { field: "provider", op: "eq", value: "email" },
+    ]);
+    await db.create("identity", {
+      id: "change-email",
+      userId: u5,
+      provider: "email",
+      subject: "b@example.com",
+      linkedAt: AT,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+    const r = await importUsers(db, listSource(record()), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "u5", missing: ["identity:email"], repairRefused: "email_changed" },
+    ]);
+    expect(r.repaired).toEqual([]);
+    expect((await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`)).toEqual([
+      "email:b@example.com",
+    ]);
+  });
+
+  it("counts a second record of a repaired user as exists, in a dry run as in a real run", async () => {
+    const dryDb = createMemoryAdapter();
+    await halfUser(dryDb);
+    const dry = await importUsers(dryDb, listSource([half(), half()]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+      dryRun: true,
+    });
+    const db = createMemoryAdapter();
+    await halfUser(db);
+    const r = await importUsers(db, listSource([half(), half()]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(r.repaired.map((x) => x.sourceId)).toEqual(["u1"]);
+    expect(r.exists.user).toBe(1);
+    expect({ ...dry, dryRun: false }).toEqual(r);
+  });
+
   it("repairs nothing without the option, as before", async () => {
     const db = createMemoryAdapter();
     await halfUser(db);

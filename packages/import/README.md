@@ -62,9 +62,13 @@ that `missing` names, and the report lists them as `repaired`. A repair
 writes nothing, and the record stays `partial` with `not repaired:
 <reason>`, when a core flow can have removed the rows on purpose:
 `verified_since_import` (a claim verified the user and removed the
-claimant's credentials), `credential_exists` (an unverified user that holds
-another credential now), `identity_taken` (another user holds the identity),
-or `no_owner` (an organization whose members map to no owner). Without
+claimant's credentials), `email_changed` (the user's address changed in the
+app), `credential_exists` (an unverified user that holds another credential
+now), `identity_taken` (another user holds the identity), `claimed` (a
+verified user that holds its `email` identity lacks a password, a passkey,
+or a social identity), or `no_owner` (an organization whose members map to
+no owner). A verified user's missing credential is an operator action,
+because the importer cannot tell a claim from a newer export. Without
 `--repair` the importer writes nothing for a `partial` record.
 
 `--report <file>` also writes the report as JSON. The report file holds no
