@@ -3,11 +3,14 @@ import { createD1Adapter } from "@tempo-auth/adapter-d1";
 import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { FIREBASE } from "@tempo-auth/legacy-hashes/testing";
 import { describe, expect, it, vi } from "vitest";
+import { importId } from "../../src/ids.js";
+import { importUsers } from "../../src/import.js";
 import { type ImportBundle, sourceOf } from "../../src/sources.js";
 import worker from "../../worker/src/index.js";
 import { type D1Bundle, runImport } from "../../worker/src/run.js";
 import identities from "../fixtures/supabase-identities.csv?raw";
 import users from "../fixtures/supabase-users.csv?raw";
+import { AT, BCRYPT, listSource, user } from "../source.js";
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
@@ -285,5 +288,66 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
     expect(second.exists.user).toBe(7);
     expect(second.created).toEqual(NONE);
     expect(await everyRow()).toEqual(before);
+  });
+});
+
+describe("the repair on core's D1 adapter (plan 9b2 fix round 2)", () => {
+  it("repairs a verified and an unverified half user: the conditional update matches on D1", async () => {
+    const db = createD1Adapter(env.DB);
+    // Two runs that stopped after the user row (an isolate that dies does not
+    // roll back, spec 6): one verified, one unverified, so the update's
+    // `emailVerified` filter is proven with both values, and its `email`
+    // filter with D1's stored text.
+    for (const [sourceId, verified] of [
+      ["d1-repair-v", true],
+      ["d1-repair-u", false],
+    ] as const)
+      await db.create("user", {
+        id: await importId("user", "supabase", sourceId),
+        email: `${sourceId}@example.com`,
+        emailVerified: verified,
+        name: null,
+        image: null,
+        createdAt: AT,
+        updatedAt: AT,
+      });
+    const records = [
+      user("d1-repair-v", {
+        identities: [{ provider: "google", subject: "g-d1-repair" }],
+        password: { hash: BCRYPT },
+      }),
+      user("d1-repair-u", { emailVerified: false, password: { hash: BCRYPT } }),
+    ];
+    const r = await importUsers(db, listSource(records), {
+      formats: LEGACY_FORMATS,
+      now: () => AT,
+      repair: true,
+    });
+    expect(r.partial).toEqual([]);
+    expect(r.repaired).toEqual([
+      {
+        kind: "user",
+        sourceId: "d1-repair-v",
+        rows: ["identity:email", "identity:google", "password"],
+      },
+      { kind: "user", sourceId: "d1-repair-u", rows: ["password"] },
+    ]);
+    const rowsOf = async (sourceId: string) => {
+      const userId = await importId("user", "supabase", sourceId);
+      return {
+        identity: (await db.findMany("identity", [{ field: "userId", op: "eq", value: userId }]))
+          .map((i) => `${i.provider}:${i.subject}`)
+          .sort(),
+        password: (
+          await db.findMany("password", [{ field: "userId", op: "eq", value: userId }])
+        ).map((p) => p.hash),
+      };
+    };
+    // The password rows are active: the last statement replaced the pending string.
+    expect(await rowsOf("d1-repair-v")).toEqual({
+      identity: ["email:d1-repair-v@example.com", "google:g-d1-repair"],
+      password: [BCRYPT],
+    });
+    expect(await rowsOf("d1-repair-u")).toEqual({ identity: [], password: [BCRYPT] });
   });
 });

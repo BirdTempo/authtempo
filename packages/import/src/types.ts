@@ -217,11 +217,12 @@ export interface ImportOptions {
  *   repair would write a password, a passkey, or a social identity. A claim
  *   always writes that identity, and the importer cannot tell a claim from a
  *   newer export, so a verified user's missing credential is an operator
- *   action. The same reason also comes from the repair's last statement: a
- *   conditional update of the user row by the `email` and `emailVerified`
- *   that the guards read. Zero rows means a claim or an address change
- *   landed after the guards; the repair deletes the rows it wrote and keeps
- *   the record here.
+ *   action. The same reason also comes from the repair's two last updates:
+ *   a conditional update of the user row by the `email` and `emailVerified`
+ *   that the guards read, then the activation of its pending password row.
+ *   Zero rows from either means a claim or an address change landed after
+ *   the guards; the repair deletes the rows it wrote and keeps the record
+ *   here.
  * - `no_owner`: an organization with no member, whose members map to no owner.
  */
 export type RepairRefusal =

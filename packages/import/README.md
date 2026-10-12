@@ -68,10 +68,15 @@ now), `identity_taken` (another user holds the identity), `claimed` (a
 verified user that holds its `email` identity lacks a password, a passkey,
 or a social identity), or `no_owner` (an organization whose members map to
 no owner). A verified user's missing credential is an operator action,
-because the importer cannot tell a claim from a newer export. The last
-statement of each user repair checks the user row again: when a claim or an
+because the importer cannot tell a claim from a newer export. Each user
+repair checks the user row again after its writes: when a claim or an
 address change lands during the repair, the repair deletes the rows it
-wrote, and the record stays `partial` with `not repaired: claimed`. Without
+wrote, and the record stays `partial` with `not repaired: claimed`. The
+repaired password row is pending until the repair's last statement
+activates it, after that check, so a sign-in with it fails until then. A repaired passkey or social
+identity is active at once: on D1, for a few round trips before the check,
+it can sign in a claimant who also holds the authenticator or the provider
+login. Without
 `--repair` the importer writes nothing for a `partial` record.
 
 A repair also gives back a credential that the user removed in the app
@@ -296,8 +301,13 @@ Cognito exports no hash, so this command needs no `--formats`.
   default), or an app's Better Auth 1.7 tables on D1 with `--var
   TARGET:compat` (plan 9b2). `TARGET=compat` serves Better Auth's default
   table and column names only. An app with custom names (for example
-  snake_case columns or plural tables) has no Worker path yet: the Worker
-  refuses its tables with `schema_mismatch` before any write. The
+  snake_case columns or plural tables) has no Worker path yet. The ready
+  check reads only the unique index on the account table's (issuer,
+  accountId). A custom name of that table or of those columns refuses with
+  `schema_mismatch` before any write. Any other custom name passes the
+  check, and the run stops with a D1 error at the first statement on that
+  table: the failing record writes no row (its undo removes them), and the
+  records before it stay. Do not run `TARGET=compat` on such an app. The
   `--better-auth` target on Postgres also uses the default names.
 
 CAUTION: the D1 bundle holds every password hash and, for Supabase, the

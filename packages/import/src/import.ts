@@ -5,6 +5,7 @@ import {
   newId,
   normalizeEmail,
   normalizeSlug,
+  PENDING_HASH_PREFIX,
   type StorageAdapter,
   StorageError,
   validOrganizationName,
@@ -524,6 +525,8 @@ async function writeCredentials(
   tx: StorageAdapter,
   c: CredentialRows,
   now: Date,
+  /** A repair writes the password row pending (`PENDING_HASH_PREFIX`) and activates it last. */
+  pending = false,
 ): Promise<Written> {
   const written: Written = { identities: [], password: null, passkeys: [] };
   for (const i of c.identities) {
@@ -541,11 +544,12 @@ async function writeCredentials(
   }
   if (c.password !== null) {
     const id = newId(now);
-    written.password = { id, hash: c.password };
+    const hash = pending ? `${PENDING_HASH_PREFIX}${c.password}` : c.password;
+    written.password = { id, hash };
     await tx.create("password", {
       id,
       userId: c.userId,
-      hash: c.password,
+      hash,
       createdAt: now,
       updatedAt: now,
     });
@@ -565,18 +569,28 @@ async function writeCredentials(
 }
 
 /**
- * Writes the missing rows of a user, then runs the last statement: a
- * conditional update of the user row by its id and by the `email` and
- * `emailVerified` the guards read (I-3 of the plan 9b2 final review). This is
- * the pattern of core's sign-up (`engine/password.ts`, `insertSignUp`).
+ * Writes the missing rows of a user, then a conditional update of the user
+ * row by its id and by the `email` and `emailVerified` the guards read (I-3
+ * of the plan 9b2 final review), then the last statement: the activation of
+ * the password row. This is the pattern of core's sign-up
+ * (`engine/password.ts`, `insertSignUp`).
+ * - The password row goes in pending (`PENDING_HASH_PREFIX`), and a sign-in
+ *   refuses a pending row. On D1 the writes are visible at once, so a row
+ *   with the real hash could sign a claimant in before the conditional
+ *   update ran (fix round 2). The activation updates the row by its id and
+ *   the pending string. A passkey and a social identity go in active: a
+ *   passkey needs the authenticator and a social identity needs the
+ *   provider's login, and the window is a few D1 round trips (spec 17.1).
  * - A claim (core `claimEmail`) flips `emailVerified` in its first statement,
  *   and then deletes the claimant's credentials. A claim that lands between
  *   the guard read and the writes does not see these new rows, so they would
  *   stay on a user that the owner of the address now holds.
- * - Zero rows means a claim or an address change landed since the guards.
- *   The repair then deletes its own rows by id (the password row also by the
- *   hash it wrote: an owner's reset can keep a row id and write the owner's
- *   hash), commits, and the record stays `partial` with `claimed`. It never
+ * - Zero rows from the user update means a claim or an address change
+ *   landed since the guards; zero rows from the activation means a claim
+ *   deleted the pending row after the user update. The repair then deletes
+ *   its own rows by id (the password row also by the pending string it
+ *   wrote: an owner's reset can keep a row id and write the owner's hash),
+ *   commits, and the record stays `partial` with `claimed`. It never
  *   throws to undo, as core's sign-up never does: on D1 a throw runs the
  *   adapter's undo log, which deletes a created row by its id only, with no
  *   check of what a claim or a reset wrote into that row since.
@@ -590,7 +604,7 @@ async function repairUser(
   p: Extract<Plan<UserRows, RepairRows>, { kind: "repair" }>,
   now: Date,
 ): Promise<Plan<UserRows, RepairRows>> {
-  const written = await writeCredentials(tx, p.rows, now);
+  const written = await writeCredentials(tx, p.rows, now, true);
   const kept = await tx.update(
     "user",
     [
@@ -600,7 +614,20 @@ async function repairUser(
     ],
     { updatedAt: now },
   );
-  if (kept > 0) return p;
+  // Zero rows from the activation means a claim deleted the pending row (or
+  // a reset wrote the owner's hash into it) after the user update.
+  const active =
+    kept > 0 &&
+    (written.password === null ||
+      (await tx.update(
+        "password",
+        [
+          { field: "id", op: "eq", value: written.password.id },
+          { field: "hash", op: "eq", value: written.password.hash },
+        ],
+        { hash: p.rows.password as string, updatedAt: now },
+      )) > 0);
+  if (active) return p;
   for (const id of written.identities)
     await tx.delete("identity", [{ field: "id", op: "eq", value: id }]);
   if (written.password !== null)

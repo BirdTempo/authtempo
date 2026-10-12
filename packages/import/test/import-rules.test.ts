@@ -1,5 +1,10 @@
-import { createMemoryAdapter, type StorageAdapter } from "@tempo-auth/core";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
+import {
+  createAuth,
+  createMemoryAdapter,
+  createPbkdf2PasswordHash,
+  type StorageAdapter,
+} from "@tempo-auth/core";
+import { createLegacyPasswordHash, LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importId } from "../src/ids.js";
 import { importUsers } from "../src/import.js";
@@ -876,6 +881,78 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     expect((await db.findOne("user", [{ field: "id", op: "eq", value: u1 }]))?.emailVerified).toBe(
       true,
     );
+  });
+
+  it("refuses a sign-in with the repaired password before the repair's conditional update (fix round 2)", async () => {
+    const db = createMemoryAdapter();
+    await halfUser(db, false);
+    const u1 = await importId("user", "supabase", "u1");
+    const race = claimBeforeFirstWrite(db, u1, "u1@example.com");
+    // The app signs in on a view with no isolation, as on D1: its writes do
+    // not wait for the repair's open transaction.
+    const open: StorageAdapter = { ...db, transaction: (fn) => fn(open) };
+    const auth = createAuth({
+      baseURL: "https://api.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: open,
+      mail: { send: async () => {} },
+      password: {
+        hash: createLegacyPasswordHash({
+          formats: ["bcrypt"],
+          next: createPbkdf2PasswordHash({ iterations: 1000 }),
+        }),
+      },
+    });
+    const pw = auth.api.password;
+    if (!pw) throw new Error("the password api is missing");
+    // The claimant signs in after the password row is written and before
+    // the conditional update of the user row.
+    let signIn: Awaited<ReturnType<typeof pw.signIn>> | null = null;
+    const view: StorageAdapter = {
+      ...race.view,
+      transaction: (fn) =>
+        race.view.transaction((tx) =>
+          fn({
+            ...tx,
+            create: async (model, data) => {
+              const row = await tx.create(model, data);
+              if (model === "password")
+                signIn = await pw.signIn({
+                  email: "u1@example.com",
+                  password: "allmine",
+                  ip: null,
+                  userAgent: null,
+                });
+              return row;
+            },
+          }),
+        ),
+    };
+    const r = await importUsers(
+      view,
+      listSource([user("u1", { emailVerified: false, password: { hash: BCRYPT } })]),
+      { formats: LEGACY_FORMATS, now, repair: true },
+    );
+    expect(race.fired()).toBe(true);
+    expect(signIn).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect(await db.findMany("session", [])).toEqual([]);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "u1", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    expect(await db.findMany("password", [])).toEqual([]);
+  });
+
+  it("activates the repaired password row as its last statement", async () => {
+    const db = createMemoryAdapter();
+    await halfUser(db, false);
+    const r = await importUsers(
+      db,
+      listSource([user("u1", { emailVerified: false, password: { hash: BCRYPT } })]),
+      { formats: LEGACY_FORMATS, now, repair: true },
+    );
+    expect(r.repaired).toEqual([{ kind: "user", sourceId: "u1", rows: ["password"] }]);
+    expect((await db.findMany("password", [])).map((p) => p.hash)).toEqual([BCRYPT]);
   });
 
   it("deletes every row it wrote, by id, when an address change lands before the repair write (I-3)", async () => {
