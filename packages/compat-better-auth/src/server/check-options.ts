@@ -155,7 +155,16 @@ const plugins: Rule = (v, p, out) => {
 };
 
 /** google, github, and linkedin: core's presets take the id and the secret only. */
-const idAndSecret = object({ clientId: string, clientSecret: string });
+const idAndSecretShape = object({ clientId: string, clientSecret: string });
+/** Core refuses a missing or empty id or secret at createAuth; refuse it here with the option's path. */
+const idAndSecret: Rule = (v, p, out) => {
+  idAndSecretShape(v, p, out);
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return;
+  const o = v as Record<string, unknown>;
+  for (const key of ["clientId", "clientSecret"]) {
+    if (o[key] === undefined || o[key] === "") refuse(out, `${p}.${key}`, "required");
+  }
+};
 const apple = object({
   clientId: string,
   teamId: string,

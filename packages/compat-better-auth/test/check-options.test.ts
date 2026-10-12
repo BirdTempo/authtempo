@@ -41,6 +41,29 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     ]);
   });
 
+  it("refuses a missing, empty, or non-string clientId or clientSecret of google, github, and linkedin", () => {
+    for (const name of ["google", "github", "linkedin"]) {
+      const refusals = (config: unknown) =>
+        checkOptions({
+          socialProviders: { [name]: config },
+        } as unknown as BetterAuthOptions).refusals.filter((r) => r.startsWith("socialProviders"));
+      expect(refusals({ clientId: "i" })).toEqual([
+        `socialProviders.${name}.clientSecret: required`,
+      ]);
+      expect(refusals({ clientSecret: "s" })).toEqual([
+        `socialProviders.${name}.clientId: required`,
+      ]);
+      expect(refusals({ clientId: "", clientSecret: "s" })).toEqual([
+        `socialProviders.${name}.clientId: required`,
+      ]);
+      expect(refusals({ clientId: 1, clientSecret: ["s"] })).toEqual([
+        `socialProviders.${name}.clientId: expected a string`,
+        `socialProviders.${name}.clientSecret: expected a string`,
+      ]);
+      expect(refusals({ clientId: "i", clientSecret: "s" })).toEqual([]);
+    }
+  });
+
   it("refuses exactly these consumer-i options", () => {
     const c = checkOptions(consumeri);
     expect(paths(c.refusals)).toEqual([
