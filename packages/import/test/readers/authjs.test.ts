@@ -90,7 +90,10 @@ describe("authjsSource", () => {
     ).toEqual(["email:ida@example.com", "google:g-1"]);
     expect((await db.findMany("passkey", [])).map((p) => p.credentialId)).toEqual(["AQID-_8"]);
     expect(report.created).toMatchObject({ user: 2, password: 1, passkey: 1 });
-    expect(report.dropped).toContainEqual({ sourceId: "cuid2", item: "identity:github" });
+    expect(report.dropped).toContainEqual({
+      sourceId: "cuid2",
+      item: "identity:github:subject_form",
+    });
     expect(report.dropped).toContainEqual({ sourceId: "cuid2", item: "passkey:unverified" });
     expect(report.dropped).toContainEqual({ sourceId: "cuid1", item: "account:email" });
   });
@@ -215,5 +218,91 @@ describe("authjsSource edge rows", () => {
     await expect(
       all(authjsSource({ tables: EDGE, passwordColumn: "password_hash" })),
     ).rejects.toThrow('no Auth.js user row has the password column "password_hash"');
+  });
+});
+
+describe("authjsSource: a user with no id (plan 9b2, Review Focus 4)", () => {
+  it("skips it as no_source_id, names the item, and links no account to it", async () => {
+    const tables = JSON.stringify({
+      users: [{ email: "nid@example.com", emailVerified: "2024-01-01T00:00:00.000Z" }],
+      accounts: [{ userId: "", type: "oidc", provider: "google", providerAccountId: "g-9" }],
+    });
+    const r = await all(authjsSource({ tables }));
+    expect(r).toEqual([
+      {
+        kind: "user",
+        sourceId: "(none) users item 1",
+        email: null,
+        emailVerified: false,
+        name: null,
+        image: null,
+        createdAt: null,
+        identities: [],
+        password: null,
+        passkeys: [],
+        skip: "no_source_id",
+      },
+    ]);
+    const report = await importUsers(createMemoryAdapter(), authjsSource({ tables }), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 1", reason: "no_source_id" },
+    ]);
+  });
+
+  it("keeps the order and the item number of a no-id user between two valid users, and links each account to its own user (parked Task 3 Minor)", async () => {
+    const tables = JSON.stringify({
+      users: [
+        { id: "ja", email: "a@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+        { email: "nid@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+        { id: "jb", email: "b@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+      ],
+      accounts: [
+        { userId: "ja", type: "oidc", provider: "google", providerAccountId: "g-a" },
+        { userId: "jb", type: "oidc", provider: "google", providerAccountId: "g-b" },
+      ],
+    });
+    const source = () => authjsSource({ tables });
+    expect(
+      (await all(source())).map((r) => [
+        r.sourceId,
+        r.kind === "user" ? r.identities.map((x) => x.subject) : null,
+      ]),
+    ).toEqual([
+      ["ja", ["g-a"]],
+      ["(none) users item 2", []],
+      ["jb", ["g-b"]],
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 2", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(2);
+  });
+});
+
+describe("authjsSource: GitHub and LinkedIn (plan 9b2)", () => {
+  it("keeps a LinkedIn account of type oidc and lists one of type oauth as linkedin_legacy", async () => {
+    const tables = JSON.stringify({
+      users: [{ id: "c9", email: "lin@example.com", emailVerified: "2024-01-01T00:00:00.000Z" }],
+      accounts: [
+        { userId: "c9", type: "oauth", provider: "github", providerAccountId: "583231" },
+        { userId: "c9", type: "oidc", provider: "linkedin", providerAccountId: "782bbtaQ" },
+        { userId: "c9", type: "oauth", provider: "linkedin", providerAccountId: "yrZCpj2Z12" },
+      ],
+    });
+    const r = await all(authjsSource({ tables }));
+    expect(r[0]).toMatchObject({
+      identities: [
+        { provider: "github", subject: "583231" },
+        { provider: "linkedin", subject: "782bbtaQ" },
+        { provider: "linkedin_legacy", subject: "yrZCpj2Z12" },
+      ],
+    });
   });
 });

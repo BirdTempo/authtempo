@@ -41,6 +41,7 @@ target:
 
 options:
   --dry-run               read only; print the report a real run would print
+  --repair                write the rows a partial record lacks; check each such user in the app first
   --on-email-taken <m>    skip (default) or fail
   --formats <list>        required, except for cognito: the formats list of the app's
                           createLegacyPasswordHash, comma-separated, or none; no default
@@ -178,6 +179,7 @@ function parse(argv: string[], io: CliIo) {
       "better-auth": { type: "boolean" },
       "d1-bundle": { type: "string" },
       "dry-run": { type: "boolean" },
+      repair: { type: "boolean" },
       "on-email-taken": { type: "string" },
       formats: { type: "string" },
       "legacy-verify": { type: "boolean" },
@@ -281,6 +283,7 @@ function parse(argv: string[], io: CliIo) {
   const options: ImportOptions = {
     onEmailTaken: onEmailTaken as "skip" | "fail",
     dryRun: values["dry-run"] === true,
+    ...(values.repair === true ? { repair: true } : {}),
     legacyVerify: values["legacy-verify"] === true,
     roleMap,
     formats,

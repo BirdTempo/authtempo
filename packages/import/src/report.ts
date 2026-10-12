@@ -30,7 +30,10 @@ export function summary(r: ImportReport): string[] {
   for (const s of r.skipped) lines.push(`skipped ${s.kind} ${s.sourceId}: ${s.reason}`);
   for (const h of r.refusedHashes) lines.push(`refused hash ${h.sourceId}: ${h.format}`);
   for (const p of r.partial)
-    lines.push(`partial ${p.kind} ${p.sourceId}: missing ${p.missing.join(", ")}`);
+    lines.push(
+      `partial ${p.kind} ${p.sourceId}: missing ${p.missing.join(", ")}${p.repairRefused ? `; not repaired: ${p.repairRefused}` : ""}`,
+    );
+  for (const x of r.repaired) lines.push(`repaired ${x.kind} ${x.sourceId}: ${x.rows.join(", ")}`);
   for (const d of r.dropped) lines.push(`dropped ${d.sourceId}: ${d.item}`);
   return lines;
 }

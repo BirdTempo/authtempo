@@ -192,7 +192,7 @@ describe("supabaseSource", () => {
     ).toThrow("tempo-auth import: the Supabase identities file has no provider_id column");
   });
 
-  it("imports the fixture: the bcrypt and Firebase rows, a refused argon2i, the github identity dropped", async () => {
+  it("imports the fixture: the bcrypt and Firebase rows, a refused argon2i, the github identity off the unverified user", async () => {
     const db = createMemoryAdapter();
     const report = await importUsers(
       db,
@@ -217,8 +217,12 @@ describe("supabaseSource", () => {
         format: "argon2i (malformed or out of bounds)",
       },
     ]);
+    // Bob is unverified with a password, so his GitHub identity (4242) is a second credential.
     expect(report.dropped).toEqual([
-      { sourceId: "22222222-2222-4222-8222-222222222222", item: "identity:github" },
+      {
+        sourceId: "22222222-2222-4222-8222-222222222222",
+        item: "unverified_extra_credential:github",
+      },
     ]);
     const bob = await db.findOne("user", [{ field: "email", op: "eq", value: "bob@example.com" }]);
     expect(bob).toMatchObject({ emailVerified: false });
@@ -239,5 +243,91 @@ describe("supabaseSource", () => {
           { field: "subject", op: "eq", value: subject },
         ]),
       ).not.toBeNull();
+  });
+});
+
+describe("supabaseSource: a row with no id (plan 9b2, Review Focus 4)", () => {
+  it("skips a user row with no id as no_source_id and names the row", async () => {
+    const header = users.split("\n")[0];
+    const noId = `${header}\n,nid@example.com,,2024-02-12 08:00:00+00,{},2024-02-12 08:00:00+00,f,,,f\n`;
+    const source = () =>
+      supabaseSource({ users: noId, identities: "provider,provider_id,user_id\n", now });
+    expect(await all(source())).toEqual([
+      {
+        kind: "user",
+        sourceId: "(none) users csv row 2",
+        email: null,
+        emailVerified: false,
+        name: null,
+        image: null,
+        createdAt: null,
+        identities: [],
+        password: null,
+        passkeys: [],
+        skip: "no_source_id",
+      },
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users csv row 2", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(0);
+  });
+
+  it("keeps the order and the row number of a no-id row between two valid rows (parked Task 3 Minor)", async () => {
+    const header = users.split("\n")[0];
+    const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const row = (id: string, email: string) =>
+      `${id},${email},,2024-02-12 08:00:00+00,{},2024-02-12 08:00:00+00,f,,,f`;
+    const text = `${header}\n${row(A, "a@example.com")}\n${row("", "nid@example.com")}\n${row(B, "b@example.com")}\n`;
+    const source = () =>
+      supabaseSource({ users: text, identities: "provider,provider_id,user_id\n", now });
+    expect(
+      (await all(source())).map((r) => [r.sourceId, r.kind === "user" ? r.email : null]),
+    ).toEqual([
+      [A, "a@example.com"],
+      ["(none) users csv row 3", null],
+      [B, "b@example.com"],
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users csv row 3", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(2);
+  });
+});
+
+describe("supabaseSource: GitHub and LinkedIn (plan 9b2)", () => {
+  it("maps linkedin_oidc to linkedin and the older linkedin provider to linkedin_legacy", async () => {
+    const header = users.split("\n")[0];
+    const A = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const B = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const row = (id: string, email: string) =>
+      `${id},${email},,2024-02-12 08:00:00+00,{},2024-02-12 08:00:00+00,f,,,f`;
+    const two = `${header}\n${row(A, "gh@example.com")}\n${row(B, "li@example.com")}\n`;
+    const ids = `provider,provider_id,user_id\ngithub,583231,${A}\nlinkedin_oidc,782bbtaQ,${A}\nlinkedin,yrZCpj2Z12,${B}\n`;
+    const r = await all(supabaseSource({ users: two, identities: ids, now }));
+    expect(r[0]).toMatchObject({
+      identities: [
+        { provider: "github", subject: "583231" },
+        { provider: "linkedin", subject: "782bbtaQ" },
+      ],
+    });
+    expect(r[1]).toMatchObject({
+      identities: [{ provider: "linkedin_legacy", subject: "yrZCpj2Z12" }],
+    });
+    const report = await importUsers(
+      createMemoryAdapter(),
+      supabaseSource({ users: two, identities: ids, now }),
+      { formats: LEGACY_FORMATS, now },
+    );
+    expect(report.dropped).toEqual([{ sourceId: B, item: "identity:linkedin_legacy" }]);
   });
 });

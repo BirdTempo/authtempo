@@ -62,6 +62,12 @@ export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js"
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
 export { type Clock, systemClock } from "./primitives/clock.js";
+export {
+  createDeriveGate,
+  DERIVE_GATE_MAX,
+  type DeriveGate,
+  deriveGate,
+} from "./primitives/derive-gate.js";
 export { newId } from "./primitives/ids.js";
 export type { Result } from "./result.js";
 export {
@@ -104,12 +110,16 @@ export {
   type WebAuthnSeam,
 } from "./seams/webauthn.js";
 export type { AppleConfig } from "./social/apple.js";
-export type { GitHubConfig } from "./social/github.js";
+export { type GitHubConfig, isGithubSubject } from "./social/github.js";
 export type { GoogleConfig } from "./social/google.js";
 export type { LinkedInConfig } from "./social/linkedin.js";
 export type { OAuth2Entry } from "./social/oauth2.js";
 export type { OidcEndpoints, OidcEntry } from "./social/oidc.js";
-export type { SocialProfile, SocialProviderName } from "./social/provider.js";
+export {
+  PROVIDER_NAME_RE,
+  type SocialProfile,
+  type SocialProviderName,
+} from "./social/provider.js";
 export { createMemoryAdapter } from "./storage/memory.js";
 export {
   type FindManyOptions,

@@ -49,13 +49,16 @@ is base64 of 0 to 16 bytes. Another value stops the seam at construction.
 
 ## The gate
 
-At most two derives run at once per isolate; the rest wait in order, and the
-gate never refuses. The gate is module state, so every seam of this package in
-one isolate shares it. One Argon2id or scrypt derive holds up to 32 MiB.
-
-The Better Auth seam of `@tempo-auth/compat-better-auth` has its own gate of
-two. An app that chains both seams can run four derives at once, 128 MiB at
-the worst, which is the whole isolate. Chain only the seam your rows need.
+At most two derives of any legacy format run at once per isolate; the rest
+wait in order, and the gate never refuses. The gate is core's `deriveGate`
+(plan 9b2): one gate per isolate, which every seam of this package and the
+Better Auth seam of `@tempo-auth/compat-better-auth` share. An app that chains
+both seams still runs at most two derives at once. One Argon2id or scrypt
+derive holds up to 32 MiB. The share holds only with one copy of
+`@tempo-auth/core` in the app: a second copy has a second gate, and a chain
+can then run four derives. This package and the compatibility package
+declare core as a peer dependency, so a package manager warns on a version
+that does not match. Keep one version of core.
 
 ## Cognito
 
@@ -65,6 +68,7 @@ at the first sign-in:
 
 ```ts
 import { createCognitoLegacyVerify } from "@tempo-auth/legacy-hashes/cognito";
+import { waitUntil } from "cloudflare:workers";
 
 password: {
   legacyVerify: {
@@ -72,7 +76,7 @@ password: {
       region: "eu-west-1",
       clientId,
       clientSecret, // only when the app client has a secret
-      onFailure: (reason) => console.warn("cognito check failed:", reason),
+      waitUntil, // keeps the failure line and a timed-out request alive after the response
     }),
     timeoutMs: 2000,
   },
@@ -83,8 +87,13 @@ password: {
   flows. Without it, every Cognito user fails to sign in, and `onFailure`
   gets `InvalidParameterException`.
 - The check sends the email that the importer stored, in core's lower case,
-  as `USERNAME`. It binds by email, not by the Cognito `sub`. The pool must
-  accept the email as a user name or an alias.
+  as `USERNAME`. It binds by email, never by the Cognito `sub`. The pool must
+  accept the email as a user name or an alias. A pool that does not fails
+  every imported user: Cognito answers `NotAuthorizedException` when the app
+  client sets `PreventUserExistenceErrors` to `ENABLED`, and
+  `UserNotFoundException` when it is `LEGACY` (AWS docs, read 2026-10-12).
+  Without an `onFailure` of your own, each such failure writes the default
+  line below.
 - A pool with case-sensitive user names can refuse a lower-case address for a
   user stored as `Ada@Example.com`. Unverified whether the email alias follows
   that setting. Such a user must reset the password.
@@ -93,14 +102,16 @@ password: {
   user with a challenge must reset the password.
 - A password longer than core's policy (128 code points) never reaches
   Cognito. Such a user must reset the password.
-- `onFailure` gets only the reason: the Cognito error type, or `timeout`,
-  `network`, `malformed`, `challenge`. It never gets the email or the
-  password. Every failure answers false, so without `onFailure` a wrong setup
-  is silent.
+- Every failure answers false, and each one calls `onFailure` once with only
+  the reason: the Cognito error type, or `timeout`, `network`, `malformed`,
+  `challenge`. It never gets the email or the password. The default writes
+  one line, `tempo-auth: cognito legacy verify failed <reason>`, with
+  `console.error`. An `onFailure` of your own replaces that line.
 - `onFailure` runs after the answer, on a 0 ms timer, and its errors are
-  dropped. On a `timeout` the floor has passed, so core answers at once and
-  the timer can run after the response. Workers can drop a timer after the
-  response, so a `timeout` report can be lost.
+  dropped. Workers can drop a timer after the response, so pass `waitUntil`:
+  `waitUntil` from `cloudflare:workers`, or `ctx.waitUntil.bind(ctx)` when
+  the app builds its config per request. The check gives it each failure
+  call and, on a `timeout`, the Cognito request that is still in flight.
 - `timeoutMs` is 100 to 30000, default 5000. While `legacyVerify` is set,
   every failed password sign-in waits until `timeoutMs` after its check
   began. So a migrated and an unmigrated address look the same. Set it longer

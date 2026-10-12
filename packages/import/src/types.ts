@@ -103,7 +103,7 @@ export interface ImportUser {
   image: string | null;
   /** Null when the export has no created date; the import time is used. */
   createdAt: Date | null;
-  /** Social identities. A provider other than google and apple is dropped and listed. */
+  /** Social identities. A provider other than google, apple, github, and linkedin is dropped and listed, and so is a subject outside the provider's form (plan 9b2). */
   identities: { provider: string; subject: string }[];
   /**
    * A tagged legacy hash (`$2b$...`), `LEGACY_VERIFY_HASH` (Cognito), a
@@ -185,9 +185,53 @@ export interface ImportOptions {
    * organization. Not a slug is an error.
    */
   platformSlug?: string;
+  /**
+   * Default false. True: a record that exists by its import id but lacks a
+   * row it maps to (a `partial` entry) gets exactly the rows that `missing`
+   * names, through the same key, in one transaction, and the report lists
+   * them under `repaired`. Nothing else changes. A repair is refused, and the
+   * entry stays `partial` with `repairRefused`, when a core flow can have
+   * removed the rows on purpose (see `RepairRefusal`). Check each user in the
+   * app first (plan 9b2).
+   */
+  repair?: boolean;
   /** For tests. Default the system time. */
   now?: () => Date;
 }
+
+/**
+ * Why `repair: true` left a `partial` record as it is (plan 9b2):
+ * - `verified_since_import`: the user's `emailVerified` differs from the
+ *   record's, in either direction: the user is verified and the record is
+ *   not, or the record is verified and the user is not. A claim verifies an
+ *   unverified user and deletes the claimant's credentials (core
+ *   `claimEmail`); a repair would give them back. A record that states a
+ *   user verified who is not verified in the app would write an `email`
+ *   identity that core makes only after a proof.
+ * - `email_changed`: the user's address differs from the record's, and the
+ *   repair would write an `email` identity for the old address.
+ * - `credential_exists`: the record is unverified and the user holds a
+ *   credential now. Core reaches no unverified user with two (spec 17.1).
+ * - `identity_taken`: another user holds an identity the record maps to.
+ * - `claimed`: the user is verified and holds its `email` identity, and the
+ *   repair would write a password, a passkey, or a social identity. A claim
+ *   always writes that identity, and the importer cannot tell a claim from a
+ *   newer export, so a verified user's missing credential is an operator
+ *   action. The same reason also comes from the repair's two last updates:
+ *   a conditional update of the user row by the `email` and `emailVerified`
+ *   that the guards read, then the activation of its pending password row.
+ *   Zero rows from either means a claim or an address change landed after
+ *   the guards; the repair deletes the rows it wrote and keeps the record
+ *   here.
+ * - `no_owner`: an organization with no member, whose members map to no owner.
+ */
+export type RepairRefusal =
+  | "verified_since_import"
+  | "email_changed"
+  | "credential_exists"
+  | "identity_taken"
+  | "claimed"
+  | "no_owner";
 
 export interface ImportReport {
   source: SourceName;
@@ -212,11 +256,19 @@ export interface ImportReport {
    * - Another app change since the first run (a removed password or passkey),
    *   or a newer export or other options (for example a row the source now
    *   states as verified, so the record maps to an `email` identity).
-   * The importer never repairs an entry and never counts it as `exists`. The
-   * operator checks that user in the app before any repair. The CLI exits 1
-   * on any entry (Task 13).
+   * Without `repair` the importer never writes an entry's rows and never
+   * counts it as `exists`. The operator checks that user in the app before a
+   * repair. With `repair`, an entry stays here only with `repairRefused`. The
+   * CLI exits 1 on any entry (Task 13).
    */
-  partial: { kind: "user" | "organization"; sourceId: string; missing: string[] }[];
+  partial: {
+    kind: "user" | "organization";
+    sourceId: string;
+    missing: string[];
+    repairRefused?: RepairRefusal;
+  }[];
+  /** The records whose missing rows `repair: true` wrote, with one row kind per row written (plan 9b2). */
+  repaired: { kind: "user" | "organization"; sourceId: string; rows: string[] }[];
 }
 
 /** `onEmailTaken: "fail"` met a taken address or identity. The report holds every record before it. */

@@ -147,6 +147,12 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
         if (!s) return 0;
         return (await run(db, s)).meta.changes;
       }
+      // A foreign key's ON DELETE CASCADE deletes child rows inside SQLite.
+      // RETURNING lists only this table's rows, so the log holds no entry for
+      // the children, and a rollback restores the parent without them. Core's
+      // own tables have no foreign key; the Better Auth tables have seven
+      // (plan 9). Inside `transaction`, delete the child rows first, as core's
+      // deleteOrganization does (plan 9b2, spec 17.8).
       // RETURNING gives the exact rows this statement removed, in one statement.
       // An impossible where (an empty `in`) answers null here as in `delete`.
       const returning = st.deleteReturning(model, where);

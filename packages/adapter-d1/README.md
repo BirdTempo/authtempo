@@ -104,6 +104,14 @@ plan 3 lands, sign-in can leave a user row without its email identity,
 and no later sign-in creates it. Plan 3 repairs this: it creates the
 missing email identity when the user exists.
 
+WARNING: Inside `transaction`, do not delete a row whose child rows a foreign
+key deletes with `ON DELETE CASCADE`. SQLite deletes the child rows itself,
+so the undo log holds no entry for them, and a rollback restores the parent
+row without its children. Delete the child rows first, then the parent, as
+core's organization delete does. Core's own tables have no foreign key; the
+Better Auth tables of `@tempo-auth/compat-better-auth` have seven, and app
+code that uses `createD1AdapterOn` on them must follow this rule (plan 9b2).
+
 ## Tests
 
 `pnpm --filter @tempo-auth/adapter-d1 test` runs the core conformance

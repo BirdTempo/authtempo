@@ -14,6 +14,10 @@
   // routes, and the Worker refuses to run without --var LOCAL_IMPORT:1.
   "workers_dev": false,
   "preview_urls": false,
+  // core (default) writes core's tables; compat writes the app's Better Auth
+  // 1.7 tables (worker/README.md). `--var TARGET:compat` sets it per run.
+  // Any other value refuses at start and writes nothing.
+  "vars": { "TARGET": "core" },
   // The git-ignored file the CLI's --d1-bundle writes (worker/README.md).
   // The build fails until it exists, so the Worker never runs on old input.
   "alias": { "tempo-auth-import-input": "./input/import.local.json" },

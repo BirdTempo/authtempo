@@ -1,6 +1,6 @@
 # @tempo-auth/import
 
-Moves users, social identities (Google and Apple), password hashes, Auth.js
+Moves users, social identities (Google, Apple, GitHub, and LinkedIn), password hashes, Auth.js
 passkeys, organizations, and members into tempo-auth (spec 17). No session
 moves from any source, and no MFA secret moves (spec 17.5). Passkeys move only
 from Auth.js. A Clerk, Supabase, Auth0, Firebase, or Cognito passkey needs a
@@ -12,8 +12,19 @@ tempo-auth-import <provider> [files] --formats <the seam's list> --postgres "$DA
 
 Run `--dry-run` first. It prints the report a real run prints. The importer
 writes only rows that a core flow writes: an address is verified only where
-the export says so, and a social identity other than Google or Apple is
-dropped and listed.
+the export says so, and a social identity other than Google, Apple, GitHub, or
+LinkedIn is dropped and listed.
+
+A GitHub identity imports only as GitHub's numeric user id; any other subject
+is dropped and listed as `identity:github:subject_form`. A LinkedIn identity
+imports only when the export marks it as LinkedIn's OpenID Connect `sub`:
+Supabase `linkedin_oidc`, Clerk `oauth_linkedin_oidc`, or an Auth.js account
+of type `oidc`. An id of the older LinkedIn API (Supabase `linkedin`, Clerk
+`oauth_linkedin`, an Auth.js account of type `oauth`, and every Auth0
+`linkedin` identity) is dropped and listed as `identity:linkedin_legacy`.
+LinkedIn's `sub` is pairwise per client id, so an imported LinkedIn identity
+links only while the app keeps the LinkedIn client id that the old system
+used. Firebase and Cognito have no built-in LinkedIn provider.
 
 `--formats` is required, and it has no default. Give it the `formats` list
 of the app's `createLegacyPasswordHash`, comma-separated, or `none` for an app
@@ -41,11 +52,42 @@ a taken address or identity skips the record, or with `--on-email-taken fail`
 stops the run.
 
 Run the import again at any time: a second run of the same export writes
-nothing, and a user that exists by its import id is never written again.
-Some re-runs can list a user as `partial`, with the missing row kinds, and
-the CLI then exits 1. These are a re-run after a claim, after another change
-in the app, with a newer export, or with other options. Check each such user
-in the app before any repair. The importer has no repair mode.
+nothing, and a user that exists by its import id is never written again
+without `--repair`. Some re-runs can list a user as `partial`, with the
+missing row kinds, and the CLI then exits 1. These are a re-run after a
+claim, after another change in the app, with a newer export, or with other
+options. Check each such user in the app before any repair. Then run the
+import again with `--repair`: each `partial` record gets exactly the rows
+that `missing` names, and the report lists them as `repaired`. A repair
+writes nothing, and the record stays `partial` with `not repaired:
+<reason>`, when a core flow can have removed the rows on purpose:
+`verified_since_import` (a claim verified the user and removed the
+claimant's credentials), `email_changed` (the user's address changed in the
+app), `credential_exists` (an unverified user that holds another credential
+now), `identity_taken` (another user holds the identity), `claimed` (a
+verified user that holds its `email` identity lacks a password, a passkey,
+or a social identity), or `no_owner` (an organization whose members map to
+no owner). A verified user's missing credential is an operator action,
+because the importer cannot tell a claim from a newer export. Each user
+repair checks the user row again after its writes: when a claim or an
+address change lands during the repair, the repair deletes the rows it
+wrote, and the record stays `partial` with `not repaired: claimed`. The
+repaired password row is pending until the repair's last statement
+activates it, after that check, so a sign-in with it fails until then. A repaired passkey or social
+identity is active at once: on D1, for a few round trips before the check,
+it can sign in a claimant who also holds the authenticator or the provider
+login. Without
+`--repair` the importer writes nothing for a `partial` record.
+
+A repair also gives back a credential that the user removed in the app
+since the first run, for example a password or a passkey. The importer
+cannot tell that removal from a stopped run, so check in the app that each
+user still wants each missing credential before you run `--repair`. The
+`email_changed` guard looks only at an `email` identity. An unverified user
+whose address changed can still get another missing credential back, but no
+path reaches that state today: core has no address change flow, and an
+unverified user with no credential has no session to change the address
+with.
 
 `--report <file>` also writes the report as JSON. The report file holds no
 hash. It is written with mode 0600.
@@ -75,6 +117,9 @@ tempo-auth-import supabase --users users.csv --identities identities.csv --forma
   also a value the reader cannot read, such as `infinity`.
 - A phone-only user has no email and is skipped as `no_email`. Supabase
   passkeys do not move (spec 17.5).
+- The `github` provider imports as GitHub. The `linkedin_oidc` provider
+  imports as LinkedIn. The older `linkedin` provider is listed as
+  `identity:linkedin_legacy`.
 - Rows with Supabase's `$fbscrypt$` tag need `--firebase-signer-key` and
   `--firebase-salt-separator`, the same values as the seam's `firebase`
   option, and `firescrypt` in `--formats`. A row of another Firebase project
@@ -113,6 +158,9 @@ tempo-auth-import clerk --csv export.csv --users users.json [--organizations org
   user.
 - A user or a CSV row with no id is listed as `no_source_id`, a conflict. So
   is an organization with no id.
+- The `oauth_github` strategy imports as GitHub. The `oauth_linkedin_oidc`
+  strategy imports as LinkedIn. The older `oauth_linkedin` strategy is listed
+  as `identity:linkedin_legacy`.
 - Unverified: the unit of `created_at` (a value below 1e11 is read as
   seconds, else milliseconds), the `password_hasher` values of a real export,
   and the `banned` field (runbook item 3).
@@ -145,6 +193,9 @@ other top-level value stops the run.
   unmapped role becomes `member`. An organization with no owner gets its
   first admin as owner; with no admin it is skipped as `no_owner`.
 - A `blocked` value other than `false` skips the user as `banned`.
+- A `github` identity imports as GitHub. Every `linkedin` identity is listed
+  as `identity:linkedin_legacy`, because the export does not show whether its
+  id is the OpenID Connect `sub` (unverified on 2026-10-12).
 - A user line or an organization with no id is listed as `no_source_id`, a
   conflict.
 - Unverified: the hash algorithm (`$2b$10$` in every sample), the hash file's
@@ -169,6 +220,9 @@ tempo-auth-import firebase --users users.json --firebase-rounds 8 --firebase-mem
   sign-in with no report line. Sign in once with a known user before the
   cut-over.
 - A `disabled` value other than `false` skips the user.
+- A `github.com` provider imports as GitHub, with its `rawId`. Firebase has no
+  built-in LinkedIn provider. A custom `oidc.<name>` provider is dropped and
+  listed.
 - Unverified: the JSON type of `createdAt` and the `{ "users": [...] }`
   wrapper (runbook item 5).
 
@@ -205,6 +259,9 @@ rm tables.json
 - `--password-column` names the app's own column of `User`. A name that no
   row has stops the run.
 - Account rows other than `oauth` and `oidc` are dropped and listed.
+- A `github` account imports as GitHub. A `linkedin` account of type `oidc`
+  imports as LinkedIn. A `linkedin` account of type `oauth` is listed as
+  `identity:linkedin_legacy`.
 
 ### Cognito
 
@@ -240,9 +297,18 @@ Cognito exports no hash, so this command needs no `--formats`.
   tables (`@tempo-auth/compat-better-auth`).
 - D1: `--d1-bundle <file>`, then the Worker script. `worker/README.md`
   names the bundle path and every step. The Worker prints the report and
-  the CLI's exit status. It writes core's tables only, through core's D1
-  adapter. An app that keeps the Better Auth tables on D1 has no import path
-  yet (a plan 9c input).
+  the CLI's exit status. It writes core's tables (`TARGET=core`, the
+  default), or an app's Better Auth 1.7 tables on D1 with `--var
+  TARGET:compat` (plan 9b2). `TARGET=compat` serves Better Auth's default
+  table and column names only. An app with custom names (for example
+  snake_case columns or plural tables) has no Worker path yet. The ready
+  check reads only the unique index on the account table's (issuer,
+  accountId). A custom name of that table or of those columns refuses with
+  `schema_mismatch` before any write. Any other custom name passes the
+  check, and the run stops with a D1 error at the first statement on that
+  table: the failing record writes no row (its undo removes them), and the
+  records before it stay. Do not run `TARGET=compat` on such an app. The
+  `--better-auth` target on Postgres also uses the default names.
 
 CAUTION: the D1 bundle holds every password hash and, for Supabase, the
 Firebase signer key. The CLI writes it with mode 0600. Do not commit it, and

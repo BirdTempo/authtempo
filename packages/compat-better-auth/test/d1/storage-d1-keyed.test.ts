@@ -1,7 +1,8 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { createAuth, createPbkdf2PasswordHash, type StorageAdapter } from "@tempo-auth/core";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
+import { NULL_PASSWORD_LOG } from "../../src/storage/statements.js";
 import { BETTER_AUTH_SQLITE, countForeignKeys } from "../fixtures.js";
 import { at, eq, sqlNames } from "./mapping-suite.js";
 import { count, execD1 } from "./schema.js";
@@ -156,5 +157,127 @@ describe("the Better Auth foreign keys on D1", () => {
     const back = await s.findOne("user", [eq("id", "u1")]);
     expect(back?.updatedAt).toEqual(at);
     expect(back?.emailVerified).toBe(true);
+  });
+});
+
+describe("the plan 9b2 inputs on the recorded Better Auth tables", () => {
+  beforeEach(sqlNames({}).truncate);
+  const user = (id: string, email: string) => ({
+    id,
+    email,
+    emailVerified: true,
+    name: null,
+    image: null,
+    createdAt: at,
+    updatedAt: at,
+  });
+  const identity = (id: string, userId: string, subject: string) => ({
+    id,
+    userId,
+    provider: "email",
+    subject,
+    linkedAt: at,
+    createdAt: at,
+    updatedAt: at,
+  });
+
+  it("loses the rows that a cascade deletes when a transaction that deleted their parent fails", async () => {
+    const s = storage().storage;
+    await s.create("user", user("u1", "a@example.com"));
+    await s.create("identity", identity("i1", "u1", "a@example.com"));
+    await expect(
+      s.transaction(async (tx) => {
+        await tx.delete("user", [eq("id", "u1")]);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    // The undo log restores the user row. ON DELETE CASCADE deleted the account row inside
+    // SQLite, outside the log, so no undo entry brings it back (adapter-d1 README).
+    expect([await count('"user"'), await count('"account"')]).toEqual([1, 0]);
+  });
+
+  it("keeps every row when the child rows are deleted first, as core's deleteOrganization does", async () => {
+    const s = storage().storage;
+    await s.create("user", user("u1", "a@example.com"));
+    await s.create("identity", identity("i1", "u1", "a@example.com"));
+    await expect(
+      s.transaction(async (tx) => {
+        await tx.delete("identity", [eq("userId", "u1")]);
+        await tx.delete("user", [eq("id", "u1")]);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect([await count('"user"'), await count('"account"')]).toEqual([1, 1]);
+  });
+
+  it("signs in a null account.password row as no password row, logs once, and a reset repairs it (Review Focus 5)", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Better Auth 1.7.2 never writes this row; a hand-edited table can.
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO "user" ("id","name","email","emailVerified","createdAt","updatedAt") VALUES ('u1','Ada','ada@example.com',1,'2026-10-12T00:00:00.000Z','2026-10-12T00:00:00.000Z')`,
+        ),
+        env.DB.prepare(
+          `INSERT INTO "account" ("id","issuer","accountId","providerId","userId","password","createdAt","updatedAt") VALUES ('a1','local:credential','u1','credential','u1',NULL,'2026-10-12T00:00:00.000Z','2026-10-12T00:00:00.000Z')`,
+        ),
+      ]);
+      const mails: string[] = [];
+      const s = storage();
+      const auth = createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [],
+        storage: s.storage,
+        limiter: s.limiter,
+        mail: { send: async (m) => void mails.push(m.text) },
+        password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) },
+      });
+      const pw = auth.api.password;
+      if (!pw) throw new Error("the password api is missing");
+      const signIn = (password: string) =>
+        pw.signIn({ email: "ada@example.com", password, ip: null, userAgent: null });
+      expect(await signIn("a guess of one")).toMatchObject({
+        ok: false,
+        code: "invalid_credentials",
+      });
+      expect(await signIn("a guess of two")).toMatchObject({
+        ok: false,
+        code: "invalid_credentials",
+      });
+      expect(error.mock.calls).toEqual([[`${NULL_PASSWORD_LOG} (account a1)`]]);
+      expect(await pw.requestReset({ email: "ada@example.com", ip: null })).toMatchObject({
+        ok: true,
+      });
+      const token = decodeURIComponent(/token=([^\s&]+)/.exec(mails.at(-1) ?? "")?.[1] ?? "");
+      expect(
+        await pw.reset({ token, password: "a long new passphrase 1", ip: null, userAgent: null }),
+      ).toMatchObject({ ok: true });
+      expect(await signIn("a long new passphrase 1")).toMatchObject({ ok: true });
+      expect(
+        await env.DB.prepare(`SELECT "password" FROM "account" WHERE "id" = 'a1'`).first(
+          "password",
+        ),
+      ).toMatch(/^pbkdf2-sha256\$1000\$/);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("reads a date in SQLite's space form as UTC, and refuses one it cannot read", async () => {
+    await env.DB.prepare(
+      `INSERT INTO "user" ("id","name","email","emailVerified","createdAt","updatedAt") VALUES ('u2','Bo','bo@example.com',1,'2024-01-15 10:30:00','2024-01-15 10:30:00.5')`,
+    ).run();
+    const s = storage().storage;
+    expect(await s.findOne("user", [eq("id", "u2")])).toMatchObject({
+      createdAt: new Date("2024-01-15T10:30:00.000Z"),
+      updatedAt: new Date("2024-01-15T10:30:00.500Z"),
+    });
+    await env.DB.prepare(`UPDATE "user" SET "updatedAt" = 'yesterday' WHERE "id" = 'u2'`).run();
+    await expect(s.findOne("user", [eq("id", "u2")])).rejects.toMatchObject({
+      code: "schema_mismatch",
+      model: "user",
+      fields: ["updatedAt"],
+    });
   });
 });

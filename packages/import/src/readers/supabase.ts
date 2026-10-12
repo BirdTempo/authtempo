@@ -1,7 +1,7 @@
 import type { FirebaseHashConfig } from "@tempo-auth/legacy-hashes";
 import { csvRecords, parseCsv } from "../csv.js";
 import type { ImportUser, Source } from "../types.js";
-import { asRecord, parseTime } from "./common.js";
+import { asRecord, LINKEDIN_LEGACY, noSourceIdUser, parseTime } from "./common.js";
 
 /**
  * Supabase Auth: two CSV files from the project's Postgres, made with the
@@ -116,6 +116,17 @@ function requireColumns(file: string, text: string, columns: readonly string[]):
       );
 }
 
+/**
+ * Supabase provider names that differ from core's. `linkedin_oidc` is the
+ * LinkedIn provider; the older `linkedin` provider was disabled and then
+ * removed on 2024-01-04 (Supabase "Login with LinkedIn", read 2026-10-12), so
+ * its rows hold ids of the older API. `github` keeps its name.
+ */
+const PROVIDERS: Readonly<Record<string, string>> = {
+  linkedin_oidc: "linkedin",
+  linkedin: LINKEDIN_LEGACY,
+};
+
 export function supabaseSource(input: SupabaseExport): Source {
   requireColumns("users", input.users, SUPABASE_USER_COLUMNS);
   requireColumns("identities", input.identities, SUPABASE_IDENTITY_COLUMNS);
@@ -129,10 +140,23 @@ export function supabaseSource(input: SupabaseExport): Source {
         // The email identity is the user's own address; the importer writes it from the user row.
         if (i.provider === "email" || !i.user_id || !i.provider_id) continue;
         const list = byUser.get(i.user_id) ?? [];
-        list.push({ provider: i.provider ?? "", subject: i.provider_id });
+        const provider = i.provider ?? "";
+        list.push({
+          provider: Object.hasOwn(PROVIDERS, provider) ? (PROVIDERS[provider] as string) : provider,
+          subject: i.provider_id,
+        });
         byUser.set(i.user_id, list);
       }
-      for (const u of csvRecords(input.users)) {
+      for (const [n, u] of csvRecords(input.users).entries()) {
+        // A row with no id has no import key: listed, never imported (plan 9b2).
+        // The label is the record's index plus 2 (the header is record 1).
+        // That is the file line only when no blank line and no quoted field
+        // with a line break comes before it; psql's `\copy` quotes a jsonb
+        // value with a line break, so count records, not lines.
+        if (!u.id) {
+          yield noSourceIdUser(`users csv row ${n + 2}`);
+          continue;
+        }
         const dropped: string[] = [];
         // A jsonb null, or any value that is not an object, gives no name and no image.
         let meta: Record<string, unknown> = {};
@@ -146,14 +170,14 @@ export function supabaseSource(input: SupabaseExport): Source {
           typeof meta[k] === "string" && meta[k] ? (meta[k] as string) : null;
         const record: ImportUser = {
           kind: "user",
-          sourceId: u.id ?? "",
+          sourceId: u.id,
           email: u.email || null,
           // email_confirmed_at, not confirmed_at: confirmed_at is LEAST(email, phone) (migration 20210710035447).
           emailVerified: parseTime(u.email_confirmed_at) !== null,
           name: text("full_name") ?? text("name"),
           image: text("avatar_url") ?? text("picture"),
           createdAt: parseTime(u.created_at),
-          identities: byUser.get(u.id ?? "") ?? [],
+          identities: byUser.get(u.id) ?? [],
           password: supabasePassword(u.encrypted_password ?? "", input.firebase),
           passkeys: [],
         };

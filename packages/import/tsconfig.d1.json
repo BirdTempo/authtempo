@@ -5,7 +5,10 @@
     "rootDir": ".",
     // workers-types declares the same globals as DOM and conflicts with it.
     "lib": ["ES2023"],
-    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"],
+    // The Worker imports the package by its own name. The typecheck reads the
+    // source, so it does not wait for dist (the bundle proof reads dist).
+    "paths": { "@tempo-auth/import": ["./src/index.ts"] }
   },
   "include": ["test/d1", "worker/src", "test/raw.d.ts"]
 }

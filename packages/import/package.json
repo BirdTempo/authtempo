@@ -14,14 +14,18 @@
   },
   "files": [
     "dist",
-    "worker"
+    "worker/README.md",
+    "worker/wrangler.jsonc",
+    "worker/src",
+    "worker/proof"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.d1.json",
-    "test": "vitest run && vitest run -c vitest.d1.config.ts && node worker/proof/bundle-no-node.mjs"
+    "test": "vitest run && vitest run -c vitest.d1.config.ts && node worker/proof/bundle-no-node.mjs && node worker/proof/pack-files.mjs"
   },
   "dependencies": {
+    "@tempo-auth/adapter-d1": "workspace:*",
     "@tempo-auth/adapter-postgres": "workspace:*",
     "@tempo-auth/compat-better-auth": "workspace:*",
     "@tempo-auth/core": "workspace:*",
@@ -31,7 +35,6 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",
     "@cloudflare/workers-types": "5.20261007.1",
-    "@tempo-auth/adapter-d1": "workspace:*",
     "@types/node": "24.19.1",
     "typescript": "7.0.2",
     "vite": "8.3.3",

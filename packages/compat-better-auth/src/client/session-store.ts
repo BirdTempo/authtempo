@@ -20,9 +20,19 @@ export function createSessionStore(
   // A read asked for while another runs. The running read may carry the state from before the
   // change that asked (a sign-out), so its answer is dropped and one newer read runs.
   let dirty = false;
+  // Set while the listeners run. A listener that refetches on every notify calls `refetch` from
+  // inside `set`; the state it sees is the newest, so the call starts no read and queues none.
+  // Without this guard each read's own notify asked for the next read, with no end (plan 9
+  // N-R7, plan 9b2). A call from outside a notify during a read still queues one more read.
+  let notifying = 0;
   const set = (next: SessionState) => {
     state = next;
-    for (const l of listeners) l();
+    notifying++;
+    try {
+      for (const l of listeners) l();
+    } finally {
+      notifying--;
+    }
   };
   const read = async (): ReturnType<typeof fetchSession> => {
     try {
@@ -33,6 +43,7 @@ export function createSessionStore(
     }
   };
   const refetch = (): Promise<void> => {
+    if (notifying > 0) return inFlight ?? Promise.resolve();
     if (inFlight) {
       dirty = true;
       return inFlight;

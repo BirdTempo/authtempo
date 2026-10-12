@@ -63,8 +63,10 @@ and consumerb import some of them: remove those imports first.
 PBKDF2 on the first right sign-in. A legacy row verifies slower than a PBKDF2
 row until that sign-in rehashes it. So during the migration window the
 response time shows which accounts are not yet migrated. Each account loses
-this tell at its first right sign-in. At most two scrypt derives run at once
-per isolate; the others wait, and no sign-in is refused.
+this tell at its first right sign-in.
+At most two legacy derives run at once per isolate, also when the app chains
+`@tempo-auth/legacy-hashes` before this seam: both use core's `deriveGate`.
+The others wait, and no sign-in is refused.
 
 ## Storage: in place on the Better Auth tables
 
@@ -144,8 +146,25 @@ while `account` has no unique index on (issuer, accountId): the 1.7 file uses
 Better Auth's own index and adds none.
 
 A Better Auth date in SQLite's `YYYY-MM-DD HH:MM:SS` form has no time zone.
-On Workers it reads as UTC. Off Workers, for example in a Node test of the
-same code, it reads as local time.
+The storage reads it as UTC, as SQLite's date functions do, on Workers and
+off them (plan 9b2). A where clause and a sort still compare the stored text,
+so a row in that form sorts before an ISO row of the same second. A date text
+that is not a date answers `schema_mismatch`. The storage does not match the
+`YYYY-MM-DD HH:MM` form with no seconds. SQLite's `CURRENT_TIMESTAMP` never
+writes it, but SQL written by hand can. JavaScript reads that text as local
+time: on Workers, whose time zone is UTC, the read is correct; in a process
+with another time zone it is wrong by the zone offset (probe with Node and
+`TZ=Pacific/Auckland`, 2026-10-12). Write each date with its seconds.
+
+A `credential` account row with a null `password` (Better Auth never writes
+one) reads as no password row: the sign-in answers `invalid_credentials`
+after the dummy verify, a reset writes a real hash, and the storage logs one
+line, `tempo-auth compat: a credential account row has no password; it reads
+as no password row (account <id>)`.
+
+On D1, do not delete a user or an organization inside a `transaction` of
+your own while its child rows exist: the foreign keys delete them, and a
+rollback does not bring them back (`@tempo-auth/adapter-d1` README).
 
 These D1 facts come from the local Workers pool only and are not verified on
 a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound
@@ -266,6 +285,15 @@ need `webBrowser` (the `expo-web-browser` module) and `crypto` (the
 This matters for a Next server render of a client module. The client reads the
 base at the first call: `baseURL`, else the page's `location.origin`. A call
 with neither answers the error code `BASE_URL_REQUIRED`.
+
+A `baseURL` that is not an absolute `http` or `https` URL (for example
+`/api/auth`) throws one error when the client is made. A throw of the Expo
+token store's `setItem` answers `UNEXPECTED_RESPONSE` with status 0. The call
+does not reject. A `useSession` listener may call `refetch` on every notify.
+The store starts no read for a call made while it notifies, so the reads end.
+A listener that refetches later (for example in a timer or an effect) on every
+notify still reads with no end. Refetch on a change of the data, not on every
+notify.
 
 `signIn.email` with `rememberMe: false` answers `NOT_SUPPORTED` (501): core
 keeps no short session. `rememberMe: true` works.

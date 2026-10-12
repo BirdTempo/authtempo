@@ -1,4 +1,10 @@
-import { type ModelName, StorageError, schema, type Where } from "@tempo-auth/core";
+import {
+  type ModelName,
+  PENDING_HASH_PREFIX,
+  StorageError,
+  schema,
+  type Where,
+} from "@tempo-auth/core";
 import {
   assertFields,
   assertModel,
@@ -44,6 +50,28 @@ export function base64StdToUrl(text: string): string {
 /** ISO text in UTC, so a Drizzle client with the timestamp parsers off and a plain client read the same value. */
 const pgDate = (col: string) =>
   `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+
+/**
+ * SQLite's own date text, `YYYY-MM-DD HH:MM:SS` with an optional fraction and
+ * no zone. SQLite's date functions read it as UTC; JavaScript's Date reads it
+ * as local time. A Better Auth row written by SQL (`CURRENT_TIMESTAMP`) has
+ * it. The read turns it into ISO text in UTC first (plan 9b2).
+ */
+const SQLITE_SPACE_DATE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(\.\d+)?$/;
+
+/**
+ * What a `credential` account row with a null `password` reads as (plan
+ * 9b2). Better Auth 1.7.2 never writes such a row; a hand-edited table can.
+ * Before plan 9b2 the row read as schema_mismatch, so the sign-in and the
+ * reset answered 500. Core treats a row with the pending prefix as no
+ * password row (engine/password.ts): the sign-in runs the dummy verify and
+ * answers invalid_credentials, and a reset writes a real hash over it. No
+ * seam parses this text, so no password matches it.
+ */
+export const NULL_PASSWORD_HASH = `${PENDING_HASH_PREFIX}null-password`;
+/** The line the statements log once per storage for such a row, followed by the account id. */
+export const NULL_PASSWORD_LOG =
+  "tempo-auth compat: a credential account row has no password; it reads as no password row";
 const PG_KEY_RE = /^Key \((.+?)\)=\(/;
 const SQLITE_UNIQUE_RE = /UNIQUE constraint failed: ((?:[\w"]+\.[\w"]+)(?:, [\w"]+\.[\w"]+)*)/;
 
@@ -108,6 +136,8 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
 export function compatStatements(dialect: "postgres" | "sqlite", names: Names): CompatStatements {
   const d = dialect === "postgres" ? POSTGRES : SQLITE;
   const pg = dialect === "postgres";
+  // One log line per storage for a null credential password: a hand-edited table can hold many.
+  let loggedNullPassword = false;
 
   class Params {
     readonly values: unknown[] = [];
@@ -170,8 +200,20 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     let v: unknown = raw ?? null;
     if (v !== null) {
       if (type === "boolean") v = typeof v === "number" ? v !== 0 : v === true;
-      else if (type === "date") v = new Date(v as string);
-      else if (type === "json") {
+      else if (type === "date") {
+        // Only text can be in the space form. A driver's Date or a number goes
+        // to `new Date` as it is: `String(v)` would drop a Date's milliseconds
+        // and make a number unreadable (M-2 of the plan 9b2 final review).
+        // Any other type (a boolean, an object) is no date: `new Date(true)`
+        // would read as 1 ms after the epoch (fix round 2).
+        if (typeof v !== "string" && typeof v !== "number" && !(v instanceof Date))
+          throw new StorageError("schema_mismatch", model, [field]);
+        const space = typeof v === "string" ? SQLITE_SPACE_DATE_RE.exec(v) : null;
+        const at = new Date(space ? `${space[1]}T${space[2]}${(space[3] ?? "").slice(0, 4)}Z` : v);
+        // A date core cannot read would compare as NaN, so an expiry would never pass.
+        if (Number.isNaN(at.getTime())) throw new StorageError("schema_mismatch", model, [field]);
+        v = at;
+      } else if (type === "json") {
         // App SQL can write any text here. Name the model and the field, as
         // for any other value core cannot read (final review L-10).
         try {
@@ -371,8 +413,16 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       return { sql: `DELETE FROM ${table(model)}${w.clause}`, params: p.values };
     },
     decode(model, row) {
+      let r = row;
+      if (model === "password" && (row.hash === null || row.hash === undefined)) {
+        if (!loggedNullPassword) {
+          loggedNullPassword = true;
+          console.error(`${NULL_PASSWORD_LOG} (account ${String(row.id)})`);
+        }
+        r = { ...row, hash: NULL_PASSWORD_HASH };
+      }
       const out: Row = {};
-      for (const f of Object.keys(MAP[model].fields)) out[f] = decodeField(model, f, row[f]);
+      for (const f of Object.keys(MAP[model].fields)) out[f] = decodeField(model, f, r[f]);
       return out as never;
     },
     undoSelect(model, where) {

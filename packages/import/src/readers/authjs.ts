@@ -1,6 +1,14 @@
 import { decodeBase64, encodeBase64 } from "@tempo-auth/legacy-hashes";
 import type { ImportPasskey, ImportUser, Source } from "../types.js";
-import { asArray, asRecord, parseTime, str, toBase64Url } from "./common.js";
+import {
+  asArray,
+  asRecord,
+  LINKEDIN_LEGACY,
+  noSourceIdUser,
+  parseTime,
+  str,
+  toBase64Url,
+} from "./common.js";
 
 /**
  * Auth.js (NextAuth): the adapter tables User, Account, and Authenticator,
@@ -80,8 +88,13 @@ export function authjsSource(input: AuthjsExport): Source {
         const cid = idKey(k.credentialID);
         if (cid !== null) idCount.set(cid, (idCount.get(cid) ?? 0) + 1);
       }
-      for (const u of users) {
-        const id = str(u.id) ?? "";
+      for (const [n, u] of users.entries()) {
+        const id = str(u.id);
+        // No id: no import key, and no account or passkey can name it. Listed, never imported (plan 9b2).
+        if (id === null) {
+          yield noSourceIdUser(`users item ${n + 1}`);
+          continue;
+        }
         const dropped: string[] = [];
         const passkeys: ImportPasskey[] = [];
         for (const k of keys.filter((k) => str(k.userId) === id)) {
@@ -144,10 +157,16 @@ export function authjsSource(input: AuthjsExport): Source {
           createdAt: null,
           identities: accounts
             .filter((a) => str(a.userId) === id && (a.type === "oauth" || a.type === "oidc"))
-            .map((a) => ({
-              provider: str(a.provider) ?? "unknown",
-              subject: str(a.providerAccountId) ?? "",
-            }))
+            .map((a) => {
+              const provider = str(a.provider) ?? "unknown";
+              return {
+                // Auth.js's LinkedIn provider is type "oidc" on main (providers/linkedin.ts,
+                // read 2026-10-12), so its providerAccountId is the OIDC sub. An "oauth"
+                // LinkedIn account came from an older provider version (plan 9b2).
+                provider: provider === "linkedin" && a.type !== "oidc" ? LINKEDIN_LEGACY : provider,
+                subject: str(a.providerAccountId) ?? "",
+              };
+            })
             .filter((i) => i.subject.length > 0),
           password: hash ? { hash } : null,
           passkeys,

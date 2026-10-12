@@ -739,3 +739,122 @@ describe("one status per code (plan 9b)", () => {
     });
   });
 });
+
+describe("createAuthClient: the residual throws (plan 9b2)", () => {
+  it("refuses a relative or non-http baseURL at construction with one error", () => {
+    expect(() => createAuthClient({ baseURL: "/api/auth" })).toThrow(
+      "tempo-auth compat: baseURL must be an absolute http or https URL, for example https://api.example.com/api/auth; got /api/auth",
+    );
+    expect(() => createAuthClient({ baseURL: "ftp://files.example.com" })).toThrow(
+      /must be an absolute http or https URL/,
+    );
+    expect(() => createAuthClient({ baseURL: `${BASE}/api/auth` })).not.toThrow();
+    // No baseURL stays legal: the base is read at the first call (consumere's server render).
+    expect(() => createAuthClient()).not.toThrow();
+  });
+
+  it("answers UNEXPECTED_RESPONSE, never a rejection, when the token store throws on write", async () => {
+    const s = server();
+    const onError = vi.fn();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [
+        expoClient({
+          scheme: "reception",
+          storage: {
+            getItem: () => null,
+            setItem: () => {
+              throw new Error("store full");
+            },
+          },
+        }),
+      ],
+      fetchOptions: { customFetchImpl: s.fetchImpl, onError },
+    });
+    const up = await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    expect(up).toMatchObject({ data: null, error: { code: "UNEXPECTED_RESPONSE", status: 0 } });
+    expect(up.error?.message).toContain("store full");
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0].error).toMatchObject({ code: "UNEXPECTED_RESPONSE" });
+    const signedIn = await c.signIn.email({ email: "pat@example.com", password: PASSWORD });
+    expect(signedIn).toMatchObject({ data: null, error: { code: "UNEXPECTED_RESPONSE" } });
+  });
+
+  it("answers UNEXPECTED_RESPONSE, never a rejection, when the token store throws after a system-browser sign-in", async () => {
+    const s = server();
+    // The handoff redeem answers a real sign-up session, so the token store is the only step that fails.
+    const redeeming: typeof fetch = async (input, init) => {
+      const req = new Request(input, init);
+      if (!new URL(req.url).pathname.endsWith("/handoff/redeem")) return s.fetchImpl(req);
+      return s.fetchImpl(
+        new Request(`${BASE}/api/auth/password/sign-up`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email: "pat@example.com", password: PASSWORD, name: "Pat" }),
+        }),
+      );
+    };
+    const onError = vi.fn();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [
+        expoClient({
+          scheme: "reception",
+          webBrowser: {
+            openAuthSessionAsync: async () => ({
+              type: "success",
+              url: "reception://auth?code=c1",
+            }),
+          },
+          storage: {
+            getItem: () => null,
+            setItem: () => {
+              throw new Error("store full");
+            },
+          },
+        }),
+      ],
+      fetchOptions: { customFetchImpl: redeeming, onError },
+    });
+    const social = await c.signIn.social({ provider: "google" });
+    expect(social).toMatchObject({ data: null, error: { code: "UNEXPECTED_RESPONSE", status: 0 } });
+    expect(social.error?.message).toContain("store full");
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0].error).toMatchObject({ code: "UNEXPECTED_RESPONSE" });
+  });
+
+  it("ends the reads when a listener refetches on every notify", async () => {
+    const s = server();
+    let reads = 0;
+    const counting: typeof fetch = async (input, init) => {
+      const req = new Request(input, init);
+      if (req.method === "GET" && new URL(req.url).pathname.endsWith("/session")) {
+        reads++;
+        // A runaway loop ends here, so a regression fails on the count and not on a crashed worker.
+        if (reads === 50) stop();
+      }
+      return s.fetchImpl(req);
+    };
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [
+        expoClient({ scheme: "reception", storagePrefix: "reception", storage: memoryStorage() }),
+      ],
+      fetchOptions: { customFetchImpl: counting },
+    });
+    // The listener of an app that refetches on each change it sees.
+    const stop = c.useSession.subscribe(() => void c.useSession.refetch());
+    await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    await vi.waitFor(() => expect(c.useSession.get().data?.user.email).toBe("pat@example.com"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const settled = reads;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reads).toBe(settled);
+    // Ceiling 3: a guarded store reads twice (first subscriber, sign-up refresh); one more is slack.
+    expect(reads).toBeLessThanOrEqual(3);
+    stop();
+  });
+});

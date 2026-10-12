@@ -1,6 +1,6 @@
 import { firescryptParamsValid, SCRYPT_MAX_N_TIMES_R } from "@tempo-auth/legacy-hashes";
 import type { ImportUser, Source } from "../types.js";
-import { asArray, asRecord, parseMillis, str } from "./common.js";
+import { asArray, asRecord, noSourceIdUser, parseMillis, str } from "./common.js";
 
 /**
  * Firebase Auth: `firebase auth:export users.json --format=json`, and the
@@ -24,6 +24,9 @@ export interface FirebaseExport {
   hashConfig: { rounds: number; memCost: number };
 }
 
+// `github.com` becomes `github` by the `.com` rule below (plan 9b2). Firebase
+// has no built-in LinkedIn provider; a custom OIDC provider has the id
+// `oidc.<name>`, which the importer drops and lists.
 const PROVIDERS: Record<string, string> = { "google.com": "google", "apple.com": "apple" };
 
 function provider(id: string): string {
@@ -49,8 +52,14 @@ export function firebaseSource(input: FirebaseExport): Source {
       if (!Array.isArray(parsed) && !Array.isArray(wrapped))
         throw new Error("tempo-auth import: the firebase export has no users array");
       const list = Array.isArray(parsed) ? parsed : asArray(wrapped);
-      for (const raw of list) {
+      for (const [n, raw] of list.entries()) {
         const u = asRecord(raw);
+        const id = str(u.localId);
+        // No localId: no import key. Listed, never imported (plan 9b2).
+        if (id === null) {
+          yield noSourceIdUser(`users item ${n + 1}`);
+          continue;
+        }
         const hash = str(u.passwordHash);
         const salt = str(u.salt);
         const dropped: string[] = [];
@@ -69,7 +78,7 @@ export function firebaseSource(input: FirebaseExport): Source {
         else if (salt) password = { refused: "firescrypt (no hash)" };
         const record: ImportUser = {
           kind: "user",
-          sourceId: str(u.localId) ?? "",
+          sourceId: id,
           email: str(u.email),
           emailVerified: u.emailVerified === true,
           name: str(u.displayName),

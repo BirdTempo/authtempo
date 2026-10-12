@@ -171,3 +171,85 @@ describe("firebaseSource edge rows", () => {
     ).not.toThrow();
   });
 });
+
+describe("firebaseSource: a user with no localId (plan 9b2, Review Focus 4)", () => {
+  it("skips it as no_source_id and names the item", async () => {
+    const users = JSON.stringify({
+      users: [{ email: "nid@example.com", emailVerified: true, providerUserInfo: [] }],
+    });
+    const r = await all(firebaseSource({ users, hashConfig: CONFIG }));
+    expect(r).toEqual([
+      {
+        kind: "user",
+        sourceId: "(none) users item 1",
+        email: null,
+        emailVerified: false,
+        name: null,
+        image: null,
+        createdAt: null,
+        identities: [],
+        password: null,
+        passkeys: [],
+        skip: "no_source_id",
+      },
+    ]);
+    const report = await importUsers(
+      createMemoryAdapter(),
+      firebaseSource({ users, hashConfig: CONFIG }),
+      { formats: LEGACY_FORMATS, now },
+    );
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 1", reason: "no_source_id" },
+    ]);
+  });
+
+  it("keeps the order and the item number of a no-id user between two valid users (parked Task 3 Minor)", async () => {
+    const users = JSON.stringify({
+      users: [
+        { localId: "fa", email: "a@example.com", emailVerified: true, providerUserInfo: [] },
+        { email: "nid@example.com", emailVerified: true, providerUserInfo: [] },
+        { localId: "fb", email: "b@example.com", emailVerified: true, providerUserInfo: [] },
+      ],
+    });
+    const source = () => firebaseSource({ users, hashConfig: CONFIG });
+    expect(
+      (await all(source())).map((r) => [r.sourceId, r.kind === "user" ? r.email : null]),
+    ).toEqual([
+      ["fa", "a@example.com"],
+      ["(none) users item 2", null],
+      ["fb", "b@example.com"],
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 2", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(2);
+  });
+});
+
+describe("firebaseSource: GitHub (plan 9b2)", () => {
+  it("maps github.com with its rawId, and the importer keeps it", async () => {
+    const users = JSON.stringify({
+      users: [
+        {
+          localId: "f9",
+          email: "oc@example.com",
+          emailVerified: true,
+          providerUserInfo: [{ providerId: "github.com", rawId: "583231" }],
+        },
+      ],
+    });
+    const db = createMemoryAdapter();
+    const report = await importUsers(db, firebaseSource({ users, hashConfig: CONFIG }), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.dropped).toEqual([]);
+    expect(
+      (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
+    ).toEqual(["email:oc@example.com", "github:583231"]);
+  });
+});

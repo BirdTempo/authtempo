@@ -1,7 +1,15 @@
 import { normalizeEmail } from "@tempo-auth/core";
 import { formatName } from "../import.js";
 import type { ImportOrganization, ImportUser, SkipReason, Source } from "../types.js";
-import { asArray, asRecord, ndjson, noSourceIdUser, parseTime, str } from "./common.js";
+import {
+  asArray,
+  asRecord,
+  LINKEDIN_LEGACY,
+  ndjson,
+  noSourceIdUser,
+  parseTime,
+  str,
+} from "./common.js";
 
 /**
  * Auth0: the bulk user export (`POST /api/v2/jobs/users-exports` with
@@ -25,7 +33,17 @@ export interface Auth0Export {
   organizations?: string;
 }
 
-const PROVIDERS: Record<string, string> = { "google-oauth2": "google", apple: "apple" };
+/**
+ * Auth0's built-in LinkedIn connection asked for `r_liteprofile` (an Auth0
+ * community thread of 2023); unverified on 2026-10-12 whether a current
+ * `linkedin` identity carries the OIDC `sub`. So every Auth0 `linkedin`
+ * identity is `linkedin_legacy`, which the importer drops and lists (plan 9b2).
+ */
+const PROVIDERS: Record<string, string> = {
+  "google-oauth2": "google",
+  apple: "apple",
+  linkedin: LINKEDIN_LEGACY,
+};
 
 /** Auth0 stores bcrypt only (research 1c). */
 const BCRYPT = /^\$2[ab]\$\d{2}\$/;

@@ -110,8 +110,16 @@ export function bundleOf(value: unknown): ImportBundle {
  */
 export function optionsOf(value: unknown): Omit<ImportOptions, "now"> {
   if (!isObject(value)) badInput("options", "is not an object");
-  const { dryRun, legacyVerify, onEmailTaken, formats, roleMap, reservedSlugs, platformSlug } =
-    value;
+  const {
+    dryRun,
+    repair,
+    legacyVerify,
+    onEmailTaken,
+    formats,
+    roleMap,
+    reservedSlugs,
+    platformSlug,
+  } = value;
   if (!Array.isArray(formats))
     badInput("options.formats", "is not a list; the app's seam names it");
   for (const f of formats)
@@ -121,6 +129,10 @@ export function optionsOf(value: unknown): Omit<ImportOptions, "now"> {
   if (dryRun !== undefined) {
     if (typeof dryRun !== "boolean") badInput("options.dryRun", "is not true or false");
     out.dryRun = dryRun;
+  }
+  if (repair !== undefined) {
+    if (typeof repair !== "boolean") badInput("options.repair", "is not true or false");
+    out.repair = repair;
   }
   if (legacyVerify !== undefined) {
     if (typeof legacyVerify !== "boolean") badInput("options.legacyVerify", "is not true or false");
