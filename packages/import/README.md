@@ -52,11 +52,20 @@ a taken address or identity skips the record, or with `--on-email-taken fail`
 stops the run.
 
 Run the import again at any time: a second run of the same export writes
-nothing, and a user that exists by its import id is never written again.
-Some re-runs can list a user as `partial`, with the missing row kinds, and
-the CLI then exits 1. These are a re-run after a claim, after another change
-in the app, with a newer export, or with other options. Check each such user
-in the app before any repair. The importer has no repair mode.
+nothing, and a user that exists by its import id is never written again
+without `--repair`. Some re-runs can list a user as `partial`, with the
+missing row kinds, and the CLI then exits 1. These are a re-run after a
+claim, after another change in the app, with a newer export, or with other
+options. Check each such user in the app before any repair. Then run the
+import again with `--repair`: each `partial` record gets exactly the rows
+that `missing` names, and the report lists them as `repaired`. A repair
+writes nothing, and the record stays `partial` with `not repaired:
+<reason>`, when a core flow can have removed the rows on purpose:
+`verified_since_import` (a claim verified the user and removed the
+claimant's credentials), `credential_exists` (an unverified user that holds
+another credential now), `identity_taken` (another user holds the identity),
+or `no_owner` (an organization whose members map to no owner). Without
+`--repair` the importer writes nothing for a `partial` record.
 
 `--report <file>` also writes the report as JSON. The report file holds no
 hash. It is written with mode 0600.

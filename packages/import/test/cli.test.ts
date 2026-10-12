@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { createMemoryAdapter, type StorageAdapter, StorageError } from "@tempo-auth/core";
 import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
 import { describe, expect, it } from "vitest";
-import { type CliIo, exitCode, runCli, writePrivate } from "../src/cli.js";
+import { type CliIo, exitCode, runCli, USAGE, writePrivate } from "../src/cli.js";
+import { importId } from "../src/ids.js";
 import { CONFLICT_REASONS, type ImportReport } from "../src/types.js";
 import { SUPABASE_FIXTURE_CREATED } from "./fixtures/supabase-counts.js";
 import identities from "./fixtures/supabase-identities.csv?raw";
@@ -105,6 +106,7 @@ function report(over: Partial<ImportReport>): ImportReport {
     dropped: [],
     refusals: 0,
     partial: [],
+    repaired: [],
     ...over,
   };
 }
@@ -408,6 +410,30 @@ describe("tempo-auth-import", () => {
       expect(exitCode(report({ skipped: [{ kind: "user", sourceId: "u", reason }] })), reason).toBe(
         0,
       );
+  });
+
+  it("passes --repair: a half record gets its rows, and the report lists them", async () => {
+    const db = createMemoryAdapter();
+    const ada = "11111111-1111-4111-8111-111111111111";
+    await db.create("user", {
+      id: await importId("user", "supabase", ada),
+      email: "ada@example.com",
+      emailVerified: true,
+      name: "Ada Lovelace",
+      image: null,
+      createdAt: new Date("2024-01-15T10:29:00.500Z"),
+      updatedAt: new Date("2024-01-15T10:29:00.500Z"),
+    });
+    const plain = io(FILES, db);
+    await runCli(BASE, plain.value);
+    expect(plain.out).toContain(
+      `partial user ${ada}: missing identity:email, identity:google, password`,
+    );
+    const fixed = io(FILES, db);
+    await runCli([...BASE, "--repair"], fixed.value);
+    expect(fixed.out).toContain(`repaired user ${ada}: identity:email, identity:google, password`);
+    expect(fixed.out.some((l) => l.startsWith("partial "))).toBe(false);
+    expect(USAGE).toContain("--repair");
   });
 
   it("writes the bundle and the report file with mode 0600, also over a wider file", () => {

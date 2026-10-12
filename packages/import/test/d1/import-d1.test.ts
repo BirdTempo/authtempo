@@ -240,6 +240,7 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
       [{ formats: [], roleMap: { billing: 1 } }, "options.roleMap.billing is not text"],
       [{ formats: [], reservedSlugs: "help" }, "options.reservedSlugs is not a list of text"],
       [{ formats: [], platformSlug: 7 }, "options.platformSlug is not text"],
+      [{ formats: [], repair: "true" }, "options.repair is not true or false"],
     ];
     for (const [options, message] of cases)
       await expect(runImport(env.DB, { bundle: cognito, options })).rejects.toThrow(

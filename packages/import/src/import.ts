@@ -19,6 +19,7 @@ import {
   type ImportRole,
   type ImportUser,
   isRefusal,
+  type RepairRefusal,
   type SkipReason,
   type Source,
 } from "./types.js";
@@ -69,6 +70,7 @@ interface Resolved {
   /** A Map, not an object: a source role named `constructor` or `__proto__` must miss. */
   roles: ReadonlyMap<string, ImportRole>;
   reserved: ReadonlySet<string>;
+  repair: boolean;
   now: () => Date;
 }
 
@@ -86,9 +88,10 @@ interface Planned {
   slugs: Set<string>;
 }
 
-type Plan<T> =
+type Plan<T, R> =
   | { kind: "exists" }
-  | { kind: "partial"; missing: string[] }
+  | { kind: "partial"; missing: string[]; repairRefused?: RepairRefusal }
+  | { kind: "repair"; missing: string[]; rows: R }
   | { kind: "skip"; reason: SkipReason }
   | { kind: "write"; rows: T };
 
@@ -114,6 +117,17 @@ interface OrgRows {
   skippedMembers: { sourceId: string; reason: SkipReason }[];
 }
 
+/** A user's credential rows: all of them for a new user, the missing ones for a repair. */
+interface CredentialRows {
+  userId: string;
+  identities: { provider: string; subject: string }[];
+  password: string | null;
+  passkeys: ImportUser["passkeys"];
+}
+
+/** The member rows of an organization: all of them for a new one, all of them for a repair. */
+type OrgMembers = Pick<OrgRows, "id" | "members" | "dropped" | "skippedMembers">;
+
 function emptyReport(source: Source, dryRun: boolean): ImportReport {
   return {
     source: source.name,
@@ -125,6 +139,7 @@ function emptyReport(source: Source, dryRun: boolean): ImportReport {
     dropped: [],
     refusals: 0,
     partial: [],
+    repaired: [],
   };
 }
 
@@ -218,10 +233,11 @@ export function formatName(hash: string): string {
  *   app's platform organization slug.
  * Each record is one transaction. The key is the id `importId` derives from
  * the source id, so a second run of the same export finds every record and
- * writes nothing. A user that exists by that id is never written again, even
- * when its rows changed since: a claim may have removed a claimant's
- * credentials, and a re-run must not restore them. A record whose id exists
- * without all its rows is reported in `partial`, never repaired.
+ * writes nothing. Without `repair`, a user that exists by that id is never
+ * written again, even when its rows changed since: a claim may have removed a
+ * claimant's credentials, and a re-run must not restore them. A record whose
+ * id exists without all its rows is reported in `partial`; with `repair` it
+ * gets exactly the missing rows, unless a guard refuses (`RepairRefusal`).
  */
 export async function importUsers(
   storage: StorageAdapter,
@@ -236,6 +252,7 @@ export async function importUsers(
     legacyVerify: options.legacyVerify ?? false,
     roles: roleMap(source, options),
     reserved: reservedSet(options),
+    repair: options.repair ?? false,
     now: options.now ?? (() => new Date()),
   };
   const report = emptyReport(source, o.dryRun);
@@ -262,7 +279,7 @@ async function planUser(
   r: ImportUser,
   o: Resolved,
   planned: Planned,
-): Promise<Plan<UserRows>> {
+): Promise<Plan<UserRows, CredentialRows>> {
   if (r.skip) return { kind: "skip", reason: r.skip };
   const email = r.email === null ? null : normalizeEmail(r.email);
   if (email === null) return { kind: "skip", reason: "no_email" };
@@ -271,7 +288,7 @@ async function planUser(
   const rows = userRows(source, r, id, email, o);
   if (rows === null) return { kind: "skip", reason: "duplicate_passkey" };
   const found = await db.findOne("user", [{ field: "id", op: "eq", value: id }]);
-  if (found) return existingUser(db, rows);
+  if (found) return existingUser(db, rows, o, planned);
   if (
     planned.emails.has(email) ||
     (await db.findOne("user", [{ field: "email", op: "eq", value: email }]))
@@ -381,14 +398,20 @@ function userRows(
 }
 
 /**
- * A user that exists by its import id. It is never written again. When it
- * lacks a row its record maps to, the report lists it as `partial` with each
- * missing row kind. The importer cannot tell why a row is missing (see
- * `ImportReport.partial`), so it has no rule that turns a missing row into
- * `exists`: the operator checks the user in the app.
+ * A user that exists by its import id. Without `repair` it is never written
+ * again. When it lacks a row its record maps to, the report lists it as
+ * `partial` with each missing row kind. The importer cannot tell why a row
+ * is missing (see `ImportReport.partial`), so with `repair` it writes the
+ * missing rows only when no guard of `repairRefusal` objects.
  */
-async function existingUser(db: StorageAdapter, rows: UserRows): Promise<Plan<UserRows>> {
+async function existingUser(
+  db: StorageAdapter,
+  rows: UserRows,
+  o: Resolved,
+  planned: Planned,
+): Promise<Plan<UserRows, CredentialRows>> {
   const missing: string[] = [];
+  const fill: CredentialRows = { userId: rows.id, identities: [], password: null, passkeys: [] };
   const own = rows.verified
     ? [{ provider: "email", subject: rows.email }, ...rows.identities]
     : rows.identities;
@@ -398,21 +421,100 @@ async function existingUser(db: StorageAdapter, rows: UserRows): Promise<Plan<Us
       { field: "provider", op: "eq", value: i.provider },
       { field: "subject", op: "eq", value: i.subject },
     ]);
-    if (!row) missing.push(`identity:${i.provider}`);
+    if (!row) {
+      missing.push(`identity:${i.provider}`);
+      fill.identities.push(i);
+    }
   }
   if (
     rows.password !== null &&
     !(await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }]))
-  )
+  ) {
     missing.push("password");
+    fill.password = rows.password;
+  }
   for (const p of rows.passkeys) {
     const row = await db.findOne("passkey", [
       { field: "credentialId", op: "eq", value: p.credentialId },
     ]);
     // A credential another user holds was dropped as `passkey:taken` on the first run.
-    if (!row) missing.push("passkey");
+    if (!row) {
+      missing.push("passkey");
+      fill.passkeys.push(p);
+    }
   }
-  return missing.length > 0 ? { kind: "partial", missing } : { kind: "exists" };
+  if (missing.length === 0) return { kind: "exists" };
+  if (!o.repair) return { kind: "partial", missing };
+  const refused = await repairRefusal(db, rows, fill, planned);
+  return refused === null
+    ? { kind: "repair", missing, rows: fill }
+    : { kind: "partial", missing, repairRefused: refused };
+}
+
+/** Why a repair must not write `fill`, or null. The cases are `RepairRefusal`'s. */
+async function repairRefusal(
+  db: StorageAdapter,
+  rows: UserRows,
+  fill: CredentialRows,
+  planned: Planned,
+): Promise<RepairRefusal | null> {
+  const found = await db.findOne("user", [{ field: "id", op: "eq", value: rows.id }]);
+  if (!found || found.emailVerified !== rows.verified) return "verified_since_import";
+  if (!rows.verified) {
+    const held =
+      (await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }])) ??
+      (await db.findOne("identity", [
+        { field: "userId", op: "eq", value: rows.id },
+        { field: "provider", op: "ne", value: "email" },
+      ])) ??
+      (await db.findOne("passkey", [{ field: "userId", op: "eq", value: rows.id }]));
+    if (held) return "credential_exists";
+  }
+  for (const i of fill.identities) {
+    // A dry run keeps the identities of the earlier records in `planned`, as a
+    // real run reads them from the rows it wrote.
+    const held =
+      planned.identities.has(key(i.provider, i.subject)) ||
+      (await db.findOne("identity", [
+        { field: "provider", op: "eq", value: i.provider },
+        { field: "subject", op: "eq", value: i.subject },
+      ]));
+    if (held) return "identity_taken";
+  }
+  return null;
+}
+
+/** The identity, password, and passkey rows of one user, as a sign-up, a social sign-in, or a claim writes them. */
+async function writeCredentials(tx: StorageAdapter, c: CredentialRows, now: Date): Promise<void> {
+  for (const i of c.identities) {
+    await tx.create("identity", {
+      id: newId(now),
+      userId: c.userId,
+      provider: i.provider,
+      subject: i.subject,
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  if (c.password !== null) {
+    await tx.create("password", {
+      id: newId(now),
+      userId: c.userId,
+      hash: c.password,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  for (const p of c.passkeys) {
+    await tx.create("passkey", {
+      id: newId(now),
+      userId: c.userId,
+      ...p,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 }
 
 async function writeUser(
@@ -431,38 +533,18 @@ async function writeUser(
     createdAt: r.createdAt ?? now,
     updatedAt: now,
   });
-  const identities = rows.verified
-    ? [{ provider: "email", subject: rows.email }, ...rows.identities]
-    : rows.identities;
-  for (const i of identities) {
-    await tx.create("identity", {
-      id: newId(now),
+  await writeCredentials(
+    tx,
+    {
       userId: rows.id,
-      provider: i.provider,
-      subject: i.subject,
-      linkedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-  if (rows.password !== null) {
-    await tx.create("password", {
-      id: newId(now),
-      userId: rows.id,
-      hash: rows.password,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-  for (const p of rows.passkeys) {
-    await tx.create("passkey", {
-      id: newId(now),
-      userId: rows.id,
-      ...p,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
+      identities: rows.verified
+        ? [{ provider: "email", subject: rows.email }, ...rows.identities]
+        : rows.identities,
+      password: rows.password,
+      passkeys: rows.passkeys,
+    },
+    now,
+  );
 }
 
 function count(report: ImportReport, rows: UserRows): void {
@@ -488,7 +570,7 @@ async function importUser(
   planned: Planned,
 ): Promise<void> {
   const now = o.now();
-  let plan: Plan<UserRows> | null = null;
+  let plan: Plan<UserRows, CredentialRows> | null = null;
   for (let attempt = 0; plan === null; attempt++) {
     try {
       plan = o.dryRun
@@ -496,6 +578,7 @@ async function importUser(
         : await storage.transaction(async (tx) => {
             const p = await planUser(tx, source, r, o, planned);
             if (p.kind === "write") await writeUser(tx, r, p.rows, now);
+            if (p.kind === "repair") await writeCredentials(tx, p.rows, now);
             return p;
           });
     } catch (err) {
@@ -508,7 +591,19 @@ async function importUser(
     return;
   }
   if (plan.kind === "partial") {
-    report.partial.push({ kind: "user", sourceId: r.sourceId, missing: plan.missing });
+    report.partial.push({
+      kind: "user",
+      sourceId: r.sourceId,
+      missing: plan.missing,
+      ...(plan.repairRefused !== undefined ? { repairRefused: plan.repairRefused } : {}),
+    });
+    return;
+  }
+  if (plan.kind === "repair") {
+    report.repaired.push({ kind: "user", sourceId: r.sourceId, rows: plan.missing });
+    // A dry run plans the next records against these rows, as a real run reads them.
+    for (const i of plan.rows.identities) planned.identities.add(key(i.provider, i.subject));
+    for (const p of plan.rows.passkeys) planned.credentials.add(p.credentialId);
     return;
   }
   if (plan.kind === "skip") {
@@ -542,7 +637,7 @@ async function importUser(
  * error names, so the run goes on and the report stays whole. Any other error
  * stops the run.
  */
-function afterViolation<T>(err: unknown, attempt: number): Plan<T> | null {
+function afterViolation<T, R>(err: unknown, attempt: number): Plan<T, R> | null {
   if (!(err instanceof StorageError) || err.code !== "unique_violation") throw err;
   if (attempt === 0) return null;
   const reason = RACE_REASON.get(err.model);
@@ -560,39 +655,18 @@ export function slugFrom(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-async function planOrganization(
+/**
+ * The member rows of an organization record, with the role map and the
+ * owner rule. Null when no member maps to an owner and no admin can become
+ * one (the record is skipped, or a repair refused, as `no_owner`).
+ */
+async function planMembers(
   db: StorageAdapter,
   source: Source,
   r: ImportOrganization,
   o: Resolved,
   planned: Planned,
-): Promise<Plan<OrgRows>> {
-  // A reader skip (no_source_id): with no id there is no import key.
-  if (r.skip) return { kind: "skip", reason: r.skip };
-  const id = await importId("organization", source.name, r.sourceId);
-  if (planned.orgs.has(id)) return { kind: "exists" };
-  if (await db.findOne("organization", [{ field: "id", op: "eq", value: id }])) {
-    // Core reaches no organization with no member (the last-owner rule), so
-    // one with none is a run that stopped between the organization row and
-    // its members.
-    const member = await db.findOne("member", [{ field: "organizationId", op: "eq", value: id }]);
-    return member ? { kind: "exists" } : { kind: "partial", missing: ["member"] };
-  }
-  // Core's organization create refuses a name outside its rule, so no import makes one.
-  const name = r.name;
-  if (name === null || !validOrganizationName(name))
-    return { kind: "skip", reason: "invalid_name" };
-  // The source's slug when the export has one, else one from the name. A
-  // name with no ASCII letter or digit gives none: the skip is a refusal, so
-  // the CLI exits 1 and a person sets the slug.
-  const slug = normalizeSlug(r.slug ?? slugFrom(name));
-  if (slug === null) return { kind: "skip", reason: "invalid_slug" };
-  if (o.reserved.has(slug)) return { kind: "skip", reason: "reserved_slug" };
-  if (
-    planned.slugs.has(slug) ||
-    (await db.findOne("organization", [{ field: "slug", op: "eq", value: slug }]))
-  )
-    return { kind: "skip", reason: "slug_taken" };
+): Promise<Omit<OrgMembers, "id"> | null> {
   const members: OrgRows["members"] = [];
   const dropped: string[] = [];
   const skippedMembers: OrgRows["skippedMembers"] = [];
@@ -627,11 +701,72 @@ async function planOrganization(
   }
   if (!members.some((m) => m.role === "owner")) {
     const first = members.find((m) => m.role === "admin");
-    if (!first) return { kind: "skip", reason: "no_owner" };
+    if (!first) return null;
     first.role = "owner";
     dropped.push(`promoted_owner:${first.userId}`);
   }
-  return { kind: "write", rows: { id, name, slug, members, dropped, skippedMembers } };
+  return { members, dropped, skippedMembers };
+}
+
+async function planOrganization(
+  db: StorageAdapter,
+  source: Source,
+  r: ImportOrganization,
+  o: Resolved,
+  planned: Planned,
+): Promise<Plan<OrgRows, OrgMembers>> {
+  // A reader skip (no_source_id): with no id there is no import key.
+  if (r.skip) return { kind: "skip", reason: r.skip };
+  const id = await importId("organization", source.name, r.sourceId);
+  if (planned.orgs.has(id)) return { kind: "exists" };
+  if (await db.findOne("organization", [{ field: "id", op: "eq", value: id }])) {
+    // Core reaches no organization with no member (the last-owner rule), so
+    // one with none is a run that stopped between the organization row and
+    // its members.
+    const member = await db.findOne("member", [{ field: "organizationId", op: "eq", value: id }]);
+    if (member) return { kind: "exists" };
+    if (!o.repair) return { kind: "partial", missing: ["member"] };
+    const m = await planMembers(db, source, r, o, planned);
+    return m === null
+      ? { kind: "partial", missing: ["member"], repairRefused: "no_owner" }
+      : { kind: "repair", missing: ["member"], rows: { id, ...m } };
+  }
+  // Core's organization create refuses a name outside its rule, so no import makes one.
+  const name = r.name;
+  if (name === null || !validOrganizationName(name))
+    return { kind: "skip", reason: "invalid_name" };
+  // The source's slug when the export has one, else one from the name. A
+  // name with no ASCII letter or digit gives none: the skip is a refusal, so
+  // the CLI exits 1 and a person sets the slug.
+  const slug = normalizeSlug(r.slug ?? slugFrom(name));
+  if (slug === null) return { kind: "skip", reason: "invalid_slug" };
+  if (o.reserved.has(slug)) return { kind: "skip", reason: "reserved_slug" };
+  if (
+    planned.slugs.has(slug) ||
+    (await db.findOne("organization", [{ field: "slug", op: "eq", value: slug }]))
+  )
+    return { kind: "skip", reason: "slug_taken" };
+  const m = await planMembers(db, source, r, o, planned);
+  if (m === null) return { kind: "skip", reason: "no_owner" };
+  return { kind: "write", rows: { id, name, slug, ...m } };
+}
+
+async function writeMembers(
+  tx: StorageAdapter,
+  organizationId: string,
+  members: OrgRows["members"],
+  now: Date,
+): Promise<void> {
+  for (const m of members) {
+    await tx.create("member", {
+      id: newId(now),
+      organizationId,
+      userId: m.userId,
+      role: m.role,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 }
 
 async function importOrganization(
@@ -643,13 +778,14 @@ async function importOrganization(
   planned: Planned,
 ): Promise<void> {
   const now = o.now();
-  let plan: Plan<OrgRows> | null = null;
+  let plan: Plan<OrgRows, OrgMembers> | null = null;
   for (let attempt = 0; plan === null; attempt++) {
     try {
       plan = o.dryRun
         ? await planOrganization(storage, source, r, o, planned)
         : await storage.transaction(async (tx) => {
             const p = await planOrganization(tx, source, r, o, planned);
+            if (p.kind === "repair") await writeMembers(tx, p.rows.id, p.rows.members, now);
             if (p.kind !== "write") return p;
             await tx.create("organization", {
               id: p.rows.id,
@@ -659,16 +795,7 @@ async function importOrganization(
               createdAt: r.createdAt ?? now,
               updatedAt: now,
             });
-            for (const m of p.rows.members) {
-              await tx.create("member", {
-                id: newId(now),
-                organizationId: p.rows.id,
-                userId: m.userId,
-                role: m.role,
-                createdAt: now,
-                updatedAt: now,
-              });
-            }
+            await writeMembers(tx, p.rows.id, p.rows.members, now);
             return p;
           });
     } catch (err) {
@@ -681,7 +808,23 @@ async function importOrganization(
     return;
   }
   if (plan.kind === "partial") {
-    report.partial.push({ kind: "organization", sourceId: r.sourceId, missing: plan.missing });
+    report.partial.push({
+      kind: "organization",
+      sourceId: r.sourceId,
+      missing: plan.missing,
+      ...(plan.repairRefused !== undefined ? { repairRefused: plan.repairRefused } : {}),
+    });
+    return;
+  }
+  if (plan.kind === "repair") {
+    report.repaired.push({
+      kind: "organization",
+      sourceId: r.sourceId,
+      rows: plan.rows.members.map(() => "member"),
+    });
+    for (const s of plan.rows.skippedMembers) skip(report, "member", s.sourceId, s.reason);
+    for (const item of plan.rows.dropped) report.dropped.push({ sourceId: r.sourceId, item });
+    planned.orgs.add(plan.rows.id);
     return;
   }
   if (plan.kind === "skip") {

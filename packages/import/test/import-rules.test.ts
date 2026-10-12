@@ -426,3 +426,247 @@ describe("importUsers: GitHub and LinkedIn identities (plan 9b2)", () => {
     expect(r.created).toMatchObject({ user: 2, identity: 4 });
   });
 });
+
+describe("importUsers: the repair mode (plan 9b2)", () => {
+  /** A run on D1 that stopped after the user row of `u1` (an isolate that dies does not roll back, spec 6). */
+  async function halfUser(db: StorageAdapter, verified = true) {
+    await db.create("user", {
+      id: await importId("user", "supabase", "u1"),
+      email: "u1@example.com",
+      emailVerified: verified,
+      name: null,
+      image: null,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+  }
+  const half = () =>
+    user("u1", {
+      identities: [{ provider: "google", subject: "g-1" }],
+      password: { hash: BCRYPT },
+    });
+  const rowsOf = async (db: StorageAdapter) => ({
+    identity: (await db.findMany("identity", [])).map((i) => `${i.provider}:${i.subject}`).sort(),
+    password: (await db.findMany("password", [])).map((p) => p.hash),
+  });
+
+  it("writes only the missing rows, reports them under repaired, and writes nothing on a second run", async () => {
+    const db = createMemoryAdapter();
+    await halfUser(db);
+    const dry = await importUsers(db, listSource([half()]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+      dryRun: true,
+    });
+    expect(await rowsOf(db)).toEqual({ identity: [], password: [] });
+    const r = await importUsers(db, listSource([half()]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(r.repaired).toEqual([
+      {
+        kind: "user",
+        sourceId: "u1",
+        rows: ["identity:email", "identity:google", "password"],
+      },
+    ]);
+    expect({ ...dry, dryRun: false }).toEqual(r);
+    expect(r.partial).toEqual([]);
+    expect(r.created.user).toBe(0);
+    expect(await rowsOf(db)).toEqual({
+      identity: ["email:u1@example.com", "google:g-1"],
+      password: [BCRYPT],
+    });
+    const again = await importUsers(db, listSource([half()]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(again.repaired).toEqual([]);
+    expect(again.exists.user).toBe(1);
+  });
+
+  it("writes nothing when no record has a missing row (Review Focus 3)", async () => {
+    const db = createMemoryAdapter();
+    const records = () => [
+      user("a", { password: { hash: BCRYPT }, identities: [{ provider: "github", subject: "7" }] }),
+      user("b", { emailVerified: false, password: { hash: BCRYPT } }),
+      org("o1", [{ userSourceId: "a", roles: ["owner"] }]),
+    ];
+    await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
+    const before = {
+      ...(await rowsOf(db)),
+      users: await db.findMany("user", []),
+      members: await db.findMany("member", []),
+    };
+    const r = await importUsers(db, listSource(records()), {
+      formats: LEGACY_FORMATS,
+      now: () => new Date("2026-10-13T00:00:00.000Z"),
+      repair: true,
+    });
+    expect(r.repaired).toEqual([]);
+    expect(r.partial).toEqual([]);
+    expect(r.exists).toEqual({ user: 2, organization: 1 });
+    expect({
+      ...(await rowsOf(db)),
+      users: await db.findMany("user", []),
+      members: await db.findMany("member", []),
+    }).toEqual(before);
+  });
+
+  it("refuses to repair a user that a claim verified since the first run", async () => {
+    const db = createMemoryAdapter();
+    const claimant = () => [user("u2", { emailVerified: false, password: { hash: BCRYPT } })];
+    await importUsers(db, listSource(claimant()), { formats: LEGACY_FORMATS, now });
+    const u2 = await importId("user", "supabase", "u2");
+    // A claim, as core's claimEmail writes it: the flag first, then the
+    // claimant's password goes, then the owner's email identity.
+    await db.update("user", [{ field: "id", op: "eq", value: u2 }], {
+      emailVerified: true,
+      updatedAt: AT,
+    });
+    await db.delete("password", [{ field: "userId", op: "eq", value: u2 }]);
+    await db.create("identity", {
+      id: "claim-email",
+      userId: u2,
+      provider: "email",
+      subject: "u2@example.com",
+      linkedAt: AT,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+    const r = await importUsers(db, listSource(claimant()), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(r.partial).toEqual([
+      {
+        kind: "user",
+        sourceId: "u2",
+        missing: ["password"],
+        repairRefused: "verified_since_import",
+      },
+    ]);
+    expect(r.repaired).toEqual([]);
+    expect(await db.findMany("password", [])).toEqual([]);
+  });
+
+  it("refuses a second credential for an unverified user, and an identity another user holds", async () => {
+    const db = createMemoryAdapter();
+    // The first export: an unverified user with a password, and a verified user with no GitHub.
+    await importUsers(
+      db,
+      listSource([user("u3", { emailVerified: false, password: { hash: BCRYPT } }), user("u4")]),
+      { formats: LEGACY_FORMATS, now },
+    );
+    // Another user of the app signs in with GitHub 583231.
+    await appUser(db, "app-1", "app-1@example.com", true, [
+      { provider: "github", subject: "583231" },
+    ]);
+    // A newer export: u3 has a Google identity and no password; u4 has GitHub 583231.
+    const r = await importUsers(
+      db,
+      listSource([
+        user("u3", { emailVerified: false, identities: [{ provider: "google", subject: "g-3" }] }),
+        user("u4", { identities: [{ provider: "github", subject: "583231" }] }),
+      ]),
+      { formats: LEGACY_FORMATS, now, repair: true },
+    );
+    expect(r.partial).toEqual([
+      {
+        kind: "user",
+        sourceId: "u3",
+        missing: ["identity:google"],
+        repairRefused: "credential_exists",
+      },
+      {
+        kind: "user",
+        sourceId: "u4",
+        missing: ["identity:github"],
+        repairRefused: "identity_taken",
+      },
+    ]);
+    expect(r.repaired).toEqual([]);
+    expect(
+      (await db.findMany("identity", [{ field: "provider", op: "ne", value: "email" }])).map(
+        (i) => `${i.userId}:${i.provider}:${i.subject}`,
+      ),
+    ).toEqual(["app-1:github:583231"]);
+  });
+
+  it("writes the member rows of an organization with none, and refuses one with no owner", async () => {
+    const db = createMemoryAdapter();
+    await importUsers(db, listSource([user("a")]), { formats: LEGACY_FORMATS, now });
+    for (const sourceId of ["o1", "o2"])
+      await db.create("organization", {
+        id: await importId("organization", "supabase", sourceId),
+        slug: `org-${sourceId}`,
+        name: `Org ${sourceId}`,
+        metadata: null,
+        createdAt: AT,
+        updatedAt: AT,
+      });
+    const r = await importUsers(
+      db,
+      listSource([
+        user("a"),
+        org("o1", [{ userSourceId: "a", roles: ["owner"] }]),
+        org("o2", [{ userSourceId: "a", roles: ["member"] }]),
+      ]),
+      { formats: LEGACY_FORMATS, now, repair: true },
+    );
+    expect(r.repaired).toEqual([{ kind: "organization", sourceId: "o1", rows: ["member"] }]);
+    expect(r.partial).toEqual([
+      { kind: "organization", sourceId: "o2", missing: ["member"], repairRefused: "no_owner" },
+    ]);
+    const o1 = await importId("organization", "supabase", "o1");
+    expect((await db.findMany("member", [])).map((m) => [m.organizationId === o1, m.role])).toEqual(
+      [[true, "owner"]],
+    );
+  });
+
+  it("refuses in a dry run, as in a real run, an identity an earlier record takes", async () => {
+    const records = () => [
+      user("n1", { identities: [{ provider: "google", subject: "g-1" }] }),
+      half(),
+    ];
+    const dryDb = createMemoryAdapter();
+    await halfUser(dryDb);
+    const dry = await importUsers(dryDb, listSource(records()), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+      dryRun: true,
+    });
+    const db = createMemoryAdapter();
+    await halfUser(db);
+    const r = await importUsers(db, listSource(records()), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(r.partial).toEqual([
+      {
+        kind: "user",
+        sourceId: "u1",
+        missing: ["identity:email", "identity:google", "password"],
+        repairRefused: "identity_taken",
+      },
+    ]);
+    expect({ ...dry, dryRun: false }).toEqual(r);
+  });
+
+  it("repairs nothing without the option, as before", async () => {
+    const db = createMemoryAdapter();
+    await halfUser(db);
+    const r = await importUsers(db, listSource([half()]), { formats: LEGACY_FORMATS, now });
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "u1", missing: ["identity:email", "identity:google", "password"] },
+    ]);
+    expect(r.repaired).toEqual([]);
+    expect(await rowsOf(db)).toEqual({ identity: [], password: [] });
+  });
+});

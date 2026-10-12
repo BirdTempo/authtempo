@@ -185,9 +185,35 @@ export interface ImportOptions {
    * organization. Not a slug is an error.
    */
   platformSlug?: string;
+  /**
+   * Default false. True: a record that exists by its import id but lacks a
+   * row it maps to (a `partial` entry) gets exactly the rows that `missing`
+   * names, through the same key, in one transaction, and the report lists
+   * them under `repaired`. Nothing else changes. A repair is refused, and the
+   * entry stays `partial` with `repairRefused`, when a core flow can have
+   * removed the rows on purpose (see `RepairRefusal`). Check each user in the
+   * app first (plan 9b2).
+   */
+  repair?: boolean;
   /** For tests. Default the system time. */
   now?: () => Date;
 }
+
+/**
+ * Why `repair: true` left a `partial` record as it is (plan 9b2):
+ * - `verified_since_import`: the user's `emailVerified` differs from the
+ *   record's. A claim verifies an unverified user and deletes the claimant's
+ *   credentials (core `claimEmail`); a repair would give them back.
+ * - `credential_exists`: the record is unverified and the user holds a
+ *   credential now. Core reaches no unverified user with two (spec 17.1).
+ * - `identity_taken`: another user holds an identity the record maps to.
+ * - `no_owner`: an organization with no member, whose members map to no owner.
+ */
+export type RepairRefusal =
+  | "verified_since_import"
+  | "credential_exists"
+  | "identity_taken"
+  | "no_owner";
 
 export interface ImportReport {
   source: SourceName;
@@ -212,11 +238,19 @@ export interface ImportReport {
    * - Another app change since the first run (a removed password or passkey),
    *   or a newer export or other options (for example a row the source now
    *   states as verified, so the record maps to an `email` identity).
-   * The importer never repairs an entry and never counts it as `exists`. The
-   * operator checks that user in the app before any repair. The CLI exits 1
-   * on any entry (Task 13).
+   * Without `repair` the importer never writes an entry's rows and never
+   * counts it as `exists`. The operator checks that user in the app before a
+   * repair. With `repair`, an entry stays here only with `repairRefused`. The
+   * CLI exits 1 on any entry (Task 13).
    */
-  partial: { kind: "user" | "organization"; sourceId: string; missing: string[] }[];
+  partial: {
+    kind: "user" | "organization";
+    sourceId: string;
+    missing: string[];
+    repairRefused?: RepairRefusal;
+  }[];
+  /** The records whose missing rows `repair: true` wrote, with one row kind per row written (plan 9b2). */
+  repaired: { kind: "user" | "organization"; sourceId: string; rows: string[] }[];
 }
 
 /** `onEmailTaken: "fail"` met a taken address or identity. The report holds every record before it. */
