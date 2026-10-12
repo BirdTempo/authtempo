@@ -18,6 +18,8 @@ export default defineConfig(async () => {
     // wrangler (worker/wrangler.jsonc). The tests read the tracked sample.
     resolve: {
       alias: {
+        // The Worker imports the package by its own name; the D1 tests run the source.
+        "@tempo-auth/import": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
         "tempo-auth-import-input": fileURLToPath(
           new URL("./worker/input/import.json", import.meta.url),
         ),

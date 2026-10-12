@@ -1,7 +1,13 @@
 import { createD1Adapter } from "@tempo-auth/adapter-d1";
-import { importUsers } from "../../src/import.js";
-import { bundleOf, type ImportBundle, optionsOf, readSource } from "../../src/sources.js";
-import type { ImportOptions, ImportReport } from "../../src/types.js";
+import {
+  bundleOf,
+  type ImportBundle,
+  type ImportOptions,
+  type ImportReport,
+  importUsers,
+  optionsOf,
+  readSource,
+} from "@tempo-auth/import";
 
 /** What `tempo-auth-import ... --d1-bundle <file>` writes. */
 export interface D1Bundle {

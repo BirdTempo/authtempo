@@ -7,5 +7,14 @@ export { CLERK_ROLES, type ClerkExport, clerkSource } from "./readers/clerk.js";
 export { type CognitoExport, cognitoSource } from "./readers/cognito.js";
 export { type FirebaseExport, firebaseSource } from "./readers/firebase.js";
 export { type SupabaseExport, supabasePassword, supabaseSource } from "./readers/supabase.js";
-export { type ImportBundle, PROVIDER_FILES, sourceOf } from "./sources.js";
+// The D1 Worker script (worker/src) reads the next two lines through the package's own name, as a published package must (plan 9b2).
+export { exitCode, summary } from "./report.js";
+export {
+  bundleOf,
+  type ImportBundle,
+  optionsOf,
+  PROVIDER_FILES,
+  readSource,
+  sourceOf,
+} from "./sources.js";
 export * from "./types.js";

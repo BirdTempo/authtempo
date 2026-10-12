@@ -72,10 +72,13 @@ Run every command from `packages/import/worker`.
    password hashes. After a rehearsal on the local copy, also delete
    `.wrangler/state`: the local database in it holds the imported hashes.
 
-The Worker writes core's tables only, through core's D1 adapter. It runs
-with Node.js compatibility off: `proof/bundle-no-node.mjs` bundles it with
-both flags and fails on any `node:` module, and the package's `test` script
-runs it.
+The Worker imports `@tempo-auth/import`, the package's public entry, and the
+D1 adapter, so it builds the same from this repo and from an installed
+package. It runs with Node.js compatibility off: `proof/bundle-no-node.mjs`
+bundles it with both flags, fails on any `node:` module, and fails unless the
+bundle reads the package's `dist`. `proof/pack-files.mjs` checks the file
+list of a pack, and fails if it holds `input/import.local.json`. The
+package's `test` script runs both.
 
 Unverified (the owner runbook): a run against the real database with
 `"remote": true`, and a run with an input file of tens of megabytes.

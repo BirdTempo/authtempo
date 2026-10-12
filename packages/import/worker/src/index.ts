@@ -1,5 +1,5 @@
+import { exitCode } from "@tempo-auth/import";
 import input from "tempo-auth-import-input";
-import { exitCode } from "../../src/report.js";
 import { runImport } from "./run.js";
 
 /** The bindings and vars of worker/wrangler.jsonc. */
