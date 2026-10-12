@@ -141,13 +141,14 @@ The handoff confirm page adds the source of the matched dev redirect to
 (`http://127.0.0.1:8081`). A dev redirect on `[::1]` cannot be listed.
 Use `127.0.0.1`.
 
-`signInPage` replaces the page; the function gets the base path, the continue path,
-the enabled methods, and the script nonce, and must put the nonce on its
-script tag. The `methods` input has the flags `magicLink`, `google`,
-`apple`, `passkey`, and `password`, and `providers`, a list of
-`{ name, label }` for every configured provider other than Google and Apple.
-`password` is true when the config
-has a `password` section. `@tempo-auth/handoff` (plan 5b) does the app side.
+`signInPage` replaces the page. The function gets the base path, the continue
+path, the enabled methods, and the script nonce. It must put the nonce on its
+script tag. The `methods` input has the flags `magicLink`, `google`, `apple`,
+`passkey`, and `password`, and `providers`, a list of `{ name, label }` for
+every configured provider other than Google and Apple. `password` is true when
+the config has a `password` section. A custom `signInPage` must render
+`methods.providers`, or the buttons for GitHub, LinkedIn, and the list
+providers do not show. `@tempo-auth/handoff` (plan 5b) does the app side.
 
 ## Social sign-in
 
@@ -157,6 +158,25 @@ Configure `social.google` with `{ clientId, clientSecret }` and
 developer portal. Core signs a five-minute Apple client secret on every
 token exchange, so nothing stored expires. Rotate the key in the portal
 and change `privateKey`.
+
+Register `<baseURL><basePath>/social/<provider>/callback` as the redirect
+URI at the provider. The flow sends `state`, a PKCE S256 challenge, and, for
+an OpenID Connect provider, `nonce`. Apple's support for PKCE is unverified;
+the state, the nonce, and the binding cookie bind the exchange without it.
+Core sends the client secret in the token request body (`client_secret_post`).
+A provider that expects `client_secret_basic` answers `invalid_client`.
+
+Linking: a social identity links to an existing user only when the
+provider reports the email as verified and it equals the user's email.
+Otherwise core creates a new user, or answers `email_taken_unverified`
+when the address is in use. A profile with no email answers
+`email_required`.
+
+An account created through an unverified email is a claim. When a sign-in
+proves the address (a magic link, or a provider that reports the email
+verified), core deletes that user's other identities and every session,
+then marks the email verified. The claimant loses access; the owner keeps
+the account.
 
 GitHub and LinkedIn are presets: `social.github` and `social.linkedin` each
 take `{ clientId, clientSecret }`. GitHub issues no ID token, so core reads
@@ -238,23 +258,6 @@ Answer `emailVerified: true` only when the provider says that this person
 proved the address. Core counts no other value as verified. Core never
 stores or logs the access token, and a failure logs the error name, never
 its message.
-
-Register `<baseURL><basePath>/social/<provider>/callback` as the redirect
-URI at the provider. The flow sends `state`, `nonce`, and a PKCE S256
-challenge. Apple's support for PKCE is unverified; the state, the nonce,
-and the binding cookie bind the exchange without it.
-
-Linking: a social identity links to an existing user only when the
-provider reports the email as verified and it equals the user's email.
-Otherwise core creates a new user, or answers `email_taken_unverified`
-when the address is in use. A profile with no email answers
-`email_required`.
-
-An account created through an unverified email is a claim. When a sign-in
-proves the address (a magic link, or a provider that reports the email
-verified), core deletes that user's other identities and every session,
-then marks the email verified. The claimant loses access; the owner keeps
-the account.
 
 `social.fetch` and `jwt` exist for tests: inject a fetch for the token
 endpoint and a fake verifier, so no test reaches a provider.

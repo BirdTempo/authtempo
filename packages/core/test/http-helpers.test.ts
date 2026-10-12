@@ -400,7 +400,8 @@ describe("sign-in page", () => {
       `<a class="button" href="/auth/social/acme/start?${next}">&lt;img src=x onerror=alert(1)&gt; &amp; &quot;Acme&quot;</a>`,
     );
     expect(html).toContain(`href="/auth/social/a%20b%22/start?${next}"`);
-    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt; &amp; &quot;Acme&quot;");
+    expect(html).not.toContain("<img src=x onerror=alert(1)>");
     // Google keeps its own flag and its place before the list.
     expect(html.indexOf("/social/google/start")).toBeLessThan(html.indexOf("/social/github/start"));
   });
