@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { createCognitoLegacyVerify } from "../src/cognito.js";
+import {
+  createAuth,
+  createMemoryAdapter,
+  createPbkdf2PasswordHash,
+  LEGACY_VERIFY_HASH,
+} from "@tempo-auth/core";
+import { describe, expect, it, vi } from "vitest";
+import { COGNITO_FAILURE_LOG, createCognitoLegacyVerify } from "../src/cognito.js";
 
 type Seen = { url: string; init: RequestInit };
 
@@ -326,5 +332,173 @@ describe("createCognitoLegacyVerify", () => {
     expect(() => createCognitoLegacyVerify({ region: "eu-west-1", clientId: "" })).toThrow(
       /clientId is empty/,
     );
+  });
+});
+
+describe("createCognitoLegacyVerify: the default onFailure and waitUntil (plan 9b2)", () => {
+  it("logs one line with the reason only when the app passes no onFailure", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const c = fakeCognito({
+        status: 400,
+        body: { __type: "NotAuthorizedException", message: "Incorrect username or password." },
+      });
+      const verify = createCognitoLegacyVerify({
+        region: "eu-west-1",
+        clientId: "abc",
+        fetch: c.fetch,
+      });
+      expect(await verify("ada@example.com", "pw-secret", signal)).toBe(false);
+      await settle();
+      expect(error.mock.calls).toEqual([[`${COGNITO_FAILURE_LOG} NotAuthorizedException`]]);
+      expect(JSON.stringify(error.mock.calls)).not.toMatch(/ada@example\.com|pw-secret/);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("logs nothing on a match, and the app's onFailure replaces the default line", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const ok = createCognitoLegacyVerify({
+        region: "eu-west-1",
+        clientId: "abc",
+        fetch: fakeCognito({ status: 200, body: TOKENS }).fetch,
+      });
+      expect(await ok("ada@example.com", "pw", signal)).toBe(true);
+      const c = checkWith({ status: 400, body: { __type: "UserNotFoundException" } });
+      expect(await c.verify("ada@example.com", "pw", signal)).toBe(false);
+      await settle();
+      expect(c.reasons).toEqual(["UserNotFoundException"]);
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("hands the report to waitUntil, and the promise settles after onFailure ran", async () => {
+    const held: Promise<unknown>[] = [];
+    let ran = false;
+    const verify = createCognitoLegacyVerify({
+      region: "eu-west-1",
+      clientId: "abc",
+      fetch: fakeCognito({ status: 400, body: { __type: "UserNotFoundException" } }).fetch,
+      onFailure: () => {
+        ran = true;
+      },
+      waitUntil: (promise) => held.push(promise),
+    });
+    expect(await verify("ada@example.com", "pw", signal)).toBe(false);
+    expect(held).toHaveLength(1);
+    expect(ran).toBe(false);
+    await held[0];
+    expect(ran).toBe(true);
+  });
+
+  it("hands the request in flight and the report to waitUntil on a timeout", async () => {
+    const held: Promise<unknown>[] = [];
+    const reasons: string[] = [];
+    // This fetch never answers and never looks at the signal.
+    const fetch = (() => new Promise<Response>(() => {})) as unknown as typeof globalThis.fetch;
+    const verify = createCognitoLegacyVerify({
+      region: "eu-west-1",
+      clientId: "abc",
+      fetch,
+      onFailure: (reason) => reasons.push(reason),
+      waitUntil: (promise) => held.push(promise),
+    });
+    const controller = new AbortController();
+    const answer = verify("ada@example.com", "pw", controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    expect(await answer).toBe(false);
+    expect(held).toHaveLength(2);
+    await held[1];
+    expect(reasons).toEqual(["timeout"]);
+  }, 1000);
+
+  it("keeps the answer when waitUntil throws outside a request", async () => {
+    const reasons: string[] = [];
+    const verify = createCognitoLegacyVerify({
+      region: "eu-west-1",
+      clientId: "abc",
+      fetch: fakeCognito({ status: 400, body: { __type: "NotAuthorizedException" } }).fetch,
+      onFailure: (reason) => reasons.push(reason),
+      waitUntil: () => {
+        throw new Error("no request context");
+      },
+    });
+    expect(await verify("ada@example.com", "pw", signal)).toBe(false);
+    await settle();
+    expect(reasons).toEqual(["NotAuthorizedException"]);
+  });
+});
+
+describe("a Cognito pool that does not accept the email as a user name (plan 9b2, Review Focus 2)", () => {
+  it("answers invalid_credentials through core and logs one reason line per failure", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const storage = createMemoryAdapter();
+      const at = new Date("2026-10-12T00:00:00.000Z");
+      await storage.create("user", {
+        id: "u1",
+        email: "ada@example.com",
+        emailVerified: true,
+        name: null,
+        image: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      await storage.create("password", {
+        id: "p1",
+        userId: "u1",
+        hash: LEGACY_VERIFY_HASH,
+        createdAt: at,
+        updatedAt: at,
+      });
+      // PreventUserExistenceErrors ENABLED answers NotAuthorizedException for a user
+      // name the pool does not know; LEGACY answers UserNotFoundException (AWS docs, read 2026-10-12).
+      const c = fakeCognito({ status: 400, body: { __type: "NotAuthorizedException" } });
+      const auth = createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [],
+        storage,
+        mail: { send: async () => {} },
+        password: {
+          hash: createPbkdf2PasswordHash({ iterations: 1000 }),
+          legacyVerify: {
+            verify: createCognitoLegacyVerify({
+              region: "eu-west-1",
+              clientId: "abc",
+              fetch: c.fetch,
+            }),
+            timeoutMs: 100,
+          },
+        },
+      });
+      const pw = auth.api.password;
+      if (!pw) throw new Error("the password api is missing");
+      for (let i = 0; i < 2; i++)
+        expect(
+          await pw.signIn({
+            email: "ada@example.com",
+            password: "the old password",
+            ip: null,
+            userAgent: null,
+          }),
+        ).toMatchObject({ ok: false, code: "invalid_credentials" });
+      await settle();
+      expect(c.seen).toHaveLength(2);
+      expect(error.mock.calls).toEqual([
+        [`${COGNITO_FAILURE_LOG} NotAuthorizedException`],
+        [`${COGNITO_FAILURE_LOG} NotAuthorizedException`],
+      ]);
+      // The marker stays: a failed check writes no hash.
+      expect(
+        (await storage.findOne("password", [{ field: "id", op: "eq", value: "p1" }]))?.hash,
+      ).toBe(LEGACY_VERIFY_HASH);
+    } finally {
+      error.mockRestore();
+    }
   });
 });
