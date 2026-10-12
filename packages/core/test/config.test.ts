@@ -263,6 +263,13 @@ describe("social.oidc (plan 9c)", () => {
     ]);
   });
 
+  it("refuses endpoints that is null or not an object with a ConfigError, not a TypeError", () => {
+    for (const bad of [null, "https://x.example", 7, []])
+      expect(() => build([oidc({ endpoints: bad as unknown as OidcEntry["endpoints"] })])).toThrow(
+        /social\.oidc\[0\]\.endpoints must be an object/,
+      );
+  });
+
   it("refuses an issuer that is not an https URL with no query, fragment, or credentials", () => {
     for (const issuer of [
       "http://login.acme.example",

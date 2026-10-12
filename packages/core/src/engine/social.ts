@@ -14,6 +14,7 @@ import type { UserRow } from "../schema.js";
 import {
   buildQuery,
   type ConfiguredProvider,
+  isHttpsUrl,
   type OAuth2Provider,
   type OidcProvider,
   PROVIDER_TIMEOUT_MS,
@@ -193,14 +194,15 @@ export async function completeSocial(
     provider.kind === "oidc"
       ? await idTokenProfile(config, provider, token, data.nonceHash, input.user ?? undefined, now)
       : await userinfoProfile(config, provider, token);
-  if (!profile?.subject) return fail("oauth_failed");
+  const bounded = profile ? boundProfile(profile, provider.name) : null;
+  if (!bounded) return fail("oauth_failed");
 
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
   const resolved = await resolveSocialUser(
     config.storage,
     provider.name,
-    profile,
+    bounded,
     now,
     (tx, user) =>
       createSession(config, { userId: user.id, ip: input.ip, userAgent: input.userAgent }, tx),
@@ -326,39 +328,57 @@ async function userinfoProfile(
   const deadline = new Promise<never>((_, reject) => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
-  let answer: unknown;
   try {
-    answer = await Promise.race([provider.userinfo(accessToken, timedFetch), deadline]);
+    const answer: unknown = await Promise.race([
+      provider.userinfo(accessToken, timedFetch),
+      deadline,
+    ]);
+    // The function is app code. Only a boolean true is a verified address, so
+    // no provider widens the linking rule of spec 8.3. The fields are read
+    // here, inside the try, so a getter that throws answers oauth_failed.
+    const a = (typeof answer === "object" && answer !== null ? answer : {}) as Record<
+      string,
+      unknown
+    >;
+    return {
+      subject: typeof a.subject === "string" ? a.subject : "",
+      email: stringClaim(a, "email"),
+      emailVerified: a.emailVerified === true,
+      name: stringClaim(a, "name"),
+      image: stringClaim(a, "image"),
+    };
   } catch (e) {
     console.error("tempo-auth: social user info failed", provider.name, appErrorName(e));
     return null;
   }
-  // The function is app code. Only a boolean true is a verified address, so
-  // no provider widens the linking rule of spec 8.3.
-  const a = (typeof answer === "object" && answer !== null ? answer : {}) as Record<
-    string,
-    unknown
-  >;
-  const subject = a.subject;
+}
+
+/**
+ * The one bound on a profile, for both provider kinds (plan 9c final review
+ * I-2). A bad subject refuses the sign-in: the subject is an identity key, so
+ * core never trims it. A bad name or image is dropped, not refused, so the
+ * person can still sign in. The image must be an `https:` URL, so a
+ * `javascript:` or `data:` value never reaches the user row.
+ */
+function boundProfile(profile: SocialProfile, providerName: string): SocialProfile | null {
+  const subject = profile.subject;
   if (
-    typeof subject !== "string" ||
     subject.length < 1 ||
     subject.length > SUBJECT_MAX ||
-    hasControlChar(subject)
+    hasControlChar(subject) ||
+    subject.trim().length === 0
   ) {
-    console.error("tempo-auth: social user info has a bad subject", provider.name);
+    console.error("tempo-auth: social user info has a bad subject", providerName);
     return null;
   }
-  // The user row takes name and image as they are, so bound them here. A
-  // bad value is dropped, not refused: the person can still sign in.
-  const name = stringClaim(a, "name");
-  const image = stringClaim(a, "image");
+  const { name, image } = profile;
   return {
-    subject,
-    email: stringClaim(a, "email"),
-    emailVerified: a.emailVerified === true,
+    ...profile,
     name: name !== null && validUserName(name) ? name : null,
-    image: image !== null && image.length <= IMAGE_MAX && !hasControlChar(image) ? image : null,
+    image:
+      image !== null && image.length <= IMAGE_MAX && !hasControlChar(image) && isHttpsUrl(image)
+        ? image
+        : null,
   };
 }
 

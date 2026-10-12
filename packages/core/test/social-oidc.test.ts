@@ -220,6 +220,110 @@ describe("an oidc entry with discovery (plan 9c)", () => {
   });
 });
 
+describe("the profile bound for an oidc entry (final review I-2)", () => {
+  /** Runs one full flow whose ID token carries `claims`. */
+  async function run(claims: Record<string, unknown>) {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const tokens: Record<string, FakeIdToken> = {};
+    const auth = oidcAuth(entry(), () => Response.json(DOC), fakeJwt(tokens));
+    const s = await started(auth);
+    tokens["entra-idtok"] = {
+      audience: "entra-id",
+      issuer: ISSUER,
+      claims: {
+        sub: "oid-1",
+        email: "ada@example.com",
+        email_verified: true,
+        nonce: s.nonce,
+        ...claims,
+      },
+    };
+    return { auth, result: await complete(auth, s) };
+  }
+
+  it("answers oauth_failed for a subject over 255 characters, with a control character, or of spaces only, and writes no identity", async () => {
+    for (const sub of ["s".repeat(256), "oid\n1", "   "]) {
+      const { auth, result } = await run({ sub });
+      expect(result).toMatchObject({ ok: false, code: "oauth_failed" });
+      expect(await auth.storage.findMany("identity", [])).toEqual([]);
+      expect(await auth.storage.findMany("user", [])).toEqual([]);
+    }
+    expect((await run({ sub: "s".repeat(255) })).result.ok).toBe(true);
+    // The subject is an identity key: core refuses a padded one, it does not trim it.
+    const { auth, result } = await run({ sub: " oid-9 " });
+    expect(result.ok).toBe(true);
+    expect(
+      (await auth.storage.findMany("identity", [])).find((i) => i.provider === "entra")?.subject,
+    ).toBe(" oid-9 ");
+  });
+
+  it("drops a name with a control character and an image that is too long, has a control character, or is not https", async () => {
+    for (const claims of [
+      { name: "Ada\nX", picture: "https://img.acme.example/a.png" },
+      { name: "Ada", picture: `https://img.acme.example/${"a".repeat(2048)}` },
+      { name: "Ada", picture: "https://img.acme.example/a\n" },
+      { name: "Ada", picture: "javascript:alert(1)" },
+    ]) {
+      const { result } = await run(claims);
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.value.user.name).toBe(claims.name === "Ada" ? "Ada" : null);
+      expect(result.value.user.image).toBe(
+        claims.picture === "https://img.acme.example/a.png" ? claims.picture : null,
+      );
+    }
+  });
+});
+
+describe("discovery across instances (final review, Task 2 parked Minor)", () => {
+  it("reads the document on the instance that runs the callback, and the callback still completes", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const a = oidcAuth(entry(), () => Response.json(DOC), fakeJwt(tokens));
+    const s = await started(a);
+    // A second instance with the same storage and no discovery cache.
+    const f = fakeFetch((call) =>
+      call.url === DOC_URL ? Response.json(DOC) : Response.json({ id_token: "entra-idtok" }),
+    );
+    const b = makeAuth({
+      social: { oidc: [entry()], fetch: f.fetchFn },
+      jwt: fakeJwt(tokens),
+      storage: a.storage,
+    });
+    tokens["entra-idtok"] = {
+      audience: "entra-id",
+      issuer: ISSUER,
+      claims: { sub: "oid-1", email: "ada@example.com", email_verified: true, nonce: s.nonce },
+    };
+    expect((await complete(b, s)).ok).toBe(true);
+    expect(f.calls.map((c) => c.url)).toEqual([DOC_URL, DOC.token_endpoint]);
+  });
+
+  it("answers oauth_failed when the read fails there, spends the state, and clears the binding cookie", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const a = oidcAuth(entry(), () => Response.json(DOC));
+    const start = await createRouter(
+      a.config,
+      socialRoutes(a.config),
+    )(get("/auth/social/entra/start"));
+    const bind = start.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const state = new URL(start.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    const f = fakeFetch(() => new Response("down", { status: 503 }));
+    const b = makeAuth({
+      social: { oidc: [entry()], fetch: f.fetchFn },
+      storage: a.storage,
+    });
+    const handle = createRouter(b.config, socialRoutes(b.config));
+    const url = `/auth/social/entra/callback?code=c1&state=${encodeURIComponent(state)}`;
+    const done = await handle(get(url, { cookie: bind }));
+    expect(done.headers.get("location")).toBe(`${BASE_URL}/?auth_error=oauth_failed`);
+    expect(done.headers.getSetCookie().some((c) => /_oauth=; .*Max-Age=0/.test(c))).toBe(true);
+    expect(f.calls.map((c) => c.url)).toEqual([DOC_URL]);
+    const again = await handle(get(url, { cookie: bind }));
+    expect(again.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    expect(f.calls).toHaveLength(1);
+  });
+});
+
 describe("discover", () => {
   it("drops one trailing slash of the issuer for the URL and compares iss as configured", async () => {
     expect(discoveryUrl("https://tenant.acme.example/")).toBe(

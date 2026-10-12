@@ -372,6 +372,41 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect((await complete(max, await started(max))).ok).toBe(true);
   });
 
+  it("answers invalid_token for a callback with no binding cookie or a wrong one, and calls no token endpoint and no userinfo (final review M-1)", async () => {
+    let userinfoCalls = 0;
+    const auth = acmeAuth(async () => {
+      userinfoCalls++;
+      return PERSON;
+    });
+    for (const bindToken of [null, "not-the-binding-value"]) {
+      const s = await started(auth);
+      expect(await complete(auth, s, { bindToken })).toMatchObject({
+        ok: false,
+        code: "invalid_token",
+      });
+    }
+    expect(userinfoCalls).toBe(0);
+    expect(auth.calls).toEqual([]);
+  });
+
+  it("answers oauth_failed when a field of the userinfo answer throws on read (final review M-7)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = acmeAuth(
+      async () =>
+        ({
+          subject: "acme-7",
+          get email(): string {
+            throw new TypeError("getter");
+          },
+        }) as unknown as SocialProfile,
+    );
+    expect(await complete(auth, await started(auth))).toMatchObject({
+      ok: false,
+      code: "oauth_failed",
+    });
+    expect(await auth.storage.findMany("identity", [])).toEqual([]);
+  });
+
   it("drops a name or an image that breaks its bound, and keeps a valid one", async () => {
     const bad = acmeAuth(async () => ({
       ...PERSON,

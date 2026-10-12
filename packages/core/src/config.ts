@@ -607,6 +607,7 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
         throw new ConfigError(`${path}.scope must hold openid, or the provider sends no ID token`);
     }
     if (e.endpoints !== undefined) {
+      if (!isPlainObject(e.endpoints)) throw new ConfigError(`${path}.endpoints must be an object`);
       https(`${path}.endpoints.authorizeUrl`, e.endpoints.authorizeUrl);
       https(`${path}.endpoints.tokenUrl`, e.endpoints.tokenUrl);
       https(`${path}.endpoints.jwksUrl`, e.endpoints.jwksUrl);

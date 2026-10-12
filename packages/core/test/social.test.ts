@@ -157,6 +157,21 @@ describe("completeSocial", () => {
     expect(await auth.storage.findMany("session", [])).toHaveLength(1);
   });
 
+  it("drops a name with a control character, a 3000-character picture, and a picture that is not https (final review I-2)", async () => {
+    const cases: Array<Record<string, unknown>> = [
+      { name: "Ada\nX", picture: `https://p/${"a".repeat(3000)}` },
+      { name: "Ada\u0000", picture: "javascript:alert(1)" },
+    ];
+    for (const claims of cases) {
+      const jwtTokens: Record<string, ReturnType<typeof googleToken>> = {};
+      const auth = socialAuth({}, fakeJwt(jwtTokens));
+      const s = await started(auth);
+      jwtTokens["idtok-default"] = googleToken(s.nonce, claims);
+      const r = await complete(auth, s);
+      expect(r.ok && r.value.user).toMatchObject({ name: null, image: null });
+    }
+  });
+
   it("rejects a resubmitted callback with invalid_token and keeps one session (Review Focus 2)", async () => {
     const jwtTokens: Record<string, ReturnType<typeof googleToken>> = {};
     const auth = socialAuth({}, fakeJwt(jwtTokens));
