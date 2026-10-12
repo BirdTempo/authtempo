@@ -3,15 +3,25 @@
  * amended by plan 9b2). One Argon2id or scrypt derive holds up to 32 MiB,
  * and a Workers isolate has 128 MiB for all its requests (Workers limits
  * page, checked 2026-10-10 for plan 9). The derives yield between blocks, so
- * the derives of concurrent sign-ins overlap. At most `max` derives run at
- * once; the rest wait in order. The gate never refuses: a refusal would
- * answer invalid_credentials to a right password under load.
+ * the derives of concurrent sign-ins overlap, and four of them can end the
+ * isolate. A memory kill of the isolate is not a throw, so no catch sees it,
+ * and every request of the isolate fails; the gate must stop the derive
+ * before it starts. At most `max` derives run at once; the rest wait in
+ * order. bcrypt needs little memory, but its CPU is the largest of the
+ * legacy formats, so it waits in the same line. The gate never refuses: a
+ * refusal would answer invalid_credentials to a right password under load.
  *
  * `deriveGate` is module state of core, so every seam in one isolate shares
  * it: `createLegacyPasswordHash` of `@tempo-auth/legacy-hashes` and
  * `betterAuthPasswordHash` of `@tempo-auth/compat-better-auth`. A chain of
  * both seams runs at most two derives at once, not four. Neither package
  * keeps a gate of its own (plan 9b2).
+ *
+ * The share holds only with one copy of core in the app. A second copy (two
+ * versions of `@tempo-auth/core` in the dependency tree) has a second gate,
+ * and a chain can then run four derives. Both seam packages declare core as
+ * a peer dependency, so a package manager warns on a version that does not
+ * match; keep one version of core.
  */
 export interface DeriveGate {
   /** The most derives that run at once. */

@@ -41,6 +41,30 @@ describe("createDeriveGate (plan 9b2)", () => {
     expect(await gate.run(async () => 7)).toBe(7);
   });
 
+  it("hands the slot of a derive that throws to the next waiter (parked Task 1 Minor)", async () => {
+    const gate = createDeriveGate(1);
+    let fail: () => void = () => {};
+    const first = gate.run(
+      () =>
+        new Promise<never>((_, reject) => {
+          fail = () => reject(new Error("out of memory"));
+        }),
+    );
+    let started = false;
+    const second = gate.run(async () => {
+      started = true;
+      return 7;
+    });
+    await tick();
+    expect([gate.running(), gate.waiting(), started]).toEqual([1, 1, false]);
+    fail();
+    await expect(first).rejects.toThrow("out of memory");
+    await tick();
+    expect(started).toBe(true);
+    expect(await second).toBe(7);
+    expect([gate.running(), gate.waiting()]).toEqual([0, 0]);
+  });
+
   it("refuses a slot count that is not a whole number of at least 1", () => {
     for (const bad of [0, -1, 1.5, Number.NaN])
       expect(() => createDeriveGate(bad)).toThrow(/a whole number of slots of at least 1/);

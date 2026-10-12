@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { completeSocial, startSocial } from "../src/engine/social.js";
-import { githubProvider, githubUserinfo } from "../src/social/github.js";
+import { githubProvider, githubUserinfo, isGithubSubject } from "../src/social/github.js";
 import { makeAuth } from "./helpers.js";
 import { fakeFetch } from "./social-helpers.js";
 
@@ -122,12 +122,34 @@ describe("the github preset (plan 9c)", () => {
       [() => new Response("{}", { status: 401 }), () => Response.json(EMAILS)],
       [() => Response.json({ ...USER, id: "583231" }), () => Response.json(EMAILS)],
       [() => Response.json({ ...USER, id: 0 }), () => Response.json(EMAILS)],
+      [() => Response.json({ ...USER, id: -583231 }), () => Response.json(EMAILS)],
+      [() => Response.json({ ...USER, id: 583231.5 }), () => Response.json(EMAILS)],
+      [() => Response.json({ ...USER, id: 2 ** 53 }), () => Response.json(EMAILS)],
       [() => Response.json(USER), () => new Response("{}", { status: 500 })],
     ];
     for (const [user, emails] of cases) {
       const f = githubFetch(user, emails);
       await expect(githubUserinfo(ACCESS, f.fetchFn)).rejects.toThrow(/github/);
     }
+  });
+
+  it("names one subject rule, which the importer also applies (M-4)", () => {
+    for (const ok of ["1", "583231", String(Number.MAX_SAFE_INTEGER)])
+      expect(isGithubSubject(ok)).toBe(true);
+    for (const bad of [
+      "",
+      "0",
+      "0583231",
+      "-1",
+      "+1",
+      "1.5",
+      "1e21",
+      "octocat",
+      " 583231",
+      "9007199254740992",
+      "12345678901234567",
+    ])
+      expect(isGithubSubject(bad)).toBe(false);
   });
 
   it("throws on a /user body that is not JSON, has no id, or is null", async () => {

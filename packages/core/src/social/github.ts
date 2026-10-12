@@ -32,6 +32,17 @@ export function githubProvider(c: GitHubConfig): OAuth2Provider {
   };
 }
 
+/**
+ * The one GitHub subject rule: the decimal text of a positive safe integer,
+ * with no sign, no leading zero, and no exponent. This preset answers only
+ * such a subject (`String(id)`), so an identity with another subject can
+ * never sign in. The importer (`@tempo-auth/import`) drops one with this
+ * rule, so the two never drift.
+ */
+export function isGithubSubject(subject: string): boolean {
+  return /^[1-9][0-9]{0,15}$/.test(subject) && Number.isSafeInteger(Number(subject));
+}
+
 interface GitHubEmail {
   email?: unknown;
   primary?: unknown;
@@ -54,7 +65,8 @@ export async function githubUserinfo(
   if (!userRes.ok) throw new Error(`github /user answered ${userRes.status}`);
   const user = (await userRes.json()) as Record<string, unknown> | null;
   const id = user?.id;
-  if (user === null || typeof id !== "number" || !Number.isSafeInteger(id) || id < 1)
+  const subject = typeof id === "number" ? String(id) : null;
+  if (user === null || subject === null || !isGithubSubject(subject))
     throw new Error("github /user has no numeric id");
   const emailsRes = await fetchFn(`${API}/user/emails`, { headers: githubHeaders(accessToken) });
   let emails: GitHubEmail[] = [];
@@ -73,7 +85,7 @@ export async function githubUserinfo(
       e.email.length > 0,
   );
   return {
-    subject: String(id),
+    subject,
     email: primary ? (primary.email as string) : stringClaim(user, "email"),
     emailVerified: primary?.verified === true,
     name: stringClaim(user, "name") ?? stringClaim(user, "login"),
