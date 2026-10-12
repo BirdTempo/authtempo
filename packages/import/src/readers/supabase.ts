@@ -1,7 +1,7 @@
 import type { FirebaseHashConfig } from "@tempo-auth/legacy-hashes";
 import { csvRecords, parseCsv } from "../csv.js";
 import type { ImportUser, Source } from "../types.js";
-import { asRecord, parseTime } from "./common.js";
+import { asRecord, noSourceIdUser, parseTime } from "./common.js";
 
 /**
  * Supabase Auth: two CSV files from the project's Postgres, made with the
@@ -132,7 +132,13 @@ export function supabaseSource(input: SupabaseExport): Source {
         list.push({ provider: i.provider ?? "", subject: i.provider_id });
         byUser.set(i.user_id, list);
       }
-      for (const u of csvRecords(input.users)) {
+      for (const [n, u] of csvRecords(input.users).entries()) {
+        // A row with no id has no import key: listed, never imported (plan 9b2).
+        // csvRecords numbers a row as its index plus 2 (the header is row 1).
+        if (!u.id) {
+          yield noSourceIdUser(`users csv row ${n + 2}`);
+          continue;
+        }
         const dropped: string[] = [];
         // A jsonb null, or any value that is not an object, gives no name and no image.
         let meta: Record<string, unknown> = {};
@@ -146,14 +152,14 @@ export function supabaseSource(input: SupabaseExport): Source {
           typeof meta[k] === "string" && meta[k] ? (meta[k] as string) : null;
         const record: ImportUser = {
           kind: "user",
-          sourceId: u.id ?? "",
+          sourceId: u.id,
           email: u.email || null,
           // email_confirmed_at, not confirmed_at: confirmed_at is LEAST(email, phone) (migration 20210710035447).
           emailVerified: parseTime(u.email_confirmed_at) !== null,
           name: text("full_name") ?? text("name"),
           image: text("avatar_url") ?? text("picture"),
           createdAt: parseTime(u.created_at),
-          identities: byUser.get(u.id ?? "") ?? [],
+          identities: byUser.get(u.id) ?? [],
           password: supabasePassword(u.encrypted_password ?? "", input.firebase),
           passkeys: [],
         };

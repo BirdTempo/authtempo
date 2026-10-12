@@ -217,3 +217,35 @@ describe("authjsSource edge rows", () => {
     ).rejects.toThrow('no Auth.js user row has the password column "password_hash"');
   });
 });
+
+describe("authjsSource: a user with no id (plan 9b2, Review Focus 4)", () => {
+  it("skips it as no_source_id, names the item, and links no account to it", async () => {
+    const tables = JSON.stringify({
+      users: [{ email: "nid@example.com", emailVerified: "2024-01-01T00:00:00.000Z" }],
+      accounts: [{ userId: "", type: "oidc", provider: "google", providerAccountId: "g-9" }],
+    });
+    const r = await all(authjsSource({ tables }));
+    expect(r).toEqual([
+      {
+        kind: "user",
+        sourceId: "(none) users item 1",
+        email: null,
+        emailVerified: false,
+        name: null,
+        image: null,
+        createdAt: null,
+        identities: [],
+        password: null,
+        passkeys: [],
+        skip: "no_source_id",
+      },
+    ]);
+    const report = await importUsers(createMemoryAdapter(), authjsSource({ tables }), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 1", reason: "no_source_id" },
+    ]);
+  });
+});

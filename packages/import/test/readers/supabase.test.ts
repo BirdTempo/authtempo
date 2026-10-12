@@ -241,3 +241,35 @@ describe("supabaseSource", () => {
       ).not.toBeNull();
   });
 });
+
+describe("supabaseSource: a row with no id (plan 9b2, Review Focus 4)", () => {
+  it("skips a user row with no id as no_source_id and names the row", async () => {
+    const header = users.split("\n")[0];
+    const noId = `${header}\n,nid@example.com,,2024-02-12 08:00:00+00,{},2024-02-12 08:00:00+00,f,,,f\n`;
+    const source = () =>
+      supabaseSource({ users: noId, identities: "provider,provider_id,user_id\n", now });
+    expect(await all(source())).toEqual([
+      {
+        kind: "user",
+        sourceId: "(none) users csv row 2",
+        email: null,
+        emailVerified: false,
+        name: null,
+        image: null,
+        createdAt: null,
+        identities: [],
+        password: null,
+        passkeys: [],
+        skip: "no_source_id",
+      },
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users csv row 2", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(0);
+  });
+});

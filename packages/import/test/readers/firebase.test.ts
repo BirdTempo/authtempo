@@ -171,3 +171,35 @@ describe("firebaseSource edge rows", () => {
     ).not.toThrow();
   });
 });
+
+describe("firebaseSource: a user with no localId (plan 9b2, Review Focus 4)", () => {
+  it("skips it as no_source_id and names the item", async () => {
+    const users = JSON.stringify({
+      users: [{ email: "nid@example.com", emailVerified: true, providerUserInfo: [] }],
+    });
+    const r = await all(firebaseSource({ users, hashConfig: CONFIG }));
+    expect(r).toEqual([
+      {
+        kind: "user",
+        sourceId: "(none) users item 1",
+        email: null,
+        emailVerified: false,
+        name: null,
+        image: null,
+        createdAt: null,
+        identities: [],
+        password: null,
+        passkeys: [],
+        skip: "no_source_id",
+      },
+    ]);
+    const report = await importUsers(
+      createMemoryAdapter(),
+      firebaseSource({ users, hashConfig: CONFIG }),
+      { formats: LEGACY_FORMATS, now },
+    );
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 1", reason: "no_source_id" },
+    ]);
+  });
+});
