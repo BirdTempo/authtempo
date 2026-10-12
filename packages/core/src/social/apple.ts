@@ -1,4 +1,4 @@
-import { type Provider, stringClaim } from "./provider.js";
+import { type OidcProvider, stringClaim } from "./provider.js";
 
 export interface AppleConfig {
   /** The Services ID for web sign-in, for example `com.example.web`. */
@@ -14,9 +14,11 @@ const APPLE_AUDIENCE = "https://appleid.apple.com";
 const CLIENT_SECRET_LIFE_SECONDS = 300;
 
 /** Endpoints from Apple's "Sign in with Apple REST API" docs, checked 2026-10-09. */
-export function appleProvider(c: AppleConfig): Provider {
+export function appleProvider(c: AppleConfig): OidcProvider {
   return {
+    kind: "oidc",
     name: "apple",
+    label: "Continue with Apple",
     authorizeUrl: "https://appleid.apple.com/auth/authorize",
     tokenUrl: "https://appleid.apple.com/auth/token",
     jwksUrl: "https://appleid.apple.com/auth/keys",

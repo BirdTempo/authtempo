@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
+import type { OAuth2Entry } from "../src/social/oauth2.js";
+import type { OidcEntry } from "../src/social/oidc.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 const base = {
@@ -79,6 +81,38 @@ describe("social config", () => {
     expect(typeof c.jwt.verifyIdToken).toBe("function");
     expect(typeof c.jwt.signES256).toBe("function");
   });
+  it("builds the github preset after google and apple, and refuses an empty field (plan 9c)", () => {
+    const c = resolveConfig({
+      ...base,
+      social: {
+        github: { clientId: "h", clientSecret: "hs" },
+        google: { clientId: "g", clientSecret: "s" },
+      },
+    });
+    expect(c.social.providers.map((p) => [p.name, p.kind])).toEqual([
+      ["google", "oidc"],
+      ["github", "oauth2"],
+    ]);
+    expect(() =>
+      resolveConfig({ ...base, social: { github: { clientId: "h", clientSecret: "" } } }),
+    ).toThrow(/social\.github\.clientSecret must be a non-empty string/);
+  });
+  it("builds the linkedin preset after github, and refuses an empty field (plan 9c)", () => {
+    const c = resolveConfig({
+      ...base,
+      social: {
+        linkedin: { clientId: "l", clientSecret: "ls" },
+        github: { clientId: "h", clientSecret: "hs" },
+      },
+    });
+    expect(c.social.providers.map((p) => [p.name, p.kind])).toEqual([
+      ["github", "oauth2"],
+      ["linkedin", "oauth2"],
+    ]);
+    expect(() =>
+      resolveConfig({ ...base, social: { linkedin: { clientId: "", clientSecret: "ls" } } }),
+    ).toThrow(/social\.linkedin\.clientId must be a non-empty string/);
+  });
   it("builds the configured providers in order google, apple", () => {
     const c = resolveConfig({
       ...base,
@@ -99,6 +133,193 @@ describe("social config", () => {
         social: { apple: { clientId: "c", teamId: "T", keyId: "", privateKey: "pem" } },
       }),
     ).toThrow(/social.apple.keyId/);
+  });
+});
+
+describe("social.oauth2 (plan 9c)", () => {
+  const userinfo = async () => ({
+    subject: "s",
+    email: null,
+    emailVerified: false,
+    name: null,
+    image: null,
+  });
+  const entry = (over: Partial<OAuth2Entry> = {}): OAuth2Entry => ({
+    name: "acme",
+    label: "Continue with Acme",
+    authorizeUrl: "https://id.acme.example/authorize",
+    tokenUrl: "https://id.acme.example/token",
+    clientId: "c",
+    clientSecret: "s",
+    scope: "user",
+    userinfo,
+    ...over,
+  });
+  const build = (oauth2: OAuth2Entry[]) =>
+    resolveConfig({ ...base, social: { google: { clientId: "g", clientSecret: "s" }, oauth2 } });
+
+  it("builds google first, then the entries in order, each with its kind and label", () => {
+    const c = build([entry(), entry({ name: "beta-2", label: "Beta" })]);
+    expect(c.social.providers.map((p) => [p.name, p.kind, p.label])).toEqual([
+      ["google", "oidc", "Continue with Google"],
+      ["acme", "oauth2", "Continue with Acme"],
+      ["beta-2", "oauth2", "Beta"],
+    ]);
+  });
+
+  it("refuses a name that fails the rule (Review Focus 2)", () => {
+    for (const name of ["Acme", "1acme", "a_b", "a/b", "", "a".repeat(33)])
+      expect(() => build([entry({ name })])).toThrow(/social\.oauth2\[0\]\.name must match/);
+    expect(build([entry({ name: "a".repeat(32) })]).social.providers).toHaveLength(2);
+  });
+
+  it("refuses a preset name, email, credential, and a name given twice (Review Focus 2)", () => {
+    for (const name of ["google", "apple", "github", "linkedin", "email", "credential"])
+      expect(() => build([entry({ name })])).toThrow(
+        new RegExp(`social\\.oauth2\\[0\\]\\.name ${name} is reserved`),
+      );
+    expect(() => build([entry(), entry()])).toThrow(
+      /social\.oauth2\[1\]\.name acme is given twice/,
+    );
+  });
+
+  it("refuses a bad label, scope, URL, secret, userinfo, or authorize parameter", () => {
+    for (const label of ["", "x".repeat(81), "a\nb"])
+      expect(() => build([entry({ label })])).toThrow(
+        /social\.oauth2\[0\]\.label must be 1 to 80 characters with no control character/,
+      );
+    for (const scope of [" ", "user\r\nx"])
+      expect(() => build([entry({ scope })])).toThrow(
+        /social\.oauth2\[0\]\.scope must be a non-empty string with no control character/,
+      );
+    expect(() => build([entry({ authorizeUrl: "http://id.acme.example/authorize" })])).toThrow(
+      /social\.oauth2\[0\]\.authorizeUrl must be an https URL/,
+    );
+    expect(() => build([entry({ tokenUrl: "not a url" })])).toThrow(
+      /social\.oauth2\[0\]\.tokenUrl must be an https URL/,
+    );
+    expect(() => build([entry({ clientSecret: "" })])).toThrow(
+      /social\.oauth2\[0\]\.clientSecret must be a non-empty string/,
+    );
+    expect(() => build([{ ...entry(), userinfo: undefined } as unknown as OAuth2Entry])).toThrow(
+      /social\.oauth2\[0\]\.userinfo must be a function/,
+    );
+    for (const key of [
+      "client_id",
+      "redirect_uri",
+      "response_type",
+      "scope",
+      "state",
+      "nonce",
+      "code_challenge",
+      "code_challenge_method",
+    ])
+      expect(() => build([entry({ authorizeParams: { [key]: "x" } })])).toThrow(
+        new RegExp(`social\\.oauth2\\[0\\]\\.authorizeParams\\.${key} is set by core`),
+      );
+    expect(() => build([entry({ authorizeParams: { prompt: "a\nb" } })])).toThrow(
+      /social\.oauth2\[0\]\.authorizeParams\.prompt must be a string with no control character/,
+    );
+    expect(() =>
+      resolveConfig({ ...base, social: { oauth2: {} as unknown as OAuth2Entry[] } }),
+    ).toThrow(/social\.oauth2 must be a list/);
+    for (const bad of [null, "acme", []])
+      expect(() => build([bad as unknown as OAuth2Entry])).toThrow(
+        /social\.oauth2\[0\] must be an object/,
+      );
+    for (const authorizeParams of ["prompt=consent", null, ["x"]])
+      expect(() =>
+        build([entry({ authorizeParams: authorizeParams as unknown as Record<string, string> })]),
+      ).toThrow(/social\.oauth2\[0\]\.authorizeParams must be an object/);
+  });
+});
+
+describe("social.oidc (plan 9c)", () => {
+  const oidc = (over: Partial<OidcEntry> = {}): OidcEntry => ({
+    name: "entra",
+    label: "Continue with Microsoft",
+    issuer: "https://login.acme.example/tenant-1/v2.0",
+    clientId: "c",
+    clientSecret: "s",
+    ...over,
+  });
+  const build = (list: OidcEntry[]) => resolveConfig({ ...base, social: { oidc: list } });
+  const endpoints = {
+    authorizeUrl: "https://login.acme.example/authorize",
+    tokenUrl: "https://login.acme.example/token",
+    jwksUrl: "https://login.acme.example/keys",
+  };
+
+  it("takes an issuer with a path or a trailing slash, and reads the kind from endpoints", () => {
+    const c = build([
+      oidc(),
+      oidc({ name: "auth0", issuer: "https://tenant.acme.example/" }),
+      oidc({ name: "fixed", endpoints }),
+    ]);
+    expect(c.social.providers.map((p) => [p.name, p.kind, p.scope])).toEqual([
+      ["entra", "oidc-discovery", "openid email profile"],
+      ["auth0", "oidc-discovery", "openid email profile"],
+      ["fixed", "oidc", "openid email profile"],
+    ]);
+  });
+
+  it("refuses endpoints that is null or not an object with a ConfigError, not a TypeError", () => {
+    for (const bad of [null, "https://x.example", 7, []])
+      expect(() => build([oidc({ endpoints: bad as never })])).toThrow(
+        /social\.oidc\[0\]\.endpoints must be an object/,
+      );
+  });
+
+  it("refuses an issuer that is not an https URL with no query, fragment, or credentials", () => {
+    for (const issuer of [
+      "http://login.acme.example",
+      "https://login.acme.example/?tenant=1",
+      "https://login.acme.example/#x",
+      "https://user:pass@login.acme.example",
+      "login.acme.example",
+    ])
+      expect(() => build([oidc({ issuer })])).toThrow(
+        /social\.oidc\[0\]\.issuer must be an https URL with no query, fragment, or credentials/,
+      );
+  });
+
+  it("refuses a scope without openid, an endpoint that is not https, and the name rule (Review Focus 2)", () => {
+    expect(() => build([oidc({ scope: "email profile" })])).toThrow(
+      /social\.oidc\[0\]\.scope must hold openid/,
+    );
+    expect(() =>
+      build([oidc({ endpoints: { ...endpoints, jwksUrl: "http://x.example/keys" } })]),
+    ).toThrow(/social\.oidc\[0\]\.endpoints\.jwksUrl must be an https URL/);
+    expect(() => build([oidc({ name: "linkedin" })])).toThrow(
+      /social\.oidc\[0\]\.name linkedin is reserved/,
+    );
+    expect(() => build([oidc({ label: "" })])).toThrow(/social\.oidc\[0\]\.label/);
+    expect(() =>
+      resolveConfig({
+        ...base,
+        social: {
+          oidc: [oidc()],
+          oauth2: [
+            {
+              name: "entra",
+              label: "Entra again",
+              authorizeUrl: "https://a.example/authorize",
+              tokenUrl: "https://a.example/token",
+              clientId: "c",
+              clientSecret: "s",
+              scope: "x",
+              userinfo: async () => ({
+                subject: "s",
+                email: null,
+                emailVerified: false,
+                name: null,
+                image: null,
+              }),
+            },
+          ],
+        },
+      }),
+    ).toThrow(/social\.oauth2\[0\]\.name entra is given twice/);
   });
 });
 

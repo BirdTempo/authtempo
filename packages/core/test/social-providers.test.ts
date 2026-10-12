@@ -15,6 +15,8 @@ describe("buildQuery", () => {
 describe("google provider", () => {
   const google = googleProvider({ clientId: "gid", clientSecret: "gsecret" });
   it("has the Google endpoints, both issuers, and a GET callback", () => {
+    expect(google.kind).toBe("oidc");
+    expect(google.label).toBe("Continue with Google");
     expect(google.authorizeUrl).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(google.tokenUrl).toBe("https://oauth2.googleapis.com/token");
     expect(google.jwksUrl).toBe("https://www.googleapis.com/oauth2/v3/certs");
@@ -69,6 +71,8 @@ describe("apple provider", () => {
     privateKey: "pem",
   });
   it("has the Apple endpoints, form_post, and a POST callback", () => {
+    expect(apple.kind).toBe("oidc");
+    expect(apple.label).toBe("Continue with Apple");
     expect(apple.authorizeUrl).toBe("https://appleid.apple.com/auth/authorize");
     expect(apple.tokenUrl).toBe("https://appleid.apple.com/auth/token");
     expect(apple.jwksUrl).toBe("https://appleid.apple.com/auth/keys");

@@ -1,5 +1,6 @@
 import { applyPostgresMigrations } from "@tempo-auth/adapter-postgres";
 import {
+  type Auth,
   createAuth,
   createPbkdf2PasswordHash,
   SCHEMA_VERSION,
@@ -7,7 +8,8 @@ import {
 } from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
 import type { Sql } from "postgres";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { betterAuth } from "../src/server/better-auth.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { type AnyModelMap, issuerFor, MAPPING } from "../src/storage/mapping.js";
 import { compatMigrationSql } from "../src/storage/migration.js";
@@ -816,6 +818,162 @@ describe("the compat migration and core's own write paths on postgres", () => {
       );
       expect(added.length).toBe(0);
     } finally {
+      await pg.close();
+    }
+  });
+});
+
+describe("Better Auth-era GitHub and LinkedIn accounts on postgres (plan 9c)", () => {
+  // Better Auth 1.7.2 stores accountId = profile.id for github and profile.sub for linkedin
+  // (social-providers/github.ts and linkedin.ts at tag v1.7.2, read 2026-10-12), with the
+  // issuer `local:oauth:<id>`. The providers answer other addresses below, so only the
+  // subject can link these rows.
+  const BA_ROWS = `
+INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES
+  ('ba-gh-u','Gil','gil@example.com',true,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z'),
+  ('ba-li-u','Lia','lia@example.com',true,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z');
+INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdAt","updatedAt") VALUES
+  ('ba-gh','local:oauth:github','583231','github','ba-gh-u','2026-09-02T00:00:00.000Z','2026-09-02T00:00:00.000Z'),
+  ('ba-li','local:oauth:linkedin','782bbtaQ','linkedin','ba-li-u','2026-09-02T00:00:00.000Z','2026-09-02T00:00:00.000Z');
+`;
+  const PROVIDER_ROUTES = {
+    "https://github.com/login/oauth/access_token": {
+      access_token: "gho_compat",
+      token_type: "bearer",
+      scope: "read:user,user:email",
+    },
+    "https://api.github.com/user": {
+      login: "gil",
+      id: 583231,
+      name: "Gil",
+      email: null,
+      avatar_url: "https://avatars.githubusercontent.com/u/583231?v=4",
+    },
+    "https://api.github.com/user/emails": [
+      { email: "gil@new.example", primary: true, verified: true, visibility: "private" },
+    ],
+    "https://www.linkedin.com/oauth/v2/accessToken": {
+      access_token: "li-at",
+      id_token: "li-idtok",
+      token_type: "Bearer",
+      expires_in: 3600,
+    },
+    // The preset reads the subject here, not from the ID token above.
+    "https://api.linkedin.com/v2/userinfo": {
+      sub: "782bbtaQ",
+      name: "Lia L",
+      email: "lia@other.example",
+      email_verified: true,
+    },
+  };
+  const fetchFor =
+    (routes: Record<string, unknown>): typeof fetch =>
+    async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return Object.hasOwn(routes, url)
+        ? Response.json(routes[url])
+        : new Response("not found", { status: 404 });
+    };
+  async function signIn(auth: Auth, provider: string) {
+    const started = await auth.api.startSocial({ provider, ip: null });
+    if (!started.ok) throw new Error(`start failed: ${started.code}`);
+    const url = new URL(started.value.location);
+    return auth.api.completeSocial({
+      provider,
+      state: url.searchParams.get("state"),
+      code: "c1",
+      error: null,
+      bindToken: started.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+  }
+
+  it("links each row on the first sign-in by its subject, with no second user or account (Review Focus 5)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await pg.sql.unsafe(BA_ROWS);
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await s.migrate();
+      const auth = createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [],
+        storage: s.storage,
+        limiter: s.limiter,
+        mail: { send: async () => {} },
+        social: {
+          github: { clientId: "gh-id", clientSecret: "gh-secret" },
+          linkedin: { clientId: "li-id", clientSecret: "li-secret" },
+          fetch: fetchFor(PROVIDER_ROUTES),
+        },
+      });
+      const gh = await signIn(auth, "github");
+      expect(gh.ok && gh.value.user.id).toBe("ba-gh-u");
+      const li = await signIn(auth, "linkedin");
+      expect(li.ok && li.value.user.id).toBe("ba-li-u");
+      const users = await pg.sql.unsafe<{ id: string }[]>('SELECT "id" FROM "user" ORDER BY "id"');
+      expect(users.map((u) => u.id)).toEqual(["ba-gh-u", "ba-li-u"]);
+      const accounts = await pg.sql.unsafe<{ id: string }[]>(
+        `SELECT "id" FROM "account" WHERE "providerId" IN ('github', 'linkedin') ORDER BY "id"`,
+      );
+      expect(accounts.map((a) => a.id)).toEqual(["ba-gh", "ba-li"]);
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("links each row through betterAuth() and its handler, with no second user or account (Review Focus 5)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    // Core binds globalThis.fetch when it builds the config: stub it first.
+    vi.stubGlobal("fetch", fetchFor(PROVIDER_ROUTES));
+    try {
+      await pg.sql.unsafe(BA_ROWS);
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await s.migrate();
+      const auth = betterAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        database: s,
+        socialProviders: {
+          github: { clientId: "gh-id", clientSecret: "gh-secret" },
+          linkedin: { clientId: "li-id", clientSecret: "li-secret" },
+        },
+      });
+      for (const provider of ["github", "linkedin"]) {
+        const start = await auth.handler(
+          new Request(`https://api.example.com/api/auth/social/${provider}/start`),
+        );
+        expect(start.status).toBe(302);
+        const state = new URL(start.headers.get("location") ?? "").searchParams.get("state");
+        const bind = (
+          start.headers.getSetCookie().find((c) => c.startsWith("tempo_session_oauth=")) ?? ""
+        ).split(";")[0] as string;
+        expect(bind).not.toBe("");
+        const done = await auth.handler(
+          new Request(
+            `https://api.example.com/api/auth/social/${provider}/callback?code=c1&state=${state}`,
+            { headers: { cookie: bind } },
+          ),
+        );
+        expect(
+          done.headers
+            .getSetCookie()
+            .some((c) => c.startsWith("tempo_session=") && !c.startsWith("tempo_session=;")),
+        ).toBe(true);
+      }
+      const sessions = await pg.sql.unsafe<{ userId: string }[]>(
+        'SELECT "userId" FROM "session" ORDER BY "userId"',
+      );
+      expect(sessions.map((r) => r.userId)).toEqual(["ba-gh-u", "ba-li-u"]);
+      const users = await pg.sql.unsafe<{ id: string }[]>('SELECT "id" FROM "user" ORDER BY "id"');
+      expect(users.map((u) => u.id)).toEqual(["ba-gh-u", "ba-li-u"]);
+      const accounts = await pg.sql.unsafe<{ id: string }[]>(
+        `SELECT "id" FROM "account" WHERE "providerId" IN ('github', 'linkedin') ORDER BY "id"`,
+      );
+      expect(accounts.map((a) => a.id)).toEqual(["ba-gh", "ba-li"]);
+    } finally {
+      vi.unstubAllGlobals();
       await pg.close();
     }
   });

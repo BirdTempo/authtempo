@@ -205,6 +205,10 @@ export interface BetterAuthOptions {
       privateKey?: string;
       clientSecret?: string;
     };
+    /** Core's GitHub preset (plan 9c). */
+    github?: { clientId: string; clientSecret: string };
+    /** Core's LinkedIn preset (plan 9c). */
+    linkedin?: { clientId: string; clientSecret: string };
   };
   session?: {
     expiresIn?: number;

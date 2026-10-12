@@ -233,12 +233,16 @@ describe("betterAuth", () => {
           keyId: "KEY1234567",
           privateKey,
         },
+        github: { clientId: "h", clientSecret: "hs" },
+        linkedin: { clientId: "l", clientSecret: "ls" },
       },
       advanced: { defaultCookieAttributes: { sameSite: "None" } },
     });
     expect(m.config.social).toEqual({
       google: { clientId: "g", clientSecret: "gs" },
       apple: { clientId: "com.example.web", teamId: "TEAM123456", keyId: "KEY1234567", privateKey },
+      github: { clientId: "h", clientSecret: "hs" },
+      linkedin: { clientId: "l", clientSecret: "ls" },
     });
     expect(m.config.cookie).toEqual({ sameSite: "None" });
     expect(m.config.cookieName).toBe("tempo_session");

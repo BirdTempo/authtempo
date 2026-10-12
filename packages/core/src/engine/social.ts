@@ -8,9 +8,20 @@ import {
   sha256Hex,
 } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
-import { buildQuery, type Provider, type SocialProfile } from "../social/provider.js";
+import {
+  buildQuery,
+  type ConfiguredProvider,
+  isHttpsUrl,
+  type OAuth2Provider,
+  type OidcProvider,
+  PROVIDER_TIMEOUT_MS,
+  type Provider,
+  type SocialProfile,
+  stringClaim,
+} from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { createSession } from "./sessions.js";
 import {
@@ -20,6 +31,7 @@ import {
   normalizeEmail,
   undoSessionIfIdentityGone,
   userStillUnverified,
+  validUserName,
 } from "./users.js";
 
 export const OAUTH_STATE_PREFIX = "os_";
@@ -61,11 +73,19 @@ interface StateData {
   next: string;
 }
 
-function findProvider(config: ResolvedConfig, name: string): Provider | undefined {
+function findProvider(config: ResolvedConfig, name: string): ConfiguredProvider | undefined {
   return config.social.providers.find((p) => p.name === name);
 }
 
-function callbackUrl(config: ResolvedConfig, provider: Provider): string {
+/** The provider with its endpoints. A discovery entry reads them on first use (plan 9c). */
+async function resolveProvider(
+  config: ResolvedConfig,
+  entry: ConfiguredProvider,
+): Promise<Provider | null> {
+  return entry.kind === "oidc-discovery" ? entry.resolve(config.social.fetch) : entry;
+}
+
+function callbackUrl(config: ResolvedConfig, provider: { name: string }): string {
   return `${config.baseURL}${config.basePath}/social/${provider.name}/callback`;
 }
 
@@ -78,11 +98,14 @@ export async function startSocial(
   config: ResolvedConfig,
   input: SocialStart,
 ): Promise<Result<SocialStarted>> {
-  const provider = findProvider(config, input.provider);
-  if (!provider) return fail("not_found");
+  const entry = findProvider(config, input.provider);
+  if (!entry) return fail("not_found");
   if (!(await config.limiter.allow(`social-start:ip:${input.ip ?? "unknown"}`, START_LIMIT))) {
     return fail("rate_limited");
   }
+  // After the limit, so the limit bounds the discovery reads.
+  const provider = await resolveProvider(config, entry);
+  if (!provider) return fail("oauth_failed");
   const now = config.clock.now();
   const state = randomToken(OAUTH_STATE_PREFIX);
   const verifier = randomBase64Url(32);
@@ -111,7 +134,8 @@ export async function startSocial(
     response_type: "code",
     scope: provider.scope,
     state,
-    nonce,
+    // An oauth2 provider issues no ID token, so a nonce has nothing to bind (plan 9c).
+    ...(provider.kind === "oidc" ? { nonce } : {}),
     code_challenge: await sha256Base64Url(verifier),
     code_challenge_method: "S256",
     ...provider.authorizeParams,
@@ -128,8 +152,8 @@ export async function completeSocial(
   config: ResolvedConfig,
   input: SocialComplete,
 ): Promise<Result<{ token: string; next: string; user: UserRow }>> {
-  const provider = findProvider(config, input.provider);
-  if (!provider) return fail("not_found");
+  const entry = findProvider(config, input.provider);
+  if (!entry) return fail("not_found");
   const state = input.state ?? "";
   if (!STATE_RE.test(state)) return fail("invalid_token");
   const now = config.clock.now();
@@ -153,7 +177,7 @@ export async function completeSocial(
   }
   // From here the state is spent. Every failure below sends the person back
   // to start again, which is the safe direction.
-  if (row.identifier !== provider.name) return fail("invalid_token");
+  if (row.identifier !== entry.name) return fail("invalid_token");
   const data = row.data as StateData | null;
   if (!data || typeof data.verifier !== "string") return fail("invalid_token");
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash)) {
@@ -161,41 +185,24 @@ export async function completeSocial(
   }
   if (input.error) return fail("oauth_denied");
   if (!input.code) return fail("oauth_failed");
+  const provider = await resolveProvider(config, entry);
+  if (!provider) return fail("oauth_failed");
 
-  const idToken = await exchangeCode(config, provider, input.code, data.verifier, now);
-  if (idToken === null) return fail("oauth_failed");
-
-  let claims: Record<string, unknown>;
-  try {
-    claims = await config.jwt.verifyIdToken({
-      token: idToken,
-      jwksUrl: provider.jwksUrl,
-      issuer: provider.issuer,
-      audience: provider.clientId,
-      now,
-    });
-  } catch (e) {
-    console.error(
-      "tempo-auth: social id token rejected",
-      provider.name,
-      e instanceof Error ? e.name : typeof e,
-    );
-    return fail("oauth_failed");
-  }
-  const nonce = claims.nonce;
-  if (typeof nonce !== "string" || !constantTimeEqual(await sha256Hex(nonce), data.nonceHash)) {
-    console.error("tempo-auth: social nonce mismatch", provider.name);
-    return fail("oauth_failed");
-  }
-  const profile = provider.profile(claims, { user: input.user ?? undefined });
-  if (!profile.subject) return fail("oauth_failed");
+  const token = await exchangeCode(config, provider, input.code, data.verifier, now);
+  if (token === null) return fail("oauth_failed");
+  const profile =
+    provider.kind === "oidc"
+      ? await idTokenProfile(config, provider, token, data.nonceHash, input.user ?? undefined, now)
+      : await userinfoProfile(config, provider, token);
+  const bounded = profile ? boundProfile(profile, provider.name) : null;
+  if (!bounded) return fail("oauth_failed");
 
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
   const resolved = await resolveSocialUser(
     config.storage,
     provider.name,
-    profile,
+    bounded,
     now,
     (tx, user) =>
       createSession(config, { userId: user.id, ip: input.ip, userAgent: input.userAgent }, tx),
@@ -205,7 +212,11 @@ export async function completeSocial(
   return ok({ token: after.token, next: safeNext(data.next), user });
 }
 
-/** The ID token from the token endpoint, or null on any failure. Logs the status only. */
+/**
+ * The token that the provider's kind needs, or null on any failure: the ID
+ * token of an `oidc` provider, the access token of an `oauth2` provider.
+ * Logs the status or the error name only, never a token or the code.
+ */
 async function exchangeCode(
   config: ResolvedConfig,
   provider: Provider,
@@ -227,8 +238,7 @@ async function exchangeCode(
   let res: Response;
   try {
     res = await config.social.fetch(provider.tokenUrl, {
-      // A provider that hangs must not hold the request open. 10 s covers a slow token endpoint.
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: buildQuery({
@@ -258,8 +268,134 @@ async function exchangeCode(
   } catch {
     return null;
   }
-  const idToken = (body as { id_token?: unknown } | null)?.id_token;
-  return typeof idToken === "string" && idToken.length > 0 ? idToken : null;
+  const field = provider.kind === "oidc" ? "id_token" : "access_token";
+  const token = (body as Record<string, unknown> | null)?.[field];
+  if (typeof token === "string" && token.length > 0) return token;
+  // GitHub answers a bad code with 200 and an `error` field. Log no value of the body.
+  console.error("tempo-auth: social token answer has no token", provider.name);
+  return null;
+}
+
+/** The profile from a verified ID token whose nonce matches the row, or null. */
+async function idTokenProfile(
+  config: ResolvedConfig,
+  provider: OidcProvider,
+  idToken: string,
+  nonceHash: string,
+  user: string | undefined,
+  now: Date,
+): Promise<SocialProfile | null> {
+  let claims: Record<string, unknown>;
+  try {
+    claims = await config.jwt.verifyIdToken({
+      token: idToken,
+      jwksUrl: provider.jwksUrl,
+      issuer: provider.issuer,
+      audience: provider.clientId,
+      now,
+    });
+  } catch (e) {
+    console.error(
+      "tempo-auth: social id token rejected",
+      provider.name,
+      e instanceof Error ? e.name : typeof e,
+    );
+    return null;
+  }
+  const nonce = claims.nonce;
+  if (typeof nonce !== "string" || !constantTimeEqual(await sha256Hex(nonce), nonceHash)) {
+    console.error("tempo-auth: social nonce mismatch", provider.name);
+    return null;
+  }
+  return provider.profile(claims, { user });
+}
+
+/**
+ * The profile from an oauth2 provider's `userinfo`, or null on any failure
+ * (plan 9c). One deadline covers the whole step, so a function that never
+ * calls fetch stops too, and every fetch the function makes carries the same
+ * signal. The access token is an argument only: it is never stored, and a
+ * failure logs the error name, never its message, which may hold the token.
+ */
+async function userinfoProfile(
+  config: ResolvedConfig,
+  provider: OAuth2Provider,
+  accessToken: string,
+): Promise<SocialProfile | null> {
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  const timedFetch: typeof fetch = (input, init) => config.social.fetch(input, { ...init, signal });
+  // Promise.race keeps a handler on this promise, so its late rejection is handled.
+  const deadline = new Promise<never>((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  try {
+    const answer: unknown = await Promise.race([
+      provider.userinfo(accessToken, timedFetch),
+      deadline,
+    ]);
+    // The function is app code. Only a boolean true is a verified address, so
+    // no provider widens the linking rule of spec 8.3. The fields are read
+    // here, inside the try, so a getter that throws answers oauth_failed.
+    const a = (typeof answer === "object" && answer !== null ? answer : {}) as Record<
+      string,
+      unknown
+    >;
+    return {
+      subject: typeof a.subject === "string" ? a.subject : "",
+      email: stringClaim(a, "email"),
+      emailVerified: a.emailVerified === true,
+      name: stringClaim(a, "name"),
+      image: stringClaim(a, "image"),
+    };
+  } catch (e) {
+    console.error("tempo-auth: social user info failed", provider.name, appErrorName(e));
+    return null;
+  }
+}
+
+/**
+ * The one bound on a profile, for both provider kinds (plan 9c final review
+ * I-2). A bad subject refuses the sign-in: the subject is an identity key, so
+ * core never trims it. A bad name or image is dropped, not refused, so the
+ * person can still sign in. The image must be an `https:` URL, so a
+ * `javascript:` or `data:` value never reaches the user row.
+ */
+function boundProfile(profile: SocialProfile, providerName: string): SocialProfile | null {
+  const subject = profile.subject;
+  if (
+    subject.length < 1 ||
+    subject.length > SUBJECT_MAX ||
+    hasControlChar(subject) ||
+    subject.trim().length === 0
+  ) {
+    console.error("tempo-auth: social user info has a bad subject", providerName);
+    return null;
+  }
+  const { name, image } = profile;
+  return {
+    ...profile,
+    name: name !== null && validUserName(name) ? name : null,
+    image:
+      image !== null && image.length <= IMAGE_MAX && !hasControlChar(image) && isHttpsUrl(image)
+        ? image
+        : null,
+  };
+}
+
+/** The identity row's subject. 255 covers every provider id we know and bounds the row. */
+const SUBJECT_MAX = 255;
+/** An image URL. LinkedIn's signed picture URLs pass 255, so the bound is wider than the subject's. */
+const IMAGE_MAX = 2048;
+const ERROR_CLASS_RE = /^[A-Za-z]+Error$/;
+
+/**
+ * The name of an error from app code, safe for a log line. The app sets the
+ * name, so it is app data and can hold the access token. Only a plain class
+ * name such as `TypeError` passes; anything else logs as `Error`.
+ */
+function appErrorName(e: unknown): string {
+  if (!(e instanceof Error)) return typeof e;
+  return ERROR_CLASS_RE.test(e.name) ? e.name : "Error";
 }
 
 /**

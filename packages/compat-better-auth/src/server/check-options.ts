@@ -11,7 +11,8 @@ export interface OptionCheck {
 
 type Rule = (value: unknown, path: string, out: OptionCheck) => void;
 
-const PLAN_9C = "plan 9c (a generic OAuth2 and OIDC provider) is not written yet";
+/** Plan 9c maps google, apple, github, and linkedin. Core takes any other provider as a list entry. */
+const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.oauth2";
 const PLAN_9D = "plan 9d (hooks on organizations and sessions) is not written yet";
 const PLAN_9G = "plan 9g (JWT minting and an OIDC provider mode) is not written yet";
 const NO_SUCH_OPTION = "tempo-auth has no such option";
@@ -153,7 +154,20 @@ const plugins: Rule = (v, p, out) => {
   }
 };
 
-const google = object({ clientId: string, clientSecret: string });
+/** google, github, and linkedin: core's presets take the id and the secret only. */
+const idAndSecretShape = object({ clientId: string, clientSecret: string });
+/** Core refuses a missing or empty id or secret at createAuth; refuse it here with the option's path. */
+const idAndSecret: Rule = (v, p, out) => {
+  idAndSecretShape(v, p, out);
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return;
+  const o = v as Record<string, unknown>;
+  for (const key of ["clientId", "clientSecret"]) {
+    // Trim for this check only: a whitespace-only value is as empty as "".
+    const value = o[key];
+    if (value === undefined || (typeof value === "string" && value.trim() === ""))
+      refuse(out, `${p}.${key}`, "required");
+  }
+};
 const apple = object({
   clientId: string,
   teamId: string,
@@ -240,7 +254,8 @@ const TOP: Record<string, Rule> = {
     }
     for (const [name, config] of Object.entries(v)) {
       if (config === undefined) continue;
-      if (name === "google") google(config, `${p}.google`, out);
+      if (name === "google" || name === "github" || name === "linkedin")
+        idAndSecret(config, `${p}.${name}`, out);
       else if (name === "apple") {
         apple(config, `${p}.apple`, out);
         // A null or non-object entry is refused above: read its keys only on an object.
@@ -248,7 +263,7 @@ const TOP: Record<string, Rule> = {
         const a = config as Record<string, unknown>;
         if (!a.teamId || !a.keyId || !a.privateKey)
           refuse(out, `${p}.apple`, "needs teamId, keyId, and privateKey");
-      } else refuse(out, `${p}.${name}`, PLAN_9C);
+      } else refuse(out, `${p}.${name}`, OTHER_PROVIDER);
     }
   },
   session: object({
@@ -417,6 +432,8 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     options.emailAndPassword?.enabled === true ||
     options.socialProviders?.google !== undefined ||
     options.socialProviders?.apple !== undefined ||
+    options.socialProviders?.github !== undefined ||
+    options.socialProviders?.linkedin !== undefined ||
     pluginOf(options, "passkey") !== null;
   if (pluginOf(options, "expo") && !pageHasMethod) {
     refuse(
