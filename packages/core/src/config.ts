@@ -508,10 +508,20 @@ function requireFields<T extends object>(path: string, obj: T, keys: (keyof T & 
 
 const LABEL_MAX = 80;
 
-/** `undefined` gives an empty list; anything that is not an array throws. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * `undefined` gives an empty list. A value that is not an array, or an
+ * entry that is not an object, throws: the checks below read the entry's
+ * fields, and a null entry would throw a TypeError with no path.
+ */
 function listOf<T>(path: string, value: T[] | undefined): T[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new ConfigError(`${path} must be a list`);
+  for (const [i, entry] of value.entries())
+    if (!isPlainObject(entry)) throw new ConfigError(`${path}[${i}] must be an object`);
   return value;
 }
 
@@ -568,6 +578,9 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
     https(`${path}.tokenUrl`, e.tokenUrl);
     if (typeof e.userinfo !== "function")
       throw new ConfigError(`${path}.userinfo must be a function`);
+    // Object.entries of a string gives its characters as keys, so refuse it.
+    if (e.authorizeParams !== undefined && !isPlainObject(e.authorizeParams))
+      throw new ConfigError(`${path}.authorizeParams must be an object`);
     for (const [key, value] of Object.entries(e.authorizeParams ?? {})) {
       if (CORE_AUTHORIZE_PARAMS.has(key))
         throw new ConfigError(`${path}.authorizeParams.${key} is set by core`);

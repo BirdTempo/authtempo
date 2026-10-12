@@ -68,6 +68,7 @@ function complete(
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("an oauth2 provider (plan 9c)", () => {
@@ -125,16 +126,22 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect(await auth.storage.findMany("session", [])).toHaveLength(1);
   });
 
-  it("gives userinfo a fetch that carries the 10 s signal", async () => {
-    const timeout = vi.spyOn(AbortSignal, "timeout");
+  it("gives userinfo a fetch whose own signal aborts at PROVIDER_TIMEOUT_MS", async () => {
+    // A fake AbortSignal.timeout on fake timers, so the test can move the clock to the limit.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const c = new AbortController();
+      setTimeout(() => c.abort(new DOMException("timed out", "TimeoutError")), ms);
+      return c.signal;
+    });
     const urls: string[] = [];
     const signals: (AbortSignal | null | undefined)[] = [];
     const fetchFn: typeof fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       urls.push(url);
+      signals.push(init?.signal);
       if (url === "https://id.acme.example/oauth/token")
         return Response.json({ access_token: ACCESS });
-      signals.push(init?.signal);
       return Response.json({ id: "acme-9" });
     };
     const auth = makeAuth({
@@ -154,16 +161,57 @@ describe("an oauth2 provider (plan 9c)", () => {
     const r = await complete(auth, await started(auth));
     expect(r.ok).toBe(true);
     expect(urls).toEqual(["https://id.acme.example/oauth/token", "https://api.acme.example/me"]);
-    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    const [tokenSignal, userSignal] = signals;
+    expect(userSignal).toBeInstanceOf(AbortSignal);
+    // The user info step has its own deadline, not the one of the token exchange.
+    expect(userSignal).not.toBe(tokenSignal);
     expect(PROVIDER_TIMEOUT_MS).toBe(10_000);
-    expect(timeout).toHaveBeenCalledWith(PROVIDER_TIMEOUT_MS);
+    vi.advanceTimersByTime(PROVIDER_TIMEOUT_MS - 1);
+    expect(userSignal?.aborted).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(userSignal?.aborted).toBe(true);
+  });
+
+  it("passes the method, the headers, and the body of a userinfo fetch through and adds only the signal", async () => {
+    const inits: (RequestInit | undefined)[] = [];
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url === "https://id.acme.example/oauth/token")
+        return Response.json({ access_token: ACCESS });
+      inits.push(init);
+      return Response.json({});
+    };
+    const auth = makeAuth({
+      social: {
+        oauth2: [
+          acme(async (_token, f) => {
+            await f("https://api.acme.example/me", {
+              method: "POST",
+              headers: { "x-a": "1" },
+              body: "b",
+            });
+            return PERSON;
+          }),
+        ],
+        fetch: fetchFn,
+      },
+    });
+    expect((await complete(auth, await started(auth))).ok).toBe(true);
+    expect(inits).toHaveLength(1);
+    const { signal, ...rest } = inits[0] ?? {};
+    expect(rest).toEqual({ method: "POST", headers: { "x-a": "1" }, body: "b" });
+    expect(signal).toBeInstanceOf(AbortSignal);
   });
 
   it("answers oauth_failed when userinfo never settles, clears the binding cookie, and logs TimeoutError (Review Focus 3)", async () => {
     const real = AbortSignal.timeout.bind(AbortSignal);
     const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => real(20));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const auth = acmeAuth(() => new Promise<SocialProfile>(() => {}));
+    let calls = 0;
+    const auth = acmeAuth(() => {
+      calls++;
+      return new Promise<SocialProfile>(() => {});
+    });
     const handle = createRouter(auth.config, socialRoutes(auth.config));
     const start = await handle(get("/auth/social/acme/start"));
     const bind = start.headers.get("set-cookie")?.split(";")[0] ?? "";
@@ -186,6 +234,15 @@ describe("an oauth2 provider (plan 9c)", () => {
     );
     expect(await auth.storage.findMany("user", [])).toHaveLength(0);
     expect(await auth.storage.findMany("session", [])).toHaveLength(0);
+    // The state row is consumed before the exchange, so a replay runs no step again.
+    const replay = await handle(
+      get(`/auth/social/acme/callback?code=c1&state=${encodeURIComponent(state)}`, {
+        cookie: bind,
+      }),
+    );
+    expect(replay.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    expect(calls).toBe(1);
+    expect(auth.calls).toHaveLength(1);
   });
 
   it("answers oauth_failed when userinfo throws, gives no subject, or the token answer has no access token", async () => {
@@ -281,6 +338,65 @@ describe("an oauth2 provider (plan 9c)", () => {
     });
     expect(logs.length).toBeGreaterThan(0);
     expect(JSON.stringify(logs)).not.toContain(ACCESS);
+  });
+
+  it("logs no app error name that is not a plain error class name, so a token in the name is not logged", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = acmeAuth(async (token) => {
+      const e = new Error("refused");
+      e.name = `Bad ${token}`;
+      throw e;
+    });
+    expect(await complete(auth, await started(auth))).toMatchObject({
+      ok: false,
+      code: "oauth_failed",
+    });
+    expect(error).toHaveBeenCalledWith("tempo-auth: social user info failed", "acme", "Error");
+    expect(JSON.stringify(error.mock.calls)).not.toContain(ACCESS);
+  });
+
+  it("answers oauth_failed for a subject that is empty, over 255 characters, or holds a control character, and writes no identity", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const subject of ["", "s".repeat(256), "acme\n7"]) {
+      const auth = acmeAuth(async () => ({ ...PERSON, subject }));
+      expect(await complete(auth, await started(auth))).toMatchObject({
+        ok: false,
+        code: "oauth_failed",
+      });
+      expect(await auth.storage.findMany("identity", [])).toEqual([]);
+      expect(await auth.storage.findMany("user", [])).toEqual([]);
+    }
+    expect(error).toHaveBeenCalledWith("tempo-auth: social user info has a bad subject", "acme");
+    expect(error).toHaveBeenCalledTimes(3);
+    const max = acmeAuth(async () => ({ ...PERSON, subject: "s".repeat(255) }));
+    expect((await complete(max, await started(max))).ok).toBe(true);
+  });
+
+  it("drops a name or an image that breaks its bound, and keeps a valid one", async () => {
+    const bad = acmeAuth(async () => ({
+      ...PERSON,
+      name: "x".repeat(201),
+      image: `https://img.acme.example/${"a".repeat(2048)}`,
+    }));
+    const r1 = await complete(bad, await started(bad));
+    expect(r1.ok && r1.value.user).toMatchObject({ name: null, image: null });
+    const ctl = acmeAuth(async () => ({
+      ...PERSON,
+      name: "Ada\r\nX",
+      image: "https://img.acme.example/a\n",
+    }));
+    const r2 = await complete(ctl, await started(ctl));
+    expect(r2.ok && r2.value.user).toMatchObject({ name: null, image: null });
+    const good = acmeAuth(async () => ({
+      ...PERSON,
+      name: "x".repeat(200),
+      image: "https://img.acme.example/a.png",
+    }));
+    const r3 = await complete(good, await started(good));
+    expect(r3.ok && r3.value.user).toMatchObject({
+      name: "x".repeat(200),
+      image: "https://img.acme.example/a.png",
+    });
   });
 
   it("serves GET start and GET callback for the entry, and 404 for a name that is not configured", async () => {

@@ -190,6 +190,14 @@ describe("social.oauth2 (plan 9c)", () => {
     expect(() =>
       resolveConfig({ ...base, social: { oauth2: {} as unknown as OAuth2Entry[] } }),
     ).toThrow(/social\.oauth2 must be a list/);
+    for (const bad of [null, "acme", []])
+      expect(() => build([bad as unknown as OAuth2Entry])).toThrow(
+        /social\.oauth2\[0\] must be an object/,
+      );
+    for (const authorizeParams of ["prompt=consent", null, ["x"]])
+      expect(() =>
+        build([entry({ authorizeParams: authorizeParams as unknown as Record<string, string> })]),
+      ).toThrow(/social\.oauth2\[0\]\.authorizeParams must be an object/);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   sha256Hex,
 } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import {
@@ -28,6 +29,7 @@ import {
   normalizeEmail,
   undoSessionIfIdentityGone,
   userStillUnverified,
+  validUserName,
 } from "./users.js";
 
 export const OAUTH_STATE_PREFIX = "os_";
@@ -314,11 +316,7 @@ async function userinfoProfile(
   try {
     answer = await Promise.race([provider.userinfo(accessToken, timedFetch), deadline]);
   } catch (e) {
-    console.error(
-      "tempo-auth: social user info failed",
-      provider.name,
-      e instanceof Error ? e.name : typeof e,
-    );
+    console.error("tempo-auth: social user info failed", provider.name, appErrorName(e));
     return null;
   }
   // The function is app code. Only a boolean true is a verified address, so
@@ -327,13 +325,43 @@ async function userinfoProfile(
     string,
     unknown
   >;
+  const subject = a.subject;
+  if (
+    typeof subject !== "string" ||
+    subject.length < 1 ||
+    subject.length > SUBJECT_MAX ||
+    hasControlChar(subject)
+  ) {
+    console.error("tempo-auth: social user info has a bad subject", provider.name);
+    return null;
+  }
+  // The user row takes name and image as they are, so bound them here. A
+  // bad value is dropped, not refused: the person can still sign in.
+  const name = stringClaim(a, "name");
+  const image = stringClaim(a, "image");
   return {
-    subject: typeof a.subject === "string" ? a.subject : "",
+    subject,
     email: stringClaim(a, "email"),
     emailVerified: a.emailVerified === true,
-    name: stringClaim(a, "name"),
-    image: stringClaim(a, "image"),
+    name: name !== null && validUserName(name) ? name : null,
+    image: image !== null && image.length <= IMAGE_MAX && !hasControlChar(image) ? image : null,
   };
+}
+
+/** The identity row's subject. 255 covers every provider id we know and bounds the row. */
+const SUBJECT_MAX = 255;
+/** An image URL. LinkedIn's signed picture URLs pass 255, so the bound is wider than the subject's. */
+const IMAGE_MAX = 2048;
+const ERROR_CLASS_RE = /^[A-Za-z]+Error$/;
+
+/**
+ * The name of an error from app code, safe for a log line. The app sets the
+ * name, so it is app data and can hold the access token. Only a plain class
+ * name such as `TypeError` passes; anything else logs as `Error`.
+ */
+function appErrorName(e: unknown): string {
+  if (!(e instanceof Error)) return typeof e;
+  return ERROR_CLASS_RE.test(e.name) ? e.name : "Error";
 }
 
 /**
