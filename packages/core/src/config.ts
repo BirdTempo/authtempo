@@ -17,6 +17,7 @@ import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js
 import { type AppleConfig, appleProvider } from "./social/apple.js";
 import { type GitHubConfig, githubProvider } from "./social/github.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
+import { type LinkedInConfig, linkedinProvider } from "./social/linkedin.js";
 import { type OAuth2Entry, oauth2Provider } from "./social/oauth2.js";
 import { isIssuer, type OidcEntry, oidcProvider } from "./social/oidc.js";
 import {
@@ -95,6 +96,11 @@ export interface AuthConfig {
     apple?: AppleConfig;
     /** GitHub, an oauth2 preset with scope `read:user user:email` (plan 9c). */
     github?: GitHubConfig;
+    /**
+     * LinkedIn, an oauth2 preset on the user info endpoint with scope
+     * `openid profile email` (plan 9c). It ignores LinkedIn's ID token.
+     */
+    linkedin?: LinkedInConfig;
     /**
      * OpenID Connect providers (plan 9c). An entry with no `endpoints` reads
      * `<issuer>/.well-known/openid-configuration` on its first start and
@@ -552,6 +558,10 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
   if (social?.github) {
     requireFields("social.github", social.github, ["clientId", "clientSecret"]);
     providers.push(githubProvider(social.github));
+  }
+  if (social?.linkedin) {
+    requireFields("social.linkedin", social.linkedin, ["clientId", "clientSecret"]);
+    providers.push(linkedinProvider(social.linkedin));
   }
   const names = new Set<string>();
   const listName = (path: string, name: unknown) => {
