@@ -68,8 +68,21 @@ now), `identity_taken` (another user holds the identity), `claimed` (a
 verified user that holds its `email` identity lacks a password, a passkey,
 or a social identity), or `no_owner` (an organization whose members map to
 no owner). A verified user's missing credential is an operator action,
-because the importer cannot tell a claim from a newer export. Without
+because the importer cannot tell a claim from a newer export. The last
+statement of each user repair checks the user row again: when a claim or an
+address change lands during the repair, the repair deletes the rows it
+wrote, and the record stays `partial` with `not repaired: claimed`. Without
 `--repair` the importer writes nothing for a `partial` record.
+
+A repair also gives back a credential that the user removed in the app
+since the first run, for example a password or a passkey. The importer
+cannot tell that removal from a stopped run, so check in the app that each
+user still wants each missing credential before you run `--repair`. The
+`email_changed` guard looks only at an `email` identity. An unverified user
+whose address changed can still get another missing credential back, but no
+path reaches that state today: core has no address change flow, and an
+unverified user with no credential has no session to change the address
+with.
 
 `--report <file>` also writes the report as JSON. The report file holds no
 hash. It is written with mode 0600.
@@ -281,7 +294,11 @@ Cognito exports no hash, so this command needs no `--formats`.
   names the bundle path and every step. The Worker prints the report and
   the CLI's exit status. It writes core's tables (`TARGET=core`, the
   default), or an app's Better Auth 1.7 tables on D1 with `--var
-  TARGET:compat` (plan 9b2).
+  TARGET:compat` (plan 9b2). `TARGET=compat` serves Better Auth's default
+  table and column names only. An app with custom names (for example
+  snake_case columns or plural tables) has no Worker path yet: the Worker
+  refuses its tables with `schema_mismatch` before any write. The
+  `--better-auth` target on Postgres also uses the default names.
 
 CAUTION: the D1 bundle holds every password hash and, for Supabase, the
 Firebase signer key. The CLI writes it with mode 0600. Do not commit it, and

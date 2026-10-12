@@ -276,6 +276,32 @@ describe("supabaseSource: a row with no id (plan 9b2, Review Focus 4)", () => {
     ]);
     expect(report.created.user).toBe(0);
   });
+
+  it("keeps the order and the row number of a no-id row between two valid rows (parked Task 3 Minor)", async () => {
+    const header = users.split("\n")[0];
+    const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const row = (id: string, email: string) =>
+      `${id},${email},,2024-02-12 08:00:00+00,{},2024-02-12 08:00:00+00,f,,,f`;
+    const text = `${header}\n${row(A, "a@example.com")}\n${row("", "nid@example.com")}\n${row(B, "b@example.com")}\n`;
+    const source = () =>
+      supabaseSource({ users: text, identities: "provider,provider_id,user_id\n", now });
+    expect(
+      (await all(source())).map((r) => [r.sourceId, r.kind === "user" ? r.email : null]),
+    ).toEqual([
+      [A, "a@example.com"],
+      ["(none) users csv row 3", null],
+      [B, "b@example.com"],
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users csv row 3", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(2);
+  });
 });
 
 describe("supabaseSource: GitHub and LinkedIn (plan 9b2)", () => {

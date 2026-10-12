@@ -202,6 +202,32 @@ describe("firebaseSource: a user with no localId (plan 9b2, Review Focus 4)", ()
       { kind: "user", sourceId: "(none) users item 1", reason: "no_source_id" },
     ]);
   });
+
+  it("keeps the order and the item number of a no-id user between two valid users (parked Task 3 Minor)", async () => {
+    const users = JSON.stringify({
+      users: [
+        { localId: "fa", email: "a@example.com", emailVerified: true, providerUserInfo: [] },
+        { email: "nid@example.com", emailVerified: true, providerUserInfo: [] },
+        { localId: "fb", email: "b@example.com", emailVerified: true, providerUserInfo: [] },
+      ],
+    });
+    const source = () => firebaseSource({ users, hashConfig: CONFIG });
+    expect(
+      (await all(source())).map((r) => [r.sourceId, r.kind === "user" ? r.email : null]),
+    ).toEqual([
+      ["fa", "a@example.com"],
+      ["(none) users item 2", null],
+      ["fb", "b@example.com"],
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 2", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(2);
+  });
 });
 
 describe("firebaseSource: GitHub (plan 9b2)", () => {

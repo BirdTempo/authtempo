@@ -149,7 +149,10 @@ export function supabaseSource(input: SupabaseExport): Source {
       }
       for (const [n, u] of csvRecords(input.users).entries()) {
         // A row with no id has no import key: listed, never imported (plan 9b2).
-        // csvRecords numbers a row as its index plus 2 (the header is row 1).
+        // The label is the record's index plus 2 (the header is record 1).
+        // That is the file line only when no blank line and no quoted field
+        // with a line break comes before it; psql's `\copy` quotes a jsonb
+        // value with a line break, so count records, not lines.
         if (!u.id) {
           yield noSourceIdUser(`users csv row ${n + 2}`);
           continue;

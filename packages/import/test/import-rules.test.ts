@@ -808,6 +808,139 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     expect({ ...dry, dryRun: false }).toEqual(r);
   });
 
+  /**
+   * The memory adapter with a claim that lands inside the next transaction,
+   * after the guard reads and before the first write. The claim runs outside
+   * that transaction, as on D1 (no isolation) or as a second connection on
+   * Postgres: the memory adapter does not make a write outside a transaction
+   * wait. It is core's `claimEmail` order: the flag first, then the
+   * claimant's credentials go, then the owner's email identity.
+   */
+  function claimBeforeFirstWrite(db: StorageAdapter, userId: string, email: string) {
+    let fired = false;
+    const claim = async () => {
+      await db.update("user", [{ field: "id", op: "eq", value: userId }], {
+        emailVerified: true,
+        updatedAt: AT,
+      });
+      await db.delete("password", [{ field: "userId", op: "eq", value: userId }]);
+      await db.delete("identity", [{ field: "userId", op: "eq", value: userId }]);
+      await db.create("identity", {
+        id: "claim-email",
+        userId,
+        provider: "email",
+        subject: email,
+        linkedAt: AT,
+        createdAt: AT,
+        updatedAt: AT,
+      });
+    };
+    const view: StorageAdapter = {
+      ...db,
+      transaction: (fn) =>
+        db.transaction((tx) =>
+          fn({
+            ...tx,
+            create: async (model, data) => {
+              if (!fired) {
+                fired = true;
+                await claim();
+              }
+              return tx.create(model, data);
+            },
+          }),
+        ),
+    };
+    return { view, fired: () => fired };
+  }
+
+  it("writes nothing when a claim lands between the guard read and the repair write (I-3)", async () => {
+    const db = createMemoryAdapter();
+    // A run on D1 that stopped after the user row of an unverified u1.
+    await halfUser(db, false);
+    const u1 = await importId("user", "supabase", "u1");
+    const race = claimBeforeFirstWrite(db, u1, "u1@example.com");
+    const r = await importUsers(
+      race.view,
+      listSource([user("u1", { emailVerified: false, password: { hash: BCRYPT } })]),
+      { formats: LEGACY_FORMATS, now, repair: true },
+    );
+    expect(race.fired()).toBe(true);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "u1", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    expect(r.repaired).toEqual([]);
+    // The claimant's password is not on the user that the owner now holds.
+    expect(await db.findMany("password", [])).toEqual([]);
+    expect(await rowsOf(db)).toEqual({ identity: ["email:u1@example.com"], password: [] });
+    expect((await db.findOne("user", [{ field: "id", op: "eq", value: u1 }]))?.emailVerified).toBe(
+      true,
+    );
+  });
+
+  it("deletes every row it wrote, by id, when an address change lands before the repair write (I-3)", async () => {
+    const db = createMemoryAdapter();
+    await halfUser(db);
+    const u1 = await importId("user", "supabase", "u1");
+    // The app changes the address of the verified u1 after the guard read and
+    // before the first write. The last statement then matches zero rows too.
+    let fired = false;
+    const view: StorageAdapter = {
+      ...db,
+      transaction: (fn) =>
+        db.transaction((tx) =>
+          fn({
+            ...tx,
+            create: async (model, data) => {
+              if (!fired) {
+                fired = true;
+                await db.update("user", [{ field: "id", op: "eq", value: u1 }], {
+                  email: "new@example.com",
+                  updatedAt: AT,
+                });
+              }
+              return tx.create(model, data);
+            },
+          }),
+        ),
+    };
+    const r = await importUsers(view, listSource([half()]), {
+      formats: LEGACY_FORMATS,
+      now,
+      repair: true,
+    });
+    expect(fired).toBe(true);
+    expect(r.partial).toEqual([
+      {
+        kind: "user",
+        sourceId: "u1",
+        missing: ["identity:email", "identity:google", "password"],
+        repairRefused: "claimed",
+      },
+    ]);
+    expect(await rowsOf(db)).toEqual({ identity: [], password: [] });
+  });
+
+  it("lists the same partial rows in a dry run without repair as in a real run, for a passkey an earlier record takes (M-8)", async () => {
+    const records = () => [
+      user("n1", { passkeys: [passkey("c1")] }),
+      user("u1", { passkeys: [passkey("c1")] }),
+    ];
+    const dryDb = createMemoryAdapter();
+    await halfAuthjs(dryDb);
+    const dry = await importUsers(dryDb, named("authjs", records()), {
+      formats: LEGACY_FORMATS,
+      now,
+      dryRun: true,
+    });
+    const db = createMemoryAdapter();
+    await halfAuthjs(db);
+    const r = await importUsers(db, named("authjs", records()), { formats: LEGACY_FORMATS, now });
+    // The real run finds the credential row of n1, so u1 lacks only its email identity.
+    expect(r.partial).toEqual([{ kind: "user", sourceId: "u1", missing: ["identity:email"] }]);
+    expect({ ...dry, dryRun: false }).toEqual(r);
+  });
+
   it("repairs nothing without the option, as before", async () => {
     const db = createMemoryAdapter();
     await halfUser(db);

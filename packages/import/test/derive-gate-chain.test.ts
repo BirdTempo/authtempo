@@ -34,9 +34,11 @@ describe("one derive gate for chained legacy seams (plan 9b2, Review Focus 1)", 
       seam.verify("pw", VECTORS.bcrypt2b.stored),
       seam.verify("pw", BA_ROW),
     ];
-    while (release.length < 2) await wait(1);
-    // Time for the third derive to start if a second gate let it.
-    await wait(20);
+    // Poll until two derives hold a slot and the third waits in core's gate,
+    // at most 1000 turns. A second gate would let the third derive start, so
+    // the loop would end on the bound and the checks below would fail.
+    for (let i = 0; i < 1000 && (release.length < 2 || deriveGate.waiting() < 1); i++)
+      await wait(1);
     expect(inFlight).toBe(2);
     expect(deriveGate.waiting()).toBe(1);
     for (let done = 0; done < 3; done++) {

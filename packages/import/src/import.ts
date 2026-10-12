@@ -1,5 +1,6 @@
 import {
   DEFAULT_RESERVED_SLUGS,
+  isGithubSubject,
   LEGACY_VERIFY_HASH,
   newId,
   normalizeEmail,
@@ -30,8 +31,8 @@ import {
  * dropped and listed as `identity:<provider>`. A subject outside its form is
  * dropped and listed as `identity:<provider>:subject_form`: an identity that
  * the preset can never answer would only hold the key against a real user.
- * - github: the numeric user id as decimal text. Core's preset answers
- *   `String(id)` for a positive safe integer (`social/github.ts`).
+ * - github: the numeric user id as decimal text, by core's own rule
+ *   (`isGithubSubject`, which core's preset also applies).
  * - linkedin: LinkedIn's OIDC `sub`. It is pairwise per client id (the
  *   discovery document's `subject_types_supported`, read 2026-10-12), so it
  *   matches only while the app keeps the same LinkedIn client id. A reader
@@ -44,7 +45,7 @@ const SOCIAL: ReadonlyMap<string, ((subject: string) => boolean) | null> = new M
 >([
   ["google", null],
   ["apple", null],
-  ["github", (s) => /^[1-9][0-9]{0,15}$/.test(s) && Number.isSafeInteger(Number(s))],
+  ["github", isGithubSubject],
   ["linkedin", null],
 ]);
 const RANK: Record<ImportRole, number> = { member: 1, admin: 2, owner: 3 };
@@ -123,6 +124,22 @@ interface CredentialRows {
   identities: { provider: string; subject: string }[];
   password: string | null;
   passkeys: ImportUser["passkeys"];
+}
+
+/**
+ * The rows a user repair writes, and the user row as the guards read it. The
+ * last statement of the repair is a conditional update on `seen` (I-3 of the
+ * plan 9b2 final review).
+ */
+interface RepairRows extends CredentialRows {
+  seen: { email: string; emailVerified: boolean };
+}
+
+/** The ids of the rows `writeCredentials` wrote, so a repair can delete exactly its own rows. */
+interface Written {
+  identities: string[];
+  password: { id: string; hash: string } | null;
+  passkeys: string[];
 }
 
 /** The member rows of an organization: all of them for a new one, all of them for a repair. */
@@ -279,7 +296,7 @@ async function planUser(
   r: ImportUser,
   o: Resolved,
   planned: Planned,
-): Promise<Plan<UserRows, CredentialRows>> {
+): Promise<Plan<UserRows, RepairRows>> {
   if (r.skip) return { kind: "skip", reason: r.skip };
   const email = r.email === null ? null : normalizeEmail(r.email);
   if (email === null) return { kind: "skip", reason: "no_email" };
@@ -409,7 +426,7 @@ async function existingUser(
   rows: UserRows,
   o: Resolved,
   planned: Planned,
-): Promise<Plan<UserRows, CredentialRows>> {
+): Promise<Plan<UserRows, RepairRows>> {
   const missing: string[] = [];
   const fill: CredentialRows = { userId: rows.id, identities: [], password: null, passkeys: [] };
   const own = rows.verified
@@ -447,24 +464,28 @@ async function existingUser(
   }
   if (missing.length === 0) return { kind: "exists" };
   if (!o.repair) return { kind: "partial", missing };
-  const refused = await repairRefusal(db, rows, fill, planned);
-  return refused === null
-    ? { kind: "repair", missing, rows: fill }
-    : { kind: "partial", missing, repairRefused: refused };
+  const guard = await repairRefusal(db, rows, fill, planned);
+  return "refused" in guard
+    ? { kind: "partial", missing, repairRefused: guard.refused }
+    : { kind: "repair", missing, rows: { ...fill, seen: guard.seen } };
 }
 
-/** Why a repair must not write `fill`, or null. The cases are `RepairRefusal`'s. */
+/**
+ * Why a repair must not write `fill`, or the user row as the guards read it
+ * (the repair's last statement checks that row again). The cases are
+ * `RepairRefusal`'s.
+ */
 async function repairRefusal(
   db: StorageAdapter,
   rows: UserRows,
   fill: CredentialRows,
   planned: Planned,
-): Promise<RepairRefusal | null> {
+): Promise<{ refused: RepairRefusal } | { seen: RepairRows["seen"] }> {
   const found = await db.findOne("user", [{ field: "id", op: "eq", value: rows.id }]);
-  if (!found || found.emailVerified !== rows.verified) return "verified_since_import";
+  if (!found || found.emailVerified !== rows.verified) return { refused: "verified_since_import" };
   // Both addresses are normalized: the record's by userRows, the row's by core.
   if (found.email !== rows.email && fill.identities.some((i) => i.provider === "email"))
-    return "email_changed";
+    return { refused: "email_changed" };
   if (!rows.verified) {
     const held =
       (await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }])) ??
@@ -473,7 +494,7 @@ async function repairRefusal(
         { field: "provider", op: "ne", value: "email" },
       ])) ??
       (await db.findOne("passkey", [{ field: "userId", op: "eq", value: rows.id }]));
-    if (held) return "credential_exists";
+    if (held) return { refused: "credential_exists" };
   }
   for (const i of fill.identities) {
     // A dry run keeps the identities of the earlier records in `planned`, as a
@@ -484,7 +505,7 @@ async function repairRefusal(
         { field: "provider", op: "eq", value: i.provider },
         { field: "subject", op: "eq", value: i.subject },
       ]));
-    if (held) return "identity_taken";
+    if (held) return { refused: "identity_taken" };
   }
   // The importer stores no state from the first run, so it cannot tell a claim
   // from a newer export. A claim always writes the `email` identity, so a
@@ -494,15 +515,22 @@ async function repairRefusal(
     !fill.identities.some((i) => i.provider === "email") &&
     (fill.password !== null || fill.passkeys.length > 0 || fill.identities.length > 0)
   )
-    return "claimed";
-  return null;
+    return { refused: "claimed" };
+  return { seen: { email: found.email, emailVerified: found.emailVerified } };
 }
 
 /** The identity, password, and passkey rows of one user, as a sign-up, a social sign-in, or a claim writes them. */
-async function writeCredentials(tx: StorageAdapter, c: CredentialRows, now: Date): Promise<void> {
+async function writeCredentials(
+  tx: StorageAdapter,
+  c: CredentialRows,
+  now: Date,
+): Promise<Written> {
+  const written: Written = { identities: [], password: null, passkeys: [] };
   for (const i of c.identities) {
+    const id = newId(now);
+    written.identities.push(id);
     await tx.create("identity", {
-      id: newId(now),
+      id,
       userId: c.userId,
       provider: i.provider,
       subject: i.subject,
@@ -512,8 +540,10 @@ async function writeCredentials(tx: StorageAdapter, c: CredentialRows, now: Date
     });
   }
   if (c.password !== null) {
+    const id = newId(now);
+    written.password = { id, hash: c.password };
     await tx.create("password", {
-      id: newId(now),
+      id,
       userId: c.userId,
       hash: c.password,
       createdAt: now,
@@ -521,14 +551,66 @@ async function writeCredentials(tx: StorageAdapter, c: CredentialRows, now: Date
     });
   }
   for (const p of c.passkeys) {
+    const id = newId(now);
+    written.passkeys.push(id);
     await tx.create("passkey", {
-      id: newId(now),
+      id,
       userId: c.userId,
       ...p,
       createdAt: now,
       updatedAt: now,
     });
   }
+  return written;
+}
+
+/**
+ * Writes the missing rows of a user, then runs the last statement: a
+ * conditional update of the user row by its id and by the `email` and
+ * `emailVerified` the guards read (I-3 of the plan 9b2 final review). This is
+ * the pattern of core's sign-up (`engine/password.ts`, `insertSignUp`).
+ * - A claim (core `claimEmail`) flips `emailVerified` in its first statement,
+ *   and then deletes the claimant's credentials. A claim that lands between
+ *   the guard read and the writes does not see these new rows, so they would
+ *   stay on a user that the owner of the address now holds.
+ * - Zero rows means a claim or an address change landed since the guards.
+ *   The repair then deletes its own rows by id (the password row also by the
+ *   hash it wrote: an owner's reset can keep a row id and write the owner's
+ *   hash), commits, and the record stays `partial` with `claimed`. It never
+ *   throws to undo, as core's sign-up never does: on D1 a throw runs the
+ *   adapter's undo log, which deletes a created row by its id only, with no
+ *   check of what a claim or a reset wrote into that row since.
+ * - One row on Postgres holds the row lock until the commit, so a claim's
+ *   flag flip waits, and its delete then sees these rows. One row on D1 means
+ *   no claim flipped the flag before this statement; a claim after it deletes
+ *   these rows as it deletes any claimant credential.
+ */
+async function repairUser(
+  tx: StorageAdapter,
+  p: Extract<Plan<UserRows, RepairRows>, { kind: "repair" }>,
+  now: Date,
+): Promise<Plan<UserRows, RepairRows>> {
+  const written = await writeCredentials(tx, p.rows, now);
+  const kept = await tx.update(
+    "user",
+    [
+      { field: "id", op: "eq", value: p.rows.userId },
+      { field: "email", op: "eq", value: p.rows.seen.email },
+      { field: "emailVerified", op: "eq", value: p.rows.seen.emailVerified },
+    ],
+    { updatedAt: now },
+  );
+  if (kept > 0) return p;
+  for (const id of written.identities)
+    await tx.delete("identity", [{ field: "id", op: "eq", value: id }]);
+  if (written.password !== null)
+    await tx.delete("password", [
+      { field: "id", op: "eq", value: written.password.id },
+      { field: "hash", op: "eq", value: written.password.hash },
+    ]);
+  for (const id of written.passkeys)
+    await tx.delete("passkey", [{ field: "id", op: "eq", value: id }]);
+  return { kind: "partial", missing: p.missing, repairRefused: "claimed" };
 }
 
 async function writeUser(
@@ -584,7 +666,7 @@ async function importUser(
   planned: Planned,
 ): Promise<void> {
   const now = o.now();
-  let plan: Plan<UserRows, CredentialRows> | null = null;
+  let plan: Plan<UserRows, RepairRows> | null = null;
   for (let attempt = 0; plan === null; attempt++) {
     try {
       plan = o.dryRun
@@ -592,7 +674,7 @@ async function importUser(
         : await storage.transaction(async (tx) => {
             const p = await planUser(tx, source, r, o, planned);
             if (p.kind === "write") await writeUser(tx, r, p.rows, now);
-            if (p.kind === "repair") await writeCredentials(tx, p.rows, now);
+            if (p.kind === "repair") return repairUser(tx, p, now);
             return p;
           });
     } catch (err) {

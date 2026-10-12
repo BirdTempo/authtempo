@@ -251,6 +251,39 @@ describe("authjsSource: a user with no id (plan 9b2, Review Focus 4)", () => {
       { kind: "user", sourceId: "(none) users item 1", reason: "no_source_id" },
     ]);
   });
+
+  it("keeps the order and the item number of a no-id user between two valid users, and links each account to its own user (parked Task 3 Minor)", async () => {
+    const tables = JSON.stringify({
+      users: [
+        { id: "ja", email: "a@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+        { email: "nid@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+        { id: "jb", email: "b@example.com", emailVerified: "2024-01-01T00:00:00.000Z" },
+      ],
+      accounts: [
+        { userId: "ja", type: "oidc", provider: "google", providerAccountId: "g-a" },
+        { userId: "jb", type: "oidc", provider: "google", providerAccountId: "g-b" },
+      ],
+    });
+    const source = () => authjsSource({ tables });
+    expect(
+      (await all(source())).map((r) => [
+        r.sourceId,
+        r.kind === "user" ? r.identities.map((x) => x.subject) : null,
+      ]),
+    ).toEqual([
+      ["ja", ["g-a"]],
+      ["(none) users item 2", []],
+      ["jb", ["g-b"]],
+    ]);
+    const report = await importUsers(createMemoryAdapter(), source(), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.skipped).toEqual([
+      { kind: "user", sourceId: "(none) users item 2", reason: "no_source_id" },
+    ]);
+    expect(report.created.user).toBe(2);
+  });
 });
 
 describe("authjsSource: GitHub and LinkedIn (plan 9b2)", () => {

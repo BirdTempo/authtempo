@@ -202,8 +202,12 @@ export interface ImportOptions {
 /**
  * Why `repair: true` left a `partial` record as it is (plan 9b2):
  * - `verified_since_import`: the user's `emailVerified` differs from the
- *   record's. A claim verifies an unverified user and deletes the claimant's
- *   credentials (core `claimEmail`); a repair would give them back.
+ *   record's, in either direction: the user is verified and the record is
+ *   not, or the record is verified and the user is not. A claim verifies an
+ *   unverified user and deletes the claimant's credentials (core
+ *   `claimEmail`); a repair would give them back. A record that states a
+ *   user verified who is not verified in the app would write an `email`
+ *   identity that core makes only after a proof.
  * - `email_changed`: the user's address differs from the record's, and the
  *   repair would write an `email` identity for the old address.
  * - `credential_exists`: the record is unverified and the user holds a
@@ -213,7 +217,11 @@ export interface ImportOptions {
  *   repair would write a password, a passkey, or a social identity. A claim
  *   always writes that identity, and the importer cannot tell a claim from a
  *   newer export, so a verified user's missing credential is an operator
- *   action.
+ *   action. The same reason also comes from the repair's last statement: a
+ *   conditional update of the user row by the `email` and `emailVerified`
+ *   that the guards read. Zero rows means a claim or an address change
+ *   landed after the guards; the repair deletes the rows it wrote and keeps
+ *   the record here.
  * - `no_owner`: an organization with no member, whose members map to no owner.
  */
 export type RepairRefusal =
