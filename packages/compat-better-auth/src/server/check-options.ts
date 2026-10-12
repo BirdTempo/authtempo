@@ -162,7 +162,10 @@ const idAndSecret: Rule = (v, p, out) => {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return;
   const o = v as Record<string, unknown>;
   for (const key of ["clientId", "clientSecret"]) {
-    if (o[key] === undefined || o[key] === "") refuse(out, `${p}.${key}`, "required");
+    // Trim for this check only: a whitespace-only value is as empty as "".
+    const value = o[key];
+    if (value === undefined || (typeof value === "string" && value.trim() === ""))
+      refuse(out, `${p}.${key}`, "required");
   }
 };
 const apple = object({

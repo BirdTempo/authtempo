@@ -41,7 +41,7 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     ]);
   });
 
-  it("refuses a missing, empty, or non-string clientId or clientSecret of google, github, and linkedin", () => {
+  it("refuses a missing, empty, whitespace-only, or non-string clientId or clientSecret of google, github, and linkedin", () => {
     for (const name of ["google", "github", "linkedin"]) {
       const refusals = (config: unknown) =>
         checkOptions({
@@ -55,6 +55,12 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       ]);
       expect(refusals({ clientId: "", clientSecret: "s" })).toEqual([
         `socialProviders.${name}.clientId: required`,
+      ]);
+      expect(refusals({ clientId: "   ", clientSecret: "s" })).toEqual([
+        `socialProviders.${name}.clientId: required`,
+      ]);
+      expect(refusals({ clientId: "i", clientSecret: " \t\n" })).toEqual([
+        `socialProviders.${name}.clientSecret: required`,
       ]);
       expect(refusals({ clientId: 1, clientSecret: ["s"] })).toEqual([
         `socialProviders.${name}.clientId: expected a string`,
