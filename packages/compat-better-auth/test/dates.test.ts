@@ -45,4 +45,12 @@ describe("a Better Auth date in SQLite's space form (plan 9b2)", () => {
     expect(thrown).toBeInstanceOf(StorageError);
     expect(thrown).toMatchObject({ code: "schema_mismatch", model: "user", fields: ["updatedAt"] });
   });
+
+  it("keeps a Date's milliseconds and reads a number as epoch milliseconds (M-2)", () => {
+    const st = compatStatements("postgres", resolveNames());
+    const at = new Date("2026-10-12T08:00:00.123Z");
+    const user = st.decode("user", row(at, at.getTime())) as { createdAt: Date; updatedAt: Date };
+    expect(user.createdAt).toEqual(at);
+    expect(user.updatedAt).toEqual(at);
+  });
 });

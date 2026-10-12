@@ -822,6 +822,7 @@ describe("createAuthClient: the residual throws (plan 9b2)", () => {
     expect(social).toMatchObject({ data: null, error: { code: "UNEXPECTED_RESPONSE", status: 0 } });
     expect(social.error?.message).toContain("store full");
     expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0].error).toMatchObject({ code: "UNEXPECTED_RESPONSE" });
   });
 
   it("ends the reads when a listener refetches on every notify", async () => {

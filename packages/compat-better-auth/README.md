@@ -149,7 +149,12 @@ A Better Auth date in SQLite's `YYYY-MM-DD HH:MM:SS` form has no time zone.
 The storage reads it as UTC, as SQLite's date functions do, on Workers and
 off them (plan 9b2). A where clause and a sort still compare the stored text,
 so a row in that form sorts before an ISO row of the same second. A date text
-that is not a date answers `schema_mismatch`.
+that is not a date answers `schema_mismatch`. The storage does not match the
+`YYYY-MM-DD HH:MM` form with no seconds. SQLite's `CURRENT_TIMESTAMP` never
+writes it, but SQL written by hand can. JavaScript reads that text as local
+time: on Workers, whose time zone is UTC, the read is correct; in a process
+with another time zone it is wrong by the zone offset (probe with Node and
+`TZ=Pacific/Auckland`, 2026-10-12). Write each date with its seconds.
 
 A `credential` account row with a null `password` (Better Auth never writes
 one) reads as no password row: the sign-in answers `invalid_credentials`

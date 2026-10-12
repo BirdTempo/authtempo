@@ -201,14 +201,18 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     if (v !== null) {
       if (type === "boolean") v = typeof v === "number" ? v !== 0 : v === true;
       else if (type === "date") {
-        const text = String(v);
-        const space = SQLITE_SPACE_DATE_RE.exec(text);
-        const d = new Date(
-          space ? `${space[1]}T${space[2]}${(space[3] ?? "").slice(0, 4)}Z` : text,
+        // Only text can be in the space form. A driver's Date or a number goes
+        // to `new Date` as it is: `String(v)` would drop a Date's milliseconds
+        // and make a number unreadable (M-2 of the plan 9b2 final review).
+        const space = typeof v === "string" ? SQLITE_SPACE_DATE_RE.exec(v) : null;
+        const at = new Date(
+          space
+            ? `${space[1]}T${space[2]}${(space[3] ?? "").slice(0, 4)}Z`
+            : (v as string | number | Date),
         );
         // A date core cannot read would compare as NaN, so an expiry would never pass.
-        if (Number.isNaN(d.getTime())) throw new StorageError("schema_mismatch", model, [field]);
-        v = d;
+        if (Number.isNaN(at.getTime())) throw new StorageError("schema_mismatch", model, [field]);
+        v = at;
       } else if (type === "json") {
         // App SQL can write any text here. Name the model and the field, as
         // for any other value core cannot read (final review L-10).
