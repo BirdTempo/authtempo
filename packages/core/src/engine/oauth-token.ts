@@ -382,9 +382,12 @@ export async function refreshGrant(
 }
 
 /**
- * RFC 7009: a refresh token's family goes when `client_id` is absent or
- * names the token's client. Every other token, known or not, answers the
- * same 200 (section 2.2). An access token cannot be revoked: it is a JWT
+ * RFC 7009 (read 2026-10-14). A refresh token's family goes when
+ * `client_id` is absent or names the token's client. A `client_id` of
+ * another client answers `unauthorized_client` and revokes nothing (section
+ * 2.1: the server verifies that the token was issued to the client; plan
+ * 9h, owner decision 1a). An unknown token answers the same 200 as a
+ * revoked one (section 2.2). An access token cannot be revoked: it is a JWT
  * that lives at most `oauth.accessTtlMinutes`.
  */
 export async function revokeToken(
@@ -396,8 +399,11 @@ export async function revokeToken(
     const row = await config.storage.findOne("oauthToken", [
       { field: "tokenHash", op: "eq", value: await sha256Hex(input.token) },
     ]);
-    if (row && (input.clientId === null || input.clientId === row.clientId))
+    if (row) {
+      if (input.clientId !== null && input.clientId !== row.clientId)
+        return oauthFail("unauthorized_client");
       await revokeFamily(config, row.familyId);
+    }
   }
   return oauthOk({ revoked: true });
 }

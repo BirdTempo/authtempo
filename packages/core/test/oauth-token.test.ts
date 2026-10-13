@@ -336,9 +336,10 @@ describe("the refresh token (plan 9g)", () => {
     ).toEqual(GRANT);
   });
 
-  it("revoke deletes the family, and answers 200 for an unknown token, an access token, and another client's id", async () => {
+  it("revoke deletes the family; 200 for an unknown token and an access token; 400 unauthorized_client for another client's id, which revokes nothing (plan 9h, RFC 7009 section 2.1, Review Focus 4)", async () => {
     const h = oauthHandle();
     const c = await codeFor(h);
+    const other = await registered(h);
     const t = await tokens(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)));
     const revoke = (body: Record<string, string>) =>
       h.auth.handle(
@@ -348,14 +349,19 @@ describe("the refresh token (plan 9g)", () => {
           body: new URLSearchParams(body).toString(),
         }),
       );
-    for (const body of [
-      { token: "or_unknown" },
-      { token: t.access_token },
-      { token: t.refresh_token ?? "", client_id: "cl_other" },
-    ]) {
+    for (const body of [{ token: "or_unknown" }, { token: t.access_token }]) {
       const res = await revoke(body);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({});
+    }
+    // A registered client and an unknown id: neither got this token.
+    for (const clientId of [other, "cl_other"]) {
+      const res = await revoke({ token: t.refresh_token ?? "", client_id: clientId });
+      expect({ clientId, status: res.status, body: await res.json() }).toEqual({
+        clientId,
+        status: 400,
+        body: { error: "unauthorized_client" },
+      });
     }
     expect(await h.storage.findMany("oauthToken", [])).toHaveLength(1);
     expect((await revoke({ token: t.refresh_token ?? "", client_id: c.clientId })).status).toBe(
