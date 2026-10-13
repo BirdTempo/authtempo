@@ -5,13 +5,21 @@ import {
   decideAuthorize,
 } from "../../engine/oauth-authorize.js";
 import { registerClient } from "../../engine/oauth-clients.js";
-import type { OAuthResult } from "../../engine/oauth-result.js";
-import { sessionFromRequest } from "../../engine/sessions.js";
+import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
+import {
+  exchangeCode,
+  refreshGrant,
+  resolveAccessToken,
+  revokeToken,
+  type TokenAnswer,
+  userinfoClaims,
+} from "../../engine/oauth-token.js";
+import { readBearer, sessionFromRequest } from "../../engine/sessions.js";
 import { OAUTH_ERRORS } from "../../errors.js";
 import { consentPagePolicy, pageHeaders } from "../csp.js";
 import { json } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
-import type { Route } from "../router.js";
+import type { Route, RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
 
@@ -139,6 +147,76 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         return signInPageResponse(config, next);
       },
     },
+  );
+  /** RFC 6749 section 5.1: a token answer carries no-store and no-cache. */
+  const tokenAnswer = (r: OAuthResult<TokenAnswer>): Response => {
+    const res = oauthJson(r);
+    res.headers.set("pragma", "no-cache");
+    return res;
+  };
+  const userinfo = async (ctx: RouteContext): Promise<Response> => {
+    const bearer = readBearer(ctx.request);
+    const access = bearer ? await resolveAccessToken(config, bearer) : null;
+    if (!access)
+      return json({ error: "invalid_token" }, 401, {
+        "www-authenticate": 'Bearer error="invalid_token"',
+      });
+    const claims = userinfoClaims(access);
+    if (!claims)
+      return json({ error: "insufficient_scope" }, 403, {
+        "www-authenticate": 'Bearer error="insufficient_scope", scope="openid"',
+      });
+    return json(claims);
+  };
+  routes.push(
+    {
+      method: "POST",
+      path: "/oauth/token",
+      async handler(ctx) {
+        const form = await formParams(ctx.request);
+        if (!form) return tokenAnswer(oauthFail("invalid_request"));
+        const clientId = form.get("client_id") ?? "";
+        const grant = form.get("grant_type");
+        if (grant === "authorization_code")
+          return tokenAnswer(
+            await exchangeCode(config, {
+              code: form.get("code") ?? "",
+              codeVerifier: form.get("code_verifier") ?? "",
+              clientId,
+              redirectUri: form.get("redirect_uri") ?? "",
+              resource: form.get("resource"),
+              ip: ctx.ip,
+            }),
+          );
+        if (grant === "refresh_token")
+          return tokenAnswer(
+            await refreshGrant(config, {
+              refreshToken: form.get("refresh_token") ?? "",
+              clientId,
+              scope: form.get("scope"),
+              resource: form.get("resource"),
+              ip: ctx.ip,
+            }),
+          );
+        return tokenAnswer(oauthFail("unsupported_grant_type"));
+      },
+    },
+    {
+      method: "POST",
+      path: "/oauth/revoke",
+      async handler(ctx) {
+        const form = await formParams(ctx.request);
+        if (!form) return oauthJson(oauthFail("invalid_request"));
+        const r = await revokeToken(config, {
+          token: form.get("token") ?? "",
+          clientId: form.get("client_id"),
+          ip: ctx.ip,
+        });
+        return r.ok ? json({}) : oauthJson(r);
+      },
+    },
+    { method: "GET", path: "/oauth/userinfo", handler: userinfo },
+    { method: "POST", path: "/oauth/userinfo", handler: userinfo },
   );
   return routes;
 }

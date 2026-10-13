@@ -58,6 +58,7 @@ export {
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
+export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
