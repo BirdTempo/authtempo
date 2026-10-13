@@ -71,6 +71,14 @@ function getAuth(env: Env): Auth {
     // config below the reset by code. They are on by default; `{}` keeps the defaults (6 digits,
     // 10 minutes, 5 guesses), and `emailOtp: false` turns them off.
     emailOtp: {},
+    // The OAuth 2.1 and OIDC provider (plan 9g) for one MCP resource on this Worker, and the
+    // JWTs it signs (`jwtMint` is on by default). Dynamic registration only: a client ID
+    // metadata document needs the app's own SSRF-guarded fetch, and the example has none.
+    oauth: {
+      resources: [`${env.BASE_URL}/mcp`],
+      registration: { cimd: false },
+      scopes: { "mcp:tools": "Use the example tools" },
+    },
     // TEST_MODE only (plan 9d): the hooks the end-to-end test proves on D1. They write
     // app_tenant, a table of the test setup, so a deploy without the table sets none.
     ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
@@ -100,6 +108,8 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const a = getAuth(env);
+    // RFC 8414 and RFC 9728 put the metadata at the origin root (plan 9g).
+    if (url.pathname.startsWith("/.well-known/")) return a.wellKnown(request);
     if (url.pathname.startsWith("/auth/")) return a.handle(request);
     if (url.pathname === "/me") {
       const s = await a.session(request);
@@ -121,6 +131,22 @@ export default {
       const renewed = c.kind === "session" ? a.sessionCookie(request, c) : null;
       if (renewed) res.headers.set("set-cookie", renewed);
       return res;
+    }
+    // An MCP resource (plan 9g): an OAuth access token for this resource only. A session
+    // or an API token is refused here, and a token for another resource is null at `caller`.
+    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
+      const c = await a.caller(request);
+      if (c?.kind !== "oauth")
+        return Response.json(
+          { error: "unauthorized" },
+          {
+            status: 401,
+            headers: {
+              "www-authenticate": `Bearer resource_metadata="${env.BASE_URL}/.well-known/oauth-protected-resource/mcp"`,
+            },
+          },
+        );
+      return Response.json({ sub: c.user.id, clientId: c.clientId, scopes: c.scopes });
     }
     // TEST_MODE only (plan 9c): the fake provider's authorize step, which the browser visits.
     if (url.pathname.startsWith("/__test/oauth/")) {
