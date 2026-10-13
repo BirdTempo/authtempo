@@ -16,6 +16,7 @@ const sidebar = [
   { label: "Getting started", items: [{ autogenerate: { directory: "docs/start" } }] },
   { label: "How-to guides", items: [{ autogenerate: { directory: "docs/guides" } }] },
   { label: "Reference", items: [{ autogenerate: { directory: "docs/reference" } }] },
+  { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }] },
 ];
 
 export default defineConfig({
