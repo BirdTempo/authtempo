@@ -10,6 +10,11 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** True when the line holds the text and no letter or digit follows it ("Task 3" is not "Task 30"). */
+function endsHere(line: string, text: string): boolean {
+  return new RegExp(`${escapeRegExp(text)}(?![A-Za-z0-9])`).test(line);
+}
+
 /**
  * Every page has a title, a description, one of the four types, and at least
  * one source; every source names a repo file that exists and, when it names a
@@ -52,7 +57,7 @@ export function checkFrontmatter(
       if (section === undefined) continue;
       const quoted = /^"(.+)"$/.exec(section);
       const found = quoted
-        ? text.split("\n").some((l) => l.startsWith("#") && l.includes(quoted[1] ?? ""))
+        ? text.split("\n").some((l) => l.startsWith("#") && endsHere(l, quoted[1] ?? ""))
         : /^\d+(\.\d+)?$/.test(section)
           ? new RegExp(`^#{2,4} ${escapeRegExp(section)}[. ]`, "m").test(text)
           : null;
@@ -66,9 +71,15 @@ export function checkFrontmatter(
     const lines = fm.body.split("\n").map((l) => l.trim());
     const parts =
       type === "how-to" ? [...TEMPLATE.slice(0, 3), "## If it fails", "## Next"] : [...TEMPLATE];
-    for (const part of parts)
-      if (!lines.some((l) => l.startsWith(part)))
-        r.failures.push(`${p.path}: lacks the template part ${part}`);
+    let prev = -1;
+    for (const part of parts) {
+      const at = lines.findIndex((l) => l.startsWith(part));
+      if (at < 0) r.failures.push(`${p.path}: lacks the template part ${part}`);
+      else {
+        if (at < prev) r.failures.push(`${p.path}: the template part ${part} is out of order`);
+        prev = Math.max(prev, at);
+      }
+    }
   }
   return requireCounts(r, ["pages", "sources"]);
 }

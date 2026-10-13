@@ -37,6 +37,14 @@ describe("checkFences", () => {
     ]);
   });
 
+  it("refuses an include from outside samples/", () => {
+    const outside = 'import a from "../../../../../scripts/check.ts?raw";';
+    const r = checkFences([mdx(`${outside}\n\n${include}`)], [sample], () => true);
+    expect(r.failures).toEqual([
+      `docs/guides/a.mdx: includes ${SITE}scripts/check.ts, which is outside samples/`,
+    ]);
+  });
+
   it("fails when no page includes a sample", () => {
     expect(checkFences([], [], exists).failures).toEqual(["read 0 pages", "read 0 includes"]);
     expect(DOCS.startsWith(SITE)).toBe(true);

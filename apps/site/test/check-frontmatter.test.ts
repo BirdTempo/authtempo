@@ -56,6 +56,30 @@ describe("checkFrontmatter", () => {
     ).toEqual(["docs/x.md: lacks the template part ## Next"]);
   });
 
+  it("does not take Task 3 for Task 30 in a quoted heading", () => {
+    const longer: Record<string, string> = { ...repo, "docs/plan.md": "### Task 30\n" };
+    const src = GOOD.replace("docs/spec.md 8.2", 'docs/plan.md "Task 3"');
+    expect(checkFrontmatter([page(src)], (p) => longer[p] ?? null).failures).toEqual([
+      "docs/x.md: source docs/plan.md has no heading Task 3",
+    ]);
+    expect(
+      checkFrontmatter(
+        [page(src)],
+        (p) => ({ ...longer, "docs/plan.md": "### Task 3: x\n" })[p] ?? null,
+      ).failures,
+    ).toEqual([]);
+  });
+
+  it("refuses template parts out of order", () => {
+    const swapped = TEMPLATE.replace(
+      "## Before you start\n\n- A thing.\n\n## Next\n\n- [Home](/docs/)\n",
+      "## Next\n\n- [Home](/docs/)\n\n## Before you start\n\n- A thing.\n",
+    );
+    expect(checkFrontmatter([page(GOOD, swapped)], read).failures).toEqual([
+      "docs/x.md: the template part ## Next is out of order",
+    ]);
+  });
+
   it("fails when it reads no page", () => {
     expect(checkFrontmatter([], read).failures).toEqual(["read 0 pages", "read 0 sources"]);
   });

@@ -38,6 +38,15 @@ describe("checkLinks", () => {
     ]);
   });
 
+  it("refuses an internal page link with no trailing slash and names the rule", () => {
+    const r = checkLinks(
+      ...tree({ "docs/index.html": `<a href="/docs/start">x</a>`, "docs/start/index.html": "" }),
+    );
+    expect(r.failures).toEqual([
+      "docs/index.html: /docs/start is a page link with no trailing /; every internal page link ends with /",
+    ]);
+  });
+
   it("fails when it reads no page and no link", () => {
     expect(checkLinks(new Map(), new Set()).failures).toEqual(["read 0 pages", "read 0 links"]);
   });

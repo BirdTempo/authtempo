@@ -39,6 +39,15 @@ export function checkLinks(
         continue;
       }
       r.counts.links = (r.counts.links ?? 0) + 1;
+      // The Worker's assets send /x to /x/ only by a redirect, so every
+      // internal page link names the folder form (astro.config.mjs).
+      const last = href.split(/[?#]/)[0]?.split("/").pop() ?? "";
+      if (last !== "" && !/\.[a-z0-9]+$/i.test(last)) {
+        r.failures.push(
+          `${from}: ${href} is a page link with no trailing /; every internal page link ends with /`,
+        );
+        continue;
+      }
       if (!files.has(target.file)) {
         r.failures.push(`${from}: ${href} has no file ${target.file}`);
         continue;

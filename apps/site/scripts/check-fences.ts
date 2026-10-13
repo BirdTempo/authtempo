@@ -45,6 +45,10 @@ export function checkFences(
       r.counts.includes = (r.counts.includes ?? 0) + 1;
       const abs = join(dirname(`${DOCS}${p.path}`), m[1] ?? "");
       included.add(abs);
+      if (!abs.startsWith(`${SITE}samples/`)) {
+        r.failures.push(`${p.path}: includes ${abs}, which is outside samples/`);
+        continue;
+      }
       if (!exists(abs)) r.failures.push(`${p.path}: includes ${abs}, which does not exist`);
     }
   }
