@@ -1,5 +1,15 @@
 import { type AuthConfig, resolveConfig } from "./config.js";
 import {
+  type EmailOtpRequest,
+  type EmailOtpReset,
+  type EmailOtpSession,
+  type EmailOtpVerify,
+  requestEmailOtp,
+  requestResetOtp,
+  resetPasswordWithOtp,
+  verifyEmailOtp,
+} from "./engine/email-otp.js";
+import {
   continueHandoff,
   type HandoffStart,
   redeemHandoff,
@@ -88,6 +98,7 @@ import {
 } from "./engine/tokens.js";
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
+import { emailOtpRoutes } from "./http/routes/email-otp.js";
 import { handoffRoutes } from "./http/routes/handoff.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
 import { organizationRoutes } from "./http/routes/organizations.js";
@@ -122,6 +133,17 @@ export interface TokensApi {
   revoke(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
   /** The token's user and summary, or `unauthorized`. A `ts_` token answers `unauthorized`. */
   current(input: { token: string }): Promise<Result<ResolvedApiToken>>;
+}
+
+/** Present on `api` unless the config sets `emailOtp: false` (plan 9e). */
+export interface EmailOtpApi {
+  /** A sign-in code. Always `{ sent: true }`, except `rate_limited`. */
+  request(input: EmailOtpRequest): Promise<Result<{ sent: true }>>;
+  verify(input: EmailOtpVerify): Promise<Result<EmailOtpSession>>;
+  /** A reset code. `not_found` without a `password` config. */
+  requestReset(input: EmailOtpRequest): Promise<Result<{ sent: true }>>;
+  /** The reset by code. `not_found` without a `password` config. */
+  reset(input: EmailOtpReset): Promise<Result<EmailOtpSession>>;
 }
 
 export interface AuthApi {
@@ -234,6 +256,7 @@ export interface AuthApi {
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
   password?: PasswordApi;
+  emailOtp?: EmailOtpApi;
 }
 
 export interface Auth {
@@ -268,6 +291,7 @@ export function createAuth(input: AuthConfig): Auth {
     ...socialRoutes(config),
     ...passkeyRoutes(config),
     ...passwordRoutes(config),
+    ...emailOtpRoutes(config),
     ...handoffRoutes(config),
     ...organizationRoutes(config),
     ...tokenRoutes(config),
@@ -324,6 +348,16 @@ export function createAuth(input: AuthConfig): Auth {
               requestReset: (i) => requestPasswordReset(config, i),
               reset: (i) => resetPassword(config, i),
               change: (i) => changePassword(config, i),
+            },
+          }
+        : {}),
+      ...(config.emailOtp
+        ? {
+            emailOtp: {
+              request: (i) => requestEmailOtp(config, i),
+              verify: (i) => verifyEmailOtp(config, i),
+              requestReset: (i) => requestResetOtp(config, i),
+              reset: (i) => resetPasswordWithOtp(config, i),
             },
           }
         : {}),

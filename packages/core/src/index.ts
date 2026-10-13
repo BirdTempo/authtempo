@@ -15,9 +15,16 @@ export {
   type Auth,
   type AuthApi,
   createAuth,
+  type EmailOtpApi,
   type PasswordApi,
   type TokensApi,
 } from "./create-auth.js";
+export type {
+  EmailOtpRequest,
+  EmailOtpReset,
+  EmailOtpSession,
+  EmailOtpVerify,
+} from "./engine/email-otp.js";
 export {
   defaultEmailOtpMail,
   defaultResetOtpMail,

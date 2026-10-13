@@ -209,6 +209,9 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
         (options.session?.updateAge ?? BETTER_AUTH_DEFAULTS.sessionUpdateAge) / DAY,
     },
     magicLink: { ttlMinutes: ttlSeconds / 60 },
+    // Core turns email codes on by default; Better Auth serves them only with
+    // its email-otp plugin. Task 6 of plan 9e maps the plugin onto this key.
+    emailOtp: false,
     ...(google || apple || github || linkedin
       ? {
           social: {

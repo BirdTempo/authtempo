@@ -503,6 +503,20 @@ describe("the mail routes through compatMail (fix round 1: I-1, M-7)", () => {
     expect(sent).toEqual([]);
   });
 
+  it("answers 404 on core's email code routes without the email-otp plugin (plan 9e)", async () => {
+    const { auth, sent } = app();
+    for (const path of ["/otp/request", "/otp/verify", "/otp/reset/request", "/otp/reset"])
+      expect({
+        path,
+        status: (
+          await auth.handler(
+            json(path, { email: "a@example.com", code: "123456", password: "a long password" }),
+          )
+        ).status,
+      }).toEqual({ path, status: 404 });
+    expect(sent).toEqual([]);
+  });
+
   it("mails a reset link through sendResetPassword with the user, the URL, and the token", async () => {
     const { auth, sent } = app();
     await auth.api.signUpEmail({
