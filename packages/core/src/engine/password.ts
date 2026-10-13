@@ -9,6 +9,7 @@ import { hookGuard } from "./hooks.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import {
+  endedList,
   endSessions,
   openSession,
   prepareSession,
@@ -602,7 +603,7 @@ export async function verifyPasswordEmail(
   const row = consumed.value;
   const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
   if (typeof passwordId !== "string") return fail("invalid_token");
-  const ended: SessionRow[] = [];
+  const ended = endedList(config);
   const verified = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
       const user = await tx.findOne("user", [{ field: "email", op: "eq", value: row.identifier }]);
@@ -767,7 +768,7 @@ export async function runReset(
   hash: string,
   now: Date,
 ): Promise<Result<PasswordSession & { next: string }>> {
-  const ended: ResetEnded = { claim: [], reset: [] };
+  const ended: ResetEnded = { claim: endedList(config), reset: endedList(config) };
   let reset: Result<PasswordSession & { next: string }> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
@@ -832,10 +833,10 @@ export async function resetWithProof(
   return runReset(config, input, consume, hash, now);
 }
 
-/** The session rows a reset deleted, by cause. Only one list fills in one reset. */
+/** The session rows a reset deleted, by cause. Only one list fills in one reset. Undefined lists when no `afterEnd` hook listens (plan 9h). */
 interface ResetEnded {
-  claim: SessionRow[];
-  reset: SessionRow[];
+  claim: SessionRow[] | undefined;
+  reset: SessionRow[] | undefined;
 }
 
 function applyReset(
@@ -849,8 +850,8 @@ function applyReset(
   return config.storage.transaction(
     async (tx): Promise<Result<PasswordSession & { next: string }>> => {
       // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
-      ended.claim.length = 0;
-      ended.reset.length = 0;
+      if (ended.claim) ended.claim.length = 0;
+      if (ended.reset) ended.reset.length = 0;
       // The first statement. Two POSTs of one proof race here, and only one
       // wins. A refusal comes before any write, so nothing is left to undo.
       const consumed = await consume(tx);
@@ -899,7 +900,7 @@ function applyReset(
         // handoff codes, and every other password row, and keeps the new password.
         await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
       } else {
-        await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset);
+        await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset ?? null);
         await deleteHandoffCodes(tx, user.id);
       }
       // The OAuth refresh tokens and codes end with the sessions: a reset after a
@@ -995,7 +996,7 @@ export async function changePassword(
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.newPassword);
   const now = config.clock.now();
-  const ended: SessionRow[] = [];
+  const ended = endedList(config);
   let changed: Result<{ ok: true }>;
   try {
     changed = await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
@@ -1030,8 +1031,8 @@ export async function changePassword(
       ];
       // The second-factor challenges before the session delete, as in a reset (plan 9f).
       await deleteTwoFactorChallenges(tx, user.id);
-      // Each row by id, for the after hook (plan 9d, final fix wave M-1).
-      await endSessions(tx, others, ended);
+      // With an after hook, each row by id (plan 9d, final fix wave M-1); with none, one statement (plan 9h).
+      await endSessions(tx, others, ended ?? null);
       // The OAuth refresh tokens and codes go with the other sessions, as in a reset (plan 9g final fix wave).
       await deleteOAuthTokens(tx, user.id);
       // The codes of the changer's own session go too. The row names the
@@ -1069,8 +1070,7 @@ export async function verifyPassword(
   config: ResolvedConfig,
   input: PasswordReauth,
 ): Promise<Result<{ verified: true }>> {
-  const pw = config.password;
-  if (!pw) return fail("not_found");
+  if (!config.password) return fail("not_found");
   if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
     return fail("rate_limited");
   const user = await config.storage.findOne("user", [
@@ -1078,15 +1078,32 @@ export async function verifyPassword(
   ]);
   if (user && !(await config.limiter.allow(`password:email:${user.email}`, SIGN_IN_PER_EMAIL)))
     return fail("rate_limited");
-  if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
-  const row = user
-    ? await config.storage.findOne("password", [{ field: "userId", op: "eq", value: user.id }])
-    : null;
+  return checkUserPassword(config, input.userId, input.password);
+}
+
+/**
+ * The check of `verifyPassword` with no limit (plan 9h): the caller counts
+ * on its own key first. The TOTP setup does, so that a stolen session that
+ * guesses there cannot hold the owner's password sign-in at `rate_limited`.
+ * A missing user, a pending row, and a legacy marker run the dummy verify and
+ * answer `invalid_credentials`, so the time does not tell them apart.
+ */
+export async function checkUserPassword(
+  config: ResolvedConfig,
+  userId: string,
+  password: string,
+): Promise<Result<{ verified: true }>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  if ([...password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
+  const row = await config.storage.findOne("password", [
+    { field: "userId", op: "eq", value: userId },
+  ]);
   if (!row || row.hash.startsWith(PENDING_HASH_PREFIX) || row.hash === LEGACY_VERIFY_HASH) {
-    await pw.hash.verify(input.password, await pw.hash.dummy());
+    await pw.hash.verify(password, await pw.hash.dummy());
     return fail("invalid_credentials");
   }
-  return (await pw.hash.verify(input.password, row.hash)).ok
+  return (await pw.hash.verify(password, row.hash)).ok
     ? ok({ verified: true })
     : fail("invalid_credentials");
 }

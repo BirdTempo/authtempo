@@ -854,6 +854,14 @@ function resolveTotp(
     throw new ConfigError(
       "totp.issuer must be 1 to 80 characters with no control character and no colon",
     );
+  // The default is appName, else the host of baseURL with no port. An IPv6
+  // host ([::1]) or an appName with a colon would split the key URI's label
+  // at the wrong place (plan 9h; until then the README only told the app to
+  // set issuer). A config refusal is the machine check.
+  if (issuer === undefined && defaultIssuer.includes(":"))
+    throw new ConfigError(
+      `totp.issuer is required: the default issuer ${defaultIssuer} holds a colon, which the key URI reads as the split between the issuer and the account; set totp.issuer to a name with no colon, or set totp to false`,
+    );
   const backupCodes = o.backupCodes ?? 10;
   if (!Number.isSafeInteger(backupCodes) || backupCodes < 5 || backupCodes > 20)
     throw new ConfigError("totp.backupCodes must be an integer from 5 to 20");

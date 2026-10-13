@@ -6,7 +6,7 @@ import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
-import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
+import { endedList, sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
@@ -104,18 +104,34 @@ async function requestCode(
     ],
     { consumedAt: now, updatedAt: now },
   );
-  const id = newId(now);
+  // After the spend, so every row that this request spent is in the read
+  // (plan 9h). The new row comes strictly after the newest of them: the id is
+  // random inside its millisecond, so with equal times the fallback read of
+  // `newestCode` could find a spent older row first and answer invalid_code
+  // after the cap (spec 8.10 item 4). A parallel request that this read does
+  // not see left its row live, and the cap spends live rows.
+  const [newest] = await config.storage.findMany(
+    "verification",
+    [
+      { field: "purpose", op: "eq", value: purpose },
+      { field: "identifier", op: "eq", value: email },
+    ],
+    { sort: NEWEST_FIRST, limit: 1 },
+  );
+  const createdAt = new Date(Math.max(now.getTime(), (newest?.createdAt.getTime() ?? 0) + 1));
+  const id = newId(createdAt);
   const code = randomDigits(otp.length);
   await config.storage.create("verification", {
     id,
     purpose,
     identifier: email,
     valueHash: await codeHash(config.secret, id, code),
+    // From the request time: the bump above moves the order, not the life.
     expiresAt: new Date(now.getTime() + otp.ttlMinutes * 60_000),
     consumedAt: null,
     data: { attempts: 0 },
-    createdAt: now,
-    updatedAt: now,
+    createdAt,
+    updatedAt: createdAt,
   });
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });
@@ -151,8 +167,10 @@ async function verifyGate(
 /**
  * The live code of the address: the newest unconsumed row. With none, the
  * newest row of any state, so a code that its cap spent still answers
- * `too_many_attempts`. Rows of one millisecond sort by id, which is random
- * inside the millisecond, so the live row is read first, not the newest row.
+ * `too_many_attempts`. The request writes each row after every row that it
+ * spent (plan 9h), so the newest row is the last request's row; rows of two
+ * parallel requests can share a millisecond, and both are live until the cap
+ * spends both.
  */
 async function newestCode(
   storage: StorageAdapter,
@@ -244,7 +262,7 @@ export async function verifyEmailOtp(
   if (!checked.ok) return checked;
   const consumed = await consumeCode(config.storage, checked.value, now);
   if (!consumed.ok) return consumed;
-  const ended: SessionRow[] = [];
+  const ended = endedList(config);
   // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
   const steps = sessionSteps(config, {
     ip: input.ip,

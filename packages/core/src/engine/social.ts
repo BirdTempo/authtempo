@@ -25,7 +25,7 @@ import {
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
-import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
+import { endedList, sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import {
   type BeforeResolveWrite,
   ClaimRacedError,
@@ -202,7 +202,7 @@ export async function completeSocial(
 
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
-  const ended: SessionRow[] = [];
+  const ended = endedList(config);
   // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
   const steps = sessionSteps(config, { ip: input.ip, userAgent: input.userAgent, via: "social" });
   const resolved = await hookGuard(() =>

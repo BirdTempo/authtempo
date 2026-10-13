@@ -78,6 +78,27 @@ describe("the setup (plan 9f)", () => {
     expect(await auth.storage.findMany("totp", [])).toEqual([]);
   });
 
+  it("counts a wrong setup password on its own key, 5 per user per 15 minutes, and not on the sign-in's limits (plan 9h, owner decision 3a)", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const setup = (password: string) =>
+      setupTotp(auth.config, { userId: session.user.id, password, ip: "6.6.6.6" });
+    for (let i = 0; i < 5; i++)
+      expect(await setup("not the password")).toMatchObject({ code: "invalid_credentials" });
+    expect(await setup(PASSWORD)).toEqual({ ok: false, code: "rate_limited", status: 429 });
+    expect(await auth.storage.findMany("totp", [])).toEqual([]);
+    // The owner's sign-in keeps its whole budget of 10 per address: verifiedSession
+    // took 1, and 8 wrong and 1 right make 10. Before plan 9h the five setup misses
+    // counted on password:email too, and the right sign-in answered rate_limited.
+    const signIn = (password: string) =>
+      passwordSignIn(auth.config, { email: EMAIL, password, ip: "5.5.5.5", userAgent: null });
+    for (let i = 0; i < 8; i++)
+      expect(await signIn("not the password")).toMatchObject({ code: "invalid_credentials" });
+    expect((await signIn(PASSWORD)).ok).toBe(true);
+    auth.clock.advance(15 * 60_000);
+    expect((await setup(PASSWORD)).ok).toBe(true);
+  });
+
   it("takes the issuer, the count, and the length from the config, and an issuer from the call", async () => {
     const auth = totpAuth({ totp: { issuer: "Acme", backupCodes: 5, backupCodeLength: 12 } });
     const session = await verifiedSession(auth);

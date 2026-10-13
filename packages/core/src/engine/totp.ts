@@ -14,8 +14,9 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, TotpRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
-import { verifyPassword } from "./password.js";
+import { checkUserPassword } from "./password.js";
 import {
+  endedList,
   endSessions,
   openSession,
   type ResolvedSession,
@@ -51,6 +52,12 @@ const CODE_PER_USER = { seconds: 900, max: 10 };
 // With 30 a day: one account per day about 9 x 10^-5, per year about 3.2 %,
 // the same order as the email code's daily figure (spec section 9).
 const CODE_PER_USER_DAY = { seconds: 86_400, max: 30 };
+// Per 15 minutes, for the setup's password check (plan 9h, owner decision
+// 3a). Its own key, not the sign-in's `password:ip` and `password:email`:
+// a stolen session that guesses here must not hold the owner's password
+// sign-in at rate_limited. 5 is half the sign-in's per-address budget; the
+// setup needs the password once.
+const SETUP_PER_USER = { seconds: 900, max: 5 };
 /**
  * One code check of the user: true when both per-user keys allow it. Every
  * operation that compares a code or a backup code calls this first.
@@ -221,7 +228,10 @@ export async function deleteTwoFactorChallenges(tx: StorageAdapter, userId: stri
 export interface TotpSetupInput {
   userId: string;
   password: string;
-  /** The caller's IP, for the password check's per-IP limit. */
+  /**
+   * Not read since plan 9h: the setup counts per user only
+   * (`totp-setup:user`). Kept so that the callers of plan 9f keep compiling.
+   */
   ip?: string | null | undefined;
   issuer?: string | undefined;
 }
@@ -229,8 +239,9 @@ export interface TotpSetupInput {
 /**
  * The secret, the key URI, and the backup codes for a new factor (plan 9f).
  * Needs the user's password and a verified email. The password check is
- * `verifyPassword`: the sign-in's limits and its dummy verify, and
- * `invalid_credentials` on a miss, before any row write. A session alone
+ * `checkUserPassword` under its own key, `totp-setup:user` 5 per 15 minutes
+ * (plan 9h), with the dummy verify, and `invalid_credentials` on a miss,
+ * before any row write. A session alone
  * must not set up the factor: a session thief would enroll an own
  * authenticator, the enable would end the owner's sessions, and every later
  * password sign-in of the owner would ask for the thief's code. A factor
@@ -244,16 +255,14 @@ export async function setupTotp(
 ): Promise<Result<TotpSetup>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  const proved = await verifyPassword(config, {
-    userId: input.userId,
-    password: input.password,
-    ip: input.ip ?? null,
-  });
+  if (!(await config.limiter.allow(`totp-setup:user:${input.userId}`, SETUP_PER_USER)))
+    return fail("rate_limited");
+  const proved = await checkUserPassword(config, input.userId, input.password);
   if (!proved.ok) return fail(proved.code);
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
-  // verifyPassword found the user; a user deleted since then gets no factor.
+  // checkUserPassword found the password row; a user deleted since then gets no factor.
   if (!user) return fail("invalid_credentials");
   if (!user.emailVerified) return fail("email_unverified");
   const now = config.clock.now();
@@ -330,7 +339,7 @@ export async function enableTotp(
     return fail("totp_not_enabled");
   const step = await matchStep(await openSecret(config, row), input.code, now);
   if (step === null) return fail("invalid_code");
-  const ended: SessionRow[] = [];
+  const ended = endedList(config);
   const done = await config.storage.transaction(async (tx): Promise<Result<TotpStatus>> => {
     // The confirm and the replay guard in one statement, as `acceptCode`.
     const n = await tx.update(
@@ -354,7 +363,7 @@ export async function enableTotp(
         { field: "userId", op: "eq", value: user.id },
         { field: "id", op: "ne", value: session.id },
       ],
-      ended,
+      ended ?? null,
     );
     await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: user.id }]);
     await deleteTwoFactorChallenges(tx, user.id);

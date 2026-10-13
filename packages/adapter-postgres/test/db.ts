@@ -45,6 +45,37 @@ export async function freshDatabase(): Promise<{ sql: Sql; close(): Promise<void
 }
 
 /**
+ * A fresh schema with the migrations applied, and a client on it whose pool
+ * has `max` connections (plan 9h: the one-connection hang test). The
+ * migrations run on a client of their own, so a pool of one holds no
+ * connection when the test starts. `close` ends the client first, with a
+ * 1-second timeout, because a hung transaction holds the only connection;
+ * then it drops the schema on an admin client.
+ */
+export async function freshDatabaseOf(max: number): Promise<{ sql: Sql; close(): Promise<void> }> {
+  const name = await createSchema();
+  const setup = client(name);
+  try {
+    await applyPostgresMigrations(setup);
+  } finally {
+    await setup.end({ timeout: 5 });
+  }
+  const sql = postgres(PG_URL, { max, onnotice: () => {}, connection: { search_path: name } });
+  return {
+    sql,
+    async close() {
+      await sql.end({ timeout: 1 });
+      const admin = postgres(PG_URL, { max: 1, onnotice: () => {} });
+      try {
+        await admin.unsafe(`DROP SCHEMA ${name} CASCADE`);
+      } finally {
+        await admin.end({ timeout: 5 });
+      }
+    },
+  };
+}
+
+/**
  * A fresh, empty schema with no migrations applied, and two separate clients
  * on it. The two clients act as two replicas that deploy at the same time.
  */

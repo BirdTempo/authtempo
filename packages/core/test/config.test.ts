@@ -582,6 +582,20 @@ describe("totp (plan 9f)", () => {
     expect(resolveConfig({ ...local, totp: { issuer: "Acme Dev" } }).totp?.issuer).toBe("Acme Dev");
   });
 
+  it("refuses a default issuer that holds a colon, from an IPv6 host or from appName, and takes an issuer set beside it (plan 9h)", () => {
+    const required = (issuer: string) =>
+      `totp.issuer is required: the default issuer ${issuer} holds a colon, which the key URI reads as the split between the issuer and the account; set totp.issuer to a name with no colon, or set totp to false`;
+    const ipv6 = { ...pw, baseURL: "http://[::1]:8787" };
+    expect(() => resolveConfig(ipv6)).toThrowError(required("[::1]"));
+    expect(() => resolveConfig({ ...pw, appName: "Acme: Notes" })).toThrowError(
+      required("Acme: Notes"),
+    );
+    expect(resolveConfig({ ...ipv6, totp: { issuer: "Acme Dev" } }).totp?.issuer).toBe("Acme Dev");
+    expect(resolveConfig({ ...ipv6, totp: false }).totp).toBeNull();
+    // Without password the factor is off, so no issuer is needed.
+    expect(resolveConfig({ ...base, baseURL: "http://[::1]:8787" }).totp).toBeNull();
+  });
+
   it("refuses a value out of range, a key core does not have, a page that is not a function, and totp without password", () => {
     const ISSUER = "totp.issuer must be 1 to 80 characters with no control character and no colon";
     const CODES = "totp.backupCodes must be an integer from 5 to 20";

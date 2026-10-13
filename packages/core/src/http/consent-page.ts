@@ -21,7 +21,10 @@ export interface ConsentPageInput {
    * with the same scopes and no new consent (plan 9g final fix wave, review M-3).
    */
   otherResources: string[];
-  /** The authorization request, posted back as hidden fields. */
+  /**
+   * The hidden fields the form posts back with `decision`. Since plan 9h one
+   * field, `request_id`: the short id of the request that core holds.
+   */
   fields: Record<string, string>;
 }
 

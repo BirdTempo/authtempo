@@ -56,7 +56,7 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/tokens` | session | `{ tokens: [{ id, name, hint, expiresAt, lastUsedAt, organizationId, createdAt }] }`, newest first, never a token or its hash; 401; 403 `email_unverified` |
 | POST | `/tokens/revoke` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `email_unverified`; 404 `not_found` for another user's token |
 | GET | `/tokens/current` | `Authorization: Bearer tk_…` only | `{ user, apiToken }`; 401 for a session cookie, a `ts_` bearer, or no credential |
-| POST | `/totp/setup` | session, `{ password }` | `{ secret, uri, backupCodes }`, each answered once; 400 `invalid_body`; 401, `invalid_credentials` (a wrong password; no row is written); 403 `email_unverified`; 429 `rate_limited` (the sign-in's limits); 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
+| POST | `/totp/setup` | session, `{ password }` | `{ secret, uri, backupCodes }`, each answered once; 400 `invalid_body`; 401, `invalid_credentials` (a wrong password; no row is written); 403 `email_unverified`; 429 `rate_limited` (`totp-setup:user`, 5 per 15 minutes); 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
 | POST | `/totp/enable` | session, `{ code }` | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; 400 `invalid_body`, `invalid_code`, `totp_not_enabled` (no setup, or one older than 15 minutes); 401; 403 `email_unverified`; 409 `totp_enabled`; 429 `rate_limited`. Every other session of the user ends with `two_factor` |
 | POST | `/totp/disable` | session, `{ code }` (a current code or a backup code) | `{ ok: true }`, and clears the trust cookie; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 429 `rate_limited` |
 | POST | `/totp/backup-codes` | session, `{ code }` | `{ backupCodes }`, a new list; the old codes stop working; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 409 `conflict` (parallel writes won every try); 429 `rate_limited` |
@@ -68,11 +68,11 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
 | GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
 | POST | `/oauth/register` | JSON client metadata (RFC 7591) | 201 `{ client_id, client_id_issued_at, client_name?, redirect_uris, token_endpoint_auth_method: "none", grant_types, response_types }`; 400 `invalid_redirect_uri`, `invalid_client_metadata`; 429. Only with `oauth` and `registration.dynamic` |
-| GET | `/oauth/authorize` | the OAuth 2.1 parameters, PKCE S256, `resource`, `scope`, `state`, `nonce`, `prompt` | 302 to `/oauth/sign-in` with no session; 200 the consent page; 302 to the client with `code`, `state`, and `iss` when a consent covers the scopes; 302 with `error` for a bad request; 400 or 401 JSON with no redirect for a bad client or redirect URI; 429 |
-| POST | `/oauth/authorize` | the consent form, `decision=allow` or `deny`; session; `Origin` equal to `baseURL` | 302 to the client with `code` or `error=access_denied`; 401; 403 |
+| GET | `/oauth/authorize` | the OAuth 2.1 parameters, PKCE S256, `resource`, `scope`, `state`, `nonce`, `prompt` | 302 to `/oauth/sign-in` with no session, with `next` back to `?request_id=oq_…`, a request that core holds for 10 minutes; `request_id` alone shows the held request, and an unknown, spent, or expired one, or one that the consent page showed to another user, also with no session, answers 400 `invalid_request` JSON and spends nothing for that caller; 200 the consent page; 302 to the client with `code`, `state`, and `iss` when a consent covers the scopes; 302 with `error` for a bad request; 400 or 401 JSON with no redirect for a bad client or redirect URI; 429 |
+| POST | `/oauth/authorize` | the consent form: `request_id` and `decision=allow` or `deny`; the user the page showed the request to; session; `Origin` equal to `baseURL` | 302 to the client with `code` or `error=access_denied`; 400 `invalid_request` for a spent, expired, or another user's request; 401; 403 |
 | GET | `/oauth/sign-in` | `?next=<basePath>/oauth/authorize?…` | the sign-in page, which lands back on `next`; 302 to `<appURL>/?auth_error=invalid_request` for another `next` |
 | POST | `/oauth/token` | form: `grant_type=authorization_code` with `code`, `code_verifier`, `client_id`, `redirect_uri`, `resource?`; or `grant_type=refresh_token` with `refresh_token`, `client_id`, `scope?`, `resource?` | `{ access_token, token_type: "Bearer", expires_in, scope, refresh_token?, id_token? }`; 400 `invalid_grant`, `invalid_target`, `invalid_scope`, `invalid_request`, `unsupported_grant_type`; 401 `invalid_client`; 429 |
-| POST | `/oauth/revoke` | form `token`, `client_id?` (RFC 7009) | 200 `{}` for any token, known or not; a refresh token's family goes; 400 `invalid_request` for a body that is not a form; 429 |
+| POST | `/oauth/revoke` | form `token`, `client_id?` (RFC 7009) | 200 `{}` for a token it revoked, an unknown token, and an access token; a refresh token's family goes; 400 `unauthorized_client` for a refresh token of another client, which stays; 400 `invalid_request` for a body that is not a form; 429 |
 | GET, POST | `/oauth/userinfo` | `Authorization: Bearer <access token>` with `openid` | `{ sub, email?, email_verified?, name?, picture? }` by scope; 401 `invalid_token`; 403 `insufficient_scope` |
 | GET | `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration` | none | the issuer's metadata, `cache-control: public, max-age=300`; also at the origin root through `auth.wellKnown`. `/.well-known/oauth-protected-resource` answers 404 here |
 
@@ -468,7 +468,7 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 
 - The code: RFC 6238 with SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once: the write of the last step is the check.
 - A challenge lives 5 minutes and takes 5 wrong codes. The verify is limited to 30 per IP per 15 minutes. Enable, disable, the new backup codes, and the verify share two per-user limits on every code check: `totp-code:user` (10 per 15 minutes) and `totp-code:user-day` (30 per 24 hours). These two are the limits that bind an attacker who has the password.
-- The per-user limits have a cost: a person who has the password, or a stolen session, can use up the budget with wrong codes. Until the window ends, the owner's verify, enable, and disable answer `rate_limited`. A wrong password at the setup counts on the sign-in's limits (`password:ip` and `password:email`), so a stolen session can also hold the owner's password sign-in at `rate_limited` for 15 minutes. Better Auth's account lockout has the same effect.
+- The per-user limits have a cost: a person who has the password, or a stolen session, can use up the budget with wrong codes. Until the window ends, the owner's verify, enable, and disable answer `rate_limited`. Better Auth's account lockout has the same effect. A wrong password at the setup counts on its own key, `totp-setup:user` (5 per 15 minutes), and not on the sign-in's limits, so a stolen session cannot hold the owner's password sign-in at `rate_limited` from there (plan 9h). The trade of owner decision 3a: a stolen session can still use up the setup budget, and until the window ends the owner's own setup answers `rate_limited`.
 - A trusted device skips the factor for `totp.trustDays` (default 30). Its cookie `tempo_totp_trust` has the path `<basePath>/`. Enable and disable delete the user's trusted devices.
 - The secret is sealed with AES-256-GCM under a key from `secret`. A new app `secret` opens no sealed secret: every user with the factor on then fails the code, and the backup codes too, because they are keyed by `secret` as well. Before you change `secret`, have each such user turn the factor off, or turn it off for them with `api.totp.disable`.
 - There is no per-account lockout. The sign-in's 10 per address and the 5 codes per challenge allow 50 challenge guesses per address per 15 minutes; the shared per-user limits stop the verify at 10 code checks per user in that window and 30 in a day. One guess passes with odds of 3 in 10⁶ (the three codes of the window). The odds of a takeover by an attacker who has the password, at the full rate:
@@ -480,8 +480,8 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
   | One account per year | 10,950 | about 3.2 % |
 
   The limits are per isolate under the memory limiter: on Workers each isolate counts on its own, so the per-user budgets multiply by the isolate count. The owned D1 and Postgres limiters count once. The per-challenge cap lives in the row and stays global.
-- `api.totp` holds the same operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
-- The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. An app whose `appName` holds a colon sets `totp.issuer`: the key URI uses the colon to split the issuer from the account.
+- `api.totp` holds the same operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does; `ip` is not read since plan 9h. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
+- The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. A default that holds a colon (an IPv6 `baseURL` such as `http://[::1]:8787`, or an `appName` such as "Acme: Notes") stops `createAuth` with a message that names `totp.issuer`: the key URI uses the colon to split the issuer from the account. Set `totp.issuer`, or `totp: false`.
 
 ## JWT minting
 
@@ -541,10 +541,10 @@ export default {
 - `auth.wellKnown` serves, at the origin root, the authorization server metadata (RFC 8414) at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-authorization-server<basePath>`, the same document at `/.well-known/openid-configuration` and `/.well-known/openid-configuration<basePath>`, and the protected resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource<path>` for each resource. The root form `/.well-known/oauth-protected-resource` answers the first resource on the request's origin. Every document is public, with `access-control-allow-origin: *`. A method other than GET answers 405, `OPTIONS` 204, and any other path 404.
 - Clients are public: no client secret, `token_endpoint_auth_method: "none"`, and PKCE S256 on every code. A client registers at `POST /oauth/register`, or its client id is the https URL of its metadata document: core fetches it through `oauth.fetch` with `redirect: "manual"`, 10 seconds, and 64 KB, and keeps it one hour per isolate. The document's `client_id` must equal its URL. Core refuses a document URL that is not in canonical form, or whose host is an IP literal, `localhost`, a single label, a `.local`, `.home.arpa`, or `.internal` name, or the host of `baseURL` on any port. A public name can still resolve to a private address, so `oauth.fetch` must refuse private addresses too.
 - A redirect URI is https, http on 127.0.0.1 or localhost with any port, or a private-use scheme, and it must match exactly. Registration refuses `http://[::1]`: the consent page's policy cannot name an IPv6 literal, so a loopback client uses 127.0.0.1.
-- The authorize step sends a browser with no session to core's sign-in page and back. It refuses an unverified user. `prompt=login` with a session answers `login_required`: core does not end a live session to sign the person in again. `prompt=select_account` is accepted and ignored: a session holds one account, so core cannot offer a selection. With no session the sign-in page is that new sign-in. An authorize URL longer than 2048 characters with no session answers `invalid_request` to the client, because the way back through the sign-in page cannot hold it.
-- The consent page names the client by its own claimed name and the resource of the request. A consent is one decision per user and client for every resource of this instance: the scopes, not the resources, are the unit of consent. With more than one `oauth.resources` entry, the page states that the client may ask for the other resources with the same scopes, and it asks for no new consent then. A new scope asks again. `oauth.consentPage` replaces the page; its input has `resource` and `otherResources`.
+- The authorize step sends a browser with no session to core's sign-in page and back. It refuses an unverified user. `prompt=login` with a session answers `login_required`: core does not end a live session to sign the person in again. `prompt=select_account` is accepted and ignored: a session holds one account, so core cannot offer a selection. With no session the sign-in page is that new sign-in. Core holds each request that goes to the sign-in page or to the consent page for 10 minutes and passes only its short id (`request_id=oq_…`), so a long client id or `state` fits the way back. The consent form posts that id and the decision; the POST decides on the held request, once, and only for the user the page showed it to (plan 9h).
+- The consent page names the client by its own claimed name and the resource of the request. A consent is one decision per user and client for every resource of this instance: the scopes, not the resources, are the unit of consent. With more than one `oauth.resources` entry, the page states that the client may ask for the other resources with the same scopes, and it asks for no new consent then. A new scope asks again. `oauth.consentPage` replaces the page; its input has `resource` and `otherResources`, and `fields` holds `request_id` only. Upgrade note for an app with its own `oauth.consentPage` (plan 9h): render each entry of `input.fields` as a hidden input, and do not write the old field names (`client_id`, `code_challenge`, and the others) by hand. A form that still posts the old fields answers 400 `invalid_request`. A consent page that the old version showed before the deploy answers the same 400 once, and the person starts the sign-in again from the client.
 - An access token is a JWT (`typ: "at+jwt"`) with `aud` equal to the resource, `scope`, `client_id`, and `sub`. It lives `accessTtlMinutes` (default `jwtMint.ttlMinutes`) and cannot be revoked; a sign-out does not end it. `auth.caller` answers `kind: "oauth"` only under the resource of the token: the `oauth.resources` entry on the request's origin whose path is the request path or a parent of it at a `/` boundary, the longest first. The cookie still wins. `auth.session` never accepts an access token, so core's own routes answer 401 to it.
-- A refresh token (`offline_access`) rotates at each use. A used refresh token presented again deletes the whole family. `POST /oauth/revoke` deletes a family.
+- A refresh token (`offline_access`) rotates at each use. A used refresh token presented again deletes the whole family. `POST /oauth/revoke` deletes a family. A `client_id` of another client answers 400 `unauthorized_client` and deletes nothing (RFC 7009 section 2.1).
 - Grants: a grant is the consent of one user for one client, with the client's refresh tokens. `api.oauth.grants({ userId })` lists each consent of the user, newest first: `clientId`, `clientName`, `scopes`, `createdAt`, and `refreshTokens` (the count of live refresh tokens). `api.oauth.revoke({ userId, clientId })` deletes the consent and every refresh token of the user and the client, and answers `{ ok: true }` also when nothing existed. A code from before the revoke gives no token. The session routes `GET /oauth/grants` (`{ grants }`) and `POST /oauth/grants/revoke` (`{ clientId }`) and the calls `client.oauth.grants()` and `client.oauth.revoke({ clientId })` do the same for the signed-in person; a `tk_` token and an access token answer 401, and the POST takes the Origin rule of every session POST. Build a "connected apps" page on them. An access token that the client holds lives on to its `exp`.
 - A password reset of either kind (the link and the code) and a password change delete every refresh token and every pending authorization code of the user, in the same transaction as the session delete, so a code from before the reset gives no token. The consents stay: the next authorize asks for no consent, but each client must send the person through the authorize step again.
 - With `openid` the code exchange adds an ID token (`aud` = the client id, `nonce`, `sid`, `at_hash`, and `email` or `name` and `picture` by scope), and `/oauth/userinfo` answers the same claims. The ID token uses the `jwtMint.alg` (EdDSA or ES256). OIDC Discovery asks a provider to support RS256 too; core does not, so a relying party that accepts RS256 only cannot use it.
@@ -780,6 +780,7 @@ const auth = createAuth({
   social sign-in, the verify link, and the reset of an unverified user. A
   reset of a verified user ends that user's sessions with `password_reset`.
 - Plan 9f adds the end reason `two_factor`: the enable of a second factor ends every other session of the user. A session that a challenge opens has `via: "password"`.
+- With no `afterEnd` hook, a reset, a change, a claim, and the enable of a second factor delete the ended sessions in one statement (plan 9h). With the hook, each ended row goes by id, so the hook fires once per row the flow ended; an account with many sessions then pays one statement per session.
 - `session.beforeCreate` runs on a password sign-in only after the password
   is correct. So `hook_refused` against `invalid_credentials` tells the
   caller that the password was right. A ban hook should refuse with a text
@@ -857,25 +858,25 @@ The API token cap has the same rule.
 
 ## Sweep
 
-`auth.api.sweepExpired()` deletes the rows that no flow can use any more.
-It removes every verification row past its expiry, consumed or not. It
-removes a consumed verification row one day after the consume; this only
-matters when `magicLink.ttlMinutes` is above one day. It removes
-invitations that are accepted or expired, and sessions past their expiry.
-It also calls the limiter's `sweep`, when the limiter has one, to delete
-the limit windows that ended. It answers five counts:
-`verificationExpired`, `verificationConsumed`, `invitations`, `sessions`,
-and `limits`. It is an `api` function and not a route. Call it from a
-scheduled handler. It is safe to run at any time. A replayed token
+`auth.api.sweepExpired()` deletes the rows that no flow can use any more,
+and calls the limiter's `sweep`, when the limiter has one, to delete the
+limit windows that ended. It is an `api` function and not a route. Call it
+from a scheduled handler. It is safe to run at any time. A replayed token
 answers `invalid_token` after the sweep because its row is gone.
 
-Since plan 8b it also deletes API tokens past their expiry and answers a sixth count, `apiTokens`. A token with no expiry stays.
+It answers one count for each kind of row:
 
-Since plan 9f it also deletes trusted devices past their expiry and answers `trustedDevices`.
-
-Since the plan 9f final fix wave it also deletes TOTP setups that no enable confirmed within 15 minutes and answers `totpSetups`.
-
-Since plan 9g it also deletes signing keys retired more than 24 hours ago (`jwks`), refresh tokens past their expiry (`oauthTokens`), and up to 100 OAuth clients unseen for 90 days with no consent and no refresh token (`oauthClients`).
+- `verificationExpired`: verification rows past their expiry, consumed or not.
+- `verificationConsumed`: consumed verification rows one day after the consume. This only matters when `magicLink.ttlMinutes` is above one day.
+- `invitations`: invitations that are accepted or expired.
+- `sessions`: sessions past their expiry.
+- `apiTokens`: API tokens past their expiry. A token with no expiry stays.
+- `trustedDevices`: trusted devices past their expiry.
+- `totpSetups`: TOTP setups that no enable confirmed within 15 minutes.
+- `jwks`: signing keys retired more than 24 hours ago.
+- `oauthTokens`: refresh tokens past their expiry.
+- `oauthClients`: up to 100 OAuth clients unseen for 90 days with no consent and no refresh token.
+- `limits`: limit windows that ended; 0 when the limiter has no `sweep`.
 
 ```ts
 export default {

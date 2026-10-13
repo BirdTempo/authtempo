@@ -82,7 +82,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   const stepResponse = (step: AuthorizeStep): Response => {
     if (step.kind === "error") return json({ error: step.error }, OAUTH_ERRORS[step.error]);
     if (step.kind !== "consent") return redirect(step.location);
-    const { request, client, user } = step;
+    const { request, client, user, requestId } = step;
     const target = new URL(request.redirectUri);
     const html = oauth.consentPage({
       action: `${config.basePath}/oauth/authorize`,
@@ -97,17 +97,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       scopes: request.scopes.map((name) => ({ name, description: oauth.scopes.get(name) ?? name })),
       resource: request.resource,
       otherResources: oauth.resources.filter((r) => r !== request.resource),
-      fields: {
-        response_type: "code",
-        client_id: request.clientId,
-        redirect_uri: request.redirectUri,
-        code_challenge: request.codeChallenge,
-        code_challenge_method: "S256",
-        scope: request.scopes.join(" "),
-        resource: request.resource,
-        ...(request.state !== null ? { state: request.state } : {}),
-        ...(request.nonce !== null ? { nonce: request.nonce } : {}),
-      },
+      // The request stays on the server (plan 9h): the form posts its short id only.
+      fields: { request_id: requestId },
     });
     return new Response(html, {
       status: 200,
@@ -137,10 +128,13 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         if (!session) return json({ error: "unauthorized" }, 401);
         const form = await formParams(ctx.request);
         if (!form) return json({ error: "invalid_request" }, 400);
-        const decision = form.get("decision") ?? "";
-        form.delete("decision");
         return stepResponse(
-          await decideAuthorize(config, { params: form, decision, session, ip: ctx.ip }),
+          await decideAuthorize(config, {
+            requestId: form.get("request_id") ?? "",
+            decision: form.get("decision") ?? "",
+            session,
+            ip: ctx.ip,
+          }),
         );
       },
     },

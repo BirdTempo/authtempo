@@ -58,6 +58,11 @@ export type ErrorCode = keyof typeof ERRORS;
 export const OAUTH_ERRORS = {
   invalid_request: 400,
   invalid_client: 401,
+  // RFC 7009 section 2.1: a revoke of a token that was not issued to the
+  // client is refused. Section 2.2.1 takes the codes of RFC 6749 section 5.2
+  // and names none for this case; the owner chose unauthorized_client
+  // (plan 9h, decision 1a of 2026-10-14). RFC 6749 section 5.2: 400.
+  unauthorized_client: 400,
   invalid_grant: 400,
   unsupported_grant_type: 400,
   invalid_scope: 400,
