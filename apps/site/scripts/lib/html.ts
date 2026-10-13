@@ -42,3 +42,11 @@ export function codeTexts(html: string): Set<string> {
     [...html.matchAll(/<code[^>]*>([\s\S]*?)<\/code>/g)].map((m) => stripTags(m[1] ?? "")),
   );
 }
+
+/** The id and the text of every h3 that has an id: the entry of a route or of an error code. */
+export function h3Headings(html: string): { id: string; text: string }[] {
+  return [...html.matchAll(/<h3\b[^>]*\sid="([^"]+)"[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => ({
+    id: decode(m[1] ?? ""),
+    text: stripTags(m[2] ?? ""),
+  }));
+}
