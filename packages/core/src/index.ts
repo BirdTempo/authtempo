@@ -90,6 +90,8 @@ export type {
   TwoFactorSession,
   TwoFactorVerify,
 } from "./engine/totp.js";
+/** The shape of a `tf_` challenge token (plan 9f): the compat shim checks a cookie against it before core's verify. */
+export { TWO_FACTOR_TOKEN_RE } from "./engine/totp.js";
 export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
