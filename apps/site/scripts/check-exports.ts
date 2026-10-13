@@ -45,9 +45,13 @@ export function readExports(source: string, file: string): ExportRead {
         );
       return;
     }
+    // `export default class Foo` is imported as `default`, so only `default` counts.
+    if (/^export\s+default\b/.test(line)) {
+      names.add("default");
+      return;
+    }
     const decl = DECLARATION.exec(line);
     if (decl?.[1]) names.add(decl[1]);
-    else if (/^export\s+default\b/.test(line)) names.add("default");
     else unreadable.push(`${file}:${i + 1}: cannot read the export: ${line.trim()}`);
   });
   return { names: [...names].sort(), unreadable };
@@ -59,12 +63,9 @@ export function exportNames(source: string): string[] {
 }
 
 /** Every export of an entry appears as a code span on its reference page. */
-export function checkExports(
-  html: string,
-  names: readonly string[],
-  label: string,
-  unreadable: readonly string[] = [],
-): CheckReport {
+export function checkExports(html: string, read: ExportRead, label: string): CheckReport {
+  // `read` is required, with no default: a caller cannot skip the unreadable lines.
+  const { names, unreadable } = read;
   const code = codeTexts(html);
   const r: CheckReport = {
     name: `check-exports-${label}`,

@@ -34,6 +34,7 @@ export default function () {}
 export * as G from "./g.js";`;
     const r = readExports(source, "x.ts");
     expect(r.names).toEqual(["B", "C", "E", "F", "G", "a", "d", "default"]);
+    expect(readExports("export default class Foo {}", "x.ts").names).toEqual(["default"]);
     expect(r.unreadable).toEqual([]);
   });
 
@@ -50,18 +51,22 @@ export * as G from "./g.js";`;
   });
 });
 
+const read = (names: string[], unreadable: string[] = []) => ({ names, unreadable });
+
 describe("checkExports", () => {
   it("fails closed on an export line that the reader could not read", () => {
-    const r = checkExports("<code>a</code>", ["a"], "core", [
-      "x.ts:2: cannot read the export: export =  foo;",
-    ]);
+    const r = checkExports(
+      "<code>a</code>",
+      read(["a"], ["x.ts:2: cannot read the export: export =  foo;"]),
+      "core",
+    );
     expect(r.failures).toEqual(["x.ts:2: cannot read the export: export =  foo;"]);
   });
 
   it("passes when each name is a code span on the page", () => {
     const r = checkExports(
       "<p><code>createAuth</code> and <code>AuthConfig</code></p>",
-      ["createAuth", "AuthConfig"],
+      read(["createAuth", "AuthConfig"]),
       "core",
     );
     expect(r.failures).toEqual([]);
@@ -69,11 +74,20 @@ describe("checkExports", () => {
   });
 
   it("refuses a name that the page does not show in a code span", () => {
-    const r = checkExports("<p>createAuth</p>", ["createAuth"], "core");
+    const r = checkExports("<p>createAuth</p>", read(["createAuth"]), "core");
     expect(r.failures).toEqual(["core export createAuth is not on the page"]);
   });
 
   it("fails when it reads no export", () => {
-    expect(checkExports("", [], "core").failures).toEqual(["read 0 exports"]);
+    expect(checkExports("", read([]), "core").failures).toEqual(["read 0 exports"]);
+  });
+
+  it("takes the read of readExports, so an export * in the source fails the check", () => {
+    const r = checkExports(
+      "<code>ok</code>",
+      readExports('export const ok = 1;\nexport * from "./more.js";', "src/index.ts"),
+      "core",
+    );
+    expect(r.failures).toHaveLength(1);
   });
 });
