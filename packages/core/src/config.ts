@@ -642,7 +642,9 @@ const EMAIL_OTP_KEYS: Readonly<Record<keyof EmailOtpConfig, true>> = {
 /** `emailOtp` (plan 9e). Absent: on, with the defaults. `false`: off. */
 function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEmailOtp | null {
   if (input === false) return null;
-  const o: EmailOtpConfig = input ?? {};
+  // Only `undefined` means the defaults: `null` from a JS caller or a JSON
+  // config must not turn the feature on, so it falls to the guard below.
+  const o: EmailOtpConfig = input === undefined ? {} : input;
   // `as unknown`: the guard must not narrow `o`, or its fields lose their types.
   if (!isPlainObject(o as unknown)) throw new ConfigError("emailOtp must be an object or false");
   for (const [key, value] of Object.entries(o))

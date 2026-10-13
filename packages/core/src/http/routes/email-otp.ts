@@ -7,10 +7,9 @@ import {
   resetPasswordWithOtp,
   verifyEmailOtp,
 } from "../../engine/email-otp.js";
-import { publicSession } from "../../engine/sessions.js";
-import { sessionCookie } from "../cookies.js";
-import { json, readJson, respond } from "../json.js";
+import { readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
+import { signedInResponse } from "../session-answer.js";
 
 const requestBody = z.object({ email: z.string().max(320) });
 const verifyBody = z.object({ email: z.string().max(320), code: z.string().max(16) });
@@ -29,19 +28,7 @@ const resetBody = z.object({
  */
 export function emailOtpRoutes(config: ResolvedConfig): Route[] {
   if (!config.emailOtp) return [];
-  const signedIn = (v: EmailOtpSession): Response =>
-    json(
-      { token: v.token, ...publicSession({ user: v.user, session: v.session, refreshed: false }) },
-      200,
-      {
-        "set-cookie": sessionCookie(
-          config.cookieName,
-          v.token,
-          config.session.ttlDays * 86_400,
-          config.cookie.sameSite,
-        ),
-      },
-    );
+  const signedIn = (v: EmailOtpSession): Response => signedInResponse(config, v);
   const routes: Route[] = [
     {
       method: "POST",

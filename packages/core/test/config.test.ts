@@ -511,6 +511,8 @@ describe("emailOtp (plan 9e)", () => {
         "emailOtp.ttl is not an option; core has ttlMinutes, length, maxAttempts, mail, and resetMail",
       ],
       [true, "emailOtp must be an object or false"],
+      [null, "emailOtp must be an object or false"],
+      [[], "emailOtp must be an object or false"],
     ];
     for (const [emailOtp, message] of bad)
       expect(() => resolveConfig({ ...base, emailOtp: emailOtp as never })).toThrowError(message);

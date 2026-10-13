@@ -9,6 +9,7 @@ export type {
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
+  ResolvedEmailOtp,
 } from "./config.js";
 export { ConfigError, DEFAULT_RESERVED_SLUGS, isAppScheme } from "./config.js";
 export {

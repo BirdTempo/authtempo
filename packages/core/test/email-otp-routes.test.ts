@@ -100,6 +100,39 @@ describe("email code routes (plan 9e)", () => {
     expect(signIn.status).toBe(200);
   });
 
+  it("POST /otp/reset answers invalid_body on a bad body, password_breached, and too_many_attempts at the cap (M-8)", async () => {
+    // A clock that steps 1 ms per read, so the two code rows never share a
+    // millisecond and the capped row is the newest (see `newestCode`).
+    let tick = Date.parse("2026-01-01T00:00:00.000Z");
+    const { auth, code } = server({
+      password: { hash: FAST, breachCheck: async () => true },
+      clock: { now: () => new Date(tick++) },
+    });
+    for (const body of [{ email: EMAIL, code: "123456" }, { email: EMAIL, password: "x" }, {}]) {
+      const bad = await auth.handle(post("/auth/otp/reset", body));
+      expect({ body, status: bad.status, json: await bad.json() }).toEqual({
+        body,
+        status: 400,
+        json: { error: "invalid_body" },
+      });
+    }
+    await auth.handle(post("/auth/otp/reset/request", { email: EMAIL }));
+    const breached = await auth.handle(
+      post("/auth/otp/reset", { email: EMAIL, code: code(), password: "a new long password" }),
+    );
+    expect(breached.status).toBe(400);
+    expect(await breached.json()).toEqual({ error: "password_breached" });
+    await auth.handle(post("/auth/otp/reset/request", { email: EMAIL }));
+    const right = code();
+    const reset = (c: string) =>
+      auth.handle(post("/auth/otp/reset", { email: EMAIL, code: c, password: "a long password" }));
+    for (let i = 0; i < 4; i++) expect((await reset(wrongFor(right))).status).toBe(400);
+    const capped = await reset(wrongFor(right));
+    expect(capped.status).toBe(400);
+    expect(await capped.json()).toEqual({ error: "too_many_attempts" });
+    expect(await (await reset(right)).json()).toEqual({ error: "too_many_attempts" });
+  });
+
   it("answers 404 on the four routes with emailOtp: false, and leaves api.emailOtp out", async () => {
     const { auth } = server({ emailOtp: false });
     for (const path of ["/otp/request", "/otp/verify", "/otp/reset/request", "/otp/reset"])

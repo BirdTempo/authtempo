@@ -3,7 +3,7 @@ import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
+import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
@@ -44,7 +44,8 @@ const RESET_POST_PER_IP = { seconds: 900, max: 20 };
 const CHANGE_PER_USER = { seconds: 900, max: 10 };
 // The proofs of a reset: the mailed link and the mailed code (plan 9e). A
 // reset of either kind and a password change spend the live ones of both.
-const RESET_PURPOSES = ["password-reset", "password-reset-otp"];
+// Typed, so a renamed purpose fails the typecheck.
+const RESET_PURPOSES: readonly VerificationPurpose[] = ["password-reset", "password-reset-otp"];
 // Per 15 minutes. Each resend sends one mail from the app's sender, so the
 // product owns this limit (plan 8b).
 const RESEND_PER_IP = { seconds: 900, max: 20 };

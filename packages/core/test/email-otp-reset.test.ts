@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
-import { requestEmailOtp, requestResetOtp, resetPasswordWithOtp } from "../src/engine/email-otp.js";
+import {
+  requestEmailOtp,
+  requestResetOtp,
+  resetPasswordWithOtp,
+  verifyEmailOtp,
+} from "../src/engine/email-otp.js";
 import { hookRefusal } from "../src/engine/hooks.js";
 import {
   changePassword,
@@ -199,6 +204,41 @@ describe("reset by code (plan 9e)", () => {
     expect(await reset(auth, code, "a third long password")).toMatchObject({
       code: "invalid_code",
     });
+  });
+
+  it("a reset by code and a password change keep the address's sign-in code and another address's reset code (M-8)", async () => {
+    const auth = resetAuth();
+    const OTHER = "bea@example.com";
+    await signUpAndVerify(auth, EMAIL, OLD);
+    const signInCode = async () => {
+      await requestEmailOtp(auth.config, { email: EMAIL, ip: null });
+      return codeFrom(auth);
+    };
+    const verifySignIn = (code: string) =>
+      verifyEmailOtp(auth.config, { email: EMAIL, code, ip: null, userAgent: null });
+    // A reset by code.
+    const first = await signInCode();
+    const otherCode = await requestReset(auth, OTHER);
+    expect((await reset(auth, await requestReset(auth))).ok).toBe(true);
+    expect((await verifySignIn(first)).ok).toBe(true);
+    expect((await reset(auth, otherCode, NEW, OTHER)).ok).toBe(true);
+    // A password change.
+    const s = await signIn(auth, NEW);
+    if (!s.ok) throw new Error(s.code);
+    const session = await resolveSession(auth.config, s.value.token);
+    if (!session) throw new Error("no session");
+    auth.clock.advance(15 * 60_000);
+    const second = await signInCode();
+    const otherCode2 = await requestReset(auth, OTHER);
+    expect(
+      await changePassword(auth.config, {
+        session,
+        currentPassword: NEW,
+        newPassword: "a third long password",
+      }),
+    ).toEqual({ ok: true, value: { ok: true } });
+    expect((await verifySignIn(second)).ok).toBe(true);
+    expect((await reset(auth, otherCode2, "a fourth long password", OTHER)).ok).toBe(true);
   });
 
   it("shares the request budget with the sign-in code", async () => {
