@@ -2,7 +2,7 @@ import { ERRORS, type ErrorCode } from "./errors.js";
 
 /**
  * `message` is set by `hook_refused` only (plan 9d): the app's refusal
- * text, already checked by `publicHookMessage`. `handle` writes it into the
+ * text, already checked by `publicHookMessage`. `respond` writes it into the
  * JSON body.
  */
 export type Result<T> =

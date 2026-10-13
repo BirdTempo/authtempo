@@ -2,6 +2,7 @@ import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { endSessions } from "./sessions.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 const USER_NAME_MAX = 200;
@@ -73,11 +74,9 @@ export async function claimEmail(
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
   await tx.delete("password", passwords);
-  // The rows first, for the after hook. The delete still matches by user id, so a
-  // session that another request adds between the two statements goes too, with no hook.
-  if (ended)
-    ended.push(...(await tx.findMany("session", [{ field: "userId", op: "eq", value: userId }])));
-  await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
+  // Each row by id, for the after hook; then by user id, so a session that
+  // another request adds between the two statements goes too, with no hook.
+  await endSessions(tx, [{ field: "userId", op: "eq", value: userId }], ended ?? null);
   // A claimant's passkeys would keep the account open after the claim.
   // Registration already needs a verified email; this closes any other path.
   await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);

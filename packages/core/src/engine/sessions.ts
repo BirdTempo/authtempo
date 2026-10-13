@@ -3,7 +3,7 @@ import { readCookie, sessionCookie } from "../http/cookies.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
-import type { StorageAdapter } from "../storage/port.js";
+import type { StorageAdapter, Where } from "../storage/port.js";
 import {
   runAfter,
   runBefore,
@@ -221,6 +221,29 @@ export async function sessionOpened(
 }
 
 /** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). */
+/**
+ * Deletes the sessions that `where` matches, inside the flow's transaction,
+ * and pushes each row it ended to `ended` for the after hook. Each read row
+ * is deleted by id and goes to `ended` only when its delete count is 1: a
+ * sign-out between the read and the delete already fired `afterEnd` for that
+ * row, so a second event would name a row this flow did not end (final fix
+ * wave M-1). The last delete still matches `where`, so a session that
+ * another request adds between the read and the delete goes too, with no
+ * hook. With `ended` null, only the last delete runs.
+ */
+export async function endSessions(
+  tx: StorageAdapter,
+  where: Where<"session">[],
+  ended: SessionRow[] | null,
+): Promise<void> {
+  if (ended)
+    for (const row of await tx.findMany("session", where)) {
+      const n = await tx.delete("session", [{ field: "id", op: "eq", value: row.id }]);
+      if (n === 1) ended.push(row);
+    }
+  await tx.delete("session", where);
+}
+
 export async function sessionsEnded(
   config: ResolvedConfig,
   sessions: readonly SessionRow[],

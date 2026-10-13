@@ -413,6 +413,95 @@ describe("invitation hooks (plan 9d)", () => {
     expect(names()).toEqual(["beforeAddMember", "afterAcceptInvitation"]);
   });
 
+  it("runs the role hooks once on an accept that raises an existing member's role, and no afterAddMember (final fix wave I-1)", async () => {
+    const { auth, calls, names } = recorded();
+    const { owner, organization } = await acme(auth);
+    const bob = await auth.seedUser("bob@example.com");
+    const added = await addMember(auth.config, {
+      user: owner,
+      organizationId: organization.id,
+      userId: bob.id,
+      role: "member",
+    });
+    if (!added.ok) throw new Error(added.code);
+    const invited = await inviteMember(auth.config, {
+      user: owner,
+      organizationId: organization.id,
+      email: "bob@example.com",
+      role: "admin",
+    });
+    if (!invited.ok) throw new Error(invited.code);
+    calls.length = 0;
+    const r = await acceptInvitation(auth.config, { user: bob, token: lastToken(auth), ip: null });
+    if (!r.ok) throw new Error(r.code);
+    expect(r.value.member.role).toBe("admin");
+    expect(names()).toEqual([
+      "beforeAddMember",
+      "beforeUpdateMemberRole",
+      "afterUpdateMemberRole",
+      "afterAcceptInvitation",
+    ]);
+    expect(calls[1]?.[1]).toEqual({
+      organization,
+      member: added.value,
+      role: "admin",
+      memberUser: bob,
+      by: owner,
+    });
+    expect(calls[2]?.[1]).toEqual({
+      organization,
+      member: { ...added.value, role: "admin" },
+      previousRole: "member",
+      memberUser: bob,
+      by: owner,
+    });
+  });
+
+  it("keeps the role and the invitation pending when beforeUpdateMemberRole refuses a raise by accept (final fix wave I-1)", async () => {
+    const { auth, names, calls } = recorded({
+      beforeUpdateMemberRole() {
+        throw hookRefusal("Admins need a paid plan.");
+      },
+    });
+    const { owner, organization } = await acme(auth);
+    const bob = await auth.seedUser("bob@example.com");
+    expect(
+      (
+        await addMember(auth.config, {
+          user: owner,
+          organizationId: organization.id,
+          userId: bob.id,
+          role: "member",
+        })
+      ).ok,
+    ).toBe(true);
+    const invited = await inviteMember(auth.config, {
+      user: owner,
+      organizationId: organization.id,
+      email: "bob@example.com",
+      role: "admin",
+    });
+    if (!invited.ok) throw new Error(invited.code);
+    calls.length = 0;
+    expect(
+      await acceptInvitation(auth.config, { user: bob, token: lastToken(auth), ip: null }),
+    ).toEqual({
+      ok: false,
+      code: "hook_refused",
+      status: 403,
+      message: "Admins need a paid plan.",
+    });
+    expect(names()).toEqual(["beforeAddMember"]);
+    expect(
+      await auth.storage.findOne("member", [{ field: "userId", op: "eq", value: bob.id }]),
+    ).toMatchObject({ role: "member" });
+    expect(
+      await auth.storage.findOne("invitation", [
+        { field: "id", op: "eq", value: invited.value.id },
+      ]),
+    ).toMatchObject({ acceptedAt: null });
+  });
+
   it("fires afterDeclineInvitation with no user through the api, and with the session's user through the route", async () => {
     const { auth, calls } = recorded();
     const { owner, organization } = await acme(auth);
@@ -532,6 +621,34 @@ describe("member and invitation limits (plan 9d)", () => {
       ).ok,
     ).toBe(true);
     expect((await acceptInvitation(auth.config, { user: carol, token, ip: null })).ok).toBe(true);
+  });
+
+  it("membersPerOrganization lets an existing member accept a raise at a full organization (final fix wave I-1, parked 9)", async () => {
+    const { auth } = recorded({}, { membersPerOrganization: 2 });
+    const { owner, organization } = await acme(auth);
+    const bob = await auth.seedUser("bob@example.com");
+    expect(
+      (
+        await addMember(auth.config, {
+          user: owner,
+          organizationId: organization.id,
+          userId: bob.id,
+          role: "admin",
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      (
+        await inviteMember(auth.config, {
+          user: owner,
+          organizationId: organization.id,
+          email: "bob@example.com",
+          role: "owner",
+        })
+      ).ok,
+    ).toBe(true);
+    const r = await acceptInvitation(auth.config, { user: bob, token: lastToken(auth), ip: null });
+    expect(r.ok && r.value.member.role).toBe("owner");
   });
 
   it("pendingInvitationsPerOrganization counts other addresses only, and an expired invitation frees a slot", async () => {

@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import { appErrorName } from "../primitives/app-error.js";
 import {
   constantTimeEqual,
   randomBase64Url,
@@ -396,18 +397,6 @@ function boundProfile(profile: SocialProfile, providerName: string): SocialProfi
 const SUBJECT_MAX = 255;
 /** An image URL. LinkedIn's signed picture URLs pass 255, so the bound is wider than the subject's. */
 const IMAGE_MAX = 2048;
-const ERROR_CLASS_RE = /^[A-Za-z]+Error$/;
-
-/**
- * The name of an error from app code, safe for a log line. The app sets the
- * name, so it is app data and can hold the access token. Only a plain class
- * name such as `TypeError` passes; anything else logs as `Error`.
- */
-function appErrorName(e: unknown): string {
-  if (!(e instanceof Error)) return typeof e;
-  return ERROR_CLASS_RE.test(e.name) ? e.name : "Error";
-}
-
 /**
  * Links the identity to a user by the spec's rules. One transaction per
  * attempt. A `unique_violation` is caught here, outside the transaction,

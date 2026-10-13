@@ -8,6 +8,7 @@ import { type StorageAdapter, StorageError, type Where } from "../storage/port.j
 import { hookGuard } from "./hooks.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import {
+  endSessions,
   openSession,
   prepareSession,
   type ResolvedSession,
@@ -794,10 +795,7 @@ function applyReset(
         // handoff codes, and every other password row, and keeps the new password.
         await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
       } else {
-        ended.reset.push(
-          ...(await tx.findMany("session", [{ field: "userId", op: "eq", value: user.id }])),
-        );
-        await tx.delete("session", [{ field: "userId", op: "eq", value: user.id }]);
+        await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset);
         await deleteHandoffCodes(tx, user.id);
       }
       // The other links for this address. A person who reads the mailbox
@@ -922,9 +920,8 @@ export async function changePassword(
         { field: "userId", op: "eq", value: user.id },
         { field: "id", op: "ne", value: session.id },
       ];
-      // The rows first, for the after hook (plan 9d).
-      ended.push(...(await tx.findMany("session", others)));
-      await tx.delete("session", others);
+      // Each row by id, for the after hook (plan 9d, final fix wave M-1).
+      await endSessions(tx, others, ended);
       // The codes of the changer's own session go too. The row names the
       // user, not the session, and a lost code costs one more handoff.
       await deleteHandoffCodes(tx, user.id);

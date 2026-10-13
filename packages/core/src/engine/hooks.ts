@@ -1,4 +1,5 @@
 import { ERRORS, type ErrorCode } from "../errors.js";
+import { appErrorName } from "../primitives/app-error.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
@@ -274,10 +275,25 @@ function isRefusal(e: unknown): e is Error {
 }
 
 /**
+ * The copy of the event that the hook gets. Core builds the event, so a
+ * clone failure is a core fault, not the app's: it has its own log line, so
+ * that it never reads as a hook failure (parked Minor 4).
+ */
+function eventCopy<E>(name: HookName, event: E): { copy: E } | null {
+  try {
+    return { copy: structuredClone(event) };
+  } catch (e) {
+    console.error("tempo-auth: hook event copy failed", name, appErrorName(e));
+    return null;
+  }
+}
+
+/**
  * Runs a before hook on a copy of the event and answers its value. A
  * refusal throws `HookStop` with `hook_refused`; any other throw writes one
- * line with the hook name and the error name, never the error message, and
- * throws `HookStop` with `hook_failed`.
+ * line with the hook name and the filtered error name (`appErrorName`),
+ * never the error message, and throws `HookStop` with `hook_failed`. A
+ * refusal is matched before the filter, by its class or its name.
  */
 export async function runBefore<E>(
   name: HookName,
@@ -285,8 +301,10 @@ export async function runBefore<E>(
   event: E,
 ): Promise<unknown> {
   if (!hook) return undefined;
+  const copied = eventCopy(name, event);
+  if (!copied) throw new HookStop({ ok: false, code: "hook_failed", status: ERRORS.hook_failed });
   try {
-    return await hook(structuredClone(event));
+    return await hook(copied.copy);
   } catch (e) {
     if (isRefusal(e))
       throw new HookStop({
@@ -295,7 +313,7 @@ export async function runBefore<E>(
         status: ERRORS.hook_refused,
         message: publicHookMessage(e.message),
       });
-    console.error("tempo-auth: before hook failed", name, e instanceof Error ? e.name : typeof e);
+    console.error("tempo-auth: before hook failed", name, appErrorName(e));
     throw new HookStop({ ok: false, code: "hook_failed", status: ERRORS.hook_failed });
   }
 }
@@ -303,7 +321,7 @@ export async function runBefore<E>(
 /**
  * Runs an after hook on a copy of the event. The row is committed, so a
  * throw cannot undo it: one line with the hook name, the row id, and the
- * error name, and the flow goes on (owner decision 1a, 2026-10-13).
+ * filtered error name, and the flow goes on (owner decision 1a, 2026-10-13).
  */
 export async function runAfter<E>(
   name: HookName,
@@ -312,15 +330,12 @@ export async function runAfter<E>(
   rowId: string,
 ): Promise<void> {
   if (!hook) return;
+  const copied = eventCopy(name, event);
+  if (!copied) return;
   try {
-    await hook(structuredClone(event));
+    await hook(copied.copy);
   } catch (e) {
-    console.error(
-      "tempo-auth: after hook failed",
-      name,
-      rowId,
-      e instanceof Error ? e.name : typeof e,
-    );
+    console.error("tempo-auth: after hook failed", name, rowId, appErrorName(e));
   }
 }
 

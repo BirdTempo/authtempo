@@ -329,5 +329,86 @@ describe("organization update and delete hooks (plan 9d)", () => {
     ).toMatchObject({ ok: false, code: "hook_refused", message: "Export your data first." });
     expect(await refusing.auth.storage.findMany("organization", [])).toHaveLength(1);
     expect(await refusing.auth.storage.findMany("member", [])).toHaveLength(1);
+    // The refusal undoes the delete, so no after hook reports it (parked Minor 6).
+    expect(refusing.names()).not.toContain("afterDelete");
+  });
+
+  it("runs beforeUpdate and beforeDelete before the first write (parked Minor 5)", async () => {
+    const seen: unknown[] = [];
+    const { auth } = recorded({
+      async beforeUpdate(e) {
+        seen.push(
+          await auth.storage.findOne("organization", [
+            { field: "id", op: "eq", value: e.organization.id },
+          ]),
+        );
+      },
+      async beforeDelete(e) {
+        seen.push(
+          await auth.storage.findMany("member", [
+            { field: "organizationId", op: "eq", value: e.organization.id },
+          ]),
+        );
+      },
+    });
+    const ada = await auth.seedUser("ada@example.com");
+    const c = await createOrganization(auth.config, { user: ada, slug: "acme", name: "Acme" });
+    if (!c.ok) throw new Error(c.code);
+    const id = c.value.organization.id;
+    const u = await updateOrganization(auth.config, { user: ada, organizationId: id, name: "Two" });
+    expect(u.ok).toBe(true);
+    expect(seen[0]).toMatchObject({ name: "Acme" });
+    expect((await deleteOrganization(auth.config, { user: ada, organizationId: id })).ok).toBe(
+      true,
+    );
+    expect(seen[1]).toHaveLength(1);
+  });
+
+  it("answers hook_failed and keeps the rows when beforeUpdate or beforeDelete throws a plain Error (parked Minor 7)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { auth, names } = recorded({
+      beforeUpdate() {
+        throw new Error("audit store down");
+      },
+      beforeDelete() {
+        throw new Error("audit store down");
+      },
+    });
+    const ada = await auth.seedUser("ada@example.com");
+    const c = await createOrganization(auth.config, { user: ada, slug: "acme", name: "Acme" });
+    if (!c.ok) throw new Error(c.code);
+    const id = c.value.organization.id;
+    expect(
+      await updateOrganization(auth.config, { user: ada, organizationId: id, name: "Two" }),
+    ).toEqual({ ok: false, code: "hook_failed", status: 500 });
+    expect(await deleteOrganization(auth.config, { user: ada, organizationId: id })).toEqual({
+      ok: false,
+      code: "hook_failed",
+      status: 500,
+    });
+    expect(
+      await auth.storage.findOne("organization", [{ field: "id", op: "eq", value: id }]),
+    ).toMatchObject({ name: "Acme" });
+    expect(await auth.storage.findMany("member", [])).toHaveLength(1);
+    expect(names()).not.toContain("afterUpdate");
+    expect(names()).not.toContain("afterDelete");
+    expect(log).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs no update hook for a slug that is taken (parked Minor 7)", async () => {
+    const { auth, calls, names } = recorded();
+    const ada = await auth.seedUser("ada@example.com");
+    const a = await createOrganization(auth.config, { user: ada, slug: "acme", name: "A" });
+    const b = await createOrganization(auth.config, { user: ada, slug: "other", name: "B" });
+    if (!a.ok || !b.ok) throw new Error("create");
+    calls.length = 0;
+    expect(
+      await updateOrganization(auth.config, {
+        user: ada,
+        organizationId: b.value.organization.id,
+        slug: "acme",
+      }),
+    ).toMatchObject({ ok: false, code: "slug_taken" });
+    expect(names()).toEqual([]);
   });
 });

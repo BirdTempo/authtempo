@@ -207,6 +207,18 @@ export async function revokeInvitation(
   return ok({ ok: true });
 }
 
+/** The member row as the API shows it, with the accepting user's address and name. */
+function memberSummary(row: MemberRow, user: UserRow): MemberSummary {
+  return {
+    id: row.id,
+    userId: row.userId,
+    role: row.role,
+    email: user.email,
+    name: user.name,
+    createdAt: row.createdAt,
+  };
+}
+
 async function liveInvitation(
   config: ResolvedConfig,
   token: string,
@@ -220,8 +232,16 @@ async function liveInvitation(
   return ok(row);
 }
 
-/** What the accept transaction answers: the member row and whether it is new, or why it stopped. */
-type Accepted = { row: MemberRow; created: boolean } | "inviter_lost" | "member_limit" | null;
+/**
+ * What the accept transaction answers: the member row, whether it is new, and
+ * for a raise of an existing member the role before and the inviter's user;
+ * or why it stopped.
+ */
+type Accepted =
+  | { row: MemberRow; created: boolean; raised: { previousRole: string; by: UserRow } | null }
+  | "inviter_lost"
+  | "member_limit"
+  | null;
 
 export async function acceptInvitation(
   config: ResolvedConfig,
@@ -296,6 +316,24 @@ export async function acceptInvitation(
         via: "invitation",
         invitation,
       });
+      // An accept that raises an existing member's role is a role change: the role hooks see it
+      // as they see updateMemberRole (final fix wave I-1). Before the consume, so a refusal throws
+      // before any write and the invitation stays pending. `by` is the inviter, whose rank grants
+      // the role; the accepting user when the inviter's user row is gone.
+      const raise = existing !== null && grantRank > rankOf(o.ranks, existing.role);
+      let raisedBy: UserRow = input.user;
+      if (existing && raise) {
+        raisedBy =
+          (await tx.findOne("user", [{ field: "id", op: "eq", value: inv.inviterId }])) ??
+          input.user;
+        await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
+          organization,
+          member: memberSummary(existing, input.user),
+          role: inv.role,
+          memberUser: input.user,
+          by: raisedBy,
+        });
+      }
       // One conditional update consumes the token: two accepts race for one row and only one wins.
       const n = await tx.update(
         "invitation",
@@ -307,14 +345,18 @@ export async function acceptInvitation(
       );
       if (n === 0) return null;
       if (existing) {
-        if (rankOf(o.ranks, inv.role) > rankOf(o.ranks, existing.role)) {
+        if (raise) {
           await tx.update("member", [{ field: "id", op: "eq", value: existing.id }], {
             role: inv.role,
             updatedAt: now,
           });
-          return { row: { ...existing, role: inv.role, updatedAt: now }, created: false };
+          return {
+            row: { ...existing, role: inv.role, updatedAt: now },
+            created: false,
+            raised: { previousRole: existing.role, by: raisedBy },
+          };
         }
-        return { row: existing, created: false };
+        return { row: existing, created: false, raised: null };
       }
       const row: MemberRow = {
         id: newId(now),
@@ -325,7 +367,7 @@ export async function acceptInvitation(
         updatedAt: now,
       };
       await tx.create("member", row);
-      return { row, created: true };
+      return { row, created: true, raised: null };
     });
   } catch (err) {
     if (err instanceof HookStop) return err.result;
@@ -338,14 +380,20 @@ export async function acceptInvitation(
   if (accepted === "member_limit") return fail("member_limit");
   // Both a lost race for the token and a lost inviter answer invalid_token: the link is dead either way.
   if (accepted === null || accepted === "inviter_lost") return fail("invalid_token");
-  const member: MemberSummary = {
-    id: accepted.row.id,
-    userId: accepted.row.userId,
-    role: accepted.row.role,
-    email: input.user.email,
-    name: input.user.name,
-    createdAt: accepted.row.createdAt,
-  };
+  const member = memberSummary(accepted.row, input.user);
+  if (accepted.raised)
+    await runAfter(
+      "organization.afterUpdateMemberRole",
+      hooks.afterUpdateMemberRole,
+      {
+        organization,
+        member,
+        previousRole: accepted.raised.previousRole,
+        memberUser: input.user,
+        by: accepted.raised.by,
+      },
+      member.id,
+    );
   if (accepted.created)
     await runAfter(
       "organization.afterAddMember",

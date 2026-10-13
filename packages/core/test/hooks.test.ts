@@ -207,6 +207,62 @@ describe("the runners (plan 9d)", () => {
     ]);
   });
 
+  it("logs a filtered error name: a name that holds data logs as Error, in both runners (final fix wave M-3)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const leaky = () => {
+      const e = new Error("x");
+      e.name = "tok_secret123 for acme";
+      throw e;
+    };
+    expect(
+      await hookGuard(async (): Promise<Result<true>> => {
+        await runBefore("organization.beforeCreate", leaky, {});
+        return ok(true);
+      }),
+    ).toEqual({ ok: false, code: "hook_failed", status: 500 });
+    await runAfter("organization.afterCreate", leaky, {}, "ORG1");
+    expect(log.mock.calls).toEqual([
+      ["tempo-auth: before hook failed", "organization.beforeCreate", "Error"],
+      ["tempo-auth: after hook failed", "organization.afterCreate", "ORG1", "Error"],
+    ]);
+  });
+
+  it("answers hook_refused for a plain Error named HookRefusal, as from a second copy of the package (parked Minor 3)", async () => {
+    const r = await hookGuard(async (): Promise<Result<true>> => {
+      await runBefore(
+        "organization.beforeCreate",
+        () => {
+          const e = new Error("Other copy.");
+          e.name = "HookRefusal";
+          throw e;
+        },
+        {},
+      );
+      return ok(true);
+    });
+    expect(r).toEqual({ ok: false, code: "hook_refused", status: 403, message: "Other copy." });
+  });
+
+  it("logs a distinct line and calls no hook when the event cannot be copied (parked Minor 4)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const hook = vi.fn();
+    const event = { f: () => 1 };
+    expect(
+      await hookGuard(async (): Promise<Result<true>> => {
+        await runBefore("organization.beforeCreate", hook, event);
+        return ok(true);
+      }),
+    ).toEqual({ ok: false, code: "hook_failed", status: 500 });
+    await expect(
+      runAfter("organization.afterCreate", hook, event, "ORG1"),
+    ).resolves.toBeUndefined();
+    expect(hook).not.toHaveBeenCalled();
+    expect(log.mock.calls).toEqual([
+      ["tempo-auth: hook event copy failed", "organization.beforeCreate", "DataCloneError"],
+      ["tempo-auth: hook event copy failed", "organization.afterCreate", "DataCloneError"],
+    ]);
+  });
+
   it("passes any error that is not a hook stop", async () => {
     await expect(
       hookGuard(async (): Promise<Result<true>> => {

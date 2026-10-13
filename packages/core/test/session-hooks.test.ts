@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
+import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { hookRefusal, type SessionHooks } from "../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { addMember, createOrganization, removeMember } from "../src/engine/organizations.js";
+import {
+  passkeyAuthenticationOptions,
+  passkeyRegistrationOptions,
+  verifyPasskeyAuthentication,
+  verifyPasskeyRegistration,
+} from "../src/engine/passkeys.js";
 import {
   changePassword,
   passwordSignIn,
@@ -14,7 +21,9 @@ import {
 import { createSession, destroySession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
+import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
+import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
@@ -252,6 +261,113 @@ describe("session create hooks (plan 9d)", () => {
       .filter(([name]) => name === "afterCreate")
       .map(([, e]) => (e as { via: string }).via);
     expect(vias).toEqual(["password", "password", "password", "password"]);
+  });
+
+  it("fires beforeCreate and afterCreate once each, with the stored row, on a social, a passkey, and a handoff sign-in (parked Minor 12)", async () => {
+    /** The after hook's events, checked against the stored session row. */
+    const check = async (
+      r: { calls: [string, unknown][]; auth: ReturnType<typeof makeAuth> },
+      via: string,
+      token: string,
+    ) => {
+      const created = r.calls.filter(([name]) => name === "afterCreate").map(([, e]) => e);
+      expect(r.calls.filter(([name]) => name === "beforeCreate")).toHaveLength(1);
+      expect(created).toHaveLength(1);
+      const stored = await resolveSession(r.auth.config, token);
+      expect(created[0]).toEqual({ session: stored?.session, user: stored?.user, via });
+    };
+
+    // Social.
+    const jwtTokens: Record<string, FakeIdToken> = {};
+    const { fetchFn } = tokenEndpoint("idtok-default");
+    const social = recorded(
+      {},
+      { social: { google: GOOGLE, fetch: fetchFn }, jwt: fakeJwt(jwtTokens) },
+    );
+    const started = await startSocial(social.auth.config, {
+      provider: "google",
+      next: "/",
+      ip: null,
+    });
+    if (!started.ok) throw new Error(started.code);
+    const url = new URL(started.value.location);
+    jwtTokens["idtok-default"] = {
+      audience: GOOGLE.clientId,
+      issuer: "https://accounts.google.com",
+      claims: {
+        sub: "g-1",
+        email: "ada@example.com",
+        email_verified: true,
+        name: "Ada",
+        picture: "https://p/a.png",
+        nonce: url.searchParams.get("nonce") ?? "",
+      },
+    };
+    const s = await completeSocial(social.auth.config, {
+      provider: "google",
+      state: url.searchParams.get("state") ?? "",
+      code: "code-1",
+      error: null,
+      bindToken: started.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+    if (!s.ok) throw new Error(s.code);
+    await check(social, "social", s.value.token);
+
+    // Passkey.
+    const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
+    const passkey = recorded({}, { passkey: RP });
+    const ada = await passkey.auth.seedUser("ada@example.com");
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
+    const reg = await passkeyRegistrationOptions(passkey.auth.config, { user: ada });
+    if (!reg.ok) throw new Error(reg.code);
+    const stored = await verifyPasskeyRegistration(passkey.auth.config, {
+      user: ada,
+      response: await soft.register(reg.value.challenge, new TextEncoder().encode(ada.id)),
+    });
+    if (!stored.ok) throw new Error(stored.code);
+    const options = await passkeyAuthenticationOptions(passkey.auth.config, { ip: null });
+    if (!options.ok) throw new Error(options.code);
+    passkey.calls.length = 0;
+    const p = await verifyPasskeyAuthentication(passkey.auth.config, {
+      response: await soft.authenticate(options.value.challenge),
+      ip: null,
+      userAgent: null,
+    });
+    if (!p.ok) throw new Error(p.code);
+    await check(passkey, "passkey", p.value.token);
+
+    // Handoff.
+    const handoff = recorded({}, { handoff: { schemes: ["consumera://"] } });
+    const grace = await handoff.auth.seedUser("grace@example.com");
+    const verifier = randomBase64Url(32);
+    const h = await startHandoff(handoff.auth.config, {
+      challenge: await sha256Base64Url(verifier),
+      redirect: "consumera://auth",
+      ip: null,
+    });
+    if (!h.ok) throw new Error(h.code);
+    const browser = await createSession(handoff.auth.config, {
+      userId: grace.id,
+      ip: null,
+      userAgent: null,
+    });
+    const c = await continueHandoff(handoff.auth.config, {
+      handoffId: h.value.handoffId,
+      userId: grace.id,
+      sessionId: browser.session.id,
+    });
+    if (!c.ok) throw new Error(c.code);
+    handoff.calls.length = 0;
+    const redeemed = await redeemHandoff(handoff.auth.config, {
+      code: new URL(c.value.location).searchParams.get("code") ?? "",
+      verifier,
+      ip: null,
+      userAgent: null,
+    });
+    if (!redeemed.ok) throw new Error(redeemed.code);
+    await check(handoff, "handoff", redeemed.value.token);
   });
 
   it("keeps the session and answers the sign-in when afterCreate throws, with one log line", async () => {
@@ -515,6 +631,94 @@ describe("session end hooks (plan 9d)", () => {
     expect(ended.map((e) => (e as { session: { id: string } }).session.id)).not.toContain(
       mine.value.session.id,
     );
+  });
+
+  it("fires one afterEnd per row when a sign-out ends a row between the flow's read and its delete (final fix wave M-1)", async () => {
+    const { auth, calls } = recorded();
+    /**
+     * Signs out `token` right after the next session read inside a
+     * transaction. The memory adapter lets a write outside a transaction run
+     * while one is open, as Postgres read committed and D1 do.
+     */
+    const signOutAfterRead = (token: string) => {
+      const original = auth.storage.transaction.bind(auth.storage);
+      let armed = true;
+      auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+        original((tx) =>
+          fn({
+            ...tx,
+            findMany: async (m, w, o) => {
+              const rows = await tx.findMany(m, w, o);
+              if (armed && m === "session") {
+                armed = false;
+                await destroySession(auth.config, token);
+              }
+              return rows;
+            },
+          }),
+        );
+      return () => {
+        auth.storage.transaction = original;
+      };
+    };
+    const perRow = () => {
+      const ids = calls
+        .filter(([name]) => name === "afterEnd")
+        .map(([, e]) => (e as { session: { id: string } }).session.id);
+      return { count: ids.length, distinct: new Set(ids).size };
+    };
+
+    // The reset.
+    await signUpAndVerify(auth, "ada@example.com", PASSWORD);
+    const two = await signIn(auth);
+    if (!two.ok) throw new Error(two.code);
+    calls.length = 0;
+    let restore = signOutAfterRead(two.value.token);
+    expect((await reset(auth)).ok).toBe(true);
+    restore();
+    expect(perRow()).toEqual({ count: 2, distinct: 2 });
+    expect(calls).toContainEqual(["afterEnd", { session: two.value.session, reason: "sign_out" }]);
+
+    // The change: the changer's session stays; every other session ends once, one by the sign-out.
+    await signUpAndVerify(auth, "cara@example.com", PASSWORD);
+    const caraIn = () =>
+      passwordSignIn(auth.config, {
+        email: "cara@example.com",
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+    const mine = await caraIn();
+    const other = await caraIn();
+    if (!mine.ok || !other.ok) throw new Error("sign-in");
+    const session = await resolveSession(auth.config, mine.value.token);
+    if (!session) throw new Error("no session");
+    const others = (
+      await auth.storage.findMany("session", [
+        { field: "userId", op: "eq", value: session.user.id },
+      ])
+    ).filter((x) => x.id !== mine.value.session.id);
+    expect(others.length).toBeGreaterThanOrEqual(2);
+    calls.length = 0;
+    restore = signOutAfterRead(other.value.token);
+    const changed = await changePassword(auth.config, {
+      session,
+      currentPassword: PASSWORD,
+      newPassword: "another long password",
+    });
+    restore();
+    expect(changed.ok).toBe(true);
+    expect(perRow()).toEqual({ count: others.length, distinct: others.length });
+
+    // The claim: a magic link proves bob's address and ends the claimant's two sessions.
+    const bob = await signUp(auth, "bob@example.com");
+    if (!bob.ok) throw new Error(bob.code);
+    await createSession(auth.config, { userId: bob.value.user.id, ip: null, userAgent: null });
+    calls.length = 0;
+    restore = signOutAfterRead(bob.value.token);
+    expect((await magicSignIn(auth, "bob@example.com")).ok).toBe(true);
+    restore();
+    expect(perRow()).toEqual({ count: 2, distinct: 2 });
   });
 
   it("fires afterEnd with sign_out and with expired, once each, and the sweep fires none", async () => {
