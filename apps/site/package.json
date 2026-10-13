@@ -1,0 +1,32 @@
+{
+  "name": "@authtempo/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "astro build && vitest run",
+    "preview": "astro build && wrangler dev"
+  },
+  "dependencies": {
+    "@authtempo/adapter-d1": "workspace:*",
+    "@authtempo/adapter-postgres": "workspace:*",
+    "@authtempo/client": "workspace:*",
+    "@authtempo/compat-better-auth": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@authtempo/handoff": "workspace:*",
+    "@authtempo/legacy-hashes": "workspace:*"
+  },
+  "devDependencies": {
+    "@astrojs/markdown-remark": "7.3.2",
+    "@astrojs/starlight": "0.42.6",
+    "@types/node": "24.19.1",
+    "astro": "7.3.8",
+    "postgres": "3.4.9",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}

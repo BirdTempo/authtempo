@@ -14,6 +14,8 @@
     "packages/**/vitest*.config.ts",
     "packages/**/vitest*.config.mts",
     "examples/**/vitest*.config.ts",
-    "examples/**/vitest*.config.mts"
+    "examples/**/vitest*.config.mts",
+    "apps/**/vitest*.config.ts",
+    "apps/**/vitest*.config.mts"
   ]
 }

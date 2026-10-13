@@ -1,6 +1,8 @@
 packages:
   - packages/*
   - examples/*
+  # The docs site (plan 11a). An app, not a library: it is never published.
+  - apps/*
 
 # A version younger than one day is the common window for a malicious publish.
 minimumReleaseAge: 1440
