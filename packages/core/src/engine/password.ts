@@ -1069,8 +1069,7 @@ export async function verifyPassword(
   config: ResolvedConfig,
   input: PasswordReauth,
 ): Promise<Result<{ verified: true }>> {
-  const pw = config.password;
-  if (!pw) return fail("not_found");
+  if (!config.password) return fail("not_found");
   if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
     return fail("rate_limited");
   const user = await config.storage.findOne("user", [
@@ -1078,15 +1077,32 @@ export async function verifyPassword(
   ]);
   if (user && !(await config.limiter.allow(`password:email:${user.email}`, SIGN_IN_PER_EMAIL)))
     return fail("rate_limited");
-  if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
-  const row = user
-    ? await config.storage.findOne("password", [{ field: "userId", op: "eq", value: user.id }])
-    : null;
+  return checkUserPassword(config, input.userId, input.password);
+}
+
+/**
+ * The check of `verifyPassword` with no limit (plan 9h): the caller counts
+ * on its own key first. The TOTP setup does, so that a stolen session that
+ * guesses there cannot hold the owner's password sign-in at `rate_limited`.
+ * A missing user, a pending row, and a legacy marker run the dummy verify and
+ * answer `invalid_credentials`, so the time does not tell them apart.
+ */
+export async function checkUserPassword(
+  config: ResolvedConfig,
+  userId: string,
+  password: string,
+): Promise<Result<{ verified: true }>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  if ([...password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
+  const row = await config.storage.findOne("password", [
+    { field: "userId", op: "eq", value: userId },
+  ]);
   if (!row || row.hash.startsWith(PENDING_HASH_PREFIX) || row.hash === LEGACY_VERIFY_HASH) {
-    await pw.hash.verify(input.password, await pw.hash.dummy());
+    await pw.hash.verify(password, await pw.hash.dummy());
     return fail("invalid_credentials");
   }
-  return (await pw.hash.verify(input.password, row.hash)).ok
+  return (await pw.hash.verify(password, row.hash)).ok
     ? ok({ verified: true })
     : fail("invalid_credentials");
 }
