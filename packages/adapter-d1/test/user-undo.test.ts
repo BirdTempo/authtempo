@@ -172,6 +172,29 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         createdAt: t0,
         updatedAt: t0,
       }),
+    oauthConsent: (db) =>
+      db.create("oauthConsent", {
+        id: "c1",
+        userId: "u1",
+        clientId: "cl_x",
+        scopes: [],
+        createdAt: t0,
+        updatedAt: t0,
+      }),
+    oauthToken: (db) =>
+      db.create("oauthToken", {
+        id: "c1",
+        tokenHash: "h-c1",
+        familyId: "f1",
+        userId: "u1",
+        clientId: "cl_x",
+        scopes: [],
+        resource: "https://api.example.com/mcp",
+        expiresAt: t0,
+        usedAt: null,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
   };
 
   it("covers every child model of the schema", () => {

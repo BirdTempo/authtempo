@@ -6,6 +6,7 @@ export {
   createClient,
   type InvitationJSON,
   type MemberJSON,
+  type OAuthGrantJSON,
   type OrganizationJSON,
   type PasskeySummaryJSON,
   type TotpStatusJSON,

@@ -65,6 +65,16 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/totp/verify` | `{ challenge, code }` or `{ challenge, backupCode }`, `trustDevice?` | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie, and the trust cookie when `trustDevice` is true; 400 `invalid_code`, `too_many_attempts` (the fifth wrong code), `invalid_token` (unknown, spent, or older than 5 minutes), `invalid_body`; 429 `rate_limited` |
 | GET | `/totp/challenge` | `?challenge=` | 200 HTML form (`totp.challengePage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed challenge. No side effect |
 | POST | `/totp/challenge` | form `challenge`, `code` or `backupCode`, `trustDevice=1` | 302 to `next` with the cookies; back to the form on `invalid_code`; 302 to `/?auth_error=<code>` otherwise |
+| GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
+| GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
+| POST | `/oauth/register` | JSON client metadata (RFC 7591) | 201 `{ client_id, client_id_issued_at, client_name?, redirect_uris, token_endpoint_auth_method: "none", grant_types, response_types }`; 400 `invalid_redirect_uri`, `invalid_client_metadata`; 429. Only with `oauth` and `registration.dynamic` |
+| GET | `/oauth/authorize` | the OAuth 2.1 parameters, PKCE S256, `resource`, `scope`, `state`, `nonce`, `prompt` | 302 to `/oauth/sign-in` with no session; 200 the consent page; 302 to the client with `code`, `state`, and `iss` when a consent covers the scopes; 302 with `error` for a bad request; 400 or 401 JSON with no redirect for a bad client or redirect URI; 429 |
+| POST | `/oauth/authorize` | the consent form, `decision=allow` or `deny`; session; `Origin` equal to `baseURL` | 302 to the client with `code` or `error=access_denied`; 401; 403 |
+| GET | `/oauth/sign-in` | `?next=<basePath>/oauth/authorize?…` | the sign-in page, which lands back on `next`; 302 to `<appURL>/?auth_error=invalid_request` for another `next` |
+| POST | `/oauth/token` | form: `grant_type=authorization_code` with `code`, `code_verifier`, `client_id`, `redirect_uri`, `resource?`; or `grant_type=refresh_token` with `refresh_token`, `client_id`, `scope?`, `resource?` | `{ access_token, token_type: "Bearer", expires_in, scope, refresh_token?, id_token? }`; 400 `invalid_grant`, `invalid_target`, `invalid_scope`, `invalid_request`, `unsupported_grant_type`; 401 `invalid_client`; 429 |
+| POST | `/oauth/revoke` | form `token`, `client_id?` (RFC 7009) | 200 `{}` for any token, known or not; a refresh token's family goes; 400 `invalid_request` for a body that is not a form; 429 |
+| GET, POST | `/oauth/userinfo` | `Authorization: Bearer <access token>` with `openid` | `{ sub, email?, email_verified?, name?, picture? }` by scope; 401 `invalid_token`; 403 `insufficient_scope` |
+| GET | `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration` | none | the issuer's metadata, `cache-control: public, max-age=300`; also at the origin root through `auth.wellKnown`. `/.well-known/oauth-protected-resource` answers 404 here |
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
@@ -473,6 +483,74 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 - `api.totp` holds the same operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
 - The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. An app whose `appName` holds a colon sets `totp.issuer`: the key URI uses the colon to split the issuer from the account.
 
+## JWT minting
+
+`jwtMint` (plan 9g) is on by default; `jwtMint: false` removes `/jwks`, `/token`, and `api.jwt`. A session JWT is a signed statement about a session user for a server that cannot call `auth.session`.
+
+- The key: `jwtMint.alg` is `EdDSA` (Ed25519, the default) or `ES256` (ECDSA P-256). Core writes the first key at the first use, seals the private half with AES-256-GCM under a key from `secret`, and opens it for one signature at a time. `api.jwt.rotate()` makes a new key; the old one verifies for 24 hours and signs nothing, and the sweep deletes it after that. A new app `secret` opens no old key: the key retires at the next signature with one log line, and a new key signs.
+- Two live versions: during a gradual deployment, two versions of the app with different secrets, or with different `jwtMint.alg` values, retire each other's key at each mint. The JWKS then grows by one key per mint for 24 hours (core lists the signing key and at most 100 retired keys, the last retired first), and a mint can throw after three tries (`tempo-auth: no signing key after three tries`). Finish the deployment: when one version serves every request, one key signs again.
+- The token: header `{ alg, kid, typ: "JWT" }`; claims `iss` (`baseURL + basePath`), `sub` (the user id), `aud` (`jwtMint.audience`, default `baseURL`), `iat`, `exp` (`jwtMint.ttlMinutes`, 1 to 60, default 15), `sid` (the session id), `email`, `email_verified`, `name`, and `org` (the active organization id or null). `jwtMint.claims(user, session)` adds names and sets none of these, nor `nbf` or `jti`.
+- A resource server verifies the signature against `<basePath>/jwks`, `iss`, `aud`, `exp`, and the header `typ`: `JWT` for a session JWT, `at+jwt` for an OAuth access token (with jose, `jwtVerify(token, jwks, { issuer, audience, typ: "JWT" })`). One key signs both kinds with one issuer, so a server that skips `typ` can take one kind for the other. It keeps the key set in a cache. The token is a bearer for its life: a sign-out does not end it. Keep `ttlMinutes` short, and where a sign-out must end access at once, check the `sid` claim with `api.jwt.sessionLive({ sid })`: true while the session exists and is not expired.
+- Core refuses a config where a `jwtMint.audience` entry is also an `oauth.resources` entry: a server of that audience would take an access token of any client and scope as a session JWT. The default audience is `baseURL`, so a resource equal to `baseURL` needs its own `jwtMint.audience`.
+- `api.jwt.mint({ userId, sessionId })`, `api.jwt.verify(token)` (this instance's session JWTs only), `api.jwt.rotate()`, `api.jwt.jwks()`, `api.jwt.sessionLive({ sid })`, and `client.jwt.token()` hold the same operations.
+
+## OAuth 2.1 and OIDC provider
+
+`oauth` (plan 9g) makes core the authorization server for agents and MCP clients. It is off by default. With `oauth` set, `oauth.resources` must name 1 to 20 resources, and core refuses the config with `jwtMint: false`.
+
+```ts
+const auth = createAuth({
+  // ...
+  oauth: {
+    resources: ["https://api.example.com/mcp"],
+    scopes: { "mcp:tools": "Use your tools" },
+    // A client id may be the https URL of its metadata document. Pass your
+    // own fetch that refuses private addresses, or set registration.cimd to false.
+    fetch: guardedFetch,
+  },
+});
+
+export default {
+  async fetch(request: Request) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/.well-known/")) return auth.wellKnown(request);
+    if (url.pathname.startsWith("/auth/")) return auth.handle(request);
+    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
+      const metadata = 'resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"';
+      const c = await auth.caller(request);
+      if (c?.kind !== "oauth")
+        return Response.json({ error: "unauthorized" }, {
+          status: 401,
+          headers: { "www-authenticate": `Bearer ${metadata}` },
+        });
+      // Check the scope of each tool: a token with only openid must not call it.
+      if (!c.scopes.includes("mcp:tools"))
+        return Response.json({ error: "insufficient_scope" }, {
+          status: 403,
+          headers: {
+            "www-authenticate": `Bearer error="insufficient_scope", scope="mcp:tools", ${metadata}`,
+          },
+        });
+      // c.user, c.clientId, c.scopes, c.resource
+    }
+    return new Response("not found", { status: 404 });
+  },
+};
+```
+
+- `auth.wellKnown` serves, at the origin root, the authorization server metadata (RFC 8414) at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-authorization-server<basePath>`, the same document at `/.well-known/openid-configuration` and `/.well-known/openid-configuration<basePath>`, and the protected resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource<path>` for each resource. The root form `/.well-known/oauth-protected-resource` answers the first resource on the request's origin. Every document is public, with `access-control-allow-origin: *`. A method other than GET answers 405, `OPTIONS` 204, and any other path 404.
+- Clients are public: no client secret, `token_endpoint_auth_method: "none"`, and PKCE S256 on every code. A client registers at `POST /oauth/register`, or its client id is the https URL of its metadata document: core fetches it through `oauth.fetch` with `redirect: "manual"`, 10 seconds, and 64 KB, and keeps it one hour per isolate. The document's `client_id` must equal its URL. Core refuses a document URL that is not in canonical form, or whose host is an IP literal, `localhost`, a single label, a `.local`, `.home.arpa`, or `.internal` name, or the host of `baseURL` on any port. A public name can still resolve to a private address, so `oauth.fetch` must refuse private addresses too.
+- A redirect URI is https, http on 127.0.0.1 or localhost with any port, or a private-use scheme, and it must match exactly. Registration refuses `http://[::1]`: the consent page's policy cannot name an IPv6 literal, so a loopback client uses 127.0.0.1.
+- The authorize step sends a browser with no session to core's sign-in page and back. It refuses an unverified user. `prompt=login` with a session answers `login_required`: core does not end a live session to sign the person in again. `prompt=select_account` is accepted and ignored: a session holds one account, so core cannot offer a selection. With no session the sign-in page is that new sign-in. An authorize URL longer than 2048 characters with no session answers `invalid_request` to the client, because the way back through the sign-in page cannot hold it.
+- The consent page names the client by its own claimed name and the resource of the request. A consent is one decision per user and client for every resource of this instance: the scopes, not the resources, are the unit of consent. With more than one `oauth.resources` entry, the page states that the client may ask for the other resources with the same scopes, and it asks for no new consent then. A new scope asks again. `oauth.consentPage` replaces the page; its input has `resource` and `otherResources`.
+- An access token is a JWT (`typ: "at+jwt"`) with `aud` equal to the resource, `scope`, `client_id`, and `sub`. It lives `accessTtlMinutes` (default `jwtMint.ttlMinutes`) and cannot be revoked; a sign-out does not end it. `auth.caller` answers `kind: "oauth"` only under the resource of the token: the `oauth.resources` entry on the request's origin whose path is the request path or a parent of it at a `/` boundary, the longest first. The cookie still wins. `auth.session` never accepts an access token, so core's own routes answer 401 to it.
+- A refresh token (`offline_access`) rotates at each use. A used refresh token presented again deletes the whole family. `POST /oauth/revoke` deletes a family.
+- Grants: a grant is the consent of one user for one client, with the client's refresh tokens. `api.oauth.grants({ userId })` lists each consent of the user, newest first: `clientId`, `clientName`, `scopes`, `createdAt`, and `refreshTokens` (the count of live refresh tokens). `api.oauth.revoke({ userId, clientId })` deletes the consent and every refresh token of the user and the client, and answers `{ ok: true }` also when nothing existed. A code from before the revoke gives no token. The session routes `GET /oauth/grants` (`{ grants }`) and `POST /oauth/grants/revoke` (`{ clientId }`) and the calls `client.oauth.grants()` and `client.oauth.revoke({ clientId })` do the same for the signed-in person; a `tk_` token and an access token answer 401, and the POST takes the Origin rule of every session POST. Build a "connected apps" page on them. An access token that the client holds lives on to its `exp`.
+- A password reset of either kind (the link and the code) and a password change delete every refresh token and every pending authorization code of the user, in the same transaction as the session delete, so a code from before the reset gives no token. The consents stay: the next authorize asks for no consent, but each client must send the person through the authorize step again.
+- With `openid` the code exchange adds an ID token (`aud` = the client id, `nonce`, `sid`, `at_hash`, and `email` or `name` and `picture` by scope), and `/oauth/userinfo` answers the same claims. The ID token uses the `jwtMint.alg` (EdDSA or ES256). OIDC Discovery asks a provider to support RS256 too; core does not, so a relying party that accepts RS256 only cannot use it.
+- Limits: `oauth-register:ip` 10 per hour; `oauth-authorize:ip` 60 per 15 minutes; `oauth-token:ip` 60 per 15 minutes, shared with the revoke.
+- Not in version 1: a confidential client with a secret, a browser-based client on another origin (the token and register endpoints send no CORS headers to an origin that is not trusted), and a token exchange or a device flow.
+
 ## API tokens
 
 A script or a CLI signs in with an API token, not with a password. A
@@ -485,6 +563,7 @@ const c = await auth.caller(request);
 if (!c) return Response.json({ error: "unauthorized" }, { status: 401 });
 // c.kind === "session": c.user, c.session, c.refreshed
 // c.kind === "token":   c.user, c.apiToken, c.activeOrganizationId
+// c.kind === "oauth":   c.user, c.clientId, c.scopes, c.resource, c.tokenId, c.expiresAt (plan 9g)
 const res = Response.json({ id: c.user.id });
 // After a sliding refresh, renew the cookie or the browser drops it early.
 const renewed = c.kind === "session" ? auth.sessionCookie(request, c) : null;
@@ -796,6 +875,8 @@ Since plan 9f it also deletes trusted devices past their expiry and answers `tru
 
 Since the plan 9f final fix wave it also deletes TOTP setups that no enable confirmed within 15 minutes and answers `totpSetups`.
 
+Since plan 9g it also deletes signing keys retired more than 24 hours ago (`jwks`), refresh tokens past their expiry (`oauthTokens`), and up to 100 OAuth clients unseen for 90 days with no consent and no refresh token (`oauthClients`).
+
 ```ts
 export default {
   fetch: (request: Request) => auth.handle(request),
@@ -878,6 +959,7 @@ Without a trigger, expired rows stay in the database.
 - Core at version 4 needs the `0004_schema_v4` migration in both adapters. Version 4 adds the password table.
 - Core at version 5 needs the `0005_schema_v5` migration in both adapters. Version 5 adds the API token table, `ta_api_token`.
 - Core at version 6 needs the `0006_schema_v6` migration in both adapters. Version 6 adds `ta_totp` and `ta_trusted_device` (plan 9f).
+- Core at version 7 needs the `0007_schema_v7` migration in both adapters. Version 7 adds `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, and `ta_oauth_token` (plan 9g).
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

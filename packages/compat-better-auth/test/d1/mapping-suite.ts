@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
-import { schema } from "@tempo-auth/core";
+import { type ModelName, schema } from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
-import { columnName, TABLES } from "@tempo-auth/core/sql";
+import { columnName, TABLES, uniqueIndexName } from "@tempo-auth/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import {
@@ -28,12 +28,36 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
     TABLE_FIELDS[t].includes(f) ? n.column(t, f) : `"${naming.casing === "snake" ? snake(f) : f}"`;
   const truncate = async () => {
     await env.DB.batch(
-      [...BETTER_AUTH_TABLES.map(T), "ta_limit", "ta_totp", "ta_trusted_device"].map((t) =>
-        env.DB.prepare(`DELETE FROM ${t}`),
-      ),
+      [
+        ...BETTER_AUTH_TABLES.map(T),
+        "ta_limit",
+        "ta_totp",
+        "ta_trusted_device",
+        "ta_jwk",
+        "ta_oauth_client",
+        "ta_oauth_consent",
+        "ta_oauth_token",
+      ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     );
   };
   return { n, T, C, truncate };
+}
+
+/** Core's unique indexes and indexes of one model, with core's names and column order. */
+function expectedIndexes(model: ModelName) {
+  const cols = (fields: readonly string[]) => fields.map(columnName);
+  return [
+    ...schema[model].unique.map((f) => ({
+      name: uniqueIndexName(model, f),
+      unique: true,
+      columns: cols(f),
+    })),
+    ...schema[model].indexes.map((f) => ({
+      name: `ix_${TABLES[model]}__${cols(f).join("__")}`,
+      unique: false,
+      columns: cols(f),
+    })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -71,8 +95,15 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
   describe(`the Better Auth mapping on D1, ${label}`, () => {
     beforeEach(truncate);
 
-    it("marks NOT NULL on ta_totp and ta_trusted_device exactly as core's schema does (core's parity check)", async () => {
-      for (const model of ["totp", "trustedDevice"] as const) {
+    it("marks NOT NULL on core's own tables exactly as core's schema does (core's parity check, plans 9f and 9g)", async () => {
+      for (const model of [
+        "totp",
+        "trustedDevice",
+        "jwk",
+        "oauthClient",
+        "oauthConsent",
+        "oauthToken",
+      ] as const) {
         const info = await env.DB.prepare(`PRAGMA table_info(${TABLES[model]})`).all<{
           name: string;
           notnull: number;
@@ -83,6 +114,34 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
           Object.entries(fields).map(([f, def]) => [columnName(f), def.nullable ? 0 : 1]),
         );
         expect({ model, notnull: actual }).toEqual({ model, notnull: expected });
+      }
+    });
+
+    it("has core's unique indexes and indexes on core's own tables, with core's names and column order (core's parity check, plan 9g fix round 1)", async () => {
+      for (const model of [
+        "totp",
+        "trustedDevice",
+        "jwk",
+        "oauthClient",
+        "oauthConsent",
+        "oauthToken",
+      ] as const) {
+        const list = await env.DB.prepare(`PRAGMA index_list(${TABLES[model]})`).all<{
+          name: string;
+          unique: number;
+          origin: string;
+        }>();
+        const actual = [];
+        for (const ix of list.results.filter((i) => i.origin === "c")) {
+          const info = await env.DB.prepare(`PRAGMA index_info(${ix.name})`).all<{
+            seqno: number;
+            name: string;
+          }>();
+          const columns = [...info.results].sort((a, b) => a.seqno - b.seqno).map((c) => c.name);
+          actual.push({ name: ix.name, unique: ix.unique === 1, columns });
+        }
+        actual.sort((a, b) => a.name.localeCompare(b.name));
+        expect({ model, indexes: actual }).toEqual({ model, indexes: expectedIndexes(model) });
       }
     });
 

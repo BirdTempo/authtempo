@@ -2,6 +2,7 @@ import type {
   ApiTokenSummary,
   InvitationSummary,
   MemberSummary,
+  OAuthGrantSummary,
   OrganizationSummary,
   PasskeySummary,
   PublicKeyCredentialCreationOptionsJSON,
@@ -29,6 +30,9 @@ export type ApiTokenSummaryJSON = Omit<
   lastUsedAt: string | null;
   createdAt: string;
 };
+
+/** One OAuth grant of the signed-in person (plan 9g final fix wave). */
+export type OAuthGrantJSON = Omit<OAuthGrantSummary, "createdAt"> & { createdAt: string };
 
 /** The password sign-in's answer for a user with the second factor on (plan 9f): no session yet. */
 export interface TwoFactorChallengeJSON {
@@ -205,6 +209,25 @@ export interface Client {
     current(): Promise<
       ClientResult<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>
     >;
+  };
+  /**
+   * A signed JWT of the caller's session (plan 9g), for a server that
+   * verifies it offline against `<basePath>/jwks`. Needs a session: a `tk_`
+   * token answers `unauthorized`. It lives `jwtMint.ttlMinutes`; a sign-out does not end it.
+   */
+  jwt: {
+    token(): Promise<ClientResult<{ token: string }>>;
+  };
+  /**
+   * The OAuth grants of the signed-in person (plan 9g final fix wave), for
+   * a "connected apps" page. Both calls need a session: a token answers
+   * `unauthorized`. Both answer `not_found` when the server runs without
+   * `oauth`. `revoke` ends the client's consent and refresh tokens, and
+   * answers `{ ok: true }` also when the client had none.
+   */
+  oauth: {
+    grants(): Promise<ClientResult<OAuthGrantJSON[]>>;
+    revoke(input: { clientId: string }): Promise<ClientResult<{ ok: true }>>;
   };
   /**
    * The TOTP second factor (plan 9f). Every call but `verify` needs a
@@ -428,6 +451,17 @@ export function createClient(options: ClientOptions): Client {
           "GET",
           "/tokens/current",
         ),
+    },
+    jwt: {
+      token: () => call<{ token: string }>("GET", "/token"),
+    },
+    oauth: {
+      async grants() {
+        const r = await call<{ grants: OAuthGrantJSON[] }>("GET", "/oauth/grants");
+        return r.ok ? ok(r.value.grants) : r;
+      },
+      revoke: (input) =>
+        call<{ ok: true }>("POST", "/oauth/grants/revoke", { clientId: input.clientId }),
     },
     totp: {
       setup: (input) =>

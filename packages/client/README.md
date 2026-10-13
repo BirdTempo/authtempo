@@ -124,6 +124,22 @@ token. The clear token appears once, in the `create` answer.
 A CLI passes the token as the bearer: `createClient({ baseURL, credentials: "omit", token: () => process.env.TEMPO_TOKEN ?? null })`.
 `expiresInDays` is 1 to 3650, default 90; `null` means no expiry.
 
+## Connected apps
+
+The OAuth grants of the signed-in person (plan 9g), for a page that lists
+the agents and apps with access and ends one. Both calls need a session; a
+token answers `unauthorized`. Both answer `not_found` when the server runs
+without `oauth`.
+
+| Operation | Route | Answer type |
+| --- | --- | --- |
+| `client.oauth.grants()` | `GET /oauth/grants` | `ClientResult<OAuthGrantJSON[]>`: `clientId`, `clientName`, `scopes`, `createdAt`, `refreshTokens` |
+| `client.oauth.revoke({ clientId })` | `POST /oauth/grants/revoke` | `ClientResult<{ ok: true }>` |
+
+`revoke` deletes the consent and every refresh token of the client, and
+answers `{ ok: true }` also when the client had none. An access token that
+the client holds lives on to its `exp`, at most `oauth.accessTtlMinutes`.
+
 ## Organizations
 
 The server must set `organizations: {}` in `createAuth`. Without it, each

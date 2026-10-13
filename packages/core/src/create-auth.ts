@@ -25,11 +25,21 @@ import {
   setActiveOrganization,
 } from "./engine/invitations.js";
 import {
+  type MintedJwt,
+  mintSessionJwt,
+  publicKeySet,
+  rotateKey,
+  type SessionJwtClaims,
+  sessionLive,
+  verifySessionJwt,
+} from "./engine/jwt.js";
+import {
   type MagicLinkRequest,
   type MagicLinkVerify,
   requestMagicLink,
   verifyMagicLink,
 } from "./engine/magic-link.js";
+import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
 import {
   addMember,
   createOrganization,
@@ -120,7 +130,9 @@ import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
 import { emailOtpRoutes } from "./http/routes/email-otp.js";
 import { handoffRoutes } from "./http/routes/handoff.js";
+import { jwtRoutes } from "./http/routes/jwt.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
+import { oauthRoutes } from "./http/routes/oauth.js";
 import { organizationRoutes } from "./http/routes/organizations.js";
 import { passkeyRoutes } from "./http/routes/passkeys.js";
 import { passwordRoutes } from "./http/routes/password.js";
@@ -128,6 +140,8 @@ import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
 import { tokenRoutes } from "./http/routes/tokens.js";
 import { totpRoutes } from "./http/routes/totp.js";
+import { createWellKnownHandler } from "./http/well-known.js";
+import type { PublicJwk } from "./primitives/jwk.js";
 import type { Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import type {
@@ -172,6 +186,38 @@ export interface TotpApi {
   /** The key URI of a factor that is on. In process only: no route answers it after the setup. */
   uri(input: { userId: string }): Promise<Result<{ uri: string }>>;
   revokeTrustedDevices(input: { userId: string }): Promise<Result<{ ok: true }>>;
+}
+
+/**
+ * JWT minting (plan 9g, spec 8.12). Present unless `jwtMint` is `false`.
+ * `verify` checks a session JWT of this instance only: the signature, the
+ * issuer, an audience of `jwtMint.audience`, and `exp`.
+ */
+export interface JwtApi {
+  mint(input: { userId: string; sessionId: string }): Promise<Result<MintedJwt>>;
+  verify(token: string): Promise<SessionJwtClaims | null>;
+  /** A new signing key. The old one retires: it verifies for 24 hours and signs nothing. */
+  rotate(): Promise<{ kid: string }>;
+  jwks(): Promise<{ keys: PublicJwk[] }>;
+  /**
+   * True while the session of `sid` exists and is not expired. A resource
+   * server that must end access at a sign-out checks the `sid` of a
+   * verified session JWT here (plan 9g final fix wave).
+   */
+  sessionLive(input: { sid: string }): Promise<boolean>;
+}
+
+/**
+ * The OAuth grants of a user (plan 9g final fix wave). Present when `oauth`
+ * is set. A grant is one consent of the user for one client, with the
+ * client's refresh tokens. `revoke` deletes the consent and every refresh
+ * token of the user and the client, and answers `{ ok: true }` also when
+ * nothing existed. An access token that a client holds lives on to its
+ * `exp`, at most `oauth.accessTtlMinutes`.
+ */
+export interface OAuthApi {
+  grants(input: { userId: string }): Promise<Result<OAuthGrantSummary[]>>;
+  revoke(input: { userId: string; clientId: string }): Promise<Result<{ ok: true }>>;
 }
 
 /** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
@@ -306,6 +352,8 @@ export interface AuthApi {
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
   totp?: TotpApi;
+  jwt?: JwtApi;
+  oauth?: OAuthApi;
 }
 
 export interface Auth {
@@ -314,9 +362,12 @@ export interface Auth {
   /** The caller's session from the cookie or the bearer header, or null. */
   session(request: Request): Promise<ResolvedSession | null>;
   /**
-   * The caller as a session or as an API token, or null. Use it in a route
-   * that a script may call. `session(request)` stays session-only, so every
-   * route that calls it answers 401 to a token. For a session caller, send
+   * The caller as a session, an API token, or an OAuth access token (plan
+   * 9g), or null. Use it in a route that a script or an OAuth client may
+   * call. An access token passes only under its resource: the request URL
+   * must fall under the `oauth.resources` entry that is its `aud`.
+   * `session(request)` stays session-only, so every route that calls it
+   * answers 401 to a token. For a session caller, send
    * `sessionCookie(request, caller)`, or the browser drops the cookie at its old Max-Age.
    */
   caller(request: Request): Promise<Caller | null>;
@@ -327,6 +378,13 @@ export interface Auth {
    * Null for a bearer request.
    */
   sessionCookie(request: Request, resolved: ResolvedSession): string | null;
+  /**
+   * The well-known documents at the origin root (plan 9g): RFC 8414 and
+   * OIDC Discovery for this issuer, and RFC 9728 for each `oauth.resources`
+   * entry. Mount it for the paths that start with `/.well-known/`. 404 for
+   * any other path and while `oauth` is off; 405 for a method other than GET.
+   */
+  wellKnown(request: Request): Promise<Response>;
   /** The same operations, in-process. */
   api: AuthApi;
   errors: typeof ERRORS;
@@ -345,12 +403,15 @@ export function createAuth(input: AuthConfig): Auth {
     ...handoffRoutes(config),
     ...organizationRoutes(config),
     ...tokenRoutes(config),
+    ...jwtRoutes(config),
+    ...oauthRoutes(config),
   ]);
   return {
     handle,
     session: (request) => sessionFromRequest(config, request),
     caller: (request) => callerFromRequest(config, request),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
+    wellKnown: createWellKnownHandler(config),
     api: {
       sweepExpired: () => sweepExpired(config),
       requestMagicLink: (i) => requestMagicLink(config, i),
@@ -426,6 +487,25 @@ export function createAuth(input: AuthConfig): Auth {
               uri: (i) => totpUri(config, i),
               revokeTrustedDevices: (i) => revokeTrustedDevices(config, i),
             } satisfies TotpApi,
+          }
+        : {}),
+      ...(config.jwtMint
+        ? {
+            jwt: {
+              mint: (i) => mintSessionJwt(config, i),
+              verify: (token) => verifySessionJwt(config, token),
+              rotate: () => rotateKey(config),
+              jwks: () => publicKeySet(config),
+              sessionLive: (i) => sessionLive(config, i),
+            } satisfies JwtApi,
+          }
+        : {}),
+      ...(config.oauth
+        ? {
+            oauth: {
+              grants: (i) => listGrants(config, i),
+              revoke: (i) => revokeGrant(config, i),
+            } satisfies OAuthApi,
           }
         : {}),
     },

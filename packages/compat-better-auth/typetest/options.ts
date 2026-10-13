@@ -210,6 +210,8 @@ export const consumerb = {
     }),
     { id: "admin" },
     { id: "api-key", defaultPrefix: "laaa_" },
+    // Refused at construction since plan 9g, with JWT_NOT_MAPPED and PROVIDER_NOT_MAPPED
+    // (check-options.ts); the type admits the literal, the runtime check refuses it.
     { id: "jwt" },
     passkey({ rpID: "consumerb.com", rpName: "Consumerb" }),
     magicLink({ sendMagicLink: async () => {} }),

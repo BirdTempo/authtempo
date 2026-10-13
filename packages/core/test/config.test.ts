@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
 import { defaultEmailOtpMail, defaultResetOtpMail } from "../src/engine/email-otp-mail.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
+import { defaultConsentPage } from "../src/http/consent-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
 import { defaultTotpPage } from "../src/http/totp-page.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
@@ -615,5 +616,181 @@ describe("totp (plan 9f)", () => {
     expect(() => resolveConfig({ ...base, totp: {} })).toThrowError(
       "totp needs a password config: the second factor gates the password sign-in only",
     );
+  });
+});
+
+describe("jwtMint (plan 9g)", () => {
+  it("is on with the defaults, off with false, and takes each option", () => {
+    expect(resolveConfig(base).jwtMint).toEqual({
+      alg: "EdDSA",
+      audience: ["https://api.example.com"],
+      ttlMinutes: 15,
+      claims: null,
+    });
+    expect(resolveConfig({ ...base, jwtMint: false }).jwtMint).toBeNull();
+    const claims = () => ({ role: "admin" });
+    expect(
+      resolveConfig({
+        ...base,
+        jwtMint: { alg: "ES256", audience: "https://rs.example.com", ttlMinutes: 60, claims },
+      }).jwtMint,
+    ).toEqual({ alg: "ES256", audience: ["https://rs.example.com"], ttlMinutes: 60, claims });
+    expect(
+      resolveConfig({ ...base, jwtMint: { audience: ["a", "b"], ttlMinutes: 1 } }).jwtMint,
+    ).toMatchObject({ audience: ["a", "b"], ttlMinutes: 1 });
+  });
+
+  it("refuses a value out of range, a key core does not have, and a value that is not an object", () => {
+    const AUD =
+      "jwtMint.audience must be 1 to 10 strings of 1 to 2048 characters with no control character";
+    const bad: [unknown, string][] = [
+      [{ alg: "RS256" }, "jwtMint.alg must be EdDSA or ES256"],
+      [{ ttlMinutes: 0 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
+      [{ ttlMinutes: 61 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
+      [{ ttlMinutes: 1.5 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
+      [{ audience: [] }, AUD],
+      [{ audience: [""] }, AUD],
+      [{ audience: Array.from({ length: 11 }, (_, i) => `a${i}`) }, AUD],
+      [{ audience: ["a\nb"] }, AUD],
+      [{ claims: "x" }, "jwtMint.claims must be a function"],
+      [
+        { issuer: "x" },
+        "jwtMint.issuer is not an option; core has alg, audience, ttlMinutes, and claims",
+      ],
+      [true, "jwtMint must be an object or false"],
+    ];
+    for (const [jwtMint, message] of bad)
+      expect(() => resolveConfig({ ...base, jwtMint: jwtMint as never })).toThrowError(message);
+  });
+});
+
+describe("oauth (plan 9g)", () => {
+  const R = "https://api.example.com/mcp";
+  const fetch = (async () => new Response()) as typeof globalThis.fetch;
+
+  it("is off when absent or false, and on with the defaults when resources is set", () => {
+    expect(resolveConfig(base).oauth).toBeNull();
+    expect(resolveConfig({ ...base, oauth: false }).oauth).toBeNull();
+    const on = resolveConfig({ ...base, oauth: { resources: [R], fetch } }).oauth;
+    expect(on).toMatchObject({
+      resources: [R],
+      dynamic: true,
+      cimd: true,
+      fetch,
+      accessTtlMinutes: 15,
+      refreshTtlDays: 30,
+      codeTtlMinutes: 5,
+    });
+    expect([...(on?.scopes.keys() ?? [])]).toEqual([
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+    ]);
+    expect(on?.consentPage).toBe(defaultConsentPage);
+    const custom = resolveConfig({
+      ...base,
+      jwtMint: { ttlMinutes: 30 },
+      oauth: {
+        resources: [R, "http://localhost:8787/mcp"],
+        scopes: { "mcp:read": "Read" },
+        registration: { cimd: false },
+        refreshTtlDays: 365,
+        codeTtlMinutes: 10,
+      },
+    }).oauth;
+    expect(custom).toMatchObject({
+      cimd: false,
+      fetch: null,
+      accessTtlMinutes: 30,
+      refreshTtlDays: 365,
+      codeTtlMinutes: 10,
+    });
+    expect(custom?.scopes.get("mcp:read")).toBe("Read");
+  });
+
+  it("refuses a bad resource list, scope, registration, fetch, lifetime, page, and key, and refuses oauth without jwtMint", () => {
+    const RES =
+      "oauth.resources must be 1 to 20 distinct absolute http or https URLs with no query, fragment, or credentials";
+    const bad: [unknown, string][] = [
+      [{ fetch }, RES],
+      [{ resources: [], fetch }, RES],
+      [{ resources: ["/mcp"], fetch }, RES],
+      [{ resources: ["ftp://a.example.com/x"], fetch }, RES],
+      [{ resources: [`${R}?x=1`], fetch }, RES],
+      [{ resources: [`${R}#a`], fetch }, RES],
+      [{ resources: ["https://u:p@api.example.com/mcp"], fetch }, RES],
+      [{ resources: [R, R], fetch }, RES],
+      [
+        { resources: [R], fetch, scopes: { "bad scope": "x" } },
+        "oauth.scopes has a name that is not a scope token: 1 to 64 printable ASCII characters with no space, quote, or backslash",
+      ],
+      [{ resources: [R], fetch, scopes: { openid: "x" } }, "oauth.scopes.openid is built in"],
+      [
+        { resources: [R], fetch, scopes: { a: "" } },
+        "oauth.scopes.a must be 1 to 200 characters with no control character",
+      ],
+      [
+        { resources: [R], registration: { dynamic: false, cimd: false } },
+        "oauth.registration must leave dynamic or cimd on, or no client can register",
+      ],
+      [{ resources: [R], fetch, registration: null }, "oauth.registration must be an object"],
+      [
+        { resources: [R], fetch, registration: { cimd: "yes" } },
+        "oauth.registration.cimd must be a boolean",
+      ],
+      [
+        { resources: [R], fetch, registration: { open: true } },
+        "oauth.registration.open is not an option; core has dynamic and cimd",
+      ],
+      [
+        { resources: [R] },
+        "oauth.fetch is required while registration.cimd is on: pass the app's guarded fetch for client metadata documents, or set registration.cimd to false",
+      ],
+      [{ resources: [R], fetch: "x" }, "oauth.fetch must be a function"],
+      [
+        { resources: [R], fetch, accessTtlMinutes: 61 },
+        "oauth.accessTtlMinutes must be an integer from 1 to 60",
+      ],
+      [
+        { resources: [R], fetch, refreshTtlDays: 0 },
+        "oauth.refreshTtlDays must be an integer from 1 to 365",
+      ],
+      [
+        { resources: [R], fetch, codeTtlMinutes: 11 },
+        "oauth.codeTtlMinutes must be an integer from 1 to 10",
+      ],
+      [{ resources: [R], fetch, consentPage: "html" }, "oauth.consentPage must be a function"],
+      [
+        { resources: [R], fetch, loginPage: "/login" },
+        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, and codeTtlMinutes",
+      ],
+      [true, "oauth must be an object or false"],
+    ];
+    for (const [oauth, message] of bad)
+      expect(() => resolveConfig({ ...base, oauth: oauth as never })).toThrowError(message);
+    expect(() =>
+      resolveConfig({ ...base, jwtMint: false, oauth: { resources: [R], fetch } }),
+    ).toThrowError("oauth needs jwtMint: an access token is a JWT that core signs");
+  });
+
+  it("refuses a jwtMint.audience entry that is also an oauth.resources entry, by either form of audience (final fix wave, review I-2)", () => {
+    const message = `jwtMint.audience and oauth.resources both hold ${R}: a server of that audience would take an OAuth access token as a session JWT; give the session JWT its own audience`;
+    for (const audience of [R, ["https://app.example.com", R]])
+      expect(() =>
+        resolveConfig({ ...base, jwtMint: { audience }, oauth: { resources: [R], fetch } }),
+      ).toThrowError(message);
+    // The default audience is baseURL: a resource equal to it is refused too.
+    expect(() =>
+      resolveConfig({ ...base, oauth: { resources: [base.baseURL], fetch } }),
+    ).toThrowError("jwtMint.audience and oauth.resources both hold");
+    // A resource under the audience at another path is another string: it passes.
+    expect(
+      resolveConfig({
+        ...base,
+        jwtMint: { audience: base.baseURL },
+        oauth: { resources: [R], fetch },
+      }).oauth?.resources,
+    ).toEqual([R]);
   });
 });

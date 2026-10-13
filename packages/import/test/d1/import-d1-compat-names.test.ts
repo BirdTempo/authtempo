@@ -43,10 +43,12 @@ await env.DB.batch(
     ),
   ).map((s) => env.DB.prepare(s)),
 );
-// 0002 and 0003 are the same text for every naming.
+// 0002, 0003, and 0004 are the same text for every naming.
 await applyD1Migrations(
   env.DB,
-  env.COMPAT_MIGRATIONS.filter((m) => m.name.startsWith("0002") || m.name.startsWith("0003")),
+  env.COMPAT_MIGRATIONS.filter(
+    (m) => m.name.startsWith("0002") || m.name.startsWith("0003") || m.name.startsWith("0004"),
+  ),
 );
 
 const count = async (table: string) =>

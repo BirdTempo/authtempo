@@ -93,6 +93,119 @@ UPDATE ta_meta SET value = '3' WHERE key = 'compat_better_auth';
 `,
 };
 
+export const MIGRATION_0004_NAME = "0004_compat_schema_v7";
+
+/**
+ * Migration 0004 (plan 9g): core's schema version 7. Core 7 adds the `jwk`,
+ * `oauthClient`, `oauthConsent`, and `oauthToken` models. This package maps
+ * no Better Auth jwt or OAuth plugin (owner decision of 2026-10-13), and core's
+ * minting is off under it, so the tables stay empty until an app moves to
+ * core's routes; the migration creates them so that core's version gate and
+ * conformance hold. They are core's own tables, with core 0007's names,
+ * columns, and indexes, beside the Better Auth tables (`CORE_TABLE_MODELS`).
+ * The text is the same for every naming and for both D1 variants. Append-only.
+ */
+export const COMPAT_MIGRATION_0004_SQL: Readonly<Record<"postgres" | "sqlite", string>> = {
+  postgres: `CREATE TABLE ta_jwk (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  public_jwk jsonb NOT NULL,
+  private_key text NOT NULL,
+  slot text,
+  retired_at timestamptz
+);
+CREATE UNIQUE INDEX ux_ta_jwk__slot ON ta_jwk (slot);
+CREATE TABLE ta_oauth_client (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  kind text NOT NULL,
+  name text,
+  redirect_uris jsonb NOT NULL,
+  last_seen_at timestamptz NOT NULL
+);
+CREATE TABLE ta_oauth_consent (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  user_id text NOT NULL,
+  client_id text NOT NULL,
+  scopes jsonb NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_oauth_consent__client_id__user_id ON ta_oauth_consent (client_id, user_id);
+CREATE INDEX ix_ta_oauth_consent__user_id ON ta_oauth_consent (user_id);
+CREATE TABLE ta_oauth_token (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  token_hash text NOT NULL,
+  family_id text NOT NULL,
+  user_id text NOT NULL,
+  client_id text NOT NULL,
+  scopes jsonb NOT NULL,
+  resource text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz
+);
+CREATE UNIQUE INDEX ux_ta_oauth_token__token_hash ON ta_oauth_token (token_hash);
+CREATE INDEX ix_ta_oauth_token__user_id ON ta_oauth_token (user_id);
+CREATE INDEX ix_ta_oauth_token__family_id ON ta_oauth_token (family_id);
+CREATE INDEX ix_ta_oauth_token__client_id ON ta_oauth_token (client_id);
+UPDATE ta_meta SET value = '7' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '4' WHERE key = 'compat_better_auth';
+`,
+  sqlite: `CREATE TABLE ta_jwk (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  public_jwk TEXT NOT NULL,
+  private_key TEXT NOT NULL,
+  slot TEXT,
+  retired_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_jwk__slot ON ta_jwk (slot);
+CREATE TABLE ta_oauth_client (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT,
+  redirect_uris TEXT NOT NULL,
+  last_seen_at INTEGER NOT NULL
+);
+CREATE TABLE ta_oauth_consent (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  scopes TEXT NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_oauth_consent__client_id__user_id ON ta_oauth_consent (client_id, user_id);
+CREATE INDEX ix_ta_oauth_consent__user_id ON ta_oauth_consent (user_id);
+CREATE TABLE ta_oauth_token (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  token_hash TEXT NOT NULL,
+  family_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  scopes TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_oauth_token__token_hash ON ta_oauth_token (token_hash);
+CREATE INDEX ix_ta_oauth_token__user_id ON ta_oauth_token (user_id);
+CREATE INDEX ix_ta_oauth_token__family_id ON ta_oauth_token (family_id);
+CREATE INDEX ix_ta_oauth_token__client_id ON ta_oauth_token (client_id);
+UPDATE ta_meta SET value = '7' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '4' WHERE key = 'compat_better_auth';
+`,
+};
+
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
 
@@ -345,6 +458,7 @@ export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): P
     { version: 1, name: MIGRATION_NAME, text: compatMigrationSql("postgres", names) },
     { version: 2, name: MIGRATION_0002_NAME, text: COMPAT_MIGRATION_0002_SQL },
     { version: 3, name: MIGRATION_0003_NAME, text: COMPAT_MIGRATION_0003_SQL.postgres },
+    { version: 4, name: MIGRATION_0004_NAME, text: COMPAT_MIGRATION_0004_SQL.postgres },
   ];
   const applied: string[] = [];
   for (const m of migrations) {

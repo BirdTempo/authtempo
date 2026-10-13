@@ -45,3 +45,33 @@ export const ERRORS = {
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;
+
+/**
+ * The OAuth 2.1 and OIDC wire errors of the provider routes (plan 9g), with
+ * their status. A key is the string an OAuth client reads, so no map stands
+ * between them. RFC 6749 sections 4.1.2.1 and 5.2, RFC 7591 section 3.2.2,
+ * RFC 8707 section 2, RFC 6750 section 3.1, and OIDC Core 1.0 section
+ * 3.1.2.6 (not re-read on 2026-10-13). `rate_limited` is core's own name.
+ * A provider route never answers a code of `ERRORS`, and `ERRORS` gains none,
+ * so the client codes and the compatibility table do not change.
+ */
+export const OAUTH_ERRORS = {
+  invalid_request: 400,
+  invalid_client: 401,
+  invalid_grant: 400,
+  unsupported_grant_type: 400,
+  invalid_scope: 400,
+  invalid_target: 400,
+  unsupported_response_type: 400,
+  access_denied: 400,
+  login_required: 400,
+  consent_required: 400,
+  invalid_redirect_uri: 400,
+  invalid_client_metadata: 400,
+  // RFC 6750: the bearer of the userinfo endpoint. Not ERRORS.invalid_token (400), which is a mailed link.
+  invalid_token: 401,
+  insufficient_scope: 403,
+  rate_limited: 429,
+} as const;
+
+export type OAuthErrorCode = keyof typeof OAUTH_ERRORS;

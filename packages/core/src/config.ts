@@ -11,9 +11,12 @@ import {
   SESSION_HOOK_POINTS,
   type SessionHooks,
 } from "./engine/hooks.js";
+import type { CimdEntry } from "./engine/oauth-clients.js";
+import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
+import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 import {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -24,7 +27,9 @@ import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.j
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
+import type { JwsAlg } from "./primitives/jwk.js";
 import { hasControlChar } from "./primitives/text.js";
+import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
@@ -176,6 +181,18 @@ export interface AuthConfig {
    */
   totp?: TotpConfig | false;
   /**
+   * JWT minting (plan 9g, spec 8.12): `GET /jwks`, `GET /token`, and
+   * `api.jwt`. On by default; `false` removes them. The OAuth provider
+   * needs it. Not `jwt`: that key is the ID token seam (plan 3).
+   */
+  jwtMint?: JwtMintConfig | false;
+  /**
+   * The OAuth 2.1 and OIDC provider (plan 9g, spec 8.13), for agents and MCP
+   * clients. Off when absent or `false`; on when `resources` is set. Needs
+   * `jwtMint`: an access token is a JWT that core signs.
+   */
+  oauth?: OAuthConfig | false;
+  /**
    * The app's code at named points of the organization and session flows
    * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
    * refuses with `throw hookRefusal(message)`; an after hook runs after the
@@ -257,6 +274,79 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
+}
+
+export interface JwtMintConfig {
+  /** `EdDSA` (Ed25519, default) or `ES256` (ECDSA P-256). A change retires the signing key at the next signature. */
+  alg?: JwsAlg;
+  /** The `aud` of a session JWT: 1 to 10 strings, each 1 to 2048 characters. Default `[baseURL]`. */
+  audience?: string | string[];
+  /** The life of a session JWT, 1 to 60. Default 15. A sign-out does not end a token. */
+  ttlMinutes?: number;
+  /**
+   * The app's own claims. A reserved name (`iss`, `sub`, `aud`, `iat`,
+   * `exp`, `nbf`, `jti`, `sid`, `email`, `email_verified`, `name`, `org`)
+   * never comes from here. A throw answers `hook_failed`.
+   */
+  claims?: (
+    user: UserRow,
+    session: SessionRow,
+  ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+}
+
+export interface ResolvedJwtMint {
+  alg: JwsAlg;
+  audience: string[];
+  ttlMinutes: number;
+  claims:
+    | ((
+        user: UserRow,
+        session: SessionRow,
+      ) => Record<string, unknown> | Promise<Record<string, unknown>>)
+    | null;
+}
+
+export interface OAuthConfig {
+  /**
+   * The resource indicators (RFC 8707) that a client may ask for: 1 to 20
+   * absolute http or https URLs, no query, fragment, or credentials. Each is
+   * the `aud` of the access tokens for it, and `auth.caller` reads a request
+   * under its path as that resource.
+   */
+  resources: string[];
+  /** The app's scopes, name to the consent page's text. `openid`, `profile`, `email`, and `offline_access` are built in. */
+  scopes?: Record<string, string>;
+  /** `dynamic`: RFC 7591 at `POST /oauth/register`. `cimd`: a client id that is the URL of its metadata document. Both default true. */
+  registration?: { dynamic?: boolean; cimd?: boolean };
+  /**
+   * The fetch for a client metadata document: the app's own guarded fetch,
+   * which refuses private addresses (SSRF). Required while `cimd` is on.
+   * Core adds the timeout, the size cap, and `redirect: "manual"`.
+   */
+  fetch?: typeof fetch;
+  /** The HTML of the consent page. Default `defaultConsentPage`. */
+  consentPage?: (input: ConsentPageInput) => string;
+  /** The life of an access token, 1 to 60. Default `jwtMint.ttlMinutes`. */
+  accessTtlMinutes?: number;
+  /** The life of a refresh token from its issue, 1 to 365. Default 30. */
+  refreshTtlDays?: number;
+  /** The life of an authorization code, 1 to 10. Default 5. */
+  codeTtlMinutes?: number;
+}
+
+export interface ResolvedOAuth {
+  resources: readonly string[];
+  /** Name to text, the built-in four first. */
+  scopes: ReadonlyMap<string, string>;
+  dynamic: boolean;
+  cimd: boolean;
+  fetch: typeof fetch | null;
+  consentPage: (input: ConsentPageInput) => string;
+  accessTtlMinutes: number;
+  refreshTtlDays: number;
+  codeTtlMinutes: number;
+  /** The metadata documents this isolate read, by URL, each for one hour. */
+  cimdCache: Map<string, CimdEntry>;
 }
 
 export interface LegacyVerifyConfig {
@@ -346,6 +436,8 @@ export interface ResolvedConfig {
   } | null;
   emailOtp: ResolvedEmailOtp | null;
   totp: ResolvedTotp | null;
+  jwtMint: ResolvedJwtMint | null;
+  oauth: ResolvedOAuth | null;
   hooks: ResolvedHooks;
 }
 
@@ -584,6 +676,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   }
   // One source for the session cookie name: the trust cookie check of `totp` reads it too.
   const cookieName = input.cookieName ?? "tempo_session";
+  const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
   return {
     basePath,
     baseURL: input.baseURL,
@@ -619,6 +712,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
+    jwtMint,
+    oauth: resolveOAuth(input.oauth, jwtMint),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
@@ -788,6 +883,183 @@ function resolveTotp(
     trustDays,
     trustCookieName,
     challengePage: o.challengePage ?? defaultTotpPage,
+  };
+}
+
+const JWT_MINT_KEYS: Readonly<Record<keyof JwtMintConfig, true>> = {
+  alg: true,
+  audience: true,
+  ttlMinutes: true,
+  claims: true,
+};
+
+/** `jwtMint` (plan 9g). Absent: on, with the defaults. `false`: off. */
+function resolveJwtMint(
+  input: JwtMintConfig | false | undefined,
+  baseURL: string,
+): ResolvedJwtMint | null {
+  if (input === false) return null;
+  const o: JwtMintConfig = input === undefined ? {} : input;
+  // `as unknown`: the guard must not narrow `o`, or its fields lose their types.
+  if (!isPlainObject(o as unknown)) throw new ConfigError("jwtMint must be an object or false");
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(JWT_MINT_KEYS, key))
+      throw new ConfigError(
+        `jwtMint.${key} is not an option; core has alg, audience, ttlMinutes, and claims`,
+      );
+  const alg = o.alg ?? "EdDSA";
+  if (alg !== "EdDSA" && alg !== "ES256")
+    throw new ConfigError("jwtMint.alg must be EdDSA or ES256");
+  const audience: unknown =
+    o.audience === undefined
+      ? [baseURL]
+      : typeof o.audience === "string"
+        ? [o.audience]
+        : o.audience;
+  if (
+    !Array.isArray(audience) ||
+    audience.length < 1 ||
+    audience.length > 10 ||
+    audience.some(
+      (a) => typeof a !== "string" || a.length < 1 || a.length > 2048 || hasControlChar(a),
+    )
+  )
+    throw new ConfigError(
+      "jwtMint.audience must be 1 to 10 strings of 1 to 2048 characters with no control character",
+    );
+  const ttlMinutes = o.ttlMinutes ?? 15;
+  if (!Number.isSafeInteger(ttlMinutes) || ttlMinutes < 1 || ttlMinutes > 60)
+    throw new ConfigError("jwtMint.ttlMinutes must be an integer from 1 to 60");
+  if (o.claims !== undefined && typeof o.claims !== "function")
+    throw new ConfigError("jwtMint.claims must be a function");
+  return { alg, audience: [...(audience as string[])], ttlMinutes, claims: o.claims ?? null };
+}
+
+const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
+  resources: true,
+  scopes: true,
+  registration: true,
+  fetch: true,
+  consentPage: true,
+  accessTtlMinutes: true,
+  refreshTtlDays: true,
+  codeTtlMinutes: true,
+};
+
+function isResourceUrl(value: unknown): boolean {
+  if (typeof value !== "string" || value.length > 2048 || value.includes("#")) return false;
+  try {
+    const u = new URL(value);
+    return (
+      (u.protocol === "https:" || u.protocol === "http:") &&
+      u.search === "" &&
+      u.username === "" &&
+      u.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function integerIn(path: string, value: number, min: number, max: number): number {
+  if (!Number.isSafeInteger(value) || value < min || value > max)
+    throw new ConfigError(`${path} must be an integer from ${min} to ${max}`);
+  return value;
+}
+
+/** `oauth` (plan 9g). Absent or `false`: off. */
+function resolveOAuth(
+  input: OAuthConfig | false | undefined,
+  jwtMint: ResolvedJwtMint | null,
+): ResolvedOAuth | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("oauth must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
+      throw new ConfigError(
+        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, and codeTtlMinutes`,
+      );
+  if (!jwtMint)
+    throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
+  const resources: unknown = input.resources;
+  if (
+    !Array.isArray(resources) ||
+    resources.length < 1 ||
+    resources.length > 20 ||
+    !resources.every(isResourceUrl) ||
+    new Set(resources).size !== resources.length
+  )
+    throw new ConfigError(
+      "oauth.resources must be 1 to 20 distinct absolute http or https URLs with no query, fragment, or credentials",
+    );
+  // One key signs the session JWTs and the access tokens with one issuer. A
+  // server whose audience is in both lists would take an access token of any
+  // client and scope as a session JWT and lose the scope limit (plan 9g
+  // final fix wave, review I-2).
+  const shared = jwtMint.audience.find((a) => (resources as string[]).includes(a));
+  if (shared !== undefined)
+    throw new ConfigError(
+      `jwtMint.audience and oauth.resources both hold ${shared}: a server of that audience would take an OAuth access token as a session JWT; give the session JWT its own audience`,
+    );
+  const scopes = new Map(BUILT_IN_SCOPES);
+  if (input.scopes !== undefined) {
+    if (!isPlainObject(input.scopes as unknown))
+      throw new ConfigError("oauth.scopes must be an object of names to texts");
+    for (const [name, text] of Object.entries(input.scopes)) {
+      if (!SCOPE_RE.test(name))
+        throw new ConfigError(
+          "oauth.scopes has a name that is not a scope token: 1 to 64 printable ASCII characters with no space, quote, or backslash",
+        );
+      if (BUILT_IN_SCOPES.has(name)) throw new ConfigError(`oauth.scopes.${name} is built in`);
+      if (typeof text !== "string" || text.length < 1 || text.length > 200 || hasControlChar(text))
+        throw new ConfigError(
+          `oauth.scopes.${name} must be 1 to 200 characters with no control character`,
+        );
+      scopes.set(name, text);
+    }
+  }
+  // Not `??`: `null` must reach the check and be refused, as `emailOtp: null` is.
+  const registration: unknown = input.registration === undefined ? {} : input.registration;
+  if (!isPlainObject(registration)) throw new ConfigError("oauth.registration must be an object");
+  for (const [key, value] of Object.entries(registration)) {
+    if (value === undefined) continue;
+    if (key !== "dynamic" && key !== "cimd")
+      throw new ConfigError(
+        `oauth.registration.${key} is not an option; core has dynamic and cimd`,
+      );
+    if (typeof value !== "boolean")
+      throw new ConfigError(`oauth.registration.${key} must be a boolean`);
+  }
+  const dynamic = registration.dynamic !== false;
+  const cimd = registration.cimd !== false;
+  if (!dynamic && !cimd)
+    throw new ConfigError(
+      "oauth.registration must leave dynamic or cimd on, or no client can register",
+    );
+  if (input.fetch !== undefined && typeof input.fetch !== "function")
+    throw new ConfigError("oauth.fetch must be a function");
+  if (cimd && input.fetch === undefined)
+    throw new ConfigError(
+      "oauth.fetch is required while registration.cimd is on: pass the app's guarded fetch for client metadata documents, or set registration.cimd to false",
+    );
+  if (input.consentPage !== undefined && typeof input.consentPage !== "function")
+    throw new ConfigError("oauth.consentPage must be a function");
+  return {
+    resources: [...(resources as string[])],
+    scopes,
+    dynamic,
+    cimd,
+    fetch: input.fetch ?? null,
+    consentPage: input.consentPage ?? defaultConsentPage,
+    accessTtlMinutes: integerIn(
+      "oauth.accessTtlMinutes",
+      input.accessTtlMinutes ?? jwtMint.ttlMinutes,
+      1,
+      60,
+    ),
+    refreshTtlDays: integerIn("oauth.refreshTtlDays", input.refreshTtlDays ?? 30, 1, 365),
+    codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
+    cimdCache: new Map(),
   };
 }
 

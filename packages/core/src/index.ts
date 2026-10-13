@@ -3,9 +3,11 @@ export const VERSION = "0.0.0";
 export type {
   AuthConfig,
   EmailOtpConfig,
+  JwtMintConfig,
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
+  OAuthConfig,
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
@@ -18,6 +20,8 @@ export {
   type AuthApi,
   createAuth,
   type EmailOtpApi,
+  type JwtApi,
+  type OAuthApi,
   type PasswordApi,
   type TokensApi,
   type TotpApi,
@@ -53,7 +57,10 @@ export {
   type SessionVia,
 } from "./engine/hooks.js";
 export type { InvitationSummary } from "./engine/invitations.js";
+export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
+export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
+export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
@@ -93,8 +100,9 @@ export type {
 /** The shape of a `tf_` challenge token (plan 9f): the compat shim checks a cookie against it before core's verify. */
 export { TWO_FACTOR_TOKEN_RE } from "./engine/totp.js";
 export { normalizeEmail, validUserName } from "./engine/users.js";
-export { ERRORS, type ErrorCode } from "./errors.js";
+export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
+export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 export {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -117,14 +125,19 @@ export {
   deriveGate,
 } from "./primitives/derive-gate.js";
 export { newId } from "./primitives/ids.js";
+export type { JwsAlg, PublicJwk } from "./primitives/jwk.js";
 export type { Result } from "./result.js";
 export {
   type ApiTokenRow,
   type IdentityRow,
   type InvitationRow,
+  type JwkRow,
   type MemberRow,
   type ModelName,
   type Models,
+  type OAuthClientRow,
+  type OAuthConsentRow,
+  type OAuthTokenRow,
   type OrganizationRow,
   type PasskeyRow,
   type PasswordRow,

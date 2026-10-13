@@ -11,6 +11,7 @@ import { createMemoryLimiter } from "../src/limiter/memory.js";
 import type { Result } from "../src/result.js";
 import type { PasswordRow } from "../src/schema.js";
 import { createPbkdf2PasswordHash } from "../src/seams/password-hash.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, tokenFromMail } from "./helpers.js";
 
 /** A low cost, so that a test runs fast. Production uses `PBKDF2_ITERATIONS`. */
@@ -101,4 +102,36 @@ export async function sessionOnly(
   if (v.ok && !("token" in v.value))
     throw new Error("the sign-in answered a second-factor challenge");
   return v as Result<PasswordSession>;
+}
+
+/**
+ * Records each write of the next transaction as `op:model`, in order, so a
+ * test can read the statement order of one flow.
+ */
+export function recordNextTransaction(storage: StorageAdapter): string[] {
+  const writes: string[] = [];
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        create: (m, d) => {
+          writes.push(`create:${m}`);
+          return tx.create(m, d);
+        },
+        update: (m, w, d) => {
+          writes.push(`update:${m}`);
+          return tx.update(m, w, d);
+        },
+        delete: (m, w) => {
+          writes.push(`delete:${m}`);
+          return tx.delete(m, w);
+        },
+      }),
+    );
+  };
+  return writes;
 }

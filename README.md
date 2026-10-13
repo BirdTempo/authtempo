@@ -84,3 +84,9 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   secret and bound to its user; the backup codes are keyed hashes. A
   second-factor challenge is a session in waiting: a reset and a password
   change delete it before they end the sessions.
+- Core signs its tokens itself, on Web Crypto, with no supplier in the
+  signing path. One key signs at a time, through a unique key; its private
+  half is sealed under the app secret and bound to its key id. A retired key
+  verifies for 24 hours and signs nothing. An OAuth code is spent at the
+  first exchange, whatever the result; a refresh token used twice deletes
+  its whole family; an access token passes only under its own resource.

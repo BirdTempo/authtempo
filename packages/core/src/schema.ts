@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export interface BaseRow {
   id: string;
@@ -47,7 +47,13 @@ export type VerificationPurpose =
    * A second-factor challenge (plan 9f). identifier: the user id; valueHash:
    * the SHA-256 hex of the `tf_` token; data: { via, ip, userAgent, next, attempts }.
    */
-  | "two-factor";
+  | "two-factor"
+  /**
+   * An OAuth authorization code (plan 9g). identifier: the client id;
+   * valueHash: the SHA-256 hex of the `oc_` code; data: { clientId,
+   * redirectUri, codeChallenge, scopes, resource, userId, nonce, sessionId }.
+   */
+  | "oauth-code";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;
@@ -141,6 +147,56 @@ export interface TrustedDeviceRow extends BaseRow {
   lastSeenAt: Date;
 }
 
+/** A signing key of this instance (plan 9g). The id is the `kid`. */
+export interface JwkRow extends BaseRow {
+  /** The public JWK: kty, crv, x, (y), kid, alg, use. The algorithm is read from here. */
+  publicJwk: Record<string, unknown>;
+  /**
+   * The PKCS#8 private key, sealed: base64url of the 12-byte IV and the
+   * AES-256-GCM ciphertext under HKDF-SHA256 of the app secret (info
+   * `tempo-auth jwk`), with the kid as additional data. Never the clear key.
+   */
+  privateKey: string;
+  /** `"signing"` for the one key that signs; null once retired. The unique key keeps one signing key. */
+  slot: string | null;
+  /** Null while the key signs. A retired key verifies for 24 hours and signs nothing. */
+  retiredAt: Date | null;
+}
+
+/** An OAuth client (plan 9g). */
+export interface OAuthClientRow extends BaseRow {
+  /** `registered`: the id is a `cl_` token. `cimd`: the id is the https URL of the client's metadata document. */
+  kind: "registered" | "cimd";
+  /** The client's own name: a claim of the client, not a fact. */
+  name: string | null;
+  redirectUris: string[];
+  /** Moved at most once a day. The sweep deletes a client unseen for 90 days with no consent and no refresh token. */
+  lastSeenAt: Date;
+}
+
+/** The scopes one user allowed one client (plan 9g). A request for any other scope asks again. */
+export interface OAuthConsentRow extends BaseRow {
+  userId: string;
+  clientId: string;
+  scopes: string[];
+}
+
+/** One refresh token (plan 9g). A rotation spends the row and adds a row to the family. */
+export interface OAuthTokenRow extends BaseRow {
+  /** SHA-256 hex of the `or_` token. The clear token is never stored. */
+  tokenHash: string;
+  /** The first row's grant: every rotation of one authorization shares it. */
+  familyId: string;
+  userId: string;
+  clientId: string;
+  scopes: string[];
+  /** The resource indicator (RFC 8707) of the grant: the `aud` of every access token it gives. */
+  resource: string;
+  expiresAt: Date;
+  /** Set when the token was exchanged. A second exchange deletes the family. */
+  usedAt: Date | null;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -154,6 +210,10 @@ export interface Models {
   apiToken: ApiTokenRow;
   totp: TotpRow;
   trustedDevice: TrustedDeviceRow;
+  jwk: JwkRow;
+  oauthClient: OAuthClientRow;
+  oauthConsent: OAuthConsentRow;
+  oauthToken: OAuthTokenRow;
 }
 
 export type ModelName = keyof Models;
@@ -330,5 +390,63 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["tokenHash"]],
     indexes: [["userId"]],
+  },
+  // plan 9g: the signing keys. The table holds the sealed private key, never the key.
+  jwk: {
+    fields: {
+      ...base,
+      publicJwk: { type: "json" },
+      privateKey: { type: "string" },
+      slot: { type: "string", nullable: true },
+      retiredAt: { type: "date", nullable: true },
+    },
+    // One signing key. A retired key has slot null, and a null never conflicts.
+    unique: [["slot"]],
+    indexes: [],
+  },
+  // plan 9g: the OAuth clients, registered or read from a metadata document.
+  oauthClient: {
+    fields: {
+      ...base,
+      kind: { type: "string" },
+      name: { type: "string", nullable: true },
+      redirectUris: { type: "json" },
+      lastSeenAt: { type: "date" },
+    },
+    unique: [],
+    indexes: [],
+  },
+  // plan 9g: one consent per user and client.
+  oauthConsent: {
+    fields: {
+      ...base,
+      userId: { type: "string" },
+      clientId: { type: "string" },
+      scopes: { type: "json" },
+    },
+    // clientId first: the sweep looks up the consents of one client, and the
+    // authorize compares both fields, so the one index serves both.
+    unique: [["clientId", "userId"]],
+    // userId: the grants list reads the consents of one user (plan 9g final
+    // fix wave, round 2). The unique key above starts with clientId, so it
+    // cannot serve that read.
+    indexes: [["userId"]],
+  },
+  // plan 9g: one row per refresh token. The table holds the hash, never the token.
+  oauthToken: {
+    fields: {
+      ...base,
+      tokenHash: { type: "string" },
+      familyId: { type: "string" },
+      userId: { type: "string" },
+      clientId: { type: "string" },
+      scopes: { type: "json" },
+      resource: { type: "string" },
+      expiresAt: { type: "date" },
+      usedAt: { type: "date", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    // clientId: the sweep looks up the refresh tokens of one client.
+    indexes: [["userId"], ["familyId"], ["clientId"]],
   },
 };

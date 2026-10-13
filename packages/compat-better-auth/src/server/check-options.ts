@@ -21,7 +21,16 @@ const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.
 const NO_REQUEST_HOOKS =
   "core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe";
 const noRowHook = (name: string) => `core has no row hook on ${name}; see the plan index`;
-const PLAN_9G = "plan 9g (JWT minting and an OIDC provider mode) is not written yet";
+/**
+ * Plan 9g (owner decision 4b and the controller ruling of 2026-10-13): core
+ * mints JWTs and is an OAuth 2.1 and OIDC provider on its own routes, and
+ * this package maps none of the Better Auth plugins. An MCP access token is
+ * a JWT, so a mapping of one without the other would be half a promise.
+ */
+const JWT_NOT_MAPPED =
+  "core mints JWTs on its own routes (`/jwks`, `/token`, `api.jwt`); the Better Auth plugin is not mapped, and a token it issued stops verifying at the cutover; see the plan index";
+const PROVIDER_NOT_MAPPED =
+  "core has an OAuth 2.1 and OIDC provider on its own routes (`/oauth/*`, the well-known handler); the Better Auth plugin is not mapped; see the plan index";
 const NO_SUCH_OPTION = "tempo-auth has no such option";
 
 const refuse = (out: OptionCheck, path: string, why: string) =>
@@ -299,11 +308,11 @@ const PLUGIN_RULES: Record<string, Rule> = {
 
 const FOREIGN_PLUGINS: Record<string, string> = {
   admin: "tempo-auth has no admin plugin",
-  jwt: PLAN_9G,
-  mcp: PLAN_9G,
-  cimd: PLAN_9G,
-  "oidc-provider": PLAN_9G,
-  "oauth-provider": PLAN_9G,
+  jwt: JWT_NOT_MAPPED,
+  mcp: PROVIDER_NOT_MAPPED,
+  cimd: PROVIDER_NOT_MAPPED,
+  "oidc-provider": PROVIDER_NOT_MAPPED,
+  "oauth-provider": PROVIDER_NOT_MAPPED,
   "api-key": "not mapped; see the plan index",
   anonymous: "tempo-auth has no anonymous sign-in",
   username: "tempo-auth has no username sign-in",

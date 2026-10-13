@@ -283,3 +283,34 @@ describe("checkOptions: the allow list fails closed", () => {
     );
   });
 });
+
+describe("checkOptions: the JWT and OAuth provider plugins (plan 9g)", () => {
+  it("refuses jwt, mcp, cimd, oidc-provider, and oauth-provider with plan 9g's texts", () => {
+    const c = checkOptions({
+      baseURL: "https://api.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      database: {
+        kind: "tempo-auth-compat-database",
+        dialect: "postgres",
+        storage: {} as never,
+        limiter: {} as never,
+      },
+      plugins: [
+        { id: "jwt" },
+        { id: "mcp", loginPage: "/login" },
+        { id: "cimd" },
+        { id: "oidc-provider" },
+        { id: "oauth-provider" },
+      ],
+    } as unknown as BetterAuthOptions);
+    const PROVIDER =
+      "core has an OAuth 2.1 and OIDC provider on its own routes (`/oauth/*`, the well-known handler); the Better Auth plugin is not mapped; see the plan index";
+    expect(c.refusals).toEqual([
+      `plugins[cimd]: ${PROVIDER}`,
+      "plugins[jwt]: core mints JWTs on its own routes (`/jwks`, `/token`, `api.jwt`); the Better Auth plugin is not mapped, and a token it issued stops verifying at the cutover; see the plan index",
+      `plugins[mcp]: ${PROVIDER}`,
+      `plugins[oauth-provider]: ${PROVIDER}`,
+      `plugins[oidc-provider]: ${PROVIDER}`,
+    ]);
+  });
+});

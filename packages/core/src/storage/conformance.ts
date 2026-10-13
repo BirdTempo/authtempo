@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   ApiTokenRow,
   IdentityRow,
+  JwkRow,
+  OAuthClientRow,
+  OAuthConsentRow,
+  OAuthTokenRow,
   PasskeyRow,
   TotpRow,
   TrustedDeviceRow,
@@ -814,6 +818,109 @@ export function runAdapterConformance(
           (r) => r.id,
         ),
       ).toEqual(["d3"]);
+    });
+
+    it("round-trips the version 7 jwk, oauthClient, oauthConsent, and oauthToken models and keeps their unique keys (plan 9g)", async () => {
+      const at = new Date("2026-10-13T00:00:00.000Z");
+      const key: JwkRow = {
+        id: "k1",
+        publicJwk: { kty: "OKP", crv: "Ed25519", x: "x1", kid: "k1", alg: "EdDSA", use: "sig" },
+        privateKey: "sealed",
+        slot: "signing",
+        retiredAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("jwk", key);
+      // One signing key: a second row in the slot conflicts; a retired row (slot null) does not.
+      await expect(db.create("jwk", { ...key, id: "k2" })).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["slot"],
+      });
+      const retire = [
+        { field: "id" as const, op: "eq" as const, value: "k1" },
+        { field: "slot" as const, op: "eq" as const, value: "signing" },
+      ];
+      expect(await db.update("jwk", retire, { slot: null, retiredAt: at })).toBe(1);
+      expect(await db.update("jwk", retire, { slot: null, retiredAt: at })).toBe(0);
+      await db.create("jwk", { ...key, id: "k2" });
+      await db.create("jwk", {
+        ...key,
+        id: "k3",
+        slot: null,
+        retiredAt: new Date(at.getTime() - 1000),
+      });
+      expect(await db.findOne("jwk", [{ field: "id", op: "eq", value: "k1" }])).toEqual({
+        ...key,
+        slot: null,
+        retiredAt: at,
+      });
+      expect(
+        (await db.findMany("jwk", [{ field: "retiredAt", op: "lt", value: at }])).map((r) => r.id),
+      ).toEqual(["k3"]);
+
+      const client: OAuthClientRow = {
+        id: "https://client.example.com/oauth/metadata.json",
+        kind: "cimd",
+        name: null,
+        redirectUris: ["https://client.example.com/cb", "http://127.0.0.1:5173/cb"],
+        lastSeenAt: at,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthClient", client);
+      await expect(db.create("oauthClient", client)).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["id"],
+      });
+      expect(
+        await db.findOne("oauthClient", [{ field: "id", op: "eq", value: client.id }]),
+      ).toEqual(client);
+
+      const consent: OAuthConsentRow = {
+        id: "c1",
+        userId: "u1",
+        clientId: client.id,
+        scopes: ["openid", "mcp:read"],
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthConsent", consent);
+      await expect(db.create("oauthConsent", { ...consent, id: "c2" })).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["clientId", "userId"],
+      });
+
+      const token: OAuthTokenRow = {
+        id: "t1",
+        tokenHash: "h1",
+        familyId: "f1",
+        userId: "u1",
+        clientId: client.id,
+        scopes: ["offline_access"],
+        resource: "https://api.example.com/mcp",
+        expiresAt: new Date(at.getTime() + 1000),
+        usedAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthToken", token);
+      await expect(db.create("oauthToken", { ...token, id: "t2" })).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["tokenHash"],
+      });
+      await db.create("oauthToken", { ...token, id: "t3", tokenHash: "h3" });
+      // The rotation guard: the second spend of one refresh token matches no row.
+      const spend = [
+        { field: "id" as const, op: "eq" as const, value: "t1" },
+        { field: "usedAt" as const, op: "eq" as const, value: null },
+      ];
+      expect(await db.update("oauthToken", spend, { usedAt: at })).toBe(1);
+      expect(await db.update("oauthToken", spend, { usedAt: at })).toBe(0);
+      expect(
+        await db.findOne("oauthToken", [{ field: "tokenHash", op: "eq", value: "h1" }]),
+      ).toEqual({ ...token, usedAt: at });
+      expect(await db.delete("oauthToken", [{ field: "familyId", op: "eq", value: "f1" }])).toBe(2);
     });
   });
 }
