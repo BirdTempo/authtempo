@@ -4,6 +4,14 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
+import {
+  runAfter,
+  runBefore,
+  type SessionDraft,
+  type SessionEndReason,
+  type SessionVia,
+  stopWith,
+} from "./hooks.js";
 
 const DAY_MS = 86_400_000;
 export const SESSION_TOKEN_PREFIX = "ts_";
@@ -13,6 +21,16 @@ export interface SessionInput {
   userId: string;
   ip: string | null;
   userAgent: string | null;
+  /** Set only through `openSession`, after the membership check of a hook's patch (plan 9d). */
+  activeOrganizationId?: string | null;
+}
+
+/** What an engine flow passes to `openSession` (plan 9d). */
+export interface SessionOpen {
+  user: UserRow;
+  ip: string | null;
+  userAgent: string | null;
+  via: SessionVia;
 }
 
 export interface ResolvedSession {
@@ -26,6 +44,7 @@ export interface ResolvedSession {
  * `storage` is the adapter to write through. A sign-in that resolves the
  * user in a transaction passes its `tx`, so the session commits with the
  * claim that deletes a claimant's sessions (plan 7 input).
+ * It runs no hook: an engine flow calls openSession (plan 9d).
  */
 export async function createSession(
   config: ResolvedConfig,
@@ -42,11 +61,124 @@ export async function createSession(
     lastSeenAt: now,
     ip: input.ip,
     userAgent: input.userAgent,
-    activeOrganizationId: null,
+    activeOrganizationId: input.activeOrganizationId ?? null,
     createdAt: now,
     updatedAt: now,
   });
   return { token, session };
+}
+
+const PATCH_KEYS: ReadonlySet<string> = new Set(["ip", "userAgent", "activeOrganizationId"]);
+
+function nullableString(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+/** One line that says what was wrong, never a value: a value can be an address or an agent string. */
+function refusePatch(what: string): never {
+  console.error("tempo-auth: session patch refused", what);
+  return stopWith("hook_failed");
+}
+
+/**
+ * The session fields after `session.beforeCreate`'s answer (plan 9d). Only
+ * `ip`, `userAgent`, and `activeOrganizationId` may change. A set
+ * organization must be one the user is a member of, read on the flow's
+ * transaction, as `POST /organizations/active` requires; else `not_found`.
+ */
+async function patchedInput(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  draft: SessionDraft,
+  patch: unknown,
+): Promise<SessionInput> {
+  const input: SessionInput = { userId: draft.userId, ip: draft.ip, userAgent: draft.userAgent };
+  if (patch === undefined || patch === null) return input;
+  if (typeof patch !== "object" || Array.isArray(patch))
+    return refusePatch("a value that is not an object");
+  const fields = patch as Record<string, unknown>;
+  for (const key of Object.keys(fields))
+    if (!PATCH_KEYS.has(key)) return refusePatch(`the field ${key}`);
+  const { ip, userAgent, activeOrganizationId } = fields;
+  if (ip !== undefined) {
+    if (!nullableString(ip)) return refusePatch("an ip that is not a string or null");
+    input.ip = ip;
+  }
+  if (userAgent !== undefined) {
+    if (!nullableString(userAgent)) return refusePatch("a userAgent that is not a string or null");
+    input.userAgent = userAgent;
+  }
+  if (activeOrganizationId !== undefined) {
+    if (!nullableString(activeOrganizationId))
+      return refusePatch("an activeOrganizationId that is not a string or null");
+    if (activeOrganizationId !== null) {
+      const member = config.organizations
+        ? await storage.findOne("member", [
+            { field: "organizationId", op: "eq", value: activeOrganizationId },
+            { field: "userId", op: "eq", value: draft.userId },
+          ])
+        : null;
+      if (!member) stopWith("not_found");
+    }
+    input.activeOrganizationId = activeOrganizationId;
+  }
+  return input;
+}
+
+/**
+ * The one way an engine flow opens a session (plan 9d). It runs
+ * `session.beforeCreate` on the flow's transaction (`storage`), applies the
+ * patch, and writes the row. A refusal or a bad patch throws `HookStop`,
+ * which undoes the flow's transaction; the flow's `hookGuard` answers it.
+ * The flow calls `sessionOpened` after its commit.
+ */
+export async function openSession(
+  config: ResolvedConfig,
+  input: SessionOpen,
+  storage: StorageAdapter = config.storage,
+): Promise<{ token: string; session: SessionRow }> {
+  const draft: SessionDraft = {
+    userId: input.user.id,
+    ip: input.ip,
+    userAgent: input.userAgent,
+    activeOrganizationId: null,
+  };
+  const patch = await runBefore("session.beforeCreate", config.hooks.session.beforeCreate, {
+    session: draft,
+    user: input.user,
+    via: input.via,
+  });
+  return createSession(config, await patchedInput(config, storage, draft, patch), storage);
+}
+
+/** `session.afterCreate` for a sign-in that committed (plan 9d). */
+export async function sessionOpened(
+  config: ResolvedConfig,
+  session: SessionRow,
+  user: UserRow,
+  via: SessionVia,
+): Promise<void> {
+  await runAfter(
+    "session.afterCreate",
+    config.hooks.session.afterCreate,
+    { session, user, via },
+    session.id,
+  );
+}
+
+/** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). */
+export async function sessionsEnded(
+  config: ResolvedConfig,
+  sessions: readonly SessionRow[],
+  reason: SessionEndReason,
+): Promise<void> {
+  for (const session of sessions)
+    await runAfter(
+      "session.afterEnd",
+      config.hooks.session.afterEnd,
+      { session, reason },
+      session.id,
+    );
 }
 
 /**
@@ -66,7 +198,11 @@ export async function resolveSession(
   ]);
   if (!session) return null;
   if (session.expiresAt.getTime() <= now.getTime()) {
-    await config.storage.delete("session", [{ field: "id", op: "eq", value: session.id }]);
+    const n = await config.storage.delete("session", [
+      { field: "id", op: "eq", value: session.id },
+    ]);
+    // One row: this call ended it. Zero: another call or the sweep did, and the sweep fires no hook.
+    if (n === 1) await sessionsEnded(config, [session], "expired");
     return null;
   }
   const user = await config.storage.findOne("user", [
@@ -92,9 +228,13 @@ export async function resolveSession(
 
 export async function destroySession(config: ResolvedConfig, token: string): Promise<void> {
   if (!TOKEN_RE.test(token)) return;
-  await config.storage.delete("session", [
+  const session = await config.storage.findOne("session", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
   ]);
+  if (!session) return;
+  // By id, so the row the after hook names is the row this call deleted.
+  const n = await config.storage.delete("session", [{ field: "id", op: "eq", value: session.id }]);
+  if (n === 1) await sessionsEnded(config, [session], "sign_out");
 }
 
 /** The value of `Authorization: Bearer <value>`, or null. The one copy of the bearer rule. */

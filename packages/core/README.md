@@ -78,6 +78,13 @@ The organization routes follow.
 
 Without an `organizations` config none of the organization routes exist, and the router answers 404.
 
+With hooks (see "Hooks" below), every organization write and every sign-in
+can also answer 403 `hook_refused` (with `message`) and 500 `hook_failed`.
+With `organizations.limits`, create answers 409 `organization_limit`, add
+and accept answer 409 `member_limit`, and invite answers 409
+`invitation_limit`. A sign-in whose session hook names an organization the
+user is not a member of answers 404 `not_found`.
+
 Set `appName` in the config to name the app. It is 1 to 80 characters with
 no control character. The default is the host of `baseURL`. The default
 pages show it in the title and the heading. The magic link mail subject is
@@ -493,6 +500,107 @@ Check the member's rank on each request.
 | `already_member` | 409 | The user is already a member |
 | `email_mismatch` | 403 | The invitation is for another address |
 | `conflict` | 409 | A concurrent write changed the organization or the member; retry |
+| `organization_limit` | 409 | The user holds `organizations.limits.perUser` member rows |
+| `member_limit` | 409 | The organization holds `organizations.limits.membersPerOrganization` members |
+| `invitation_limit` | 409 | The organization holds `organizations.limits.pendingInvitationsPerOrganization` pending invitations |
+| `hook_refused` | 403 | A before hook threw `hookRefusal(message)`; the body carries `message` |
+| `hook_failed` | 500 | A before hook threw another error, or a session patch was wrong |
+
+## Hooks
+
+A hook is your code at a named point of a core flow (plan 9d). Pass plain
+objects of functions in `hooks`:
+
+```ts
+import { createAuth, hookRefusal } from "@tempo-auth/core";
+
+const auth = createAuth({
+  // ...
+  organizations: { limits: { perUser: 5, membersPerOrganization: 50 } },
+  hooks: {
+    organization: {
+      async beforeCreate({ organization, user }) {
+        if (organization.slug.startsWith("acme-")) throw hookRefusal("Choose another name.");
+        // Write your own row first, with the id core minted.
+        await tenants.create({ id: organization.id, ownerId: user.id });
+      },
+      async afterAddMember({ organization, member, via }) {
+        await audit.write("member.added", organization.id, member.userId, via);
+      },
+    },
+    session: {
+      beforeCreate: () => ({ ip: null, userAgent: null }),
+      async afterEnd({ session, reason }) {
+        await audit.write("session.ended", session.id, reason);
+      },
+    },
+  },
+});
+```
+
+- A before hook runs inside the flow's transaction, after core's rank
+  checks and limits, and before the first write. `throw hookRefusal(message)`
+  answers 403 `{ "error": "hook_refused", "message": "…" }`. A message that
+  is empty, longer than 200 characters, or holds a control character becomes
+  "The app refused this request.". Any other throw answers 500
+  `hook_failed` and logs `tempo-auth: before hook failed <hook> <error name>`.
+  Either way, no row is written.
+- An after hook runs after the commit, before the answer. A throw cannot
+  undo the row: core logs `tempo-auth: after hook failed <hook> <row id>
+  <error name>` and answers success. If your app must not keep a core row
+  without its own row, write yours in the before hook, with the id core
+  minted. Then the residual of a failure is your row with no core row.
+- Each hook gets a copy of its event. A before hook cannot change the row,
+  except `session.beforeCreate`, which may answer `{ ip?, userAgent?,
+  activeOrganizationId? }`, each a string or null. The organization must be
+  one the user is a member of, or the sign-in answers 404 `not_found`. Any
+  other field answers 500 `hook_failed`.
+- Organization points: `beforeCreate`, `afterCreate`, `beforeUpdate`,
+  `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember` and
+  `afterAddMember` (`via`: `create` for the creator's owner row, `add`, or
+  `invitation`), `beforeUpdateMemberRole`, `afterUpdateMemberRole`,
+  `beforeRemoveMember` and `afterRemoveMember` (`via`: `remove` or `leave`),
+  `beforeInvite`, `afterInvite`, `afterAcceptInvitation`,
+  `afterDeclineInvitation` (`user` is null when the decline carried no
+  session), and `afterRevokeInvitation`. An accept runs `beforeAddMember`
+  with `via: "invitation"` every time, and `afterAddMember` only when it
+  made a new member row. A delete runs no member hook for the rows it
+  removes.
+- Session points: `beforeCreate` and `afterCreate` (`via`: `password`,
+  `magic_link`, `social`, `passkey`, or `handoff`), and `afterEnd`
+  (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`, or
+  `expired`), once per ended row. `sweepExpired` deletes expired rows in
+  bulk and fires no hook, so `expired` fires only when a request presents
+  the token after its expiry.
+- A before hook can run for a sign-in that then fails: a claim race guard
+  deletes the new session in the same transaction and answers an error, and
+  `afterCreate` does not run. A flow that retries after a unique key race
+  (the magic link, the social sign-in, the sign-up, the reset) runs its
+  before hook again.
+- Hooks have no timeout, as the mail port has none. A hook that never
+  settles holds the request. A before hook holds the transaction, and on
+  Postgres one connection, for as long as it runs. Do not open a
+  transaction on core's storage from a before hook.
+- Core has no request hooks. Wrap `auth.handle`, and read
+  `auth.caller(request)` for the caller.
+- `createAuth` refuses a hook that is not a function, a name that is no
+  hook point, a hook object that is not a plain object, and organization
+  hooks while `organizations` is off.
+
+### Limits
+
+`organizations.limits` takes three positive integers. Each is off by default.
+
+| Limit | Counts | Answer at the limit |
+| --- | --- | --- |
+| `perUser` | the user's member rows at any rank; a leave frees a slot | 409 `organization_limit` on create |
+| `membersPerOrganization` | the organization's member rows, on add and on an accept that makes a member | 409 `member_limit`; the invitation stays pending |
+| `pendingInvitationsPerOrganization` | the pending, unexpired invitations to other addresses | 409 `invitation_limit` on invite |
+
+Core counts inside the transaction, before the before hook. On D1 the count
+and the write are not isolated, so two writes at the same moment can both
+pass at the limit minus one. Postgres read committed has the same window.
+The API token cap has the same rule.
 
 ## Sweep
 

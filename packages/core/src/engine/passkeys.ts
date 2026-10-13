@@ -10,7 +10,8 @@ import type {
   RegistrationResponseJSON,
 } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
-import { createSession } from "./sessions.js";
+import { hookGuard } from "./hooks.js";
+import { openSession, sessionOpened } from "./sessions.js";
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
 const SIGN_IN = "sign-in";
@@ -268,11 +269,17 @@ export async function verifyPasskeyAuthentication(
     console.error("tempo-auth: passkey counter moved");
     return fail("passkey_failed");
   }
-  const { token, session } = await createSession(config, {
-    userId: user.id,
-    ip: input.ip,
-    userAgent: input.userAgent,
-  });
+  // One transaction, so a session hook's membership check and the write read the same state.
+  const opened = await hookGuard(async () =>
+    ok(
+      await config.storage.transaction((tx) =>
+        openSession(config, { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" }, tx),
+      ),
+    ),
+  );
+  if (!opened.ok) return opened;
+  const { token, session } = opened.value;
+  await sessionOpened(config, session, user, "passkey");
   return ok({ token, user, session });
 }
 

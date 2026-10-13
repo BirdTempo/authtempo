@@ -1,6 +1,6 @@
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
-import type { UserRow } from "../schema.js";
+import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
@@ -44,13 +44,16 @@ export interface ClaimKeep {
  * session, every password row (except the one `keep.passwordId` names),
  * every passkey, every pending passkey challenge, and every
  * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
- * Runs inside the caller's transaction.
+ * Runs inside the caller's transaction. When `ended` is given, the session
+ * rows the claim deletes are pushed onto it, so the caller fires
+ * session.afterEnd after the commit (plan 9d).
  */
 export async function claimEmail(
   tx: StorageAdapter,
   userId: string,
   keep: ClaimKeep | null,
   now: Date,
+  ended?: SessionRow[],
 ): Promise<void> {
   // First, so a concurrent session insert for this user sees the verified flag and undoes itself (see the conditional update after each session insert).
   await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
@@ -70,6 +73,10 @@ export async function claimEmail(
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
   await tx.delete("password", passwords);
+  // The rows first, for the after hook. The delete still matches by user id, so a
+  // session that another request adds between the two statements goes too, with no hook.
+  if (ended)
+    ended.push(...(await tx.findMany("session", [{ field: "userId", op: "eq", value: userId }])));
   await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
   // A claimant's passkeys would keep the account open after the claim.
   // Registration already needs a verified email; this closes any other path.
@@ -179,16 +186,18 @@ export function findOrCreateUserByEmail<T>(
   email: string,
   now: Date,
   after: AfterResolve<T>,
+  ended?: SessionRow[],
 ): Promise<{ user: UserRow; created: boolean; after: T }>;
 export async function findOrCreateUserByEmail<T>(
   storage: StorageAdapter,
   email: string,
   now: Date,
   after?: AfterResolve<T>,
+  ended?: SessionRow[],
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await createOrFindInTransaction(storage, email, now, after);
+      return await createOrFindInTransaction(storage, email, now, after, ended);
     } catch (err) {
       // A concurrent call created the user between our read and our create.
       // Run the resolution once more, outside the failed transaction, so it
@@ -212,9 +221,12 @@ function createOrFindInTransaction<T>(
   email: string,
   now: Date,
   after: AfterResolve<T> | undefined,
+  ended: SessionRow[] | undefined,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   return storage.transaction(async (tx) => {
-    const { user, created } = await resolveInTransaction(tx, email, now);
+    // A retry runs the claim again. The rows of an attempt that rolled back did not end.
+    if (ended) ended.length = 0;
+    const { user, created } = await resolveInTransaction(tx, email, now, ended);
     if (!after) return { user, created };
     return { user, created, after: await after(tx, user, created) };
   });
@@ -224,6 +236,7 @@ async function resolveInTransaction(
   tx: StorageAdapter,
   email: string,
   now: Date,
+  ended: SessionRow[] | undefined,
 ): Promise<{ user: UserRow; created: boolean }> {
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (existing) {
@@ -233,7 +246,7 @@ async function resolveInTransaction(
     // outside this transaction.
     await ensureEmailIdentity(tx, existing.id, email, now);
     if (!existing.emailVerified) {
-      await claimEmail(tx, existing.id, null, now);
+      await claimEmail(tx, existing.id, null, now, ended);
       return { user: { ...existing, emailVerified: true, updatedAt: now }, created: false };
     }
     return { user: existing, created: false };

@@ -10,7 +10,7 @@ import {
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { UserRow } from "../schema.js";
+import type { SessionRow, UserRow } from "../schema.js";
 import {
   buildQuery,
   type ConfiguredProvider,
@@ -23,7 +23,8 @@ import {
   stringClaim,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { createSession } from "./sessions.js";
+import { hookGuard } from "./hooks.js";
+import { openSession, sessionOpened, sessionsEnded } from "./sessions.js";
 import {
   ClaimRacedError,
   claimEmail,
@@ -199,16 +200,22 @@ export async function completeSocial(
 
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
-  const resolved = await resolveSocialUser(
-    config.storage,
-    provider.name,
-    bounded,
-    now,
-    (tx, user) =>
-      createSession(config, { userId: user.id, ip: input.ip, userAgent: input.userAgent }, tx),
+  const ended: SessionRow[] = [];
+  const resolved = await hookGuard(() =>
+    resolveSocialUser(
+      config.storage,
+      provider.name,
+      bounded,
+      now,
+      (tx, user) =>
+        openSession(config, { user, ip: input.ip, userAgent: input.userAgent, via: "social" }, tx),
+      ended,
+    ),
   );
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
+  await sessionsEnded(config, ended, "claim");
+  await sessionOpened(config, after.session, user, "social");
   return ok({ token: after.token, next: safeNext(data.next), user });
 }
 
@@ -421,6 +428,7 @@ export function resolveSocialUser<T extends AfterSession>(
   profile: SocialProfile,
   now: Date,
   after: (tx: StorageAdapter, user: UserRow) => Promise<T>,
+  ended?: SessionRow[],
 ): Promise<Result<{ user: UserRow; after: T }>>;
 export async function resolveSocialUser<T extends AfterSession>(
   storage: StorageAdapter,
@@ -428,12 +436,15 @@ export async function resolveSocialUser<T extends AfterSession>(
   profile: SocialProfile,
   now: Date,
   after?: (tx: StorageAdapter, user: UserRow) => Promise<T>,
+  ended?: SessionRow[],
 ): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await storage.transaction(
         async (tx): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> => {
-          const linked = await linkInTransaction(tx, provider, profile, now);
+          // A retry runs the claim again. The rows of an attempt that rolled back did not end.
+          if (ended) ended.length = 0;
+          const linked = await linkInTransaction(tx, provider, profile, now, ended);
           if (!linked.ok) return linked;
           const { user, trustedIdentityId, created } = linked.value;
           if (!after) return ok(user);
@@ -496,6 +507,7 @@ async function linkInTransaction(
   provider: string,
   profile: SocialProfile,
   now: Date,
+  ended: SessionRow[] | undefined,
 ): Promise<Result<Linked>> {
   const identity = await tx.findOne("identity", [
     { field: "provider", op: "eq", value: provider },
@@ -512,7 +524,7 @@ async function linkInTransaction(
       profile.email !== null &&
       normalizeEmail(profile.email) === user.email;
     if (!user.emailVerified && proved) {
-      await claimEmail(tx, user.id, { identityId: identity.id }, now);
+      await claimEmail(tx, user.id, { identityId: identity.id }, now, ended);
       await ensureEmailIdentity(tx, user.id, user.email, now);
       const filled = await fillUser(
         tx,
@@ -543,7 +555,7 @@ async function linkInTransaction(
     // before the new identity is linked.
     let current = existing;
     if (!existing.emailVerified) {
-      await claimEmail(tx, existing.id, null, now);
+      await claimEmail(tx, existing.id, null, now, ended);
       current = { ...existing, emailVerified: true, updatedAt: now };
     }
     await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
