@@ -60,6 +60,7 @@ const s = await auth.session(request);     // { user, session } or null
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
 Without a `password` config none of the password routes exist, and the router answers 404. The token routes exist in every deployment.
+
 With `emailOtp: false` none of the code routes exist, and the router answers 404. Without a `password` config the two reset code routes do not exist.
 
 The organization routes follow.
@@ -393,21 +394,44 @@ Core sends each code mail to the address the code belongs to, whatever
 - One code per address and purpose is live. A new request spends the
   earlier code, so the code of an older mail answers `invalid_code`.
 - A wrong code counts one guess. The guess that reaches `maxAttempts`
-  spends the code and answers `too_many_attempts`, and every later try
-  answers the same until a new request. A right code after the cap does not
-  sign in.
+  spends the code and every other live code of the address and purpose,
+  and answers `too_many_attempts`. Every later try answers the same until a
+  new request, also when two parallel requests left two live codes. A right
+  code after the cap does not sign in.
 - A wrong code, an expired code, a spent code, and an address with no code
   answer `invalid_code`. Core does not tell them apart.
 - The stored value is HMAC-SHA256 under `secret` of the row id and the
   code. A copy of the verification table gives no code without the secret.
   After a change of `secret`, every live code answers `invalid_code`.
 - The guess count is a compare-and-set on the row's `updatedAt`, so
-  parallel guesses all count, on D1 and on Postgres.
+  parallel guesses all count, on D1 and on Postgres. The storage
+  conformance suite pins `eq` on a date to the millisecond on every
+  adapter. The count stops after `maxAttempts + 1` rounds and answers
+  `invalid_code`, with the log line `tempo-auth: email code count gave up`
+  and the row id, so a storage that never matches cannot hold a request.
+- One address gets at most 20 codes per 24 hours, for both purposes
+  together (`otp:email-day:<address>`), after the 15-minute limits. So one
+  address takes at most 100 guesses a day with the defaults.
 - A reset by code runs the reset link's path: the policy, the breach
   check, the new password, the end of every session, the claim rule, and a
   new session. A password that the policy or the breach check refuses
   spends the code: request a new one. A reset of either kind spends the
   live reset links and codes of the address, and so does a password change.
+
+The odds that an attacker who never sees the mail guesses a code, with the
+defaults and a limiter that the product owns (D1 or Postgres):
+
+| Scope | Guesses at most | Odds of a takeover |
+| --- | --- | --- |
+| One code | 5 | 5 × 10⁻⁶ |
+| One address, one day | 100 (20 codes × 5) | 1 × 10⁻⁴ |
+| One address, one year | about 36,500 | about 3.6 % |
+
+The attack is loud: at full rate the address gets 20 code mails a day.
+`length: 8` divides each figure by 100, so use it for high-value accounts.
+The memory limiter is per isolate: on Workers the request and verify
+budgets, the daily cap too, multiply by the isolate count. The per-code cap
+stays global, because it lives in the row.
 
 ```ts
 import { createClient } from "@tempo-auth/client";
@@ -811,6 +835,9 @@ Without a trigger, expired rows stay in the database.
   same limiter. The sign-in code and the reset code share each budget. Two
   parallel requests for one address can leave two live codes; the verify
   reads the newest.
+- Email codes (amended 2026-10-13 by the plan 9e final fix wave): a request
+  is also limited to 20 per address per 24 hours, for both purposes, in the
+  same limiter. The odds table is in "Email codes".
 - Core at version 4 needs the `0004_schema_v4` migration in both adapters. Version 4 adds the password table.
 - Core at version 5 needs the `0005_schema_v5` migration in both adapters. Version 5 adds the API token table, `ta_api_token`.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
