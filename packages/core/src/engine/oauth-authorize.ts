@@ -224,7 +224,9 @@ export async function issueCode(
   await config.storage.create("verification", {
     id: newId(now),
     purpose: "oauth-code",
-    identifier: request.clientId,
+    // The user, as for a handoff code: a reset or a password change deletes
+    // the user's codes by it (plan 9g final fix wave, round 2).
+    identifier: input.userId,
     valueHash: await sha256Hex(code),
     expiresAt: new Date(now.getTime() + oauth.codeTtlMinutes * 60_000),
     consumedAt: null,

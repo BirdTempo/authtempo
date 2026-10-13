@@ -129,9 +129,10 @@ async function writeRefresh(
 
 /**
  * True while the grant still stands: at a refresh, the spent row exists;
- * at the code exchange, the consent of the user for the client exists. A
- * grant revoke deletes both (`revokeGrant`), and a reset or a password
- * change deletes the refresh rows (`deleteRefreshTokens`).
+ * at the code exchange, the code row (its id is the family id) and the
+ * consent of the user for the client exist. A grant revoke deletes the
+ * consent and the refresh rows (`revokeGrant`); a reset or a password
+ * change deletes the refresh rows and the code rows (`deleteOAuthTokens`).
  */
 async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> {
   if (g.spentId !== null)
@@ -140,6 +141,11 @@ async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> 
         { field: "id", op: "eq", value: g.spentId },
       ])) !== null
     );
+  // A reset or a password change that ran during this exchange deleted the code row it spent.
+  if (
+    !(await config.storage.findOne("verification", [{ field: "id", op: "eq", value: g.familyId }]))
+  )
+    return false;
   return (
     (await config.storage.findOne("oauthConsent", [
       { field: "clientId", op: "eq", value: g.clientId },

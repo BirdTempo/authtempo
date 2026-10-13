@@ -414,7 +414,8 @@ describe("the authorize step (plan 9g)", () => {
     const rows = await codes(h);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      identifier: s.clientId,
+      // The user: a reset or a password change deletes the user's codes by it.
+      identifier: s.user.id,
       valueHash: await sha256Hex(code),
       consumedAt: null,
       expiresAt: new Date(before.getTime() + 300_000),

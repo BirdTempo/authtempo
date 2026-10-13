@@ -8,7 +8,7 @@ import type { StorageAdapter } from "../storage/port.js";
  * the consent of one user for one client, with the refresh tokens that the
  * client holds for that user. An app lists them on a "connected apps" page,
  * and a person ends one there. A reset or a change of the password deletes
- * the refresh tokens and keeps the consents (`deleteRefreshTokens`).
+ * the refresh tokens and the codes, and keeps the consents (`deleteOAuthTokens`).
  */
 
 export interface OAuthGrantSummary {
@@ -90,11 +90,16 @@ export async function revokeGrant(
 }
 
 /**
- * Deletes every refresh token of the user, in the caller's transaction: a
- * reset of either kind and a password change (spec 8.7, the plan 9g final
- * fix wave). The consents stay, so the next authorize asks for no consent,
- * but each client must send the person through the authorize step again.
+ * Deletes every refresh token and every `oauth-code` row of the user, in
+ * the caller's transaction: a reset of either kind and a password change
+ * (spec 8.7, the plan 9g final fix wave). A code from before the reset then
+ * gives nothing. The consents stay, so the next authorize asks for no
+ * consent, but each client must send the person through the authorize step again.
  */
-export async function deleteRefreshTokens(tx: StorageAdapter, userId: string): Promise<void> {
+export async function deleteOAuthTokens(tx: StorageAdapter, userId: string): Promise<void> {
   await tx.delete("oauthToken", [{ field: "userId", op: "eq", value: userId }]);
+  await tx.delete("verification", [
+    { field: "purpose", op: "eq", value: "oauth-code" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
 }

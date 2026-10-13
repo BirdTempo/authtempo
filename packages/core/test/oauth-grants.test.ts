@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requestResetOtp, resetPasswordWithOtp } from "../src/engine/email-otp.js";
-import { revokeGrant } from "../src/engine/oauth-grants.js";
+import { deleteOAuthTokens, revokeGrant } from "../src/engine/oauth-grants.js";
 import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -405,6 +405,72 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
     expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
     await expectEnded(h, c, tokens.refresh_token ?? "");
     await authorizeAgain(h, c.clientId, c.cookie);
+  });
+
+  it("a code issued before a reset or a change answers invalid_grant: the codes go too (round 2)", async () => {
+    for (const end of ["reset", "change"] as const) {
+      const h = pwOAuth();
+      // Without offline_access the exchange writes no refresh row, so only the code delete refuses it.
+      const c = await codeFor(h, "mcp:read");
+      const writes = recordNextTransaction(h.storage);
+      if (end === "reset") {
+        await requestPasswordReset(h.config, { email: c.user.email, ip: null });
+        const r = await resetPassword(h.config, {
+          token: h.mails.at(-1)?.token ?? "",
+          password: "a new long password",
+          ip: null,
+          userAgent: null,
+        });
+        if (!r.ok) throw new Error(r.code);
+      } else {
+        const session = await resolveSession(h.config, c.token);
+        if (!session) throw new Error("no session");
+        expect(
+          (await changePassword(h.config, { session, newPassword: "a new long password" })).ok,
+        ).toBe(true);
+      }
+      expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
+      expect(writes[writes.indexOf("delete:oauthToken") + 1]).toBe("delete:verification");
+      expect(
+        await h.storage.findMany("verification", [
+          { field: "purpose", op: "eq", value: "oauth-code" },
+        ]),
+      ).toEqual([]);
+      expect({
+        end,
+        answer: await answer(await h.auth.handle(exchange(c.code, c.clientId, c.verifier))),
+      }).toEqual({ end, answer: GRANT });
+      expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
+    }
+  });
+
+  it("a reset that lands during the code exchange, after the code is spent: the new refresh row goes (round 2)", async () => {
+    const outer = oauthHandle();
+    let resetFirst: (() => Promise<unknown>) | null = null;
+    const storage = new Proxy(outer.storage, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (key !== "create" || typeof value !== "function") return value;
+        return async (model: string, ...args: unknown[]) => {
+          if (model === "oauthToken" && resetFirst) {
+            const run = resetFirst;
+            resetFirst = null;
+            await run();
+          }
+          return (value as (...a: unknown[]) => Promise<unknown>).call(target, model, ...args);
+        };
+      },
+    }) as StorageAdapter;
+    const h = { ...oauthHandle({ storage, clock: outer.clock }), storage: outer.storage };
+    const c = await codeFor(h);
+    // The reset's own delete, with the consent kept, as a reset leaves it.
+    resetFirst = () => deleteOAuthTokens(outer.storage, c.user.id);
+    expect(await answer(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)))).toEqual(
+      GRANT,
+    );
+    expect(resetFirst).toBeNull();
+    expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
+    expect(await h.storage.findMany("oauthConsent", [])).toHaveLength(1);
   });
 
   it("another user's refresh tokens stay", async () => {

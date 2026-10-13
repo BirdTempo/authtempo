@@ -6,7 +6,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
-import { deleteRefreshTokens } from "./oauth-grants.js";
+import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import {
   endSessions,
@@ -902,10 +902,10 @@ function applyReset(
         await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset);
         await deleteHandoffCodes(tx, user.id);
       }
-      // The OAuth refresh tokens end with the sessions: a reset after a
+      // The OAuth refresh tokens and codes end with the sessions: a reset after a
       // compromise must cut off every agent too. The consents stay, so the
       // person signs each client in again with no new consent (plan 9g final fix wave).
-      await deleteRefreshTokens(tx, user.id);
+      await deleteOAuthTokens(tx, user.id);
       // The other links and codes for this address. A person who reads the
       // mailbox later must not set a password with a second proof (plan 9e).
       await tx.delete("verification", [
@@ -1032,8 +1032,8 @@ export async function changePassword(
       await deleteTwoFactorChallenges(tx, user.id);
       // Each row by id, for the after hook (plan 9d, final fix wave M-1).
       await endSessions(tx, others, ended);
-      // The OAuth refresh tokens go with the other sessions, as in a reset (plan 9g final fix wave).
-      await deleteRefreshTokens(tx, user.id);
+      // The OAuth refresh tokens and codes go with the other sessions, as in a reset (plan 9g final fix wave).
+      await deleteOAuthTokens(tx, user.id);
       // The codes of the changer's own session go too. The row names the
       // user, not the session, and a lost code costs one more handoff.
       await deleteHandoffCodes(tx, user.id);

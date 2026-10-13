@@ -1153,6 +1153,8 @@ describe("changePassword", () => {
       "delete:session",
       // The OAuth refresh tokens, in the same transaction (plan 9g final fix wave).
       "delete:oauthToken",
+      // The user's OAuth codes (plan 9g final fix wave, round 2).
+      "delete:verification",
       "delete:verification",
       "delete:verification",
     ]);
