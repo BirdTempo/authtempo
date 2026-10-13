@@ -8,12 +8,14 @@ import {
   resetPassword,
 } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
+import { enableTotp, setupTotp } from "../src/engine/totp.js";
+import { base32Decode, totpCode } from "../src/primitives/totp.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, recordNextTransaction, sessionOnly, signUpAndVerify } from "./password-helpers.js";
 
 /**
- * The session delete of a reset, a change, and a claim (plan 9h, index line
- * 179). With an `afterEnd` hook, each read row goes by id, so the hook fires
+ * The session delete of a reset, a change, a claim, and a TOTP enable
+ * (plan 9h, index line 179; spec 8.9). With an `afterEnd` hook, each read row goes by id, so the hook fires
  * once per row the flow ended, then one delete by the flow's `where`. With no
  * hook, no flow needs the rows, so one statement deletes them all.
  */
@@ -53,7 +55,7 @@ async function signIn(auth: EndAuth): Promise<string> {
 
 const sessionDeletes = (writes: string[]) => writes.filter((w) => w === "delete:session").length;
 
-describe("the session delete of a reset, a change, and a claim (plan 9h)", () => {
+describe("the session delete of a reset, a change, a claim, and a TOTP enable (plan 9h)", () => {
   for (const listen of [false, true]) {
     const label = listen ? "with an afterEnd hook, each row by id" : "with no hook, one statement";
 
@@ -108,6 +110,30 @@ describe("the session delete of a reset, a change, and a claim (plan 9h)", () =>
         r.value.session.id,
       ]);
       expect(events.map((e) => e.id).sort()).toEqual(listen ? [...before].sort() : []);
+    });
+
+    it(`a TOTP enable ends the other two sessions: ${label}`, async () => {
+      const { auth, events } = endAuth(listen);
+      await signUpAndVerify(auth, EMAIL, PASSWORD);
+      const own = await signIn(auth);
+      await signIn(auth);
+      const session = await resolveSession(auth.config, own);
+      if (!session) throw new Error("no session");
+      // The verify link's session, one other sign-in, and the enabler's own.
+      expect(await auth.storage.findMany("session", [])).toHaveLength(3);
+      const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+      if (!setup.ok) throw new Error(setup.code);
+      const code = await totpCode(base32Decode(setup.value.secret), auth.clock.now());
+      // The verify link is a claim: it fired `afterEnd` for the sign-up's session.
+      events.length = 0;
+      const writes = recordNextTransaction(auth.storage);
+      const r = await enableTotp(auth.config, { session, code });
+      if (!r.ok) throw new Error(r.code);
+      expect(sessionDeletes(writes)).toBe(listen ? 3 : 1);
+      expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
+        session.session.id,
+      ]);
+      expect(events.map((e) => e.reason)).toEqual(listen ? ["two_factor", "two_factor"] : []);
     });
 
     it(`a claim by an email code ends the claimant's two sessions: ${label}`, async () => {
