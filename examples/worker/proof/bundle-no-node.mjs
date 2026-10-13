@@ -10,15 +10,16 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const out = mkdtempSync(join(tmpdir(), "authtempo-bundle-"));
 try {
   const run = spawnSync("pnpm", ["exec", "wrangler", "deploy", "--dry-run", "--outdir", out], {
     encoding: "utf8",
-    // Pin the directory: wrangler reads wrangler.jsonc from here.
-    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    // Pin the directory: wrangler reads wrangler.jsonc from here. The first
+    // argument names another Worker's directory (plan 11a: examples/worker-d1).
+    cwd: process.argv[2] ? resolve(process.argv[2]) : fileURLToPath(new URL("..", import.meta.url)),
     env: { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
   });
   const log = `${run.stdout}\n${run.stderr}`;

@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "my-app",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  // From compatibility date 2026-08-04 Workers turn nodejs_compat on by
+  // default. Core and the D1 adapter use no Node.js API, so these two flags
+  // turn it off. The test bundles the Worker and fails on any node: import.
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  "vars": {
+    // The origin of this Worker. Change it to your own origin before a deploy.
+    "BASE_URL": "https://example.test"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "my-app",
+      // Replace this with the id that `wrangler d1 create my-app` prints.
+      // The test runs on a local database and needs no real id.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      // The adapter package ships the migrations. wrangler reads this path
+      // relative to this file.
+      "migrations_dir": "node_modules/@authtempo/adapter-d1/migrations"
+    }
+  ],
+  // The sweep deletes expired links, codes, and sessions. Without a trigger
+  // they stay in D1 forever.
+  "triggers": { "crons": ["17 * * * *"] }
+  // AUTH_SECRET is a secret: `wrangler secret put AUTH_SECRET`. The test sets
+  // it in vitest.config.ts.
+}

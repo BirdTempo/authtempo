@@ -1,0 +1,22 @@
+{
+  "name": "authtempo-example-worker-d1",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run && node ../worker/proof/bundle-no-node.mjs ."
+  },
+  "dependencies": {
+    "@authtempo/adapter-d1": "workspace:*",
+    "@authtempo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "@cloudflare/workers-types": "5.20261007.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}
