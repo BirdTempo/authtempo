@@ -161,7 +161,12 @@ export async function signToken(
  */
 export const JWKS_RETIRED_MAX = 100;
 
-/** The JWKS document: the signing key first, then at most 100 keys retired less than 24 hours ago, newest first. */
+/**
+ * The JWKS document: the signing key first, then at most 100 keys retired
+ * less than 24 hours ago, the last retired first. By `retiredAt`, not
+ * `createdAt`: under two live versions a long-lived key retires last and
+ * its tokens are the newest, so it must stay in the set (round 2 re-review).
+ */
 export async function publicKeySet(config: ResolvedConfig): Promise<{ keys: PublicJwk[] }> {
   const current = await signingKey(config, mintConfig(config).alg);
   const since = new Date(config.clock.now().getTime() - RETIRED_KEY_MS);
@@ -170,7 +175,7 @@ export async function publicKeySet(config: ResolvedConfig): Promise<{ keys: Publ
     [{ field: "retiredAt", op: "gt", value: since }],
     {
       sort: [
-        { field: "createdAt", dir: "desc" },
+        { field: "retiredAt", dir: "desc" },
         { field: "id", dir: "desc" },
       ],
       limit: JWKS_RETIRED_MAX,

@@ -1041,8 +1041,11 @@ describe("requestPasswordReset and resetPassword", () => {
     expect(verified.indexOf("update:password")).toBeGreaterThanOrEqual(0);
     expect(verified.indexOf("update:password")).toBeLessThan(verified.indexOf("delete:session"));
     // The OAuth refresh tokens go in the same transaction, after the sessions, in each branch (plan 9g final fix wave).
-    for (const writes of [claim, verified])
+    for (const writes of [claim, verified]) {
+      // Each list holds the session delete, so the order check below cannot pass on a -1.
+      expect(writes).toContain("delete:session");
       expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
+    }
   });
 });
 

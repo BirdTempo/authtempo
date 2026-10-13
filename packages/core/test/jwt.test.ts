@@ -59,7 +59,7 @@ describe("the signing key (plan 9g)", () => {
     expect(rows[0]?.publicJwk).not.toHaveProperty("d");
   });
 
-  it("lists at most 100 retired keys, the newest by createdAt first (Task 3 review)", async () => {
+  it("lists at most 100 retired keys, the last retired first (Task 3 review)", async () => {
     const auth = makeAuth();
     const current = (await publicKeySet(auth.config)).keys[0]?.kid;
     const t0 = auth.clock.now().getTime();
@@ -82,6 +82,32 @@ describe("the signing key (plan 9g)", () => {
     expect(kids[0]).toBe(current);
     expect(kids[1]).toBe("k104");
     expect(kids.at(-1)).toBe("k005");
+  });
+
+  it("keeps the oldest-created key when it retired last: the cap reads by retiredAt (round 2 re-review)", async () => {
+    const auth = makeAuth();
+    const t0 = auth.clock.now().getTime();
+    const row = (id: string, createdAt: number, retiredAt: number) =>
+      auth.storage.create("jwk", {
+        id,
+        publicJwk: { kty: "OKP", crv: "Ed25519", x: "AAAA", kid: id, alg: "EdDSA", use: "sig" },
+        privateKey: "sealed",
+        slot: null,
+        retiredAt: new Date(retiredAt),
+        createdAt: new Date(createdAt),
+        updatedAt: new Date(retiredAt),
+      });
+    // The original key of the long-lived version: made a week ago, retired a minute ago.
+    await row("orig", t0 - 7 * DAY, t0 - 60_000);
+    // 100 short-lived keys of the other version, made and retired within the last hour.
+    for (let i = 0; i < 100; i++) {
+      const at = t0 - 3_600_000 + i * 1000;
+      await row(`k${String(i).padStart(3, "0")}`, at, at);
+    }
+    const kids = (await publicKeySet(auth.config)).keys.map((k) => k.kid);
+    expect(kids).toHaveLength(101);
+    expect(kids[1]).toBe("orig");
+    expect(kids).not.toContain("k000");
   });
 
   it("rotate retires the old key: it verifies for 24 hours, signs nothing, and then fails (Review Focus 4)", async () => {

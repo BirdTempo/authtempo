@@ -152,6 +152,35 @@ describe("api.oauth.grants and api.oauth.revoke (plan 9g final fix wave)", () =>
     });
   });
 
+  it("a revoke whose token delete fails keeps the consent: both deletes run in one transaction (round 2 re-review)", async () => {
+    const h = oauthHandle();
+    const c = await codeFor(h);
+    await tokensOf(h, c);
+    // The token delete fails on both paths: inside a transaction and outside one.
+    const del = h.storage.delete.bind(h.storage);
+    h.storage.delete = ((model, where) =>
+      model === "oauthToken"
+        ? Promise.reject(new Error("storage down"))
+        : del(model, where)) as typeof h.storage.delete;
+    const transaction = h.storage.transaction.bind(h.storage);
+    h.storage.transaction = (<T>(fn: (tx: StorageAdapter) => Promise<T>) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          delete: (model, where) =>
+            model === "oauthToken"
+              ? Promise.reject(new Error("storage down"))
+              : tx.delete(model, where),
+        }),
+      )) as typeof h.storage.transaction;
+    await expect(
+      h.auth.api.oauth?.revoke({ userId: c.user.id, clientId: c.clientId }),
+    ).rejects.toThrow("storage down");
+    expect(await h.storage.findMany("oauthConsent", [])).toHaveLength(1);
+    expect(await h.storage.findMany("oauthToken", [])).toHaveLength(1);
+    expect((await grantsOf(h, c.user.id)).map((g) => g.clientId)).toEqual([c.clientId]);
+  });
+
   it("a code from before the revoke gives nothing at the exchange: the consent is gone", async () => {
     // Without offline_access no refresh row is written, so the consent check
     // before the tokens is the only guard: else an access token would go out.

@@ -76,16 +76,20 @@ export async function revokeGrant(
   config: ResolvedConfig,
   input: { userId: string; clientId: string },
 ): Promise<Result<{ ok: true }>> {
-  // The consent first: a code exchange that runs between the two deletes
-  // then finds no consent and writes no refresh token.
-  await config.storage.delete("oauthConsent", [
-    { field: "clientId", op: "eq", value: input.clientId },
-    { field: "userId", op: "eq", value: input.userId },
-  ]);
-  await config.storage.delete("oauthToken", [
-    { field: "userId", op: "eq", value: input.userId },
-    { field: "clientId", op: "eq", value: input.clientId },
-  ]);
+  // One transaction: a failed token delete leaves the consent in place, so
+  // the grants list still shows the grant and the person can try again
+  // (round 2 re-review). The consent first: a code exchange that runs
+  // between the two deletes finds no consent and writes no refresh token.
+  await config.storage.transaction(async (tx) => {
+    await tx.delete("oauthConsent", [
+      { field: "clientId", op: "eq", value: input.clientId },
+      { field: "userId", op: "eq", value: input.userId },
+    ]);
+    await tx.delete("oauthToken", [
+      { field: "userId", op: "eq", value: input.userId },
+      { field: "clientId", op: "eq", value: input.clientId },
+    ]);
+  });
   return ok({ ok: true });
 }
 
