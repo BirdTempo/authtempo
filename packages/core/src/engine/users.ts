@@ -100,6 +100,14 @@ export async function claimEmail(
 export type AfterResolve<T> = (tx: StorageAdapter, user: UserRow, created: boolean) => Promise<T>;
 
 /**
+ * Work that runs inside the resolution transaction before its first write,
+ * with the user as the resolution will leave it: the sign-in's session hook
+ * (plan 9d, fix round 2). On D1 a throw after a write runs an undo that is
+ * not exact (see `insertSignUp` in password.ts), so the hook goes first.
+ */
+export type BeforeResolveWrite = (tx: StorageAdapter, user: UserRow) => Promise<void>;
+
+/**
  * Thrown inside a transaction when a claim verified the user after this
  * transaction read the user as unverified. The throw undoes the session
  * insert. The caller catches it outside the transaction.
@@ -187,6 +195,7 @@ export function findOrCreateUserByEmail<T>(
   now: Date,
   after: AfterResolve<T>,
   ended?: SessionRow[],
+  before?: BeforeResolveWrite,
 ): Promise<{ user: UserRow; created: boolean; after: T }>;
 export async function findOrCreateUserByEmail<T>(
   storage: StorageAdapter,
@@ -194,10 +203,11 @@ export async function findOrCreateUserByEmail<T>(
   now: Date,
   after?: AfterResolve<T>,
   ended?: SessionRow[],
+  before?: BeforeResolveWrite,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await createOrFindInTransaction(storage, email, now, after, ended);
+      return await createOrFindInTransaction(storage, email, now, after, ended, before);
     } catch (err) {
       // A concurrent call created the user between our read and our create.
       // Run the resolution once more, outside the failed transaction, so it
@@ -222,11 +232,12 @@ function createOrFindInTransaction<T>(
   now: Date,
   after: AfterResolve<T> | undefined,
   ended: SessionRow[] | undefined,
+  before: BeforeResolveWrite | undefined,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   return storage.transaction(async (tx) => {
     // A retry runs the claim again. The rows of an attempt that rolled back did not end.
     if (ended) ended.length = 0;
-    const { user, created } = await resolveInTransaction(tx, email, now, ended);
+    const { user, created } = await resolveInTransaction(tx, email, now, ended, before);
     if (!after) return { user, created };
     return { user, created, after: await after(tx, user, created) };
   });
@@ -237,9 +248,15 @@ async function resolveInTransaction(
   email: string,
   now: Date,
   ended: SessionRow[] | undefined,
+  before: BeforeResolveWrite | undefined,
 ): Promise<{ user: UserRow; created: boolean }> {
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (existing) {
+    const resolved = existing.emailVerified
+      ? existing
+      : { ...existing, emailVerified: true, updatedAt: now };
+    // Before the identity repair and the claim: the D1 undo (`BeforeResolveWrite`).
+    if (before) await before(tx, resolved);
     // An isolate that died between the user create and the identity
     // create left a user with no email identity. Repair it here. A
     // concurrent repair fails unique_violation, which the caller catches
@@ -247,11 +264,10 @@ async function resolveInTransaction(
     await ensureEmailIdentity(tx, existing.id, email, now);
     if (!existing.emailVerified) {
       await claimEmail(tx, existing.id, null, now, ended);
-      return { user: { ...existing, emailVerified: true, updatedAt: now }, created: false };
     }
-    return { user: existing, created: false };
+    return { user: resolved, created: false };
   }
-  const user = await tx.create("user", {
+  const minted: UserRow = {
     id: newId(now),
     email,
     emailVerified: true,
@@ -259,7 +275,10 @@ async function resolveInTransaction(
     image: null,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  // Before the user create: the D1 undo (`BeforeResolveWrite`).
+  if (before) await before(tx, minted);
+  const user = await tx.create("user", minted);
   await tx.create("identity", {
     id: newId(now),
     userId: user.id,

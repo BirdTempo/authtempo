@@ -5,7 +5,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { hookGuard } from "./hooks.js";
-import { openSession, sessionOpened, sessionsEnded } from "./sessions.js";
+import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
@@ -88,19 +88,21 @@ export async function verifyMagicLink(
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
   const ended: SessionRow[] = [];
+  // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
+  const steps = sessionSteps(config, {
+    ip: input.ip,
+    userAgent: input.userAgent,
+    via: "magic_link",
+  });
   const resolved = await hookGuard(async () =>
     ok(
       await findOrCreateUserByEmail(
         config.storage,
         row.identifier,
         now,
-        (tx, user) =>
-          openSession(
-            config,
-            { user, ip: input.ip, userAgent: input.userAgent, via: "magic_link" },
-            tx,
-          ),
+        (tx) => steps.write(tx),
         ended,
+        steps.before,
       ),
     ),
   );

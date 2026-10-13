@@ -564,6 +564,16 @@ export async function verifyPasswordEmail(
     config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
       const user = await tx.findOne("user", [{ field: "email", op: "eq", value: row.identifier }]);
       if (!user) return fail("invalid_token");
+      const claimed = { ...user, emailVerified: true, updatedAt: now };
+      // The session hook before the first write, for the D1 undo (see `insertSignUp`).
+      // A verified user gets no session, so no hook.
+      const prepared = user.emailVerified
+        ? null
+        : await prepareSession(
+            config,
+            { user: claimed, ip: input.ip, userAgent: input.userAgent, via: "password" },
+            tx,
+          );
       // A conditional update, not a read, so that it sees a claim's
       // statements on D1. It is the first write: zero rows refuses with no
       // change. The row must also belong to this user: a user deleted and
@@ -577,15 +587,10 @@ export async function verifyPasswordEmail(
         { updatedAt: now },
       );
       if (kept === 0) return fail("invalid_token");
-      if (user.emailVerified) return ok({ user, signedIn: null });
+      if (prepared === null) return ok({ user, signedIn: null });
       await claimEmail(tx, user.id, { passwordId }, now, ended);
       await ensureEmailIdentity(tx, user.id, user.email, now);
-      const claimed = { ...user, emailVerified: true, updatedAt: now };
-      const s = await openSession(
-        config,
-        { user: claimed, ip: input.ip, userAgent: input.userAgent, via: "password" },
-        tx,
-      );
+      const s = await writeSession(config, prepared, tx);
       return ok({ user: claimed, signedIn: s });
     }),
   );
@@ -750,9 +755,11 @@ function applyReset(
       if (!consumed.ok) return consumed;
       const email = consumed.value.identifier;
       const next = safeNext((consumed.value.data as { next?: unknown } | null)?.next);
-      let user = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
-      if (!user) {
-        user = await tx.create("user", {
+      const found = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      let minted: UserRow | null = null;
+      let user: UserRow;
+      if (!found) {
+        minted = {
           id: newId(now),
           email,
           emailVerified: true,
@@ -760,8 +767,21 @@ function applyReset(
           image: null,
           createdAt: now,
           updatedAt: now,
-        });
-      }
+        };
+        user = minted;
+      } else user = found.emailVerified ? found : { ...found, emailVerified: true, updatedAt: now };
+      // The reset consumes its link first, and the hook runs before every
+      // other write (plan 9d, fix round 2). The link row belongs to this
+      // request alone, so the D1 undo of the consume is exact; an undo of the
+      // writes below would not be (see `insertSignUp`). A refusal undoes the
+      // consume with the transaction, so the link stays usable.
+      // The user the hook sees is the user this reset leaves: found, claimed, or minted.
+      const prepared = await prepareSession(
+        config,
+        { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
+        tx,
+      );
+      if (minted) await tx.create("user", minted);
       // The new password row before any session delete. A password sign-in
       // in flight re-checks its row by id and by the hash it verified as its
       // last statement. When that re-check still finds the old hash, this
@@ -769,11 +789,10 @@ function applyReset(
       // sign-in's session. The opposite order lets an old-password sign-in
       // commit a session after the delete.
       const passwordId = await setPassword(tx, user.id, hash, now);
-      if (!user.emailVerified) {
+      if (found && !found.emailVerified) {
         // The claim deletes the claimant's sessions, identities, passkeys,
         // handoff codes, and every other password row, and keeps the new password.
         await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
-        user = { ...user, emailVerified: true, updatedAt: now };
       } else {
         ended.reset.push(
           ...(await tx.findMany("session", [{ field: "userId", op: "eq", value: user.id }])),
@@ -789,11 +808,7 @@ function applyReset(
         { field: "consumedAt", op: "eq", value: null },
       ]);
       await ensureEmailIdentity(tx, user.id, email, now);
-      const s = await openSession(
-        config,
-        { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
-        tx,
-      );
+      const s = await writeSession(config, prepared, tx);
       return ok({ token: s.token, user, session: s.session, next });
     },
   );

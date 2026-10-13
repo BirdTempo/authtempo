@@ -539,11 +539,9 @@ const auth = createAuth({
 ```
 
 - A before hook runs inside the flow's transaction, after core's rank
-  checks and limits, and before the first write. The exception is
-  `session.beforeCreate`, which runs just before the session insert, after
-  the sign-in's own writes in the same transaction (see "Session points").
-  A refusal undoes those writes with the transaction. `throw hookRefusal(message)`
-  answers 403 `{ "error": "hook_refused", "message": "…" }`. A message that
+  checks and limits, and before the first write. This holds for
+  `session.beforeCreate` in every sign-in too (see "Session points").
+  `throw hookRefusal(message)` answers 403 `{ "error": "hook_refused", "message": "…" }`. A message that
   is empty, longer than 200 characters, or holds a control character becomes
   "The app refused this request.". Any other throw answers 500
   `hook_failed` and logs `tempo-auth: before hook failed <hook> <error name>`.
@@ -578,23 +576,33 @@ const auth = createAuth({
   `claim` in every flow that proves the address: the magic link, the
   social sign-in, the verify link, and the reset of an unverified user. A
   reset of a verified user ends that user's sessions with `password_reset`.
-- Where `session.beforeCreate` runs in each sign-in's transaction:
+- `session.beforeCreate` runs before the first write of the sign-in's
+  transaction in every flow except the reset (see its row). On D1 the undo
+  of a write is not exact, so a refusal after a write could bring back a
+  claimant's rows. The hook sees the user as the flow will leave it:
 
-  | Flow | Writes before the hook |
+  | Flow | The `user` the hook sees |
   | --- | --- |
-  | Password sign-up | None: the hook gets the user core minted, then core writes the user, the password, and the session |
-  | Password sign-in, passkey, handoff | None: the session insert is the first write of the transaction |
-  | Magic link | The new user and its email identity, or the email identity repair and the claim |
-  | Social sign-in | The new user or the claim, the identity link, the email identity, and the user's name and image |
-  | Verify link | The password row check, the claim, and the email identity |
-  | Reset | The link consume, the user, the new password, the claim or the session delete, the link delete, and the email identity |
+  | Password sign-up | A user core minted and has not written yet. The row does not exist at hook time, so an app's own write in the hook cannot rely on a foreign key to core's user row |
+  | Password sign-in, passkey, handoff | The stored user |
+  | Magic link | The stored user, marked verified when the link claims it, or a minted user that does not exist yet |
+  | Social sign-in | The stored user, marked verified when the sign-in claims it and with the name and image filled, or a minted user that does not exist yet |
+  | Verify link | The stored user, marked verified. A user already verified gets no session and no hook |
+  | Reset | The stored user, marked verified when the reset claims it, or a minted user that does not exist yet. The reset consumes its link first, and the hook runs before every other write. The consume belongs to this request alone, so its undo is exact |
 
-- A refused sign-in has spent what it presented. A refused magic link or
-  verify link is consumed, and a refused passkey sign-in has spent its
-  challenge and moved the passkey counter. The person starts again.
-- A before hook can run for a sign-in that then fails: a claim race guard
-  deletes the new session in the same transaction and answers an error, and
-  `afterCreate` does not run. A flow that retries after a unique key race
+  For a minted user, a set `activeOrganizationId` answers `not_found`: the
+  user is a member of nothing yet.
+
+- A refused sign-in has spent what it presented, when the flow spends it
+  before its transaction. A refused magic link, verify link, or social
+  callback is consumed, and a refused passkey sign-in has spent its
+  challenge and moved the passkey counter. The person starts again. A
+  refused reset keeps its link: its consume is in the transaction, and the
+  refusal undoes it.
+- A before hook can run for a sign-in that then fails, and `afterCreate`
+  does not run. A claim race guard deletes the new session in the same
+  transaction and answers an error. A verify link whose password row is
+  gone answers `invalid_token` after the hook. A flow that retries after a unique key race
   (the magic link, the social sign-in, the sign-up, the reset) runs its
   before hook again.
 - Hooks have no timeout, as the mail port has none. A hook that never

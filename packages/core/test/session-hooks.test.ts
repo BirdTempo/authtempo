@@ -12,10 +12,12 @@ import {
   verifyPasswordEmail,
 } from "../src/engine/password.js";
 import { createSession, destroySession, resolveSession } from "../src/engine/sessions.js";
+import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
+import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
 
 const PASSWORD = "correct horse battery";
 
@@ -291,6 +293,140 @@ describe("session create hooks (plan 9d)", () => {
       handoff: opened("handoff.ts", "handoff"),
       password: opened("password.ts", "password"),
     }).toEqual({ magicLink: 1, social: 1, passkey: 1, handoff: 1, password: 4 });
+  });
+});
+
+/**
+ * A claimant: ada signed up with a password and never proved the address,
+ * so the user is unverified and holds a password row and a session. A later
+ * proof of the address claims it. `refuse` turns the refusal on.
+ */
+async function claimantSetup(extra: Partial<AuthConfig> = {}) {
+  const flag = { refuse: false, writesAtHook: null as string[] | null };
+  let writes: string[] = [];
+  const made = recorded(
+    {
+      beforeCreate() {
+        if (!flag.refuse) return;
+        flag.writesAtHook = [...writes];
+        throw hookRefusal("Not now.");
+      },
+    },
+    extra,
+  );
+  const up = await signUp(made.auth, "ada@example.com");
+  if (!up.ok) throw new Error(up.code);
+  const snapshot = async () => ({
+    users: await made.auth.storage.findMany("user", []),
+    passwords: await made.auth.storage.findMany("password", []),
+    sessions: await made.auth.storage.findMany("session", []),
+    identities: await made.auth.storage.findMany("identity", []),
+  });
+  const before = await snapshot();
+  expect(before.users).toEqual([expect.objectContaining({ emailVerified: false })]);
+  expect(before.sessions).toHaveLength(1);
+  /** Arms the refusal and the write recorder for the next transaction. */
+  const arm = () => {
+    flag.refuse = true;
+    writes = recordNextTransaction(made.auth.storage);
+  };
+  return { ...made, flag, arm, before, snapshot };
+}
+
+describe("the session hook runs before the first write of every claim flow (fix round 2)", () => {
+  // On D1 a refusal after a write runs an undo that is not exact: it can
+  // restore the claimant's rows or flip the verified flag back. So each flow
+  // runs the hook before its first write: a refusal writes nothing.
+  it("the magic link: a refusal writes nothing and leaves the claimant's rows", async () => {
+    const c = await claimantSetup();
+    const sent = await requestMagicLink(c.auth.config, { email: "ada@example.com", ip: null });
+    if (!sent.ok) throw new Error(sent.code);
+    const token = tokenFromMail(c.auth.mail.at(-1)?.text ?? "");
+    c.arm();
+    expect(
+      await verifyMagicLink(c.auth.config, { token, ip: null, userAgent: null }),
+    ).toMatchObject({ ok: false, code: "hook_refused" });
+    expect(c.flag.writesAtHook).toEqual([]);
+    expect(await c.snapshot()).toEqual(c.before);
+  });
+
+  it("the verify link: a refusal writes nothing and leaves the claimant's rows", async () => {
+    const c = await claimantSetup();
+    const mail = c.auth.mail.findLast((m) => m.subject.startsWith("Confirm"));
+    c.arm();
+    expect(
+      await verifyPasswordEmail(c.auth.config, {
+        token: tokenFromMail(mail?.text ?? ""),
+        ip: null,
+        userAgent: null,
+      }),
+    ).toMatchObject({ ok: false, code: "hook_refused" });
+    expect(c.flag.writesAtHook).toEqual([]);
+    expect(await c.snapshot()).toEqual(c.before);
+  });
+
+  it("the reset: the consume of its link is the one write before the hook, and a refusal leaves the claimant's rows", async () => {
+    const c = await claimantSetup();
+    const asked = await requestPasswordReset(c.auth.config, { email: "ada@example.com", ip: null });
+    if (!asked.ok) throw new Error(asked.code);
+    const token = tokenFromMail(c.auth.mail.at(-1)?.text ?? "");
+    const link = async () =>
+      (await c.auth.storage.findMany("verification", [])).find(
+        (v) => v.purpose === "password-reset",
+      );
+    c.arm();
+    const input = { token, password: "another long password", ip: null, userAgent: null };
+    expect(await resetPassword(c.auth.config, input)).toMatchObject({
+      ok: false,
+      code: "hook_refused",
+    });
+    // The ruling of fix round 2: the reset consumes its link first, and the
+    // hook runs before every other write.
+    expect(c.flag.writesAtHook).toEqual(["update:verification"]);
+    expect(await c.snapshot()).toEqual(c.before);
+    // The consume is in the transaction, so the refusal undid it with the
+    // transaction: the link is not spent, and it works once the app allows it.
+    expect((await link())?.consumedAt).toBeNull();
+    c.flag.refuse = false;
+    expect((await resetPassword(c.auth.config, input)).ok).toBe(true);
+  });
+
+  it("the social sign-in: a refusal writes nothing and leaves the claimant's rows", async () => {
+    const jwtTokens: Record<string, FakeIdToken> = {};
+    const { fetchFn } = tokenEndpoint("idtok-default");
+    const c = await claimantSetup({
+      social: { google: GOOGLE, fetch: fetchFn },
+      jwt: fakeJwt(jwtTokens),
+    });
+    const r = await startSocial(c.auth.config, { provider: "google", next: "/", ip: null });
+    if (!r.ok) throw new Error(r.code);
+    const url = new URL(r.value.location);
+    jwtTokens["idtok-default"] = {
+      audience: GOOGLE.clientId,
+      issuer: "https://accounts.google.com",
+      claims: {
+        sub: "g-1",
+        email: "ada@example.com",
+        email_verified: true,
+        name: "Ada",
+        picture: "https://p/a.png",
+        nonce: url.searchParams.get("nonce") ?? "",
+      },
+    };
+    c.arm();
+    expect(
+      await completeSocial(c.auth.config, {
+        provider: "google",
+        state: url.searchParams.get("state") ?? "",
+        code: "code-1",
+        error: null,
+        bindToken: r.value.bindToken,
+        ip: null,
+        userAgent: null,
+      }),
+    ).toMatchObject({ ok: false, code: "hook_refused" });
+    expect(c.flag.writesAtHook).toEqual([]);
+    expect(await c.snapshot()).toEqual(c.before);
   });
 });
 
