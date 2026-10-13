@@ -11,7 +11,7 @@ import type { CompatServerApi } from "../types.js";
 import type { Mapped } from "./map-options.js";
 import { readToken, toInvitation, toNext, toOrganization, toSession, toUser } from "./shapes.js";
 
-export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
+export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true> {
   const { origin, basePath, clientIp, plugins, appOrigin, minPasswordLength } = mapped;
   const storage = mapped.config.storage;
   const requestOf = (headers?: Headers) =>
@@ -36,9 +36,18 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
   return {
     async getSession({ headers }) {
       const s = await auth.session(requestOf(headers));
-      return s
-        ? { session: toSession(s.session, readToken(headers) ?? ""), user: toUser(s.user) }
-        : null;
+      if (!s) return null;
+      // Computed from core's row (plan 9f): the Better Auth twoFactor table is not read.
+      const factor = plugins.has("two-factor")
+        ? await auth.api.totp?.status({ userId: s.user.id })
+        : undefined;
+      return {
+        session: toSession(s.session, readToken(headers) ?? ""),
+        user: {
+          ...toUser(s.user),
+          ...(factor?.ok ? { twoFactorEnabled: factor.value.enabled } : {}),
+        },
+      };
     },
     async signUpEmail({ body, headers }) {
       if (body.image !== undefined)
@@ -80,8 +89,9 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
           userAgent: req.headers.get("user-agent"),
         }),
       );
-      // The config sets totp: false until Task 7 of plan 9f, so core answers no challenge here.
-      if (!("token" in v)) throw apiError("unexpected", 500);
+      // Better Auth's answer for a user with the factor on. A server caller has
+      // no cookie jar: the browser continues through the handler's sign-in.
+      if (!("token" in v)) return { twoFactorRedirect: true, twoFactorMethods: ["totp"] };
       return { redirect: false, token: v.token, url: undefined, user: toUser(v.user) };
     },
     async signOut({ headers }) {

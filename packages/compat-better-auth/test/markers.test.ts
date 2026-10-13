@@ -14,6 +14,7 @@ import {
   magicLink,
   organization,
   passkey,
+  twoFactor,
 } from "../src/plugins.js";
 
 describe("plugin markers", () => {
@@ -35,6 +36,11 @@ describe("plugin markers", () => {
     });
     expect(bearer().id).toBe("bearer");
     expect(expo().id).toBe("expo");
+    expect(twoFactor({ issuer: "Acme" })).toEqual({
+      kind: COMPAT_PLUGIN,
+      id: "two-factor",
+      options: { issuer: "Acme" },
+    });
     expect(organization().options).toEqual({});
   });
 

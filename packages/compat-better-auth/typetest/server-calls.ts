@@ -1,3 +1,4 @@
+import { twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { consumere, consumeri } from "./options.js";
 
@@ -36,4 +37,30 @@ export async function consumerdInvites(headers: Headers) {
     headers,
   });
   await mr.api.cancelInvitation({ body: { invitationId: invitation.id }, headers });
+}
+
+// Plan 9f: with a literal two-factor plugin the sign-in answer is a union; without it, it is not.
+const tf = betterAuth({
+  ...consumeri,
+  plugins: [twoFactor({ issuer: "Reception", accountLockout: { enabled: false } })],
+});
+export async function twoFactorCalls() {
+  const r = await tf.api.signInEmail({
+    body: { email: "a@example.com", password: "correct horse battery" },
+  });
+  if ("twoFactorRedirect" in r) {
+    const methods: string[] = r.twoFactorMethods;
+    return methods;
+  }
+  const token: string = r.token;
+  const s = await tf.api.getSession({ headers: new Headers() });
+  const on: boolean | undefined = s?.user.twoFactorEnabled;
+  return [token, String(on)];
+}
+export async function noTwoFactorCalls() {
+  const r = await cf.api.signInEmail({
+    body: { email: "a@example.com", password: "correct horse battery" },
+  });
+  // @ts-expect-error without the plugin the answer has no twoFactorRedirect
+  return r.twoFactorRedirect;
 }

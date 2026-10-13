@@ -15,6 +15,7 @@ import { appSchemes, pluginOf } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
 import { compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
+import { TRUST_DEVICE_COOKIE } from "./two-factor.js";
 
 /** Better Auth 1.7's defaults (read in its source on 2026-10-10). They apply before the mapping. */
 export const BETTER_AUTH_DEFAULTS = {
@@ -33,6 +34,11 @@ export const BETTER_AUTH_DEFAULTS = {
   // (`opts?.allowedAttempts || 3`), read 2026-10-13 (plan 9e).
   emailOtpExpiresIn: 300,
   emailOtpAllowedAttempts: 3,
+  // dist/plugins/two-factor/backup-codes/index.mjs (generateBackupCodesFn: amount 10,
+  // length 10) and index.mjs (trustDeviceMaxAge 30 days), read 2026-10-13 (plan 9f).
+  twoFactorBackupCodes: 10,
+  twoFactorBackupCodeLength: 10,
+  trustDeviceMaxAge: 2_592_000,
   basePath: "/api/auth",
 } as const;
 
@@ -67,8 +73,10 @@ export interface Mapped {
  * per-IP limit, so it keeps core's shared unknown bucket: without it such a
  * flow has no limit at all (review I-2).
  */
+// totp-verify (plan 9f) has no per-email limit, but each challenge takes 5
+// codes and each challenge needs a password sign-in, which keeps its per-email limit.
 const NO_IP_KEY =
-  /^(password|magic-link|password-reset|password-resend|otp|otp-verify):ip:unknown$/;
+  /^(password|magic-link|password-reset|password-resend|otp|otp-verify|totp-verify):ip:unknown$/;
 
 export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
   const sweep = limiter.sweep?.bind(limiter);
@@ -176,6 +184,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const magic = pluginOf(options, "magic-link");
   const org = pluginOf(options, "organization");
   const otp = pluginOf(options, "email-otp");
+  const tf = pluginOf(options, "two-factor");
   const ttlSeconds = magic
     ? (magic.options.expiresIn ?? BETTER_AUTH_DEFAULTS.magicLinkExpiresIn)
     : (options.emailVerification?.expiresIn ?? BETTER_AUTH_DEFAULTS.emailVerificationExpiresIn);
@@ -233,9 +242,19 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
         }
       : false,
     // Core turns the second factor on with `password`; Better Auth serves it
-    // only with its two-factor plugin. Task 7 of plan 9f maps the plugin onto
-    // this key.
-    totp: false,
+    // only with its two-factor plugin (plan 9f). The trust cookie keeps
+    // Better Auth's name, so core reads and writes the one cookie.
+    totp: tf
+      ? {
+          ...(tf.options.issuer !== undefined ? { issuer: tf.options.issuer } : {}),
+          backupCodes:
+            tf.options.backupCodeOptions?.amount ?? BETTER_AUTH_DEFAULTS.twoFactorBackupCodes,
+          backupCodeLength:
+            tf.options.backupCodeOptions?.length ?? BETTER_AUTH_DEFAULTS.twoFactorBackupCodeLength,
+          trustDays: (tf.options.trustDeviceMaxAge ?? BETTER_AUTH_DEFAULTS.trustDeviceMaxAge) / DAY,
+          trustCookieName: TRUST_DEVICE_COOKIE,
+        }
+      : false,
     ...(google || apple || github || linkedin
       ? {
           social: {

@@ -272,6 +272,39 @@ export interface EmailOtpOptions {
   rateLimit?: unknown;
 }
 
+/**
+ * Better Auth 1.7.2's two-factor options (dist/plugins/two-factor/types.d.mts,
+ * totp/index.d.mts, backup-codes/index.d.mts, read 2026-10-13). Plan 9f maps
+ * `issuer`, `backupCodeOptions.amount` and `length`, and `trustDeviceMaxAge`;
+ * `totpOptions.digits` 6 and `period` 30 and `accountLockout: { enabled: false }`
+ * are accepted; the check refuses every other key by name.
+ */
+export interface TwoFactorOptions {
+  issuer?: string;
+  totpOptions?: {
+    digits?: number;
+    period?: number;
+    backupCodes?: unknown;
+    allowPasswordless?: boolean;
+    disable?: boolean;
+  };
+  otpOptions?: unknown;
+  backupCodeOptions?: {
+    amount?: number;
+    length?: number;
+    customBackupCodesGenerate?: unknown;
+    storeBackupCodes?: unknown;
+    allowPasswordless?: boolean;
+  };
+  skipVerificationOnEnable?: boolean;
+  allowPasswordless?: boolean;
+  twoFactorTable?: string;
+  schema?: unknown;
+  twoFactorCookieMaxAge?: number;
+  trustDeviceMaxAge?: number;
+  accountLockout?: { enabled?: boolean; maxFailedAttempts?: number; durationSeconds?: number };
+}
+
 export interface BearerOptions {
   requireSignature?: boolean;
 }
@@ -290,13 +323,15 @@ export type MagicLinkPlugin = Marker<"magic-link", MagicLinkOptions>;
 export type EmailOtpPlugin = Marker<"email-otp", EmailOtpOptions>;
 export type BearerPlugin = Marker<"bearer", BearerOptions>;
 export type ExpoPlugin = Marker<"expo", ExpoOptions>;
+export type TwoFactorPlugin = Marker<"two-factor", TwoFactorOptions>;
 export type CompatPlugin =
   | OrganizationPlugin
   | PasskeyPlugin
   | MagicLinkPlugin
   | EmailOtpPlugin
   | BearerPlugin
-  | ExpoPlugin;
+  | ExpoPlugin
+  | TwoFactorPlugin;
 
 /** A plugin from a package this one does not replace, for example `@better-auth/api-key`. The check refuses it by id. */
 export interface ForeignPlugin {
@@ -403,8 +438,32 @@ export interface BetterAuthOptions {
   tempoAuth?: { passwordHash?: PasswordHashSeam; appURL?: string };
 }
 
-export interface CompatServerApi {
-  getSession(input: { headers: Headers }): Promise<{ session: Session; user: User } | null>;
+/** Better Auth 1.7.2's sign-in answer for a user with the factor on (dist/plugins/two-factor/index.mjs, the after hook, read 2026-10-13). */
+export interface TwoFactorRedirect {
+  twoFactorRedirect: true;
+  twoFactorMethods: string[];
+}
+
+/**
+ * True when the option type names the two-factor plugin. A wide
+ * `BetterAuthOptions` (no literal plugin list) is false, so code that types
+ * its options wide keeps the old sign-in type; the README says so.
+ */
+export type HasTwoFactor<O extends BetterAuthOptions> = O extends {
+  plugins: readonly (infer P)[];
+}
+  ? BetterAuthPlugin extends P
+    ? false
+    : [Extract<P, TwoFactorPlugin>] extends [never]
+      ? false
+      : true
+  : false;
+
+export interface CompatServerApi<TF extends boolean = false> {
+  /** `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f). */
+  getSession(input: {
+    headers: Headers;
+  }): Promise<{ session: Session; user: User & { twoFactorEnabled?: boolean } } | null>;
   /** `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
   signUpEmail(input: {
     body: { email: string; password: string; name: string; image?: string; callbackURL?: string };
@@ -414,7 +473,10 @@ export interface CompatServerApi {
   signInEmail(input: {
     body: { email: string; password: string; callbackURL?: string; rememberMe?: boolean };
     headers?: Headers;
-  }): Promise<{ redirect: false; token: string; url: undefined; user: User }>;
+  }): Promise<
+    | { redirect: false; token: string; url: undefined; user: User }
+    | (TF extends true ? TwoFactorRedirect : never)
+  >;
   signOut(input: { headers: Headers }): Promise<{ success: true }>;
   signInMagicLink(input: {
     body: { email: string; callbackURL?: string; name?: string };
@@ -442,7 +504,7 @@ export interface CompatServerApi {
 
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {
   handler(request: Request): Promise<Response>;
-  api: CompatServerApi;
+  api: CompatServerApi<HasTwoFactor<O>>;
   /** Type-only, as in Better Auth: `Auth["$Infer"]["Session"]["user"]`. The runtime value is an empty object. */
   $Infer: { Session: { session: Session; user: User } };
   options: O;

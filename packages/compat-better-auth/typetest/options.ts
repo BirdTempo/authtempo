@@ -1,7 +1,15 @@
 import type { LimiterPort, StorageAdapter } from "@tempo-auth/core";
 import type { DrizzleAdapterConfig } from "../src/adapters/drizzle.js";
 import { expoClient } from "../src/client/expo.js";
-import { bearer, emailOTP, expo, magicLink, organization, passkey } from "../src/plugins.js";
+import {
+  bearer,
+  emailOTP,
+  expo,
+  magicLink,
+  organization,
+  passkey,
+  twoFactor,
+} from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { BetterAuthOptions, ClientOptions, CompatDatabase } from "../src/types.js";
 
@@ -238,6 +246,10 @@ export const strictOptionGuards = [
   }),
   expo({
     // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  }),
+  twoFactor({
+    // @ts-expect-error a refused key fails the compile (plan 9f)
     notMapped: true,
   }),
   {

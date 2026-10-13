@@ -12,6 +12,8 @@ import {
   type OrganizationPlugin,
   type PasskeyOptions,
   type PasskeyPlugin,
+  type TwoFactorOptions,
+  type TwoFactorPlugin,
 } from "./types.js";
 
 // Markers, not behavior: `betterAuth` reads the options (Task 7 checks them,
@@ -35,4 +37,7 @@ export function bearer(options: BearerOptions = {}): BearerPlugin {
 }
 export function expo(options: ExpoOptions = {}): ExpoPlugin {
   return { kind: COMPAT_PLUGIN, id: "expo", options };
+}
+export function twoFactor(options: TwoFactorOptions = {}): TwoFactorPlugin {
+  return { kind: COMPAT_PLUGIN, id: "two-factor", options };
 }

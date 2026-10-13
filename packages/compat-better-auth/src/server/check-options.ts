@@ -243,6 +243,54 @@ const PLUGIN_RULES: Record<string, Rule> = {
     changeEmail: refused("core has no change of address by code; see the plan index"),
     rateLimit: refused("core's owned limiter has fixed limits per flow"),
   }),
+  "two-factor": object({
+    issuer: (v, p, out) => {
+      if (typeof v !== "string" || v.length < 1 || v.length > 80 || v.includes(":"))
+        refuse(out, p, "core takes 1 to 80 characters with no colon");
+    },
+    totpOptions: object({
+      digits: only(6, "core makes 6-digit codes"),
+      period: only(30, "core fixes the step at 30 seconds"),
+      backupCodes: refused("core always offers the backup codes"),
+      allowPasswordless: only(false, "core asks for the password at every change of the factor"),
+      disable: only(false, "core serves the TOTP code whenever the plugin is on"),
+    }),
+    otpOptions: refused("core has no email or SMS second factor; see the plan index"),
+    backupCodeOptions: object({
+      amount: (v, p, out) => {
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 5 || v > 20)
+          refuse(out, p, "core takes an integer from 5 to 20");
+      },
+      length: (v, p, out) => {
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 8 || v > 12)
+          refuse(out, p, "core takes an integer from 8 to 12");
+      },
+      customBackupCodesGenerate: refused("core makes its own backup codes"),
+      storeBackupCodes: refused("core stores a keyed hash of each code; leave it out"),
+      allowPasswordless: only(false, "core asks for the password at every change of the factor"),
+    }),
+    skipVerificationOnEnable: only(false, "core turns the factor on only after a right code"),
+    allowPasswordless: only(false, "core asks for the password at every change of the factor"),
+    twoFactorTable: refused("core keeps the factor in its own ta_totp table"),
+    schema: refused("core keeps the factor in its own ta_totp table"),
+    twoFactorCookieMaxAge: refused("core's challenge lives 5 minutes; the cookie lives 600 s"),
+    trustDeviceMaxAge: seconds(DAY, DAY, 365 * DAY, "core takes whole days from 1 to 365"),
+    // Better Auth 1.7.2 turns the lockout on by default (verify-two-factor.mjs, read 2026-10-13).
+    accountLockout: (v, p, out) => {
+      const o = v as Record<string, unknown> | null;
+      if (
+        typeof o !== "object" ||
+        o === null ||
+        o.enabled !== false ||
+        Object.keys(o).some((k) => k !== "enabled" && o[k] !== undefined)
+      )
+        refuse(
+          out,
+          p,
+          "core has no account lockout; pass { enabled: false }. Core caps 5 codes per challenge and 10 password sign-ins per address per 15 minutes",
+        );
+    },
+  }),
   bearer: object({
     requireSignature: only(false, "core's bearer token is opaque and needs no signature"),
   }),
@@ -251,7 +299,6 @@ const PLUGIN_RULES: Record<string, Rule> = {
 
 const FOREIGN_PLUGINS: Record<string, string> = {
   admin: "tempo-auth has no admin plugin",
-  "two-factor": "plan 9f (a TOTP second factor) is not written yet",
   jwt: PLAN_9G,
   mcp: PLAN_9G,
   cimd: PLAN_9G,
@@ -546,6 +593,19 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
         refuse(out, `plugins[passkey].${key}`, "required");
     }
   }
+  const tf = pluginOf(options, "two-factor")?.options;
+  if (tf && options.emailAndPassword?.enabled !== true)
+    refuse(
+      out,
+      "plugins[two-factor]",
+      "needs emailAndPassword.enabled: core's second factor gates the password sign-in only",
+    );
+  if (tf && tf.accountLockout === undefined)
+    note(
+      out,
+      "plugins[two-factor].accountLockout",
+      "not set: Better Auth locks an account for 900 s after 10 wrong codes; core has no account lockout and caps 5 codes per challenge and 10 password sign-ins per address per 15 minutes",
+    );
   if (pluginOf(options, "expo") && appSchemes(options).length === 0) {
     refuse(out, "plugins[expo]", "needs the app scheme, for example myapp://, in trustedOrigins");
   }

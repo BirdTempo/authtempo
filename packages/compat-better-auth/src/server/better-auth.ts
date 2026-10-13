@@ -7,6 +7,7 @@ import { checkOptions } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
 import { type Mapped, mapOptions } from "./map-options.js";
 import { COOKIE_NAME } from "./shapes.js";
+import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
 /** The JSON field that holds the new password, per core route (core http/routes/password.ts, read 2026-10-10). */
 const PASSWORD_FIELD: Record<string, string> = {
@@ -86,7 +87,10 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
     const copy = req.method === "POST" ? req.clone() : null;
     // Better Auth's email OTP paths, in Better Auth's shapes (plan 9e). Null for every other request.
     const otp = plugins.has("email-otp") ? await emailOtpRoute(auth, mapped, req) : null;
-    const res = otp ?? (await withPolicyCode(copy, await auth.handle(req), mapped));
+    // Better Auth's two-factor paths (plan 9f). Null for every other request.
+    const tf = otp ?? (plugins.has("two-factor") ? await twoFactorRoute(auth, mapped, req) : null);
+    let res = tf ?? (await withPolicyCode(copy, await auth.handle(req), mapped));
+    if (!tf && plugins.has("two-factor")) res = await withTwoFactor(auth, mapped, req, res);
     if (!plugins.has("bearer")) return res;
     const token = sessionTokenOf(res.headers.getSetCookie());
     if (!token) return res;
@@ -112,7 +116,10 @@ export function betterAuth<O extends BetterAuthOptions>(options: O): BetterAuthI
   }
   return {
     handler: createHandler(auth, mapped),
-    api: createApi(auth, mapped),
+    // createApi answers the redirect only when core gates the sign-in, which
+    // needs the plugin (map-options.ts); the instance type says so per options.
+    // Through unknown: TypeScript does not compare a deferred conditional type.
+    api: createApi(auth, mapped) as unknown as BetterAuthInstance<O>["api"],
     $Infer: {} as BetterAuthInstance<O>["$Infer"],
     options,
     tempo: auth,

@@ -130,6 +130,9 @@ describe("betterAuth", () => {
       invitationLimit: 100,
       emailOtpExpiresIn: 300,
       emailOtpAllowedAttempts: 3,
+      twoFactorBackupCodes: 10,
+      twoFactorBackupCodeLength: 10,
+      trustDeviceMaxAge: 2592000,
       basePath: "/api/auth",
     });
     expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1 });
