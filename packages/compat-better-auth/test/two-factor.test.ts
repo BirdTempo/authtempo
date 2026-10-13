@@ -225,6 +225,22 @@ describe("the two-factor paths (plan 9f)", () => {
     expect(await storage.findMany("totp", [])).toHaveLength(1);
   });
 
+  it("limits the enable's password check on its own key: five wrong passwords answer INVALID_PASSWORD, the sixth 429, and the owner's password sign-in still passes (plan 9h final fix wave, I-2)", async () => {
+    const { post, session } = await app();
+    const answers: { status: number; code: unknown }[] = [];
+    for (let i = 0; i < 6; i++) {
+      const r = await post("/two-factor/enable", { password: "wrong password" }, session);
+      answers.push({ status: r.status, code: (await json(r)).code });
+    }
+    expect(answers).toEqual([
+      ...Array.from({ length: 5 }, () => ({ status: 400, code: "INVALID_PASSWORD" })),
+      { status: 429, code: "TOO_MANY_REQUESTS" },
+    ]);
+    // The setup's key is not the sign-in's: the owner still signs in with the password.
+    const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
+    expect(signIn.status).toBe(200);
+  });
+
   it("answers TOTP_ALREADY_ENABLED (409) for a second enable, and INVALID_PASSWORD (400) for a wrong password on disable, get-totp-uri, and generate-backup-codes", async () => {
     const { post, session, get } = await enrolled();
     const again = await post("/two-factor/enable", { password: PASSWORD }, session);

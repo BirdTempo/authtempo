@@ -178,8 +178,10 @@ export async function twoFactorRoute(
     if (issuer !== undefined && (typeof issuer !== "string" || !ISSUER_RE.test(issuer)))
       return failure(BETTER_AUTH_CODES.invalid_body, 400);
     // Core's setup checks the password itself (plan 9f final fix wave, review
-    // I-1), with the same limits as `pw.verify`. One check, not two: a second
-    // one here would spend the sign-in's limits twice per enable.
+    // I-1) and counts on its own key, `totp-setup:user`, 5 per 15 minutes
+    // (plan 9h, owner decision 3a). This enable does no second check: a
+    // `pw.verify` here would count on the sign-in's keys again, and a stolen
+    // session could then hold the owner's password sign-in at rate_limited.
     const r = await totp.setup({
       userId,
       password: body.password,
