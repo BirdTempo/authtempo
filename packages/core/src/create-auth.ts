@@ -128,18 +128,7 @@ import {
 } from "./engine/totp.js";
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
-import { emailOtpRoutes } from "./http/routes/email-otp.js";
-import { handoffRoutes } from "./http/routes/handoff.js";
-import { jwtRoutes } from "./http/routes/jwt.js";
-import { magicLinkRoutes } from "./http/routes/magic-link.js";
-import { oauthRoutes } from "./http/routes/oauth.js";
-import { organizationRoutes } from "./http/routes/organizations.js";
-import { passkeyRoutes } from "./http/routes/passkeys.js";
-import { passwordRoutes } from "./http/routes/password.js";
-import { sessionRoutes } from "./http/routes/sessions.js";
-import { socialRoutes } from "./http/routes/social.js";
-import { tokenRoutes } from "./http/routes/tokens.js";
-import { totpRoutes } from "./http/routes/totp.js";
+import { coreRoutes } from "./http/routes/index.js";
 import { createWellKnownHandler } from "./http/well-known.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import type { Result } from "./result.js";
@@ -392,20 +381,7 @@ export interface Auth {
 
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
-  const handle = createRouter(config, [
-    ...sessionRoutes(config),
-    ...magicLinkRoutes(config),
-    ...socialRoutes(config),
-    ...passkeyRoutes(config),
-    ...passwordRoutes(config),
-    ...totpRoutes(config),
-    ...emailOtpRoutes(config),
-    ...handoffRoutes(config),
-    ...organizationRoutes(config),
-    ...tokenRoutes(config),
-    ...jwtRoutes(config),
-    ...oauthRoutes(config),
-  ]);
+  const handle = createRouter(config, coreRoutes(config));
   return {
     handle,
     session: (request) => sessionFromRequest(config, request),
