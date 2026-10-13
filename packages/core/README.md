@@ -626,7 +626,8 @@ const auth = createAuth({
   before hook again. The organization flows have the same window: a role
   change or a remove whose member changed since the read answers
   `conflict` after its before hook, and an accept that loses the consume
-  race answers `invalid_token` after `beforeAddMember`. No after hook runs
+  race answers `invalid_token` after `beforeAddMember`, and for a raise
+  also after `beforeUpdateMemberRole`. No after hook runs
   for any of these.
 - Hooks have no timeout, as the mail port has none. A hook that never
   settles holds the request. A before hook holds the transaction, and on

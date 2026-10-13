@@ -220,7 +220,6 @@ export async function sessionOpened(
   );
 }
 
-/** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). */
 /**
  * Deletes the sessions that `where` matches, inside the flow's transaction,
  * and pushes each row it ended to `ended` for the after hook. Each read row
@@ -244,6 +243,7 @@ export async function endSessions(
   await tx.delete("session", where);
 }
 
+/** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). */
 export async function sessionsEnded(
   config: ResolvedConfig,
   sessions: readonly SessionRow[],
