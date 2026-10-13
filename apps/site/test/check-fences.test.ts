@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkFences } from "../scripts/check-fences.ts";
-import { DOCS, SITE } from "../scripts/lib/paths.ts";
+import { DOCS, REPO, SITE } from "../scripts/lib/paths.ts";
 
 const sample = `${SITE}samples/guides/a.ts`;
 const exists = (p: string) => p === sample;
@@ -41,8 +41,15 @@ describe("checkFences", () => {
     const outside = 'import a from "../../../../../scripts/check.ts?raw";';
     const r = checkFences([mdx(`${outside}\n\n${include}`)], [sample], () => true);
     expect(r.failures).toEqual([
-      `docs/guides/a.mdx: includes ${SITE}scripts/check.ts, which is outside samples/`,
+      `docs/guides/a.mdx: includes ${SITE}scripts/check.ts, which is outside samples/ and examples/`,
     ]);
+  });
+
+  it("passes an include from the examples/ folder", () => {
+    const ex = 'import a from "../../../../../../../examples/worker-d1/src/index.ts?raw";';
+    const r = checkFences([mdx(`${ex}\n\n${include}`)], [sample], () => true);
+    expect(r.failures).toEqual([]);
+    expect(`${REPO}examples/worker-d1/src/index.ts`.startsWith(REPO)).toBe(true);
   });
 
   it("fails when no page includes a sample", () => {

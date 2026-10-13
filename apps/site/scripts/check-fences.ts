@@ -1,10 +1,12 @@
 import { dirname, join } from "node:path";
 import type { Page } from "./lib/markdown.ts";
-import { DOCS, SITE } from "./lib/paths.ts";
+import { DOCS, REPO, SITE } from "./lib/paths.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** A shell command, a JSON body, and an HTTP exchange may be inline. Code is a sample file. */
 export const FENCE_LANGS = ["sh", "json", "jsonc", "http", "text"] as const;
+/** The folders that a `?raw` include may read. */
+const INCLUDE_ROOTS = [`${SITE}samples/`, `${REPO}examples/`];
 const CODE_LANGS = new Set(["ts", "tsx", "js", "mjs", "javascript", "typescript"]);
 
 /**
@@ -45,8 +47,10 @@ export function checkFences(
       r.counts.includes = (r.counts.includes ?? 0) + 1;
       const abs = join(dirname(`${DOCS}${p.path}`), m[1] ?? "");
       included.add(abs);
-      if (!abs.startsWith(`${SITE}samples/`)) {
-        r.failures.push(`${p.path}: includes ${abs}, which is outside samples/`);
+      // A page may show a file of samples/ or a file of an example app that
+      // has its own tests (one source for one fact). Any other path is refused.
+      if (!INCLUDE_ROOTS.some((root) => abs.startsWith(root))) {
+        r.failures.push(`${p.path}: includes ${abs}, which is outside samples/ and examples/`);
         continue;
       }
       if (!exists(abs)) r.failures.push(`${p.path}: includes ${abs}, which does not exist`);
