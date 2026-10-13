@@ -546,6 +546,33 @@ describe("the mail routes through compatMail (fix round 1: I-1, M-7)", () => {
     expect(sent).toEqual([]);
   });
 
+  it("answers 404 on core's JWT and OAuth routes: the package maps no jwt or OAuth plugin (plan 9g)", async () => {
+    const { auth } = app();
+    const routes = [
+      ["GET", "/jwks"],
+      ["GET", "/token"],
+      ["GET", "/oauth/authorize"],
+      ["POST", "/oauth/token"],
+      ["GET", "/.well-known/openid-configuration"],
+    ] as const;
+    for (const [method, path] of routes) {
+      const res = await auth.handler(
+        new Request(`${BASE}/api/auth${path}`, {
+          method,
+          ...(method === "POST"
+            ? { headers: { "content-type": "application/x-www-form-urlencoded" }, body: "" }
+            : {}),
+        }),
+      );
+      expect({ path, status: res.status }).toEqual({ path, status: 404 });
+    }
+    expect(auth.tempo.api.jwt).toBeUndefined();
+    expect(
+      (await auth.tempo.wellKnown(new Request(`${BASE}/.well-known/oauth-authorization-server`)))
+        .status,
+    ).toBe(404);
+  });
+
   it("mails a reset link through sendResetPassword with the user, the URL, and the token", async () => {
     const { auth, sent } = app();
     await auth.api.signUpEmail({

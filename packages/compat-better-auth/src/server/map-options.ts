@@ -245,6 +245,11 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           resetMail: ({ email, code }) => otpMail(email, "forget-password", code),
         }
       : false,
+    // Core mints JWTs and serves /jwks and /token by default (plan 9g).
+    // Better Auth serves them only with its jwt plugin, which this package
+    // refuses, so they stay off here; `oauth` stays absent, so the provider
+    // is off too. The tables exist (migration 0004) and stay empty.
+    jwtMint: false,
     // Core turns the second factor on with `password`; Better Auth serves it
     // only with its two-factor plugin (plan 9f). The trust cookie keeps
     // Better Auth's name, so core reads and writes the one cookie.
