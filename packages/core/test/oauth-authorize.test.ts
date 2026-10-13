@@ -681,6 +681,41 @@ describe("the authorize step (plan 9g)", () => {
     expect(await codes(h)).toHaveLength(codesBefore);
   });
 
+  it("a GET of a bound held request whose client is gone answers invalid_request and spends nothing for another user and for no session; the owner's GET spends it (plan 9h final fix wave round 2)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const bob = await signedIn(h, "bob@example.com");
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    // The client goes between the hold and the GET, so the check of the held query fails.
+    await h.storage.delete("oauthClient", [{ field: "id", op: "eq", value: s.clientId }]);
+    const path = `/auth/oauth/authorize?request_id=${requestId}`;
+    for (const cookie of [bob.cookie, null]) {
+      const res = await h.auth.handle(get(path, cookie ? { cookie } : {}));
+      expect({
+        caller: cookie ? "bob" : "no session",
+        status: res.status,
+        location: res.headers.get("location"),
+        body: await res.json(),
+      }).toEqual({
+        caller: cookie ? "bob" : "no session",
+        status: 400,
+        location: null,
+        body: { error: "invalid_request" },
+      });
+      expect(await heldRow(h, requestId)).toEqual({ userId: s.user.id, consumedAt: null });
+    }
+    // The owner's GET still runs the check: the unknown client answers 401 with no redirect, and spends the row.
+    const own = await h.auth.handle(get(path, { cookie: s.cookie }));
+    expect({ status: own.status, location: own.headers.get("location") }).toEqual({
+      status: 401,
+      location: null,
+    });
+    expect((await heldRow(h, requestId)).consumedAt).not.toBeNull();
+  });
+
   it("two parallel GETs of a held request from before the sign-in bind it once (plan 9h fix round 1)", async () => {
     const h = oauthHandle();
     const s = await setup(h);

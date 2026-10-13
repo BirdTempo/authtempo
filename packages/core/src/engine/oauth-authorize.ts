@@ -431,6 +431,8 @@ async function sessionStep(
   held: HeldRequest | null,
 ): Promise<AuthorizeStep> {
   const { request, client } = checked;
+  // The second line: heldStep refuses another user's GET of a bound row
+  // first, before checkAuthorize. This one keeps sessionStep safe on its own.
   if (held && held.data.userId !== null && held.data.userId !== session.user.id)
     return { kind: "error", error: "invalid_request" };
   if (!session.user.emailVerified)
@@ -450,7 +452,13 @@ async function sessionStep(
   return { kind: "consent", request, client, user: session.user, requestId };
 }
 
-/** The GET with `request_id`: the held query, checked again, because the client and the config may have changed. */
+/**
+ * The GET with `request_id`: the held query, checked again, because the
+ * client and the config may have changed. A row bound to a user answers the
+ * stale-id error to any other caller, with a session or with none, before
+ * the check: a failed check spends the row, so the check must not run for
+ * a caller who does not own it (spec 8.13, plan 9h final fix wave round 2).
+ */
 async function heldStep(
   config: ResolvedConfig,
   requestId: string,
@@ -458,6 +466,8 @@ async function heldStep(
 ): Promise<AuthorizeStep> {
   const held = await readHeld(config, requestId);
   if (!held) return { kind: "error", error: "invalid_request" };
+  if (held.data.userId !== null && held.data.userId !== session?.user.id)
+    return { kind: "error", error: "invalid_request" };
   const params = new URLSearchParams(held.data.params);
   const c = await checkAuthorize(config, params);
   if (!c.ok) {
