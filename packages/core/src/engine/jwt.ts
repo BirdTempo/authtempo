@@ -1,0 +1,281 @@
+import type { ResolvedConfig, ResolvedJwtMint } from "../config.js";
+import { newId } from "../primitives/ids.js";
+import {
+  type DecodedJws,
+  decodeJws,
+  generateSigningKey,
+  type JwsAlg,
+  openPrivateKey,
+  type PublicJwk,
+  RETIRED_KEY_MS,
+  sealPrivateKey,
+  signJws,
+  verifyJws,
+} from "../primitives/jwk.js";
+import { fail, ok, type Result } from "../result.js";
+import type { JwkRow } from "../schema.js";
+import { StorageError } from "../storage/port.js";
+
+/**
+ * JWT minting (plan 9g, spec 8.12). Core owns the keys: it writes the first
+ * one at the first use, seals the private half under the app secret, opens
+ * it for one signature at a time, and rotates on demand. A session JWT is a
+ * signed statement about a session user for a server that cannot call
+ * `auth.session`. It is short-lived and not revocable; the session stays
+ * the credential of record.
+ */
+
+export const SIGNING_SLOT = "signing";
+const KID_MAX = 64;
+
+/** The claims a session JWT carries from core. `jwtMint.claims` adds names, never these. */
+export const RESERVED_CLAIMS: ReadonlySet<string> = new Set([
+  "iss",
+  "sub",
+  "aud",
+  "iat",
+  "exp",
+  "nbf",
+  "jti",
+  "sid",
+  "email",
+  "email_verified",
+  "name",
+  "org",
+]);
+
+export interface SessionJwtClaims {
+  iss: string;
+  sub: string;
+  aud: string | string[];
+  iat: number;
+  exp: number;
+  sid: string;
+  email: string;
+  email_verified: boolean;
+  name: string | null;
+  org: string | null;
+  [claim: string]: unknown;
+}
+
+export interface MintedJwt {
+  token: string;
+  expiresAt: Date;
+}
+
+/** `baseURL + basePath`: the `iss` of every token core signs, and the OAuth issuer. */
+export function issuerOf(config: ResolvedConfig): string {
+  return `${config.baseURL}${config.basePath}`;
+}
+
+/** The minting config. A route or an API call that reaches here exists only while it is on. */
+export function mintConfig(config: ResolvedConfig): ResolvedJwtMint {
+  if (!config.jwtMint) throw new Error("tempo-auth: jwtMint is off");
+  return config.jwtMint;
+}
+
+function algOf(row: JwkRow): JwsAlg | null {
+  const alg = row.publicJwk.alg;
+  return alg === "EdDSA" || alg === "ES256" ? alg : null;
+}
+
+const asPublic = (row: JwkRow) => row.publicJwk as unknown as PublicJwk;
+
+/** Moves a signing key out of the slot. Zero rows: another call retired it first, which is the same end. */
+async function retireKey(config: ResolvedConfig, row: JwkRow): Promise<void> {
+  const now = config.clock.now();
+  await config.storage.update(
+    "jwk",
+    [
+      { field: "id", op: "eq", value: row.id },
+      { field: "slot", op: "eq", value: SIGNING_SLOT },
+    ],
+    { slot: null, retiredAt: now, updatedAt: now },
+  );
+}
+
+/**
+ * The signing key of `alg`. The first call writes one. Two isolates that
+ * race write two, and the unique key on `slot` keeps one: the loser reads
+ * the winner's row on the next turn. A signing key of another alg retires,
+ * and a new one takes the slot. Not in a transaction: the unique error is
+ * caught here (plan 3 rule).
+ */
+export async function signingKey(config: ResolvedConfig, alg: JwsAlg): Promise<JwkRow> {
+  const { storage } = config;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await storage.findOne("jwk", [{ field: "slot", op: "eq", value: SIGNING_SLOT }]);
+    if (row && algOf(row) === alg) return row;
+    if (row) {
+      await retireKey(config, row);
+      continue;
+    }
+    const now = config.clock.now();
+    const kid = newId(now);
+    const generated = await generateSigningKey(alg, kid);
+    try {
+      return await storage.create("jwk", {
+        id: kid,
+        publicJwk: { ...generated.publicJwk },
+        privateKey: await sealPrivateKey(config.secret, kid, generated.pkcs8),
+        slot: SIGNING_SLOT,
+        retiredAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (e) {
+      // Another isolate wrote the signing key first: read it on the next turn.
+      if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
+    }
+  }
+  throw new Error("tempo-auth: no signing key after three tries");
+}
+
+/**
+ * A compact JWS of `payload` with the signing key. The private key is
+ * opened for this signature only. A key that does not open was sealed under
+ * another app secret: it retires with one log line, and a new key signs.
+ */
+export async function signToken(
+  config: ResolvedConfig,
+  typ: string,
+  payload: Record<string, unknown>,
+): Promise<string> {
+  const { alg } = mintConfig(config);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const row = await signingKey(config, alg);
+    const key = await openPrivateKey(config.secret, row.id, row.privateKey, alg);
+    if (key) return signJws({ alg, kid: row.id, typ, key, payload });
+    console.error("tempo-auth: a signing key does not open under this secret; it retires", row.id);
+    await retireKey(config, row);
+  }
+  throw new Error("tempo-auth: no signing key opens under this secret");
+}
+
+/** The JWKS document: the signing key first, then each key retired less than 24 hours ago, newest first. */
+export async function publicKeySet(config: ResolvedConfig): Promise<{ keys: PublicJwk[] }> {
+  const current = await signingKey(config, mintConfig(config).alg);
+  const since = new Date(config.clock.now().getTime() - RETIRED_KEY_MS);
+  const retired = await config.storage.findMany(
+    "jwk",
+    [{ field: "retiredAt", op: "gt", value: since }],
+    {
+      sort: [
+        { field: "retiredAt", dir: "desc" },
+        { field: "id", dir: "desc" },
+      ],
+    },
+  );
+  // A rotation between the two reads can list one key twice.
+  const rows = [current, ...retired.filter((r) => r.id !== current.id)];
+  return { keys: rows.map(asPublic) };
+}
+
+/**
+ * The decoded token when its signature verifies under a key of this
+ * instance that may verify now: the signing key, or a key retired less than
+ * 24 hours ago. No claim is checked here; each caller checks its own.
+ */
+export async function verifyLocal(
+  config: ResolvedConfig,
+  token: string,
+): Promise<DecodedJws | null> {
+  const decoded = decodeJws(token);
+  if (!decoded || decoded.header.kid.length > KID_MAX) return null;
+  const row = await config.storage.findOne("jwk", [
+    { field: "id", op: "eq", value: decoded.header.kid },
+  ]);
+  if (!row) return null;
+  if (
+    row.retiredAt !== null &&
+    row.retiredAt.getTime() + RETIRED_KEY_MS <= config.clock.now().getTime()
+  )
+    return null;
+  return (await verifyJws(decoded, asPublic(row))) ? decoded : null;
+}
+
+/** A new signing key; the old one retires and verifies for 24 hours. */
+export async function rotateKey(config: ResolvedConfig): Promise<{ kid: string }> {
+  const row = await config.storage.findOne("jwk", [
+    { field: "slot", op: "eq", value: SIGNING_SLOT },
+  ]);
+  if (row) await retireKey(config, row);
+  return { kid: (await signingKey(config, mintConfig(config).alg)).id };
+}
+
+/** The app's claims, or null after one log line: a throw, or a value that is not an object. */
+async function appClaims(
+  mint: ResolvedJwtMint,
+  user: Parameters<NonNullable<ResolvedJwtMint["claims"]>>[0],
+  session: Parameters<NonNullable<ResolvedJwtMint["claims"]>>[1],
+): Promise<Record<string, unknown> | null> {
+  if (!mint.claims) return {};
+  try {
+    const value: unknown = await mint.claims(user, session);
+    if (typeof value === "object" && value !== null && !Array.isArray(value))
+      return value as Record<string, unknown>;
+    console.error("tempo-auth: jwtMint.claims answered a value that is not an object");
+  } catch (e) {
+    console.error("tempo-auth: jwtMint.claims threw", e instanceof Error ? e.name : typeof e);
+  }
+  return null;
+}
+
+/**
+ * A session JWT for a live session of the user. `unauthorized` for an
+ * unknown, expired, or foreign session. The caller proved the session; the
+ * route reads it through `sessionFromRequest`, so a `tk_` token never mints.
+ */
+export async function mintSessionJwt(
+  config: ResolvedConfig,
+  input: { userId: string; sessionId: string },
+): Promise<Result<MintedJwt>> {
+  const mint = mintConfig(config);
+  const now = config.clock.now();
+  const session = await config.storage.findOne("session", [
+    { field: "id", op: "eq", value: input.sessionId },
+    { field: "userId", op: "eq", value: input.userId },
+  ]);
+  if (!session || session.expiresAt.getTime() <= now.getTime()) return fail("unauthorized");
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: input.userId },
+  ]);
+  if (!user) return fail("unauthorized");
+  const extra = await appClaims(mint, user, session);
+  if (extra === null) return fail("hook_failed");
+  const own = Object.fromEntries(Object.entries(extra).filter(([k]) => !RESERVED_CLAIMS.has(k)));
+  const iat = Math.floor(now.getTime() / 1000);
+  const exp = iat + mint.ttlMinutes * 60;
+  const claims: SessionJwtClaims = {
+    ...own,
+    iss: issuerOf(config),
+    sub: user.id,
+    aud: mint.audience.length === 1 ? (mint.audience[0] ?? "") : mint.audience,
+    iat,
+    exp,
+    sid: session.id,
+    email: user.email,
+    email_verified: user.emailVerified,
+    name: user.name,
+    org: session.activeOrganizationId,
+  };
+  return ok({ token: await signToken(config, "JWT", claims), expiresAt: new Date(exp * 1000) });
+}
+
+/** The claims of a session JWT of this instance, or null: a bad signature, another typ, issuer, or audience, or a past `exp`. */
+export async function verifySessionJwt(
+  config: ResolvedConfig,
+  token: string,
+): Promise<SessionJwtClaims | null> {
+  const mint = mintConfig(config);
+  const d = await verifyLocal(config, token);
+  if (d?.header.typ !== "JWT") return null;
+  const p = d.payload;
+  const now = Math.floor(config.clock.now().getTime() / 1000);
+  if (p.iss !== issuerOf(config) || typeof p.sub !== "string" || typeof p.sid !== "string")
+    return null;
+  if (typeof p.exp !== "number" || p.exp <= now) return null;
+  const aud: unknown[] = typeof p.aud === "string" ? [p.aud] : Array.isArray(p.aud) ? p.aud : [];
+  if (!aud.some((a) => typeof a === "string" && mint.audience.includes(a))) return null;
+  return p as SessionJwtClaims;
+}

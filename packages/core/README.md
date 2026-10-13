@@ -65,6 +65,8 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/totp/verify` | `{ challenge, code }` or `{ challenge, backupCode }`, `trustDevice?` | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie, and the trust cookie when `trustDevice` is true; 400 `invalid_code`, `too_many_attempts` (the fifth wrong code), `invalid_token` (unknown, spent, or older than 5 minutes), `invalid_body`; 429 `rate_limited` |
 | GET | `/totp/challenge` | `?challenge=` | 200 HTML form (`totp.challengePage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed challenge. No side effect |
 | POST | `/totp/challenge` | form `challenge`, `code` or `backupCode`, `trustDevice=1` | 302 to `next` with the cookies; back to the form on `invalid_code`; 302 to `/?auth_error=<code>` otherwise |
+| GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
+| GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
@@ -473,6 +475,15 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 - `api.totp` holds the same operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
 - The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. An app whose `appName` holds a colon sets `totp.issuer`: the key URI uses the colon to split the issuer from the account.
 
+## JWT minting
+
+`jwtMint` (plan 9g) is on by default; `jwtMint: false` removes `/jwks`, `/token`, and `api.jwt`. A session JWT is a signed statement about a session user for a server that cannot call `auth.session`.
+
+- The key: `jwtMint.alg` is `EdDSA` (Ed25519, the default) or `ES256` (ECDSA P-256). Core writes the first key at the first use, seals the private half with AES-256-GCM under a key from `secret`, and opens it for one signature at a time. `api.jwt.rotate()` makes a new key; the old one verifies for 24 hours and signs nothing, and the sweep deletes it after that. A new app `secret` opens no old key: the key retires at the next signature with one log line, and a new key signs.
+- The token: header `{ alg, kid, typ: "JWT" }`; claims `iss` (`baseURL + basePath`), `sub` (the user id), `aud` (`jwtMint.audience`, default `baseURL`), `iat`, `exp` (`jwtMint.ttlMinutes`, 1 to 60, default 15), `sid` (the session id), `email`, `email_verified`, `name`, and `org` (the active organization id or null). `jwtMint.claims(user, session)` adds names and sets none of these, nor `nbf` or `jti`.
+- A resource server verifies the signature against `<basePath>/jwks`, `iss`, `aud`, and `exp`, and keeps the key set in a cache. The token is a bearer for its life: a sign-out does not end it. Keep `ttlMinutes` short, and check `sid` against `auth.api.getSession` where a sign-out must end access at once.
+- `api.jwt.mint({ userId, sessionId })`, `api.jwt.verify(token)` (this instance's session JWTs only), `api.jwt.rotate()`, `api.jwt.jwks()`, and `client.jwt.token()` hold the same operations.
+
 ## API tokens
 
 A script or a CLI signs in with an API token, not with a password. A
@@ -796,6 +807,8 @@ Since plan 9f it also deletes trusted devices past their expiry and answers `tru
 
 Since the plan 9f final fix wave it also deletes TOTP setups that no enable confirmed within 15 minutes and answers `totpSetups`.
 
+Since plan 9g it also deletes signing keys retired more than 24 hours ago (`jwks`), refresh tokens past their expiry (`oauthTokens`), and up to 100 OAuth clients unseen for 90 days with no consent and no refresh token (`oauthClients`).
+
 ```ts
 export default {
   fetch: (request: Request) => auth.handle(request),
@@ -878,6 +891,7 @@ Without a trigger, expired rows stay in the database.
 - Core at version 4 needs the `0004_schema_v4` migration in both adapters. Version 4 adds the password table.
 - Core at version 5 needs the `0005_schema_v5` migration in both adapters. Version 5 adds the API token table, `ta_api_token`.
 - Core at version 6 needs the `0006_schema_v6` migration in both adapters. Version 6 adds `ta_totp` and `ta_trusted_device` (plan 9f).
+- Core at version 7 needs the `0007_schema_v7` migration in both adapters. Version 7 adds `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, and `ta_oauth_token` (plan 9g).
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

@@ -617,3 +617,48 @@ describe("totp (plan 9f)", () => {
     );
   });
 });
+
+describe("jwtMint (plan 9g)", () => {
+  it("is on with the defaults, off with false, and takes each option", () => {
+    expect(resolveConfig(base).jwtMint).toEqual({
+      alg: "EdDSA",
+      audience: ["https://api.example.com"],
+      ttlMinutes: 15,
+      claims: null,
+    });
+    expect(resolveConfig({ ...base, jwtMint: false }).jwtMint).toBeNull();
+    const claims = () => ({ role: "admin" });
+    expect(
+      resolveConfig({
+        ...base,
+        jwtMint: { alg: "ES256", audience: "https://rs.example.com", ttlMinutes: 60, claims },
+      }).jwtMint,
+    ).toEqual({ alg: "ES256", audience: ["https://rs.example.com"], ttlMinutes: 60, claims });
+    expect(
+      resolveConfig({ ...base, jwtMint: { audience: ["a", "b"], ttlMinutes: 1 } }).jwtMint,
+    ).toMatchObject({ audience: ["a", "b"], ttlMinutes: 1 });
+  });
+
+  it("refuses a value out of range, a key core does not have, and a value that is not an object", () => {
+    const AUD =
+      "jwtMint.audience must be 1 to 10 strings of 1 to 2048 characters with no control character";
+    const bad: [unknown, string][] = [
+      [{ alg: "RS256" }, "jwtMint.alg must be EdDSA or ES256"],
+      [{ ttlMinutes: 0 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
+      [{ ttlMinutes: 61 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
+      [{ ttlMinutes: 1.5 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
+      [{ audience: [] }, AUD],
+      [{ audience: [""] }, AUD],
+      [{ audience: Array.from({ length: 11 }, (_, i) => `a${i}`) }, AUD],
+      [{ audience: ["a\nb"] }, AUD],
+      [{ claims: "x" }, "jwtMint.claims must be a function"],
+      [
+        { issuer: "x" },
+        "jwtMint.issuer is not an option; core has alg, audience, ttlMinutes, and claims",
+      ],
+      [true, "jwtMint must be an object or false"],
+    ];
+    for (const [jwtMint, message] of bad)
+      expect(() => resolveConfig({ ...base, jwtMint: jwtMint as never })).toThrowError(message);
+  });
+});

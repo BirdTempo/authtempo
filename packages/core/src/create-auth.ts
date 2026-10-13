@@ -25,6 +25,14 @@ import {
   setActiveOrganization,
 } from "./engine/invitations.js";
 import {
+  type MintedJwt,
+  mintSessionJwt,
+  publicKeySet,
+  rotateKey,
+  type SessionJwtClaims,
+  verifySessionJwt,
+} from "./engine/jwt.js";
+import {
   type MagicLinkRequest,
   type MagicLinkVerify,
   requestMagicLink,
@@ -120,6 +128,7 @@ import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
 import { emailOtpRoutes } from "./http/routes/email-otp.js";
 import { handoffRoutes } from "./http/routes/handoff.js";
+import { jwtRoutes } from "./http/routes/jwt.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
 import { organizationRoutes } from "./http/routes/organizations.js";
 import { passkeyRoutes } from "./http/routes/passkeys.js";
@@ -128,6 +137,7 @@ import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
 import { tokenRoutes } from "./http/routes/tokens.js";
 import { totpRoutes } from "./http/routes/totp.js";
+import type { PublicJwk } from "./primitives/jwk.js";
 import type { Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import type {
@@ -172,6 +182,19 @@ export interface TotpApi {
   /** The key URI of a factor that is on. In process only: no route answers it after the setup. */
   uri(input: { userId: string }): Promise<Result<{ uri: string }>>;
   revokeTrustedDevices(input: { userId: string }): Promise<Result<{ ok: true }>>;
+}
+
+/**
+ * JWT minting (plan 9g, spec 8.12). Present unless `jwtMint` is `false`.
+ * `verify` checks a session JWT of this instance only: the signature, the
+ * issuer, an audience of `jwtMint.audience`, and `exp`.
+ */
+export interface JwtApi {
+  mint(input: { userId: string; sessionId: string }): Promise<Result<MintedJwt>>;
+  verify(token: string): Promise<SessionJwtClaims | null>;
+  /** A new signing key. The old one retires: it verifies for 24 hours and signs nothing. */
+  rotate(): Promise<{ kid: string }>;
+  jwks(): Promise<{ keys: PublicJwk[] }>;
 }
 
 /** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
@@ -306,6 +329,7 @@ export interface AuthApi {
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
   totp?: TotpApi;
+  jwt?: JwtApi;
 }
 
 export interface Auth {
@@ -345,6 +369,7 @@ export function createAuth(input: AuthConfig): Auth {
     ...handoffRoutes(config),
     ...organizationRoutes(config),
     ...tokenRoutes(config),
+    ...jwtRoutes(config),
   ]);
   return {
     handle,
@@ -426,6 +451,16 @@ export function createAuth(input: AuthConfig): Auth {
               uri: (i) => totpUri(config, i),
               revokeTrustedDevices: (i) => revokeTrustedDevices(config, i),
             } satisfies TotpApi,
+          }
+        : {}),
+      ...(config.jwtMint
+        ? {
+            jwt: {
+              mint: (i) => mintSessionJwt(config, i),
+              verify: (token) => verifySessionJwt(config, token),
+              rotate: () => rotateKey(config),
+              jwks: () => publicKeySet(config),
+            } satisfies JwtApi,
           }
         : {}),
     },

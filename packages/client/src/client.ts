@@ -207,6 +207,14 @@ export interface Client {
     >;
   };
   /**
+   * A signed JWT of the caller's session (plan 9g), for a server that
+   * verifies it offline against `<basePath>/jwks`. Needs a session: a `tk_`
+   * token answers `unauthorized`. It lives `jwtMint.ttlMinutes`; a sign-out does not end it.
+   */
+  jwt: {
+    token(): Promise<ClientResult<{ token: string }>>;
+  };
+  /**
    * The TOTP second factor (plan 9f). Every call but `verify` needs a
    * session; a token answers `unauthorized`. Every call answers `not_found`
    * when the server runs without `password` or with `totp: false`.
@@ -428,6 +436,9 @@ export function createClient(options: ClientOptions): Client {
           "GET",
           "/tokens/current",
         ),
+    },
+    jwt: {
+      token: () => call<{ token: string }>("GET", "/token"),
     },
     totp: {
       setup: (input) =>

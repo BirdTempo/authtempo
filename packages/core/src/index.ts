@@ -3,6 +3,7 @@ export const VERSION = "0.0.0";
 export type {
   AuthConfig,
   EmailOtpConfig,
+  JwtMintConfig,
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
@@ -18,6 +19,7 @@ export {
   type AuthApi,
   createAuth,
   type EmailOtpApi,
+  type JwtApi,
   type PasswordApi,
   type TokensApi,
   type TotpApi,
@@ -53,6 +55,7 @@ export {
   type SessionVia,
 } from "./engine/hooks.js";
 export type { InvitationSummary } from "./engine/invitations.js";
+export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
@@ -117,6 +120,7 @@ export {
   deriveGate,
 } from "./primitives/derive-gate.js";
 export { newId } from "./primitives/ids.js";
+export type { JwsAlg, PublicJwk } from "./primitives/jwk.js";
 export type { Result } from "./result.js";
 export {
   type ApiTokenRow,

@@ -24,7 +24,9 @@ import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.j
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
+import type { JwsAlg } from "./primitives/jwk.js";
 import { hasControlChar } from "./primitives/text.js";
+import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
@@ -176,6 +178,12 @@ export interface AuthConfig {
    */
   totp?: TotpConfig | false;
   /**
+   * JWT minting (plan 9g, spec 8.12): `GET /jwks`, `GET /token`, and
+   * `api.jwt`. On by default; `false` removes them. The OAuth provider
+   * needs it. Not `jwt`: that key is the ID token seam (plan 3).
+   */
+  jwtMint?: JwtMintConfig | false;
+  /**
    * The app's code at named points of the organization and session flows
    * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
    * refuses with `throw hookRefusal(message)`; an after hook runs after the
@@ -257,6 +265,36 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
+}
+
+export interface JwtMintConfig {
+  /** `EdDSA` (Ed25519, default) or `ES256` (ECDSA P-256). A change retires the signing key at the next signature. */
+  alg?: JwsAlg;
+  /** The `aud` of a session JWT: 1 to 10 strings, each 1 to 2048 characters. Default `[baseURL]`. */
+  audience?: string | string[];
+  /** The life of a session JWT, 1 to 60. Default 15. A sign-out does not end a token. */
+  ttlMinutes?: number;
+  /**
+   * The app's own claims. A reserved name (`iss`, `sub`, `aud`, `iat`,
+   * `exp`, `nbf`, `jti`, `sid`, `email`, `email_verified`, `name`, `org`)
+   * never comes from here. A throw answers `hook_failed`.
+   */
+  claims?: (
+    user: UserRow,
+    session: SessionRow,
+  ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+}
+
+export interface ResolvedJwtMint {
+  alg: JwsAlg;
+  audience: string[];
+  ttlMinutes: number;
+  claims:
+    | ((
+        user: UserRow,
+        session: SessionRow,
+      ) => Record<string, unknown> | Promise<Record<string, unknown>>)
+    | null;
 }
 
 export interface LegacyVerifyConfig {
@@ -346,6 +384,7 @@ export interface ResolvedConfig {
   } | null;
   emailOtp: ResolvedEmailOtp | null;
   totp: ResolvedTotp | null;
+  jwtMint: ResolvedJwtMint | null;
   hooks: ResolvedHooks;
 }
 
@@ -619,6 +658,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
+    jwtMint: resolveJwtMint(input.jwtMint, input.baseURL),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
@@ -789,6 +829,55 @@ function resolveTotp(
     trustCookieName,
     challengePage: o.challengePage ?? defaultTotpPage,
   };
+}
+
+const JWT_MINT_KEYS: Readonly<Record<keyof JwtMintConfig, true>> = {
+  alg: true,
+  audience: true,
+  ttlMinutes: true,
+  claims: true,
+};
+
+/** `jwtMint` (plan 9g). Absent: on, with the defaults. `false`: off. */
+function resolveJwtMint(
+  input: JwtMintConfig | false | undefined,
+  baseURL: string,
+): ResolvedJwtMint | null {
+  if (input === false) return null;
+  const o: JwtMintConfig = input === undefined ? {} : input;
+  // `as unknown`: the guard must not narrow `o`, or its fields lose their types.
+  if (!isPlainObject(o as unknown)) throw new ConfigError("jwtMint must be an object or false");
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(JWT_MINT_KEYS, key))
+      throw new ConfigError(
+        `jwtMint.${key} is not an option; core has alg, audience, ttlMinutes, and claims`,
+      );
+  const alg = o.alg ?? "EdDSA";
+  if (alg !== "EdDSA" && alg !== "ES256")
+    throw new ConfigError("jwtMint.alg must be EdDSA or ES256");
+  const audience: unknown =
+    o.audience === undefined
+      ? [baseURL]
+      : typeof o.audience === "string"
+        ? [o.audience]
+        : o.audience;
+  if (
+    !Array.isArray(audience) ||
+    audience.length < 1 ||
+    audience.length > 10 ||
+    audience.some(
+      (a) => typeof a !== "string" || a.length < 1 || a.length > 2048 || hasControlChar(a),
+    )
+  )
+    throw new ConfigError(
+      "jwtMint.audience must be 1 to 10 strings of 1 to 2048 characters with no control character",
+    );
+  const ttlMinutes = o.ttlMinutes ?? 15;
+  if (!Number.isSafeInteger(ttlMinutes) || ttlMinutes < 1 || ttlMinutes > 60)
+    throw new ConfigError("jwtMint.ttlMinutes must be an integer from 1 to 60");
+  if (o.claims !== undefined && typeof o.claims !== "function")
+    throw new ConfigError("jwtMint.claims must be a function");
+  return { alg, audience: [...(audience as string[])], ttlMinutes, claims: o.claims ?? null };
 }
 
 /** An object literal. A class instance keeps its methods on the prototype, where `Object.entries` does not see them. */
