@@ -45,7 +45,8 @@ import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
 - A token counts only in the `Authorization` header, never in a cookie.
 - `expiresInDays` is 1 to 3650, and the default is 90. `null` means no expiry.
 - `organizationId` binds the token to one organization. When the membership ends, `caller` answers null, and the token stays in the list.
-- A user holds at most 50 tokens. Create has a limit of 20 per user per hour.
+- A user holds at most 50 tokens.
+- Create has one [limit](/docs/reference/limits/): `token-create:user:<userId>` 20 per hour.
 - A password reset, a password change, and a sign-out delete no token. The person revokes a token from the list.
 
 ## If it fails

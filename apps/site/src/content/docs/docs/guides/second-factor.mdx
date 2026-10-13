@@ -28,12 +28,16 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 
 <Code code={config} lang="ts" title="The second factor config" />
 
-3. On a settings page, ask for the password, and call `client.totp.setup({ password })`.
-4. Show the `uri` as a QR code, and show the backup codes once.
-5. Ask for a current code, and call `client.totp.enable({ code })`. Do it within 15 minutes of the setup.
+3. On a settings page, ask for the password.
+   - Send the password with `client.totp.setup({ password })`.
+4. Show the `uri` as a QR code.
+   - Show the backup codes once too. The setup answers them one time only.
+5. Call `client.totp.enable({ code })` with a current code from the authenticator app.
+   - The enable must come within 15 minutes of the setup.
 6. On the sign-in form, call `client.password.signIn`. An answer with `twoFactor` holds a `challenge`.
-7. Ask for a code, and call `client.totp.verify({ challenge, code })`. Add `trustDevice: true` for a trusted device.
-8. In a browser, you can send the person to `/auth/totp/challenge?challenge=<challenge>` on the API instead.
+7. Call `client.totp.verify({ challenge, code })` with the code that the person types.
+   - For a trusted device, add `trustDevice: true`.
+8. In a browser, send the person to `/auth/totp/challenge?challenge=<challenge>` on the API in place of step 7.
 
 <Code code={test} lang="ts" title="Setup, gate, and verify as a test" />
 
@@ -44,7 +48,9 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 - A challenge lives 5 minutes and takes 5 wrong codes.
 - A magic link, a social sign-in, a passkey, a handoff, and a reset open a session with no second factor.
 - A trusted device skips the factor for `totp.trustDays`. Its cookie is `tempo_totp_trust` on the path `/auth/`.
-- The code checks share two limits per user: 10 per 15 minutes and 30 per 24 hours. The setup's password check has its own limit, 5 per user per 15 minutes.
+- The code checks share two [limits](/docs/reference/limits/): `totp-code:user:<userId>` 10 per 15 minutes, and `totp-code:user-day:<userId>` 30 per 24 hours.
+- The setup's password check has its own [limit](/docs/reference/limits/): `totp-setup:user:<userId>` 5 per 15 minutes.
+- The verify has one more [limit](/docs/reference/limits/): `totp-verify:ip:<ip>` 30 per 15 minutes.
 - No per-account lockout exists. [The threat model](/docs/concepts/threat-model/) gives the odds.
 
 :::caution

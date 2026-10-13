@@ -47,7 +47,8 @@ import test from "../../../../../samples/guides/organizations.test.ts?raw";
 - An organization holds one pending invitation for each address. A new invitation replaces the old one, and the old link stops.
 - The invitation token is in the mail only. No answer of a route carries it.
 - To accept, the caller's verified address must equal the invited address.
-- Invite has two limits: 20 per inviting user per 15 minutes, and 5 per invited address per hour.
+- Invite has two [limits](/docs/reference/limits/): `invite:user:<userId>` 20 per 15 minutes, and `invite:email:<email>` 5 per hour.
+- Accept has one [limit](/docs/reference/limits/): `invitation-accept:ip:<ip>` 20 per 15 minutes.
 
 ## If it fails
 

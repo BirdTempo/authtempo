@@ -24,9 +24,12 @@ import test from "../../../../../samples/guides/adapter-conformance.test.ts?raw"
 ## Steps
 
 1. Write an object with `create`, `findOne`, `findMany`, `update`, `delete`, and `transaction`, of the type `StorageAdapter`.
-2. Read the models and fields from `schema` of `@authtempo/core`. Map each model to a table and each field to a column.
-3. Write one migration for each schema version, and store the version in a table `ta_meta`.
-4. Refuse to start when the database reports an older version than `SCHEMA_VERSION`. Throw `StorageError` with `schema_mismatch`.
+2. Read the models and fields from `schema` of `@authtempo/core`.
+   - Map each model to a table and each field to a column.
+3. Write one migration for each schema version.
+   - Store the version in the table `ta_meta`.
+4. Refuse to start when the database reports an older version than `SCHEMA_VERSION`.
+   - For that refusal, throw `StorageError` with `schema_mismatch`.
 5. Throw `StorageError` with `unique_violation` when a unique key refuses a write.
 6. Run `runAdapterConformance` from `@authtempo/core/conformance` on the adapter.
 

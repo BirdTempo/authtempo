@@ -25,7 +25,8 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 1. Pass plain objects of functions in `hooks.organization` and `hooks.session`.
 2. To refuse, throw `hookRefusal(message)` in a before hook. The caller gets `hook_refused` with your message.
-3. To write the app's own row with each core row, write it in the before hook. Use the id that core minted.
+3. To write the app's own row with each core row, write it in the before hook.
+   - The app's row takes the id that core minted, so the two rows match.
 4. To store no IP or user agent, answer `{ ip: null, userAgent: null }` from `session.beforeCreate`.
 5. For an audit trail, write from the after hooks.
 
