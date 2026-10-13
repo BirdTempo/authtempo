@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { codeHash, requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  codeHash,
+  requestEmailOtp,
+  requestResetOtp,
+  verifyEmailOtp,
+} from "../src/engine/email-otp.js";
+import { defaultEmailOtpMail, defaultResetOtpMail } from "../src/engine/email-otp-mail.js";
 import { hookRefusal } from "../src/engine/hooks.js";
 import { passwordSignUp } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { hmacSha256Hex, sha256Hex } from "../src/primitives/crypto.js";
+import { createMemoryAdapter } from "../src/storage/memory.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 
@@ -102,6 +110,27 @@ describe("email code request (plan 9e)", () => {
     ).toMatchObject({ code: "rate_limited" });
   });
 
+  it("limits requests to 20 per address per 24 hours, for both purposes together; the twenty-first after 24 hours is sent", async () => {
+    const auth = makeAuth({ password: { hash: FAST } });
+    const start = auth.clock.now().getTime();
+    const send = (i: number) =>
+      (i % 2 === 0 ? requestEmailOtp : requestResetOtp)(auth.config, {
+        email: EMAIL,
+        ip: `6.6.6.${i}`,
+      });
+    for (let i = 0; i < 20; i++) {
+      // A fresh 15-minute window every 3 requests, so only the daily key can refuse.
+      if (i > 0 && i % 3 === 0) auth.clock.advance(15 * 60_000);
+      expect((await send(i)).ok).toBe(true);
+    }
+    auth.clock.advance(15 * 60_000);
+    expect(await send(20)).toMatchObject({ ok: false, code: "rate_limited", status: 429 });
+    expect(auth.mail).toHaveLength(20);
+    auth.clock.advance(start + 86_400_000 - auth.clock.now().getTime());
+    expect(await send(21)).toEqual({ ok: true, value: { sent: true } });
+    expect(auth.mail).toHaveLength(21);
+  });
+
   it("keeps one live code: a second request makes the first code answer invalid_code (Review Focus 2)", async () => {
     const auth = makeAuth();
     const first = await request(auth);
@@ -111,6 +140,23 @@ describe("email code request (plan 9e)", () => {
     if (first !== second)
       expect(await verify(auth, first)).toMatchObject({ ok: false, code: "invalid_code" });
     expect((await verify(auth, second)).ok).toBe(true);
+  });
+
+  it("says 1 minute for a ttl of 1 and 10 minutes for 10 in both default mails (M-6)", () => {
+    const at = (ttlMinutes: number) => ({
+      email: EMAIL,
+      code: "123456",
+      ttlMinutes,
+      appName: "App",
+    });
+    expect(defaultEmailOtpMail(at(1)).text).toBe(
+      "Your code is 123456. It is valid for 1 minute. If you did not ask for it, ignore this message.",
+    );
+    expect(defaultResetOtpMail(at(1)).text).toBe(
+      "Your password reset code for App is 123456. It is valid for 1 minute.",
+    );
+    expect(defaultEmailOtpMail(at(10)).text).toContain("It is valid for 10 minutes.");
+    expect(defaultResetOtpMail(at(10)).text).toContain("It is valid for 10 minutes.");
   });
 
   it("answers not_found for both operations with emailOtp: false", async () => {
@@ -189,6 +235,51 @@ describe("email code verify (plan 9e)", () => {
     const [row] = await rows(auth);
     expect(row?.data).toEqual({ attempts: 5 });
     expect(row?.consumedAt).not.toBeNull();
+  });
+
+  it("spends every live code of the address at the cap, so an older code from a parallel request gets no more guesses (M-3)", async () => {
+    const auth = makeAuth();
+    await Promise.all([
+      requestEmailOtp(auth.config, { email: EMAIL, ip: null }),
+      requestEmailOtp(auth.config, { email: EMAIL, ip: null }),
+    ]);
+    // Two parallel requests leave two live codes: the state this test needs.
+    expect((await rows(auth)).filter((r) => r.consumedAt === null)).toHaveLength(2);
+    const codes = auth.mail.map((m) => /\b(\d{6})\b/.exec(m.text)?.[1] ?? "");
+    const wrong = ["000000", "111111", "222222"].find((c) => !codes.includes(c)) ?? "";
+    for (let i = 0; i < 4; i++)
+      expect(await verify(auth, wrong)).toMatchObject({ code: "invalid_code" });
+    expect(await verify(auth, wrong)).toMatchObject({ code: "too_many_attempts" });
+    expect((await rows(auth)).filter((r) => r.consumedAt === null)).toEqual([]);
+    for (const code of codes)
+      expect(await verify(auth, code)).toMatchObject({ code: "too_many_attempts" });
+    expect(await auth.storage.findMany("session", [])).toEqual([]);
+  });
+
+  it("bounds the count to maxAttempts + 1 rounds when an update never matches, and logs (I-1)", async () => {
+    const inner = createMemoryAdapter();
+    let updates = 0;
+    const storage: StorageAdapter = {
+      ...inner,
+      update: async () => {
+        updates += 1;
+        // A guard: without the bound the loop never ends; fail instead of hanging.
+        if (updates > 100) throw new Error("countMiss did not stop");
+        return 0;
+      },
+    };
+    const auth = makeAuth({ storage });
+    const wrong = wrongFor(await request(auth));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      updates = 0;
+      expect(await verify(auth, wrong)).toEqual({ ok: false, code: "invalid_code", status: 400 });
+      expect(updates).toBe(6);
+      const [row] = await inner.findMany("verification", []);
+      expect(errors).toHaveBeenCalledWith("tempo-auth: email code count gave up", row?.id);
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it("answers invalid_code for an expired code, right or wrong, and counts no guess", async () => {

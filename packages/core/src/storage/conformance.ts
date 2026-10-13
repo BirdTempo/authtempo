@@ -487,6 +487,51 @@ export function runAdapterConformance(
       expect(counts.sort()).toEqual([0, 1]);
     });
 
+    // The email code count (plan 9e, `countMiss`) is a compare-and-set on
+    // `updatedAt`. It holds only if `eq` on a date matches the stored value
+    // to the millisecond, on every adapter. An adapter that keeps whole
+    // seconds, or shifts a zone, answers 0 here, and the count never lands.
+    it("update with eq on a date matches the read value to the millisecond, and eq null on a nullable date matches only null (plan 9e)", async () => {
+      const at = new Date(t0.getTime() + 123);
+      await db.create("verification", verification("v1", at, null));
+      await db.create("verification", verification("v2", at, at));
+      const read = await db.findOne("verification", [{ field: "id", op: "eq", value: "v1" }]);
+      if (!read) throw new Error("no row v1");
+      expect(read.updatedAt.getTime()).toBe(at.getTime());
+      const cas = (value: Date, data: Partial<VerificationRow>) =>
+        db.update(
+          "verification",
+          [
+            { field: "id", op: "eq", value: "v1" },
+            { field: "updatedAt", op: "eq", value },
+          ],
+          data,
+        );
+      const later = new Date(at.getTime() + 1);
+      expect(await cas(later, { data: { n: 9 } })).toBe(0);
+      expect(await cas(new Date(at.getTime() - 1), { data: { n: 9 } })).toBe(0);
+      expect(await cas(read.updatedAt, { data: { n: 2 }, updatedAt: later })).toBe(1);
+      expect(await cas(read.updatedAt, { data: { n: 3 } })).toBe(0);
+      const again = await db.findOne("verification", [{ field: "id", op: "eq", value: "v1" }]);
+      expect(again?.data).toEqual({ n: 2 });
+      expect(again?.updatedAt.getTime()).toBe(later.getTime());
+      if (!again) throw new Error("no row v1");
+      expect(await cas(again.updatedAt, { data: { n: 4 } })).toBe(1);
+      const spend = await db.update(
+        "verification",
+        [
+          { field: "id", op: "in", value: ["v1", "v2"] },
+          { field: "consumedAt", op: "eq", value: null },
+        ],
+        { consumedAt: later },
+      );
+      expect(spend).toBe(1);
+      const v2 = await db.findOne("verification", [{ field: "id", op: "eq", value: "v2" }]);
+      expect(v2?.consumedAt?.getTime()).toBe(at.getTime());
+      const v1 = await db.findOne("verification", [{ field: "id", op: "eq", value: "v1" }]);
+      expect(v1?.consumedAt?.getTime()).toBe(later.getTime());
+    });
+
     it("rejects an unknown field in create data, update data, and sort", async () => {
       await expect(
         db.create("user", { ...user("u1", "a@example.com", t0), nope: 1 } as never),

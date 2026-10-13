@@ -25,6 +25,12 @@ export type EmailOtpPurpose = "email-otp" | "password-reset-otp";
 // `maxAttempts` guesses per code, it bounds the guesses on one address.
 const REQUEST_PER_IP = { seconds: 900, max: 20 };
 const REQUEST_PER_EMAIL = { seconds: 900, max: 3 };
+// Per 24 hours, for both purposes, checked after the 15-minute keys. The
+// 15-minute keys alone let one address take 960 guesses a day: about 1 in
+// 1,040 per day and about 30 % per year for a patient attacker. 20 codes a
+// day at `maxAttempts` 5 gives at most 100 guesses a day: about 1 in 10,000
+// per day and about 3.6 % per year, and the victim gets 20 mails a day.
+const REQUEST_PER_EMAIL_DAY = { seconds: 86_400, max: 20 };
 // Per 15 minutes, shared by the sign-in verify and the reset.
 const VERIFY_PER_IP = { seconds: 900, max: 30 };
 const VERIFY_PER_EMAIL = { seconds: 900, max: 10 };
@@ -89,6 +95,8 @@ async function requestCode(
   if (!(await config.limiter.allow(`otp:ip:${input.ip ?? "unknown"}`, REQUEST_PER_IP)))
     return fail("rate_limited");
   if (!(await config.limiter.allow(`otp:email:${email}`, REQUEST_PER_EMAIL)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`otp:email-day:${email}`, REQUEST_PER_EMAIL_DAY)))
     return fail("rate_limited");
   const now = config.clock.now();
   await config.storage.update(
@@ -176,6 +184,13 @@ async function newestCode(
  * zero rows, and the call reads the row again and counts on the new value.
  * So no guess goes uncounted, on D1 and on Postgres. A lost round means that
  * another guess counted or the row was spent, so the loop ends.
+ *
+ * The loop has a hard bound of `max + 1` rounds. Each lost round means that
+ * another guess counted, and the row is spent after at most `max` counts, so
+ * an honest adapter never reaches the bound. An adapter whose `eq` on a date
+ * never matches (whole seconds, a shifted zone) loses every round; without
+ * the bound, one wrong code then holds a request and a connection forever.
+ * The storage conformance suite pins `eq` on a date on every adapter.
  */
 async function countMiss(
   storage: StorageAdapter,
@@ -183,8 +198,11 @@ async function countMiss(
   max: number,
   now: Date,
 ): Promise<"invalid_code" | "too_many_attempts"> {
+  const settled = (r: VerificationRow | null) =>
+    r && attemptsOf(r) >= max ? "too_many_attempts" : "invalid_code";
   let current: VerificationRow | null = row;
-  while (current && current.consumedAt === null) {
+  for (let round = 0; round <= max; round++) {
+    if (!current || current.consumedAt !== null) return settled(current);
     const attempts = attemptsOf(current) + 1;
     const capped = attempts >= max;
     const n = await storage.update(
@@ -200,10 +218,27 @@ async function countMiss(
         ...(capped ? { consumedAt: now } : {}),
       },
     );
-    if (n === 1) return capped ? "too_many_attempts" : "invalid_code";
+    if (n === 1) {
+      if (!capped) return "invalid_code";
+      // Two parallel requests can leave two live codes. The cap spends them
+      // all, so every later try answers `too_many_attempts` until a new
+      // request, and the older code gets no more guesses.
+      await storage.update(
+        "verification",
+        [
+          { field: "purpose", op: "eq", value: current.purpose },
+          { field: "identifier", op: "eq", value: current.identifier },
+          { field: "consumedAt", op: "eq", value: null },
+        ],
+        { consumedAt: now, updatedAt: now },
+      );
+      return "too_many_attempts";
+    }
     current = await storage.findOne("verification", [{ field: "id", op: "eq", value: current.id }]);
   }
-  return current && attemptsOf(current) >= max ? "too_many_attempts" : "invalid_code";
+  if (!current || current.consumedAt !== null) return settled(current);
+  console.error("tempo-auth: email code count gave up", row.id);
+  return "invalid_code";
 }
 
 /**
