@@ -54,6 +54,8 @@ Version 5 (plan 8b, 2026-10-11) adds `ta_api_token`, one row per API token, with
 
 Version 6 (plan 9f, 2026-10-13) adds `ta_totp`, one row per user with a second factor (unique on the user), and `ta_trusted_device`, one row per trusted device, with a unique index on the token hash and an index on the user. Apply `0006_schema_v6` before you deploy a core at version 6; the adapter refuses a database at version 5.
 
+Version 7 (plan 9g, 2026-10-13) adds `ta_jwk` (the signing keys, unique on `slot`), `ta_oauth_client`, `ta_oauth_consent` (unique on the user and the client), and `ta_oauth_token` (the refresh token hashes, unique on the hash, with indexes on the user and the family). Apply `0007_schema_v7` before you deploy a core at version 7; the adapter refuses a database at version 6.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

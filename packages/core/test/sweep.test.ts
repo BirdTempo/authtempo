@@ -78,6 +78,40 @@ describe("sweepExpired", () => {
         createdAt: now,
         updatedAt: now,
       });
+    const key = (id: string, slot: string | null, retiredAt: Date | null) =>
+      storage.create("jwk", {
+        id,
+        publicJwk: { kid: id },
+        privateKey: "sealed",
+        slot,
+        retiredAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+    const client = (id: string, lastSeenAt: Date) =>
+      storage.create("oauthClient", {
+        id,
+        kind: "registered",
+        name: null,
+        redirectUris: ["https://client.example.com/cb"],
+        lastSeenAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+    const refresh = (id: string, clientId: string, expiresAt: Date) =>
+      storage.create("oauthToken", {
+        id,
+        tokenHash: `r-${id}`,
+        familyId: `f-${id}`,
+        userId: "u1",
+        clientId,
+        scopes: ["offline_access"],
+        resource: "https://api.example.com/mcp",
+        expiresAt,
+        usedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
 
     // Each row is one the product can write. A consumed row was consumed
     // before its expiry.
@@ -98,6 +132,23 @@ describe("sweepExpired", () => {
     await token("t-forever", null);
     await device("d-expired", at(-HOUR));
     await device("d-live", at(DAY));
+    await key("k-signing", "signing", null);
+    await key("k-recent", null, at(-HOUR));
+    await key("k-old", null, at(-DAY - HOUR));
+    await client("c-idle", at(-91 * DAY));
+    await client("c-consent", at(-91 * DAY));
+    await client("c-token", at(-91 * DAY));
+    await client("c-new", at(-HOUR));
+    await storage.create("oauthConsent", {
+      id: "consent-1",
+      userId: "u1",
+      clientId: "c-consent",
+      scopes: ["openid"],
+      createdAt: now,
+      updatedAt: now,
+    });
+    await refresh("r-expired", "c-new", at(-HOUR));
+    await refresh("r-live", "c-token", at(DAY));
     // A limit window that ends before the sweep, and one that is still live.
     await config.limiter.allow("ended", { seconds: 60, max: 3 });
     await config.limiter.allow("live", { seconds: 3600, max: 3 });
@@ -111,6 +162,9 @@ describe("sweepExpired", () => {
       sessions: 1,
       apiTokens: 1,
       trustedDevices: 1,
+      jwks: 1,
+      oauthTokens: 1,
+      oauthClients: 1,
       totpSetups: 0,
       limits: 1,
     });
@@ -125,6 +179,12 @@ describe("sweepExpired", () => {
     expect(tokenIds).toEqual(["t-forever", "t-live"]);
     const deviceIds = (await storage.findMany("trustedDevice", [])).map((r) => r.id);
     expect(deviceIds).toEqual(["d-live"]);
+    const keyIds = (await storage.findMany("jwk", [])).map((r) => r.id).sort();
+    expect(keyIds).toEqual(["k-recent", "k-signing"]);
+    const refreshIds = (await storage.findMany("oauthToken", [])).map((r) => r.id);
+    expect(refreshIds).toEqual(["r-live"]);
+    const clientIds = (await storage.findMany("oauthClient", [])).map((r) => r.id).sort();
+    expect(clientIds).toEqual(["c-consent", "c-new", "c-token"]);
 
     expect(await sweepExpired(config)).toEqual({
       verificationExpired: 0,
@@ -133,6 +193,9 @@ describe("sweepExpired", () => {
       sessions: 0,
       apiTokens: 0,
       trustedDevices: 0,
+      jwks: 0,
+      oauthTokens: 0,
+      oauthClients: 0,
       totpSetups: 0,
       limits: 0,
     });

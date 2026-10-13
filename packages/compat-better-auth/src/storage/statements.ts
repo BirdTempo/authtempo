@@ -144,6 +144,12 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
 export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   "totp",
   "trustedDevice",
+  // Plan 9g: migration 0004 creates them. The Better Auth jwks table and the
+  // tables of its OAuth plugins are neither read nor written.
+  "jwk",
+  "oauthClient",
+  "oauthConsent",
+  "oauthToken",
 ]);
 
 function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {

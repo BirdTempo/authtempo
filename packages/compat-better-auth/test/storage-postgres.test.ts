@@ -90,6 +90,7 @@ describe("the Better Auth mapping on postgres", () => {
       "0001_compat_better_auth",
       "0002_compat_schema_v5",
       "0003_compat_schema_v6",
+      "0004_compat_schema_v7",
     ]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
@@ -98,8 +99,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 6; a new core version needs migration 0004 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(6);
+  it("serves core schema version 7; a new core version needs migration 0005 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(7);
   });
 
   it("names only columns the table field list knows", () => {
@@ -457,7 +458,7 @@ describe("the compat migration on postgres", () => {
     }
   });
 
-  it("creates exactly core's four ta_ tables: ta_meta, ta_limit, ta_totp, and ta_trusted_device", async () => {
+  it("creates exactly core's eight ta_ tables (plans 9f and 9g)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const before = await pg.sql.unsafe<{ t: string }[]>(
@@ -471,13 +472,29 @@ describe("the compat migration on postgres", () => {
         .map((r) => r.t)
         .filter((t) => !before.some((b) => b.t === t))
         .sort();
-      expect(added).toEqual(["ta_limit", "ta_meta", "ta_totp", "ta_trusted_device"]);
-      expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "3" },
-        { key: "schema_version", value: "6" },
+      expect(added).toEqual([
+        "ta_jwk",
+        "ta_limit",
+        "ta_meta",
+        "ta_oauth_client",
+        "ta_oauth_consent",
+        "ta_oauth_token",
+        "ta_totp",
+        "ta_trusted_device",
       ]);
-      // Core's columns in core's order (plan 9f), so core's statements read these tables.
-      for (const model of ["totp", "trustedDevice"] as const) {
+      expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
+        { key: "compat_better_auth", value: "4" },
+        { key: "schema_version", value: "7" },
+      ]);
+      // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
+      for (const model of [
+        "totp",
+        "trustedDevice",
+        "jwk",
+        "oauthClient",
+        "oauthConsent",
+        "oauthToken",
+      ] as const) {
         const cols = await pg.sql.unsafe<{ c: string }[]>(
           "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
           [TABLES[model]],
@@ -489,11 +506,18 @@ describe("the compat migration on postgres", () => {
     }
   });
 
-  it("matches core's schema in NOT NULL and in column type on ta_totp and ta_trusted_device (core's parity check)", async () => {
+  it("matches core's schema in NOT NULL and in column type on core's own tables (core's parity check, plans 9f and 9g)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       await betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate();
-      for (const model of ["totp", "trustedDevice"] as const) {
+      for (const model of [
+        "totp",
+        "trustedDevice",
+        "jwk",
+        "oauthClient",
+        "oauthConsent",
+        "oauthToken",
+      ] as const) {
         const cols = await pg.sql.unsafe<
           { column_name: string; is_nullable: string; data_type: string }[]
         >(
@@ -581,8 +605,10 @@ describe("the compat undo of a created user", () => {
         ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "user_id" = ?)' +
         ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "user_id" = ?)' +
         " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = ?)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = ?)",
-      params: ["u4", 0, "u4", "u4", "u4", "u4", "u4", "u4"],
+        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = ?)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = ?)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = ?)",
+      params: ["u4", 0, "u4", "u4", "u4", "u4", "u4", "u4", "u4", "u4"],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
       sql:
@@ -592,8 +618,10 @@ describe("the compat undo of a created user", () => {
         ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "userId" = $4)' +
         ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "userId" = $5)' +
         " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = $6)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = $7)",
-      params: ["u5", "u5", "u5", "u5", "u5", "u5", "u5"],
+        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = $7)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = $8)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = $9)",
+      params: ["u5", "u5", "u5", "u5", "u5", "u5", "u5", "u5", "u5"],
     });
   });
 

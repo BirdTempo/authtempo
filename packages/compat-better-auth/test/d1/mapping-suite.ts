@@ -28,9 +28,16 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
     TABLE_FIELDS[t].includes(f) ? n.column(t, f) : `"${naming.casing === "snake" ? snake(f) : f}"`;
   const truncate = async () => {
     await env.DB.batch(
-      [...BETTER_AUTH_TABLES.map(T), "ta_limit", "ta_totp", "ta_trusted_device"].map((t) =>
-        env.DB.prepare(`DELETE FROM ${t}`),
-      ),
+      [
+        ...BETTER_AUTH_TABLES.map(T),
+        "ta_limit",
+        "ta_totp",
+        "ta_trusted_device",
+        "ta_jwk",
+        "ta_oauth_client",
+        "ta_oauth_consent",
+        "ta_oauth_token",
+      ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     );
   };
   return { n, T, C, truncate };
@@ -71,8 +78,15 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
   describe(`the Better Auth mapping on D1, ${label}`, () => {
     beforeEach(truncate);
 
-    it("marks NOT NULL on ta_totp and ta_trusted_device exactly as core's schema does (core's parity check)", async () => {
-      for (const model of ["totp", "trustedDevice"] as const) {
+    it("marks NOT NULL on core's own tables exactly as core's schema does (core's parity check, plans 9f and 9g)", async () => {
+      for (const model of [
+        "totp",
+        "trustedDevice",
+        "jwk",
+        "oauthClient",
+        "oauthConsent",
+        "oauthToken",
+      ] as const) {
         const info = await env.DB.prepare(`PRAGMA table_info(${TABLES[model]})`).all<{
           name: string;
           notnull: number;
