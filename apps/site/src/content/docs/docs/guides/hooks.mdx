@@ -1,0 +1,72 @@
+---
+title: Run your code at a flow point (hooks)
+description: Run the app's code before or after an organization or session write, refuse a write, or patch a new session.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
+  - packages/core/README.md "Hooks"
+  - packages/compat-better-auth/README.md "Hooks"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/hooks.ts?raw";
+import test from "../../../../../samples/guides/hooks.test.ts?raw";
+
+**For:** an app developer who must write a row of the app, refuse a write, or audit an event at a core flow.
+
+**What it does:** core calls your function at a named point of a flow. A before hook can refuse the flow. An after hook runs after the commit.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- `organizations` in the config for an organization hook.
+
+## Steps
+
+1. Pass plain objects of functions in `hooks.organization` and `hooks.session`.
+2. To refuse, throw `hookRefusal(message)` in a before hook. The caller gets `hook_refused` with your message.
+3. To write the app's own row with each core row, write it in the before hook. Use the id that core minted.
+4. To store no IP or user agent, answer `{ ip: null, userAgent: null }` from `session.beforeCreate`.
+5. For an audit trail, write from the after hooks.
+
+<Code code={config} lang="ts" title="Organization and session hooks" />
+
+<Code code={test} lang="ts" title="The hooks as a test" />
+
+## The hook points
+
+| Group | Points |
+| --- | --- |
+| `hooks.organization` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember`, `afterAddMember`, `beforeUpdateMemberRole`, `afterUpdateMemberRole`, `beforeRemoveMember`, `afterRemoveMember`, `beforeInvite`, `afterInvite`, `afterAcceptInvitation`, `afterDeclineInvitation`, `afterRevokeInvitation` |
+| `hooks.session` | `beforeCreate`, `afterCreate`, `afterEnd` |
+| `via` of a member | `create`, `add`, `invitation`; for a removal `remove` or `leave` |
+| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp` |
+| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor` |
+
+## How it behaves
+
+- A before hook runs inside the flow's transaction, after the rank checks and the limits, and before the first write. A throw leaves no row.
+- An after hook runs after the commit, before the answer. A throw cannot undo the row: core logs one line and answers success.
+- Each hook gets a copy of its event. Only `session.beforeCreate` may change a row, and only `ip`, `userAgent`, and `activeOrganizationId`.
+- A refusal message of 1 to 200 characters with no control character reaches the caller. Any other message becomes "The app refused this request.".
+- Hooks have no timeout. A hook that never settles holds the request, and a before hook holds the transaction.
+- The sweep fires no hook. `expired` fires only when a request presents a token after its expiry.
+- Core has no request hooks. Wrap `auth.handle`, and read `auth.caller(request)`.
+
+:::caution
+Warning: on Postgres with a pool of one connection, a before hook that queries the same client stops the request until the pool times out. Use a second connection for the app's own write.
+:::
+
+## If it fails
+
+- [`hook_refused`](/docs/reference/errors/#hook_refused): a before hook threw `hookRefusal(message)`. The body carries `message`.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook threw another error, or a session patch was wrong.
+- [`not_found`](/docs/reference/errors/#not_found): a session patch named an organization that the user is not a member of.
+
+`createAuth` refuses a hook that is not a function, a name that is no hook point, and organization hooks while `organizations` is off.
+
+## Next
+
+- [The one-connection rule](/docs/concepts/one-connection/)
+- [Add organizations and roles](/docs/guides/organizations/)
+- [Observability](/docs/operations/observability/)

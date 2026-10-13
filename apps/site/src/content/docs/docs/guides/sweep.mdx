@@ -1,0 +1,65 @@
+---
+title: Delete expired rows (the sweep)
+description: Run the sweep from a scheduled handler, so that expired links, codes, sessions, and limit windows leave the database.
+type: how-to
+sources:
+  - packages/core/README.md "Sweep"
+  - examples/worker/wrangler.jsonc
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+---
+
+import { Code } from "@astrojs/starlight/components";
+import handler from "../../../../../samples/guides/sweep.ts?raw";
+import test from "../../../../../samples/guides/sweep.test.ts?raw";
+
+**For:** an operator of an app that runs authtempo.
+
+**What it does:** `auth.api.sweepExpired()` deletes the rows that no flow can use any more, and answers a count for each kind.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- A scheduler: a cron trigger on Workers, or a timer of your host off Workers.
+
+## Steps
+
+1. Add a cron trigger to `wrangler.jsonc`, such as `"triggers": { "crons": ["17 * * * *"] }`.
+2. Add a `scheduled` handler to the Worker that calls `sweepExpired` inside `ctx.waitUntil`.
+3. Off Workers, call `auth.api.sweepExpired()` from a timer once an hour.
+
+<Code code={handler} lang="ts" title="The scheduled handler" />
+
+<Code code={test} lang="ts" title="The sweep as a test" />
+
+## The counts
+
+| Count | What it deletes |
+| --- | --- |
+| `verificationExpired` | Every verification row past its expiry, spent or not: links, codes, states, challenges, held requests. |
+| `verificationConsumed` | A spent verification row one day after its spend. |
+| `invitations` | Invitations that are accepted or expired. |
+| `sessions` | Sessions past their expiry. |
+| `apiTokens` | API tokens past their expiry. A token with no expiry stays. |
+| `trustedDevices` | Trusted devices past their expiry. |
+| `totpSetups` | Second factor setups that no enable confirmed within 15 minutes. |
+| `jwks` | Signing keys retired more than 24 hours ago. |
+| `oauthTokens` | Refresh tokens past their expiry. |
+| `oauthClients` | Up to 100 OAuth clients unseen for 90 days, with no consent and no refresh token. |
+| `limits` | The limit windows that ended, when the limiter has a sweep. |
+
+## How it behaves
+
+- The sweep is an `api` function, not a route. It is safe to run at any time.
+- Without a trigger, expired rows stay in the database forever.
+- The sweep fires no hook. A replayed token answers `invalid_token` after the sweep, because its row is gone.
+
+## If it fails
+
+- The sweep answers no error code. A storage error throws, and the scheduled run fails in the Worker's logs.
+- A `limits` count of 0 with the memory limiter is normal: the memory limiter deletes ended windows at each check.
+
+## Next
+
+- [Set up a shared limiter](/docs/guides/limiter/)
+- [Observability](/docs/operations/observability/)
+- [Schema and migrations](/docs/reference/schema/)

@@ -1,0 +1,63 @@
+---
+title: Give a script an API token
+description: Let a signed-in person create an API token, and let a script or a CLI call your routes with it.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
+  - packages/core/README.md "API tokens"
+  - packages/client/README.md "API tokens"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import server from "../../../../../samples/guides/api-tokens.ts?raw";
+import cli from "../../../../../samples/guides/api-tokens-cli.ts?raw";
+import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
+
+**For:** an app developer whose users run scripts, CLIs, or CI jobs against the app.
+
+**What it does:** a person with a session creates a `tk_` token. A script sends it as a bearer token to the routes that allow it.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- Nothing in the config. The token routes exist in every deployment.
+
+## Steps
+
+1. On a settings page, call `client.tokens.create({ name, expiresInDays })`.
+2. Show the `token` of the answer once. Core stores its SHA-256 only, and no route shows it again.
+3. List the tokens with `client.tokens.list()`. The `hint` tells them apart.
+4. In each app route that a script may call, read the caller with `auth.caller(request)`.
+5. In each app route that a token must not reach, read the caller with `auth.session(request)`.
+
+<Code code={server} lang="ts" title="The config and a route for scripts" />
+
+6. In the CLI, make a client with `credentials: "omit"` and the token.
+
+<Code code={cli} lang="ts" title="The client of a CLI" />
+
+<Code code={test} lang="ts" title="Create and use a token as a test" />
+
+## How it behaves
+
+- A token is `tk_` plus 43 base64url characters. It belongs to one verified user and is never a session.
+- `auth.session` answers null to a token, so every core route that needs a session answers 401 to it. A token cannot create a token.
+- A token counts only in the `Authorization` header, never in a cookie.
+- `expiresInDays` is 1 to 3650, and the default is 90. `null` means no expiry.
+- `organizationId` binds the token to one organization. When the membership ends, `caller` answers null, and the token stays in the list.
+- A user holds at most 50 tokens. Create has a limit of 20 per user per hour.
+- A password reset, a password change, and a sign-out delete no token. The person revokes a token from the list.
+
+## If it fails
+
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the token is unknown, expired, or revoked, or a route needs a session.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): only a verified user creates a token.
+- [`token_limit`](/docs/reference/errors/#token_limit): the user holds 50 tokens. Revoke one first.
+- [`not_found`](/docs/reference/errors/#not_found): the organization or the token does not belong to the caller.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): more than 20 creates in one hour.
+
+## Next
+
+- [Sessions, API tokens, and JWTs](/docs/concepts/credentials/)
+- [Tokens and prefixes](/docs/reference/tokens/)
+- [Mint a JWT for your other services](/docs/guides/jwt/)

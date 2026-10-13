@@ -1,0 +1,69 @@
+---
+title: Turn on the second factor
+description: Let a person turn on a TOTP second factor with backup codes, and finish a password sign-in with a code.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.11
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+  - packages/core/README.md "Second factor"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/second-factor.ts?raw";
+import test from "../../../../../samples/guides/second-factor.test.ts?raw";
+
+**For:** an app developer whose users sign in with a password and want a code from an authenticator app too.
+
+**What it does:** a password sign-in of a user with the factor on answers a challenge. The session opens only with a current code or a backup code.
+
+## Before you start
+
+- [Sign in with a password](/docs/guides/password/) works in your app. The factor gates the password sign-in only.
+- Users with a verified address. The setup refuses an unverified user.
+
+## Steps
+
+1. Keep `totp` on. It is on by default when `password` is set. `totp: false` turns it off.
+2. Set `totp.issuer` to the name that the authenticator app shows. A colon in the issuer is refused.
+
+<Code code={config} lang="ts" title="The second factor config" />
+
+3. On a settings page, ask for the password, and call `client.totp.setup({ password })`.
+4. Show the `uri` as a QR code, and show the backup codes once.
+5. Ask for a current code, and call `client.totp.enable({ code })`. Do it within 15 minutes of the setup.
+6. On the sign-in form, call `client.password.signIn`. An answer with `twoFactor` holds a `challenge`.
+7. Ask for a code, and call `client.totp.verify({ challenge, code })`. Add `trustDevice: true` for a trusted device.
+8. In a browser, you can send the person to `/auth/totp/challenge?challenge=<challenge>` on the API instead.
+
+<Code code={test} lang="ts" title="Setup, gate, and verify as a test" />
+
+## How it behaves
+
+- The code is RFC 6238: SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once.
+- The enable ends every other session of the user, and deletes the user's trusted devices and challenges.
+- A challenge lives 5 minutes and takes 5 wrong codes.
+- A magic link, a social sign-in, a passkey, a handoff, and a reset open a session with no second factor.
+- A trusted device skips the factor for `totp.trustDays`. Its cookie is `tempo_totp_trust` on the path `/auth/`.
+- The code checks share two limits per user: 10 per 15 minutes and 30 per 24 hours. The setup's password check has its own limit, 5 per user per 15 minutes.
+- No per-account lockout exists. [The threat model](/docs/concepts/threat-model/) gives the odds.
+
+:::caution
+Warning: a new `secret` opens no sealed factor secret and matches no backup code. Turn the factor off for each user before you change `secret`.
+:::
+
+## If it fails
+
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the password of the setup is wrong. No row is written.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): the user must prove the address first.
+- [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, or it passed once already.
+- [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): the challenge took its fifth wrong code. Sign in again.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the challenge is unknown, spent, or older than 5 minutes.
+- [`totp_enabled`](/docs/reference/errors/#totp_enabled) and [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): the factor is already on, or it is off or its setup is too old.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the code checks is full.
+- [`conflict`](/docs/reference/errors/#conflict): two setups or two regenerations ran at the same time. Retry.
+
+## Next
+
+- [The threat model](/docs/concepts/threat-model/)
+- [Secrets](/docs/operations/secrets/)
+- [Cookies](/docs/reference/cookies/)
