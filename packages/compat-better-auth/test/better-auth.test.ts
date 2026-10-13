@@ -448,6 +448,8 @@ describe("betterAuth", () => {
       token_expired: "TOKEN_EXPIRED",
       email_unverified: "EMAIL_NOT_VERIFIED",
       slug_taken: "ORGANIZATION_SLUG_ALREADY_TAKEN",
+      invalid_code: "INVALID_OTP",
+      too_many_attempts: "TOO_MANY_ATTEMPTS",
     });
     expect([
       passwordPolicyCode("1234567", 8),

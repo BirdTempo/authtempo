@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
+import { defaultEmailOtpMail, defaultResetOtpMail } from "../src/engine/email-otp-mail.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
@@ -475,5 +476,57 @@ describe("DEFAULT_RESERVED_SLUGS", () => {
       list.length = 0;
     }).toThrow(TypeError);
     expect(DEFAULT_RESERVED_SLUGS).toContain("admin");
+  });
+});
+
+describe("emailOtp (plan 9e)", () => {
+  it("is on with the defaults when absent, and off with false", () => {
+    const on = resolveConfig(base).emailOtp;
+    expect(on).toMatchObject({ ttlMinutes: 10, length: 6, maxAttempts: 5 });
+    expect(on?.mail).toBe(defaultEmailOtpMail);
+    expect(on?.resetMail).toBe(defaultResetOtpMail);
+    expect(resolveConfig({ ...base, emailOtp: false }).emailOtp).toBeNull();
+    expect(
+      resolveConfig({ ...base, emailOtp: { ttlMinutes: 60, length: 8, maxAttempts: 10 } }).emailOtp,
+    ).toMatchObject({ ttlMinutes: 60, length: 8, maxAttempts: 10 });
+    expect(
+      resolveConfig({ ...base, emailOtp: { ttlMinutes: 1, maxAttempts: 3 } }).emailOtp,
+    ).toMatchObject({ ttlMinutes: 1, maxAttempts: 3 });
+  });
+
+  it("refuses a value out of range, a key core does not have, and a mail that is not a function", () => {
+    const TTL = "emailOtp.ttlMinutes must be an integer from 1 to 60";
+    const ATTEMPTS = "emailOtp.maxAttempts must be an integer from 3 to 10";
+    const bad: [unknown, string][] = [
+      [{ ttlMinutes: 0 }, TTL],
+      [{ ttlMinutes: 61 }, TTL],
+      [{ ttlMinutes: 1.5 }, TTL],
+      [{ length: 7 }, "emailOtp.length must be 6 or 8"],
+      [{ maxAttempts: 2 }, ATTEMPTS],
+      [{ maxAttempts: 11 }, ATTEMPTS],
+      [{ mail: "text" }, "emailOtp.mail must be a function"],
+      [{ resetMail: 1 }, "emailOtp.resetMail must be a function"],
+      [
+        { ttl: 5 },
+        "emailOtp.ttl is not an option; core has ttlMinutes, length, maxAttempts, mail, and resetMail",
+      ],
+      [true, "emailOtp must be an object or false"],
+    ];
+    for (const [emailOtp, message] of bad)
+      expect(() => resolveConfig({ ...base, emailOtp: emailOtp as never })).toThrowError(message);
+  });
+
+  it("writes the default mails with the code, the lifetime, and the app name", () => {
+    const input = { email: "a@example.com", code: "123456", ttlMinutes: 10, appName: "Acme" };
+    expect(defaultEmailOtpMail(input)).toEqual({
+      to: "a@example.com",
+      subject: "Your sign-in code for Acme",
+      text: "Your code is 123456. It is valid for 10 minutes. If you did not ask for it, ignore this message.",
+    });
+    expect(defaultResetOtpMail(input)).toEqual({
+      to: "a@example.com",
+      subject: "Your password reset code for Acme",
+      text: "Your password reset code for Acme is 123456. It is valid for 10 minutes.",
+    });
   });
 });

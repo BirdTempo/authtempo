@@ -23,7 +23,7 @@ export type Awaitable<T> = T | Promise<T>;
 export type MemberVia = "create" | "add" | "invitation";
 /** A remove by another member, or a leave by the member. */
 export type RemoveVia = "remove" | "leave";
-export type SessionVia = "password" | "magic_link" | "social" | "passkey" | "handoff";
+export type SessionVia = "password" | "magic_link" | "social" | "passkey" | "handoff" | "email_otp";
 export type SessionEndReason =
   | "sign_out"
   | "password_reset"

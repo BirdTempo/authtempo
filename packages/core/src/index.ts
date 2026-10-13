@@ -2,6 +2,7 @@ export const VERSION = "0.0.0";
 
 export type {
   AuthConfig,
+  EmailOtpConfig,
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
@@ -17,6 +18,11 @@ export {
   type PasswordApi,
   type TokensApi,
 } from "./create-auth.js";
+export {
+  defaultEmailOtpMail,
+  defaultResetOtpMail,
+  type EmailOtpMailInput,
+} from "./engine/email-otp-mail.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export {
   type Awaitable,
