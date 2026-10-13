@@ -56,10 +56,21 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/tokens` | session | `{ tokens: [{ id, name, hint, expiresAt, lastUsedAt, organizationId, createdAt }] }`, newest first, never a token or its hash; 401; 403 `email_unverified` |
 | POST | `/tokens/revoke` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `email_unverified`; 404 `not_found` for another user's token |
 | GET | `/tokens/current` | `Authorization: Bearer tk_…` only | `{ user, apiToken }`; 401 for a session cookie, a `ts_` bearer, or no credential |
+| POST | `/totp/setup` | session | `{ secret, uri, backupCodes }`, each answered once; 401; 403 `email_unverified`; 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
+| POST | `/totp/enable` | session, `{ code }` | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; 400 `invalid_body`, `invalid_code`, `totp_not_enabled` (no setup, or one older than 15 minutes); 401; 403 `email_unverified`; 409 `totp_enabled`; 429 `rate_limited`. Every other session of the user ends with `two_factor` |
+| POST | `/totp/disable` | session, `{ code }` (a current code or a backup code) | `{ ok: true }`, and clears the trust cookie; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 429 `rate_limited` |
+| POST | `/totp/backup-codes` | session, `{ code }` | `{ backupCodes }`, a new list; the old codes stop working; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 409 `conflict` (parallel writes won every try); 429 `rate_limited` |
+| GET | `/totp` | session | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; never the secret or the URI; 401 |
+| POST | `/totp/devices/revoke` | session | `{ ok: true }`: every trusted device of the user goes, and the trust cookie is cleared; 401 |
+| POST | `/totp/verify` | `{ challenge, code }` or `{ challenge, backupCode }`, `trustDevice?` | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie, and the trust cookie when `trustDevice` is true; 400 `invalid_code`, `too_many_attempts` (the fifth wrong code), `invalid_token` (unknown, spent, or older than 5 minutes), `invalid_body`; 429 `rate_limited` |
+| GET | `/totp/challenge` | `?challenge=` | 200 HTML form (`totp.challengePage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed challenge. No side effect |
+| POST | `/totp/challenge` | form `challenge`, `code` or `backupCode`, `trustDevice=1` | 302 to `next` with the cookies; back to the form on `invalid_code`; 302 to `/?auth_error=<code>` otherwise |
 
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
 Without a `password` config none of the password routes exist, and the router answers 404. The token routes exist in every deployment.
+
+Since plan 9f a user with the second factor on gets `{ twoFactor: { challenge, expiresAt } }` from `POST /password/sign-in` in place of the session, with no cookie. Send the challenge and a code to `POST /totp/verify`, or send the browser to `GET /totp/challenge?challenge=`. The sign-in also takes `trustDevice` (a native app's `td_` token; a browser sends the trust cookie) and `next` (where the challenge page lands). Without `password`, or with `totp: false`, none of the TOTP routes exist.
 
 With `emailOtp: false` none of the code routes exist, and the router answers 404. Without a `password` config the two reset code routes do not exist.
 
@@ -441,6 +452,17 @@ await client.emailOtp.request({ email });
 const signedIn = await client.emailOtp.verify({ email, code }); // { token, user, session }
 ```
 
+## Second factor
+
+`totp` (plan 9f) is on when `password` is set. A user turns it on for their own account: `POST /totp/setup` answers the secret, the `otpauth://` URI for a QR code, and the backup codes, each once; `POST /totp/enable` with a current code confirms it. From then on a password sign-in answers a challenge, and the session opens only with a code from the app or a backup code. The magic link, the social sign-in, the passkey, the handoff, and the reset link do not ask for the factor (owner decision of 2026-10-13); a reset ends every session and the challenges.
+
+- The code: RFC 6238 with SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once: the write of the last step is the check.
+- A challenge lives 5 minutes and takes 5 wrong codes. The verify is limited to 30 per IP per 15 minutes. Enable, disable, the new backup codes, and the verify share 10 code checks per user per 15 minutes.
+- A trusted device skips the factor for `totp.trustDays` (default 30). Its cookie `tempo_totp_trust` has the path `<basePath>/`. Enable and disable delete the user's trusted devices.
+- The secret is sealed with AES-256-GCM under a key from `secret`. A new app `secret` opens no sealed secret: every user with the factor on then fails the code, and the backup codes too, because they are keyed by `secret` as well. Before you change `secret`, have each such user turn the factor off, or turn it off for them with `api.totp.disable`.
+- There is no per-account lockout. The sign-in's 10 per address and the 5 codes per challenge allow 50 challenge guesses per address per 15 minutes; the shared per-user limit stops the verify at 10 code checks per user in that window.
+- `api.totp` holds the same operations in process, and `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
+
 ## API tokens
 
 A script or a CLI signs in with an API token, not with a password. A
@@ -668,6 +690,7 @@ const auth = createAuth({
   `claim` in every flow that proves the address: the magic link, the
   social sign-in, the verify link, and the reset of an unverified user. A
   reset of a verified user ends that user's sessions with `password_reset`.
+- Plan 9f adds the end reason `two_factor`: the enable of a second factor ends every other session of the user. A session that a challenge opens has `via: "password"`.
 - `session.beforeCreate` runs on a password sign-in only after the password
   is correct. So `hook_refused` against `invalid_credentials` tells the
   caller that the password was right. A ban hook should refuse with a text
@@ -759,6 +782,8 @@ answers `invalid_token` after the sweep because its row is gone.
 
 Since plan 8b it also deletes API tokens past their expiry and answers a sixth count, `apiTokens`. A token with no expiry stays.
 
+Since plan 9f it also deletes trusted devices past their expiry and answers `trustedDevices`.
+
 ```ts
 export default {
   fetch: (request: Request) => auth.handle(request),
@@ -840,6 +865,7 @@ Without a trigger, expired rows stay in the database.
   same limiter. The odds table is in "Email codes".
 - Core at version 4 needs the `0004_schema_v4` migration in both adapters. Version 4 adds the password table.
 - Core at version 5 needs the `0005_schema_v5` migration in both adapters. Version 5 adds the API token table, `ta_api_token`.
+- Core at version 6 needs the `0006_schema_v6` migration in both adapters. Version 6 adds `ta_totp` and `ta_trusted_device` (plan 9f).
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

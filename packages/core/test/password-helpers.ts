@@ -34,7 +34,7 @@ function linkToken(text: string): string | null {
  * clock, one limiter, and one mail list. A test can call a route and then
  * read the rows and the mailed tokens. `undefined` turns password sign-in off.
  */
-export function pwHandle(password: PasswordConfig | undefined) {
+export function pwHandle(password: PasswordConfig | undefined, extra: Partial<AuthConfig> = {}) {
   const base = makeAuth();
   const mails: CapturedMail[] = [];
   const input: AuthConfig = {
@@ -51,8 +51,16 @@ export function pwHandle(password: PasswordConfig | undefined) {
     // One limiter for the route and the engine view, so a limit counts both.
     limiter: createMemoryLimiter(base.clock),
     ...(password ? { password } : {}),
+    ...extra,
   };
-  return { auth: createAuth(input), storage: base.storage, mails, config: resolveConfig(input) };
+  return {
+    auth: createAuth(input),
+    storage: base.storage,
+    mails,
+    config: resolveConfig(input),
+    // The injected clock, so a test can move to the next 30-second step (plan 9f).
+    clock: base.clock,
+  };
 }
 
 /**

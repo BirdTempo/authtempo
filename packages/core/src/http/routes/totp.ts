@@ -1,0 +1,227 @@
+import { z } from "zod";
+import type { ResolvedConfig } from "../../config.js";
+import {
+  publicSession,
+  type ResolvedSession,
+  renewedSessionCookie,
+  sessionFromRequest,
+} from "../../engine/sessions.js";
+import {
+  disableTotpWithCode,
+  enableTotp,
+  regenerateBackupCodesWithCode,
+  revokeTrustedDevices,
+  setupTotp,
+  TWO_FACTOR_TOKEN_RE,
+  type TwoFactorSession,
+  totpStatus,
+  verifyTwoFactor,
+} from "../../engine/totp.js";
+import { readBody } from "../body.js";
+import { clearTrustCookie, trustCookie } from "../cookies.js";
+import { noScriptPagePolicy, pageHeaders } from "../csp.js";
+import { json, readJson, respond } from "../json.js";
+import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
+import type { Route, RouteContext } from "../router.js";
+import { sessionCookieFor } from "../session-answer.js";
+
+const codeBody = z.object({ code: z.string().max(64) });
+const verifyBody = z.object({
+  challenge: z.string().max(64),
+  code: z.string().max(16).optional(),
+  backupCode: z.string().max(64).optional(),
+  trustDevice: z.boolean().optional(),
+});
+/** The challenge page's form: the checkbox posts `trustDevice=1` when checked and nothing else. */
+const pageBody = z.object({
+  challenge: z.string().max(64),
+  code: z.string().max(16).optional(),
+  backupCode: z.string().max(64).optional(),
+  trustDevice: z.literal("1").optional(),
+});
+
+/**
+ * The TOTP routes (plan 9f, spec 8.11). Every route but the verify and the
+ * page takes a session through `sessionFromRequest`, which resolves
+ * sessions only, so a `tk_` bearer answers 401. No route answers the secret
+ * or the key URI after the setup.
+ */
+export function totpRoutes(config: ResolvedConfig): Route[] {
+  const totp = config.totp;
+  if (!totp) return [];
+  const challengePath = `${config.basePath}/totp/challenge`;
+  const trustPath = `${config.basePath}/`;
+  const { sameSite } = config.cookie;
+  const withSession = async (
+    ctx: RouteContext,
+  ): Promise<{ resolved: ResolvedSession; renewed: string | null } | null> => {
+    const resolved = await sessionFromRequest(config, ctx.request);
+    if (!resolved) return null;
+    return { resolved, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+  };
+  const send = (res: Response, renewed: string | null) => {
+    if (renewed) res.headers.append("set-cookie", renewed);
+    return res;
+  };
+  const unauthorized = () => json({ error: "unauthorized" }, 401);
+  const clearTrust = (res: Response) => {
+    res.headers.append("set-cookie", clearTrustCookie(totp.trustCookieName, trustPath, sameSite));
+    return res;
+  };
+  const withCookies = (res: Response, v: TwoFactorSession) => {
+    res.headers.append("set-cookie", sessionCookieFor(config, v.token));
+    if (v.trustDevice)
+      res.headers.append(
+        "set-cookie",
+        trustCookie(
+          totp.trustCookieName,
+          v.trustDevice.token,
+          trustPath,
+          totp.trustDays * 86_400,
+          sameSite,
+        ),
+      );
+    return res;
+  };
+  const failed = (code: string) => redirect(authErrorUrl(config, code));
+  return [
+    {
+      method: "POST",
+      path: "/totp/setup",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        return send(respond(await setupTotp(config, { user: s.resolved.user })), s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/totp/enable",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const body = await readJson(ctx.request, codeBody);
+        if (!body.ok) return send(respond(body), s.renewed);
+        const r = await enableTotp(config, { session: s.resolved, code: body.value.code });
+        return send(respond(r), s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/totp/disable",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const body = await readJson(ctx.request, codeBody);
+        if (!body.ok) return send(respond(body), s.renewed);
+        const r = await disableTotpWithCode(config, {
+          user: s.resolved.user,
+          code: body.value.code,
+        });
+        const res = respond(r);
+        return send(r.ok ? clearTrust(res) : res, s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/totp/backup-codes",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const body = await readJson(ctx.request, codeBody);
+        if (!body.ok) return send(respond(body), s.renewed);
+        const r = await regenerateBackupCodesWithCode(config, {
+          user: s.resolved.user,
+          code: body.value.code,
+        });
+        return send(respond(r), s.renewed);
+      },
+    },
+    {
+      method: "GET",
+      path: "/totp",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        return send(respond(await totpStatus(config, { userId: s.resolved.user.id })), s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/totp/devices/revoke",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const r = await revokeTrustedDevices(config, { userId: s.resolved.user.id });
+        return send(clearTrust(respond(r)), s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/totp/verify",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, verifyBody);
+        if (!body.ok) return respond(body);
+        const r = await verifyTwoFactor(config, { ...body.value, ip: ctx.ip });
+        if (!r.ok) return respond(r);
+        const v = r.value;
+        return withCookies(
+          json({
+            token: v.token,
+            ...publicSession({ user: v.user, session: v.session, refreshed: false }),
+            next: v.next,
+            backupCodesLeft: v.backupCodesLeft,
+            trustDevice: v.trustDevice
+              ? { token: v.trustDevice.token, expiresAt: v.trustDevice.expiresAt.toISOString() }
+              : null,
+          }),
+          v,
+        );
+      },
+    },
+    {
+      // No storage read and no cookie: the page only shows the form.
+      method: "GET",
+      path: "/totp/challenge",
+      async handler(ctx) {
+        const challenge = ctx.url.searchParams.get("challenge") ?? "";
+        if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed("invalid_token");
+        const html = totp.challengePage({
+          action: challengePath,
+          challenge,
+          appName: config.appName,
+          backup: ctx.url.searchParams.get("backup") === "1",
+          trustDays: totp.trustDays,
+          error: ctx.url.searchParams.get("error") === "invalid_code" ? "invalid_code" : null,
+        });
+        return new Response(html, {
+          status: 200,
+          headers: pageHeaders(config, noScriptPagePolicy(config)),
+        });
+      },
+    },
+    {
+      method: "POST",
+      path: "/totp/challenge",
+      async handler(ctx) {
+        const body = await readBody(ctx.request, pageBody);
+        if (!body.ok) return failed("invalid_token");
+        const { challenge, code, backupCode } = body.value;
+        const r = await verifyTwoFactor(config, {
+          challenge,
+          code,
+          backupCode,
+          trustDevice: body.value.trustDevice === "1",
+          ip: ctx.ip,
+        });
+        if (r.ok) return withCookies(redirect(resolveNext(config, r.value.next)), r.value);
+        // The challenge still lives after a wrong code: send the person back to the form.
+        if (r.code === "invalid_code")
+          return redirect(
+            `${config.baseURL}${challengePath}?challenge=${encodeURIComponent(challenge)}${backupCode !== undefined ? "&backup=1" : ""}&error=invalid_code`,
+          );
+        return failed(r.code);
+      },
+    },
+  ];
+}

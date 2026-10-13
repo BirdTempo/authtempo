@@ -116,8 +116,12 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
     pwForm.addEventListener("submit", function (e) {
       e.preventDefault();
       say("");
-      postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
-        if (res.ok) location.href = cont;
+      postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont }).then(function (res) {
+        // A user with a second factor gets a challenge and no cookie yet (plan 9f): the challenge page lands on cont.
+        if (res.ok) return res.json().then(function (body) {
+          if (body && body.twoFactor) location.href = base + "/totp/challenge?challenge=" + encodeURIComponent(body.twoFactor.challenge);
+          else location.href = cont;
+        });
         else if (res.status === 401) say("The email or the password is not correct.");
         else if (res.status === 429) say("Too many attempts. Try again later.");
         else say("The request was not accepted.");

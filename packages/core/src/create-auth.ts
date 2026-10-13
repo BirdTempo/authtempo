@@ -99,6 +99,22 @@ import {
   type ResolvedApiToken,
   revokeApiToken,
 } from "./engine/tokens.js";
+import {
+  disableTotp,
+  disableTotpWithCode,
+  enableTotp,
+  regenerateBackupCodes,
+  regenerateBackupCodesWithCode,
+  revokeTrustedDevices,
+  setupTotp,
+  type TotpSetup,
+  type TotpStatus,
+  type TwoFactorSession,
+  type TwoFactorVerify,
+  totpStatus,
+  totpUri,
+  verifyTwoFactor,
+} from "./engine/totp.js";
 import { ERRORS } from "./errors.js";
 import { createRouter } from "./http/router.js";
 import { emailOtpRoutes } from "./http/routes/email-otp.js";
@@ -110,6 +126,7 @@ import { passwordRoutes } from "./http/routes/password.js";
 import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
 import { tokenRoutes } from "./http/routes/tokens.js";
+import { totpRoutes } from "./http/routes/totp.js";
 import type { Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import type {
@@ -130,6 +147,29 @@ export interface PasswordApi {
   requestReset(input: PasswordResetRequest): Promise<Result<{ sent: true }>>;
   reset(input: PasswordReset): Promise<Result<PasswordSession & { next: string }>>;
   change(input: PasswordChange): Promise<Result<{ ok: true }>>;
+}
+
+/**
+ * The second factor (plan 9f). Present when `totp` resolves: `password` is
+ * set and `totp` is not `false`. The forms with a user id and no code are
+ * for an app that checked the person another way first, such as with
+ * `api.password.verify`.
+ */
+export interface TotpApi {
+  setup(input: { user: UserRow; issuer?: string | undefined }): Promise<Result<TotpSetup>>;
+  enable(input: { session: ResolvedSession; code: string }): Promise<Result<TotpStatus>>;
+  verify(input: TwoFactorVerify): Promise<Result<TwoFactorSession>>;
+  disable(input: { userId: string }): Promise<Result<{ ok: true }>>;
+  disableWithCode(input: { user: UserRow; code: string }): Promise<Result<{ ok: true }>>;
+  regenerateBackupCodes(input: { userId: string }): Promise<Result<{ backupCodes: string[] }>>;
+  regenerateBackupCodesWithCode(input: {
+    user: UserRow;
+    code: string;
+  }): Promise<Result<{ backupCodes: string[] }>>;
+  status(input: { userId: string }): Promise<Result<TotpStatus>>;
+  /** The key URI of a factor that is on. In process only: no route answers it after the setup. */
+  uri(input: { userId: string }): Promise<Result<{ uri: string }>>;
+  revokeTrustedDevices(input: { userId: string }): Promise<Result<{ ok: true }>>;
 }
 
 /** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
@@ -263,6 +303,7 @@ export interface AuthApi {
   tokens: TokensApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
+  totp?: TotpApi;
 }
 
 export interface Auth {
@@ -297,6 +338,7 @@ export function createAuth(input: AuthConfig): Auth {
     ...socialRoutes(config),
     ...passkeyRoutes(config),
     ...passwordRoutes(config),
+    ...totpRoutes(config),
     ...emailOtpRoutes(config),
     ...handoffRoutes(config),
     ...organizationRoutes(config),
@@ -366,6 +408,22 @@ export function createAuth(input: AuthConfig): Auth {
               requestReset: (i) => requestResetOtp(config, i),
               reset: (i) => resetPasswordWithOtp(config, i),
             },
+          }
+        : {}),
+      ...(config.totp
+        ? {
+            totp: {
+              setup: (i) => setupTotp(config, i),
+              enable: (i) => enableTotp(config, i),
+              verify: (i) => verifyTwoFactor(config, i),
+              disable: (i) => disableTotp(config, i),
+              disableWithCode: (i) => disableTotpWithCode(config, i),
+              regenerateBackupCodes: (i) => regenerateBackupCodes(config, i),
+              regenerateBackupCodesWithCode: (i) => regenerateBackupCodesWithCode(config, i),
+              status: (i) => totpStatus(config, i),
+              uri: (i) => totpUri(config, i),
+              revokeTrustedDevices: (i) => revokeTrustedDevices(config, i),
+            } satisfies TotpApi,
           }
         : {}),
     },

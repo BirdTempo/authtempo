@@ -20,6 +20,7 @@ export {
   type EmailOtpApi,
   type PasswordApi,
   type TokensApi,
+  type TotpApi,
 } from "./create-auth.js";
 export type {
   EmailOtpRequest,

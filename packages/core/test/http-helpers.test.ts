@@ -7,9 +7,11 @@ import { defaultConfirmPage, escapeHtml } from "../src/http/confirm-page.js";
 import {
   clearOauthCookie,
   clearSessionCookie,
+  clearTrustCookie,
   oauthCookie,
   readCookie,
   sessionCookie,
+  trustCookie,
 } from "../src/http/cookies.js";
 import { confirmPagePolicy, formAction, noScriptPagePolicy, pageHeaders } from "../src/http/csp.js";
 import { defaultHandoffConfirmPage } from "../src/http/handoff-confirm-page.js";
@@ -17,6 +19,7 @@ import { json, readJson, respond } from "../src/http/json.js";
 import { authErrorUrl, redirect, resolveNext } from "../src/http/redirect.js";
 import { safeNext } from "../src/http/safe-next.js";
 import { defaultSignInPage } from "../src/http/sign-in-page.js";
+import { defaultTotpPage } from "../src/http/totp-page.js";
 import { fail, ok } from "../src/result.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
@@ -40,6 +43,14 @@ describe("cookies", () => {
     expect(readCookie(req, "tempo_session")).toBe("ts_abc");
     expect(readCookie(req, "nope")).toBeNull();
     expect(readCookie(new Request("https://x/"), "tempo_session")).toBeNull();
+  });
+  it("sets the trust cookie on the auth path, and clears it there (plan 9f)", () => {
+    expect(trustCookie("tempo_totp_trust", "td_abc", "/auth/", 2_592_000, "Lax")).toBe(
+      "tempo_totp_trust=td_abc; Path=/auth/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax",
+    );
+    expect(clearTrustCookie("tempo_totp_trust", "/auth/", "None")).toBe(
+      "tempo_totp_trust=; Path=/auth/; Max-Age=0; HttpOnly; Secure; SameSite=None",
+    );
   });
 });
 
@@ -538,5 +549,44 @@ describe("sign-in page", () => {
     expect(html).not.toContain(`<script>`);
     expect(html).not.toContain(`id="passkey"`);
     expect(html).toContain("/social/apple/start");
+  });
+  it("posts next with the password, and goes to the challenge page on a challenge answer (plan 9f)", () => {
+    const html = defaultSignInPage({ ...input, methods: { ...input.methods, password: true } });
+    const start = html.indexOf(`postJson("/password/sign-in"`);
+    const handler = html.slice(start, html.indexOf(".catch(", start));
+    expect(handler).toContain(
+      `postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont })`,
+    );
+    expect(handler).toContain(
+      `if (body && body.twoFactor) location.href = base + "/totp/challenge?challenge=" + encodeURIComponent(body.twoFactor.challenge);`,
+    );
+    expect(handler).toContain("else location.href = cont;");
+  });
+});
+
+describe("the TOTP challenge page (plan 9f)", () => {
+  const input = {
+    action: "/auth/totp/challenge",
+    challenge: `tf_"><b>`,
+    appName: "Acme & Co",
+    backup: false,
+    trustDays: 30,
+    error: null,
+  };
+
+  it("escapes every value, offers the backup link, and shows the error only when set", () => {
+    const html = defaultTotpPage(input);
+    expect(html).toContain('<input type="hidden" name="challenge" value="tf_&quot;&gt;&lt;b&gt;">');
+    expect(html).toContain("Enter the code for Acme &amp; Co");
+    expect(html).toContain("Trust this device for 30 days");
+    expect(html).toContain(
+      '<a href="/auth/totp/challenge?challenge=tf_%22%3E%3Cb%3E&amp;backup=1">Use a backup code</a>',
+    );
+    expect(html).not.toContain("not correct");
+    expect(html).not.toContain("<b>");
+    const shown = defaultTotpPage({ ...input, backup: true, error: "invalid_code" });
+    expect(shown).toContain("The code is not correct. Try again.");
+    expect(shown).toContain('name="backupCode"');
+    expect(shown).toContain("Use a code from your authenticator app");
   });
 });

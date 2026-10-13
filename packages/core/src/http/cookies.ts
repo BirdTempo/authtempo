@@ -42,3 +42,22 @@ export function oauthCookie(
 export function clearOauthCookie(name: string, path: string): string {
   return `${name}=; Path=${path}; Max-Age=0; HttpOnly; Secure; SameSite=None`;
 }
+
+/**
+ * The trusted-device cookie (plan 9f). The path limits it to the auth
+ * routes, where the password sign-in reads it. SameSite is the session
+ * cookie's.
+ */
+export function trustCookie(
+  name: string,
+  token: string,
+  path: string,
+  maxAgeSeconds: number,
+  sameSite: SameSite,
+): string {
+  return `${name}=${token}; Path=${path}; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=${sameSite}`;
+}
+
+export function clearTrustCookie(name: string, path: string, sameSite: SameSite): string {
+  return `${name}=; Path=${path}; Max-Age=0; HttpOnly; Secure; SameSite=${sameSite}`;
+}

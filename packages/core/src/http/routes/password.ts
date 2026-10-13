@@ -16,6 +16,7 @@ import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
+import { readCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage } from "../password-pages.js";
@@ -34,6 +35,9 @@ const signInBody = z.object({
   email: z.string().max(320),
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
+  // Plan 9f: a native app's trust token (a browser sends the cookie), and the landing path after a challenge.
+  trustDevice: z.string().max(64).optional(),
+  next: z.string().max(2048).optional(),
 });
 
 const tokenBody = z.object({ token: z.string().max(64) });
@@ -98,6 +102,12 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           password: body.value.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          trustDevice:
+            body.value.trustDevice ??
+            (config.totp
+              ? (readCookie(ctx.request, config.totp.trustCookieName) ?? undefined)
+              : undefined),
+          next: body.value.next,
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.

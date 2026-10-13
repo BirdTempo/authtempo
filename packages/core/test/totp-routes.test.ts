@@ -1,0 +1,299 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { base32Decode, totpCode } from "../src/primitives/totp.js";
+import { APP_ORIGIN, BASE_URL, get, post } from "./helpers.js";
+import { FAST, pwHandle } from "./password-helpers.js";
+
+const EMAIL = "ada@example.com";
+const PW = "correct horse battery";
+type Handle = ReturnType<typeof pwHandle>;
+
+/** The `name=value` part of a Set-Cookie value. */
+const pair = (cookie: string) => cookie.split(";")[0] ?? "";
+const cookieNamed = (res: Response, name: string) =>
+  res.headers.getSetCookie().find((c) => c.startsWith(`${name}=`)) ?? null;
+
+function form(path: string, body: string): Request {
+  return new Request(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: APP_ORIGIN },
+    body,
+  });
+}
+
+async function signedIn(h: Handle, email = EMAIL): Promise<string> {
+  const res = await h.auth.handle(post("/auth/password/sign-in", { email, password: PW }));
+  const c = cookieNamed(res, "tempo_session");
+  if (!c) throw new Error(`the sign-in answered ${res.status} with no session cookie`);
+  return pair(c);
+}
+
+/** A verified user with a password, and the session cookie of a sign-in. */
+async function verifiedUser(h: Handle, email = EMAIL): Promise<string> {
+  await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
+  const token = h.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"))?.token;
+  if (!token) throw new Error("no confirm mail");
+  await h.auth.handle(post("/auth/password/verify", { token }));
+  return signedIn(h, email);
+}
+
+/** The setup and the enable through the routes; then the clock moves one step on. */
+async function enrolled(h: Handle, cookie: string) {
+  const setup = await h.auth.handle(post("/auth/totp/setup", {}, { cookie }));
+  const body = (await setup.json()) as { secret: string; uri: string; backupCodes: string[] };
+  const secret = base32Decode(body.secret);
+  const enable = await h.auth.handle(
+    post("/auth/totp/enable", { code: await totpCode(secret, h.clock.now()) }, { cookie }),
+  );
+  if (enable.status !== 200) throw new Error(`the enable answered ${enable.status}`);
+  h.clock.advance(30_000);
+  return { ...body, bytes: secret, code: () => totpCode(secret, h.clock.now()) };
+}
+
+async function challenge(h: Handle, body: Record<string, unknown> = {}): Promise<string> {
+  const res = await h.auth.handle(
+    post("/auth/password/sign-in", { email: EMAIL, password: PW, ...body }),
+  );
+  const json = (await res.json()) as { twoFactor?: { challenge: string } };
+  if (!json.twoFactor) throw new Error(`the sign-in answered ${res.status} with no challenge`);
+  return json.twoFactor.challenge;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("the TOTP routes (plan 9f)", () => {
+  it("answers 401 on every route that needs a session, with no session and with a tk_ token", async () => {
+    const h = pwHandle({ hash: FAST });
+    const cookie = await verifiedUser(h);
+    const made = await h.auth.handle(post("/auth/tokens", { name: "ci" }, { cookie }));
+    const { token } = (await made.json()) as { token: string };
+    expect(token).toMatch(/^tk_/);
+    const routes: ["GET" | "POST", string][] = [
+      ["POST", "/auth/totp/setup"],
+      ["POST", "/auth/totp/enable"],
+      ["POST", "/auth/totp/disable"],
+      ["POST", "/auth/totp/backup-codes"],
+      ["GET", "/auth/totp"],
+      ["POST", "/auth/totp/devices/revoke"],
+    ];
+    for (const [method, path] of routes)
+      for (const headers of [{}, { authorization: `Bearer ${token}` }]) {
+        const req = method === "GET" ? get(path, headers) : post(path, { code: "123456" }, headers);
+        expect({ path, status: (await h.auth.handle(req)).status }).toEqual({ path, status: 401 });
+      }
+  });
+
+  it("sets up, enables, and answers the status; GET /auth/totp answers no secret, no URI, and no backup code, and no log line holds them (Review Focus 5)", async () => {
+    const log = [
+      vi.spyOn(console, "log").mockImplementation(() => {}),
+      vi.spyOn(console, "info").mockImplementation(() => {}),
+      vi.spyOn(console, "warn").mockImplementation(() => {}),
+      vi.spyOn(console, "error").mockImplementation(() => {}),
+    ];
+    const h = pwHandle({ hash: FAST });
+    const cookie = await verifiedUser(h);
+    const enrolledAt = h.clock.now();
+    const f = await enrolled(h, cookie);
+    expect(f.uri.startsWith("otpauth://totp/api.example.com:ada%40example.com?secret=")).toBe(true);
+    expect(f.backupCodes).toHaveLength(10);
+    const res = await h.auth.handle(get("/auth/totp", { cookie }));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({
+      enabled: true,
+      enabledAt: enrolledAt.toISOString(),
+      backupCodesLeft: 10,
+      trustedDevices: 0,
+    });
+    const logged = JSON.stringify(log.map((s) => s.mock.calls));
+    for (const secret of [f.secret, f.uri, ...f.backupCodes]) {
+      expect(text).not.toContain(secret);
+      expect(logged).not.toContain(secret);
+    }
+    expect(text).not.toContain("otpauth");
+  });
+
+  it("enable ends the other session: its next GET /session answers 401 (Review Focus 4)", async () => {
+    const h = pwHandle({ hash: FAST });
+    const mine = await verifiedUser(h);
+    const thief = await signedIn(h);
+    await enrolled(h, mine);
+    expect((await h.auth.handle(get("/auth/session", { cookie: thief }))).status).toBe(401);
+    expect((await h.auth.handle(get("/auth/session", { cookie: mine }))).status).toBe(200);
+  });
+
+  it("answers a challenge with no cookie; the JSON verify sets the session cookie and the trust cookie; the next sign-in with the trust cookie opens a session", async () => {
+    const h = pwHandle({ hash: FAST });
+    const f = await enrolled(h, await verifiedUser(h));
+    const signIn = await h.auth.handle(
+      post("/auth/password/sign-in", { email: EMAIL, password: PW }),
+    );
+    expect(signIn.status).toBe(200);
+    expect(signIn.headers.get("set-cookie")).toBeNull();
+    const body = (await signIn.json()) as { twoFactor: { challenge: string; expiresAt: string } };
+    expect(body.twoFactor.expiresAt).toBe(
+      new Date(h.clock.now().getTime() + 300_000).toISOString(),
+    );
+    const verify = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: body.twoFactor.challenge,
+        code: await f.code(),
+        trustDevice: true,
+      }),
+    );
+    expect(verify.status).toBe(200);
+    const v = (await verify.json()) as {
+      token: string;
+      user: { email: string };
+      next: string;
+      backupCodesLeft: number;
+      trustDevice: { token: string; expiresAt: string };
+    };
+    expect(v).toMatchObject({ user: { email: EMAIL }, next: "/", backupCodesLeft: 10 });
+    expect(cookieNamed(verify, "tempo_session")).toBe(
+      `tempo_session=${v.token}; Path=/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax`,
+    );
+    expect(cookieNamed(verify, "tempo_totp_trust")).toBe(
+      `tempo_totp_trust=${v.trustDevice.token}; Path=/auth/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax`,
+    );
+    const again = await h.auth.handle(
+      post(
+        "/auth/password/sign-in",
+        { email: EMAIL, password: PW },
+        { cookie: `tempo_totp_trust=${v.trustDevice.token}` },
+      ),
+    );
+    expect(cookieNamed(again, "tempo_session")).not.toBeNull();
+    // A native app sends the token in the body.
+    const native = await h.auth.handle(
+      post("/auth/password/sign-in", {
+        email: EMAIL,
+        password: PW,
+        trustDevice: v.trustDevice.token,
+      }),
+    );
+    expect(((await native.json()) as { token?: string }).token).toMatch(/^ts_/);
+  });
+
+  it("serves the challenge page with no script; a wrong code returns to it with the error; a right code redirects to next with both cookies", async () => {
+    const h = pwHandle({ hash: FAST });
+    const f = await enrolled(h, await verifiedUser(h));
+    const c = await challenge(h, { next: "/inbox" });
+    const page = await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}`));
+    expect(page.status).toBe(200);
+    const csp = page.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).not.toContain("script-src");
+    const html = await page.text();
+    expect(html).toContain('<form method="post" action="/auth/totp/challenge">');
+    expect(html).toContain(`<input type="hidden" name="challenge" value="${c}">`);
+    expect(html).toContain('autocomplete="one-time-code"');
+    expect(html).not.toContain("<script");
+    const backup = await (
+      await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}&backup=1`))
+    ).text();
+    expect(backup).toContain('name="backupCode"');
+    const bad = await h.auth.handle(get("/auth/totp/challenge?challenge=tf_bad"));
+    expect(bad.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    const wrong = await h.auth.handle(form("/auth/totp/challenge", `challenge=${c}&code=000000`));
+    const right = await f.code();
+    if (right !== "000000") {
+      expect(wrong.status).toBe(302);
+      expect(wrong.headers.get("location")).toBe(
+        `${BASE_URL}/auth/totp/challenge?challenge=${c}&error=invalid_code`,
+      );
+      const shown = await (
+        await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}&error=invalid_code`))
+      ).text();
+      expect(shown).toContain("The code is not correct. Try again.");
+    }
+    const done = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&code=${right}&trustDevice=1`),
+    );
+    expect(done.status).toBe(302);
+    expect(done.headers.get("location")).toBe(`${BASE_URL}/inbox`);
+    expect(cookieNamed(done, "tempo_session")).not.toBeNull();
+    expect(cookieNamed(done, "tempo_totp_trust")).not.toBeNull();
+  });
+
+  it("disables with a code and clears the trust cookie; regenerates the backup codes; revokes the trusted devices", async () => {
+    const h = pwHandle({ hash: FAST });
+    const cookie = await verifiedUser(h);
+    const f = await enrolled(h, cookie);
+    const codes = await h.auth.handle(
+      post("/auth/totp/backup-codes", { code: await f.code() }, { cookie }),
+    );
+    const fresh = ((await codes.json()) as { backupCodes: string[] }).backupCodes;
+    expect(fresh).toHaveLength(10);
+    expect(fresh).not.toContain(f.backupCodes[0]);
+    const trusted = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: await challenge(h),
+        backupCode: fresh[0],
+        trustDevice: true,
+      }),
+    );
+    expect(((await trusted.json()) as { backupCodesLeft: number }).backupCodesLeft).toBe(9);
+    const revoke = await h.auth.handle(post("/auth/totp/devices/revoke", {}, { cookie }));
+    expect(await revoke.json()).toEqual({ ok: true });
+    expect(cookieNamed(revoke, "tempo_totp_trust")).toBe(
+      "tempo_totp_trust=; Path=/auth/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+    );
+    expect(await h.storage.findMany("trustedDevice", [])).toEqual([]);
+    h.clock.advance(30_000);
+    const off = await h.auth.handle(
+      post("/auth/totp/disable", { code: await f.code() }, { cookie }),
+    );
+    expect(await off.json()).toEqual({ ok: true });
+    expect(cookieNamed(off, "tempo_totp_trust")).not.toBeNull();
+    expect(await h.storage.findMany("totp", [])).toEqual([]);
+  });
+
+  it("answers the challenge with no Set-Cookie and runs no session hook; the verify runs them once (plan 9f)", async () => {
+    const vias: string[] = [];
+    const h = pwHandle(
+      { hash: FAST },
+      {
+        hooks: {
+          session: {
+            beforeCreate(e) {
+              vias.push(e.via);
+            },
+            afterCreate(e) {
+              vias.push(`after:${e.via}`);
+            },
+          },
+        },
+      },
+    );
+    const f = await enrolled(h, await verifiedUser(h));
+    vias.length = 0;
+    const signIn = await h.auth.handle(
+      post("/auth/password/sign-in", { email: EMAIL, password: PW }),
+    );
+    expect(signIn.status).toBe(200);
+    expect(signIn.headers.getSetCookie()).toEqual([]);
+    const c = ((await signIn.json()) as { twoFactor: { challenge: string } }).twoFactor.challenge;
+    expect(vias).toEqual([]);
+    const verify = await h.auth.handle(
+      post("/auth/totp/verify", { challenge: c, code: await f.code() }),
+    );
+    expect(verify.status).toBe(200);
+    expect(vias).toEqual(["password", "after:password"]);
+  });
+
+  it("answers 404 on every TOTP route with totp: false, and api.totp is absent", async () => {
+    const h = pwHandle({ hash: FAST }, { totp: false });
+    const cookie = await verifiedUser(h);
+    for (const req of [
+      post("/auth/totp/setup", {}, { cookie }),
+      get("/auth/totp", { cookie }),
+      post("/auth/totp/verify", { challenge: "tf_x", code: "123456" }),
+      get("/auth/totp/challenge?challenge=tf_x"),
+    ])
+      expect((await h.auth.handle(req)).status).toBe(404);
+    expect(h.auth.api.totp).toBeUndefined();
+    expect(pwHandle({ hash: FAST }).auth.api.totp).toBeDefined();
+  });
+});
