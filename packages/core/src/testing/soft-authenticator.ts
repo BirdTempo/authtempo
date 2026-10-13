@@ -233,3 +233,10 @@ function derInteger(bytes: Uint8Array): Bytes {
   if ((v[0] ?? 0) & 0x80) v = concat(new Uint8Array([0]), v);
   return concat(new Uint8Array([0x02, v.length]), v);
 }
+
+/**
+ * A software authenticator app for tests (plan 9f): the code that an app
+ * shows for a base32 secret at a time. It is a test tool, as the passkey
+ * authenticator above is.
+ */
+export { base32Decode, totpCode } from "../primitives/totp.js";
