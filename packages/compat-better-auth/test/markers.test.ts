@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import manifest from "../package.json?raw";
-import { magicLinkClient, organizationClient, passkeyClient } from "../src/client/plugins.js";
+import {
+  emailOTPClient,
+  magicLinkClient,
+  organizationClient,
+  passkeyClient,
+} from "../src/client/plugins.js";
 import {
   bearer,
   COMPAT_PLUGIN,
@@ -34,11 +39,9 @@ describe("plugin markers", () => {
   });
 
   it("client markers carry the id", () => {
-    expect([organizationClient(), passkeyClient(), magicLinkClient()].map((p) => p.id)).toEqual([
-      "organization",
-      "passkey",
-      "magic-link",
-    ]);
+    expect(
+      [organizationClient(), passkeyClient(), magicLinkClient(), emailOTPClient()].map((p) => p.id),
+    ).toEqual(["organization", "passkey", "magic-link", "email-otp"]);
   });
 });
 

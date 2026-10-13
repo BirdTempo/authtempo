@@ -266,6 +266,19 @@ below the server's `minPasswordLength`, `PASSWORD_TOO_LONG` over 128, and
 `INVALID_PASSWORD` otherwise. The server's handler names the case, so the
 client and `api` answer the same code.
 
+Since plan 9e the client has Better Auth 1.7.2's email OTP calls, on
+core's code routes: `emailOtp.sendVerificationOtp({ email, type })` with
+`sign-in` or `forget-password` (the other types answer `NOT_SUPPORTED`),
+`signIn.emailOtp({ email, otp })`, `forgetPassword.emailOtp({ email })`,
+`emailOtp.requestPasswordReset({ email })`, and
+`emailOtp.resetPassword({ email, otp, password })`. `emailOTPClient()` is
+accepted in `plugins`. On Expo `signIn.emailOtp` keeps the session token in
+`storage`, as `signIn.email` does. The client answers `{ success: true }`
+for a malformed address, as core does; only the server's
+`/email-otp/send-verification-otp` path answers `INVALID_EMAIL`. Through the
+client, every policy refusal of `emailOtp.resetPassword` spends the code,
+the length cases too.
+
 An absolute `callbackURL` or `redirectTo` keeps its path only when its origin
 is the page's origin, and the server's `tempoAuth.appURL` must be that
 origin, because core lands every sign-in on `appURL`. Any other absolute value

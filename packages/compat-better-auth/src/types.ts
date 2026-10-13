@@ -529,7 +529,7 @@ export const COMPAT_CLIENT_PLUGIN = "tempo-auth-compat-client-plugin";
 export type ClientPlugin =
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
-      readonly id: "organization" | "passkey" | "magic-link";
+      readonly id: "organization" | "passkey" | "magic-link" | "email-otp";
     }
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
@@ -582,6 +582,13 @@ export interface AuthClient {
     passkey(input?: {
       autoFill?: boolean;
     }): Promise<CompatClientResult<{ session: ClientSession; user: ClientUser }>>;
+    /** Core's sign-in by email code (plan 9e). `name`, `image`, and other user fields answer NOT_SUPPORTED. */
+    emailOtp(input: {
+      email: string;
+      otp: string;
+      name?: string;
+      image?: string;
+    }): Promise<CompatClientResult<{ token: string; user: ClientUser }>>;
   };
   signUp: {
     email(input: {
@@ -603,15 +610,30 @@ export interface AuthClient {
     email: string;
     redirectTo?: string;
   }): Promise<CompatClientResult<{ status: true }>>;
-  /** The Better Auth 1.6 name of `requestPasswordReset`. */
-  forgetPassword(input: {
-    email: string;
-    redirectTo?: string;
-  }): Promise<CompatClientResult<{ status: true }>>;
+  /** The Better Auth 1.6 name of `requestPasswordReset`, and Better Auth 1.7.2's `forgetPassword.emailOtp` (plan 9e). */
+  forgetPassword: {
+    (input: { email: string; redirectTo?: string }): Promise<CompatClientResult<{ status: true }>>;
+    /** A reset code. Better Auth 1.7.2 marks this path deprecated for `emailOtp.requestPasswordReset`. */
+    emailOtp(input: { email: string }): Promise<CompatClientResult<{ success: true }>>;
+  };
   resetPassword(input: {
     newPassword: string;
     token: string;
   }): Promise<CompatClientResult<{ status: true }>>;
+  /** Better Auth 1.7.2's email OTP calls on core's email codes (plan 9e; dist/plugins/email-otp, read 2026-10-13). */
+  emailOtp: {
+    /** `sign-in` and `forget-password`; the other types answer NOT_SUPPORTED. */
+    sendVerificationOtp(input: {
+      email: string;
+      type: EmailOtpType;
+    }): Promise<CompatClientResult<{ success: true }>>;
+    requestPasswordReset(input: { email: string }): Promise<CompatClientResult<{ success: true }>>;
+    resetPassword(input: {
+      email: string;
+      otp: string;
+      password: string;
+    }): Promise<CompatClientResult<{ success: true }>>;
+  };
   organization: {
     create(input: {
       name: string;

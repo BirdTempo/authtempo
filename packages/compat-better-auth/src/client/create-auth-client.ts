@@ -367,6 +367,19 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         if (r.data) store.refetchIfStarted();
         return r;
       },
+      async emailOtp({ email, otp, name, image }) {
+        if (name !== undefined || image !== undefined)
+          return notSupported("core takes no name or image at the email code sign-in");
+        const r = await run(
+          (c) => c.emailOtp.verify({ email, code: otp }),
+          (v) => {
+            keepToken(v.token);
+            return { token: v.token, user: toClientUser(v.user) };
+          },
+        );
+        if (r.data) store.refetchIfStarted();
+        return r;
+      },
     },
     signUp: {
       async email({ email, password, name, image, callbackURL }) {
@@ -413,14 +426,46 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         () => ({ status: true as const }),
       );
     },
-    forgetPassword(input) {
-      return api.requestPasswordReset(input);
-    },
+    forgetPassword: Object.assign(
+      (input: { email: string; redirectTo?: string }) => api.requestPasswordReset(input),
+      {
+        emailOtp: ({ email }: { email: string }) => api.emailOtp.requestPasswordReset({ email }),
+      },
+    ),
     resetPassword({ newPassword, token }) {
       return run(
         (c) => c.password.reset({ token, password: newPassword }),
         () => ({ status: true as const }),
       );
+    },
+    emailOtp: {
+      async sendVerificationOtp({ email, type }) {
+        if (type === "sign-in")
+          return run(
+            (c) => c.emailOtp.request({ email }),
+            () => ({ success: true as const }),
+          );
+        if (type === "forget-password")
+          return run(
+            (c) => c.emailOtp.requestReset({ email }),
+            () => ({ success: true as const }),
+          );
+        return notSupported(
+          "core serves the sign-in code and the reset code only; see the plan index",
+        );
+      },
+      requestPasswordReset({ email }) {
+        return run(
+          (c) => c.emailOtp.requestReset({ email }),
+          () => ({ success: true as const }),
+        );
+      },
+      resetPassword({ email, otp, password }) {
+        return run(
+          (c) => c.emailOtp.reset({ email, code: otp, password }),
+          () => ({ success: true as const }),
+        );
+      },
     },
     organization: {
       async create({ name, slug, logo, metadata }) {
