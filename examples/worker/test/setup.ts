@@ -3,6 +3,11 @@ import betterAuthSql from "../../../packages/compat-better-auth/test/fixtures/be
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
+// The app's own table that the example's after hook writes (plan 9d), in the same D1 database.
+await env.DB.prepare(
+  "CREATE TABLE IF NOT EXISTS app_tenant (organization_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL)",
+).run();
+
 // Better Auth 1.7.2's own SQLite SQL, as recorded, with its foreign keys, then compat migration 0001.
 // The split on ";" is safe while the recorded SQL has no ";" inside a string literal.
 // The foreign keys stay on: the sign-ups prove that the user row comes before the account row.
