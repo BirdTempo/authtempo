@@ -256,6 +256,47 @@ describe("email code verify (plan 9e)", () => {
     expect(await auth.storage.findMany("session", [])).toEqual([]);
   });
 
+  it("answers too_many_attempts after the cap when a second request of the same millisecond spent the first code (plan 9h, Review Focus 3)", async () => {
+    // makeAuth's clock does not move by itself, so both requests below run in
+    // one millisecond. The id is random inside its millisecond, so before plan
+    // 9h about half of these addresses read the spent first row after the cap
+    // and answered invalid_code. 16 addresses make a pass by chance 1 in 65,536.
+    const auth = makeAuth();
+    for (let i = 0; i < 16; i++) {
+      const email = `same-ms-${i}@example.com`;
+      // An IP per address: the per-IP request and verify limits would stop 16 addresses.
+      const ip = `10.0.0.${i}`;
+      const ask = async () => {
+        const r = await requestEmailOtp(auth.config, { email, ip });
+        if (!r.ok) throw new Error(r.code);
+        return codeFrom(auth, email);
+      };
+      const first = await ask();
+      const second = await ask();
+      const [older, newer] = (
+        await auth.storage.findMany("verification", [
+          { field: "identifier", op: "eq", value: email },
+        ])
+      ).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      // The second row is strictly newer than the row its request spent.
+      expect(newer && older && newer.createdAt.getTime() - older.createdAt.getTime()).toBe(1);
+      const wrong = ["000000", "111111", "222222"].find((c) => c !== first && c !== second) ?? "";
+      for (let n = 0; n < 4; n++)
+        expect(await verify(auth, wrong, email, ip)).toMatchObject({ code: "invalid_code" });
+      expect(await verify(auth, wrong, email, ip)).toMatchObject({ code: "too_many_attempts" });
+      expect({
+        email,
+        first: await verify(auth, first, email, ip),
+        second: await verify(auth, second, email, ip),
+      }).toEqual({
+        email,
+        first: { ok: false, code: "too_many_attempts", status: 400 },
+        second: { ok: false, code: "too_many_attempts", status: 400 },
+      });
+    }
+    expect(await auth.storage.findMany("session", [])).toEqual([]);
+  });
+
   it("bounds the count to maxAttempts + 1 rounds when an update never matches, and logs (I-1)", async () => {
     const inner = createMemoryAdapter();
     let updates = 0;
