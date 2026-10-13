@@ -1,43 +1,14 @@
 import { type ModelName, schema } from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
-import {
-  columnName,
-  columnsOf,
-  type encodeValue,
-  TABLES,
-  uniqueIndexName,
-} from "@tempo-auth/core/sql";
+import { columnName, columnsOf, TABLES, uniqueIndexName } from "@tempo-auth/core/sql";
 import { describe, expect, it } from "vitest";
-import { createPostgresAdapter } from "../src/index.js";
+import { type CoreFieldType, createPostgresAdapter, postgresColumnType } from "../src/index.js";
 import { freshDatabase } from "./db.js";
-
-type FieldType = Parameters<typeof encodeValue>[1];
 
 runAdapterConformance("postgres", async () => {
   const db = await freshDatabase();
   return { adapter: createPostgresAdapter(db.sql), close: () => db.close() };
 });
-
-/**
- * The Postgres type for each core field type. `counter` is bigint because the
- * WebAuthn sign count is an unsigned 32-bit value and int32 cannot hold it all.
- * `lastStep` (plan 9f) is bigint because the spec gives a 30-second step
- * counter a 64-bit column, as RFC 6238 does.
- */
-function pgType(field: string, type: FieldType): string {
-  switch (type) {
-    case "string":
-      return "text";
-    case "boolean":
-      return "boolean";
-    case "date":
-      return "timestamp with time zone";
-    case "json":
-      return "jsonb";
-    case "integer":
-      return field === "counter" || field === "lastStep" ? "bigint" : "integer";
-  }
-}
 
 interface IndexShape {
   name: string;
@@ -93,12 +64,12 @@ describe("postgres migration matches the core schema", () => {
         );
         const fields = schema[model].fields as Record<
           string,
-          { type: FieldType; nullable?: boolean }
+          { type: CoreFieldType; nullable?: boolean }
         >;
         const expected = Object.fromEntries(
           Object.entries(fields).map(([f, def]) => [
             columnName(f),
-            `${pgType(f, def.type)} ${def.nullable ? "YES" : "NO"}`,
+            `${postgresColumnType(f, def.type)} ${def.nullable ? "YES" : "NO"}`,
           ]),
         );
         expect({ model, columns: actual }).toEqual({ model, columns: expected });

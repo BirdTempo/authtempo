@@ -14,6 +14,7 @@ export function createPostgresAdapter(sql: Sql): StorageAdapter {
 }
 
 export { createPostgresAdapterOn, type PostgresAdapterOptions } from "./adapter.js";
+export { type CoreFieldType, postgresColumnType } from "./column-types.js";
 export { toStorageError } from "./errors.js";
 export { createPostgresLimiter } from "./limiter.js";
 export { applyPostgresMigrations, MIGRATIONS, type Migration } from "./migrations.js";
