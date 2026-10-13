@@ -7,6 +7,8 @@ const PW = "correct horse battery";
 const IP = { "cf-connecting-ip": "203.0.113.90" };
 const REDIRECT = "http://127.0.0.1:33418/callback";
 const RESOURCE = `${BASE}/mcp`;
+// A second resource of the TEST_MODE config, with no route.
+const OTHER_RESOURCE = `${BASE}/files`;
 const ISSUER = `${BASE}/auth`;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -81,7 +83,7 @@ async function pkce() {
 }
 
 /** A fake MCP client: register, authorize with the user's session, allow, and exchange. */
-async function connect(email: string, scope: string) {
+async function connect(email: string, scope: string, resource = RESOURCE) {
   const cookie = await verifiedUser(email);
   const reg = await SELF.fetch(`${ISSUER}/oauth/register`, {
     method: "POST",
@@ -91,6 +93,8 @@ async function connect(email: string, scope: string) {
   expect(reg.status).toBe(201);
   const { client_id: clientId } = (await reg.json()) as { client_id: string };
   const { verifier, challenge } = await pkce();
+  // A random nonce, so the ID token proves the round trip of this request.
+  const nonce = b64(crypto.getRandomValues(new Uint8Array(16)));
   const params = {
     response_type: "code",
     client_id: clientId,
@@ -98,9 +102,9 @@ async function connect(email: string, scope: string) {
     code_challenge: challenge,
     code_challenge_method: "S256",
     scope,
-    resource: RESOURCE,
+    resource,
     state: "s-1",
-    nonce: "n-1",
+    nonce,
   };
   const page = await SELF.fetch(`${ISSUER}/oauth/authorize?${new URLSearchParams(params)}`, {
     redirect: "manual",
@@ -119,7 +123,7 @@ async function connect(email: string, scope: string) {
       code_verifier: verifier,
       client_id: clientId,
       redirect_uri: REDIRECT,
-      resource: RESOURCE,
+      resource,
     }),
   );
   expect(exchanged.status).toBe(200);
@@ -128,7 +132,7 @@ async function connect(email: string, scope: string) {
     refresh_token: string;
     id_token: string;
   };
-  return { cookie, clientId, params, page, back, tokens };
+  return { cookie, clientId, params, nonce, page, back, tokens };
 }
 
 it("serves a fake MCP client end to end on D1: discovery, register, authorize, exchange, the resource, refresh, and reuse detection", async () => {
@@ -159,7 +163,7 @@ it("serves a fake MCP client end to end on D1: discovery, register, authorize, e
   expect(await verifiedPayload(c.tokens.id_token)).toMatchObject({
     typ: "JWT",
     aud: c.clientId,
-    nonce: "n-1",
+    nonce: c.nonce,
     email: "mcp-a@example.com",
   });
 
@@ -171,7 +175,7 @@ it("serves a fake MCP client end to end on D1: discovery, register, authorize, e
   const info = await SELF.fetch(`${ISSUER}/oauth/userinfo`, { headers: bearer });
   expect(info.status).toBe(200);
   expect(await info.json()).toMatchObject({ email: "mcp-a@example.com" });
-  // The session-only route refuses the access token; the resource refuses no token (Review Focus 3).
+  // The session-only route refuses the access token, and the resource refuses a request with no token.
   expect((await SELF.fetch(`${BASE}/me`, { headers: bearer })).status).toBe(401);
   const anonymous = await SELF.fetch(`${BASE}/mcp`);
   expect(anonymous.status).toBe(401);
@@ -179,7 +183,7 @@ it("serves a fake MCP client end to end on D1: discovery, register, authorize, e
     `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp"`,
   );
 
-  // The rotation and the reuse detection run as D1 conditional updates (Review Focus 2).
+  // The rotation and the reuse detection run as D1 conditional updates.
   const refresh = (token: string) =>
     SELF.fetch(
       `${ISSUER}/oauth/token`,
@@ -197,7 +201,72 @@ it("serves a fake MCP client end to end on D1: discovery, register, authorize, e
   expect(left).toBe(0);
 });
 
-it("stores hashes and a sealed key only, revokes a family, and answers the well-known paths on D1 as consumerb pins", async () => {
+it("answers 401 at /mcp to a session cookie, a tk_ token, and a token of another resource, and 403 to a token without mcp:tools", async () => {
+  const c = await connect("mcp-c@example.com", "openid", RESOURCE);
+  const created = await SELF.fetch(`${BASE}/auth/tokens`, json({ name: "cli" }, c.cookie));
+  expect(created.status).toBe(200);
+  const { token: apiToken } = (await created.json()) as { token: string };
+  const other = await connect("mcp-d@example.com", "mcp:tools", OTHER_RESOURCE);
+  const metadata = `resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp"`;
+  for (const headers of [
+    { cookie: c.cookie },
+    { authorization: `Bearer ${apiToken}` },
+    { authorization: `Bearer ${other.tokens.access_token}` },
+  ]) {
+    const res = await SELF.fetch(`${BASE}/mcp/tools`, { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(`Bearer ${metadata}`);
+  }
+  // The token is for this resource, but its scope is openid alone.
+  const narrow = await SELF.fetch(`${BASE}/mcp/tools`, {
+    headers: { authorization: `Bearer ${c.tokens.access_token}` },
+  });
+  expect(narrow.status).toBe(403);
+  expect(await narrow.json()).toEqual({ error: "insufficient_scope" });
+  expect(narrow.headers.get("www-authenticate")).toBe(
+    `Bearer error="insufficient_scope", scope="mcp:tools", ${metadata}`,
+  );
+});
+
+it("lists and ends a grant on D1: the session routes delete the consent and the refresh tokens", async () => {
+  const c = await connect("mcp-e@example.com", "mcp:tools offline_access");
+  const listed = await SELF.fetch(`${ISSUER}/oauth/grants`, {
+    headers: { cookie: c.cookie, ...IP },
+  });
+  expect(listed.status).toBe(200);
+  expect(await listed.json()).toMatchObject({
+    grants: [
+      {
+        clientId: c.clientId,
+        clientName: "Fake MCP client",
+        scopes: ["mcp:tools", "offline_access"],
+        refreshTokens: 1,
+      },
+    ],
+  });
+  const revoked = await SELF.fetch(
+    `${ISSUER}/oauth/grants/revoke`,
+    json({ clientId: c.clientId }, c.cookie),
+  );
+  expect(await revoked.json()).toEqual({ ok: true });
+  const count = (table: string) =>
+    env.DB.prepare(`SELECT count(*) AS n FROM ${table} WHERE client_id = ?`)
+      .bind(c.clientId)
+      .first<number>("n");
+  expect(await count("ta_oauth_token")).toBe(0);
+  expect(await count("ta_oauth_consent")).toBe(0);
+  const refreshed = await SELF.fetch(
+    `${ISSUER}/oauth/token`,
+    form({
+      grant_type: "refresh_token",
+      refresh_token: c.tokens.refresh_token,
+      client_id: c.clientId,
+    }),
+  );
+  expect(await refreshed.json()).toEqual({ error: "invalid_grant" });
+});
+
+it("stores hashes and a sealed key only, revokes a family of two rows, and answers the well-known paths on D1 that consumerb's clients read", async () => {
   const c = await connect("mcp-b@example.com", "mcp:tools offline_access");
   const row = await env.DB.prepare("SELECT token_hash FROM ta_oauth_token WHERE client_id = ?")
     .bind(c.clientId)
@@ -210,11 +279,28 @@ it("stores hashes and a sealed key only, revokes a family, and answers the well-
     private_key: string;
   }>();
   expect(JSON.parse(key?.public_jwk ?? "{}")).not.toHaveProperty("d");
-  expect(key?.private_key).toMatch(/^[A-Za-z0-9_-]{60,}$/);
+  // A clear Ed25519 PKCS#8 key is 48 bytes, 64 characters. The sealed form adds the IV and the tag: 102.
+  expect(key?.private_key).toMatch(/^[A-Za-z0-9_-]{100,}$/);
 
+  // One rotation first, so the family holds two rows: the spent one and the live one.
+  const rotated = await SELF.fetch(
+    `${ISSUER}/oauth/token`,
+    form({
+      grant_type: "refresh_token",
+      refresh_token: c.tokens.refresh_token,
+      client_id: c.clientId,
+    }),
+  );
+  const { refresh_token: live } = (await rotated.json()) as { refresh_token: string };
+  const before = await env.DB.prepare(
+    "SELECT count(*) AS n FROM ta_oauth_token WHERE client_id = ?",
+  )
+    .bind(c.clientId)
+    .first<number>("n");
+  expect(before).toBe(2);
   const revoked = await SELF.fetch(
     `${ISSUER}/oauth/revoke`,
-    form({ token: c.tokens.refresh_token, client_id: c.clientId }),
+    form({ token: live, client_id: c.clientId }),
   );
   expect(revoked.status).toBe(200);
   const left = await env.DB.prepare("SELECT count(*) AS n FROM ta_oauth_token WHERE client_id = ?")

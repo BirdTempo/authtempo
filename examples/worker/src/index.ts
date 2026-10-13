@@ -74,8 +74,13 @@ function getAuth(env: Env): Auth {
     // The OAuth 2.1 and OIDC provider (plan 9g) for one MCP resource on this Worker, and the
     // JWTs it signs (`jwtMint` is on by default). Dynamic registration only: a client ID
     // metadata document needs the app's own SSRF-guarded fetch, and the example has none.
+    // In TEST_MODE only, a second resource with no route: the end-to-end test proves that its
+    // tokens answer 401 at /mcp.
     oauth: {
-      resources: [`${env.BASE_URL}/mcp`],
+      resources: [
+        `${env.BASE_URL}/mcp`,
+        ...(env.TEST_MODE === "1" ? [`${env.BASE_URL}/files`] : []),
+      ],
       registration: { cimd: false },
       scopes: { "mcp:tools": "Use the example tools" },
     },
@@ -135,14 +140,22 @@ export default {
     // An MCP resource (plan 9g): an OAuth access token for this resource only. A session
     // or an API token is refused here, and a token for another resource is null at `caller`.
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
+      const metadata = `resource_metadata="${env.BASE_URL}/.well-known/oauth-protected-resource/mcp"`;
       const c = await a.caller(request);
       if (c?.kind !== "oauth")
         return Response.json(
           { error: "unauthorized" },
+          { status: 401, headers: { "www-authenticate": `Bearer ${metadata}` } },
+        );
+      // The tools need the scope mcp:tools. Without this check a token with only
+      // openid calls them, and every app that copies this example inherits that.
+      if (!c.scopes.includes("mcp:tools"))
+        return Response.json(
+          { error: "insufficient_scope" },
           {
-            status: 401,
+            status: 403,
             headers: {
-              "www-authenticate": `Bearer resource_metadata="${env.BASE_URL}/.well-known/oauth-protected-resource/mcp"`,
+              "www-authenticate": `Bearer error="insufficient_scope", scope="mcp:tools", ${metadata}`,
             },
           },
         );
