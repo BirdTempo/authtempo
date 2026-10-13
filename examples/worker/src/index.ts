@@ -8,6 +8,7 @@ import { LEGACY_FORMATS } from "./legacy-formats.js";
 import { testProvider, testProviderFetch, testProviderRoute } from "./test-provider.js";
 
 let lastLink: string | null = null;
+let lastCode: string | null = null;
 let auth: Auth | null = null;
 
 // Built once per isolate. Bindings in `env` are fixed for the isolate's life,
@@ -24,9 +25,11 @@ function getAuth(env: Env): Auth {
     limiter: createD1Limiter(env.DB),
     mail: {
       async send(message) {
-        // The example has no mail transport. It records the last link for the test.
+        // The example has no mail transport. It records the last link for the
+        // test, or the code of a mail that carries no link (plan 9e).
         const m = /https?:\/\/\S+/.exec(message.text);
-        lastLink = m?.[0] ?? null;
+        if (m) lastLink = m[0];
+        else lastCode = /\b(\d{8}|\d{6})\b/.exec(message.text)?.[1] ?? null;
       },
     },
     // Google sign-in is on only when both vars are set. The example has no
@@ -70,6 +73,8 @@ function getAuth(env: Env): Auth {
     // sign-in with a password of at most 72 bytes, and that sign-in writes
     // PBKDF2 over it. A longer password stays bcrypt (BCRYPT_MAX_PASSWORD_BYTES). Every new hash is PBKDF2. The formats are in
     // legacy-formats.ts, which the import test reads too.
+    // Email codes (plan 9e) are on by default: /auth/otp/request and /auth/otp/verify, and with
+    // the password config below the reset by code. `emailOtp: false` turns them off.
     password: {
       hash: createLegacyPasswordHash({
         formats: LEGACY_FORMATS,
@@ -117,6 +122,10 @@ export default {
     if (url.pathname === "/__test/last-link") {
       if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
       return Response.json({ link: lastLink });
+    }
+    if (url.pathname === "/__test/last-code") {
+      if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+      return Response.json({ code: lastCode });
     }
     // The Better Auth compatibility instance (plan 9) on BA_DB. Core's routes above do not change.
     if (url.pathname.startsWith("/api/auth/")) return getCompat(env).handler(request);
