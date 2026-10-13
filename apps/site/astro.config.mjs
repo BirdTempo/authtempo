@@ -1,3 +1,8 @@
+// Each script of package.json that runs astro starts with
+// ASTRO_TELEMETRY_DISABLED=1. Astro telemetry sends an event to
+// telemetry.astro.build on each run, and the build makes no network call
+// beyond the registry. Astro reads the switch from the environment only
+// (@astrojs/telemetry 3.3.3, read 2026-10-14). test/scripts.test.ts holds it.
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 

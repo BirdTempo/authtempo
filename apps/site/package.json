@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "astro build && vitest run",
-    "preview": "astro build && wrangler dev"
+    "test": "ASTRO_TELEMETRY_DISABLED=1 astro build && vitest run",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro build && wrangler dev"
   },
   "dependencies": {
     "@authtempo/adapter-d1": "workspace:*",
