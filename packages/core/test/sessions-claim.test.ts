@@ -18,7 +18,7 @@ import type { ModelName, UserRow } from "../src/schema.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { undoCreateWhere } from "../src/storage/sql.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
+import { FAST, sessionOnly } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, socialAuth } from "./social-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -1116,12 +1116,14 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       });
       if (!v.ok) throw new Error(v.code);
     });
-    const r = await passwordSignIn(auth.config, {
-      email: EMAIL,
-      password: "owner password",
-      ip: null,
-      userAgent: null,
-    });
+    const r = await sessionOnly(
+      passwordSignIn(auth.config, {
+        email: EMAIL,
+        password: "owner password",
+        ip: null,
+        userAgent: null,
+      }),
+    );
     expect(gate.fired()).toBe(true);
     if (!r.ok) throw new Error(r.code);
     expect(await resolveSession(auth.config, r.value.token)).not.toBeNull();

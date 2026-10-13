@@ -16,7 +16,7 @@ import {
 } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST, signUpAndVerify } from "./password-helpers.js";
+import { FAST, sessionOnly, signUpAndVerify } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const OLD = "correct horse battery";
@@ -46,7 +46,7 @@ const reset = (auth: Auth, code: string, password = NEW, email = EMAIL) =>
   resetPasswordWithOtp(auth.config, { email, code, password, ip: null, userAgent: null });
 
 const signIn = (auth: Auth, password: string, email = EMAIL) =>
-  passwordSignIn(auth.config, { email, password, ip: null, userAgent: null });
+  sessionOnly(passwordSignIn(auth.config, { email, password, ip: null, userAgent: null }));
 
 const codeRows = (auth: Auth) =>
   auth.storage.findMany("verification", [

@@ -54,11 +54,13 @@ import {
 import {
   changePassword,
   type PasswordChange,
+  type PasswordReauth,
   type PasswordResend,
   type PasswordReset,
   type PasswordResetRequest,
   type PasswordSession,
   type PasswordSignIn,
+  type PasswordSignInResult,
   type PasswordSignUp,
   type PasswordVerified,
   type PasswordVerify,
@@ -67,6 +69,7 @@ import {
   requestPasswordReset,
   resendPasswordVerification,
   resetPassword,
+  verifyPassword,
   verifyPasswordEmail,
 } from "./engine/password.js";
 import {
@@ -117,7 +120,10 @@ import type {
 /** Present on `api` only when the config has a `password` section. */
 export interface PasswordApi {
   signUp(input: PasswordSignUp): Promise<Result<PasswordSession>>;
-  signIn(input: PasswordSignIn): Promise<Result<PasswordSession>>;
+  /** A session, or `{ twoFactor }` for a user with the second factor on (plan 9f). */
+  signIn(input: PasswordSignIn): Promise<Result<PasswordSignInResult>>;
+  /** The password of a known user again, with the sign-in's limits (plan 9f). */
+  verify(input: PasswordReauth): Promise<Result<{ verified: true }>>;
   verifyEmail(input: PasswordVerify): Promise<Result<PasswordVerified>>;
   /** A new verify link for an unverified user with a password. Always `{ sent: true }`, except `rate_limited`. */
   resendVerification(input: PasswordResend): Promise<Result<{ sent: true }>>;
@@ -348,6 +354,7 @@ export function createAuth(input: AuthConfig): Auth {
               requestReset: (i) => requestPasswordReset(config, i),
               reset: (i) => resetPassword(config, i),
               change: (i) => changePassword(config, i),
+              verify: (i) => verifyPassword(config, i),
             },
           }
         : {}),

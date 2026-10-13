@@ -25,7 +25,7 @@ import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST, signUpAndVerify } from "./password-helpers.js";
+import { FAST, sessionOnly, signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
 
 const PASSWORD = "correct horse battery";
@@ -76,12 +76,14 @@ async function magicSignIn(auth: ReturnType<typeof makeAuth>, email: string) {
 }
 
 const signIn = (auth: ReturnType<typeof makeAuth>) =>
-  passwordSignIn(auth.config, {
-    email: "ada@example.com",
-    password: PASSWORD,
-    ip: null,
-    userAgent: null,
-  });
+  sessionOnly(
+    passwordSignIn(auth.config, {
+      email: "ada@example.com",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    }),
+  );
 
 /**
  * Records each write of the next transaction as `op:model`, in order, as
@@ -400,6 +402,8 @@ describe("session create hooks (plan 9d)", () => {
     expect(read("handoff.ts")).toContain('via: "handoff"');
     expect(read("email-otp.ts")).toContain('via: "email_otp"');
     expect(read("password.ts").split('via: "password"')).toHaveLength(5);
+    // The challenge's data and the verify's openSession (plan 9f).
+    expect(read("totp.ts").split('via: "password"')).toHaveLength(3);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
     const opened = (file: string, via: string) =>
       read(file).match(new RegExp(`sessionOpened\\([^;]*?"${via}",?\\s*\\)`, "g"))?.length ?? 0;
@@ -410,7 +414,16 @@ describe("session create hooks (plan 9d)", () => {
       handoff: opened("handoff.ts", "handoff"),
       password: opened("password.ts", "password"),
       emailOtp: opened("email-otp.ts", "email_otp"),
-    }).toEqual({ magicLink: 1, social: 1, passkey: 1, handoff: 1, password: 4, emailOtp: 1 });
+      totp: opened("totp.ts", "password"),
+    }).toEqual({
+      magicLink: 1,
+      social: 1,
+      passkey: 1,
+      handoff: 1,
+      password: 4,
+      emailOtp: 1,
+      totp: 1,
+    });
   });
 });
 
@@ -684,12 +697,14 @@ describe("session end hooks (plan 9d)", () => {
     // The change: the changer's session stays; every other session ends once, one by the sign-out.
     await signUpAndVerify(auth, "cara@example.com", PASSWORD);
     const caraIn = () =>
-      passwordSignIn(auth.config, {
-        email: "cara@example.com",
-        password: PASSWORD,
-        ip: null,
-        userAgent: null,
-      });
+      sessionOnly(
+        passwordSignIn(auth.config, {
+          email: "cara@example.com",
+          password: PASSWORD,
+          ip: null,
+          userAgent: null,
+        }),
+      );
     const mine = await caraIn();
     const other = await caraIn();
     if (!mine.ok || !other.ok) throw new Error("sign-in");

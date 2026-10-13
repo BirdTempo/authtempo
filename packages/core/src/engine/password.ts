@@ -16,6 +16,7 @@ import {
   sessionsEnded,
   writeSession,
 } from "./sessions.js";
+import { deleteTwoFactorChallenges, type TwoFactorPending, twoFactorGate } from "./totp.js";
 import {
   claimEmail,
   ensureEmailIdentity,
@@ -90,6 +91,21 @@ export interface PasswordSignIn {
   password: string;
   ip: string | null;
   userAgent: string | null;
+  /** The clear `td_` token of a trusted device (plan 9f). A live token of this user skips the second factor. */
+  trustDevice?: string | undefined;
+  /** Where the challenge page lands after the second factor (plan 9f). `safeNext` applies. */
+  next?: string | undefined;
+}
+
+/** A session, or a second-factor challenge for a user with the factor on (plan 9f). */
+export type PasswordSignInResult = PasswordSession | TwoFactorPending;
+export type { TwoFactorPending };
+
+/** The in-process re-authentication (plan 9f): the password of a known user. */
+export interface PasswordReauth {
+  userId: string;
+  password: string;
+  ip: string | null;
 }
 
 type Resolved = NonNullable<ResolvedConfig["password"]>;
@@ -358,7 +374,7 @@ export async function resendPasswordVerification(
 export async function passwordSignIn(
   config: ResolvedConfig,
   input: PasswordSignIn,
-): Promise<Result<PasswordSession>> {
+): Promise<Result<PasswordSignInResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
   if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
@@ -432,6 +448,27 @@ export async function passwordSignIn(
         return refuse();
       proved = current.hash;
     }
+  }
+  // The second factor (plan 9f, owner decision 1b): a user with the factor on
+  // gets a challenge in place of the session. The gate keeps the guard below
+  // for its challenge, so a reset, a change, or a claim since the check
+  // refuses it.
+  const gated = await twoFactorGate(
+    config,
+    {
+      user,
+      passwordId: row.id,
+      proved,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      next: input.next,
+      trustDevice: input.trustDevice,
+    },
+    now,
+  );
+  if (gated) {
+    if (!gated.ok) await legacyFloor(pw, started);
+    return gated;
   }
   const signedIn = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<PasswordSession>> => {
@@ -853,6 +890,9 @@ function applyReset(
       // sign-in's session. The opposite order lets an old-password sign-in
       // commit a session after the delete.
       const passwordId = await setPassword(tx, user.id, hash, now);
+      // The second-factor challenges before any session delete, for the order
+      // above: a verify spends its challenge as its last statement (plan 9f).
+      await deleteTwoFactorChallenges(tx, user.id);
       if (found && !found.emailVerified) {
         // The claim deletes the claimant's sessions, identities, passkeys,
         // handoff codes, and every other password row, and keeps the new password.
@@ -983,6 +1023,8 @@ export async function changePassword(
         { field: "userId", op: "eq", value: user.id },
         { field: "id", op: "ne", value: session.id },
       ];
+      // The second-factor challenges before the session delete, as in a reset (plan 9f).
+      await deleteTwoFactorChallenges(tx, user.id);
       // Each row by id, for the after hook (plan 9d, final fix wave M-1).
       await endSessions(tx, others, ended);
       // The codes of the changer's own session go too. The row names the
@@ -1007,4 +1049,37 @@ export async function changePassword(
   }
   if (changed.ok) await sessionsEnded(config, ended, "password_change");
   return changed;
+}
+
+/**
+ * The password of a known user, for an app that asks for it again before a
+ * change (plan 9f: the compat shim's two-factor calls). The sign-in's two
+ * limits and its dummy verify, so it is no faster guess route than the
+ * sign-in. A row that a sign-up holds pending, or a legacy marker, answers
+ * `invalid_credentials`: a person proves a legacy password by a sign-in.
+ */
+export async function verifyPassword(
+  config: ResolvedConfig,
+  input: PasswordReauth,
+): Promise<Result<{ verified: true }>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
+    return fail("rate_limited");
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: input.userId },
+  ]);
+  if (user && !(await config.limiter.allow(`password:email:${user.email}`, SIGN_IN_PER_EMAIL)))
+    return fail("rate_limited");
+  if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
+  const row = user
+    ? await config.storage.findOne("password", [{ field: "userId", op: "eq", value: user.id }])
+    : null;
+  if (!row || row.hash.startsWith(PENDING_HASH_PREFIX) || row.hash === LEGACY_VERIFY_HASH) {
+    await pw.hash.verify(input.password, await pw.hash.dummy());
+    return fail("invalid_credentials");
+  }
+  return (await pw.hash.verify(input.password, row.hash)).ok
+    ? ok({ verified: true })
+    : fail("invalid_credentials");
 }

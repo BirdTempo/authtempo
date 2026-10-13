@@ -80,6 +80,8 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
           userAgent: req.headers.get("user-agent"),
         }),
       );
+      // The config sets totp: false until Task 7 of plan 9f, so core answers no challenge here.
+      if (!("token" in v)) throw apiError("unexpected", 500);
       return { redirect: false, token: v.token, url: undefined, user: toUser(v.user) };
     },
     async signOut({ headers }) {

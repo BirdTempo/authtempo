@@ -17,7 +17,7 @@ import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/c
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "../src/seams/password-hash.js";
 import type { StorageAdapter, Where } from "../src/storage/port.js";
 import { makeAuth, post, tokenFromMail } from "./helpers.js";
-import { FAST, pwAuth, pwHandle, signUpAndVerify } from "./password-helpers.js";
+import { FAST, pwAuth, pwHandle, sessionOnly, signUpAndVerify } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
@@ -230,13 +230,15 @@ function signIn(
   auth: ReturnType<typeof makeAuth>,
   over: Partial<Parameters<typeof passwordSignIn>[1]> = {},
 ) {
-  return passwordSignIn(auth.config, {
-    email: EMAIL,
-    password: PW,
-    ip: "1.1.1.1",
-    userAgent: "ua",
-    ...over,
-  });
+  return sessionOnly(
+    passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PW,
+      ip: "1.1.1.1",
+      userAgent: "ua",
+      ...over,
+    }),
+  );
 }
 
 /** The same storage, clock, and limiter, with another hash seam: a deployer who changed the cost. */
@@ -485,23 +487,27 @@ describe("passwordSignIn", () => {
     let race: () => Promise<void> = async () => {};
     const { calls, seam } = counting(createPbkdf2PasswordHash({ iterations: 2000 }), () => race());
     const raised = withSeam(auth.config, seam);
-    let second: Awaited<ReturnType<typeof passwordSignIn>> | null = null;
+    let second: Awaited<ReturnType<typeof sessionOnly>> | null = null;
     race = async () => {
       race = async () => {};
-      second = await passwordSignIn(raised, {
+      second = await sessionOnly(
+        passwordSignIn(raised, {
+          email: EMAIL,
+          password: PW,
+          ip: "2.2.2.2",
+          userAgent: "ua",
+        }),
+      );
+    };
+    const first = await sessionOnly(
+      passwordSignIn(raised, {
         email: EMAIL,
         password: PW,
-        ip: "2.2.2.2",
+        ip: "1.1.1.1",
         userAgent: "ua",
-      });
-    };
-    const first = await passwordSignIn(raised, {
-      email: EMAIL,
-      password: PW,
-      ip: "1.1.1.1",
-      userAgent: "ua",
-    });
-    const other = second as Awaited<ReturnType<typeof passwordSignIn>> | null;
+      }),
+    );
+    const other = second as Awaited<ReturnType<typeof sessionOnly>> | null;
     if (!first.ok) throw new Error(`the first sign-in answered ${first.code}`);
     if (!other?.ok) throw new Error("the second sign-in did not sign in");
     expect(calls.hash).toBe(2);
@@ -1164,6 +1170,8 @@ describe("changePassword", () => {
     ).toBe(true);
     expect(writes).toEqual([
       "update:password",
+      // The second-factor challenges, before the session delete (plan 9f).
+      "delete:verification",
       "delete:session",
       "delete:verification",
       "delete:verification",

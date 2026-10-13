@@ -232,6 +232,10 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           resetMail: ({ email, code }) => otpMail(email, "forget-password", code),
         }
       : false,
+    // Core turns the second factor on with `password`; Better Auth serves it
+    // only with its two-factor plugin. Task 7 of plan 9f maps the plugin onto
+    // this key.
+    totp: false,
     ...(google || apple || github || linkedin
       ? {
           social: {

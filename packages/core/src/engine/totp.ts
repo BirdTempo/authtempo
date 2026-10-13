@@ -1,6 +1,7 @@
 import type { ResolvedConfig, ResolvedTotp } from "../config.js";
+import { safeNext } from "../http/safe-next.js";
 import { openSealed, seal } from "../primitives/aead.js";
-import { constantTimeEqual, hmacSha256Hex } from "../primitives/crypto.js";
+import { constantTimeEqual, hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import {
   base32Encode,
@@ -12,7 +13,15 @@ import {
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, TotpRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { endSessions, type ResolvedSession, sessionsEnded } from "./sessions.js";
+import { hookGuard } from "./hooks.js";
+import {
+  endSessions,
+  openSession,
+  type ResolvedSession,
+  sessionOpened,
+  sessionsEnded,
+} from "./sessions.js";
+import { attemptsOf, countAttempt } from "./verification.js";
 
 /**
  * The TOTP second factor (plan 9f, spec 8.11). One `totp` row per user
@@ -463,4 +472,237 @@ export async function revokeTrustedDevices(
     { field: "userId", op: "eq", value: input.userId },
   ]);
   return ok({ ok: true });
+}
+
+export const TWO_FACTOR_PREFIX = "tf_";
+export const TWO_FACTOR_TOKEN_RE = /^tf_[A-Za-z0-9_-]{43}$/;
+export const TRUST_PREFIX = "td_";
+export const TRUST_TOKEN_RE = /^td_[A-Za-z0-9_-]{43}$/;
+/** A challenge lives 5 minutes and takes 5 wrong codes (spec 8.11). */
+export const CHALLENGE_TTL_MS = 300_000;
+export const CHALLENGE_MAX_ATTEMPTS = 5;
+// Per 15 minutes. The challenge cap bounds the guesses per challenge, the
+// sign-in's email limit bounds the challenges per address, and
+// `CODE_PER_USER` bounds the guesses per user over all challenges.
+const VERIFY_PER_IP = { seconds: 900, max: 30 };
+
+/** The sign-in's answer for a user with the factor on: no session yet. */
+export interface TwoFactorPending {
+  twoFactor: { challenge: string; expiresAt: Date };
+}
+
+export interface TwoFactorVerify {
+  challenge: string;
+  /** A 6-digit code of the app. Exactly one of `code` and `backupCode`. */
+  code?: string | undefined;
+  backupCode?: string | undefined;
+  /** True: write a trusted device and answer its token. */
+  trustDevice?: boolean | undefined;
+  ip: string | null;
+}
+
+export interface TwoFactorSession {
+  token: string;
+  user: UserRow;
+  session: SessionRow;
+  next: string;
+  trustDevice: { token: string; expiresAt: Date } | null;
+  backupCodesLeft: number;
+}
+
+/**
+ * True for a live trusted device of this user: then it moves `lastSeenAt`.
+ * A token of another user's device is no skip and changes nothing. An
+ * expired row is deleted.
+ */
+async function trusted(
+  config: ResolvedConfig,
+  userId: string,
+  token: string | undefined,
+  now: Date,
+): Promise<boolean> {
+  if (token === undefined || !TRUST_TOKEN_RE.test(token)) return false;
+  const row = await config.storage.findOne("trustedDevice", [
+    { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
+  ]);
+  if (!row || row.userId !== userId) return false;
+  if (row.expiresAt.getTime() <= now.getTime()) {
+    await config.storage.delete("trustedDevice", [{ field: "id", op: "eq", value: row.id }]);
+    return false;
+  }
+  await config.storage.update("trustedDevice", [{ field: "id", op: "eq", value: row.id }], {
+    lastSeenAt: now,
+    updatedAt: later(now, row.updatedAt),
+  });
+  return true;
+}
+
+/**
+ * The gate of the password sign-in (owner decision 1b), after the password
+ * is proved. Null: no gate (no factor config, no factor on, or a trusted
+ * device), so the sign-in opens its session. Else a challenge in place of
+ * the session. The challenge is a session in waiting, so it keeps the
+ * sign-in's guard: the conditional update on the proved hash runs after the
+ * create, and zero rows (a reset, a change, or a claim since the check)
+ * deletes the challenge and refuses.
+ */
+export async function twoFactorGate(
+  config: ResolvedConfig,
+  input: {
+    user: UserRow;
+    passwordId: string;
+    proved: string;
+    ip: string | null;
+    userAgent: string | null;
+    next: string | undefined;
+    trustDevice: string | undefined;
+  },
+  now: Date,
+): Promise<Result<TwoFactorPending> | null> {
+  if (!config.totp) return null;
+  const { user } = input;
+  if (!(await enabledRow(config.storage, user.id))) return null;
+  if (await trusted(config, user.id, input.trustDevice, now)) return null;
+  const challenge = randomToken(TWO_FACTOR_PREFIX);
+  const valueHash = await sha256Hex(challenge);
+  const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS);
+  const id = newId(now);
+  return config.storage.transaction(async (tx): Promise<Result<TwoFactorPending>> => {
+    await tx.create("verification", {
+      id,
+      purpose: "two-factor",
+      identifier: user.id,
+      valueHash,
+      expiresAt,
+      consumedAt: null,
+      data: {
+        via: "password",
+        ip: input.ip,
+        userAgent: input.userAgent,
+        next: safeNext(input.next),
+        attempts: 0,
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const n = await tx.update(
+      "password",
+      [
+        { field: "id", op: "eq", value: input.passwordId },
+        { field: "hash", op: "eq", value: input.proved },
+      ],
+      { updatedAt: now },
+    );
+    if (n === 0) {
+      await tx.delete("verification", [{ field: "id", op: "eq", value: id }]);
+      return fail("invalid_credentials");
+    }
+    return ok({ twoFactor: { challenge, expiresAt } });
+  });
+}
+
+/**
+ * The second step of a gated sign-in (plan 9f). A wrong code counts on the
+ * challenge (`countAttempt`); the fifth spends it. A right code opens the
+ * session with the challenge's IP and user agent. The spend of the
+ * challenge is the last statement of the session transaction: a reset or a
+ * change deletes the user's challenges before it ends the sessions, so zero
+ * rows here means that delete ran, and the verify deletes its own session.
+ */
+export async function verifyTwoFactor(
+  config: ResolvedConfig,
+  input: TwoFactorVerify,
+): Promise<Result<TwoFactorSession>> {
+  const totp = config.totp;
+  if (!totp) return fail("not_found");
+  if (!(await config.limiter.allow(`totp-verify:ip:${input.ip ?? "unknown"}`, VERIFY_PER_IP)))
+    return fail("rate_limited");
+  if (!TWO_FACTOR_TOKEN_RE.test(input.challenge)) return fail("invalid_token");
+  const { code, backupCode } = input;
+  if ((code === undefined) === (backupCode === undefined)) return fail("invalid_body");
+  const now = config.clock.now();
+  const challenge = await config.storage.findOne("verification", [
+    { field: "valueHash", op: "eq", value: await sha256Hex(input.challenge) },
+    { field: "purpose", op: "eq", value: "two-factor" },
+  ]);
+  if (!challenge) return fail("invalid_token");
+  if (challenge.consumedAt !== null)
+    return fail(
+      attemptsOf(challenge) >= CHALLENGE_MAX_ATTEMPTS ? "too_many_attempts" : "invalid_token",
+    );
+  if (challenge.expiresAt.getTime() <= now.getTime()) return fail("invalid_token");
+  // The bound per user over all challenges, shared with the enable, the
+  // disable, and the new backup codes. A capped challenge spends only itself,
+  // so without this line each new sign-in gives five more guesses. After the
+  // live check: an unknown, spent, or expired challenge costs the user nothing.
+  if (!(await config.limiter.allow(`totp-code:user:${challenge.identifier}`, CODE_PER_USER)))
+    return fail("rate_limited");
+  const row = await enabledRow(config.storage, challenge.identifier);
+  if (!row) return fail("invalid_token");
+  let backupCodesLeft = row.backupCodes.length;
+  if (code !== undefined) {
+    if (!(await acceptCode(config, row, code, now)))
+      return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
+  } else {
+    const left = await acceptBackupCode(config, row, backupCode ?? "", now);
+    if (left === null)
+      return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
+    backupCodesLeft = left;
+  }
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: challenge.identifier },
+  ]);
+  if (!user) return fail("invalid_token");
+  const data = challenge.data as { ip?: unknown; userAgent?: unknown; next?: unknown } | null;
+  const ip = typeof data?.ip === "string" ? data.ip : null;
+  const userAgent = typeof data?.userAgent === "string" ? data.userAgent : null;
+  const next = safeNext(data?.next);
+  const trust = input.trustDevice
+    ? {
+        id: newId(now),
+        token: randomToken(TRUST_PREFIX),
+        expiresAt: new Date(now.getTime() + totp.trustDays * 86_400_000),
+      }
+    : null;
+  const trustHash = trust ? await sha256Hex(trust.token) : null;
+  const opened = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<TwoFactorSession>> => {
+      const s = await openSession(config, { user, ip, userAgent, via: "password" }, tx);
+      if (trust && trustHash)
+        await tx.create("trustedDevice", {
+          id: trust.id,
+          userId: user.id,
+          tokenHash: trustHash,
+          expiresAt: trust.expiresAt,
+          lastSeenAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      const n = await tx.update(
+        "verification",
+        [
+          { field: "id", op: "eq", value: challenge.id },
+          { field: "consumedAt", op: "eq", value: null },
+          { field: "expiresAt", op: "gt", value: now },
+        ],
+        { consumedAt: now, updatedAt: later(now, challenge.updatedAt) },
+      );
+      if (n === 0) {
+        await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+        if (trust) await tx.delete("trustedDevice", [{ field: "id", op: "eq", value: trust.id }]);
+        return fail("invalid_token");
+      }
+      return ok({
+        token: s.token,
+        user,
+        session: s.session,
+        next,
+        trustDevice: trust ? { token: trust.token, expiresAt: trust.expiresAt } : null,
+        backupCodesLeft,
+      });
+    }),
+  );
+  // After the commit, as every flow does (plan 9d).
+  if (opened.ok) await sessionOpened(config, opened.value.session, opened.value.user, "password");
+  return opened;
 }

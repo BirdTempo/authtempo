@@ -208,6 +208,7 @@ describe("password change route", () => {
       "reset",
       "signIn",
       "signUp",
+      "verify",
       "verifyEmail",
     ]);
   });

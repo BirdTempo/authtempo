@@ -99,7 +99,16 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
         });
-        return r.ok ? signedIn(r.value) : respond(r);
+        if (!r.ok) return respond(r);
+        // A user with a second factor (plan 9f): the challenge, and no cookie.
+        if ("twoFactor" in r.value)
+          return json({
+            twoFactor: {
+              challenge: r.value.twoFactor.challenge,
+              expiresAt: r.value.twoFactor.expiresAt.toISOString(),
+            },
+          });
+        return signedIn(r.value);
       },
     },
     {

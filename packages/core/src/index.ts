@@ -58,11 +58,13 @@ export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
   PasswordChange,
+  PasswordReauth,
   PasswordResend,
   PasswordReset,
   PasswordResetRequest,
   PasswordSession,
   PasswordSignIn,
+  PasswordSignInResult,
   PasswordSignUp,
   PasswordVerified,
   PasswordVerify,
@@ -79,7 +81,13 @@ export {
   type Caller,
   type ResolvedApiToken,
 } from "./engine/tokens.js";
-export type { TotpSetup, TotpStatus } from "./engine/totp.js";
+export type {
+  TotpSetup,
+  TotpStatus,
+  TwoFactorPending,
+  TwoFactorSession,
+  TwoFactorVerify,
+} from "./engine/totp.js";
 export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";

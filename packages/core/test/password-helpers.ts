@@ -1,8 +1,14 @@
 import type { AuthConfig, MailMessage, PasswordConfig } from "../src/config.js";
 import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
-import { passwordSignUp, verifyPasswordEmail } from "../src/engine/password.js";
+import {
+  type PasswordSession,
+  type PasswordSignInResult,
+  passwordSignUp,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
+import type { Result } from "../src/result.js";
 import type { PasswordRow } from "../src/schema.js";
 import { createPbkdf2PasswordHash } from "../src/seams/password-hash.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, tokenFromMail } from "./helpers.js";
@@ -72,4 +78,19 @@ export async function signUpAndVerify(
   ]);
   if (!row) throw new Error("no password row");
   return row;
+}
+
+/**
+ * The answer of a password sign-in that a test expects to open a session.
+ * Since plan 9f a sign-in can answer a second-factor challenge in place of
+ * the session. A test that runs with no factor on wraps its sign-in in this
+ * call: a challenge throws, so the test cannot pass on the wrong answer.
+ */
+export async function sessionOnly(
+  r: Promise<Result<PasswordSignInResult>>,
+): Promise<Result<PasswordSession>> {
+  const v = await r;
+  if (v.ok && !("token" in v.value))
+    throw new Error("the sign-in answered a second-factor challenge");
+  return v as Result<PasswordSession>;
 }
