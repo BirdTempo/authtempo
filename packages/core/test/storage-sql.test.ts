@@ -95,6 +95,7 @@ describe("names", () => {
       "ux_ta_oauth_consent__client_id__user_id",
     );
     expect(schema.oauthConsent.unique).toEqual([["clientId", "userId"]]);
+    expect(schema.oauthConsent.indexes).toEqual([["userId"]]);
     expect(schema.oauthToken.indexes).toEqual([["userId"], ["familyId"], ["clientId"]]);
     expect(fieldsFromUniqueIndex("jwk", "ux_ta_jwk__slot")).toEqual(["slot"]);
   });

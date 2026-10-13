@@ -427,7 +427,10 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     // clientId first: the sweep looks up the consents of one client, and the
     // authorize compares both fields, so the one index serves both.
     unique: [["clientId", "userId"]],
-    indexes: [],
+    // userId: the grants list reads the consents of one user (plan 9g final
+    // fix wave, round 2). The unique key above starts with clientId, so it
+    // cannot serve that read.
+    indexes: [["userId"]],
   },
   // plan 9g: one row per refresh token. The table holds the hash, never the token.
   oauthToken: {

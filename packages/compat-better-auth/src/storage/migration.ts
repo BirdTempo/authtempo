@@ -134,6 +134,7 @@ CREATE TABLE ta_oauth_consent (
   scopes jsonb NOT NULL
 );
 CREATE UNIQUE INDEX ux_ta_oauth_consent__client_id__user_id ON ta_oauth_consent (client_id, user_id);
+CREATE INDEX ix_ta_oauth_consent__user_id ON ta_oauth_consent (user_id);
 CREATE TABLE ta_oauth_token (
   id text PRIMARY KEY,
   created_at timestamptz NOT NULL,
@@ -182,6 +183,7 @@ CREATE TABLE ta_oauth_consent (
   scopes TEXT NOT NULL
 );
 CREATE UNIQUE INDEX ux_ta_oauth_consent__client_id__user_id ON ta_oauth_consent (client_id, user_id);
+CREATE INDEX ix_ta_oauth_consent__user_id ON ta_oauth_consent (user_id);
 CREATE TABLE ta_oauth_token (
   id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
