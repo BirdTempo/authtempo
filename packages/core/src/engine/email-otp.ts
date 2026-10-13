@@ -222,13 +222,17 @@ async function countMiss(
       if (!capped) return "invalid_code";
       // Two parallel requests can leave two live codes. The cap spends them
       // all, so every later try answers `too_many_attempts` until a new
-      // request, and the older code gets no more guesses.
+      // request, and the older code gets no more guesses. The `createdAt`
+      // bound keeps a code that a parallel request commits after the cap:
+      // that code is a new request, and its owner must be able to use it
+      // (final re-review of plan 9e, 2026-10-13).
       await storage.update(
         "verification",
         [
           { field: "purpose", op: "eq", value: current.purpose },
           { field: "identifier", op: "eq", value: current.identifier },
           { field: "consumedAt", op: "eq", value: null },
+          { field: "createdAt", op: "lte", value: current.createdAt },
         ],
         { consumedAt: now, updatedAt: now },
       );
