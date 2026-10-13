@@ -56,7 +56,7 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/tokens` | session | `{ tokens: [{ id, name, hint, expiresAt, lastUsedAt, organizationId, createdAt }] }`, newest first, never a token or its hash; 401; 403 `email_unverified` |
 | POST | `/tokens/revoke` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `email_unverified`; 404 `not_found` for another user's token |
 | GET | `/tokens/current` | `Authorization: Bearer tk_…` only | `{ user, apiToken }`; 401 for a session cookie, a `ts_` bearer, or no credential |
-| POST | `/totp/setup` | session | `{ secret, uri, backupCodes }`, each answered once; 401; 403 `email_unverified`; 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
+| POST | `/totp/setup` | session, `{ password }` | `{ secret, uri, backupCodes }`, each answered once; 400 `invalid_body`; 401, `invalid_credentials` (a wrong password; no row is written); 403 `email_unverified`; 429 `rate_limited` (the sign-in's limits); 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
 | POST | `/totp/enable` | session, `{ code }` | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; 400 `invalid_body`, `invalid_code`, `totp_not_enabled` (no setup, or one older than 15 minutes); 401; 403 `email_unverified`; 409 `totp_enabled`; 429 `rate_limited`. Every other session of the user ends with `two_factor` |
 | POST | `/totp/disable` | session, `{ code }` (a current code or a backup code) | `{ ok: true }`, and clears the trust cookie; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 429 `rate_limited` |
 | POST | `/totp/backup-codes` | session, `{ code }` | `{ backupCodes }`, a new list; the old codes stop working; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 409 `conflict` (parallel writes won every try); 429 `rate_limited` |
@@ -454,14 +454,24 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 
 ## Second factor
 
-`totp` (plan 9f) is on when `password` is set. A user turns it on for their own account: `POST /totp/setup` answers the secret, the `otpauth://` URI for a QR code, and the backup codes, each once; `POST /totp/enable` with a current code confirms it. From then on a password sign-in answers a challenge, and the session opens only with a code from the app or a backup code. The magic link, the social sign-in, the passkey, the handoff, and the reset link do not ask for the factor (owner decision of 2026-10-13); a reset ends every session and the challenges.
+`totp` (plan 9f) is on when `password` is set. A user turns it on for their own account: `POST /totp/setup` with the password answers the secret, the `otpauth://` URI for a QR code, and the backup codes, each once; `POST /totp/enable` with a current code confirms it within 15 minutes. The setup takes the password because a session alone must not turn the factor on: a person with a stolen session could enroll an own authenticator, and the enable then ends the owner's sessions and asks every later password sign-in for that person's code. A wrong password answers `invalid_credentials` and writes no row. From then on a password sign-in answers a challenge, and the session opens only with a code from the app or a backup code. The magic link, the social sign-in, the passkey, the handoff, and the reset link do not ask for the factor (owner decision of 2026-10-13); a reset ends every session and the challenges.
 
 - The code: RFC 6238 with SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once: the write of the last step is the check.
-- A challenge lives 5 minutes and takes 5 wrong codes. The verify is limited to 30 per IP per 15 minutes. Enable, disable, the new backup codes, and the verify share 10 code checks per user per 15 minutes.
+- A challenge lives 5 minutes and takes 5 wrong codes. The verify is limited to 30 per IP per 15 minutes. Enable, disable, the new backup codes, and the verify share two per-user limits on every code check: `totp-code:user` (10 per 15 minutes) and `totp-code:user-day` (30 per 24 hours). These two are the limits that bind an attacker who has the password.
+- The per-user limits have a cost: a person who has the password, or a stolen session, can use up the budget with wrong codes. Until the window ends, the owner's verify, enable, and disable answer `rate_limited`. Better Auth's account lockout has the same effect.
 - A trusted device skips the factor for `totp.trustDays` (default 30). Its cookie `tempo_totp_trust` has the path `<basePath>/`. Enable and disable delete the user's trusted devices.
 - The secret is sealed with AES-256-GCM under a key from `secret`. A new app `secret` opens no sealed secret: every user with the factor on then fails the code, and the backup codes too, because they are keyed by `secret` as well. Before you change `secret`, have each such user turn the factor off, or turn it off for them with `api.totp.disable`.
-- There is no per-account lockout. The sign-in's 10 per address and the 5 codes per challenge allow 50 challenge guesses per address per 15 minutes; the shared per-user limit stops the verify at 10 code checks per user in that window.
-- `api.totp` holds the same operations in process, and `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
+- There is no per-account lockout. The sign-in's 10 per address and the 5 codes per challenge allow 50 challenge guesses per address per 15 minutes; the shared per-user limits stop the verify at 10 code checks per user in that window and 30 in a day. One guess passes with odds of 3 in 10⁶ (the three codes of the window). The odds of a takeover by an attacker who has the password, at the full rate:
+
+  | Bound | Guesses | Odds of one success |
+  | --- | --- | --- |
+  | One challenge | 5 | 1.5 × 10⁻⁵ |
+  | One account per day | 30 | 9 × 10⁻⁵ |
+  | One account per year | 10,950 | about 3.2 % |
+
+  The limits are per isolate under the memory limiter: on Workers each isolate counts on its own, so the per-user budgets multiply by the isolate count. The owned D1 and Postgres limiters count once. The per-challenge cap lives in the row and stays global.
+- `api.totp` holds the same operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
+- The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. An app whose `appName` holds a colon sets `totp.issuer`: the key URI uses the colon to split the issuer from the account.
 
 ## API tokens
 
@@ -783,6 +793,8 @@ answers `invalid_token` after the sweep because its row is gone.
 Since plan 8b it also deletes API tokens past their expiry and answers a sixth count, `apiTokens`. A token with no expiry stays.
 
 Since plan 9f it also deletes trusted devices past their expiry and answers `trustedDevices`.
+
+Since the plan 9f final fix wave it also deletes TOTP setups that no enable confirmed within 15 minutes and answers `totpSetups`.
 
 ```ts
 export default {
