@@ -1,8 +1,8 @@
 /**
- * tempo-auth schema version 1 for Postgres. Append-only: never edit a
+ * authtempo schema version 1 for Postgres. Append-only: never edit a
  * shipped migration; add 0002_... for the next version. No explicit schema
  * name, so it runs in whatever search_path the connection has.
- * Names come from @tempo-auth/core/sql: tables ta_<model>, columns snake_case,
+ * Names come from @authtempo/core/sql: tables ta_<model>, columns snake_case,
  * unique indexes ux_<table>__<col>__<col>, indexes ix_<table>__<col>.
  */
 export const name = "0001_schema_v1";

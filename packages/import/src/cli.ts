@@ -3,10 +3,10 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { createPostgresAdapter } from "@tempo-auth/adapter-postgres";
-import { betterAuthSchemaStorage } from "@tempo-auth/compat-better-auth";
-import { normalizeSlug, type StorageAdapter, StorageError } from "@tempo-auth/core";
-import { LEGACY_FORMATS, type LegacyFormat } from "@tempo-auth/legacy-hashes";
+import { createPostgresAdapter } from "@authtempo/adapter-postgres";
+import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
+import { normalizeSlug, type StorageAdapter, StorageError } from "@authtempo/core";
+import { LEGACY_FORMATS, type LegacyFormat } from "@authtempo/legacy-hashes";
 import postgres from "postgres";
 import { importUsers } from "./import.js";
 import { type ImportBundle, PROVIDER_FILES, readSource } from "./sources.js";
@@ -24,7 +24,7 @@ import {
   type SourceName,
 } from "./types.js";
 
-export const USAGE = `tempo-auth-import <provider> [files] (--postgres <url> | --d1-bundle <file>) [options]
+export const USAGE = `authtempo-import <provider> [files] (--postgres <url> | --d1-bundle <file>) [options]
 
 providers and files:
   supabase  --users users.csv --identities identities.csv [--firebase-signer-key k --firebase-salt-separator s]

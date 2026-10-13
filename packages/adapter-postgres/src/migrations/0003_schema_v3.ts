@@ -1,5 +1,5 @@
 /**
- * tempo-auth schema version 3 for Postgres: the owned limiter. Append-only:
+ * authtempo schema version 3 for Postgres: the owned limiter. Append-only:
  * never edit a shipped migration. ta_limit is not a core model: only the
  * limiter reads and writes it. window_start is bigint epoch milliseconds,
  * not timestamptz, so the limiter's one conditional statement compares

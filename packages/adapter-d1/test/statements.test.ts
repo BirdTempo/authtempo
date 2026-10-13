@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
-import { SCHEMA_VERSION, StorageError } from "@tempo-auth/core";
-import { coreStatements, SQLITE, type SqlStatements, TABLES } from "@tempo-auth/core/sql";
+import { SCHEMA_VERSION, StorageError } from "@authtempo/core";
+import { coreStatements, SQLITE, type SqlStatements, TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1AdapterOn, toStorageError } from "../src/index.js";
 import { schemaVersionCheck } from "../src/schema-version.js";

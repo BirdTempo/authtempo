@@ -1,6 +1,6 @@
 /**
  * The known-answer vectors of this package, exported as
- * `@tempo-auth/legacy-hashes/testing` so that other packages' tests use the
+ * `@authtempo/legacy-hashes/testing` so that other packages' tests use the
  * same Firebase project parameters and the same hashes (one source). They
  * are in `src` so that the build ships them in `dist/testing.js`. The
  * Firebase signer key is the public sample key of the firebase/scrypt README,

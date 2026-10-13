@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION } from "@tempo-auth/core";
+import { SCHEMA_VERSION } from "@authtempo/core";
 import type { Sql } from "postgres";
 import { describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";

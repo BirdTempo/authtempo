@@ -1,5 +1,5 @@
-import { createD1AdapterOn, createD1Limiter } from "@tempo-auth/adapter-d1";
-import { createPostgresAdapterOn, createPostgresLimiter } from "@tempo-auth/adapter-postgres";
+import { createD1AdapterOn, createD1Limiter } from "@authtempo/adapter-d1";
+import { createPostgresAdapterOn, createPostgresLimiter } from "@authtempo/adapter-postgres";
 import type { Sql } from "postgres";
 import type { CompatDatabase } from "../types.js";
 import {
@@ -64,7 +64,7 @@ export function betterAuthSchemaStorage(
     const st = compatStatements("sqlite", names);
     const db = options.db as unknown as D1;
     return {
-      kind: "tempo-auth-compat-database",
+      kind: "authtempo-compat-database",
       dialect: "d1",
       names,
       storage: createD1AdapterOn(db, {
@@ -78,7 +78,7 @@ export function betterAuthSchemaStorage(
   }
   const st = compatStatements("postgres", names);
   return {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect: "postgres",
     names,
     storage: createPostgresAdapterOn(options.sql, {

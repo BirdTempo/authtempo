@@ -1,4 +1,4 @@
-import type { encodeValue } from "@tempo-auth/core/sql";
+import type { encodeValue } from "@authtempo/core/sql";
 
 /** A core field type, as `schema` names it. */
 export type CoreFieldType = Parameters<typeof encodeValue>[1];

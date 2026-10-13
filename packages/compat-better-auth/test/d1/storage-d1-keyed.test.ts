@@ -1,5 +1,5 @@
 import { applyD1Migrations, env } from "cloudflare:test";
-import { createAuth, createPbkdf2PasswordHash, type StorageAdapter } from "@tempo-auth/core";
+import { createAuth, createPbkdf2PasswordHash, type StorageAdapter } from "@authtempo/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import { NULL_PASSWORD_LOG } from "../../src/storage/statements.js";

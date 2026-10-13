@@ -1,7 +1,7 @@
-# @tempo-auth/core
+# @authtempo/core
 
 ```ts
-import { createAuth, createMemoryAdapter } from "@tempo-auth/core";
+import { createAuth, createMemoryAdapter } from "@authtempo/core";
 
 const auth = createAuth({
   baseURL: "https://api.example.com",
@@ -182,7 +182,7 @@ script tag. The `methods` input has the flags `magicLink`, `google`, `apple`,
 every configured provider other than Google and Apple. `password` is true when
 the config has a `password` section. A custom `signInPage` must render
 `methods.providers`, or the buttons for GitHub, LinkedIn, and the list
-providers do not show. `@tempo-auth/handoff` (plan 5b) does the app side.
+providers do not show. `@authtempo/handoff` (plan 5b) does the app side.
 
 ## Social sign-in
 
@@ -311,7 +311,7 @@ routes (through `PublicKeyCredential.parseCreationOptionsFromJSON` and
 `parseRequestOptionsFromJSON`), and the credential's `toJSON()` goes back
 as `response`. Plan 5's client package wraps this.
 
-`@tempo-auth/core/testing` exports `SoftAuthenticator`, a software
+`@authtempo/core/testing` exports `SoftAuthenticator`, a software
 authenticator on Web Crypto that produces both responses, so an app's
 tests prove the whole flow without a browser.
 
@@ -428,7 +428,7 @@ Core sends each code mail to the address the code belongs to, whatever
   parallel guesses all count, on D1 and on Postgres. The storage
   conformance suite pins `eq` on a date to the millisecond on every
   adapter. The count stops after `maxAttempts + 1` rounds and answers
-  `invalid_code`, with the log line `tempo-auth: email code count gave up`
+  `invalid_code`, with the log line `authtempo: email code count gave up`
   and the row id, so a storage that never matches cannot hold a request.
 - One address gets at most 20 codes per 24 hours, for both purposes
   together (`otp:email-day:<address>`), after the 15-minute limits. So one
@@ -455,7 +455,7 @@ budgets, the daily cap too, multiply by the isolate count. The per-code cap
 stays global, because it lives in the row.
 
 ```ts
-import { createClient } from "@tempo-auth/client";
+import { createClient } from "@authtempo/client";
 
 const client = createClient({ baseURL: "https://api.example.com" });
 await client.emailOtp.request({ email });
@@ -488,7 +488,7 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 `jwtMint` (plan 9g) is on by default; `jwtMint: false` removes `/jwks`, `/token`, and `api.jwt`. A session JWT is a signed statement about a session user for a server that cannot call `auth.session`.
 
 - The key: `jwtMint.alg` is `EdDSA` (Ed25519, the default) or `ES256` (ECDSA P-256). Core writes the first key at the first use, seals the private half with AES-256-GCM under a key from `secret`, and opens it for one signature at a time. `api.jwt.rotate()` makes a new key; the old one verifies for 24 hours and signs nothing, and the sweep deletes it after that. A new app `secret` opens no old key: the key retires at the next signature with one log line, and a new key signs.
-- Two live versions: during a gradual deployment, two versions of the app with different secrets, or with different `jwtMint.alg` values, retire each other's key at each mint. The JWKS then grows by one key per mint for 24 hours (core lists the signing key and at most 100 retired keys, the last retired first), and a mint can throw after three tries (`tempo-auth: no signing key after three tries`). Finish the deployment: when one version serves every request, one key signs again.
+- Two live versions: during a gradual deployment, two versions of the app with different secrets, or with different `jwtMint.alg` values, retire each other's key at each mint. The JWKS then grows by one key per mint for 24 hours (core lists the signing key and at most 100 retired keys, the last retired first), and a mint can throw after three tries (`authtempo: no signing key after three tries`). Finish the deployment: when one version serves every request, one key signs again.
 - The token: header `{ alg, kid, typ: "JWT" }`; claims `iss` (`baseURL + basePath`), `sub` (the user id), `aud` (`jwtMint.audience`, default `baseURL`), `iat`, `exp` (`jwtMint.ttlMinutes`, 1 to 60, default 15), `sid` (the session id), `email`, `email_verified`, `name`, and `org` (the active organization id or null). `jwtMint.claims(user, session)` adds names and sets none of these, nor `nbf` or `jti`.
 - A resource server verifies the signature against `<basePath>/jwks`, `iss`, `aud`, `exp`, and the header `typ`: `JWT` for a session JWT, `at+jwt` for an OAuth access token (with jose, `jwtVerify(token, jwks, { issuer, audience, typ: "JWT" })`). One key signs both kinds with one issuer, so a server that skips `typ` can take one kind for the other. It keeps the key set in a cache. The token is a bearer for its life: a sign-out does not end it. Keep `ttlMinutes` short, and where a sign-out must end access at once, check the `sid` claim with `api.jwt.sessionLive({ sid })`: true while the session exists and is not expired.
 - Core refuses a config where a `jwtMint.audience` entry is also an `oauth.resources` entry: a server of that audience would take an access token of any client and scope as a session JWT. The default audience is `baseURL`, so a resource equal to `baseURL` needs its own `jwtMint.audience`.
@@ -701,7 +701,7 @@ A hook is your code at a named point of a core flow (plan 9d). Pass plain
 objects of functions in `hooks`:
 
 ```ts
-import { createAuth, hookRefusal } from "@tempo-auth/core";
+import { createAuth, hookRefusal } from "@authtempo/core";
 
 const auth = createAuth({
   // ...
@@ -734,7 +734,7 @@ const auth = createAuth({
   `throw hookRefusal(message)` answers 403 `{ "error": "hook_refused", "message": "…" }`. A message that
   is empty, longer than 200 characters, or holds a control character becomes
   "The app refused this request.". Any other throw answers 500
-  `hook_failed` and logs `tempo-auth: before hook failed <hook> <error name>`.
+  `hook_failed` and logs `authtempo: before hook failed <hook> <error name>`.
   The error name is logged only when it is a plain class name such as
   `TypeError`; any other name logs as `Error`, because the app sets it.
   Either way, no row is written.
@@ -744,7 +744,7 @@ const auth = createAuth({
   stamp's row lock is held while the hook runs, so a slow hook on an owner
   write blocks the other owner writes of that organization.
 - An after hook runs after the commit, before the answer. A throw cannot
-  undo the row: core logs `tempo-auth: after hook failed <hook> <row id>
+  undo the row: core logs `authtempo: after hook failed <hook> <row id>
   <error name>` and answers success. If your app must not keep a core row
   without its own row, write yours in the before hook, with the id core
   minted. Then the residual of a failure is your row with no core row. On
@@ -946,7 +946,7 @@ Without a trigger, expired rows stay in the database.
   not a unique key. Both links work until one is accepted, revoked, or
   expired.
 - On Node, loading @simplewebauthn/server prints one ExperimentalWarning
-  about ML-DSA. It is the library's post-quantum probe, not a tempo-auth
+  about ML-DSA. It is the library's post-quantum probe, not a authtempo
   setting, and workerd prints nothing.
 - Invitation accept is limited to 20 per IP per 15 minutes, in the same per-isolate limiter.
 - Email codes: a request is limited to 3 per address and 20 per IP, and a
@@ -980,4 +980,4 @@ Without a trigger, expired rows stay in the database.
 Six methods: `create`, `findOne`, `findMany`, `update`, `delete`,
 `transaction`. Clauses join with AND. Operators: `eq ne in lt lte gt gte`.
 One sort field. No joins. Run `runAdapterConformance` from
-`@tempo-auth/core/conformance` against a new adapter; it is the contract.
+`@authtempo/core/conformance` against a new adapter; it is the contract.

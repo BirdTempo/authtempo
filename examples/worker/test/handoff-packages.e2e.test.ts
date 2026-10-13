@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
-import { createClient } from "@tempo-auth/client";
-import { createHandoff, type HandoffOpener } from "@tempo-auth/handoff";
+import { createClient } from "@authtempo/client";
+import { createHandoff, type HandoffOpener } from "@authtempo/handoff";
 import { expect, it } from "vitest";
 
 const BASE = "https://example.test";
@@ -39,7 +39,7 @@ const opener: HandoffOpener = {
   },
 };
 
-it("signs in through @tempo-auth/handoff and reads the session through @tempo-auth/client on D1", async () => {
+it("signs in through @authtempo/handoff and reads the session through @authtempo/client on D1", async () => {
   const handoff = createHandoff({ baseURL: BASE, redirect: "example-app://auth", opener, fetch });
   const r = await handoff.signIn();
   expect(r.ok && r.value.user.email).toBe("ada@example.com");

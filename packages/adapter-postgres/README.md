@@ -1,10 +1,10 @@
-# @tempo-auth/adapter-postgres
+# @authtempo/adapter-postgres
 
 The storage adapter for Postgres through postgres.js (`postgres` 3.4.9 or newer, a peer dependency).
 
 ```ts
-import { createAuth } from "@tempo-auth/core";
-import { applyPostgresMigrations, createPostgresAdapter } from "@tempo-auth/adapter-postgres";
+import { createAuth } from "@authtempo/core";
+import { applyPostgresMigrations, createPostgresAdapter } from "@authtempo/adapter-postgres";
 import postgres from "postgres";
 
 const sql = postgres(env.DATABASE_URL, { max: 1, prepare: false, fetch_types: false });
@@ -94,5 +94,5 @@ unique value leave one row. The loser gets `unique_violation`.
 ## Tests
 
 `docker compose up -d` at the repo root, then
-`pnpm --filter @tempo-auth/adapter-postgres test`. Each test gets a fresh
+`pnpm --filter @authtempo/adapter-postgres test`. Each test gets a fresh
 schema. The tests fail, never skip, when Postgres is not reachable.

@@ -3,14 +3,14 @@
 // The owner runs the proof and the break proofs in their own shell. The script builds the client
 // itself (turbo with --force) before it reads packages/client/dist, so do not build by hand.
 // Firefox:
-//   pnpm --filter tempo-auth-example-worker proof:webauthn firefox
-//   PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn firefox
-//   PROOF_FORCE_WEAK=1 PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn firefox
+//   pnpm --filter authtempo-example-worker proof:webauthn firefox
+//   PROOF_STUB_TYPEERROR=1 pnpm --filter authtempo-example-worker proof:webauthn firefox
+//   PROOF_FORCE_WEAK=1 PROOF_STUB_TYPEERROR=1 pnpm --filter authtempo-example-worker proof:webauthn firefox
 // Safari (enable the driver once; it asks for the admin password):
 //   sudo safaridriver --enable
-//   pnpm --filter tempo-auth-example-worker proof:webauthn safari
-//   PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn safari
-//   PROOF_FORCE_WEAK=1 PROOF_STUB_TYPEERROR=1 pnpm --filter tempo-auth-example-worker proof:webauthn safari
+//   pnpm --filter authtempo-example-worker proof:webauthn safari
+//   PROOF_STUB_TYPEERROR=1 pnpm --filter authtempo-example-worker proof:webauthn safari
+//   PROOF_FORCE_WEAK=1 PROOF_STUB_TYPEERROR=1 pnpm --filter authtempo-example-worker proof:webauthn safari
 // For each browser, the first run is the proof. The second must fail on the strong path. The
 // third must fail on the weak path. PROOF_FORCE_WEAK=1 skips the virtual authenticator.
 // FIREFOX_BINARY sets the Firefox binary.
@@ -23,7 +23,7 @@
 // Xray wrapper and not reach the page, and a page expando on window may not be visible from
 // there. So the script injects a <script> element. The whole ceremony (the patches, the client
 // calls, the counters) runs in the page world. It stores its report as JSON text in a DOM node,
-// <script type="application/json" id="tempo-auth-proof"> appended to the body. The WebDriver
+// <script type="application/json" id="authtempo-proof"> appended to the body. The WebDriver
 // script reads that node through the DOM (getElementById, then textContent), which an Xray
 // wrapper shows as is. This is the path used; no window expando carries the report. The page
 // must have no content security policy. The Worker's own 404 page has none, and the script
@@ -75,7 +75,7 @@ const portOpen = (port) =>
 
 // Starts Firefox through `open` with a profile that holds the Marionette port. Answers a stop().
 async function openFirefox(result) {
-  const profile = mkdtempSync(join(tmpdir(), "tempo-auth-proof-firefox-"));
+  const profile = mkdtempSync(join(tmpdir(), "authtempo-proof-firefox-"));
   writeFileSync(
     join(profile, "user.js"),
     [
@@ -162,7 +162,7 @@ const WEBAUTHN_JS = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
   "node_modules",
-  "@tempo-auth",
+  "@authtempo",
   "client",
   "dist",
   "webauthn.js",
@@ -174,7 +174,7 @@ function loadClientSource() {
   // A check that reads build output proves nothing until the build is newer than the change. So
   // build the client from the root with --force (never a cache replay). The build takes seconds;
   // 5 min allows a loaded machine.
-  execFileSync("pnpm", ["-w", "turbo", "run", "build", "--filter=@tempo-auth/client", "--force"], {
+  execFileSync("pnpm", ["-w", "turbo", "run", "build", "--filter=@authtempo/client", "--force"], {
     cwd: ROOT,
     stdio: "inherit",
     timeout: 300_000,
@@ -301,7 +301,7 @@ function pageCeremony(browserWebAuthn, base, bearer, op, mode, stub, abortMs, do
 // The page-world text. The source declares its functions inside the arrow function, so the
 // assignments in pageCeremony reach them. The report, or a throw, goes to the DOM node that the
 // poll reads (see the Xray note in the header).
-const REPORT_ID = "tempo-auth-proof";
+const REPORT_ID = "authtempo-proof";
 const pageText = (op, mode, bearer, abortMs) =>
   `(() => { const save = (r) => { const el = document.createElement("script"); el.type = "application/json"; el.id = ${JSON.stringify(REPORT_ID)}; el.textContent = JSON.stringify(r); (document.body ?? document.documentElement).appendChild(el); }; try { ${source}\n(${pageCeremony.toString()})(browserWebAuthn, ${JSON.stringify(BASE)}, ${JSON.stringify(bearer)}, ${JSON.stringify(op)}, ${JSON.stringify(mode)}, ${JSON.stringify(STUB)}, ${JSON.stringify(abortMs)}, save); } catch (e) { save({ pageError: String(e) }); } })();`;
 // Reads the report through the DOM, never through a window property.

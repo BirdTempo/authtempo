@@ -1,10 +1,10 @@
 {
-  "name": "@tempo-auth/import",
+  "name": "@authtempo/import",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "bin": {
-    "tempo-auth-import": "./dist/cli.js"
+    "authtempo-import": "./dist/cli.js"
   },
   "exports": {
     ".": {
@@ -25,11 +25,11 @@
     "test": "vitest run && vitest run -c vitest.d1.config.ts && node worker/proof/bundle-no-node.mjs && node worker/proof/pack-files.mjs"
   },
   "dependencies": {
-    "@tempo-auth/adapter-d1": "workspace:*",
-    "@tempo-auth/adapter-postgres": "workspace:*",
-    "@tempo-auth/compat-better-auth": "workspace:*",
-    "@tempo-auth/core": "workspace:*",
-    "@tempo-auth/legacy-hashes": "workspace:*",
+    "@authtempo/adapter-d1": "workspace:*",
+    "@authtempo/adapter-postgres": "workspace:*",
+    "@authtempo/compat-better-auth": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@authtempo/legacy-hashes": "workspace:*",
     "postgres": "3.4.9"
   },
   "devDependencies": {

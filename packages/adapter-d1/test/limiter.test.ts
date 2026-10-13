@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
-import { limiterKey } from "@tempo-auth/core";
-import { runLimiterConformance } from "@tempo-auth/core/limiter-conformance";
+import { limiterKey } from "@authtempo/core";
+import { runLimiterConformance } from "@authtempo/core/limiter-conformance";
 import { expect, it } from "vitest";
 import { createD1Limiter } from "../src/index.js";
 

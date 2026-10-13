@@ -1,5 +1,5 @@
 {
-  "name": "@tempo-auth/adapter-d1",
+  "name": "@authtempo/adapter-d1",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tempo-auth/core": "workspace:*"
+    "@authtempo/core": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",

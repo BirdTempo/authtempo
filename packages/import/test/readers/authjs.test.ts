@@ -1,5 +1,5 @@
-import { createMemoryAdapter } from "@tempo-auth/core";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
+import { createMemoryAdapter } from "@authtempo/core";
+import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { authjsSource } from "../../src/readers/authjs.js";
@@ -211,7 +211,7 @@ describe("authjsSource edge rows", () => {
       ],
     ];
     for (const [tables, message] of cases)
-      await expect(all(authjsSource({ tables }))).rejects.toThrow(`tempo-auth import: ${message}`);
+      await expect(all(authjsSource({ tables }))).rejects.toThrow(`authtempo import: ${message}`);
   });
 
   it("throws on a password column that no row has", async () => {

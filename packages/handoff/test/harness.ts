@@ -1,4 +1,4 @@
-import { createAuth, createMemoryAdapter, type MailMessage } from "@tempo-auth/core";
+import { createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import type { HandoffOpener } from "../src/handoff.js";
 
 export const BASE_URL = "https://api.example.com";

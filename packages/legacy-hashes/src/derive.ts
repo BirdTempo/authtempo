@@ -90,12 +90,10 @@ export function decodeFirebase(config: FirebaseHashConfig): {
   const signerKey = decodeBase64(config.signerKey);
   const saltSeparator = decodeBase64(config.saltSeparator);
   if (!signerKey || signerKey.length < 16 || signerKey.length > 64)
-    throw new Error(
-      "tempo-auth legacy-hashes: firebase.signerKey must be base64 of 16 to 64 bytes",
-    );
+    throw new Error("authtempo legacy-hashes: firebase.signerKey must be base64 of 16 to 64 bytes");
   if (!saltSeparator || saltSeparator.length > 16)
     throw new Error(
-      "tempo-auth legacy-hashes: firebase.saltSeparator must be base64 of 0 to 16 bytes",
+      "authtempo legacy-hashes: firebase.saltSeparator must be base64 of 0 to 16 bytes",
     );
   return { signerKey, saltSeparator };
 }

@@ -25,8 +25,8 @@ export default defineConfig(async () => {
     resolve: {
       alias: {
         // The Worker imports the package by its own name; the D1 tests run the source.
-        "@tempo-auth/import": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
-        "tempo-auth-import-input": fileURLToPath(
+        "@authtempo/import": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+        "authtempo-import-input": fileURLToPath(
           new URL("./worker/input/import.json", import.meta.url),
         ),
       },

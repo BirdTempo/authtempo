@@ -65,7 +65,7 @@ function jsonArray(text: string, input: "users" | "organizations"): unknown[] {
   const v = JSON.parse(text) as unknown;
   if (!Array.isArray(v))
     throw new Error(
-      `tempo-auth import: the Clerk ${input} input is not a JSON array (save the data array of every page)`,
+      `authtempo import: the Clerk ${input} input is not a JSON array (save the data array of every page)`,
     );
   return v;
 }

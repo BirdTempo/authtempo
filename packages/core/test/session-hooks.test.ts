@@ -208,7 +208,7 @@ describe("session create hooks (plan 9d)", () => {
       code: "hook_failed",
       status: 500,
     });
-    expect(log.mock.calls).toEqual([["tempo-auth: session patch refused", "the field userId"]]);
+    expect(log.mock.calls).toEqual([["authtempo: session patch refused", "the field userId"]]);
     expect(await bad.auth.storage.findMany("session", [])).toEqual([]);
 
     const refusing = recorded({
@@ -383,7 +383,7 @@ describe("session create hooks (plan 9d)", () => {
     const rows = await auth.storage.findMany("session", []);
     expect(rows).toHaveLength(1);
     expect(log.mock.calls).toEqual([
-      ["tempo-auth: after hook failed", "session.afterCreate", rows[0]?.id, "Error"],
+      ["authtempo: after hook failed", "session.afterCreate", rows[0]?.id, "Error"],
     ]);
   });
 

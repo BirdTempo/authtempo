@@ -76,7 +76,7 @@ function nullableString(value: unknown): value is string | null {
 
 /** One line that says what was wrong, never a value: a value can be an address or an agent string. */
 function refusePatch(what: string): never {
-  console.error("tempo-auth: session patch refused", what);
+  console.error("authtempo: session patch refused", what);
   return stopWith("hook_failed");
 }
 
@@ -177,7 +177,7 @@ export function sessionSteps(
       prepared = await prepareSession(config, { ...open, user }, tx);
     },
     write(tx) {
-      if (!prepared) throw new Error("tempo-auth: the session hook step did not run");
+      if (!prepared) throw new Error("authtempo: the session hook step did not run");
       return writeSession(config, prepared, tx);
     },
   };
@@ -333,7 +333,7 @@ export function readBearer(request: Pick<Request, "headers">): string | null {
 
 /**
  * The cookie wins over the bearer header, so a web page cannot be overridden by a stray header.
- * Public from `@tempo-auth/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
+ * Public from `@authtempo/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
  * the session token with this function, so the cookie and bearer rule has one copy. It reads
  * only `cookieName` and the headers, so the shim passes `{ cookieName }` and `{ headers }`.
  */

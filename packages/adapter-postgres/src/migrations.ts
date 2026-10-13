@@ -25,7 +25,7 @@ export const MIGRATIONS: readonly Migration[] = [
 
 const TABLE = "ta_migrations";
 
-/** One fixed advisory lock key for every tempo-auth migration run. */
+/** One fixed advisory lock key for every authtempo migration run. */
 const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_migrations'))";
 
 /**

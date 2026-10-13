@@ -33,7 +33,7 @@ export function ndjson(text: string): unknown[] {
       try {
         return JSON.parse(l) as unknown;
       } catch {
-        throw new Error(`tempo-auth import: line ${i + 1} is not JSON`);
+        throw new Error(`authtempo import: line ${i + 1} is not JSON`);
       }
     });
 }

@@ -1,4 +1,4 @@
-import { createPbkdf2PasswordHash } from "@tempo-auth/core";
+import { createPbkdf2PasswordHash } from "@authtempo/core";
 import { createLegacyPasswordHash, LEGACY_FORMATS } from "../src/index.js";
 import { FIREBASE, VECTORS } from "../test/vectors.js";
 

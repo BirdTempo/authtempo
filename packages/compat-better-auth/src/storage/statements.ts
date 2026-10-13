@@ -1,12 +1,12 @@
-import { toStorageError as d1StorageError } from "@tempo-auth/adapter-d1";
-import { toStorageError as postgresStorageError } from "@tempo-auth/adapter-postgres";
+import { toStorageError as d1StorageError } from "@authtempo/adapter-d1";
+import { toStorageError as postgresStorageError } from "@authtempo/adapter-postgres";
 import {
   type ModelName,
   PENDING_HASH_PREFIX,
   StorageError,
   schema,
   type Where,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import {
   assertFields,
   assertModel,
@@ -21,7 +21,7 @@ import {
   USER_CHILD_MODELS,
   undoCreateWhere,
   whileNoChildRow,
-} from "@tempo-auth/core/sql";
+} from "@authtempo/core/sql";
 import { type AnyModelMap, MAPPING } from "./mapping.js";
 import { FILLED_DATES, sqliteIsoText } from "./migration.js";
 import { type BetterAuthTable, type Names, TABLE_FIELDS } from "./names.js";
@@ -76,7 +76,7 @@ const SQLITE_SPACE_DATE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(\.\d+)?$/
 export const NULL_PASSWORD_HASH = `${PENDING_HASH_PREFIX}null-password`;
 /** The line the statements log once per storage for such a row, followed by the account id. */
 export const NULL_PASSWORD_LOG =
-  "tempo-auth compat: a credential account row has no password; it reads as no password row";
+  "authtempo compat: a credential account row has no password; it reads as no password row";
 const PG_KEY_RE = /^Key \((.+?)\)=\(/;
 const SQLITE_UNIQUE_RE = /UNIQUE constraint failed: ((?:[\w"]+\.[\w"]+)(?:, [\w"]+\.[\w"]+)*)/;
 

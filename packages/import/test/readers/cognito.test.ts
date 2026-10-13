@@ -1,5 +1,5 @@
-import { createMemoryAdapter, LEGACY_VERIFY_HASH } from "@tempo-auth/core";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
+import { createMemoryAdapter, LEGACY_VERIFY_HASH } from "@authtempo/core";
+import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { cognitoSource } from "../../src/readers/cognito.js";
@@ -213,7 +213,7 @@ describe("cognitoSource edge rows", () => {
     // `aws cognito-idp list-users --query Users` prints a bare array.
     for (const users of ["[]", "{}", '{"Users":{}}'])
       await expect(all(cognitoSource({ users }))).rejects.toThrow(
-        "tempo-auth import: the Cognito users input has no Users array",
+        "authtempo import: the Cognito users input has no Users array",
       );
   });
 

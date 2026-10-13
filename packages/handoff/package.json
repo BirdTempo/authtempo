@@ -1,5 +1,5 @@
 {
-  "name": "@tempo-auth/handoff",
+  "name": "@authtempo/handoff",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -26,8 +26,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tempo-auth/client": "workspace:*",
-    "@tempo-auth/core": "workspace:*"
+    "@authtempo/client": "workspace:*",
+    "@authtempo/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "7.0.2",

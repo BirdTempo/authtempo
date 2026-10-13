@@ -1,11 +1,11 @@
-import { argon2id } from "@noble/hashes/argon2.js";
 import {
   createAuth,
   createMemoryAdapter,
   createPbkdf2PasswordHash,
   deriveGate,
   type PasswordHashSeam,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
+import { argon2id } from "@noble/hashes/argon2.js";
 import bcrypt from "bcryptjs";
 import { describe, expect, it, vi } from "vitest";
 import { type Derives, NOBLE_DERIVES } from "../src/derive.js";

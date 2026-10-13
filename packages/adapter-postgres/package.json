@@ -1,5 +1,5 @@
 {
-  "name": "@tempo-auth/adapter-postgres",
+  "name": "@authtempo/adapter-postgres",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tempo-auth/core": "workspace:*"
+    "@authtempo/core": "workspace:*"
   },
   "peerDependencies": {
     "postgres": "^3.4.9"

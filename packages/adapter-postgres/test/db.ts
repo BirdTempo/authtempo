@@ -14,7 +14,7 @@ async function createSchema(): Promise<string> {
     await admin.unsafe(`CREATE SCHEMA ${name}`);
   } catch (e) {
     throw new Error(
-      `tempo-auth postgres tests need a database at ${PG_URL}: ${(e as Error).message}. Run: docker compose up -d`,
+      `authtempo postgres tests need a database at ${PG_URL}: ${(e as Error).message}. Run: docker compose up -d`,
     );
   } finally {
     await admin.end({ timeout: 5 });

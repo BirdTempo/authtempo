@@ -3,9 +3,9 @@ import {
   betterAuth,
   betterAuthPasswordHash,
   betterAuthSchemaStorage,
-} from "@tempo-auth/compat-better-auth";
-import { bearer, expo, organization } from "@tempo-auth/compat-better-auth/plugins";
-import { createPbkdf2PasswordHash } from "@tempo-auth/core";
+} from "@authtempo/compat-better-auth";
+import { bearer, expo, organization } from "@authtempo/compat-better-auth/plugins";
+import { createPbkdf2PasswordHash } from "@authtempo/core";
 
 let compat: BetterAuthInstance | null = null;
 // Keyed by the address, so a test reads only its own mail, whatever ran before it.
@@ -30,7 +30,7 @@ export function getCompat(env: Env): BetterAuthInstance {
     baseURL: env.BASE_URL,
     basePath: "/api/auth",
     secret: env.AUTH_SECRET,
-    appName: "tempo-auth compat example",
+    appName: "authtempo compat example",
     trustedOrigins: [env.BASE_URL, "reception://"],
     database: betterAuthSchemaStorage({ dialect: "d1", db: env.BA_DB }),
     emailAndPassword: { enabled: true, minPasswordLength: 12, sendResetPassword: record },
@@ -59,7 +59,7 @@ export function getCompat(env: Env): BetterAuthInstance {
     // As for core's instance: 1000 iterations in TEST_MODE only. Production keeps the default cost.
     ...(env.TEST_MODE === "1"
       ? {
-          tempoAuth: {
+          authtempo: {
             passwordHash: betterAuthPasswordHash({
               pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }),
             }),

@@ -260,7 +260,7 @@ type HookFailure = Extract<Result<never>, { ok: false }>;
 export class HookStop extends Error {
   readonly result: HookFailure;
   constructor(result: HookFailure) {
-    super(`tempo-auth: a hook stopped the flow with ${result.code}`);
+    super(`authtempo: a hook stopped the flow with ${result.code}`);
     this.name = "HookStop";
     this.result = result;
   }
@@ -285,7 +285,7 @@ function eventCopy<E>(name: HookName, event: E): { copy: E } | null {
   try {
     return { copy: structuredClone(event) };
   } catch (e) {
-    console.error("tempo-auth: hook event copy failed", name, appErrorName(e));
+    console.error("authtempo: hook event copy failed", name, appErrorName(e));
     return null;
   }
 }
@@ -315,7 +315,7 @@ export async function runBefore<E>(
         status: ERRORS.hook_refused,
         message: publicHookMessage(e.message),
       });
-    console.error("tempo-auth: before hook failed", name, appErrorName(e));
+    console.error("authtempo: before hook failed", name, appErrorName(e));
     throw new HookStop({ ok: false, code: "hook_failed", status: ERRORS.hook_failed });
   }
 }
@@ -337,7 +337,7 @@ export async function runAfter<E>(
   try {
     await hook(copied.copy);
   } catch (e) {
-    console.error("tempo-auth: after hook failed", name, rowId, appErrorName(e));
+    console.error("authtempo: after hook failed", name, rowId, appErrorName(e));
   }
 }
 

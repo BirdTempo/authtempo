@@ -1,10 +1,10 @@
-# @tempo-auth/handoff
+# @authtempo/handoff
 
 This package signs in a native or desktop app through the system
-browser. It does the app side of the handoff of `@tempo-auth/core`. It
+browser. It does the app side of the handoff of `@authtempo/core`. It
 has two adapters, one for Expo and one for Electron. It does not depend
-on Expo or Electron. Its only dependencies are `@tempo-auth/client` and
-`@tempo-auth/core`.
+on Expo or Electron. Its only dependencies are `@authtempo/client` and
+`@authtempo/core`.
 
 ## The flow
 
@@ -22,7 +22,7 @@ verifier leaves the process once, in the redeem body.
 ## createHandoff
 
 ```ts
-import { createHandoff } from "@tempo-auth/handoff";
+import { createHandoff } from "@authtempo/handoff";
 
 const handoff = createHandoff({
   baseURL: "https://api.example.com",
@@ -68,8 +68,8 @@ If it does not, no redeem happens and the code is `redirect_mismatch`.
 ```ts
 import * as WebBrowser from "expo-web-browser";
 import * as Crypto from "expo-crypto";
-import { createHandoff } from "@tempo-auth/handoff";
-import { expoCrypto, expoOpener } from "@tempo-auth/handoff/expo";
+import { createHandoff } from "@authtempo/handoff";
+import { expoCrypto, expoOpener } from "@authtempo/handoff/expo";
 
 const handoff = createHandoff({
   baseURL: "https://api.example.com",
@@ -97,9 +97,9 @@ Run all of this in the main process.
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { app, safeStorage, shell } from "electron";
-import { createClient } from "@tempo-auth/client";
-import { createHandoff } from "@tempo-auth/handoff";
-import { asyncSafeStorageCipher, createTokenStore, electronOpener } from "@tempo-auth/handoff/electron";
+import { createClient } from "@authtempo/client";
+import { createHandoff } from "@authtempo/handoff";
+import { asyncSafeStorageCipher, createTokenStore, electronOpener } from "@authtempo/handoff/electron";
 
 // Without the lock, Windows and Linux start a second app, and the sign-in waits until the timeout.
 // `app.quit()` does not stop this script, so the losing instance must return here.
@@ -206,7 +206,7 @@ Use `127.0.0.1`.
 | `cancelled` | The person closed the browser, or the wait ended. |
 | `redirect_mismatch` | The returned URL is not on the configured `redirect`. No redeem happened. In Electron the opener drops a URL off the redirect, so this code does not appear there and the wait continues. |
 | Core codes | The server's codes pass through, for example `invalid_token`, `token_expired`, `rate_limited`. |
-| `network`, `unexpected` | The same as in `@tempo-auth/client`. |
+| `network`, `unexpected` | The same as in `@authtempo/client`. |
 
 ## Show the signed-in email
 

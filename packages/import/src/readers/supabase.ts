@@ -1,4 +1,4 @@
-import type { FirebaseHashConfig } from "@tempo-auth/legacy-hashes";
+import type { FirebaseHashConfig } from "@authtempo/legacy-hashes";
 import { csvRecords, parseCsv } from "../csv.js";
 import type { ImportUser, Source } from "../types.js";
 import { asRecord, LINKEDIN_LEGACY, noSourceIdUser, parseTime } from "./common.js";
@@ -112,7 +112,7 @@ function requireColumns(file: string, text: string, columns: readonly string[]):
   for (const c of columns)
     if (!header.includes(c))
       throw new Error(
-        `tempo-auth import: the Supabase ${file} file has no ${c} column; run the README's select`,
+        `authtempo import: the Supabase ${file} file has no ${c} column; run the README's select`,
       );
 }
 
@@ -185,7 +185,7 @@ export function supabaseSource(input: SupabaseExport): Source {
         if (pgBool(u.is_anonymous) !== false) record.skip = "anonymous";
         else if (u.deleted_at) record.skip = "deleted";
         else if (bannedNow(u.banned_until, now())) record.skip = "banned";
-        // tempo-auth has no SAML mapping. The email unique index skips SSO users
+        // authtempo has no SAML mapping. The email unique index skips SSO users
         // (users_email_partial_key, migration 20221215195500, read 2026-10-11),
         // so an SSO user can share an address with a password user, and CSV
         // order must not decide who owns it.

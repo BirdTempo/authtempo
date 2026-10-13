@@ -3,8 +3,8 @@ import {
   createMemoryLimiter,
   createPbkdf2PasswordHash,
   systemClock,
-} from "@tempo-auth/core";
-import { base32Decode, totpCode } from "@tempo-auth/core/testing";
+} from "@authtempo/core";
+import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthClient, expoClient, twoFactorClient } from "../src/client/index.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
@@ -30,7 +30,7 @@ function memoryStorage() {
 async function setup(tf: TwoFactorClientOptions = { onTwoFactorRedirect: vi.fn() }) {
   const links: string[] = [];
   const database: CompatDatabase = {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect: "postgres",
     storage: createMemoryAdapter(),
     limiter: createMemoryLimiter(systemClock),
@@ -43,7 +43,7 @@ async function setup(tf: TwoFactorClientOptions = { onTwoFactorRedirect: vi.fn()
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
     emailVerification: { sendVerificationEmail: async (d) => void links.push(d.token) },
     plugins: [bearer(), twoFactor({ accountLockout: { enabled: false } })],
-    tempoAuth: {
+    authtempo: {
       passwordHash: betterAuthPasswordHash({
         pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }),
       }),

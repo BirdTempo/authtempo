@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
-  "name": "tempo-auth-import-d1",
+  "name": "authtempo-import-d1",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-30",
   // The import code runs without Node.js modules, as the app's Worker does.
@@ -20,7 +20,7 @@
   "vars": { "TARGET": "core" },
   // The git-ignored file the CLI's --d1-bundle writes (worker/README.md).
   // The build fails until it exists, so the Worker never runs on old input.
-  "alias": { "tempo-auth-import-input": "./input/import.local.json" },
+  "alias": { "authtempo-import-input": "./input/import.local.json" },
   "d1_databases": [
     {
       "binding": "DB",

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
-import { type ModelName, schema } from "@tempo-auth/core";
-import { runAdapterConformance } from "@tempo-auth/core/conformance";
-import { columnName, columnsOf, TABLES, uniqueIndexName } from "@tempo-auth/core/sql";
+import { type ModelName, schema } from "@authtempo/core";
+import { runAdapterConformance } from "@authtempo/core/conformance";
+import { columnName, columnsOf, TABLES, uniqueIndexName } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 

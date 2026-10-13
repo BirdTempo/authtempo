@@ -1,4 +1,4 @@
-import { createPbkdf2PasswordHash, type StorageAdapter } from "@tempo-auth/core";
+import { createPbkdf2PasswordHash, type StorageAdapter } from "@authtempo/core";
 import type { ImportOrganization, ImportRecord, ImportUser, Source } from "../src/types.js";
 
 export const AT = new Date("2026-10-11T00:00:00.000Z");

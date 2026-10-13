@@ -1,5 +1,5 @@
 {
-  "name": "tempo-auth",
+  "name": "authtempo",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.8.1",

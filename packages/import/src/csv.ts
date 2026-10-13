@@ -33,7 +33,7 @@ export function parseCsv(text: string): string[][] {
       field = "";
     } else field += c;
   }
-  if (quoted) throw new Error("tempo-auth import: the CSV ends inside a quoted field");
+  if (quoted) throw new Error("authtempo import: the CSV ends inside a quoted field");
   if (field.length > 0 || row.length > 0) {
     row.push(field);
     rows.push(row);
@@ -50,7 +50,7 @@ export function csvRecords(text: string): Record<string, string>[] {
     .map((r, n) => {
       if (r.length !== header.length)
         throw new Error(
-          `tempo-auth import: CSV row ${n + 2} has ${r.length} fields, the header has ${header.length}`,
+          `authtempo import: CSV row ${n + 2} has ${r.length} fields, the header has ${header.length}`,
         );
       return Object.fromEntries(header.map((h, i) => [h, r[i] ?? ""]));
     });

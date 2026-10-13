@@ -1,5 +1,5 @@
 /**
- * tempo-auth schema version 5 for Postgres: API tokens. Append-only: never
+ * authtempo schema version 5 for Postgres: API tokens. Append-only: never
  * edit a shipped migration. One row per token. The table holds the SHA-256
  * hex of the token, never the token. The table name is ta_ plus the model
  * name in snake case. The columns keep the field order of the schema.

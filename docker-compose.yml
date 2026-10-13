@@ -3,7 +3,7 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: tempo-auth-postgres
+    container_name: authtempo-postgres
     environment:
       POSTGRES_USER: tempo
       POSTGRES_PASSWORD: tempo

@@ -1,4 +1,4 @@
-import { createAuth, createMemoryAdapter, createPbkdf2PasswordHash } from "@tempo-auth/core";
+import { createAuth, createMemoryAdapter, createPbkdf2PasswordHash } from "@authtempo/core";
 import { describe, expect, it, vi } from "vitest";
 import { betterAuthPasswordHash, nobleScrypt, SCRYPT } from "../src/hash.js";
 

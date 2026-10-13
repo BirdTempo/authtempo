@@ -1,5 +1,5 @@
-import { StorageError } from "@tempo-auth/core";
-import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@tempo-auth/core/sql";
+import { StorageError } from "@authtempo/core";
+import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/core/sql";
 import type { Sql } from "postgres";
 import { ISSUERS } from "./mapping.js";
 import { BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
@@ -315,7 +315,7 @@ const INDEXES: readonly {
 export type SqliteVariant = "1.7" | "before-1.7";
 
 /**
- * Migration 0001: tempo-auth on the Better Auth tables. Append-only:
+ * Migration 0001: authtempo on the Better Auth tables. Append-only:
  * never change the text a shipped name produces. The two added tables are
  * ta_limit (core schema version 3's shape) and ta_meta, last, so a failed
  * run leaves no version row. schema_version is the literal '4', the core
@@ -350,7 +350,7 @@ export function compatMigrationSql(
     lines.push(
       "DO $$ BEGIN",
       `  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = ${schemaExpr} AND table_name IN (${list}) AND data_type = 'timestamp without time zone') THEN`,
-      "    RAISE EXCEPTION 'tempo-auth compat: every Better Auth date column must be timestamptz';",
+      "    RAISE EXCEPTION 'authtempo compat: every Better Auth date column must be timestamptz';",
       "  END IF;",
       "END $$;",
       "CREATE TABLE ta_limit (key text PRIMARY KEY, window_start bigint NOT NULL, count bigint NOT NULL, expires_at bigint NOT NULL);",

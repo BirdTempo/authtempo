@@ -8,8 +8,8 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   PublicSession,
-} from "@tempo-auth/core";
-import { ERRORS } from "@tempo-auth/core/errors";
+} from "@authtempo/core";
+import { ERRORS } from "@authtempo/core/errors";
 import { type ClientResult, fail, ok } from "./result.js";
 import { createTransport, type TransportOptions } from "./transport.js";
 import { type BrowserWebAuthn, browserWebAuthn, WebAuthnCancelled } from "./webauthn.js";

@@ -1,5 +1,5 @@
-import type { ClientCode } from "@tempo-auth/client";
-import { type Auth, TWO_FACTOR_TOKEN_RE } from "@tempo-auth/core";
+import type { ClientCode } from "@authtempo/client";
+import { type Auth, TWO_FACTOR_TOKEN_RE } from "@authtempo/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { Mapped } from "./map-options.js";
 import { readToken, toUser } from "./shapes.js";
@@ -154,7 +154,7 @@ export async function twoFactorRoute(
         typeof id === "string"
           ? await mapped.config.storage.findOne("user", [{ field: "id", op: "eq", value: id }])
           : null;
-      if (!row) throw new Error("tempo-auth compat: the signed-in user is gone");
+      if (!row) throw new Error("authtempo compat: the signed-in user is gone");
       return Response.json(
         { token: out.token, user: { ...toUser(row), twoFactorEnabled: true } },
         { status: 200, headers: answer },

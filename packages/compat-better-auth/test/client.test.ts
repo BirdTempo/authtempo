@@ -1,11 +1,11 @@
-import type { BrowserWebAuthn } from "@tempo-auth/client";
+import type { BrowserWebAuthn } from "@authtempo/client";
 import {
   createMemoryAdapter,
   createMemoryLimiter,
   createPbkdf2PasswordHash,
   systemClock,
-} from "@tempo-auth/core";
-import { SoftAuthenticator } from "@tempo-auth/core/testing";
+} from "@authtempo/core";
+import { SoftAuthenticator } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import readme from "../README.md?raw";
 import {
@@ -28,7 +28,7 @@ function server(o: { minPasswordLength?: number; plugins?: BetterAuthOptions["pl
   const invitations: InvitationEmailData[] = [];
   const mails: { kind: "verify" | "reset"; email: string; token: string }[] = [];
   const database: CompatDatabase = {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect: "postgres",
     storage: createMemoryAdapter(),
     limiter: createMemoryLimiter(systemClock),
@@ -54,7 +54,7 @@ function server(o: { minPasswordLength?: number; plugins?: BetterAuthOptions["pl
       organization({ sendInvitationEmail: async (d) => void invitations.push(d) }),
       ...(o.plugins ?? []),
     ],
-    tempoAuth: {
+    authtempo: {
       passwordHash: betterAuthPasswordHash({
         pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }),
       }),
@@ -341,7 +341,7 @@ describe("createAuthClient: the other calls the apps make", () => {
         customFetchImpl: s.fetchImpl,
         ...(extra.headers ? { headers: extra.headers } : {}),
       },
-      ...(extra.webauthn ? { tempoAuth: { webauthn: extra.webauthn } } : {}),
+      ...(extra.webauthn ? { authtempo: { webauthn: extra.webauthn } } : {}),
     });
 
   it("requests a reset, resets the password, and names the length case by the server's minPasswordLength", async () => {
@@ -743,7 +743,7 @@ describe("one status per code (plan 9b)", () => {
 describe("createAuthClient: the residual throws (plan 9b2)", () => {
   it("refuses a relative or non-http baseURL at construction with one error", () => {
     expect(() => createAuthClient({ baseURL: "/api/auth" })).toThrow(
-      "tempo-auth compat: baseURL must be an absolute http or https URL, for example https://api.example.com/api/auth; got /api/auth",
+      "authtempo compat: baseURL must be an absolute http or https URL, for example https://api.example.com/api/auth; got /api/auth",
     );
     expect(() => createAuthClient({ baseURL: "ftp://files.example.com" })).toThrow(
       /must be an absolute http or https URL/,

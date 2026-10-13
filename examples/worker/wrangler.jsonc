@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tempo-auth-example",
+  "name": "authtempo-example",
   "main": "src/index.ts",
   // Checked against the consumera research of 2026-09-30: workerd supports
   // 2026-09-30. From compatibility date 2026-08-04 Workers turn nodejs_compat
@@ -17,23 +17,23 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "tempo-auth-example",
+      "database_name": "authtempo-example",
       // A placeholder for local tests. A real deploy needs the id that
       // `wrangler d1 create` prints; with this value the deploy fails.
-      "database_id": "tempo-auth-example",
+      "database_id": "authtempo-example",
       // The adapter package ships the migrations. wrangler reads this path
       // relative to this config file, not to the shell's directory. In a
-      // real app the path is node_modules/@tempo-auth/adapter-d1/migrations;
+      // real app the path is node_modules/@authtempo/adapter-d1/migrations;
       // here the workspace link resolves to the same files.
       "migrations_dir": "../../packages/adapter-d1/migrations"
     },
     {
-      // The compat example: Better Auth 1.7's tables with tempo-auth in place (plan 9).
+      // The compat example: Better Auth 1.7's tables with authtempo in place (plan 9).
       // A real app runs Better Auth's own table migration first, then this directory.
       "binding": "BA_DB",
-      "database_name": "tempo-auth-example-better-auth",
+      "database_name": "authtempo-example-better-auth",
       // A placeholder for local tests, as for DB.
-      "database_id": "tempo-auth-example-better-auth",
+      "database_id": "authtempo-example-better-auth",
       "migrations_dir": "../../packages/compat-better-auth/migrations/d1"
     }
   ],

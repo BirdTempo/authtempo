@@ -1,5 +1,5 @@
-import { type ClientCode, createClient } from "@tempo-auth/client";
-import type { PublicSession } from "@tempo-auth/core";
+import { type ClientCode, createClient } from "@authtempo/client";
+import type { PublicSession } from "@authtempo/core";
 import { type HandoffCrypto, makePkce, webCrypto } from "./pkce.js";
 import { parseReturnedUrl } from "./redirect.js";
 

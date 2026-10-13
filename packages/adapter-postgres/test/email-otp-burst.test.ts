@@ -1,4 +1,4 @@
-import { createAuth, type MailMessage } from "@tempo-auth/core";
+import { createAuth, type MailMessage } from "@authtempo/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";

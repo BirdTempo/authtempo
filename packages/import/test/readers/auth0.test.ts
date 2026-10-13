@@ -1,6 +1,6 @@
-import { createMemoryAdapter } from "@tempo-auth/core";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
-import { VECTORS } from "@tempo-auth/legacy-hashes/testing";
+import { createMemoryAdapter } from "@authtempo/core";
+import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
+import { VECTORS } from "@authtempo/legacy-hashes/testing";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { auth0Source } from "../../src/readers/auth0.js";
@@ -236,7 +236,7 @@ describe("auth0Source edge rows", () => {
       organizations: JSON.stringify({ organizations: [] }),
     });
     await expect(source.records()[Symbol.asyncIterator]().next()).rejects.toThrow(
-      "tempo-auth import: the Auth0 organizations input is not a JSON array",
+      "authtempo import: the Auth0 organizations input is not a JSON array",
     );
   });
 

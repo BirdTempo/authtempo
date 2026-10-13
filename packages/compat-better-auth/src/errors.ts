@@ -1,4 +1,4 @@
-import type { ClientCode } from "@tempo-auth/client";
+import type { ClientCode } from "@authtempo/client";
 import type { CompatClientError } from "./types.js";
 
 /**
@@ -33,7 +33,7 @@ export const BETTER_AUTH_CODES = {
   password_policy: "INVALID_PASSWORD",
   password_breached: "PASSWORD_COMPROMISED",
   email_taken: "USER_ALREADY_EXISTS",
-  // tempo-auth's own name: no Better Auth source is in this repo, so no Better
+  // authtempo's own name: no Better Auth source is in this repo, so no Better
   // Auth code was checked. On the compat storage `tempo.api.tokens.create`
   // never answers `token_limit`: it throws `unknown_model` after it takes a
   // limiter slot, because the model is unmapped (spec 8.8 item 9). Only core's
@@ -45,7 +45,7 @@ export const BETTER_AUTH_CODES = {
   organization_limit: "YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS",
   member_limit: "ORGANIZATION_MEMBERSHIP_LIMIT_REACHED",
   invitation_limit: "INVITATION_LIMIT_REACHED",
-  // tempo-auth's own names: Better Auth has no code for a hook's refusal or failure.
+  // authtempo's own names: Better Auth has no code for a hook's refusal or failure.
   hook_refused: "HOOK_REFUSED",
   hook_failed: "HOOK_FAILED",
   // Plan 9e. Better Auth 1.7.2's own names (dist/plugins/email-otp/error-codes.mjs:4-8, read
@@ -56,7 +56,7 @@ export const BETTER_AUTH_CODES = {
   // Plan 9f. TOTP_NOT_ENABLED is Better Auth 1.7.2's own name
   // (dist/plugins/two-factor/error-code.mjs, read 2026-10-13). Better Auth has
   // no code for a factor that is on already: its enable replaces the secret.
-  // TOTP_ALREADY_ENABLED is tempo-auth's own name.
+  // TOTP_ALREADY_ENABLED is authtempo's own name.
   totp_enabled: "TOTP_ALREADY_ENABLED",
   totp_not_enabled: "TOTP_NOT_ENABLED",
   network: "NETWORK_ERROR",
@@ -82,7 +82,7 @@ export const COMPAT_CODES = {
 
 export type CompatCode = keyof typeof COMPAT_CODES;
 
-/** The code of a call that tempo-auth does not serve, with HTTP status 501. */
+/** The code of a call that authtempo does not serve, with HTTP status 501. */
 export const NOT_SUPPORTED = "NOT_SUPPORTED" satisfies CompatCode;
 
 const STATUS_NAMES: Record<number, string> = {

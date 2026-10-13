@@ -205,7 +205,7 @@ describe("seal and openSealed (plan 9f)", () => {
   it("gives nothing for another app secret, another info, another user, or a changed byte (Review Focus 5)", async () => {
     const sealed = await seal(A, INFO, SEED, "u1");
     expect(await openSealed(B, INFO, sealed, "u1")).toBeNull();
-    expect(await openSealed(A, "tempo-auth other", sealed, "u1")).toBeNull();
+    expect(await openSealed(A, "authtempo other", sealed, "u1")).toBeNull();
     expect(await openSealed(A, INFO, sealed, "u2")).toBeNull();
     const last = sealed.at(-2) === "A" ? "B" : "A";
     const changed = `${sealed.slice(0, -2)}${last}${sealed.at(-1) ?? ""}`;

@@ -166,7 +166,7 @@ describe("the runners (plan 9d)", () => {
     });
     expect(r).toEqual({ ok: false, code: "hook_failed", status: 500 });
     expect(log.mock.calls).toEqual([
-      ["tempo-auth: before hook failed", "organization.beforeCreate", "TypeError"],
+      ["authtempo: before hook failed", "organization.beforeCreate", "TypeError"],
     ]);
   });
 
@@ -203,7 +203,7 @@ describe("the runners (plan 9d)", () => {
       ),
     ).resolves.toBeUndefined();
     expect(log.mock.calls).toEqual([
-      ["tempo-auth: after hook failed", "organization.afterCreate", "ORG1", "RangeError"],
+      ["authtempo: after hook failed", "organization.afterCreate", "ORG1", "RangeError"],
     ]);
   });
 
@@ -222,8 +222,8 @@ describe("the runners (plan 9d)", () => {
     ).toEqual({ ok: false, code: "hook_failed", status: 500 });
     await runAfter("organization.afterCreate", leaky, {}, "ORG1");
     expect(log.mock.calls).toEqual([
-      ["tempo-auth: before hook failed", "organization.beforeCreate", "Error"],
-      ["tempo-auth: after hook failed", "organization.afterCreate", "ORG1", "Error"],
+      ["authtempo: before hook failed", "organization.beforeCreate", "Error"],
+      ["authtempo: after hook failed", "organization.afterCreate", "ORG1", "Error"],
     ]);
   });
 
@@ -258,8 +258,8 @@ describe("the runners (plan 9d)", () => {
     ).resolves.toBeUndefined();
     expect(hook).not.toHaveBeenCalled();
     expect(log.mock.calls).toEqual([
-      ["tempo-auth: hook event copy failed", "organization.beforeCreate", "DataCloneError"],
-      ["tempo-auth: hook event copy failed", "organization.afterCreate", "DataCloneError"],
+      ["authtempo: hook event copy failed", "organization.beforeCreate", "DataCloneError"],
+      ["authtempo: hook event copy failed", "organization.afterCreate", "DataCloneError"],
     ]);
   });
 

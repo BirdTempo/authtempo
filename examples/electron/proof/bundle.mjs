@@ -15,9 +15,9 @@ const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LSREGISTER =
   "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 const PLIST_BUDDY = "/usr/libexec/PlistBuddy";
-const BUNDLE_ID = "dev.tempo-auth.example-electron";
+const BUNDLE_ID = "com.authtempo.example-electron";
 // Chromium names the Keychain item "<app name> Safe Storage". The app name comes from productName.
-const KEYCHAIN_SERVICE = "TempoAuthExample Safe Storage";
+const KEYCHAIN_SERVICE = "AuthTempoExample Safe Storage";
 // Every child process has a limit, so a dialog or a stuck tool fails the run, never hangs it.
 // 15 s for a quick tool. 60 s for a copy or a signature of the whole Electron.app (about 250 MB).
 const QUICK = 15_000;
@@ -51,13 +51,13 @@ export function buildBundle(outDir) {
   // From Node, require("electron") answers the path of the binary in Electron.app/Contents/MacOS.
   const binary = require("electron");
   const source = resolve(binary, "..", "..", "..");
-  const app = join(outDir, "TempoAuthExample.app");
+  const app = join(outDir, "AuthTempoExample.app");
   execFileSync("ditto", [source, app], { timeout: SLOW });
   const plist = join(app, "Contents", "Info.plist");
   const pb = (command) =>
     execFileSync(PLIST_BUDDY, ["-c", command, plist], { stdio: "pipe", timeout: QUICK });
   pb(`Set :CFBundleIdentifier ${BUNDLE_ID}`);
-  pb("Set :CFBundleName TempoAuthExample");
+  pb("Set :CFBundleName AuthTempoExample");
   try {
     pb("Delete :CFBundleURLTypes");
   } catch {
@@ -75,8 +75,8 @@ export function buildBundle(outDir) {
   writeFileSync(
     join(appDir, "package.json"),
     JSON.stringify({
-      name: "tempo-auth-example-electron",
-      productName: "TempoAuthExample",
+      name: "authtempo-example-electron",
+      productName: "AuthTempoExample",
       type: "module",
       main: "main.js",
     }),

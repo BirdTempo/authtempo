@@ -200,7 +200,7 @@ async function acceptBackupCode(
     if (n === 1) return left.length;
     current = await config.storage.findOne("totp", [{ field: "id", op: "eq", value: current.id }]);
   }
-  console.error("tempo-auth: backup code spend gave up", row.id);
+  console.error("authtempo: backup code spend gave up", row.id);
   return null;
 }
 
@@ -439,7 +439,7 @@ async function replaceBackupCodes(
     if (n === 1) return ok({ backupCodes: codes });
     current = await config.storage.findOne("totp", [{ field: "id", op: "eq", value: current.id }]);
   }
-  console.error("tempo-auth: backup code replacement gave up", row.id);
+  console.error("authtempo: backup code replacement gave up", row.id);
   return fail("conflict");
 }
 

@@ -120,6 +120,6 @@ export async function countAttempt(
   }
   if (!current || current.consumedAt !== null) return settled(current);
   const kind = row.purpose === "two-factor" ? "second-factor challenge" : "email code";
-  console.error(`tempo-auth: ${kind} count gave up`, row.id);
+  console.error(`authtempo: ${kind} count gave up`, row.id);
   return "invalid_code";
 }

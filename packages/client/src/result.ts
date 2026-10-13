@@ -1,4 +1,4 @@
-import type { ErrorCode } from "@tempo-auth/core/errors";
+import type { ErrorCode } from "@authtempo/core/errors";
 
 /**
  * The core error table, plus the three codes only a client can see:

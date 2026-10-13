@@ -1,4 +1,4 @@
-import { type HooksConfig, hookRefusal } from "@tempo-auth/core";
+import { type HooksConfig, hookRefusal } from "@authtempo/core";
 
 /**
  * TEST_MODE only (plan 9d): hooks that let the end-to-end test prove the

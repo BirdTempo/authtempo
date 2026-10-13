@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
-  "name": "tempo-auth-legacy-hashes-proof",
+  "name": "authtempo-legacy-hashes-proof",
   "main": "worker.ts",
   "compatibility_date": "2026-09-30",
   // Workers turn nodejs_compat on by default from compatibility date

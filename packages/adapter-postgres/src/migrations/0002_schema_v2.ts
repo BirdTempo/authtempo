@@ -1,6 +1,6 @@
 /**
- * tempo-auth schema version 2 for Postgres: organizations. Append-only:
- * never edit a shipped migration. Names come from @tempo-auth/core/sql:
+ * authtempo schema version 2 for Postgres: organizations. Append-only:
+ * never edit a shipped migration. Names come from @authtempo/core/sql:
  * tables ta_<model>, columns snake_case, unique indexes
  * ux_<table>__<col>__<col>, indexes ix_<table>__<col>. The columns keep the
  * field order of the schema, because the D1 parity test checks that order.

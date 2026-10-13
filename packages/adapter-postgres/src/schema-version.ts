@@ -1,4 +1,4 @@
-import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@tempo-auth/core/sql";
+import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/core/sql";
 import type { Sql } from "postgres";
 
 /** Postgres SQLSTATE for "undefined table". */

@@ -3,7 +3,7 @@ import {
   createAuth,
   createMemoryAdapter,
   type MailMessage,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 
 export const BASE_URL = "https://api.example.com";
 export const APP_ORIGIN = "https://app.example.com";

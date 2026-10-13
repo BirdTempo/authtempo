@@ -1,4 +1,4 @@
-import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@tempo-auth/core/sql";
+import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/core/sql";
 
 /**
  * The schema version check for D1, on the core gate. Only a missing table

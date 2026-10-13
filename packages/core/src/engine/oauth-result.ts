@@ -16,7 +16,7 @@ export function oauthFail<T = never>(error: OAuthErrorCode): OAuthResult<T> {
 
 /** The provider config. A route or a call that reaches here exists only while it is on. */
 export function oauthOf(config: ResolvedConfig): ResolvedOAuth {
-  if (!config.oauth) throw new Error("tempo-auth: oauth is off");
+  if (!config.oauth) throw new Error("authtempo: oauth is off");
   return config.oauth;
 }
 

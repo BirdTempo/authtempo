@@ -543,7 +543,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       ).toEqual({ ok: false, code: "invalid_code", status: 400 });
       expect(updates).toBe(backupCodes.length + 1);
       const [row] = await auth.storage.findMany("totp", []);
-      expect(errors).toHaveBeenCalledWith("tempo-auth: backup code spend gave up", row?.id);
+      expect(errors).toHaveBeenCalledWith("authtempo: backup code spend gave up", row?.id);
     } finally {
       errors.mockRestore();
     }
@@ -568,7 +568,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       );
       expect(updates).toBe(5);
       const [row] = await auth.storage.findMany("totp", []);
-      expect(errors).toHaveBeenCalledWith("tempo-auth: backup code replacement gave up", row?.id);
+      expect(errors).toHaveBeenCalledWith("authtempo: backup code replacement gave up", row?.id);
     } finally {
       errors.mockRestore();
     }

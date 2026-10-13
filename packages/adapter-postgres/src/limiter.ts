@@ -1,4 +1,4 @@
-import { type Clock, type LimiterPort, limiterKey, systemClock } from "@tempo-auth/core";
+import { type Clock, type LimiterPort, limiterKey, systemClock } from "@authtempo/core";
 import type { Sql } from "postgres";
 
 /**
@@ -34,7 +34,7 @@ export function createPostgresLimiter(sql: Sql, clock: Clock = systemClock): Lim
         window.seconds * 1000,
       ]);
       const row = rows[0];
-      if (row === undefined) throw new Error("tempo-auth limiter: the upsert returned no row");
+      if (row === undefined) throw new Error("authtempo limiter: the upsert returned no row");
       // postgres.js answers a bigint as a string.
       return Number(row.count) <= window.max;
     },

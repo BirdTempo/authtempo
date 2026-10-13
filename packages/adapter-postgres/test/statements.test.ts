@@ -1,5 +1,5 @@
-import { StorageError } from "@tempo-auth/core";
-import { coreStatements, POSTGRES, type SqlStatements } from "@tempo-auth/core/sql";
+import { StorageError } from "@authtempo/core";
+import { coreStatements, POSTGRES, type SqlStatements } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import { createPostgresAdapterOn, toStorageError } from "../src/index.js";
 import { schemaVersionCheck } from "../src/schema-version.js";

@@ -5,8 +5,8 @@ import {
   createMemoryLimiter,
   type MailMessage,
   type StorageAdapter,
-} from "@tempo-auth/core";
-import { TABLES } from "@tempo-auth/core/sql";
+} from "@authtempo/core";
+import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 

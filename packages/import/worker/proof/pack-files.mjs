@@ -1,4 +1,4 @@
-// The file list of a pack of @tempo-auth/import (plan 9b2). Publication is
+// The file list of a pack of @authtempo/import (plan 9b2). Publication is
 // on hold; this check proves the `files` entry for the day it is not, with
 // no publish. pnpm 12.8.1 prints the list with `pnpm pack --dry-run --json`
 // (checked 2026-10-12).

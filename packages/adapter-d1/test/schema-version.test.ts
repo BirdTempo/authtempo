@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { SCHEMA_VERSION } from "@tempo-auth/core";
+import { SCHEMA_VERSION } from "@authtempo/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 

@@ -8,10 +8,10 @@ import {
   type OrganizationJSON,
   type PasskeySummaryJSON,
   type TwoFactorSessionJSON,
-} from "@tempo-auth/client";
-import type { PublicSession } from "@tempo-auth/core";
-import { createHandoff } from "@tempo-auth/handoff";
-import { expoCrypto, expoOpener } from "@tempo-auth/handoff/expo";
+} from "@authtempo/client";
+import type { PublicSession } from "@authtempo/core";
+import { createHandoff } from "@authtempo/handoff";
+import { expoCrypto, expoOpener } from "@authtempo/handoff/expo";
 import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
 import { COOKIE_NAME, toNext } from "../server/shapes.js";
 import type {
@@ -148,9 +148,9 @@ function safePage(page: string): boolean {
 }
 
 const NO_BASE =
-  "tempo-auth compat: this call has no baseURL and no page location. Pass baseURL to createAuthClient.";
+  "authtempo compat: this call has no baseURL and no page location. Pass baseURL to createAuthClient.";
 
-/** Better Auth's `createAuthClient` on `@tempo-auth/client`. Nothing throws for an answer. */
+/** Better Auth's `createAuthClient` on `@authtempo/client`. Nothing throws for an answer. */
 export function createAuthClient<O extends ClientOptions = ClientOptions>(
   options: O = {} as O,
 ): AuthClient<HasTwoFactorClient<O>> {
@@ -167,7 +167,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     }
     if (!absolute)
       throw new Error(
-        `tempo-auth compat: baseURL must be an absolute http or https URL, for example https://api.example.com/api/auth; got ${options.baseURL}`,
+        `authtempo compat: baseURL must be an absolute http or https URL, for example https://api.example.com/api/auth; got ${options.baseURL}`,
       );
   }
   // The base is resolved at the first call, not here. consumere makes its client at module
@@ -222,7 +222,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     clientError(
       "UNEXPECTED_RESPONSE",
       0,
-      `tempo-auth compat: the token store failed: ${e instanceof Error ? e.message : String(e)}`,
+      `authtempo compat: the token store failed: ${e instanceof Error ? e.message : String(e)}`,
     );
   const dropToken = () => {
     if (expo && storageKey) expo.storage.setItem(storageKey, "");
@@ -256,7 +256,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       fetch: recording,
       credentials: expo ? "omit" : (fo.credentials ?? "include"),
       ...(expo ? { token: readStored } : {}),
-      ...(options.tempoAuth?.webauthn ? { webauthn: options.tempoAuth.webauthn } : {}),
+      ...(options.authtempo?.webauthn ? { webauthn: options.authtempo.webauthn } : {}),
     });
     const r = await op(client);
     if (r.ok) {

@@ -60,9 +60,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function publicJwkOf(jwk: JsonWebKey, alg: JwsAlg, kid: string): PublicJwk {
-  if (typeof jwk.x !== "string") throw new Error("tempo-auth: the public key has no x");
+  if (typeof jwk.x !== "string") throw new Error("authtempo: the public key has no x");
   if (alg === "EdDSA") return { kty: "OKP", crv: "Ed25519", x: jwk.x, kid, alg, use: "sig" };
-  if (typeof jwk.y !== "string") throw new Error("tempo-auth: the public key has no y");
+  if (typeof jwk.y !== "string") throw new Error("authtempo: the public key has no y");
   return { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y, kid, alg, use: "sig" };
 }
 

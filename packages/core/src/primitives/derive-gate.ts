@@ -12,13 +12,13 @@
  * refusal would answer invalid_credentials to a right password under load.
  *
  * `deriveGate` is module state of core, so every seam in one isolate shares
- * it: `createLegacyPasswordHash` of `@tempo-auth/legacy-hashes` and
- * `betterAuthPasswordHash` of `@tempo-auth/compat-better-auth`. A chain of
+ * it: `createLegacyPasswordHash` of `@authtempo/legacy-hashes` and
+ * `betterAuthPasswordHash` of `@authtempo/compat-better-auth`. A chain of
  * both seams runs at most two derives at once, not four. Neither package
  * keeps a gate of its own (plan 9b2).
  *
  * The share holds only with one copy of core in the app. A second copy (two
- * versions of `@tempo-auth/core` in the dependency tree) has a second gate,
+ * versions of `@authtempo/core` in the dependency tree) has a second gate,
  * and a chain can then run four derives. Both seam packages declare core as
  * a peer dependency, so a package manager warns on a version that does not
  * match; keep one version of core.
@@ -40,7 +40,7 @@ export const DERIVE_GATE_MAX = 2;
 export function createDeriveGate(max: number): DeriveGate {
   if (!Number.isSafeInteger(max) || max < 1)
     throw new Error(
-      `tempo-auth: a derive gate needs a whole number of slots of at least 1, not ${String(max)}`,
+      `authtempo: a derive gate needs a whole number of slots of at least 1, not ${String(max)}`,
     );
   let running = 0;
   const queue: Array<() => void> = [];

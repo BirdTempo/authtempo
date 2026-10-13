@@ -3,7 +3,7 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 
 /** The WebAuthn ceremonies as the client sees them: JSON in, JSON out. Tests inject a soft one. */
 export interface BrowserWebAuthn {

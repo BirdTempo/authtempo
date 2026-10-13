@@ -1,5 +1,5 @@
 {
-  "name": "@tempo-auth/legacy-hashes",
+  "name": "@authtempo/legacy-hashes",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -31,11 +31,11 @@
     "bcryptjs": "3.0.3"
   },
   "peerDependencies": {
-    "@tempo-auth/core": "workspace:*"
+    "@authtempo/core": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261007.1",
-    "@tempo-auth/core": "workspace:*",
+    "@authtempo/core": "workspace:*",
     "@types/node": "24.19.1",
     "typescript": "7.0.2",
     "vitest": "5.0.3",

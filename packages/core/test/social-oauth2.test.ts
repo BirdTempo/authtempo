@@ -228,7 +228,7 @@ describe("an oauth2 provider (plan 9c)", () => {
     ]);
     expect(timeout).toHaveBeenCalledWith(PROVIDER_TIMEOUT_MS);
     expect(error).toHaveBeenCalledWith(
-      "tempo-auth: social user info failed",
+      "authtempo: social user info failed",
       "acme",
       "TimeoutError",
     );
@@ -277,7 +277,7 @@ describe("an oauth2 provider (plan 9c)", () => {
       code: "oauth_failed",
     });
     expect(called).toBe(0);
-    expect(error).toHaveBeenCalledWith("tempo-auth: social token answer has no token", "acme");
+    expect(error).toHaveBeenCalledWith("authtempo: social token answer has no token", "acme");
     for (const a of [a1, a2, a3]) expect(await a.storage.findMany("user", [])).toHaveLength(0);
   });
 
@@ -351,7 +351,7 @@ describe("an oauth2 provider (plan 9c)", () => {
       ok: false,
       code: "oauth_failed",
     });
-    expect(error).toHaveBeenCalledWith("tempo-auth: social user info failed", "acme", "Error");
+    expect(error).toHaveBeenCalledWith("authtempo: social user info failed", "acme", "Error");
     expect(JSON.stringify(error.mock.calls)).not.toContain(ACCESS);
   });
 
@@ -366,7 +366,7 @@ describe("an oauth2 provider (plan 9c)", () => {
       expect(await auth.storage.findMany("identity", [])).toEqual([]);
       expect(await auth.storage.findMany("user", [])).toEqual([]);
     }
-    expect(error).toHaveBeenCalledWith("tempo-auth: social user info has a bad subject", "acme");
+    expect(error).toHaveBeenCalledWith("authtempo: social user info has a bad subject", "acme");
     expect(error).toHaveBeenCalledTimes(3);
     const max = acmeAuth(async () => ({ ...PERSON, subject: "s".repeat(255) }));
     expect((await complete(max, await started(max))).ok).toBe(true);

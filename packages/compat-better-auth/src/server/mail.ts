@@ -1,4 +1,4 @@
-import type { MailMessage, MailPort, StorageAdapter } from "@tempo-auth/core";
+import type { MailMessage, MailPort, StorageAdapter } from "@authtempo/core";
 import type {
   EmailOtpOptions,
   InvitationEmailData,
@@ -30,7 +30,7 @@ export function otpMail(
 ): MailMessage {
   return {
     to,
-    subject: "tempo-auth compat email code",
+    subject: "authtempo compat email code",
     text: `\n\n${OTP_LINK_PREFIX}${type}:${code}\n\n`,
   };
 }
@@ -70,22 +70,21 @@ export function compatMail(routes: MailRoutes): MailPort {
   // The verify mail follows a sign-up, so its user row exists; a missing row is a bug.
   const knownUser = async (email: string) => {
     const u = await userByEmail(email);
-    if (!u) throw new Error("tempo-auth compat: no user for the verify mail");
+    if (!u) throw new Error("authtempo compat: no user for the verify mail");
     return u;
   };
   return {
     async send(message) {
       const link = LINK_RE.exec(message.text)?.[1];
-      if (!link)
-        throw new Error(`tempo-auth compat: the mail "${message.subject}" carries no link`);
+      if (!link) throw new Error(`authtempo compat: the mail "${message.subject}" carries no link`);
       if (link.startsWith(INVITATION_LINK_PREFIX)) {
         const cb = routes.sendInvitationEmail;
-        if (!cb) throw new Error("tempo-auth compat: no sendInvitationEmail");
+        if (!cb) throw new Error("authtempo compat: no sendInvitationEmail");
         const token = link.slice(INVITATION_LINK_PREFIX.length);
         const row = await routes.storage.findOne("invitation", [
           { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
         ]);
-        if (!row) throw new Error("tempo-auth compat: the invitation of this mail is gone");
+        if (!row) throw new Error("authtempo compat: the invitation of this mail is gone");
         const org = await routes.storage.findOne("organization", [
           { field: "id", op: "eq", value: row.organizationId },
         ]);
@@ -94,7 +93,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         ]);
         if (!org || !inviter)
           throw new Error(
-            "tempo-auth compat: the organization or the inviter of this invitation is gone",
+            "authtempo compat: the organization or the inviter of this invitation is gone",
           );
         const invitation = toInvitation(row, token, "pending");
         const data: InvitationEmailData = {
@@ -110,10 +109,10 @@ export function compatMail(routes: MailRoutes): MailPort {
       }
       if (link.startsWith(OTP_LINK_PREFIX)) {
         const cb = routes.sendVerificationOTP;
-        if (!cb) throw new Error("tempo-auth compat: no sendVerificationOTP");
+        if (!cb) throw new Error("authtempo compat: no sendVerificationOTP");
         const [type, otp] = link.slice(OTP_LINK_PREFIX.length).split(":");
         if ((type !== "sign-in" && type !== "forget-password") || !otp)
-          throw new Error("tempo-auth compat: the email code mail is malformed");
+          throw new Error("authtempo compat: the email code mail is malformed");
         // Better Auth sends a reset code only to an address with a user
         // (routes.mjs requestPasswordResetEmailOTP, read 2026-10-13). Send
         // nothing and do not throw: a throw answers 500, and that difference
@@ -125,7 +124,7 @@ export function compatMail(routes: MailRoutes): MailPort {
       const token = new URL(link).searchParams.get("token") ?? "";
       if (link.startsWith(`${prefix}/password/verify?`)) {
         if (!routes.sendVerificationEmail)
-          throw new Error("tempo-auth compat: no sendVerificationEmail");
+          throw new Error("authtempo compat: no sendVerificationEmail");
         await routes.sendVerificationEmail({
           user: await knownUser(message.to),
           url: link,
@@ -134,7 +133,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         return;
       }
       if (link.startsWith(`${prefix}/password/reset?`)) {
-        if (!routes.sendResetPassword) throw new Error("tempo-auth compat: no sendResetPassword");
+        if (!routes.sendResetPassword) throw new Error("authtempo compat: no sendResetPassword");
         // Core mails a reset link to every address and answers 200 for each,
         // so the answer tells no one which address has an account. With no
         // user row, send nothing and do not throw: a throw answers 500, and
@@ -145,12 +144,12 @@ export function compatMail(routes: MailRoutes): MailPort {
         return;
       }
       if (link.startsWith(`${prefix}/magic-link/verify?`)) {
-        if (!routes.sendMagicLink) throw new Error("tempo-auth compat: no sendMagicLink");
+        if (!routes.sendMagicLink) throw new Error("authtempo compat: no sendMagicLink");
         await routes.sendMagicLink({ email: message.to, url: link, token });
         return;
       }
       throw new Error(
-        `tempo-auth compat: no Better Auth send callback for the mail "${message.subject}"`,
+        `authtempo compat: no Better Auth send callback for the mail "${message.subject}"`,
       );
     },
   };

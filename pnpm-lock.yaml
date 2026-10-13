@@ -181,10 +181,10 @@ importers:
 
   examples/electron:
     devDependencies:
-      '@tempo-auth/client':
+      '@authtempo/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@tempo-auth/handoff':
+      '@authtempo/handoff':
         specifier: workspace:*
         version: link:../../packages/handoff
       '@types/node':
@@ -199,28 +199,28 @@ importers:
 
   examples/worker:
     dependencies:
-      '@tempo-auth/adapter-d1':
+      '@authtempo/adapter-d1':
         specifier: workspace:*
         version: link:../../packages/adapter-d1
-      '@tempo-auth/adapter-postgres':
+      '@authtempo/adapter-postgres':
         specifier: workspace:*
         version: link:../../packages/adapter-postgres
-      '@tempo-auth/client':
+      '@authtempo/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@tempo-auth/compat-better-auth':
+      '@authtempo/compat-better-auth':
         specifier: workspace:*
         version: link:../../packages/compat-better-auth
-      '@tempo-auth/core':
+      '@authtempo/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@tempo-auth/handoff':
+      '@authtempo/handoff':
         specifier: workspace:*
         version: link:../../packages/handoff
-      '@tempo-auth/import':
+      '@authtempo/import':
         specifier: workspace:*
         version: link:../../packages/import
-      '@tempo-auth/legacy-hashes':
+      '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../../packages/legacy-hashes
     devDependencies:
@@ -242,7 +242,7 @@ importers:
 
   packages/adapter-d1:
     dependencies:
-      '@tempo-auth/core':
+      '@authtempo/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -264,7 +264,7 @@ importers:
 
   packages/adapter-postgres:
     dependencies:
-      '@tempo-auth/core':
+      '@authtempo/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -280,7 +280,7 @@ importers:
 
   packages/client:
     dependencies:
-      '@tempo-auth/core':
+      '@authtempo/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -297,27 +297,27 @@ importers:
         specifier: 2.4.0
         version: 2.4.0
     devDependencies:
+      '@authtempo/adapter-d1':
+        specifier: workspace:*
+        version: link:../adapter-d1
+      '@authtempo/adapter-postgres':
+        specifier: workspace:*
+        version: link:../adapter-postgres
+      '@authtempo/client':
+        specifier: workspace:*
+        version: link:../client
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../core
+      '@authtempo/handoff':
+        specifier: workspace:*
+        version: link:../handoff
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
         version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)))
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
-      '@tempo-auth/adapter-d1':
-        specifier: workspace:*
-        version: link:../adapter-d1
-      '@tempo-auth/adapter-postgres':
-        specifier: workspace:*
-        version: link:../adapter-postgres
-      '@tempo-auth/client':
-        specifier: workspace:*
-        version: link:../client
-      '@tempo-auth/core':
-        specifier: workspace:*
-        version: link:../core
-      '@tempo-auth/handoff':
-        specifier: workspace:*
-        version: link:../handoff
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1
@@ -370,10 +370,10 @@ importers:
 
   packages/handoff:
     dependencies:
-      '@tempo-auth/client':
+      '@authtempo/client':
         specifier: workspace:*
         version: link:../client
-      '@tempo-auth/core':
+      '@authtempo/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -386,19 +386,19 @@ importers:
 
   packages/import:
     dependencies:
-      '@tempo-auth/adapter-d1':
+      '@authtempo/adapter-d1':
         specifier: workspace:*
         version: link:../adapter-d1
-      '@tempo-auth/adapter-postgres':
+      '@authtempo/adapter-postgres':
         specifier: workspace:*
         version: link:../adapter-postgres
-      '@tempo-auth/compat-better-auth':
+      '@authtempo/compat-better-auth':
         specifier: workspace:*
         version: link:../compat-better-auth
-      '@tempo-auth/core':
+      '@authtempo/core':
         specifier: workspace:*
         version: link:../core
-      '@tempo-auth/legacy-hashes':
+      '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../legacy-hashes
       postgres:
@@ -436,12 +436,12 @@ importers:
         specifier: 3.0.3
         version: 3.0.3
     devDependencies:
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../core
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
-      '@tempo-auth/core':
-        specifier: workspace:*
-        version: link:../core
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1

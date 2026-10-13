@@ -1,4 +1,4 @@
-import type { OAuth2Entry, SocialProfile } from "@tempo-auth/core";
+import type { OAuth2Entry, SocialProfile } from "@authtempo/core";
 
 /**
  * TEST_MODE only (plan 9c): a fake OAuth2 provider served by this Worker

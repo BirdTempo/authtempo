@@ -1,7 +1,7 @@
-import { betterAuthPasswordHash } from "@tempo-auth/compat-better-auth";
-import { createPbkdf2PasswordHash, deriveGate } from "@tempo-auth/core";
-import { createLegacyPasswordHash, type Derives, NOBLE_DERIVES } from "@tempo-auth/legacy-hashes";
-import { VECTORS } from "@tempo-auth/legacy-hashes/testing";
+import { betterAuthPasswordHash } from "@authtempo/compat-better-auth";
+import { createPbkdf2PasswordHash, deriveGate } from "@authtempo/core";
+import { createLegacyPasswordHash, type Derives, NOBLE_DERIVES } from "@authtempo/legacy-hashes";
+import { VECTORS } from "@authtempo/legacy-hashes/testing";
 import { describe, expect, it } from "vitest";
 
 /**

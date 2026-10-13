@@ -3,7 +3,7 @@ import {
   defaultSignInPage,
   type LimiterPort,
   type SignInPageInput,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import { betterAuthPasswordHash } from "../hash.js";
 import {
   type BetterAuthOptions,
@@ -51,7 +51,7 @@ export interface Mapped {
   /** The ids of the compat plugins in use. */
   plugins: Set<string>;
   clientIp: (request: Request) => string | null;
-  /** Where core lands a sign-in: `tempoAuth.appURL`, else the origin of baseURL. */
+  /** Where core lands a sign-in: `authtempo.appURL`, else the origin of baseURL. */
   appOrigin: string;
   /** `emailAndPassword.minPasswordLength` or Better Auth's default, for the length codes. */
   minPasswordLength: number;
@@ -205,7 +205,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     secret: options.secret ?? "",
     trustedOrigins: Array.isArray(options.trustedOrigins) ? [...options.trustedOrigins] : [],
     ...(options.appName !== undefined ? { appName: options.appName } : {}),
-    ...(options.tempoAuth?.appURL !== undefined ? { appURL: options.tempoAuth.appURL } : {}),
+    ...(options.authtempo?.appURL !== undefined ? { appURL: options.authtempo.appURL } : {}),
     // One name in this package (shapes.ts), passed to core, so core and the shim read one cookie.
     cookieName: COOKIE_NAME,
     storage: database.storage,
@@ -292,7 +292,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     ...(ep?.enabled === true
       ? {
           password: {
-            hash: options.tempoAuth?.passwordHash ?? betterAuthPasswordHash(),
+            hash: options.authtempo?.passwordHash ?? betterAuthPasswordHash(),
             minLength: ep.minPasswordLength ?? BETTER_AUTH_DEFAULTS.minPasswordLength,
             resetTtlMinutes:
               (ep.resetPasswordTokenExpiresIn ?? BETTER_AUTH_DEFAULTS.resetPasswordTokenExpiresIn) /
@@ -309,7 +309,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     basePath,
     plugins,
     clientIp: clientIp ?? ((r) => r.headers.get("cf-connecting-ip") || null),
-    appOrigin: options.tempoAuth?.appURL ?? origin,
+    appOrigin: options.authtempo?.appURL ?? origin,
     minPasswordLength: ep?.minPasswordLength ?? BETTER_AUTH_DEFAULTS.minPasswordLength,
   };
 }

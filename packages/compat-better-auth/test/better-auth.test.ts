@@ -5,7 +5,7 @@ import {
   ERRORS,
   type LimiterPort,
   systemClock,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import { describe, expect, it, vi } from "vitest";
 import { type DrizzleAdapterConfig, drizzleAdapter } from "../src/adapters/drizzle.js";
 import {
@@ -27,7 +27,7 @@ const OTHER = "https://other.example.com";
 function memoryDatabase(): CompatDatabase {
   // A test database: core's memory adapter under the compat kind. The SQL storage has its own tests (Tasks 5 and 6).
   return {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect: "postgres",
     storage: createMemoryAdapter(),
     limiter: createMemoryLimiter(systemClock),
@@ -53,7 +53,7 @@ function app(extra: Record<string, unknown> = {}) {
         sent.push({ kind: "verify", data });
       },
     },
-    tempoAuth: { passwordHash: fast },
+    authtempo: { passwordHash: fast },
     ...extra,
   });
   return { auth, sent };
@@ -70,7 +70,7 @@ describe("betterAuth", () => {
         secondaryStorage: {},
       }),
     ).toThrowError(
-      "tempo-auth compat: this config uses 2 items that tempo-auth cannot keep:\n- hooks: core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe\n- secondaryStorage: core keeps sessions in the session table; secondary storage is refused",
+      "authtempo compat: this config uses 2 items that authtempo cannot keep:\n- hooks: core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe\n- secondaryStorage: core keeps sessions in the session table; secondary storage is refused",
     );
   });
 
@@ -87,7 +87,7 @@ describe("betterAuth", () => {
         hooks: {},
       } as BetterAuthOptions),
     ).toThrowError(
-      "tempo-auth compat: this config uses 3 items that tempo-auth cannot keep:\n- database.casing: drizzleAdapter accepts provider, schema, usePlural, transaction, and debugLogs only\n- database: drizzleAdapter needs a Drizzle database on postgres.js (drizzle-orm/postgres-js); other drivers are refused\n- hooks: core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe",
+      "authtempo compat: this config uses 3 items that authtempo cannot keep:\n- database.casing: drizzleAdapter accepts provider, schema, usePlural, transaction, and debugLogs only\n- database: drizzleAdapter needs a Drizzle database on postgres.js (drizzle-orm/postgres-js); other drivers are refused\n- hooks: core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe",
     );
   });
 
@@ -111,7 +111,7 @@ describe("betterAuth", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ session: { cookieCache: { enabled: true, maxAge: 60 } } });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: session.cookieCache: accepted and has no effect: every request reads the session row",
+      "authtempo compat: session.cookieCache: accepted and has no effect: every request reads the session row",
     );
     info.mockRestore();
   });
@@ -194,7 +194,7 @@ describe("betterAuth", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ plugins: [magicLink({ sendMagicLink: async () => {} })] });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: emailVerification.expiresIn: not set: the verify link lives 300 s, the magic link's lifetime, not Better Auth's verify default of 3600 s",
+      "authtempo compat: emailVerification.expiresIn: not set: the verify link lives 300 s, the magic link's lifetime, not Better Auth's verify default of 3600 s",
     );
     info.mockRestore();
   });
@@ -203,7 +203,7 @@ describe("betterAuth", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ advanced: { ipAddress: { disableIpTracking: true } } });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, the email codes, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit, and can guess 10 email codes on each of many addresses per 15 minutes (at most 100 a day per address), about 1 takeover per 100,000 addresses per window, and each address gets the code mails",
+      "authtempo compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, the email codes, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit, and can guess 10 email codes on each of many addresses per 15 minutes (at most 100 a day per address), about 1 takeover per 100,000 addresses per window, and each address gets the code mails",
     );
     info.mockRestore();
     const m = mapOptions({
@@ -277,7 +277,7 @@ describe("betterAuth", () => {
     ]).toEqual([null, null, null, null]);
     const { auth } = app({
       trustedOrigins: [APP, OTHER],
-      tempoAuth: { passwordHash: fast, appURL: APP },
+      authtempo: { passwordHash: fast, appURL: APP },
       plugins: [magicLink({ sendMagicLink: async () => {} })],
     });
     expect(

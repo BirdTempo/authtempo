@@ -1,5 +1,5 @@
-import { createPbkdf2PasswordHash } from "@tempo-auth/core";
-import { base32Decode, totpCode } from "@tempo-auth/core/testing";
+import { createPbkdf2PasswordHash } from "@authtempo/core";
+import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { describe, expect, it } from "vitest";
 import { createClient } from "../src/client.js";
 import { BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.js";

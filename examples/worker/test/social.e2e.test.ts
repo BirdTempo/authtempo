@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { createJoseJwtSeam } from "@tempo-auth/core";
+import { createJoseJwtSeam } from "@authtempo/core";
 import { expect, it } from "vitest";
 
 const BASE = "https://example.test";

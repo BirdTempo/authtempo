@@ -1,4 +1,4 @@
-import { LEGACY_FORMATS, type LegacyFormat } from "@tempo-auth/legacy-hashes";
+import { LEGACY_FORMATS, type LegacyFormat } from "@authtempo/legacy-hashes";
 import { auth0Source } from "./readers/auth0.js";
 import { authjsSource } from "./readers/authjs.js";
 import { clerkSource } from "./readers/clerk.js";
@@ -37,12 +37,12 @@ const FILE_NAMES = ["users", "identities", "csv", "hashes", "organizations", "ta
 type FileName = (typeof FILE_NAMES)[number];
 
 function invalid(field: string, problem: string): never {
-  throw new Error(`tempo-auth import: the bundle field ${field} ${problem}`);
+  throw new Error(`authtempo import: the bundle field ${field} ${problem}`);
 }
 
 /** An error in the options of the D1 input, in the words of worker/src/run.ts. */
 function badInput(field: string, problem: string): never {
-  throw new Error(`tempo-auth import: the D1 input field ${field} ${problem}`);
+  throw new Error(`authtempo import: the D1 input field ${field} ${problem}`);
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -185,7 +185,7 @@ export async function readSource(bundle: ImportBundle): Promise<Source> {
 
 function need(b: ImportBundle, name: keyof ImportBundle["files"]): string {
   const text = b.files[name];
-  if (text === undefined) throw new Error(`tempo-auth import: ${b.provider} needs --${name}`);
+  if (text === undefined) throw new Error(`authtempo import: ${b.provider} needs --${name}`);
   return text;
 }
 
@@ -220,7 +220,7 @@ export function sourceOf(b: ImportBundle): Source {
       const f = b.firebase;
       if (f?.rounds === undefined || f.memCost === undefined)
         throw new Error(
-          "tempo-auth import: firebase needs --firebase-rounds and --firebase-mem-cost",
+          "authtempo import: firebase needs --firebase-rounds and --firebase-mem-cost",
         );
       return firebaseSource({
         users: need(b, "users"),
@@ -238,7 +238,7 @@ export function sourceOf(b: ImportBundle): Source {
     default:
       // A bundle from a file can name any text; bundleOf refuses it first.
       throw new Error(
-        `tempo-auth import: unknown provider ${String((b as { provider: unknown }).provider)}`,
+        `authtempo import: unknown provider ${String((b as { provider: unknown }).provider)}`,
       );
   }
 }

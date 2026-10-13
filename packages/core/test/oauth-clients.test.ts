@@ -237,7 +237,7 @@ describe("client ID metadata documents (plan 9g)", () => {
     expect(await findClient(auth.config, DOC_URL)).toBeNull();
     expect(await auth.storage.findMany("oauthClient", [])).toEqual([]);
     expect(log).toHaveBeenCalledWith(
-      "tempo-auth: client metadata document refused",
+      "authtempo: client metadata document refused",
       "client_id is not the document URL",
     );
   });

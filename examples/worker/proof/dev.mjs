@@ -62,7 +62,7 @@ async function waitFor(condition, ms) {
 export async function startWorker() {
   if (await answers(BASE))
     throw new Error(`port 8787 answers already; stop the other wrangler dev first`);
-  const persist = mkdtempSync(join(tmpdir(), "tempo-auth-proof-d1-"));
+  const persist = mkdtempSync(join(tmpdir(), "authtempo-proof-d1-"));
   // CI=1 makes wrangler skip its confirm prompt.
   const env = { ...process.env, CI: "1" };
   // Every child process in the proofs has a limit. The local apply takes a few seconds; 2 min
@@ -190,7 +190,7 @@ export async function playBrowser(startUrl, email) {
     .join("; ");
   const confirm = await http(`${BASE}${cont}`, { redirect: "manual", headers: { cookie } });
   expectStatus(confirm, 200, "GET the continue path");
-  if (!(await confirm.text()).includes("Continue to tempo-auth example?"))
+  if (!(await confirm.text()).includes("Continue to authtempo example?"))
     throw new Error("the continue page has no confirm prompt");
   const h = new URL(`${BASE}${cont}`).searchParams.get("h") ?? "";
   const next = await http(`${BASE}/auth/handoff/continue`, {

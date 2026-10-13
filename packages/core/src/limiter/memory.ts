@@ -13,7 +13,7 @@ export function limiterKey(key: string, window: LimitWindow): string {
   // A key with it would alias another window.
   if (key.includes(KEY_SEPARATOR)) {
     throw new Error(
-      "tempo-auth limiter: a key must not contain U+001F, the separator of the stored key",
+      "authtempo limiter: a key must not contain U+001F, the separator of the stored key",
     );
   }
   // A zero or fractional window has no meaning: `max: 0` refuses all on SQL
@@ -21,7 +21,7 @@ export function limiterKey(key: string, window: LimitWindow): string {
   // Postgres also casts the window milliseconds to bigint.
   if (!isPositiveSafeInteger(window.seconds) || !isPositiveSafeInteger(window.max)) {
     throw new Error(
-      `tempo-auth limiter: seconds and max must be positive safe integers, got ${window.seconds} and ${window.max}`,
+      `authtempo limiter: seconds and max must be positive safe integers, got ${window.seconds} and ${window.max}`,
     );
   }
   return `${key}${KEY_SEPARATOR}${window.seconds}${KEY_SEPARATOR}${window.max}`;

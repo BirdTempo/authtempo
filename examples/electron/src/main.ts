@@ -4,14 +4,14 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createClient } from "@tempo-auth/client";
-import { createHandoff } from "@tempo-auth/handoff";
+import { createClient } from "@authtempo/client";
+import { createHandoff } from "@authtempo/handoff";
 import {
   asyncSafeStorageCipher,
   createTokenStore,
   type ElectronShellLike,
   electronOpener,
-} from "@tempo-auth/handoff/electron";
+} from "@authtempo/handoff/electron";
 import { app, safeStorage, shell } from "electron";
 
 const SCHEME = "example-app";

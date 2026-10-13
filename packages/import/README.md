@@ -1,13 +1,13 @@
-# @tempo-auth/import
+# @authtempo/import
 
 Moves users, social identities (Google, Apple, GitHub, and LinkedIn), password hashes, Auth.js
-passkeys, organizations, and members into tempo-auth (spec 17). No session
+passkeys, organizations, and members into authtempo (spec 17). No session
 moves from any source, and no MFA secret moves (spec 17.5). Passkeys move only
 from Auth.js. A Clerk, Supabase, Auth0, Firebase, or Cognito passkey needs a
 new enrolment.
 
 ```bash
-tempo-auth-import <provider> [files] --formats <the seam's list> --postgres "$DATABASE_URL" --dry-run
+authtempo-import <provider> [files] --formats <the seam's list> --postgres "$DATABASE_URL" --dry-run
 ```
 
 Run `--dry-run` first. It prints the report a real run prints. The importer
@@ -105,13 +105,13 @@ Two CSV files from the database; the Admin API returns no hash:
 ```bash
 psql "$SUPABASE_DB_URL" -c "\copy (select id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, is_anonymous, deleted_at, banned_until, is_sso_user from auth.users) to 'users.csv' with csv header"
 psql "$SUPABASE_DB_URL" -c "\copy (select provider, provider_id, user_id from auth.identities) to 'identities.csv' with csv header"
-tempo-auth-import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --postgres "$DATABASE_URL"
+authtempo-import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --postgres "$DATABASE_URL"
 ```
 
 - Every column of the two selects must be in the header. A missing column
   stops the run before any read, because an empty `banned_until` or
   `is_sso_user` would import a banned or SSO user.
-- SSO (SAML) users are not imported. tempo-auth has no SAML mapping. Each one
+- SSO (SAML) users are not imported. authtempo has no SAML mapping. Each one
   is listed as `sso_user`, and the CLI exits 0 on them.
 - A `banned_until` that is not a time in the past skips the user as `banned`,
   also a value the reader cannot read, such as `infinity`.
@@ -144,7 +144,7 @@ while :; do
   o=$((o + 500))
 done
 jq -s 'add // []' pages.ndjson > users.json
-tempo-auth-import clerk --csv export.csv --users users.json [--organizations organizations.json] --formats bcrypt --postgres "$DATABASE_URL"
+authtempo-import clerk --csv export.csv --users users.json [--organizations organizations.json] --formats bcrypt --postgres "$DATABASE_URL"
 ```
 
 - `organizations.json` is an array of `GET /v1/organizations` objects, each
@@ -175,7 +175,7 @@ it, then pass it as `--hashes`. Without `--hashes`, the CLI prints one line
 and imports no password.
 
 ```bash
-tempo-auth-import auth0 --users users.ndjson [--hashes hashes.ndjson] [--organizations organizations.json] --role-map lead=admin --formats bcrypt --postgres "$DATABASE_URL"
+authtempo-import auth0 --users users.ndjson [--hashes hashes.ndjson] [--organizations organizations.json] --role-map lead=admin --formats bcrypt --postgres "$DATABASE_URL"
 ```
 
 `organizations.json` is one JSON array of `GET /api/v2/organizations`
@@ -208,7 +208,7 @@ other top-level value stops the run.
 (Authentication, Users, "Password hash parameters") `rounds` and `mem_cost`:
 
 ```bash
-tempo-auth-import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --postgres "$DATABASE_URL"
+authtempo-import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --postgres "$DATABASE_URL"
 ```
 
 - The signer key and the salt separator go to the seam's `firebase` option,
@@ -241,7 +241,7 @@ as below, and delete it after the run.
 
 ```bash
 (umask 077; psql -At "$DATABASE_URL_OLD" -c "select json_build_object('users', (select coalesce(json_agg(json_build_object('id', u.id, 'email', u.email, 'emailVerified', u.\"emailVerified\" at time zone 'UTC', 'name', u.name, 'image', u.image, 'passwordHash', u.\"passwordHash\")), '[]') from \"User\" u), 'accounts', (select coalesce(json_agg(json_build_object('userId', a.\"userId\", 'type', a.type, 'provider', a.provider, 'providerAccountId', a.\"providerAccountId\")), '[]') from \"Account\" a), 'authenticators', (select coalesce(json_agg(json_build_object('credentialID', x.\"credentialID\", 'userId', x.\"userId\", 'credentialPublicKey', x.\"credentialPublicKey\", 'counter', x.counter, 'credentialDeviceType', x.\"credentialDeviceType\", 'credentialBackedUp', x.\"credentialBackedUp\", 'transports', x.transports)), '[]') from \"Authenticator\" x))" > tables.json)
-tempo-auth-import authjs --tables tables.json --formats bcrypt [--password-column passwordHash] [--same-passkey-rp-id] --postgres "$DATABASE_URL"
+authtempo-import authjs --tables tables.json --formats bcrypt [--password-column passwordHash] [--same-passkey-rp-id] --postgres "$DATABASE_URL"
 rm tables.json
 ```
 
@@ -267,10 +267,10 @@ rm tables.json
 
 ```bash
 aws cognito-idp list-users --user-pool-id "$POOL" --output json > users.json
-tempo-auth-import cognito --users users.json --legacy-verify --postgres "$DATABASE_URL"
+authtempo-import cognito --users users.json --legacy-verify --postgres "$DATABASE_URL"
 ```
 
-Set `password.legacyVerify` in the app (see `@tempo-auth/legacy-hashes`).
+Set `password.legacyVerify` in the app (see `@authtempo/legacy-hashes`).
 Without `--legacy-verify`, every marker is refused and the CLI exits 1.
 Cognito exports no hash, so this command needs no `--formats`.
 
@@ -292,9 +292,9 @@ Cognito exports no hash, so this command needs no `--formats`.
 
 ## Targets
 
-- `--postgres <url>`: core's tables (`@tempo-auth/adapter-postgres`).
+- `--postgres <url>`: core's tables (`@authtempo/adapter-postgres`).
 - `--postgres <url> --better-auth`: an app that keeps the Better Auth 1.7
-  tables (`@tempo-auth/compat-better-auth`).
+  tables (`@authtempo/compat-better-auth`).
 - D1: `--d1-bundle <file>`, then the Worker script. `worker/README.md`
   names the bundle path and every step. The Worker prints the report and
   the CLI's exit status. It writes core's tables (`TARGET=core`, the
@@ -316,5 +316,5 @@ remove it after the Worker run as `worker/README.md` says.
 
 Other options: `--reserved-slugs` (the app's `organizations.reservedSlugs`;
 core's defaults stay reserved) and `--platform-slug` (the app's platform
-organization slug; no import takes it). `tempo-auth-import` with no
+organization slug; no import takes it). `authtempo-import` with no
 arguments prints the full usage.

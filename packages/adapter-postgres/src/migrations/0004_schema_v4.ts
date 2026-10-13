@@ -1,5 +1,5 @@
 /**
- * tempo-auth schema version 4 for Postgres: passwords. Append-only: never
+ * authtempo schema version 4 for Postgres: passwords. Append-only: never
  * edit a shipped migration. One row per user. The hash names its algorithm
  * and its cost, so a later hash seam can rehash on sign-in.
  */

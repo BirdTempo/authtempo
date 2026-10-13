@@ -97,7 +97,7 @@ export function createRouter(
       });
     } catch (e) {
       console.error(
-        "tempo-auth: unhandled error",
+        "authtempo: unhandled error",
         route.method,
         route.path,
         e instanceof Error ? e.name : typeof e,

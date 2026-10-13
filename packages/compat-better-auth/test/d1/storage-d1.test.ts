@@ -50,7 +50,7 @@ describe("the Better Auth storage on D1, default names", () => {
     const mysql = drizzleAdapter({ $client: env.DB }, { provider: "mysql" });
     expect(mysql.refusals?.[0]).toMatch(/"mysql" is refused/);
     expect(mysql.refusals).toEqual([
-      'database.provider: "mysql" is refused; tempo-auth runs on Postgres and D1',
+      'database.provider: "mysql" is refused; authtempo runs on Postgres and D1',
     ]);
     expect(() => mysql.storage.findOne("user", [])).toThrow(/"mysql" is refused/);
   });
@@ -64,7 +64,7 @@ describe("the Better Auth storage on D1, default names", () => {
       }),
     };
     expect(drizzleAdapter({ $client: env.DB }, { provider: "sqlite", schema }).refusals).toEqual([
-      "database.schema.user.createdAt: an integer timestamp column is refused; on D1 tempo-auth reads Better Auth's dates as ISO 8601 text",
+      "database.schema.user.createdAt: an integer timestamp column is refused; on D1 authtempo reads Better Auth's dates as ISO 8601 text",
     ]);
     const text = {
       user: drizzleTable("user", { createdAt: { name: "createdAt", columnType: "SQLiteText" } }),

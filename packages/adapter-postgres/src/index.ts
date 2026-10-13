@@ -1,5 +1,5 @@
-import type { StorageAdapter } from "@tempo-auth/core";
-import { coreStatements, POSTGRES } from "@tempo-auth/core/sql";
+import type { StorageAdapter } from "@authtempo/core";
+import { coreStatements, POSTGRES } from "@authtempo/core/sql";
 import type { Sql } from "postgres";
 import { createPostgresAdapterOn } from "./adapter.js";
 import { toStorageError } from "./errors.js";

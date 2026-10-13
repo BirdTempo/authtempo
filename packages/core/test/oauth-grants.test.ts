@@ -256,7 +256,7 @@ describe("api.oauth.grants and api.oauth.revoke (plan 9g final fix wave)", () =>
     expect(rows).toHaveLength(1);
     expect(logged).toHaveBeenCalledTimes(1);
     expect(logged).toHaveBeenCalledWith(
-      "tempo-auth: the delete of a refresh row in a revoked grant failed",
+      "authtempo: the delete of a refresh row in a revoked grant failed",
       rows[0]?.id,
       "Error",
     );
