@@ -16,6 +16,7 @@ import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { checkUserPassword } from "./password.js";
 import {
+  endedList,
   endSessions,
   openSession,
   type ResolvedSession,
@@ -338,7 +339,7 @@ export async function enableTotp(
     return fail("totp_not_enabled");
   const step = await matchStep(await openSecret(config, row), input.code, now);
   if (step === null) return fail("invalid_code");
-  const ended: SessionRow[] = [];
+  const ended = endedList(config);
   const done = await config.storage.transaction(async (tx): Promise<Result<TotpStatus>> => {
     // The confirm and the replay guard in one statement, as `acceptCode`.
     const n = await tx.update(
@@ -362,7 +363,7 @@ export async function enableTotp(
         { field: "userId", op: "eq", value: user.id },
         { field: "id", op: "ne", value: session.id },
       ],
-      ended,
+      ended ?? null,
     );
     await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: user.id }]);
     await deleteTwoFactorChallenges(tx, user.id);

@@ -221,14 +221,15 @@ export async function sessionOpened(
 }
 
 /**
- * Deletes the sessions that `where` matches, inside the flow's transaction,
- * and pushes each row it ended to `ended` for the after hook. Each read row
+ * Deletes the sessions that `where` matches, inside the flow's transaction.
+ * With a list (an `afterEnd` hook listens, see `endedList`), each read row
  * is deleted by id and goes to `ended` only when its delete count is 1: a
  * sign-out between the read and the delete already fired `afterEnd` for that
  * row, so a second event would name a row this flow did not end (final fix
  * wave M-1). The last delete still matches `where`, so a session that
  * another request adds between the read and the delete goes too, with no
- * hook. With `ended` null, only the last delete runs.
+ * hook. With `ended` null, only the last delete runs: one statement for any
+ * number of sessions (plan 9h).
  */
 export async function endSessions(
   tx: StorageAdapter,
@@ -243,13 +244,23 @@ export async function endSessions(
   await tx.delete("session", where);
 }
 
-/** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). */
+/**
+ * The list a flow collects its ended sessions in, for `session.afterEnd`
+ * (plan 9h, index line 179). Undefined when no `afterEnd` hook is set: no
+ * code reads the rows then, so `endSessions` deletes them in one statement,
+ * and an account with many sessions pays one statement, not one per row.
+ */
+export function endedList(config: ResolvedConfig): SessionRow[] | undefined {
+  return config.hooks.session.afterEnd ? [] : undefined;
+}
+
+/** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). No list: no hook listens. */
 export async function sessionsEnded(
   config: ResolvedConfig,
-  sessions: readonly SessionRow[],
+  sessions: readonly SessionRow[] | undefined,
   reason: SessionEndReason,
 ): Promise<void> {
-  for (const session of sessions)
+  for (const session of sessions ?? [])
     await runAfter(
       "session.afterEnd",
       config.hooks.session.afterEnd,

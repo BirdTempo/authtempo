@@ -780,6 +780,7 @@ const auth = createAuth({
   social sign-in, the verify link, and the reset of an unverified user. A
   reset of a verified user ends that user's sessions with `password_reset`.
 - Plan 9f adds the end reason `two_factor`: the enable of a second factor ends every other session of the user. A session that a challenge opens has `via: "password"`.
+- With no `afterEnd` hook, a reset, a change, a claim, and the enable of a second factor delete the ended sessions in one statement (plan 9h). With the hook, each ended row goes by id, so the hook fires once per row the flow ended; an account with many sessions then pays one statement per session.
 - `session.beforeCreate` runs on a password sign-in only after the password
   is correct. So `hook_refused` against `invalid_credentials` tells the
   caller that the password was right. A ban hook should refuse with a text

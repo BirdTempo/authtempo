@@ -6,7 +6,7 @@ import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
-import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
+import { endedList, sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
@@ -262,7 +262,7 @@ export async function verifyEmailOtp(
   if (!checked.ok) return checked;
   const consumed = await consumeCode(config.storage, checked.value, now);
   if (!consumed.ok) return consumed;
-  const ended: SessionRow[] = [];
+  const ended = endedList(config);
   // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
   const steps = sessionSteps(config, {
     ip: input.ip,
