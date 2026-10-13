@@ -132,6 +132,21 @@ function split(options: ClientOptions): { origin: string; basePath: string } | n
   return { origin: u.origin, basePath: options.basePath ?? (path || "/api/auth") };
 }
 
+/**
+ * True when the browser may go to `twoFactorPage`: a relative path, or an
+ * absolute http or https URL. Better Auth 1.7.2 refuses only `javascript:`,
+ * `data:`, and `vbscript:` (isSafeUrlScheme, read 2026-10-13). This rule is
+ * stricter, so that a scheme that the list does not name cannot run code.
+ */
+function safePage(page: string): boolean {
+  try {
+    const { protocol } = new URL(page);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return true;
+  }
+}
+
 const NO_BASE =
   "tempo-auth compat: this call has no baseURL and no page location. Pass baseURL to createAuthClient.";
 
@@ -334,11 +349,11 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
   }
 
   /** Core's verify of the kept challenge, in Better Auth's shape. */
-  const verifyChallenge = (
+  const verifyChallenge = async (
     kept: string,
     input: { code?: string; backupCode?: string; trustDevice?: boolean },
-  ) =>
-    run(
+  ) => {
+    const r = await run(
       (c) =>
         c.totp.verify({
           challenge: kept,
@@ -363,6 +378,28 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
               ? "INVALID_TWO_FACTOR_COOKIE"
               : undefined,
     );
+    // A capped or dead challenge cannot answer again. Drop it, so that the next verify does not send it.
+    if (
+      r.error?.code === "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE" ||
+      r.error?.code === "INVALID_TWO_FACTOR_COOKIE"
+    )
+      challenge = null;
+    return r;
+  };
+
+  /** A shim verify, with the user cut to the five `ClientUser` keys: both verify branches answer one shape. */
+  const shimVerify = async (
+    path: string,
+    body: { code: string; trustDevice?: boolean },
+  ): Promise<CompatClientResult<{ token: string; user: ClientUser }>> => {
+    const r = await shim<{ token: string; user: ClientUser }>(path, body);
+    if (!r.data) return r;
+    const { id, name, email, emailVerified, image } = r.data.user;
+    return {
+      data: { token: r.data.token, user: { id, name, email, emailVerified, image } },
+      error: null,
+    };
+  };
 
   const readSession = (quiet: boolean) =>
     run(
@@ -422,6 +459,9 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         // Core keeps no short session. true is the only behavior core has, so it is accepted.
         if (rememberMe === false)
           return notSupported("core takes no rememberMe: every session lives session.expiresIn");
+        // A session answer or a new challenge replaces the kept challenge (plan 9f). A challenge
+        // that stays would go to the verify of the next user, in place of the session path.
+        challenge = null;
         const trustDevice = readTrust();
         const r = await run(
           (c) => c.password.signIn({ email, password, ...(trustDevice ? { trustDevice } : {}) }),
@@ -440,7 +480,8 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
           const page = twoFactorPlugin?.options.twoFactorPage;
           if (twoFactorPlugin?.options.onTwoFactorRedirect)
             await twoFactorPlugin.options.onTwoFactorRedirect(methods);
-          else if (page !== undefined && typeof location !== "undefined") location.href = page;
+          else if (page !== undefined && safePage(page) && typeof location !== "undefined")
+            location.href = page;
           return r;
         }
         if (r.data) store.refetchIfStarted();
@@ -699,7 +740,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
               code,
               ...(trustDevice !== undefined ? { trustDevice } : {}),
             })
-          : await shim<{ token: string; user: ClientUser }>("/two-factor/verify-totp", {
+          : await shimVerify("/two-factor/verify-totp", {
               code,
               ...(trustDevice !== undefined ? { trustDevice } : {}),
             });
@@ -715,7 +756,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
               backupCode: code,
               ...(trustDevice !== undefined ? { trustDevice } : {}),
             })
-          : await shim<{ token: string; user: ClientUser }>("/two-factor/verify-backup-code", {
+          : await shimVerify("/two-factor/verify-backup-code", {
               code,
               ...(trustDevice !== undefined ? { trustDevice } : {}),
             });

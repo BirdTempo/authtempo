@@ -135,6 +135,8 @@ export const secured = createAuthClient({
 export async function securedSignIn(email: string, password: string) {
   const r = await secured.signIn.email({ email, password });
   if (r.data && "twoFactorRedirect" in r.data) {
+    const methods: string[] = r.data.twoFactorMethods;
+    if (!methods.includes("totp")) return undefined;
     const v = await secured.twoFactor.verifyTotp({ code: "123456", trustDevice: true });
     return v.data?.token;
   }

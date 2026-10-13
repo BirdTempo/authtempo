@@ -10,11 +10,12 @@ import { createAuthClient, expoClient, twoFactorClient } from "../src/client/ind
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
-import type { CompatDatabase } from "../src/types.js";
+import type { CompatDatabase, TwoFactorClientOptions } from "../src/types.js";
 
 const BASE = "https://api.example.com";
 const EMAIL = "pat@example.com";
 const PASSWORD = "correct horse battery";
+const OTHER = "sam@example.com";
 
 function memoryStorage() {
   const map = new Map<string, string>();
@@ -26,7 +27,7 @@ function memoryStorage() {
 }
 
 /** A server with the plugin, and an Expo client: the token lives in storage, so no cookie jar is needed. */
-async function setup(onTwoFactorRedirect = vi.fn()) {
+async function setup(tf: TwoFactorClientOptions = { onTwoFactorRedirect: vi.fn() }) {
   const links: string[] = [];
   const database: CompatDatabase = {
     kind: "tempo-auth-compat-database",
@@ -55,27 +56,30 @@ async function setup(onTwoFactorRedirect = vi.fn()) {
     basePath: "/api/auth",
     plugins: [
       expoClient({ scheme: "reception", storagePrefix: "reception", storage }),
-      twoFactorClient({ onTwoFactorRedirect }),
+      twoFactorClient(tf),
     ],
     fetchOptions: { customFetchImpl: fetchImpl },
   });
-  await c.signUp.email({ email: EMAIL, password: PASSWORD, name: "Pat" });
-  await auth.handler(
-    new Request(`${BASE}/api/auth/password/verify`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: BASE },
-      body: JSON.stringify({ token: links.at(-1) }),
-    }),
-  );
-  // The verify claims the address and ends the sign-up session: sign in again.
+  /** Sign up and verify the address. The verify claims it and ends the sign-up session. */
+  const register = async (email: string, name: string) => {
+    await c.signUp.email({ email, password: PASSWORD, name });
+    await auth.handler(
+      new Request(`${BASE}/api/auth/password/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ token: links.at(-1) }),
+      }),
+    );
+  };
+  await register(EMAIL, "Pat");
   const signedIn = await c.signIn.email({ email: EMAIL, password: PASSWORD });
   if (signedIn.error) throw new Error(signedIn.error.code);
-  return { auth, c, storage, onTwoFactorRedirect };
+  return { auth, c, storage, register, onTwoFactorRedirect: tf.onTwoFactorRedirect };
 }
 
 /** The factor on through the client: enable with the password, then verifyTotp with the session. */
-async function enrolled() {
-  const s = await setup();
+async function enrolled(tf?: TwoFactorClientOptions) {
+  const s = await setup(tf);
   const enabled = await s.c.twoFactor.enable({ password: PASSWORD });
   if (!enabled.data) throw new Error(enabled.error?.code);
   const secret = base32Decode(new URL(enabled.data.totpURI).searchParams.get("secret") ?? "");
@@ -86,6 +90,7 @@ async function enrolled() {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("twoFactorClient (plan 9f)", () => {
@@ -116,6 +121,11 @@ describe("twoFactorClient (plan 9f)", () => {
       });
     expect((await c.twoFactor.verifyTotp({ code: wrong })).error).toMatchObject({
       code: "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE",
+    });
+    // The capped challenge is gone: the next call does not send it. It takes the session path of the
+    // bearer that the enrolment stored, where the factor is already on.
+    expect((await c.twoFactor.verifyTotp({ code: right })).error).toMatchObject({
+      code: "TOTP_ALREADY_ENABLED",
     });
   });
 
@@ -150,5 +160,40 @@ describe("twoFactorClient (plan 9f)", () => {
     expect((await c.twoFactor.verifyOtp({ code: "123456" })).error).toMatchObject({
       code: "NOT_SUPPORTED",
     });
+  });
+
+  it("drops the kept challenge at the next sign-in, so the enable confirm of another user takes the session path", async () => {
+    const { c, register } = await enrolled();
+    // A gated sign-in keeps a challenge for Pat.
+    expect((await c.signIn.email({ email: EMAIL, password: PASSWORD })).data).toMatchObject({
+      twoFactorRedirect: true,
+    });
+    await register(OTHER, "Sam");
+    const sam = await c.signIn.email({ email: OTHER, password: PASSWORD });
+    if (!sam.data || !("token" in sam.data)) throw new Error("Sam has no session");
+    const enabled = await c.twoFactor.enable({ password: PASSWORD });
+    if (!enabled.data) throw new Error(enabled.error?.code);
+    const secret = base32Decode(new URL(enabled.data.totpURI).searchParams.get("secret") ?? "");
+    const confirm = await c.twoFactor.verifyTotp({ code: await totpCode(secret, new Date()) });
+    expect(confirm).toEqual({
+      data: {
+        token: sam.data.token,
+        user: { id: sam.data.user.id, name: "Sam", email: OTHER, emailVerified: true, image: null },
+      },
+      error: null,
+    });
+  });
+
+  it("sends the browser to a relative or https twoFactorPage, and never to another scheme", async () => {
+    const location = { href: "https://app.example.com/sign-in" };
+    vi.stubGlobal("location", location);
+    const safe = await enrolled({ twoFactorPage: "/two-factor" });
+    await safe.c.signIn.email({ email: EMAIL, password: PASSWORD });
+    expect(location.href).toBe("/two-factor");
+    location.href = "https://app.example.com/sign-in";
+    const unsafe = await enrolled({ twoFactorPage: "javascript:alert(1)" });
+    const r = await unsafe.c.signIn.email({ email: EMAIL, password: PASSWORD });
+    expect(r.data).toMatchObject({ twoFactorRedirect: true });
+    expect(location.href).toBe("https://app.example.com/sign-in");
   });
 });
