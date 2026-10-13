@@ -10,7 +10,11 @@ import { defineConfig } from "astro/config";
  * The sidebar. Each content task of plan 11a adds its group. A group with
  * `autogenerate` lists the pages of one folder of src/content/docs.
  */
-const sidebar = [{ label: "Home", slug: "docs" }];
+const sidebar = [
+  { label: "Home", slug: "docs" },
+  // Starlight 0.39 and later: a group has `items`, and `autogenerate` is an item.
+  { label: "Reference", items: [{ autogenerate: { directory: "docs/reference" } }] },
+];
 
 export default defineConfig({
   // The domain that the owner named (decision 1a of 2026-10-14). This plan
