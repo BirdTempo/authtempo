@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Node runs the migrate script with its type stripping, which needs the .ts extension.
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["scripts"]
+}

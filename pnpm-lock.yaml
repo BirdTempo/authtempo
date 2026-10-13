@@ -314,6 +314,34 @@ importers:
         specifier: 4.148.0
         version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
 
+  examples/worker-postgres:
+    dependencies:
+      '@authtempo/adapter-postgres':
+        specifier: workspace:*
+        version: link:../../packages/adapter-postgres
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20261007.1
+        version: 5.20261007.1
+      '@types/node':
+        specifier: 24.19.1
+        version: 24.19.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
+
   packages/adapter-d1:
     dependencies:
       '@authtempo/core':

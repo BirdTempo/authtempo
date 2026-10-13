@@ -1,0 +1,24 @@
+{
+  "name": "authtempo-example-worker-postgres",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "migrate": "node scripts/migrate.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
+    "test": "vitest run && wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "@authtempo/adapter-postgres": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261007.1",
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}
