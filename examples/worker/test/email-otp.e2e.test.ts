@@ -2,9 +2,10 @@ import { env, SELF } from "cloudflare:test";
 import { expect, it } from "vitest";
 import { BASE, cookieClient } from "./helpers.js";
 
-/** The code of the last mail that carried no link (TEST_MODE). */
-async function lastCode(): Promise<string> {
-  const { code } = (await (await SELF.fetch(`${BASE}/__test/last-code`)).json()) as {
+/** The code of the last mail to `email` that carried no link (TEST_MODE). */
+async function lastCode(email: string): Promise<string> {
+  const url = `${BASE}/__test/last-code?email=${encodeURIComponent(email)}`;
+  const { code } = (await (await SELF.fetch(url)).json()) as {
     code: string | null;
   };
   if (!code) throw new Error("no code mailed");
@@ -25,7 +26,7 @@ it("signs in by an email code on D1: the row holds a keyed hash, a wrong code co
   const client = cookieClient();
   const email = "otp-ada@example.com";
   expect(await client.emailOtp.request({ email })).toEqual({ ok: true, value: { sent: true } });
-  const code = await lastCode();
+  const code = await lastCode(email);
   expect(code).toMatch(/^\d{6}$/);
   const row = await codeRow(email, "email-otp");
   expect(row?.value_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -54,7 +55,7 @@ it("spends the code on D1 at the fifth of five parallel wrong codes, and a right
   const client = cookieClient();
   const email = "otp-cap@example.com";
   await client.emailOtp.request({ email });
-  const code = await lastCode();
+  const code = await lastCode(email);
   const answers = await Promise.all(
     Array.from({ length: 5 }, () => client.emailOtp.verify({ email, code: wrongFor(code) })),
   );
@@ -86,7 +87,7 @@ it("resets a password by an email code on D1: a weak password spends the code, a
     ok: true,
     value: { sent: true },
   });
-  const first = await lastCode();
+  const first = await lastCode(email);
   expect(await client.emailOtp.reset({ email, code: first, password: "short" })).toEqual({
     ok: false,
     code: "password_policy",
@@ -101,12 +102,18 @@ it("resets a password by an email code on D1: a weak password spends the code, a
   await client.emailOtp.requestReset({ email });
   const r = await client.emailOtp.reset({
     email,
-    code: await lastCode(),
+    code: await lastCode(email),
     password: "a new long password",
   });
   if (!r.ok) throw new Error(r.code);
   expect(r.value.user).toMatchObject({ email, emailVerified: true });
   const old = await SELF.fetch(`${BASE}/me`, { headers: { authorization: `Bearer ${oldToken}` } });
   expect(old.status).toBe(401);
+  // The reset wrote the new password over the old one: the old one fails.
+  expect(await client.password.signIn({ email, password: "correct horse battery" })).toEqual({
+    ok: false,
+    code: "invalid_credentials",
+    status: 401,
+  });
   expect((await client.password.signIn({ email, password: "a new long password" })).ok).toBe(true);
 });
