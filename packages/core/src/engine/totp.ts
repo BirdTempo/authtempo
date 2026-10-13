@@ -673,10 +673,11 @@ export async function verifyTwoFactor(
       attemptsOf(challenge) >= CHALLENGE_MAX_ATTEMPTS ? "too_many_attempts" : "invalid_token",
     );
   if (challenge.expiresAt.getTime() <= now.getTime()) return fail("invalid_token");
-  // The bounds per user over all challenges (15 minutes and 24 hours),
-  // shared with the enable, the disable, and the new backup codes. A capped challenge spends only itself,
-  // so without this line each new sign-in gives five more guesses. After the
-  // live check: an unknown, spent, or expired challenge costs the user nothing.
+  // The bounds per user over all challenges (15 minutes and 24 hours), shared
+  // with the enable, the disable, and the new backup codes. A capped challenge
+  // spends only itself, so without this line each new sign-in gives five more
+  // guesses. After the live check: an unknown, spent, or expired challenge
+  // costs the user nothing.
   if (!(await codeCheckAllowed(config, challenge.identifier))) return fail("rate_limited");
   const row = await enabledRow(config.storage, challenge.identifier);
   if (!row) return fail("invalid_token");
