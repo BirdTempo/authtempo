@@ -412,3 +412,36 @@ export function userinfoClaims(access: OAuthAccess): Record<string, unknown> | n
     ...(access.scopes.includes("profile") ? { name: user.name, picture: user.image } : {}),
   };
 }
+
+/**
+ * The configured resource that a request URL falls under, or null: a
+ * resource on the request's origin whose path is the request's path or a
+ * parent of it at a `/` boundary, the longest first. An access token passes
+ * `auth.caller` only for this resource (RFC 8707: the `aud` is the resource).
+ */
+export function requestResource(
+  config: ResolvedConfig,
+  request: Pick<Request, "url">,
+): string | null {
+  const oauth = config.oauth;
+  if (!oauth) return null;
+  let url: URL;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return null;
+  }
+  let best: string | null = null;
+  let bestLength = -1;
+  for (const resource of oauth.resources) {
+    const r = new URL(resource);
+    if (r.origin !== url.origin) continue;
+    const base = r.pathname.replace(/\/$/, "");
+    if (base !== "" && url.pathname !== base && !url.pathname.startsWith(`${base}/`)) continue;
+    if (base.length > bestLength) {
+      best = resource;
+      bestLength = base.length;
+    }
+  }
+  return best;
+}

@@ -138,6 +138,7 @@ import { sessionRoutes } from "./http/routes/sessions.js";
 import { socialRoutes } from "./http/routes/social.js";
 import { tokenRoutes } from "./http/routes/tokens.js";
 import { totpRoutes } from "./http/routes/totp.js";
+import { createWellKnownHandler } from "./http/well-known.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import type { Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
@@ -339,9 +340,12 @@ export interface Auth {
   /** The caller's session from the cookie or the bearer header, or null. */
   session(request: Request): Promise<ResolvedSession | null>;
   /**
-   * The caller as a session or as an API token, or null. Use it in a route
-   * that a script may call. `session(request)` stays session-only, so every
-   * route that calls it answers 401 to a token. For a session caller, send
+   * The caller as a session, an API token, or an OAuth access token (plan
+   * 9g), or null. Use it in a route that a script or an OAuth client may
+   * call. An access token passes only under its resource: the request URL
+   * must fall under the `oauth.resources` entry that is its `aud`.
+   * `session(request)` stays session-only, so every route that calls it
+   * answers 401 to a token. For a session caller, send
    * `sessionCookie(request, caller)`, or the browser drops the cookie at its old Max-Age.
    */
   caller(request: Request): Promise<Caller | null>;
@@ -352,6 +356,13 @@ export interface Auth {
    * Null for a bearer request.
    */
   sessionCookie(request: Request, resolved: ResolvedSession): string | null;
+  /**
+   * The well-known documents at the origin root (plan 9g): RFC 8414 and
+   * OIDC Discovery for this issuer, and RFC 9728 for each `oauth.resources`
+   * entry. Mount it for the paths that start with `/.well-known/`. 404 for
+   * any other path and while `oauth` is off; 405 for a method other than GET.
+   */
+  wellKnown(request: Request): Promise<Response>;
   /** The same operations, in-process. */
   api: AuthApi;
   errors: typeof ERRORS;
@@ -378,6 +389,7 @@ export function createAuth(input: AuthConfig): Auth {
     session: (request) => sessionFromRequest(config, request),
     caller: (request) => callerFromRequest(config, request),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
+    wellKnown: createWellKnownHandler(config),
     api: {
       sweepExpired: () => sweepExpired(config),
       requestMagicLink: (i) => requestMagicLink(config, i),

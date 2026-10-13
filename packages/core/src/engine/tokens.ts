@@ -2,9 +2,11 @@ import type { ResolvedConfig } from "../config.js";
 import { readCookie } from "../http/cookies.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { JWS_RE } from "../primitives/jwk.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { ApiTokenRow, UserRow } from "../schema.js";
+import { type OAuthAccess, requestResource, resolveAccessToken } from "./oauth-token.js";
 import { membership } from "./organizations.js";
 import { type ResolvedSession, readBearer, resolveSession } from "./sessions.js";
 
@@ -40,10 +42,11 @@ export interface ResolvedApiToken {
   activeOrganizationId: string | null;
 }
 
-/** Who called: a person with a session, or a script with an API token. */
+/** Who called: a person with a session, a script with an API token, or an OAuth client for a person (plan 9g). */
 export type Caller =
   | ({ kind: "session" } & ResolvedSession)
-  | ({ kind: "token" } & ResolvedApiToken);
+  | ({ kind: "token" } & ResolvedApiToken)
+  | ({ kind: "oauth" } & OAuthAccess);
 
 export interface ApiTokenCreate {
   user: UserRow;
@@ -213,7 +216,8 @@ export async function revokeApiToken(
  * The cookie first, then the bearer header, as `readSessionToken` reads
  * them: a present cookie wins and the header is not read. A cookie resolves
  * as a session only. A `tk_` value counts only in the bearer header: a
- * browser sends a cookie on a cross-site request, and a script never has one.
+ * browser sends a cookie on a cross-site request, and a script never has
+ * one. A JWT bearer is an OAuth access token (plan 9g).
  */
 export async function callerFromRequest(
   config: ResolvedConfig,
@@ -229,6 +233,16 @@ export async function callerFromRequest(
   if (bearer.startsWith(API_TOKEN_PREFIX)) {
     const t = await resolveApiToken(config, bearer);
     return t ? { kind: "token", ...t } : null;
+  }
+  // Plan 9g: a JWT bearer is an OAuth access token, for the resource that
+  // this request falls under only. No session token has this shape, so a
+  // JWT bearer answered null here before; it still does while oauth is off.
+  if (JWS_RE.test(bearer)) {
+    if (!config.oauth) return null;
+    const access = await resolveAccessToken(config, bearer);
+    return access && access.resource === requestResource(config, request)
+      ? { kind: "oauth", ...access }
+      : null;
   }
   const s = await resolveSession(config, bearer);
   return s ? { kind: "session", ...s } : null;

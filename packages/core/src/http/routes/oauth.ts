@@ -22,6 +22,7 @@ import { authErrorUrl, redirect } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
+import { authorizationServerMetadata, PUBLIC_METADATA_HEADERS } from "../well-known.js";
 
 /** An OAuth answer: the value with `status`, or `{ error }` with the status of `OAUTH_ERRORS`. No cache keeps either. */
 export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {
@@ -217,6 +218,15 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     },
     { method: "GET", path: "/oauth/userinfo", handler: userinfo },
     { method: "POST", path: "/oauth/userinfo", handler: userinfo },
+  );
+  // The issuer's own well-known paths under basePath (RFC 8414 as consumerb's
+  // clients read it, and OIDC Discovery). The protected-resource document has
+  // no route here: it lives at the origin root (RFC 9728), so this path answers 404.
+  const metadata = async (): Promise<Response> =>
+    json(authorizationServerMetadata(config), 200, PUBLIC_METADATA_HEADERS);
+  routes.push(
+    { method: "GET", path: "/.well-known/oauth-authorization-server", handler: metadata },
+    { method: "GET", path: "/.well-known/openid-configuration", handler: metadata },
   );
   return routes;
 }
