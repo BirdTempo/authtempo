@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { totpRoutes } from "../src/http/routes/totp.js";
 import { base32Decode, totpCode } from "../src/primitives/totp.js";
-import { APP_ORIGIN, BASE_URL, get, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
 import { FAST, pwHandle } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -38,7 +39,7 @@ async function verifiedUser(h: Handle, email = EMAIL): Promise<string> {
 
 /** The setup and the enable through the routes; then the clock moves one step on. */
 async function enrolled(h: Handle, cookie: string) {
-  const setup = await h.auth.handle(post("/auth/totp/setup", {}, { cookie }));
+  const setup = await h.auth.handle(post("/auth/totp/setup", { password: PW }, { cookie }));
   const body = (await setup.json()) as { secret: string; uri: string; backupCodes: string[] };
   const secret = base32Decode(body.secret);
   const enable = await h.auth.handle(
@@ -114,6 +115,23 @@ describe("the TOTP routes (plan 9f)", () => {
     expect(text).not.toContain("otpauth");
   });
 
+  it("takes the password at the setup: a wrong one answers 401 invalid_credentials and writes no row, none answers 400 invalid_body (review I-1)", async () => {
+    const h = pwHandle({ hash: FAST });
+    const cookie = await verifiedUser(h);
+    const wrong = await h.auth.handle(
+      post("/auth/totp/setup", { password: "not the password" }, { cookie }),
+    );
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toMatchObject({ error: "invalid_credentials" });
+    const none = await h.auth.handle(post("/auth/totp/setup", {}, { cookie }));
+    expect(none.status).toBe(400);
+    expect(await none.json()).toMatchObject({ error: "invalid_body" });
+    expect(await h.storage.findMany("totp", [])).toEqual([]);
+    const right = await h.auth.handle(post("/auth/totp/setup", { password: PW }, { cookie }));
+    expect(right.status).toBe(200);
+    expect(await h.storage.findMany("totp", [])).toHaveLength(1);
+  });
+
   it("enable ends the other session: its next GET /session answers 401 (Review Focus 4)", async () => {
     const h = pwHandle({ hash: FAST });
     const mine = await verifiedUser(h);
@@ -174,6 +192,23 @@ describe("the TOTP routes (plan 9f)", () => {
       }),
     );
     expect(((await native.json()) as { token?: string }).token).toMatch(/^ts_/);
+    // The body's token wins over the cookie, and an empty body value falls back to the cookie.
+    const other = await h.auth.handle(
+      post(
+        "/auth/password/sign-in",
+        { email: EMAIL, password: PW, trustDevice: `td_${"x".repeat(43)}` },
+        { cookie: `tempo_totp_trust=${v.trustDevice.token}` },
+      ),
+    );
+    expect(((await other.json()) as { twoFactor?: unknown }).twoFactor).toBeDefined();
+    const empty = await h.auth.handle(
+      post(
+        "/auth/password/sign-in",
+        { email: EMAIL, password: PW, trustDevice: "" },
+        { cookie: `tempo_totp_trust=${v.trustDevice.token}` },
+      ),
+    );
+    expect(((await empty.json()) as { token?: string }).token).toMatch(/^ts_/);
   });
 
   it("serves the challenge page with no script; a wrong code returns to it with the error; a right code redirects to next with both cookies", async () => {
@@ -196,18 +231,41 @@ describe("the TOTP routes (plan 9f)", () => {
     expect(backup).toContain('name="backupCode"');
     const bad = await h.auth.handle(get("/auth/totp/challenge?challenge=tf_bad"));
     expect(bad.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
-    const wrong = await h.auth.handle(form("/auth/totp/challenge", `challenge=${c}&code=000000`));
     const right = await f.code();
-    if (right !== "000000") {
-      expect(wrong.status).toBe(302);
-      expect(wrong.headers.get("location")).toBe(
-        `${BASE_URL}/auth/totp/challenge?challenge=${c}&error=invalid_code`,
-      );
-      const shown = await (
-        await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}&error=invalid_code`))
-      ).text();
-      expect(shown).toContain("The code is not correct. Try again.");
-    }
+    // Derived from the right code, so it is always wrong.
+    const wrongCode = right === "000000" ? "111111" : "000000";
+    const wrong = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&code=${wrongCode}`),
+    );
+    expect(wrong.status).toBe(302);
+    expect(wrong.headers.get("location")).toBe(
+      `${BASE_URL}/auth/totp/challenge?challenge=${c}&error=invalid_code`,
+    );
+    const shown = await (
+      await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}&error=invalid_code`))
+    ).text();
+    expect(shown).toContain("The code is not correct. Try again.");
+    // A wrong backup code returns to the backup form.
+    const wrongBackup = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&backupCode=not-a-code`),
+    );
+    expect(wrongBackup.status).toBe(302);
+    expect(wrongBackup.headers.get("location")).toBe(
+      `${BASE_URL}/auth/totp/challenge?challenge=${c}&backup=1&error=invalid_code`,
+    );
+    // A foreign Origin is refused before the code check.
+    const foreign = await h.auth.handle(
+      new Request(`${BASE_URL}/auth/totp/challenge`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://evil.example",
+        },
+        body: `challenge=${c}&code=${right}`,
+      }),
+    );
+    expect(foreign.status).toBe(403);
+    expect(cookieNamed(foreign, "tempo_session")).toBeNull();
     const done = await h.auth.handle(
       form("/auth/totp/challenge", `challenge=${c}&code=${right}&trustDevice=1`),
     );
@@ -286,13 +344,28 @@ describe("the TOTP routes (plan 9f)", () => {
   it("answers 404 on every TOTP route with totp: false, and api.totp is absent", async () => {
     const h = pwHandle({ hash: FAST }, { totp: false });
     const cookie = await verifiedUser(h);
-    for (const req of [
-      post("/auth/totp/setup", {}, { cookie }),
+    const routes = [
+      post("/auth/totp/setup", { password: PW }, { cookie }),
+      post("/auth/totp/enable", { code: "123456" }, { cookie }),
+      post("/auth/totp/disable", { code: "123456" }, { cookie }),
+      post("/auth/totp/backup-codes", { code: "123456" }, { cookie }),
       get("/auth/totp", { cookie }),
+      post("/auth/totp/devices/revoke", {}, { cookie }),
       post("/auth/totp/verify", { challenge: "tf_x", code: "123456" }),
       get("/auth/totp/challenge?challenge=tf_x"),
-    ])
-      expect((await h.auth.handle(req)).status).toBe(404);
+      form("/auth/totp/challenge", "challenge=tf_x&code=123456"),
+    ];
+    for (const req of routes) {
+      const path = new URL(req.url).pathname;
+      expect({ path, status: (await h.auth.handle(req)).status }).toEqual({ path, status: 404 });
+    }
+    // One request per route of `totpRoutes`: a new route that is not in this list fails here.
+    expect(routes).toHaveLength(totpRoutes(makeAuth({ password: { hash: FAST } }).config).length);
+    // The sign-in's gate is off too: the sign-in answers a session.
+    const signIn = await h.auth.handle(
+      post("/auth/password/sign-in", { email: EMAIL, password: PW }),
+    );
+    expect(cookieNamed(signIn, "tempo_session")).not.toBeNull();
     expect(h.auth.api.totp).toBeUndefined();
     expect(pwHandle({ hash: FAST }).auth.api.totp).toBeDefined();
   });

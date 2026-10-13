@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
   verificationExpired: number;
@@ -10,6 +11,8 @@ export interface SweepResult {
   apiTokens: number;
   /** Trusted device rows past `expiresAt` (plan 9f). */
   trustedDevices: number;
+  /** Unconfirmed TOTP setups older than 15 minutes, which no enable can confirm (plan 9f final fix wave). */
+  totpSetups: number;
   /** Limiter windows that ended. 0 when the limiter has no sweep. */
   limits: number;
 }
@@ -59,6 +62,13 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   const trustedDevices = await storage.delete("trustedDevice", [
     { field: "expiresAt", op: "lt", value: now },
   ]);
+  // A setup that no enable confirmed stays until the user's next setup.
+  // After 15 minutes the enable refuses it, so it holds a sealed secret that
+  // no flow uses. `createdAt` is the setup time: a new setup rewrites it.
+  const totpSetups = await storage.delete("totp", [
+    { field: "enabledAt", op: "eq", value: null },
+    { field: "createdAt", op: "lt", value: new Date(now.getTime() - SETUP_TTL_MS) },
+  ]);
   // The owned limiters keep one row per key and window. Without this sweep
   // every address and IP that reached a limiter stays in ta_limit forever.
   const limits = (await config.limiter.sweep?.(now)) ?? 0;
@@ -69,6 +79,7 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     sessions,
     apiTokens,
     trustedDevices,
+    totpSetups,
     limits,
   };
 }

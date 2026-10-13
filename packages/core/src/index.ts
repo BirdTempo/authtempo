@@ -84,6 +84,7 @@ export {
 } from "./engine/tokens.js";
 export type {
   TotpSetup,
+  TotpSetupInput,
   TotpStatus,
   TwoFactorPending,
   TwoFactorSession,

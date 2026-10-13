@@ -573,6 +573,14 @@ describe("totp (plan 9f)", () => {
     });
   });
 
+  it("drops the port of baseURL from the default issuer, and takes appName as it is (review M-2)", () => {
+    const local = { ...pw, baseURL: "http://localhost:8787" };
+    expect(resolveConfig(local).appName).toBe("localhost:8787");
+    expect(resolveConfig(local).totp?.issuer).toBe("localhost");
+    expect(resolveConfig({ ...local, appName: "Acme" }).totp?.issuer).toBe("Acme");
+    expect(resolveConfig({ ...local, totp: { issuer: "Acme Dev" } }).totp?.issuer).toBe("Acme Dev");
+  });
+
   it("refuses a value out of range, a key core does not have, a page that is not a function, and totp without password", () => {
     const ISSUER = "totp.issuer must be 1 to 80 characters with no control character and no colon";
     const CODES = "totp.backupCodes must be an integer from 5 to 20";

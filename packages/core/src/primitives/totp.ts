@@ -31,9 +31,24 @@ export function base32Encode(bytes: Uint8Array): string {
   return out;
 }
 
-/** The bytes of a base32 text. Lower case, spaces, and `=` padding are accepted; any other character throws. */
+/** The alphabet in both cases, then `=` at the end only. Checked before the upper-casing: `"ß".toUpperCase()` is `"SS"` and `"ſ".toUpperCase()` is `"S"`. */
+const BASE32_TEXT_RE = /^[A-Za-z2-7]*=*$/;
+/** RFC 4648 section 6: the data lengths mod 8 that end on a whole byte. A lone character holds no byte. */
+const BASE32_TAIL = new Set([0, 2, 4, 5, 7]);
+
+/**
+ * The bytes of a base32 text. Lower case, spaces, and `=` padding at the end
+ * are accepted. Any other character, a `=` before the end, a length that
+ * ends on no whole byte, or padding to a length that is not a multiple of 8
+ * throws.
+ */
 export function base32Decode(text: string): Uint8Array<ArrayBuffer> {
-  const clean = text.toUpperCase().replace(/[\s=]/g, "");
+  const spaced = text.replace(/\s/g, "");
+  if (!BASE32_TEXT_RE.test(spaced)) throw new Error("not base32");
+  const data = spaced.replace(/=+$/, "");
+  if (!BASE32_TAIL.has(data.length % 8) || (data.length < spaced.length && spaced.length % 8 !== 0))
+    throw new Error("not base32");
+  const clean = data.toUpperCase();
   const out: number[] = [];
   let buffer = 0;
   let bits = 0;

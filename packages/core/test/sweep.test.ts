@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { sweepExpired } from "../src/engine/sweep.js";
+import { setupTotp } from "../src/engine/totp.js";
 import { makeAuth } from "./helpers.js";
+import { enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -109,6 +111,7 @@ describe("sweepExpired", () => {
       sessions: 1,
       apiTokens: 1,
       trustedDevices: 1,
+      totpSetups: 0,
       limits: 1,
     });
 
@@ -130,7 +133,27 @@ describe("sweepExpired", () => {
       sessions: 0,
       apiTokens: 0,
       trustedDevices: 0,
+      totpSetups: 0,
       limits: 0,
     });
+  });
+
+  it("deletes an unconfirmed TOTP setup older than 15 minutes, and keeps a factor that is on and a fresh setup (plan 9f final fix wave)", async () => {
+    const auth = totpAuth();
+    const setup = async (email: string) => {
+      const { user } = await verifiedSession(auth, email);
+      const r = await setupTotp(auth.config, { userId: user.id, password: PASSWORD });
+      if (!r.ok) throw new Error(r.code);
+      return user.id;
+    };
+    const stale = await setup("old@example.com");
+    const { user: on } = await enrolled(auth);
+    auth.clock.advance(15 * MINUTE);
+    const fresh = await setup("new@example.com");
+    expect(await sweepExpired(auth.config)).toMatchObject({ totpSetups: 1 });
+    const left = (await auth.storage.findMany("totp", [])).map((r) => r.userId).sort();
+    expect(left).toEqual([on.id, fresh].sort());
+    expect(left).not.toContain(stale);
+    expect(await sweepExpired(auth.config)).toMatchObject({ totpSetups: 0 });
   });
 });

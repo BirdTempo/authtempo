@@ -108,6 +108,7 @@ import {
   revokeTrustedDevices,
   setupTotp,
   type TotpSetup,
+  type TotpSetupInput,
   type TotpStatus,
   type TwoFactorSession,
   type TwoFactorVerify,
@@ -156,7 +157,8 @@ export interface PasswordApi {
  * `api.password.verify`.
  */
 export interface TotpApi {
-  setup(input: { user: UserRow; issuer?: string | undefined }): Promise<Result<TotpSetup>>;
+  /** Takes the user's password: `invalid_credentials` on a miss, with the sign-in's limits. */
+  setup(input: TotpSetupInput): Promise<Result<TotpSetup>>;
   enable(input: { session: ResolvedSession; code: string }): Promise<Result<TotpStatus>>;
   verify(input: TwoFactorVerify): Promise<Result<TwoFactorSession>>;
   disable(input: { userId: string }): Promise<Result<{ ok: true }>>;

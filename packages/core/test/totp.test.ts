@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { passwordSignUp } from "../src/engine/password.js";
+import { passwordSignIn, passwordSignUp } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import {
   disableTotp,
@@ -11,6 +11,7 @@ import {
   setupTotp,
   totpStatus,
   totpUri,
+  verifyTwoFactor,
 } from "../src/engine/totp.js";
 import { countAttempt } from "../src/engine/verification.js";
 import { openSealed } from "../src/primitives/aead.js";
@@ -32,7 +33,7 @@ describe("the setup (plan 9f)", () => {
   it("answers the secret, the key URI, and ten backup codes, and stores the secret sealed and the codes as keyed hashes (Review Focus 5)", async () => {
     const auth = totpAuth();
     const session = await verifiedSession(auth);
-    const r = await setupTotp(auth.config, { user: session.user });
+    const r = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     const { secret, uri, backupCodes } = r.value;
     expect(secret).toMatch(/^[A-Z2-7]{32}$/);
@@ -64,15 +65,32 @@ describe("the setup (plan 9f)", () => {
     ).toBeNull();
   });
 
+  it("refuses a wrong password with invalid_credentials and writes no row: a session alone sets up no factor (review I-1)", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    expect(
+      await setupTotp(auth.config, { userId: session.user.id, password: "not the password" }),
+    ).toEqual({ ok: false, code: "invalid_credentials", status: 401 });
+    expect(await auth.storage.findMany("totp", [])).toEqual([]);
+    expect(
+      await setupTotp(auth.config, { userId: "no such user", password: PASSWORD }),
+    ).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect(await auth.storage.findMany("totp", [])).toEqual([]);
+  });
+
   it("takes the issuer, the count, and the length from the config, and an issuer from the call", async () => {
     const auth = totpAuth({ totp: { issuer: "Acme", backupCodes: 5, backupCodeLength: 12 } });
     const session = await verifiedSession(auth);
-    const r = await setupTotp(auth.config, { user: session.user });
+    const r = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     expect(r.value.uri.startsWith("otpauth://totp/Acme:ada%40example.com?")).toBe(true);
     expect(r.value.backupCodes).toHaveLength(5);
     expect(r.value.backupCodes[0]).toHaveLength(12);
-    const custom = await setupTotp(auth.config, { user: session.user, issuer: "Other" });
+    const custom = await setupTotp(auth.config, {
+      userId: session.user.id,
+      password: PASSWORD,
+      issuer: "Other",
+    });
     expect(custom.ok && custom.value.uri).toContain("&issuer=Other&");
   });
 
@@ -85,13 +103,13 @@ describe("the setup (plan 9f)", () => {
       userAgent: null,
     });
     if (!up.ok) throw new Error(up.code);
-    expect(await setupTotp(auth.config, { user: up.value.user })).toEqual({
+    expect(await setupTotp(auth.config, { userId: up.value.user.id, password: PASSWORD })).toEqual({
       ok: false,
       code: "email_unverified",
       status: 403,
     });
     const { user } = await enrolled(auth);
-    expect(await setupTotp(auth.config, { user })).toEqual({
+    expect(await setupTotp(auth.config, { userId: user.id, password: PASSWORD })).toEqual({
       ok: false,
       code: "totp_enabled",
       status: 409,
@@ -101,8 +119,8 @@ describe("the setup (plan 9f)", () => {
   it("replaces an unconfirmed setup, so the code of the first secret no longer enables", async () => {
     const auth = totpAuth();
     const session = await verifiedSession(auth);
-    const first = await setupTotp(auth.config, { user: session.user });
-    const second = await setupTotp(auth.config, { user: session.user });
+    const first = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    const second = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!first.ok || !second.ok) throw new Error("setup");
     expect(await auth.storage.findMany("totp", [])).toHaveLength(1);
     const a = await codeNow(auth, base32Decode(first.value.secret));
@@ -118,7 +136,7 @@ describe("the setup (plan 9f)", () => {
   it("confirms only within 15 minutes of the setup, and answers totp_not_enabled with no setup", async () => {
     const auth = totpAuth();
     const session = await verifiedSession(auth);
-    const r = await setupTotp(auth.config, { user: session.user });
+    const r = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     auth.clock.advance(15 * 60_000);
     const code = await codeNow(auth, base32Decode(r.value.secret));
@@ -138,7 +156,7 @@ describe("the enable (plan 9f)", () => {
   it("refuses a wrong code and a code two steps old, enables with a code of the window, and answers the status", async () => {
     const auth = totpAuth();
     const session = await verifiedSession(auth);
-    const r = await setupTotp(auth.config, { user: session.user });
+    const r = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     const secret = base32Decode(r.value.secret);
     const now = auth.clock.now();
@@ -188,7 +206,7 @@ describe("the enable (plan 9f)", () => {
       createdAt: now,
       updatedAt: now,
     });
-    const r = await setupTotp(auth.config, { user: mine.user });
+    const r = await setupTotp(auth.config, { userId: mine.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     const code = await codeNow(auth, base32Decode(r.value.secret));
     // The verify link of the sign-up also opened a session: it is another device too.
@@ -213,7 +231,7 @@ describe("the enable (plan 9f)", () => {
   it("refuses an enable whose row a parallel setup replaced after the read: no unchecked secret turns on", async () => {
     const auth = totpAuth();
     const session = await verifiedSession(auth);
-    const r = await setupTotp(auth.config, { user: session.user });
+    const r = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     const code = await codeNow(auth, base32Decode(r.value.secret));
     let replaced = false;
@@ -224,7 +242,10 @@ describe("the enable (plan 9f)", () => {
       transaction: async (fn) => {
         if (!replaced) {
           replaced = true;
-          const again = await setupTotp(auth.config, { user: session.user });
+          const again = await setupTotp(auth.config, {
+            userId: session.user.id,
+            password: PASSWORD,
+          });
           if (!again.ok) throw new Error(again.code);
         }
         return auth.storage.transaction(fn);
@@ -319,7 +340,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       ok: true,
       value: off,
     });
-    const r = await setupTotp(auth.config, { user: session.user });
+    const r = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     expect(await totpStatus(auth.config, { userId: session.user.id })).toEqual({
       ok: true,
@@ -383,6 +404,67 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
     ).toEqual({ ok: false, code: "rate_limited", status: 429 });
   });
 
+  it("limits the code checks to 30 per user per 24 hours over every operation: the thirty-first answers rate_limited, and a check 24 hours on is allowed", async () => {
+    const auth = totpAuth();
+    const { user, secret, session } = await enrolled(auth);
+    // The enable of `enrolled` took the first of the 30, 30 seconds ago.
+    const start = auth.clock.now().getTime() - 30_000;
+    const wrong = async () => wrongFor(await codeNow(auth, secret));
+    // Each 15-minute window takes 10: 1 + 9, then 10, then 10 in three windows.
+    for (let i = 0; i < 9; i++)
+      expect(await disableTotpWithCode(auth.config, { user, code: await wrong() })).toMatchObject({
+        code: "invalid_code",
+      });
+    auth.clock.advance(15 * 60_000);
+    for (let i = 0; i < 10; i++)
+      expect(
+        await regenerateBackupCodesWithCode(auth.config, { user, code: await wrong() }),
+      ).toMatchObject({ code: "invalid_code" });
+    auth.clock.advance(15 * 60_000);
+    const challenge = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: "2.2.2.2",
+      userAgent: null,
+    });
+    if (!challenge.ok || !("twoFactor" in challenge.value)) throw new Error("no challenge");
+    const tf = challenge.value.twoFactor.challenge;
+    for (let i = 0; i < 5; i++)
+      await verifyTwoFactor(auth.config, { challenge: tf, code: await wrong(), ip: "2.2.2.2" });
+    for (let i = 0; i < 5; i++)
+      expect(await disableTotpWithCode(auth.config, { user, code: await wrong() })).toMatchObject({
+        code: "invalid_code",
+      });
+    // A new 15-minute window: only the daily limit refuses now, on each operation.
+    auth.clock.advance(15 * 60_000);
+    const limited = { ok: false, code: "rate_limited", status: 429 };
+    const fresh = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: "2.2.2.2",
+      userAgent: null,
+    });
+    if (!fresh.ok || !("twoFactor" in fresh.value)) throw new Error("no challenge");
+    const right = await codeNow(auth, secret);
+    expect(
+      await verifyTwoFactor(auth.config, {
+        challenge: fresh.value.twoFactor.challenge,
+        code: right,
+        ip: "2.2.2.2",
+      }),
+    ).toEqual(limited);
+    expect(await disableTotpWithCode(auth.config, { user, code: right })).toEqual(limited);
+    expect(await regenerateBackupCodesWithCode(auth.config, { user, code: right })).toEqual(
+      limited,
+    );
+    expect(await enableTotp(auth.config, { session, code: right })).toEqual(limited);
+    // 24 hours after the first check the daily window ends.
+    auth.clock.advance(start + 86_400_000 - auth.clock.now().getTime());
+    expect(
+      await disableTotpWithCode(auth.config, { user, code: await codeNow(auth, secret) }),
+    ).toEqual({ ok: true, value: { ok: true } });
+  });
+
   it("takes a user id and no code in the in-process forms: uri, regenerate, and disable", async () => {
     const auth = totpAuth();
     const { user, secret } = await enrolled(auth);
@@ -405,7 +487,9 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
   it("answers not_found with totp: false, and resolves no factor without a password config", async () => {
     const off = totpAuth({ totp: false });
     const session = await verifiedSession(off);
-    expect(await setupTotp(off.config, { user: session.user })).toMatchObject({
+    expect(
+      await setupTotp(off.config, { userId: session.user.id, password: PASSWORD }),
+    ).toMatchObject({
       code: "not_found",
       status: 404,
     });

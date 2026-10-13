@@ -45,7 +45,7 @@ export async function verifiedSession(
  */
 export async function enrolled(auth: Auth, email = EMAIL) {
   const session = await verifiedSession(auth, email);
-  const setup = await setupTotp(auth.config, { user: session.user });
+  const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
   if (!setup.ok) throw new Error(setup.code);
   const secret = base32Decode(setup.value.secret);
   const enabled = await enableTotp(auth.config, { session, code: await codeNow(auth, secret) });

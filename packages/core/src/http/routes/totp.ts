@@ -26,6 +26,8 @@ import type { Route, RouteContext } from "../router.js";
 import { sessionCookieFor } from "../session-answer.js";
 
 const codeBody = z.object({ code: z.string().max(64) });
+/** The setup takes the password (plan 9f final fix wave, review I-1); the sign-in's length bound applies in `verifyPassword`. */
+const setupBody = z.object({ password: z.string().max(1024) });
 const verifyBody = z.object({
   challenge: z.string().max(64),
   code: z.string().max(16).optional(),
@@ -91,7 +93,14 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        return send(respond(await setupTotp(config, { user: s.resolved.user })), s.renewed);
+        const body = await readJson(ctx.request, setupBody);
+        if (!body.ok) return send(respond(body), s.renewed);
+        const r = await setupTotp(config, {
+          userId: s.resolved.user.id,
+          password: body.value.password,
+          ip: ctx.ip,
+        });
+        return send(respond(r), s.renewed);
       },
     },
     {

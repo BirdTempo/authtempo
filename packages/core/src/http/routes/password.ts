@@ -102,8 +102,11 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           password: body.value.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          // The body's token wins over the cookie: a native app sends the
+          // body, a browser sends the cookie. `||`, not `??`: an empty body
+          // value is no token, so the cookie still applies.
           trustDevice:
-            body.value.trustDevice ??
+            body.value.trustDevice ||
             (config.totp
               ? (readCookie(ctx.request, config.totp.trustCookieName) ?? undefined)
               : undefined),

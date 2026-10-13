@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openSealed, seal } from "../src/primitives/aead.js";
-import { constantTimeEqual } from "../src/primitives/crypto.js";
+import { constantTimeEqual, fromBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import {
   BACKUP_CODE_ALPHABET,
   base32Decode,
@@ -47,6 +47,20 @@ describe("base32 (plan 9f)", () => {
     expect(base32Decode("gezd gnbv")).toEqual(base32Decode("GEZDGNBV"));
     expect(base32Decode("MZXW6YQ=")).toEqual(enc.encode("foob"));
     expect(() => base32Decode("GEZD1")).toThrow("not base32");
+  });
+
+  it("checks the characters before the upper-casing, takes `=` at the end only, and refuses a length with no whole byte", () => {
+    // "ß" upper-cases to "SS" and "ſ" to "S": both are outside the alphabet as typed.
+    expect(() => base32Decode("MZXWß")).toThrow("not base32");
+    expect(() => base32Decode("MZXWſ")).toThrow("not base32");
+    expect(() => base32Decode("MZ=XW6YQ")).toThrow("not base32");
+    // One character holds 5 bits, no byte; three and six end on no byte either.
+    expect(() => base32Decode("M")).toThrow("not base32");
+    expect(() => base32Decode("MZX")).toThrow("not base32");
+    expect(() => base32Decode("MZXW6Y")).toThrow("not base32");
+    // Padding pads to a multiple of 8.
+    expect(() => base32Decode("MZXW6YQ==")).toThrow("not base32");
+    expect(base32Decode("MY======")).toEqual(enc.encode("f"));
   });
 });
 
@@ -198,5 +212,19 @@ describe("seal and openSealed (plan 9f)", () => {
     expect(await openSealed(A, INFO, changed, "u1")).toBeNull();
     expect(await openSealed(A, INFO, "not base64url!", "u1")).toBeNull();
     expect(await openSealed(A, INFO, "", "u1")).toBeNull();
+  });
+
+  it("gives nothing for a changed IV or a value under the 28-byte floor, and round-trips a zero-length plaintext", async () => {
+    const sealed = fromBase64Url(await seal(A, INFO, SEED, "u1"));
+    const iv = sealed.slice();
+    iv[0] = (iv[0] ?? 0) ^ 1;
+    expect(await openSealed(A, INFO, toBase64Url(iv), "u1")).toBeNull();
+    // 12 bytes of IV and 15 of tag: one byte under the floor.
+    expect(await openSealed(A, INFO, toBase64Url(sealed.slice(0, 27)), "u1")).toBeNull();
+    // A zero-length plaintext seals to exactly the floor: the IV and the tag.
+    const empty = await seal(A, INFO, new Uint8Array(0), "u1");
+    expect(fromBase64Url(empty).length).toBe(28);
+    expect(await openSealed(A, INFO, empty, "u1")).toEqual(new Uint8Array(0));
+    expect(await openSealed(A, INFO, empty, "u2")).toBeNull();
   });
 });

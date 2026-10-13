@@ -230,7 +230,13 @@ export interface ResolvedEmailOtp {
 }
 
 export interface TotpConfig {
-  /** The issuer that an authenticator app shows: 1 to 80 characters, no control character, no colon. Default `appName`. */
+  /**
+   * The issuer that an authenticator app shows: 1 to 80 characters, no
+   * control character, no colon. Default `appName`, and with no `appName`
+   * the host of `baseURL` with no port. An app whose `appName` holds a colon
+   * sets `issuer`: the key URI uses the colon to split the issuer from the
+   * account.
+   */
   issuer?: string;
   /** The backup codes per setup and per regeneration, 5 to 20. Default 10. */
   backupCodes?: number;
@@ -612,7 +618,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     organizations,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
-    totp: resolveTotp(input.totp, password !== null, appName, cookieName),
+    totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
@@ -722,7 +728,7 @@ const COOKIE_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 function resolveTotp(
   input: TotpConfig | false | undefined,
   hasPassword: boolean,
-  appName: string,
+  defaultIssuer: string,
   cookieName: string,
 ): ResolvedTotp | null {
   if (input === false) return null;
@@ -774,8 +780,9 @@ function resolveTotp(
   if (o.challengePage !== undefined && typeof o.challengePage !== "function")
     throw new ConfigError("totp.challengePage must be a function");
   return {
-    // The default may hold a colon (a host with a port); the key URI encodes it.
-    issuer: issuer ?? appName,
+    // The default has no port (review M-2): the Key URI Format reads a colon,
+    // also as %3A, as the split between the issuer and the account.
+    issuer: issuer ?? defaultIssuer,
     backupCodes,
     backupCodeLength,
     trustDays,

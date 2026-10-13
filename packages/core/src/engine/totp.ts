@@ -14,6 +14,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, TotpRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
+import { verifyPassword } from "./password.js";
 import {
   endSessions,
   openSession,
@@ -38,10 +39,28 @@ const TOTP_WINDOW = 1;
 /** The compare's secret when the sealed value opens with no key (another app secret): the same three HMACs run. */
 const NO_SECRET = new Uint8Array(SECRET_BYTES);
 /** An unconfirmed setup confirms within 15 minutes. After that `enable` answers `totp_not_enabled`, and a new setup replaces it. */
-const SETUP_TTL_MS = 15 * 60_000;
-// Per 15 minutes, for every operation that takes a code with a session: a
-// stolen session must not guess codes to turn the factor off.
+export const SETUP_TTL_MS = 15 * 60_000;
+// Per 15 minutes, for every code check: the challenge verify, the enable,
+// the disable, and the new backup codes. A stolen session must not guess
+// codes to turn the factor off, and a capped challenge spends only itself.
 const CODE_PER_USER = { seconds: 900, max: 10 };
+// Per 24 hours, after `CODE_PER_USER`, on the same code checks (plan 9f
+// final fix wave). One guess passes with p = 3 / 10^6 (the three codes of the
+// window). With the 15-minute key alone an attacker who has the password
+// gets 960 guesses a day: about 8.3 % in 30 days and about 65 % in a year.
+// With 30 a day: one account per day about 9 x 10^-5, per year about 3.2 %,
+// the same order as the email code's daily figure (spec section 9).
+const CODE_PER_USER_DAY = { seconds: 86_400, max: 30 };
+/**
+ * One code check of the user: true when both per-user keys allow it. Every
+ * operation that compares a code or a backup code calls this first.
+ */
+async function codeCheckAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return (
+    (await config.limiter.allow(`totp-code:user:${userId}`, CODE_PER_USER)) &&
+    (await config.limiter.allow(`totp-code:user-day:${userId}`, CODE_PER_USER_DAY))
+  );
+}
 /** The rounds of the backup code replacement's compare-and-set. Each lost round means that another write landed first. */
 const REPLACE_ROUNDS = 5;
 
@@ -198,19 +217,44 @@ export async function deleteTwoFactorChallenges(tx: StorageAdapter, userId: stri
   ]);
 }
 
+/** The setup's input: the user and the user's password (plan 9f final fix wave, review I-1). */
+export interface TotpSetupInput {
+  userId: string;
+  password: string;
+  /** The caller's IP, for the password check's per-IP limit. */
+  ip?: string | null | undefined;
+  issuer?: string | undefined;
+}
+
 /**
  * The secret, the key URI, and the backup codes for a new factor (plan 9f).
- * Needs a verified email. A factor that is on answers `totp_enabled`; an
- * unconfirmed setup is replaced in place, so one row per user stays. The
- * backup codes pass only after `enable`.
+ * Needs the user's password and a verified email. The password check is
+ * `verifyPassword`: the sign-in's limits and its dummy verify, and
+ * `invalid_credentials` on a miss, before any row write. A session alone
+ * must not set up the factor: a session thief would enroll an own
+ * authenticator, the enable would end the owner's sessions, and every later
+ * password sign-in of the owner would ask for the thief's code. A factor
+ * that is on answers `totp_enabled`; an unconfirmed setup is replaced in
+ * place, so one row per user stays. The backup codes pass only after
+ * `enable`.
  */
 export async function setupTotp(
   config: ResolvedConfig,
-  input: { user: UserRow; issuer?: string | undefined },
+  input: TotpSetupInput,
 ): Promise<Result<TotpSetup>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  const { user } = input;
+  const proved = await verifyPassword(config, {
+    userId: input.userId,
+    password: input.password,
+    ip: input.ip ?? null,
+  });
+  if (!proved.ok) return fail(proved.code);
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: input.userId },
+  ]);
+  // verifyPassword found the user; a user deleted since then gets no factor.
+  if (!user) return fail("invalid_credentials");
   if (!user.emailVerified) return fail("email_unverified");
   const now = config.clock.now();
   const existing = await config.storage.findOne("totp", [
@@ -278,8 +322,7 @@ export async function enableTotp(
   if (!totp) return fail("not_found");
   const { user, session } = input.session;
   if (!user.emailVerified) return fail("email_unverified");
-  if (!(await config.limiter.allow(`totp-code:user:${user.id}`, CODE_PER_USER)))
-    return fail("rate_limited");
+  if (!(await codeCheckAllowed(config, user.id))) return fail("rate_limited");
   const now = config.clock.now();
   const row = await config.storage.findOne("totp", [{ field: "userId", op: "eq", value: user.id }]);
   if (row?.enabledAt) return fail("totp_enabled");
@@ -353,8 +396,7 @@ export async function disableTotpWithCode(
   input: { user: UserRow; code: string },
 ): Promise<Result<{ ok: true }>> {
   if (!config.totp) return fail("not_found");
-  if (!(await config.limiter.allow(`totp-code:user:${input.user.id}`, CODE_PER_USER)))
-    return fail("rate_limited");
+  if (!(await codeCheckAllowed(config, input.user.id))) return fail("rate_limited");
   const now = config.clock.now();
   const row = await enabledRow(config.storage, input.user.id);
   if (!row) return fail("totp_not_enabled");
@@ -411,8 +453,7 @@ export async function regenerateBackupCodesWithCode(
 ): Promise<Result<{ backupCodes: string[] }>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  if (!(await config.limiter.allow(`totp-code:user:${input.user.id}`, CODE_PER_USER)))
-    return fail("rate_limited");
+  if (!(await codeCheckAllowed(config, input.user.id))) return fail("rate_limited");
   const now = config.clock.now();
   const row = await enabledRow(config.storage, input.user.id);
   if (!row) return fail("totp_not_enabled");
@@ -483,7 +524,8 @@ export const CHALLENGE_TTL_MS = 300_000;
 export const CHALLENGE_MAX_ATTEMPTS = 5;
 // Per 15 minutes. The challenge cap bounds the guesses per challenge, the
 // sign-in's email limit bounds the challenges per address, and
-// `CODE_PER_USER` bounds the guesses per user over all challenges.
+// `CODE_PER_USER` and `CODE_PER_USER_DAY` bound the guesses per user over
+// all challenges.
 const VERIFY_PER_IP = { seconds: 900, max: 30 };
 
 /** The sign-in's answer for a user with the factor on: no session yet. */
@@ -631,12 +673,11 @@ export async function verifyTwoFactor(
       attemptsOf(challenge) >= CHALLENGE_MAX_ATTEMPTS ? "too_many_attempts" : "invalid_token",
     );
   if (challenge.expiresAt.getTime() <= now.getTime()) return fail("invalid_token");
-  // The bound per user over all challenges, shared with the enable, the
-  // disable, and the new backup codes. A capped challenge spends only itself,
+  // The bounds per user over all challenges (15 minutes and 24 hours),
+  // shared with the enable, the disable, and the new backup codes. A capped challenge spends only itself,
   // so without this line each new sign-in gives five more guesses. After the
   // live check: an unknown, spent, or expired challenge costs the user nothing.
-  if (!(await config.limiter.allow(`totp-code:user:${challenge.identifier}`, CODE_PER_USER)))
-    return fail("rate_limited");
+  if (!(await codeCheckAllowed(config, challenge.identifier))) return fail("rate_limited");
   const row = await enabledRow(config.storage, challenge.identifier);
   if (!row) return fail("invalid_token");
   let backupCodesLeft = row.backupCodes.length;
@@ -644,6 +685,11 @@ export async function verifyTwoFactor(
     if (!(await acceptCode(config, row, code, now)))
       return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
   } else {
+    // The spend commits here, before the session transaction. So a backup
+    // code is spent also when that transaction refuses: a spend of the
+    // challenge that matches zero rows (a reset or a change ran), or a
+    // `session.beforeCreate` hook that refuses (hookGuard). The person then
+    // uses another backup code.
     const left = await acceptBackupCode(config, row, backupCode ?? "", now);
     if (left === null)
       return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
