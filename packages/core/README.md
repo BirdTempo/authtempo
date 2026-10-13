@@ -521,7 +521,8 @@ const auth = createAuth({
     organization: {
       async beforeCreate({ organization, user }) {
         if (organization.slug.startsWith("acme-")) throw hookRefusal("Choose another name.");
-        // Write your own row first, with the id core minted.
+        // Write your own row first, with the id core minted. On Postgres, on a
+        // connection that core's adapter does not hold (see the rule below).
         await tenants.create({ id: organization.id, ownerId: user.id });
       },
       async afterAddMember({ organization, member, via }) {
@@ -545,12 +546,21 @@ const auth = createAuth({
   is empty, longer than 200 characters, or holds a control character becomes
   "The app refused this request.". Any other throw answers 500
   `hook_failed` and logs `tempo-auth: before hook failed <hook> <error name>`.
+  The error name is logged only when it is a plain class name such as
+  `TypeError`; any other name logs as `Error`, because the app sets it.
   Either way, no row is written.
+- Three flows have a write before the before hook. An owner demotion and
+  an owner removal stamp the owner lock first, and a passkey sign-in moves
+  the passkey counter first. A refusal undoes the stamp. On Postgres the
+  stamp's row lock is held while the hook runs, so a slow hook on an owner
+  write blocks the other owner writes of that organization.
 - An after hook runs after the commit, before the answer. A throw cannot
   undo the row: core logs `tempo-auth: after hook failed <hook> <row id>
   <error name>` and answers success. If your app must not keep a core row
   without its own row, write yours in the before hook, with the id core
-  minted. Then the residual of a failure is your row with no core row.
+  minted. Then the residual of a failure is your row with no core row. On
+  Postgres, write it on a second connection (see the rule on one
+  connection below).
 - Each hook gets a copy of its event. A before hook cannot change the row,
   except `session.beforeCreate`, which may answer `{ ip?, userAgent?,
   activeOrganizationId? }`, each a string or null. The organization must be
@@ -565,8 +575,11 @@ const auth = createAuth({
   `afterDeclineInvitation` (`user` is null when the decline carried no
   session), and `afterRevokeInvitation`. An accept runs `beforeAddMember`
   with `via: "invitation"` every time, and `afterAddMember` only when it
-  made a new member row. A delete runs no member hook for the rows it
-  removes.
+  made a new member row. An accept that raises an existing member's role
+  runs `beforeUpdateMemberRole` and `afterUpdateMemberRole` too, with the
+  inviter as `by` (the accepting user when the inviter's user row is
+  gone). A refusal keeps the role and the invitation pending. A delete
+  runs no member hook for the rows it removes.
 - Session points: `beforeCreate` and `afterCreate` (`via`: `password`,
   `magic_link`, `social`, `passkey`, or `handoff`), and `afterEnd`
   (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`, or
@@ -576,6 +589,12 @@ const auth = createAuth({
   `claim` in every flow that proves the address: the magic link, the
   social sign-in, the verify link, and the reset of an unverified user. A
   reset of a verified user ends that user's sessions with `password_reset`.
+- `session.beforeCreate` runs on a password sign-in only after the password
+  is correct. So `hook_refused` against `invalid_credentials` tells the
+  caller that the password was right. A ban hook should refuse with a text
+  that does not depend on the password. The code still differs from a
+  wrong password, so only the sign-in rate limits bound such a guess, as
+  in Better Auth's ban check.
 - `session.beforeCreate` runs before the first write of the sign-in's
   transaction in every flow except the reset (see its row). On D1 the undo
   of a write is not exact, so a refusal after a write could bring back a
@@ -604,11 +623,25 @@ const auth = createAuth({
   transaction and answers an error. A verify link whose password row is
   gone answers `invalid_token` after the hook. A flow that retries after a unique key race
   (the magic link, the social sign-in, the sign-up, the reset) runs its
-  before hook again.
+  before hook again. The organization flows have the same window: a role
+  change or a remove whose member changed since the read answers
+  `conflict` after its before hook, and an accept that loses the consume
+  race answers `invalid_token` after `beforeAddMember`. No after hook runs
+  for any of these.
 - Hooks have no timeout, as the mail port has none. A hook that never
   settles holds the request. A before hook holds the transaction, and on
   Postgres one connection, for as long as it runs. Do not open a
   transaction on core's storage from a before hook.
+- On Postgres, a before hook must not run a query on the client that core's
+  adapter uses while its pool has one connection (`max: 1`, the setup the
+  adapter README gives for Workers). The transaction holds that one
+  connection and waits for the hook, and the query waits for the
+  connection: with one connection the request hangs until the pool times
+  out. To write your own row from a before hook, use a second connection (a
+  pool of two or more, or a separate client). Or write it from the after
+  hook and accept the orphan rule above. On D1, a write through the
+  binding is a separate request and takes no lock. After hooks run after
+  the commit and are not affected.
 - Core has no request hooks. Wrap `auth.handle`, and read
   `auth.caller(request)` for the caller.
 - `createAuth` refuses a hook that is not a function, a name that is no
