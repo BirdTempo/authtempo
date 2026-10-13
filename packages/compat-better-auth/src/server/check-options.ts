@@ -287,7 +287,7 @@ const PLUGIN_RULES: Record<string, Rule> = {
         refuse(
           out,
           p,
-          "core has no account lockout; pass { enabled: false }. Core caps 5 codes per challenge and 10 password sign-ins per address per 15 minutes",
+          "core has no account lockout; pass { enabled: false }. Core caps the code checks per user at 10 per 15 minutes and 30 per 24 hours, and 5 codes per challenge",
         );
     },
   }),
@@ -604,7 +604,7 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     note(
       out,
       "plugins[two-factor].accountLockout",
-      "not set: Better Auth locks an account for 900 s after 10 wrong codes; core has no account lockout and caps 5 codes per challenge and 10 password sign-ins per address per 15 minutes",
+      "not set: Better Auth locks an account for 900 s after 10 wrong codes; core has no account lockout and caps the code checks per user at 10 per 15 minutes and 30 per 24 hours, and 5 codes per challenge",
     );
   if (pluginOf(options, "expo") && appSchemes(options).length === 0) {
     refuse(out, "plugins[expo]", "needs the app scheme, for example myapp://, in trustedOrigins");

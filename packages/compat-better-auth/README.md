@@ -203,7 +203,31 @@ accepted. The client answers the same `NOT_SUPPORTED` (501) for `callbackURL`
 on `signIn.email` and `signUp.email` and for `rememberMe: false`, and sends no
 request.
 
-Two-factor (plan 9f): the error codes are Better Auth 1.7.2's (`INVALID_CODE`, `INVALID_BACKUP_CODE`, `TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE`, `INVALID_TWO_FACTOR_COOKIE`, `TOTP_NOT_ENABLED`, `TWO_FACTOR_NOT_ENABLED`, `INVALID_PASSWORD`), with core's status: 400 for a wrong code, where Better Auth answers 401. A missing or stale `better-auth.two_factor` cookie answers `INVALID_TWO_FACTOR_COOKIE` with 401. A second enable answers `TOTP_ALREADY_ENABLED` (409), where Better Auth replaces the secret: disable first. A challenge lives 5 minutes, where Better Auth's cookie lives 10. `api.signInEmail` answers `{ twoFactorRedirect: true, twoFactorMethods: ["totp"] }`; its type says so only when the options name the plugin in a literal list. The backup codes of a Better Auth user do not move: each user sets the factor up again on tempo-auth. A new `secret` opens no sealed secret, so every user with the factor on fails the code and the backup codes until the factor is turned off for them.
+Two-factor (plan 9f): the error codes are Better Auth 1.7.2's (`INVALID_CODE`,
+`INVALID_BACKUP_CODE`, `TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE`,
+`INVALID_TWO_FACTOR_COOKIE`, `TOTP_NOT_ENABLED`, `TWO_FACTOR_NOT_ENABLED`,
+`INVALID_PASSWORD`), with core's status: 400 for a wrong code, where Better
+Auth answers 401. A missing or stale `better-auth.two_factor` cookie answers
+`INVALID_TWO_FACTOR_COOKIE` with 401. A second enable answers
+`TOTP_ALREADY_ENABLED` (409), where Better Auth replaces the secret: disable
+first. A challenge lives 5 minutes, where Better Auth's cookie lives 10.
+`api.signInEmail` answers `{ twoFactorRedirect: true, twoFactorMethods:
+["totp"] }`; its type says so only when the options name the plugin in a
+literal list. The backup codes of a Better Auth user do not move: each user
+sets the factor up again on tempo-auth. A new `secret` opens no sealed secret,
+so every user with the factor on fails the code and the backup codes until the
+factor is turned off for them. The setup takes the password at every path:
+`/two-factor/enable` passes it into core's setup, and core's own `POST
+/totp/setup` takes `{ password }` too, so a session alone sets up no factor. A
+wrong password answers `INVALID_PASSWORD` (400) and writes no row. The limits
+that bind are per user, on every code check: 10 per 15 minutes and 30 per 24
+hours. A person who has the password or a stolen session can use up that
+budget, and the owner's verify, enable, and disable then answer
+`TOO_MANY_REQUESTS` until the window ends, as with Better Auth's lockout.
+`api.signInEmail` reads `better-auth.trust_device` from `headers`, so a
+trusted device signs in with no challenge. A gated server sign-in keeps no
+challenge, because a server caller has no cookie jar: the browser repeats the
+sign-in through the handler.
 
 An invitation has two ids. The mail id (`data.id` in `sendInvitationEmail`)
 accepts the invitation, and the row id (from `api.createInvitation`) cancels it.
@@ -351,7 +375,20 @@ with `getItem` and `setItem`, as Better Auth does. With a plain store, such as
 `localStorage`, the session token lies readable at rest, and any script on the
 page can read it.
 
-`twoFactorClient({ twoFactorPage?, onTwoFactorRedirect? })` (plan 9f): `signIn.email` answers `{ twoFactorRedirect: true, twoFactorMethods: ["totp"] }` for a user with the factor on and calls `onTwoFactorRedirect`, or sends the browser to `twoFactorPage`. The client keeps the challenge in memory, so `twoFactor.verifyTotp({ code })` and `twoFactor.verifyBackupCode({ code })` work on Expo with no cookie; on the web, after a reload, they send the `better-auth.two_factor` cookie. On Expo, `trustDevice: true` stores the trust token under `<storagePrefix>_trust_device`, and the next `signIn.email` sends it. `twoFactor.enable`, `disable`, `getTotpUri`, and `generateBackupCodes` take the password. `sendOtp`, `verifyOtp`, and `disableSession: true` answer `NOT_SUPPORTED`. The answer type holds `twoFactorRedirect` only when the client options name `twoFactorClient()` in a literal list.
+`twoFactorClient({ twoFactorPage?, onTwoFactorRedirect? })` (plan 9f):
+`signIn.email` answers `{ twoFactorRedirect: true, twoFactorMethods: ["totp"]
+}` for a user with the factor on and calls `onTwoFactorRedirect`, or sends the
+browser to `twoFactorPage`. The client keeps the challenge in memory, so
+`twoFactor.verifyTotp({ code })` and `twoFactor.verifyBackupCode({ code })`
+work on Expo with no cookie; on the web, after a reload, they send the
+`better-auth.two_factor` cookie. On Expo, `trustDevice: true` stores the trust
+token under `<storagePrefix>_trust_device`, and the next `signIn.email` sends
+it. On Expo, a sign-in that answers a challenge also drops the stored session
+token: the token of an earlier sign-in is not the new one. `twoFactor.enable`,
+`disable`, `getTotpUri`, and `generateBackupCodes` take the password.
+`sendOtp`, `verifyOtp`, and `disableSession: true` answer `NOT_SUPPORTED`. The
+answer type holds `twoFactorRedirect` only when the client options name
+`twoFactorClient()` in a literal list.
 
 ## Plugins
 

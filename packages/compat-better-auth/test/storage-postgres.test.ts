@@ -1,13 +1,18 @@
-import { applyPostgresMigrations } from "@tempo-auth/adapter-postgres";
+import {
+  applyPostgresMigrations,
+  type CoreFieldType,
+  postgresColumnType,
+} from "@tempo-auth/adapter-postgres";
 import {
   type Auth,
   createAuth,
   createPbkdf2PasswordHash,
   SCHEMA_VERSION,
   type StorageAdapter,
+  schema,
 } from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
-import { columnsOf, TABLES } from "@tempo-auth/core/sql";
+import { columnName, columnsOf, TABLES } from "@tempo-auth/core/sql";
 import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -478,6 +483,37 @@ describe("the compat migration on postgres", () => {
           [TABLES[model]],
         );
         expect({ model, cols: cols.map((r) => r.c) }).toEqual({ model, cols: columnsOf(model) });
+      }
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("matches core's schema in NOT NULL and in column type on ta_totp and ta_trusted_device (core's parity check)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate();
+      for (const model of ["totp", "trustedDevice"] as const) {
+        const cols = await pg.sql.unsafe<
+          { column_name: string; is_nullable: string; data_type: string }[]
+        >(
+          "SELECT column_name, is_nullable, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1",
+          [TABLES[model]],
+        );
+        const actual = Object.fromEntries(
+          cols.map((c) => [c.column_name, `${c.data_type} ${c.is_nullable}`]),
+        );
+        const fields = schema[model].fields as Record<
+          string,
+          { type: CoreFieldType; nullable?: boolean }
+        >;
+        const expected = Object.fromEntries(
+          Object.entries(fields).map(([f, def]) => [
+            columnName(f),
+            `${postgresColumnType(f, def.type)} ${def.nullable ? "YES" : "NO"}`,
+          ]),
+        );
+        expect({ model, columns: actual }).toEqual({ model, columns: expected });
       }
     } finally {
       await pg.close();

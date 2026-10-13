@@ -1,5 +1,7 @@
 import { env } from "cloudflare:test";
+import { schema } from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
+import { columnName, TABLES } from "@tempo-auth/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import {
@@ -68,6 +70,21 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
 
   describe(`the Better Auth mapping on D1, ${label}`, () => {
     beforeEach(truncate);
+
+    it("marks NOT NULL on ta_totp and ta_trusted_device exactly as core's schema does (core's parity check)", async () => {
+      for (const model of ["totp", "trustedDevice"] as const) {
+        const info = await env.DB.prepare(`PRAGMA table_info(${TABLES[model]})`).all<{
+          name: string;
+          notnull: number;
+        }>();
+        const actual = Object.fromEntries(info.results.map((c) => [c.name, c.notnull]));
+        const fields = schema[model].fields as Record<string, { nullable?: boolean }>;
+        const expected = Object.fromEntries(
+          Object.entries(fields).map(([f, def]) => [columnName(f), def.nullable ? 0 : 1]),
+        );
+        expect({ model, notnull: actual }).toEqual({ model, notnull: expected });
+      }
+    });
 
     it("keeps a user row that another request verified inside the open transaction (Task 4's undo on Better Auth's columns)", async () => {
       const s = db();

@@ -56,7 +56,9 @@ const pair = (cookie: string | null) => (cookie ?? "").split(";")[0] ?? "";
 /** A verified user with a session; `post` sends a JSON POST under /api/auth with the given cookies. */
 async function app(tf: TwoFactorOptions | null = {}) {
   const links: string[] = [];
-  const auth = betterAuth(options(tf, links));
+  const opts = options(tf, links);
+  const storage = (opts.database as CompatDatabase).storage;
+  const auth = betterAuth(opts);
   const post = (path: string, body: unknown, cookie = "") =>
     auth.handler(
       new Request(`${BASE}/api/auth${path}`, {
@@ -75,7 +77,7 @@ async function app(tf: TwoFactorOptions | null = {}) {
   await post("/password/verify", { token: links.at(-1) });
   const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
   const session = pair(cookieOf(signIn, "tempo_session"));
-  return { auth, post, get, session };
+  return { auth, post, get, session, storage };
 }
 
 /** The factor on through Better Auth's two paths: enable with the password, then verify-totp with the session. */
@@ -147,7 +149,7 @@ describe("the two-factor options (plan 9f)", () => {
       }).sort(),
     ).toEqual(
       [
-        "plugins[two-factor].accountLockout: core has no account lockout; pass { enabled: false }. Core caps 5 codes per challenge and 10 password sign-ins per address per 15 minutes",
+        "plugins[two-factor].accountLockout: core has no account lockout; pass { enabled: false }. Core caps the code checks per user at 10 per 15 minutes and 30 per 24 hours, and 5 codes per challenge",
         "plugins[two-factor].allowPasswordless: core asks for the password at every change of the factor",
         "plugins[two-factor].backupCodeOptions.amount: core takes an integer from 5 to 20",
         "plugins[two-factor].backupCodeOptions.customBackupCodesGenerate: core makes its own backup codes",
@@ -164,6 +166,13 @@ describe("the two-factor options (plan 9f)", () => {
         "plugins[two-factor].twoFactorTable: core keeps the factor in its own ta_totp table",
       ].sort(),
     );
+    // Whole days, but more than core's 365.
+    expect(
+      refusalsFor({ accountLockout: { enabled: false }, trustDeviceMaxAge: 366 * 86_400 }),
+    ).toEqual(["plugins[two-factor].trustDeviceMaxAge: core takes whole days from 1 to 365"]);
+    expect(
+      refusalsFor({ accountLockout: { enabled: false }, trustDeviceMaxAge: 365 * 86_400 }),
+    ).toEqual([]);
     const noPassword = checkOptions({
       ...options(null),
       emailAndPassword: { enabled: false },
@@ -177,7 +186,7 @@ describe("the two-factor options (plan 9f)", () => {
   it("notes Better Auth's account lockout when the app sets none", () => {
     const notes = checkOptions({ ...options(null), plugins: [twoFactor()] }).notes;
     expect(notes).toContain(
-      "plugins[two-factor].accountLockout: not set: Better Auth locks an account for 900 s after 10 wrong codes; core has no account lockout and caps 5 codes per challenge and 10 password sign-ins per address per 15 minutes",
+      "plugins[two-factor].accountLockout: not set: Better Auth locks an account for 900 s after 10 wrong codes; core has no account lockout and caps the code checks per user at 10 per 15 minutes and 30 per 24 hours, and 5 codes per challenge",
     );
   });
 });
@@ -197,6 +206,81 @@ describe("the two-factor paths (plan 9f)", () => {
     const wrong = await post("/two-factor/enable", { password: "wrong password" }, session);
     expect(wrong.status).toBe(400);
     expect(await json(wrong)).toMatchObject({ code: "INVALID_PASSWORD" });
+  });
+
+  it("checks the password before any setup: a wrong one on enable and on core's /totp/setup writes no row (review I-1)", async () => {
+    const { post, session, storage } = await app();
+    const wrong = await post("/two-factor/enable", { password: "wrong password" }, session);
+    expect(wrong.status).toBe(400);
+    expect(await json(wrong)).toMatchObject({ code: "INVALID_PASSWORD" });
+    // Core's own setup route, which the handler passes through, takes the password too.
+    const bare = await post("/totp/setup", {}, session);
+    expect(bare.status).toBe(400);
+    const coreWrong = await post("/totp/setup", { password: "wrong password" }, session);
+    expect(coreWrong.status).toBe(401);
+    expect(await json(coreWrong)).toMatchObject({ error: "invalid_credentials" });
+    expect(await storage.findMany("totp", [])).toEqual([]);
+    const right = await post("/two-factor/enable", { password: PASSWORD }, session);
+    expect(right.status).toBe(200);
+    expect(await storage.findMany("totp", [])).toHaveLength(1);
+  });
+
+  it("answers TOTP_ALREADY_ENABLED (409) for a second enable, and INVALID_PASSWORD (400) for a wrong password on disable, get-totp-uri, and generate-backup-codes", async () => {
+    const { post, session, get } = await enrolled();
+    const again = await post("/two-factor/enable", { password: PASSWORD }, session);
+    expect(again.status).toBe(409);
+    expect(await json(again)).toMatchObject({ code: "TOTP_ALREADY_ENABLED" });
+    for (const path of [
+      "/two-factor/disable",
+      "/two-factor/get-totp-uri",
+      "/two-factor/generate-backup-codes",
+    ]) {
+      const r = await post(path, { password: "wrong password" }, session);
+      expect({ path, status: r.status, body: await json(r) }).toMatchObject({
+        path,
+        status: 400,
+        body: { code: "INVALID_PASSWORD" },
+      });
+    }
+    expect((await json(await get("/session", session))).user).toMatchObject({
+      twoFactorEnabled: true,
+    });
+  });
+
+  it("answers INVALID_TWO_FACTOR_COOKIE (401) and clears a challenge cookie of another shape, also one over 64 characters", async () => {
+    const { post } = await enrolled();
+    for (const value of [`tf_${"a".repeat(80)}`, "not-a-challenge"]) {
+      const r = await post(
+        "/two-factor/verify-totp",
+        { code: "123456" },
+        `better-auth.two_factor=${value}`,
+      );
+      expect({ value, status: r.status }).toEqual({ value, status: 401 });
+      expect(await json(r)).toMatchObject({ code: "INVALID_TWO_FACTOR_COOKIE" });
+      expect(cookieOf(r, "better-auth.two_factor")).toMatch(/Max-Age=0/);
+    }
+  });
+
+  it("clears the two_factor cookie on core's own verify of the challenge (review M-5)", async () => {
+    const { post, secret } = await enrolled();
+    const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
+    const body = (await signIn.json()) as { twoFactor: { challenge: string } };
+    const challenge = pair(cookieOf(signIn, "better-auth.two_factor"));
+    vi.useFakeTimers({ now: Date.now() + 30_000, toFake: ["Date"] });
+    try {
+      const v = await post(
+        "/totp/verify",
+        { challenge: body.twoFactor.challenge, code: await totpCode(secret, new Date()) },
+        challenge,
+      );
+      expect(v.status).toBe(200);
+      expect(cookieOf(v, "better-auth.two_factor")).toBe(
+        "better-auth.two_factor=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+      );
+      expect(cookieOf(v, "tempo_session")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("answers a challenge at the sign-in with the two_factor cookie, and verify-totp opens the session", async () => {
@@ -267,7 +351,11 @@ describe("the two-factor paths (plan 9f)", () => {
       expect(await json(r)).toMatchObject({ code: "INVALID_CODE" });
     }
     const fifth = await post("/two-factor/verify-totp", { code: wrong }, challenge);
+    expect(fifth.status).toBe(400);
     expect(await json(fifth)).toMatchObject({ code: "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE" });
+    // The capped challenge answers the same to a right code.
+    const after = await post("/two-factor/verify-totp", { code: right }, challenge);
+    expect(await json(after)).toMatchObject({ code: "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE" });
     const next = pair(
       cookieOf(
         await post("/password/sign-in", { email: EMAIL, password: PASSWORD }),
@@ -323,13 +411,41 @@ describe("the two-factor paths (plan 9f)", () => {
   });
 
   it("api.signInEmail answers twoFactorRedirect, and api.getSession answers twoFactorEnabled", async () => {
-    const { auth, session } = await enrolled();
+    const { auth, session, storage } = await enrolled();
     expect(await auth.api.signInEmail({ body: { email: EMAIL, password: PASSWORD } })).toEqual({
       twoFactorRedirect: true,
       twoFactorMethods: ["totp"],
     });
+    // No caller can reach a server sign-in's challenge, so no row stays (review M-1).
+    expect(
+      await storage.findMany("verification", [{ field: "purpose", op: "eq", value: "two-factor" }]),
+    ).toEqual([]);
     const s = await auth.api.getSession({ headers: new Headers({ cookie: session }) });
     expect(s?.user.twoFactorEnabled).toBe(true);
+  });
+
+  it("api.signInEmail reads the trust cookie from the headers: a trusted device signs in with no challenge (review M-1)", async () => {
+    const { auth, post, secret } = await enrolled();
+    const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
+    const challenge = pair(cookieOf(signIn, "better-auth.two_factor"));
+    vi.useFakeTimers({ now: Date.now() + 30_000, toFake: ["Date"] });
+    try {
+      const v = await post(
+        "/two-factor/verify-totp",
+        { code: await totpCode(secret, new Date()), trustDevice: true },
+        challenge,
+      );
+      const trust = pair(cookieOf(v, "better-auth.trust_device"));
+      expect(trust).toMatch(/^better-auth\.trust_device=td_/);
+      const r = await auth.api.signInEmail({
+        body: { email: EMAIL, password: PASSWORD },
+        headers: new Headers({ cookie: trust }),
+      });
+      expect(r).toMatchObject({ redirect: false, user: { email: EMAIL } });
+      expect(String((r as { token?: string }).token)).toMatch(/^ts_/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("answers 404 on the two-factor paths and on core's TOTP routes without the plugin", async () => {

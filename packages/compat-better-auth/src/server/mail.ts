@@ -49,7 +49,8 @@ export interface MailRoutes {
 /** Core writes the link on its own paragraph in every mail (engine/password.ts, magic-link.ts, invitations.ts). */
 const LINK_RE = /\n\n(\S+)\n\n/;
 
-async function sha256Hex(text: string): Promise<string> {
+/** The lowercase hex SHA-256 of a text: core's stored form of a token (`valueHash`, `tokenHash`). */
+export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }

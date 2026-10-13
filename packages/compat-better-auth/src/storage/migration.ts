@@ -6,9 +6,11 @@ import { BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js
 
 /**
  * The lowest `compat_better_auth` value this code reads. Migration 0002
- * writes 2 so that the Postgres runner applies it once; the mapping itself
- * does not change in 0002, so the floor stays 1. Core's gate on
- * `schema_version` is the check that needs 0002.
+ * writes 2 and migration 0003 writes 3, so that the Postgres runner applies
+ * each once. The mapping of Better Auth's tables does not change in either:
+ * 0002 adds no table, and 0003 adds core's own `ta_totp` and
+ * `ta_trusted_device` (plan 9f). So the floor stays 1. Core's gate on
+ * `schema_version` is the check that needs 0002 and 0003.
  */
 export const COMPAT_SCHEMA_VERSION = 1;
 export const COMPAT_META_KEY = "compat_better_auth";

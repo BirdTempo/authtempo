@@ -1,5 +1,5 @@
 import type { ClientCode } from "@tempo-auth/client";
-import type { Auth } from "@tempo-auth/core";
+import { type Auth, TWO_FACTOR_TOKEN_RE } from "@tempo-auth/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { Mapped } from "./map-options.js";
 import { readToken, toUser } from "./shapes.js";
@@ -48,7 +48,7 @@ async function readBody(request: Request): Promise<Body | null> {
 }
 
 /** One cookie of the request, never the bearer header. */
-function cookieValue(request: Request, name: string): string | null {
+export function cookieValue(request: Request, name: string): string | null {
   for (const part of (request.headers.get("cookie") ?? "").split(";")) {
     const eq = part.indexOf("=");
     if (eq !== -1 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
@@ -119,6 +119,14 @@ export async function twoFactorRoute(
       return failure(NOT_SUPPORTED, 501, "core opens a session at every second-factor verify");
     const challenge = cookieValue(request, TWO_FACTOR_COOKIE);
     if (!challenge) return failure("INVALID_TWO_FACTOR_COOKIE", 401);
+    // Core's pattern first: a cookie of another shape (one that real Better
+    // Auth set, or one over core's 64-character body bound) is no challenge.
+    // Without this check core answers `invalid_body` 400 and the cookie stays.
+    if (!TWO_FACTOR_TOKEN_RE.test(challenge)) {
+      const cleared = new Headers();
+      cleared.append("set-cookie", clearCookie(TWO_FACTOR_COOKIE, "/", sameSite));
+      return failure("INVALID_TWO_FACTOR_COOKIE", 401, undefined, cleared);
+    }
     const headers = new Headers(request.headers);
     headers.set("content-type", "application/json");
     headers.delete("content-length");
@@ -163,28 +171,30 @@ export async function twoFactorRoute(
   if (path === ENABLE && body.method !== undefined && body.method !== "totp")
     return failure(NOT_SUPPORTED, 501, NOT_SERVED);
   if (typeof body.password !== "string") return failure(BETTER_AUTH_CODES.invalid_body, 400);
-  const proved = await pw.verify({
-    userId: session.user.id,
-    password: body.password,
-    ip: mapped.clientIp(request),
-  });
-  if (!proved.ok) return failure(codeFor(proved.code, path), statusFor(proved.code, proved.status));
   const userId = session.user.id;
+  const ip = mapped.clientIp(request);
   if (path === ENABLE) {
     const issuer = body.issuer;
     if (issuer !== undefined && (typeof issuer !== "string" || !ISSUER_RE.test(issuer)))
       return failure(BETTER_AUTH_CODES.invalid_body, 400);
+    // Core's setup checks the password itself (plan 9f final fix wave, review
+    // I-1), with the same limits as `pw.verify`. One check, not two: a second
+    // one here would spend the sign-in's limits twice per enable.
     const r = await totp.setup({
-      user: session.user,
+      userId,
+      password: body.password,
+      ip,
       ...(typeof issuer === "string" ? { issuer } : {}),
     });
-    if (!r.ok) return failure(codeFor(r.code, path), r.status);
+    if (!r.ok) return failure(codeFor(r.code, path), statusFor(r.code, r.status));
     return Response.json({
       method: "totp",
       totpURI: r.value.uri,
       backupCodes: r.value.backupCodes,
     });
   }
+  const proved = await pw.verify({ userId, password: body.password, ip });
+  if (!proved.ok) return failure(codeFor(proved.code, path), statusFor(proved.code, proved.status));
   if (path === DISABLE) {
     const r = await totp.disable({ userId });
     if (!r.ok) return failure(codeFor(r.code, path), r.status);
@@ -221,6 +231,17 @@ export async function withTwoFactor(
   const path = new URL(request.url).pathname.slice(mapped.basePath.length);
   const signIn = request.method === "POST" && path === "/password/sign-in";
   const session = request.method === "GET" && path === "/session";
+  // Core's own verify of a challenge (the compat client's kept challenge,
+  // review M-5): the challenge is spent, so the `two_factor` cookie goes,
+  // as on the shim's verify paths.
+  if (request.method === "POST" && path === "/totp/verify") {
+    const out = new Response(res.body, res);
+    out.headers.append(
+      "set-cookie",
+      clearCookie(TWO_FACTOR_COOKIE, "/", mapped.config.cookie?.sameSite ?? "Lax"),
+    );
+    return out;
+  }
   if (!signIn && !session) return res;
   const body = (await res
     .clone()

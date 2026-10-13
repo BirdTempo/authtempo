@@ -72,9 +72,13 @@ export interface Mapped {
  * POST, invitation accept, handoff, passkey, social start) has only the
  * per-IP limit, so it keeps core's shared unknown bucket: without it such a
  * flow has no limit at all (review I-2).
+ *
+ * One exception has no per-email limit: `totp-verify` (plan 9f). Its binding
+ * limits are per user: `totp-code:user` (10 code checks per 15 minutes) and
+ * `totp-code:user-day` (30 per 24 hours), on every code check. Each
+ * challenge also takes 5 codes and needs a password sign-in, which keeps its
+ * per-email limit.
  */
-// totp-verify (plan 9f) has no per-email limit, but each challenge takes 5
-// codes and each challenge needs a password sign-in, which keeps its per-email limit.
 const NO_IP_KEY =
   /^(password|magic-link|password-reset|password-resend|otp|otp-verify|totp-verify):ip:unknown$/;
 

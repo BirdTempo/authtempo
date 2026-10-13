@@ -8,8 +8,10 @@ import {
   passwordPolicyCode,
 } from "../errors.js";
 import type { CompatServerApi } from "../types.js";
+import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
 import { readToken, toInvitation, toNext, toOrganization, toSession, toUser } from "./shapes.js";
+import { cookieValue, TRUST_DEVICE_COOKIE } from "./two-factor.js";
 
 export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true> {
   const { origin, basePath, clientIp, plugins, appOrigin, minPasswordLength } = mapped;
@@ -81,17 +83,30 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true> {
           "core takes no rememberMe: false: every session lives session.expiresIn",
         );
       const req = requestOf(headers);
+      // The trust cookie of the caller's request, as the handler's sign-in
+      // reads it (review M-1): a trusted device skips the factor here too.
+      const trustDevice = plugins.has("two-factor")
+        ? (cookieValue(req, TRUST_DEVICE_COOKIE) ?? undefined)
+        : undefined;
       const v = unwrap(
         await passwords().signIn({
           email: body.email,
           password: body.password,
           ip: clientIp(req),
           userAgent: req.headers.get("user-agent"),
+          ...(trustDevice ? { trustDevice } : {}),
         }),
       );
       // Better Auth's answer for a user with the factor on. A server caller has
-      // no cookie jar: the browser continues through the handler's sign-in.
-      if (!("token" in v)) return { twoFactorRedirect: true, twoFactorMethods: ["totp"] };
+      // no cookie jar, so no caller can reach the challenge: it is deleted, and
+      // the browser repeats the sign-in through the handler.
+      if (!("token" in v)) {
+        await storage.delete("verification", [
+          { field: "valueHash", op: "eq", value: await sha256Hex(v.twoFactor.challenge) },
+          { field: "purpose", op: "eq", value: "two-factor" },
+        ]);
+        return { twoFactorRedirect: true, twoFactorMethods: ["totp"] };
+      }
       return { redirect: false, token: v.token, url: undefined, user: toUser(v.user) };
     },
     async signOut({ headers }) {
