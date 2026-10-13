@@ -43,7 +43,8 @@ import test from "../../../../../samples/guides/email-code.test.ts?raw";
 - A wrong, expired, spent, or unknown code answers `invalid_code`. Core does not tell them apart.
 - Core stores HMAC-SHA256 under `secret` of the row id and the code. A copy of the table gives no code.
 - Core sends each code to the address of the code, whatever `to` your mail builder answers.
-- A request has three limits: 3 per address and 20 per IP in 15 minutes, and 20 per address in 24 hours.
+- A request has three [limits](/docs/reference/limits/): `otp:email:<email>` 3 per 15 minutes, `otp:ip:<ip>` 20 per 15 minutes, and `otp:email-day:<email>` 20 per 24 hours.
+- A verify or a reset by code has two [limits](/docs/reference/limits/): `otp-verify:email:<email>` 10 per 15 minutes, and `otp-verify:ip:<ip>` 30 per 15 minutes.
 - A reset by code takes `{ email, code, password }` at `POST /auth/otp/reset`. A refused password spends the code.
 
 ## If it fails
@@ -51,7 +52,7 @@ import test from "../../../../../samples/guides/email-code.test.ts?raw";
 - [`invalid_body`](/docs/reference/errors/#invalid_body): the request has no valid address or code.
 - [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, old, or spent. Ask the person to type it again.
 - [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): the code took its last guess. Request a new code.
-- [`rate_limited`](/docs/reference/errors/#rate_limited): too many requests or guesses. Wait 15 minutes.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the request or of the verify is full. Wait 15 minutes, or 24 hours after 20 requests in a day.
 - [`password_policy`](/docs/reference/errors/#password_policy) and [`password_breached`](/docs/reference/errors/#password_breached): the reset refused the new password, and spent the code.
 
 ## Next

@@ -24,12 +24,14 @@ import test from "../../../../../samples/guides/social-providers.test.ts?raw";
 ## Steps
 
 1. For GitHub, set `social.github` to `{ clientId, clientSecret }`. Core asks for the scope `read:user user:email`.
-2. For LinkedIn, set `social.linkedin`, and add the product "Sign In with LinkedIn using OpenID Connect" to the LinkedIn app.
-3. For an OpenID Connect provider, add an entry to `social.oidc` with its `issuer`.
-4. Set `endpoints` on that entry. Then a sign-in does not depend on the provider's discovery document.
-5. For a provider with no ID token, add an entry to `social.oauth2` with a `userinfo` function.
-6. In `userinfo`, call the provider with the `fetch` that core gives, and answer `emailVerified: true` only for a proved address.
-7. At each provider, register `https://api.example.com/auth/social/<name>/callback` as the redirect URI.
+2. For LinkedIn, set `social.linkedin`.
+3. In the LinkedIn app, add the product "Sign In with LinkedIn using OpenID Connect".
+4. For an OpenID Connect provider, add an entry to `social.oidc` with its `issuer`.
+5. Set `endpoints` on that entry. Then a sign-in does not depend on the provider's discovery document.
+6. For a provider with no ID token, add an entry to `social.oauth2` with a `userinfo` function.
+7. In `userinfo`, call the provider with the `fetch` that core gives.
+8. In the answer of `userinfo`, set `emailVerified: true` only for a proved address.
+9. At each provider, register `https://api.example.com/auth/social/<name>/callback` as the redirect URI.
 
 <Code code={config} lang="ts" title="GitHub, an OIDC entry, and an OAuth2 entry" />
 

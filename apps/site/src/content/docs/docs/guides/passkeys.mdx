@@ -43,10 +43,10 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 
 - A challenge is 32 random bytes, valid for five minutes and for one use. A replayed answer fails on the spent challenge.
 - Both ceremonies require user verification. Registration asks for a discoverable passkey, so the sign-in options list no passkey.
-- The client converts the options itself when the browser has no `parseCreationOptionsFromJSON`, as in older Firefox and Safari.
+- The client converts the options itself when the browser has no `parseCreationOptionsFromJSON`.
 - `@authtempo/core/testing` exports `SoftAuthenticator`, a software authenticator, so a test runs both ceremonies with no browser.
 - An Electron or Expo app runs the ceremonies in the system browser through the [handoff](/docs/guides/handoff/).
-- The options have a limit of 30 per IP, and the verify has a limit of 20 per IP, in 15 minutes.
+- The options have the [limit](/docs/reference/limits/) `passkey-options:ip:<ip>` 30 per 15 minutes. The verify has `passkey-verify:ip:<ip>` 20 per 15 minutes.
 
 ## If it fails
 

@@ -7,10 +7,15 @@ const APP = "https://app.example.net";
 describe("run the app on another origin", () => {
   it("answers the app's preflight with credentialed CORS, and refuses another origin", async () => {
     const auth = createSplitOriginsAuth(harness());
-    const ok = await call(auth, "OPTIONS" as "GET", "/auth/session", undefined, { origin: APP });
+    const ok = await call(auth, "OPTIONS", "/auth/session", undefined, { origin: APP });
     expect(ok.status).toBe(204);
     expect(ok.headers.get("access-control-allow-origin")).toBe(APP);
     expect(ok.headers.get("access-control-allow-credentials")).toBe("true");
+    const preflight = await call(auth, "OPTIONS", "/auth/session", undefined, {
+      origin: "https://evil.example",
+    });
+    expect(preflight.status).toBe(403);
+    expect(await preflight.json()).toEqual({ error: "origin_not_trusted" });
     const other = await call(
       auth,
       "POST",

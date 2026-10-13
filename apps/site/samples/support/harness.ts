@@ -60,7 +60,7 @@ export function codeIn(h: Harness, to: string): string {
 /** One request to `auth.handle`, with a JSON body when one is given. No Origin header: a server caller. */
 export function call(
   auth: Auth,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "OPTIONS",
   path: string,
   body?: unknown,
   headers: Record<string, string> = {},

@@ -47,9 +47,9 @@ import test from "../../../../../samples/guides/handoff.test.ts?raw";
 - The app makes a PKCE verifier. The verifier leaves the app once, in the redeem body.
 - The sign-in page shows every method of the config. Each method ends on a confirm page that names the account.
 - The code is minted only when the person presses the button of the confirm page. It lives two minutes and redeems once.
-- The URL that the app receives must start with the configured redirect, byte for byte, or no redeem happens.
+- The URL that the app receives must start with exactly the configured redirect, or no redeem happens.
 - Show `user.email` after each sign-in, so that the person sees a sign-in to another account.
-- The start has a limit of 30 per IP, and the redeem has a limit of 20 per IP, in 15 minutes.
+- The start has the [limit](/docs/reference/limits/) `handoff-start:ip:<ip>` 30 per 15 minutes. The redeem has `handoff-redeem:ip:<ip>` 20 per 15 minutes.
 
 :::caution
 Warning: `handoff.devRedirectPattern` admits any URL that it matches. Keep it to the host and the port of your development server, and leave it unset in production.

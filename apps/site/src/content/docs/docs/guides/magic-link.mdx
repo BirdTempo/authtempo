@@ -29,21 +29,22 @@ import test from "../../../../../samples/guides/magic-link.test.ts?raw";
 
 <Code code={config} lang="ts" title="The magic link config" />
 
-4. From the app, post the address and `next` to [`POST /magic-link/request`](/docs/reference/routes/#post-magic-link-request).
+4. From the app, post the address and `next` to [`POST /auth/magic-link/request`](/docs/reference/routes/#post-magic-link-request).
 5. Show the same text for every address. The route answers `{ "sent": true }` for an unknown address too.
-6. The person opens the link. The confirm page has one button and no script.
-7. The button posts the token. Core opens the session, sets the cookie, and sends the browser to `appURL` plus `next`.
+6. Tell the person to open the link in the mail.
 
 <Code code={test} lang="ts" title="The flow as a test" />
 
 ## How it behaves
 
+- The link opens a confirm page with one button and no script.
+- The button posts the token. Core opens the session, sets the cookie, and sends the browser to `appURL` plus `next`.
 - The GET of the link reads no row and counts no limit. A mail scanner that fetches the link spends nothing.
 - A link works once. A second post of the same token answers `invalid_token`.
 - A JSON post of the token answers `{ user, session }` with the cookie, and never a redirect. A native app uses this form.
 - A `next` value must start with `/` and not with `//`. Core replaces any other value with `/`.
 - A `next` under `basePath` stays on `baseURL`. The handoff uses this rule.
-- The request has two limits: 5 per address and 20 per IP in 15 minutes.
+- The request has two [limits](/docs/reference/limits/): `magic-link:email:<email>` 5 per 15 minutes, and `magic-link:ip:<ip>` 20 per 15 minutes.
 - A link that proves the address of an unverified account claims it. [The claim rule](/docs/concepts/claim-rule/) tells what core deletes.
 
 ## If it fails

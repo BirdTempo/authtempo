@@ -43,7 +43,7 @@ import test from "../../../../../samples/guides/social.test.ts?raw";
 - Core links a social identity to an existing user only when the provider reports the address as verified and it equals the user's address.
 - An address that a verified provider proves claims an unverified account. [The claim rule](/docs/concepts/claim-rule/) tells what core deletes.
 - Apple sends the name on the first sign-in only. Core stores it then.
-- The start has one limit: 30 per IP in 15 minutes.
+- The start has one [limit](/docs/reference/limits/) for every provider: `social-start:ip:<ip>` 30 per 15 minutes.
 
 ## If it fails
 
