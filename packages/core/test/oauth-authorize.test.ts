@@ -36,6 +36,14 @@ async function heldParams(h: Handle, id: string): Promise<URLSearchParams> {
   ]);
   return new URLSearchParams(String(row?.data?.params ?? ""));
 }
+/** The held row of a short id, as user and spend. */
+async function heldRow(h: Handle, id: string) {
+  const row = await h.storage.findOne("verification", [
+    { field: "valueHash", op: "eq", value: await sha256Hex(id) },
+    { field: "purpose", op: "eq", value: "oauth-request" },
+  ]);
+  return { userId: row?.data?.userId, consumedAt: row?.consumedAt };
+}
 const errorOf = (res: Response) =>
   new URL(res.headers.get("location") ?? "about:blank").searchParams.get("error");
 
@@ -593,6 +601,84 @@ describe("the authorize step (plan 9g)", () => {
     );
     expect(done.status).toBe(302);
     expect(new URL(done.headers.get("location") ?? "").searchParams.get("code")).toMatch(/^oc_/);
+  });
+
+  it("another user's GET of a held request bound to a user spends nothing, also with a consent that covers the scopes: it answers invalid_request, and the first user's POST still gives a code (plan 9h final fix wave, I-1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const bob = await signedIn(h, "bob@example.com");
+    // Bob's own consent covers the scopes of Alice's request, so the GET would skip the page.
+    const bobPkce = await pkce();
+    await authorized(h, bob.cookie, { clientId: s.clientId, challenge: bobPkce.challenge });
+    const codesBefore = (await codes(h)).length;
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    const taken = await h.auth.handle(
+      get(`/auth/oauth/authorize?request_id=${requestId}`, { cookie: bob.cookie }),
+    );
+    expect({
+      status: taken.status,
+      location: taken.headers.get("location"),
+      body: await taken.json(),
+    }).toEqual({ status: 400, location: null, body: { error: "invalid_request" } });
+    expect(await heldRow(h, requestId)).toEqual({ userId: s.user.id, consumedAt: null });
+    expect(await codes(h)).toHaveLength(codesBefore);
+    const done = await h.auth.handle(
+      consentPost({ request_id: requestId, decision: "allow" }, { cookie: s.cookie }),
+    );
+    expect(done.status).toBe(302);
+    expect(new URL(done.headers.get("location") ?? "").searchParams.get("code")).toMatch(/^oc_/);
+  });
+
+  it("an unverified user's GET of a held request bound to another user spends nothing and redirects nothing (plan 9h final fix wave, I-1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const bob = await signedIn(h, "bob@example.com", false);
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    const taken = await h.auth.handle(
+      get(`/auth/oauth/authorize?request_id=${requestId}`, { cookie: bob.cookie }),
+    );
+    expect({
+      status: taken.status,
+      location: taken.headers.get("location"),
+      body: await taken.json(),
+    }).toEqual({ status: 400, location: null, body: { error: "invalid_request" } });
+    expect(await heldRow(h, requestId)).toEqual({ userId: s.user.id, consumedAt: null });
+    const done = await h.auth.handle(
+      consentPost({ request_id: requestId, decision: "allow" }, { cookie: s.cookie }),
+    );
+    expect(done.status).toBe(302);
+    expect(new URL(done.headers.get("location") ?? "").searchParams.get("code")).toMatch(/^oc_/);
+  });
+
+  it("another user's prompt=none GET with a held request bound to a user spends nothing, also with a consent that covers the scopes (plan 9h final fix wave, I-1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const bob = await signedIn(h, "bob@example.com");
+    const bobPkce = await pkce();
+    await authorized(h, bob.cookie, { clientId: s.clientId, challenge: bobPkce.challenge });
+    const codesBefore = (await codes(h)).length;
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    // A held row never holds prompt=none: core shows no consent page for it.
+    // So the only prompt=none that Bob can send rides beside the id.
+    const taken = await h.auth.handle(
+      get(`/auth/oauth/authorize?request_id=${requestId}&prompt=none`, { cookie: bob.cookie }),
+    );
+    expect({
+      status: taken.status,
+      location: taken.headers.get("location"),
+      body: await taken.json(),
+    }).toEqual({ status: 400, location: null, body: { error: "invalid_request" } });
+    expect(await heldRow(h, requestId)).toEqual({ userId: s.user.id, consumedAt: null });
+    expect(await codes(h)).toHaveLength(codesBefore);
   });
 
   it("two parallel GETs of a held request from before the sign-in bind it once (plan 9h fix round 1)", async () => {

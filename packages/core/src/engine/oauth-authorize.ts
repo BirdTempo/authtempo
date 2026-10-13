@@ -414,7 +414,10 @@ function withoutLogin(params: URLSearchParams): URLSearchParams {
 }
 
 /**
- * The steps with a session, for a fresh request and a held one. An
+ * The steps with a session, for a fresh request and a held one. A held
+ * request bound to another user answers the stale-id error first, before
+ * any read of consents and any spend: else that user's GET would spend the
+ * row on the three branches below (spec 8.13, plan 9h final fix wave). An
  * unverified user is refused: a grant would outlive a claim of the address
  * (spec 8.7). A consent that covers every scope asked gives the code at
  * once, unless `prompt=consent`. Else the consent page shows the held
@@ -428,6 +431,8 @@ async function sessionStep(
   held: HeldRequest | null,
 ): Promise<AuthorizeStep> {
   const { request, client } = checked;
+  if (held && held.data.userId !== null && held.data.userId !== session.user.id)
+    return { kind: "error", error: "invalid_request" };
   if (!session.user.emailVerified)
     return settle(config, held, () => Promise.resolve(denied(config, request, "access_denied")));
   if (
