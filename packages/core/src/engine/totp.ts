@@ -33,6 +33,8 @@ const SETUP_TTL_MS = 15 * 60_000;
 // Per 15 minutes, for every operation that takes a code with a session: a
 // stolen session must not guess codes to turn the factor off.
 const CODE_PER_USER = { seconds: 900, max: 10 };
+/** The rounds of the backup code replacement's compare-and-set. Each lost round means that another write landed first. */
+const REPLACE_ROUNDS = 5;
 
 export interface TotpSetup {
   /** The base32 secret, for a person who types it in. Answered once. */
@@ -139,7 +141,12 @@ async function acceptBackupCode(
 ): Promise<number | null> {
   const typed = normalizeBackupCode(code);
   let current: TotpRow | null = row;
-  while (current && current.enabledAt !== null) {
+  // A hard bound, as `countAttempt` has. Each lost round means that a
+  // parallel use spent a code, so an honest adapter ends before the list is
+  // empty. An adapter whose `eq` on a date never matches loses every round;
+  // without the bound one backup code then holds a request forever.
+  for (let round = 0; round <= row.backupCodes.length; round++) {
+    if (!current || current.enabledAt === null) return null;
     const candidate = await backupCodeHash(config.secret, current.id, typed);
     let found = -1;
     current.backupCodes.forEach((hash, i) => {
@@ -158,6 +165,7 @@ async function acceptBackupCode(
     if (n === 1) return left.length;
     current = await config.storage.findOne("totp", [{ field: "id", op: "eq", value: current.id }]);
   }
+  console.error("tempo-auth: backup code spend gave up", row.id);
   return null;
 }
 
@@ -279,6 +287,11 @@ export async function enableTotp(
         { field: "id", op: "eq", value: row.id },
         { field: "enabledAt", op: "eq", value: null },
         { field: "lastStep", op: "lt", value: step },
+        // The row as this call read it: a parallel setup that replaced it
+        // after the read wrote another secret and reset `lastStep`, and the
+        // code was checked against the old secret. Without this line the
+        // enable turns on a secret that no code confirmed.
+        { field: "updatedAt", op: "eq", value: row.updatedAt },
       ],
       { enabledAt: now, lastStep: step, updatedAt: later(now, row.updatedAt) },
     );
@@ -349,7 +362,11 @@ async function replaceBackupCodes(
   now: Date,
 ): Promise<Result<{ backupCodes: string[] }>> {
   let current: TotpRow | null = row;
-  while (current && current.enabledAt !== null) {
+  // A hard bound, as `countAttempt` has: a lost round means that a parallel
+  // spend or replacement wrote first. Past the bound the answer is
+  // `conflict`, because the factor is still on.
+  for (let round = 0; round < REPLACE_ROUNDS; round++) {
+    if (!current || current.enabledAt === null) return fail("totp_not_enabled");
     const { codes, hashes } = await newBackupCodes(config, totp, current.id);
     const n = await config.storage.update(
       "totp",
@@ -362,7 +379,8 @@ async function replaceBackupCodes(
     if (n === 1) return ok({ backupCodes: codes });
     current = await config.storage.findOne("totp", [{ field: "id", op: "eq", value: current.id }]);
   }
-  return fail("totp_not_enabled");
+  console.error("tempo-auth: backup code replacement gave up", row.id);
+  return fail("conflict");
 }
 
 /** The in-process regeneration, with no code (plan 9f). */

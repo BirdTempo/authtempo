@@ -495,7 +495,7 @@ export function runAdapterConformance(
       expect(counts.sort()).toEqual([0, 1]);
     });
 
-    // The email code count (plan 9e, `countMiss`) is a compare-and-set on
+    // The attempt count (plan 9e; `countAttempt` since plan 9f) is a compare-and-set on
     // `updatedAt`. It holds only if `eq` on a date matches the stored value
     // to the millisecond, on every adapter. An adapter that keeps whole
     // seconds, or shifts a zone, answers 0 here, and the count never lands.

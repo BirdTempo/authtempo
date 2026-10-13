@@ -576,6 +576,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       legacyVerify,
     };
   }
+  // One source for the session cookie name: the trust cookie check of `totp` reads it too.
+  const cookieName = input.cookieName ?? "tempo_session";
   return {
     basePath,
     baseURL: input.baseURL,
@@ -589,7 +591,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     limiter: input.limiter ?? createMemoryLimiter(clock),
     clientIp: input.clientIp ?? workersClientIp,
     clock,
-    cookieName: input.cookieName ?? "tempo_session",
+    cookieName,
     session: {
       ttlDays: input.session?.ttlDays ?? 30,
       slidingRefreshDays: input.session?.slidingRefreshDays ?? 7,
@@ -610,7 +612,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     organizations,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
-    totp: resolveTotp(input.totp, password !== null, appName, input.cookieName ?? "tempo_session"),
+    totp: resolveTotp(input.totp, password !== null, appName, cookieName),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { passwordSignUp } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import {
@@ -16,6 +16,7 @@ import { countAttempt } from "../src/engine/verification.js";
 import { openSealed } from "../src/primitives/aead.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode, otpauthUri, totpCode } from "../src/primitives/totp.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
 import {
   codeNow,
@@ -209,6 +210,37 @@ describe("the enable (plan 9f)", () => {
     expect(await auth.storage.findMany("trustedDevice", [])).toEqual([]);
   });
 
+  it("refuses an enable whose row a parallel setup replaced after the read: no unchecked secret turns on", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const r = await setupTotp(auth.config, { user: session.user });
+    if (!r.ok) throw new Error(r.code);
+    const code = await codeNow(auth, base32Decode(r.value.secret));
+    let replaced = false;
+    // The enable reads the row and checks the code, then opens its transaction:
+    // a second setup runs in that gap and writes another secret.
+    const storage: StorageAdapter = {
+      ...auth.storage,
+      transaction: async (fn) => {
+        if (!replaced) {
+          replaced = true;
+          const again = await setupTotp(auth.config, { user: session.user });
+          if (!again.ok) throw new Error(again.code);
+        }
+        return auth.storage.transaction(fn);
+      },
+    };
+    expect(await enableTotp({ ...auth.config, storage }, { session, code })).toEqual({
+      ok: false,
+      code: "invalid_code",
+      status: 400,
+    });
+    expect(replaced).toBe(true);
+    const rows = await auth.storage.findMany("totp", []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.enabledAt).toBeNull();
+  });
+
   it("answers totp_enabled for a second enable", async () => {
     const auth = totpAuth();
     const { session, secret } = await enrolled(auth);
@@ -381,6 +413,60 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       code: "not_found",
     });
     expect(makeAuth().config.totp).toBeNull();
+  });
+
+  it("bounds the backup code spend to the codes + 1 rounds when an update never matches, and logs", async () => {
+    const auth = totpAuth();
+    const { user, backupCodes } = await enrolled(auth);
+    let updates = 0;
+    const storage: StorageAdapter = {
+      ...auth.storage,
+      update: async () => {
+        updates += 1;
+        // A guard: without the bound the loop never ends; fail instead of hanging.
+        if (updates > 100) throw new Error("the backup code spend did not stop");
+        return 0;
+      },
+    };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(
+        await disableTotpWithCode(
+          { ...auth.config, storage },
+          { user, code: backupCodes[0] ?? "" },
+        ),
+      ).toEqual({ ok: false, code: "invalid_code", status: 400 });
+      expect(updates).toBe(backupCodes.length + 1);
+      const [row] = await auth.storage.findMany("totp", []);
+      expect(errors).toHaveBeenCalledWith("tempo-auth: backup code spend gave up", row?.id);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("bounds the backup code replacement to 5 rounds when an update never matches, and logs", async () => {
+    const auth = totpAuth();
+    const { user } = await enrolled(auth);
+    let updates = 0;
+    const storage: StorageAdapter = {
+      ...auth.storage,
+      update: async () => {
+        updates += 1;
+        if (updates > 100) throw new Error("the backup code replacement did not stop");
+        return 0;
+      },
+    };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await regenerateBackupCodes({ ...auth.config, storage }, { userId: user.id })).toEqual(
+        { ok: false, code: "conflict", status: 409 },
+      );
+      expect(updates).toBe(5);
+      const [row] = await auth.storage.findMany("totp", []);
+      expect(errors).toHaveBeenCalledWith("tempo-auth: backup code replacement gave up", row?.id);
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it("counts an attempt and keeps the other keys of data (countAttempt)", async () => {
