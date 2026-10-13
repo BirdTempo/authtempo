@@ -570,4 +570,115 @@ describe("the authorize step (plan 9g)", () => {
       ).status,
     ).toBe(200);
   });
+
+  it("a held request bound to a user stays bound: another user's GET of its id answers invalid_request, and the first user's POST still gives a code (plan 9h fix round 1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const bob = await signedIn(h, "bob@example.com");
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    const taken = await h.auth.handle(
+      get(`/auth/oauth/authorize?request_id=${requestId}`, { cookie: bob.cookie }),
+    );
+    expect({
+      status: taken.status,
+      location: taken.headers.get("location"),
+      body: await taken.json(),
+    }).toEqual({ status: 400, location: null, body: { error: "invalid_request" } });
+    expect((await held(h)).map((r) => r.data?.userId)).toEqual([s.user.id]);
+    const done = await h.auth.handle(
+      consentPost({ request_id: requestId, decision: "allow" }, { cookie: s.cookie }),
+    );
+    expect(done.status).toBe(302);
+    expect(new URL(done.headers.get("location") ?? "").searchParams.get("code")).toMatch(/^oc_/);
+  });
+
+  it("two parallel GETs of a held request from before the sign-in bind it once (plan 9h fix round 1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const bob = await signedIn(h, "bob@example.com");
+    const res = await h.auth.handle(authorizeGet({ clientId: s.clientId, challenge: s.challenge }));
+    const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
+    // Each read of the held row waits for the other one, so both GETs read
+    // the row with no user before either binds. The clock does not move.
+    const findOne = h.storage.findOne.bind(h.storage);
+    const waiting: (() => void)[] = [];
+    h.storage.findOne = (async (model: "verification", where: Parameters<typeof findOne>[1]) => {
+      const row = await findOne(model, where);
+      if (model === "verification" && waiting.length < 2)
+        await new Promise<void>((done) => {
+          waiting.push(done);
+          if (waiting.length === 2) for (const w of waiting) w();
+        });
+      return row;
+    }) as typeof h.storage.findOne;
+    const [ada, other] = await Promise.all([
+      h.auth.handle(get(next, { cookie: s.cookie })),
+      h.auth.handle(get(next, { cookie: bob.cookie })),
+    ]);
+    expect(waiting).toHaveLength(2);
+    expect([ada.status, other.status].sort()).toEqual([200, 400]);
+    const winner = ada.status === 200 ? s.user.id : bob.user.id;
+    expect((await held(h)).map((r) => r.data?.userId)).toEqual([winner]);
+  });
+
+  it("a post after the app cleared the user's verified address answers access_denied and spends the held request (plan 9h fix round 1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    // Core never clears the flag, but the app owns its user table and may: an admin who takes back a verified address.
+    await h.storage.update("user", [{ field: "id", op: "eq", value: s.user.id }], {
+      emailVerified: false,
+    });
+    const res = await h.auth.handle(
+      consentPost({ request_id: requestId, decision: "allow" }, { cookie: s.cookie }),
+    );
+    expect(res.status).toBe(302);
+    expect(errorOf(res)).toBe("access_denied");
+    expect((await held(h))[0]?.consumedAt).not.toBeNull();
+    expect(await h.storage.findMany("oauthConsent", [])).toEqual([]);
+    expect(await codes(h)).toEqual([]);
+  });
+
+  it("the consent POST refuses a repeated request_id, as the GET does, and spends nothing (plan 9h fix round 1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    const twice = new Request(`${BASE_URL}/auth/oauth/authorize`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: BASE_URL,
+        cookie: s.cookie,
+      },
+      body: `request_id=${requestId}&request_id=${requestId}&decision=allow`,
+    });
+    const res = await h.auth.handle(twice);
+    expect({
+      status: res.status,
+      location: res.headers.get("location"),
+      body: await res.json(),
+    }).toEqual({ status: 400, location: null, body: { error: "invalid_request" } });
+    expect((await held(h))[0]?.consumedAt).toBeNull();
+    expect(await codes(h)).toEqual([]);
+  });
+
+  it("a held request is live 1 ms before its 10 minutes end: the way back shows the consent page (plan 9h fix round 1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const res = await h.auth.handle(authorizeGet({ clientId: s.clientId, challenge: s.challenge }));
+    const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
+    h.clock.advance(10 * 60_000 - 1);
+    const page = await h.auth.handle(get(next, { cookie: s.cookie }));
+    expect(page.status).toBe(200);
+    expect(requestIdOf(await page.text())).toBe(idOfNext(next));
+  });
 });

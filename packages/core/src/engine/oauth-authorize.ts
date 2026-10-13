@@ -355,20 +355,32 @@ async function spendHeld(config: ResolvedConfig, held: HeldRequest): Promise<boo
   return n === 1;
 }
 
-/** Binds the held request to the user the consent page shows it to. False: it was spent since the read. */
+/**
+ * Binds the held request to the user the consent page shows it to. A row
+ * bound to a user stays bound (plan 9h fix round 1): another user's GET of
+ * its id answers false, so the first user's page keeps working. The update
+ * matches the read's `updatedAt`, and the bind moves `updatedAt` at least
+ * 1 ms on, so of two parallel GETs on a row with no user one binds. False:
+ * another user holds the row, or it was spent or bound since the read.
+ */
 async function bindHeld(
   config: ResolvedConfig,
   held: HeldRequest,
   userId: string,
 ): Promise<boolean> {
   if (held.data.userId === userId) return true;
+  if (held.data.userId !== null) return false;
+  // A clock that does not move between two requests would give the same
+  // `updatedAt` twice, and the second bind would match the first one's row.
+  const at = new Date(Math.max(config.clock.now().getTime(), held.row.updatedAt.getTime() + 1));
   const n = await config.storage.update(
     "verification",
     [
       { field: "id", op: "eq", value: held.row.id },
       { field: "consumedAt", op: "eq", value: null },
+      { field: "updatedAt", op: "eq", value: held.row.updatedAt },
     ],
-    { data: { params: held.data.params, userId }, updatedAt: config.clock.now() },
+    { data: { params: held.data.params, userId }, updatedAt: at },
   );
   return n === 1;
 }
