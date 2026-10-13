@@ -32,9 +32,10 @@ beforeAll(async () => {
   try {
     await admin.unsafe(`CREATE DATABASE ${DB}`);
   } catch (e) {
-    throw new Error(
-      `this test needs Postgres at ${ADMIN_URL}: ${(e as Error).message}. Run: docker compose up -d`,
-    );
+    // A refused connection arrives as an AggregateError with an empty message,
+    // so name the error code when there is one.
+    const why = (e as { code?: string }).code ?? (e as Error).message;
+    throw new Error(`this test needs Postgres at ${ADMIN_URL}: ${why}. Run: docker compose up -d`);
   } finally {
     await admin.end({ timeout: 5 });
   }
