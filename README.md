@@ -90,3 +90,10 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   verifies for 24 hours and signs nothing. An OAuth code is spent at the
   first exchange, whatever the result; a refresh token used twice deletes
   its whole family; an access token passes only under its own resource.
+- An OAuth consent decides on the request that core holds, not on the
+  form: the form posts a short id, the held request ends at its first
+  answer, and only the user that the page showed it to can answer it. A
+  revoke under another client's id revokes nothing.
+- With no `afterEnd` hook, a flow that ends sessions deletes them in one
+  statement; with the hook, it deletes each row by id, so the hook fires
+  once for each row that the flow ended.
