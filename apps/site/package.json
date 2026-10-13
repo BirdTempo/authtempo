@@ -7,8 +7,9 @@
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "ASTRO_TELEMETRY_DISABLED=1 astro build && vitest run",
-    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro build && wrangler dev"
+    "test": "ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/check.ts && vitest run",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro build && wrangler dev",
+    "preview:smoke": "ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/preview-smoke.ts"
   },
   "dependencies": {
     "@authtempo/adapter-d1": "workspace:*",

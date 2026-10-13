@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "authtempo-site",
+  // The same date as examples/worker. The Worker has no script, so the
+  // Node.js compatibility flags change nothing here.
+  "compatibility_date": "2026-09-30",
+  "assets": {
+    "directory": "./dist",
+    // A path with no file answers the nearest 404.html with status 404.
+    // "single-page-application" answers 200 for every miss and hides a broken
+    // link from the link check and from a crawler (Cloudflare static assets
+    // page, read 2026-10-14).
+    "not_found_handling": "404-page"
+  }
+  // No "main": with no Worker script a request for a missing file answers 404,
+  // and requests to static assets are free (Cloudflare docs, read 2026-10-14).
+  // Limits, read 2026-10-14: 20,000 files per Worker version on Workers Free,
+  // 100,000 on Workers Paid, 25 MiB per file. check-size.ts keeps a margin.
+  // Plan 11a never deploys this Worker. The owner publishes.
+}
