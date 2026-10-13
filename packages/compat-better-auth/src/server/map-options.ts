@@ -25,6 +25,10 @@ export const BETTER_AUTH_DEFAULTS = {
   magicLinkExpiresIn: 300,
   emailVerificationExpiresIn: 3_600,
   invitationExpiresIn: 172_800,
+  // crud-members.mjs:62 and crud-invites.mjs:171 (read 2026-10-13): Better Auth applies both
+  // when the option is absent. Core keeps them as organizations.limits (plan 9d).
+  membershipLimit: 100,
+  invitationLimit: 100,
   basePath: "/api/auth",
 } as const;
 
@@ -112,11 +116,18 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
   const out: PluginConfig = {};
   const org = pluginOf(options, "organization");
   if (org) {
+    const o = org.options;
     out.organizations = {
-      invitationTtlDays:
-        (org.options.invitationExpiresIn ?? BETTER_AUTH_DEFAULTS.invitationExpiresIn) / DAY,
+      invitationTtlDays: (o.invitationExpiresIn ?? BETTER_AUTH_DEFAULTS.invitationExpiresIn) / DAY,
       // Never mailed by core: the mail port hands the token to sendInvitationEmail (mail.ts).
       invitationLinkBuilder: (token) => `${INVITATION_LINK_PREFIX}${token}`,
+      // A function organizationLimit is a hook (src/server/hooks.ts), not a number.
+      limits: {
+        ...(typeof o.organizationLimit === "number" ? { perUser: o.organizationLimit } : {}),
+        membersPerOrganization: o.membershipLimit ?? BETTER_AUTH_DEFAULTS.membershipLimit,
+        pendingInvitationsPerOrganization:
+          o.invitationLimit ?? BETTER_AUTH_DEFAULTS.invitationLimit,
+      },
     };
   }
   const pk = pluginOf(options, "passkey");

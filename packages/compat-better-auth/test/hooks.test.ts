@@ -1,6 +1,8 @@
 import {
   createMemoryAdapter,
   createMemoryLimiter,
+  HOOK_REFUSED_TEXT,
+  type OrganizationsConfig,
   type StorageAdapter,
   systemClock,
   type UserRow,
@@ -8,9 +10,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthClient, organizationClient } from "../src/client/index.js";
 import { APIError } from "../src/errors.js";
-import { organization } from "../src/plugins.js";
+import { magicLink, organization } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
+import { mapOptions } from "../src/server/map-options.js";
 import type {
   BetterAuthOptions,
   CompatDatabase,
@@ -332,5 +335,267 @@ describe("organizationHooks (plan 9d)", () => {
       message: "Choose another name.",
       status: 403,
     });
+  });
+});
+
+const memory = (): CompatDatabase => ({
+  kind: "tempo-auth-compat-database",
+  dialect: "postgres",
+  storage: createMemoryAdapter(),
+  limiter: createMemoryLimiter(systemClock),
+});
+
+function sessionInstance(databaseHooks: NonNullable<BetterAuthOptions["databaseHooks"]>) {
+  const links: string[] = [];
+  const database = memory();
+  const auth = betterAuth({
+    baseURL: BASE,
+    secret: "0123456789abcdef0123456789abcdef",
+    database,
+    databaseHooks,
+    plugins: [
+      organization({ sendInvitationEmail: async () => {} }),
+      magicLink({ sendMagicLink: async (d) => void links.push(d.token) }),
+    ],
+  });
+  const signIn = async (email: string) => {
+    const ip = "198.51.100.9";
+    const sent = await auth.tempo.api.requestMagicLink({ email, ip });
+    if (!sent.ok) throw new Error(sent.code);
+    return auth.tempo.api.verifyMagicLink({ token: links.at(-1) ?? "", ip, userAgent: "Agent/2" });
+  };
+  return { auth, storage: database.storage, signIn };
+}
+
+describe("databaseHooks.session.create (plan 9d)", () => {
+  it("stores the null userAgent of consumere's hook and keeps the ip", async () => {
+    const { storage, signIn } = sessionInstance({
+      session: { create: { before: async (s) => ({ data: { ...s, userAgent: null } }) } },
+    });
+    expect((await signIn("ada@example.com")).ok).toBe(true);
+    expect(await storage.findMany("session", [])).toEqual([
+      expect.objectContaining({ ip: "198.51.100.9", userAgent: null }),
+    ]);
+  });
+
+  it("hands the before hook the four draft fields in Better Auth's names", async () => {
+    const seen: unknown[] = [];
+    const { signIn } = sessionInstance({
+      session: {
+        create: {
+          before: async (s) => {
+            seen.push(s);
+          },
+        },
+      },
+    });
+    const r = await signIn("ada@example.com");
+    if (!r.ok) throw new Error(r.code);
+    expect(seen).toEqual([
+      {
+        userId: r.value.user.id,
+        ipAddress: "198.51.100.9",
+        userAgent: "Agent/2",
+        activeOrganizationId: null,
+      },
+    ]);
+  });
+
+  it("drops a change of userId with one log line at the first call, and applies the allowed fields", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { storage, signIn } = sessionInstance({
+      session: {
+        create: {
+          before: async (s) => ({ data: { ...s, userId: "someone-else", ipAddress: null } }),
+        },
+      },
+    });
+    const first = await signIn("ada@example.com");
+    const second = await signIn("ada@example.com");
+    if (!first.ok || !second.ok) throw new Error("sign-in");
+    expect((await storage.findMany("session", [])).map((s) => [s.userId, s.ip])).toEqual([
+      [first.value.user.id, null],
+      [first.value.user.id, null],
+    ]);
+    expect(log.mock.calls).toEqual([
+      [
+        "tempo-auth compat: databaseHooks.session.create.before changed userId; core takes ipAddress, userAgent, and activeOrganizationId only and drops the rest (one line per instance)",
+      ],
+    ]);
+  });
+
+  it("sets an organization the user is a member of, and answers not_found for another", async () => {
+    let organizationId = "";
+    const { auth, storage, signIn } = sessionInstance({
+      session: {
+        create: { before: async (s) => ({ data: { ...s, activeOrganizationId: organizationId } }) },
+      },
+    });
+    const ada = await seed(storage, "ada@example.com");
+    const created = await auth.tempo.api.createOrganization({ user: ada, slug: "acme", name: "A" });
+    if (!created.ok) throw new Error(created.code);
+    organizationId = created.value.organization.id;
+    expect((await signIn("ada@example.com")).ok).toBe(true);
+    expect(await storage.findMany("session", [])).toEqual([
+      expect.objectContaining({ activeOrganizationId: organizationId }),
+    ]);
+    organizationId = "01JNOSUCHORGANIZATION000";
+    expect(await signIn("ada@example.com")).toMatchObject({ ok: false, code: "not_found" });
+  });
+
+  it("answers hook_refused with the default text when the before hook returns false, and writes no session", async () => {
+    const { storage, signIn } = sessionInstance({
+      session: { create: { before: async () => false } },
+    });
+    expect(await signIn("ada@example.com")).toEqual({
+      ok: false,
+      code: "hook_refused",
+      status: 403,
+      message: HOOK_REFUSED_TEXT,
+    });
+    expect(await storage.findMany("session", [])).toEqual([]);
+  });
+
+  it("hands create.after the stored session in Better Auth's shape, with the token hash as token", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const { storage, signIn } = sessionInstance({
+      session: {
+        create: {
+          after: async (s) => {
+            seen.push({ ...s });
+          },
+        },
+      },
+    });
+    expect((await signIn("ada@example.com")).ok).toBe(true);
+    const [row] = await storage.findMany("session", []);
+    if (!row) throw new Error("no session");
+    expect(seen).toEqual([
+      {
+        id: row.id,
+        token: row.tokenHash,
+        userId: row.userId,
+        expiresAt: row.expiresAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        ipAddress: "198.51.100.9",
+        userAgent: "Agent/2",
+        activeOrganizationId: null,
+      },
+    ]);
+  });
+
+  it("refuses every other databaseHooks key, a hook that is not a function, and request hooks", () => {
+    const f = async () => {};
+    const c = checkOptions({
+      databaseHooks: {
+        user: { create: { before: f } },
+        session: { update: { before: f }, create: { before: "x", after: f, other: f } },
+      },
+      hooks: { before: f },
+    } as never);
+    expect(
+      c.refusals.filter((r) => r.startsWith("databaseHooks") || r.startsWith("hooks")),
+    ).toEqual([
+      "databaseHooks.session.create.before: expected a function",
+      "databaseHooks.session.create.other: core has no row hook on session.create.other; see the plan index",
+      "databaseHooks.session.update: core has no row hook on session.update; see the plan index",
+      "databaseHooks.user: core has no row hook on user; see the plan index",
+      "hooks: core has no request hooks: wrap auth.handler and read auth.tempo.caller(request); see the README recipe",
+    ]);
+  });
+});
+
+describe("organization limits (plan 9d)", () => {
+  const options = (o: Parameters<typeof organization>[0]): BetterAuthOptions => ({
+    baseURL: BASE,
+    secret: "0123456789abcdef0123456789abcdef",
+    database: memory(),
+    plugins: [organization({ sendInvitationEmail: async () => {}, ...o })],
+  });
+
+  it("maps the numbers onto core's limits, with Better Auth's defaults of 100", () => {
+    const limits = (o: Parameters<typeof organization>[0]) =>
+      (mapOptions(options(o)).config.organizations as OrganizationsConfig).limits;
+    expect(limits({ organizationLimit: 3, membershipLimit: 50, invitationLimit: 7 })).toEqual({
+      perUser: 3,
+      membersPerOrganization: 50,
+      pendingInvitationsPerOrganization: 7,
+    });
+    expect(limits({})).toEqual({
+      membersPerOrganization: 100,
+      pendingInvitationsPerOrganization: 100,
+    });
+    expect(limits({ organizationLimit: () => false })).toEqual({
+      membersPerOrganization: 100,
+      pendingInvitationsPerOrganization: 100,
+    });
+  });
+
+  it("refuses a create with Better Auth's text when the function organizationLimit answers true, and hands it the Better Auth user", async () => {
+    const asked: unknown[] = [];
+    const { api, storage } = instance(
+      {},
+      {
+        plugins: [
+          organization({
+            sendInvitationEmail: async () => {},
+            organizationLimit: (user) => {
+              asked.push(user);
+              return user.email === "full@example.com";
+            },
+          }),
+        ],
+      },
+    );
+    const full = await seed(storage, "full@example.com");
+    const free = await seed(storage, "free@example.com");
+    expect(await api.createOrganization({ user: full, slug: "acme", name: "Acme" })).toEqual({
+      ok: false,
+      code: "hook_refused",
+      status: 403,
+      message: "You have reached the maximum number of organizations",
+    });
+    expect((await api.createOrganization({ user: free, slug: "acme", name: "Acme" })).ok).toBe(
+      true,
+    );
+    expect(asked).toEqual([
+      expect.objectContaining({ id: full.id, name: "" }),
+      expect.objectContaining({ id: free.id }),
+    ]);
+  });
+
+  it("answers member_limit at membershipLimit", async () => {
+    const { api, storage } = instance(
+      {},
+      { plugins: [organization({ sendInvitationEmail: async () => {}, membershipLimit: 1 })] },
+    );
+    const owner = await seed(storage, "owner@example.com");
+    const bob = await seed(storage, "bob@example.com");
+    const created = await api.createOrganization({ user: owner, slug: "acme", name: "Acme" });
+    if (!created.ok) throw new Error(created.code);
+    expect(
+      await api.addMember({
+        user: owner,
+        organizationId: created.value.organization.id,
+        userId: bob.id,
+        role: "member",
+      }),
+    ).toEqual({ ok: false, code: "member_limit", status: 409 });
+  });
+
+  it("refuses a limit that is not a positive integer, and a function membershipLimit or invitationLimit", () => {
+    const refusals = checkOptions(
+      options({
+        organizationLimit: 0,
+        membershipLimit: (() => 5) as never,
+        invitationLimit: 1.5,
+      }),
+    ).refusals.filter((r) => r.startsWith("plugins[organization]"));
+    expect(refusals).toEqual([
+      "plugins[organization].invitationLimit: expected a positive integer",
+      "plugins[organization].membershipLimit: a function is refused; pass a positive integer",
+      "plugins[organization].organizationLimit: expected a positive integer",
+    ]);
   });
 });

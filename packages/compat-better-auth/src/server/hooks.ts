@@ -1,7 +1,29 @@
-import { type HooksConfig, hookRefusal, type OrganizationHooks } from "@tempo-auth/core";
-import type { BetterAuthOptions, OrganizationHookOptions } from "../types.js";
+import {
+  HOOK_REFUSED_TEXT,
+  type HooksConfig,
+  hookRefusal,
+  type OrganizationHooks,
+  type SessionHooks,
+  type SessionPatch,
+} from "@tempo-auth/core";
+import type {
+  BetterAuthOptions,
+  OrganizationHookOptions,
+  SessionDraftFields,
+  User,
+} from "../types.js";
 import { pluginOf } from "./check-options.js";
-import { toInvitation, toMember, toOrganization, toUser } from "./shapes.js";
+import { toInvitation, toMember, toOrganization, toSession, toUser } from "./shapes.js";
+
+/** Better Auth 1.7.2's text for the limit (dist/plugins/organization/error-codes.mjs:5, read 2026-10-13). */
+export const ORGANIZATION_LIMIT_TEXT = "You have reached the maximum number of organizations";
+
+/** Better Auth's function form of `organizationLimit`: true means the user is at the limit. */
+type OrganizationLimitFn = (user: User) => boolean | Promise<boolean>;
+
+type SessionCreateHooks = NonNullable<
+  NonNullable<NonNullable<BetterAuthOptions["databaseHooks"]>["session"]>["create"]
+>;
 
 /** Any Better Auth hook, called with the one argument it reads by its own type. */
 type AnyHook = (data: never) => unknown;
@@ -50,11 +72,20 @@ async function callHook(
 }
 
 /** Core's organization hooks from Better Auth's `organizationHooks`. A core point is set only when a mapped hook exists. */
-function organizationHooksOf(h: OrganizationHookOptions): OrganizationHooks {
+function organizationHooksOf(
+  h: OrganizationHookOptions,
+  limit: OrganizationLimitFn | null,
+): OrganizationHooks {
   const out: OrganizationHooks = {};
   const beforeCreate = h.beforeCreateOrganization;
-  if (beforeCreate)
+  if (beforeCreate || limit)
     out.beforeCreate = async (e) => {
+      const user = toUser(e.user);
+      // Better Auth runs the function limit before beforeCreateOrganization, and a truthy
+      // answer means the user is at the limit (crud-org.mjs:61-64, read 2026-10-13).
+      if (limit && (await refusingApiErrors(() => limit(user))))
+        throw hookRefusal(ORGANIZATION_LIMIT_TEXT);
+      if (!beforeCreate) return;
       // Better Auth passes the body. Core minted the id already, so the id is here too:
       // an app that keeps its own row writes it with this id (consumerc's order).
       const organization = {
@@ -67,7 +98,7 @@ function organizationHooksOf(h: OrganizationHookOptions): OrganizationHooks {
       await callHook(
         "beforeCreateOrganization",
         beforeCreate,
-        { organization, user: toUser(e.user) },
+        { organization, user },
         organization,
       );
     };
@@ -305,8 +336,65 @@ function organizationHooksOf(h: OrganizationHookOptions): OrganizationHooks {
   return out;
 }
 
+/**
+ * Core's session hooks from `databaseHooks.session.create` (plan 9d). The
+ * before hook's `{ data }` may change `ipAddress`, `userAgent`, and
+ * `activeOrganizationId`. A change of any other field is dropped, with one
+ * line per instance. `false` refuses, as in Better Auth.
+ */
+function sessionHooksOf(create: SessionCreateHooks | undefined): SessionHooks {
+  const out: SessionHooks = {};
+  const before = create?.before;
+  if (before) {
+    let warned = false;
+    out.beforeCreate = async (e) => {
+      // Better Auth's names. Core writes the id, the token, and the dates after this hook.
+      const given: SessionDraftFields = {
+        userId: e.session.userId,
+        ipAddress: e.session.ip,
+        userAgent: e.session.userAgent,
+        activeOrganizationId: null,
+      };
+      const answer = await refusingApiErrors(() => before({ ...given }, null));
+      // Better Auth: "if the hook returns false, the session will not be created".
+      if (answer === false) throw hookRefusal(HOOK_REFUSED_TEXT);
+      if (!isRecord(answer) || !isRecord(answer.data)) return undefined;
+      const patch: SessionPatch = {};
+      const dropped: string[] = [];
+      for (const [key, value] of Object.entries(answer.data)) {
+        if (Object.hasOwn(given, key) && Object.is(value, given[key as keyof SessionDraftFields]))
+          continue;
+        if (key === "ipAddress" && (typeof value === "string" || value === null)) patch.ip = value;
+        else if (key === "userAgent" && (typeof value === "string" || value === null))
+          patch.userAgent = value;
+        else if (key === "activeOrganizationId" && (typeof value === "string" || value === null))
+          patch.activeOrganizationId = value;
+        else dropped.push(key);
+      }
+      if (dropped.length > 0 && !warned) {
+        warned = true;
+        console.error(
+          `tempo-auth compat: databaseHooks.session.create.before changed ${dropped.join(", ")}; core takes ipAddress, userAgent, and activeOrganizationId only and drops the rest (one line per instance)`,
+        );
+      }
+      return patch;
+    };
+  }
+  const after = create?.after;
+  if (after)
+    out.afterCreate = async (e) => {
+      // The session.token column holds the token's SHA-256 hex, so the hook gets that value.
+      await after(toSession(e.session, e.session.tokenHash), null);
+    };
+  return out;
+}
+
 /** Core's `hooks` from the Better Auth options (plan 9d). */
 export function compatHooks(options: BetterAuthOptions): HooksConfig {
   const org = pluginOf(options, "organization")?.options;
-  return org ? { organization: organizationHooksOf(org.organizationHooks ?? {}) } : {};
+  const limit = org && typeof org.organizationLimit === "function" ? org.organizationLimit : null;
+  return {
+    ...(org ? { organization: organizationHooksOf(org.organizationHooks ?? {}, limit) } : {}),
+    session: sessionHooksOf(options.databaseHooks?.session?.create),
+  };
 }

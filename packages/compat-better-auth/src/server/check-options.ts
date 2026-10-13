@@ -18,7 +18,9 @@ type Rule = (value: unknown, path: string, out: OptionCheck) => void;
 
 /** Plan 9c maps google, apple, github, and linkedin. Core takes any other provider as a list entry. */
 const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.oauth2";
-const PLAN_9D = "plan 9d (hooks on organizations and sessions) is not written yet";
+const NO_REQUEST_HOOKS =
+  "core has no request hooks: wrap auth.handler and read auth.tempo.caller(request); see the README recipe";
+const noRowHook = (name: string) => `core has no row hook on ${name}; see the plan index`;
 const PLAN_9G = "plan 9g (JWT minting and an OIDC provider mode) is not written yet";
 const NO_SUCH_OPTION = "tempo-auth has no such option";
 
@@ -74,6 +76,50 @@ const seconds =
     if (typeof v !== "number" || !Number.isInteger(v) || v % unit !== 0 || v < min || v > max)
       refuse(out, p, why);
   };
+
+const positiveInteger: Rule = (v, p, out) => {
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1)
+    refuse(out, p, "expected a positive integer");
+};
+/** membershipLimit and invitationLimit: core takes a number; Better Auth's function form is refused. */
+const limitNumber: Rule = (v, p, out) => {
+  if (typeof v === "function") refuse(out, p, "a function is refused; pass a positive integer");
+  else positiveInteger(v, p, out);
+};
+
+/** Visits each key of an object, or refuses a value that is not one. */
+function eachKey(
+  v: unknown,
+  p: string,
+  out: OptionCheck,
+  visit: (key: string, value: unknown, path: string) => void,
+): void {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) {
+    refuse(out, p, "expected an object");
+    return;
+  }
+  for (const [key, value] of Object.entries(v))
+    if (value !== undefined) visit(key, value, `${p}.${key}`);
+}
+
+/** `databaseHooks`: only session.create.before and session.create.after map (plan 9d). */
+const databaseHooks: Rule = (v, p, out) =>
+  eachKey(v, p, out, (model, ops, modelPath) => {
+    if (model !== "session") {
+      refuse(out, modelPath, noRowHook(model));
+      return;
+    }
+    eachKey(ops, modelPath, out, (op, times, opPath) => {
+      if (op !== "create") {
+        refuse(out, opPath, noRowHook(`session.${op}`));
+        return;
+      }
+      eachKey(times, opPath, out, (time, hook, timePath) => {
+        if (time === "before" || time === "after") fn(hook, timePath, out);
+        else refuse(out, timePath, noRowHook(`session.create.${time}`));
+      });
+    });
+  });
 
 const DAY = 86_400;
 const MINUTES = seconds(60, 60, 86_400, "core takes whole minutes from 1 to 1440");
@@ -133,8 +179,13 @@ const PLUGIN_RULES: Record<string, Rule> = {
         true,
         "core lets every verified user create an organization",
       ),
-      organizationLimit: refused("core has no organization count limit"),
-      membershipLimit: refused("core has no member count limit"),
+      // A number maps onto organizations.limits.perUser; a function runs before
+      // beforeCreateOrganization (src/server/hooks.ts, plan 9d).
+      organizationLimit: (v, p, out) => {
+        if (typeof v !== "function") positiveInteger(v, p, out);
+      },
+      membershipLimit: limitNumber,
+      invitationLimit: limitNumber,
       creatorRole: only("owner", "core makes the creator owner"),
       invitationExpiresIn: seconds(DAY, DAY, 365 * DAY, "core takes whole days"),
       requireEmailVerificationOnInvitation: only(
@@ -371,8 +422,8 @@ const TOP: Record<string, Rule> = {
     // Core checks that appURL is an exact origin in trustedOrigins (core config.ts).
     appURL: string,
   }),
-  databaseHooks: refused(PLAN_9D),
-  hooks: refused(PLAN_9D),
+  databaseHooks,
+  hooks: refused(NO_REQUEST_HOOKS),
   secondaryStorage: refused(
     "core keeps sessions in the session table; secondary storage is refused",
   ),
@@ -433,15 +484,6 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     }
   }
   const org = pluginOf(options, "organization")?.options;
-  // Better Auth 1.7.2 applies both limits when the option is absent
-  // (crud-members.mjs and crud-invites.mjs, read 2026-10-10). Core has none,
-  // so say so at start: no option is ignored in silence (final review I-2).
-  if (org)
-    note(
-      out,
-      "plugins[organization]",
-      "Better Auth's default limits of 100 members and 100 pending invitations per organization do not apply: core has no count limit",
-    );
   if (org && typeof org.sendInvitationEmail !== "function") {
     refuse(
       out,

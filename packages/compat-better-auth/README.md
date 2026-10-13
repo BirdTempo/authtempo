@@ -50,7 +50,8 @@ refuses its plugin by id at construction.
 
 `better-auth/api` maps to `./api`, which exports `APIError` only (plan 9b).
 An import of another name from it, such as `createAuthMiddleware`, fails at
-build: it needs hooks (plan 9d).
+build: core has no request hooks (plan 9d). Wrap the handler instead (see
+"Request hooks").
 
 The package exports no other subpath. An import of `better-auth/db`,
 `better-auth/types`, `better-auth/plugins/access`, or
@@ -191,7 +192,6 @@ Better Auth defaults that core does not keep:
 | An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `tempoAuth.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
-| An organization stops at 100 members and 100 pending invitations when `membershipLimit` and `invitationLimit` are absent | Core has no count limit. Only core's per-inviter rate limit applies. The factory logs a note at start when the organization plugin is on. |
 | `trustedOrigins` takes a function and wildcards such as `https://*.example.com` | Each entry is an exact origin (`https://app.example.com`, no path or trailing slash) or an app scheme (`myapp://`). Any other entry is refused at start. |
 
 Call arguments that core cannot keep: on the server, `api.signUpEmail` with
@@ -350,6 +350,94 @@ Give each plugin once. A second entry with the same id is refused at start, beca
 
 Only `auth.handler` keeps the plugin behavior in this table: the magic link 404, `set-auth-token`, and the `expo-origin` rule. `auth.tempo.handle` serves core's routes directly, without them.
 
+## Hooks
+
+The package maps Better Auth's hooks onto core's hooks (plan 9d; the core
+README, "Hooks").
+
+- `organization({ organizationHooks })` takes Better Auth 1.7.2's names:
+  `beforeCreateOrganization`, `afterCreateOrganization`,
+  `beforeUpdateOrganization`, `afterUpdateOrganization`,
+  `beforeDeleteOrganization`, `afterDeleteOrganization`, `beforeAddMember`,
+  `afterAddMember`, `beforeRemoveMember`, `afterRemoveMember`,
+  `beforeUpdateMemberRole`, `afterUpdateMemberRole`,
+  `beforeCreateInvitation`, `afterCreateInvitation`,
+  `beforeAcceptInvitation`, `afterAcceptInvitation`, `afterRejectInvitation`,
+  and `afterCancelInvitation`. Each hook gets Better Auth's argument keys.
+  The team hooks, `beforeCancelInvitation`, and `beforeRejectInvitation` are
+  refused at start.
+- A before hook runs inside core's transaction.
+  `throw new APIError("FORBIDDEN", { message })` answers 403 `HOOK_REFUSED`
+  with that message, on the server `api` and on the client. Any other throw
+  answers 500 `HOOK_FAILED`. No row is written.
+- An after hook runs after the commit. A throw is logged with the hook name
+  and the row id, and the call answers success. In Better Auth the same
+  throw answers an error for a row that exists.
+- A before hook cannot change the row. A `{ data }` answer that changes a
+  field it was given stops the write with `HOOK_FAILED` and one log line.
+  `beforeCreateOrganization` gets `organization.id`, the id core writes: an
+  app that keeps its own row writes it with this id and returns nothing.
+- `beforeAcceptInvitation` runs on every accept. `beforeAddMember` and
+  `afterAddMember` run for the creator's row and for an add, not for an
+  accept, as in Better Auth. `beforeRemoveMember` and `afterRemoveMember`
+  run on a leave too; Better Auth 1.7.2 runs neither there.
+  `afterAcceptInvitation` runs on every successful accept, whether the
+  accept created the member row or found it, as in Better Auth 1.7.2.
+  `afterRejectInvitation` gets `user: null` when the decline request
+  carried no session.
+- `databaseHooks.session.create.before` gets `{ userId, ipAddress,
+  userAgent, activeOrganizationId }`. Its `{ data }` may change `ipAddress`,
+  `userAgent`, and `activeOrganizationId`. The organization must be one the
+  user is a member of, or the sign-in answers `NOT_FOUND`. A change of
+  another field is dropped, with one log line at the first call. `false`
+  answers `HOOK_REFUSED`. `databaseHooks.session.create.after` gets the
+  stored session; its `token` holds the token's SHA-256 hex, as the
+  `session.token` column does. Every other `databaseHooks` key is refused.
+- `organizationLimit` as a number, `membershipLimit`, and `invitationLimit`
+  map onto core's `organizations.limits`. With the option absent,
+  `membershipLimit` and `invitationLimit` are 100, Better Auth's defaults. A
+  function `organizationLimit` runs before `beforeCreateOrganization`, and a
+  true answer refuses with "You have reached the maximum number of
+  organizations". A function `membershipLimit` or `invitationLimit` is
+  refused. The limits answer 409, not Better Auth's 403.
+- Hooks have no timeout. A hook that never settles holds the request.
+
+### Request hooks
+
+Core has no request hooks, so `hooks` is refused. Wrap the handler, and
+read the caller from `auth.tempo.caller(request)`. consumerd's two uses, as a
+wrapper:
+
+```ts
+const auth = betterAuth(options);
+
+/** consumerd's hooks.before (admin-only organization reads) and hooks.after (an audit row). */
+export async function handler(request: Request): Promise<Response> {
+  const { pathname, searchParams } = new URL(request.url);
+  if (
+    pathname === "/api/auth/organizations/members" ||
+    pathname === "/api/auth/organizations/invitations"
+  ) {
+    const caller = await auth.tempo.caller(request);
+    if (!caller) return Response.json({ error: "unauthorized" }, { status: 401 });
+    const list = await auth.tempo.api.listOrganizations({ user: caller.user });
+    const id = searchParams.get("organizationId");
+    const role = list.ok ? list.value.find((x) => x.organization.id === id)?.role : undefined;
+    if (role !== "admin" && role !== "owner")
+      return Response.json({ error: "forbidden_rank" }, { status: 403 });
+  }
+  const response = await auth.handler(request);
+  if (pathname === "/api/auth/organizations/members/remove" && response.ok) {
+    const caller = await auth.tempo.caller(request);
+    if (caller) await recordMemberChange(caller.user.id);
+  }
+  return response;
+}
+```
+
+The audit row of a leave is simpler as `organizationHooks.afterRemoveMember`,
+which runs on a leave.
+
 ## The five Better Auth apps
 
 None of the five runs with no edit. These are the edits, and the refusals the
@@ -357,7 +445,7 @@ factory prints without them.
 
 consumere (small edits):
 - Remove `secondaryStorage` and `session.storeSessionInDatabase: false`. Sessions move into a `session` table. Create it, and the `organization`, `member`, `invitation`, and `passkey` tables, with Better Auth's own SQL before migration 0001.
-- Remove `databaseHooks`. To store no IP, keep `advanced.ipAddress.disableIpTracking: true`; the factory logs a note. For a request with no client IP, only the password sign-in, the magic link, the reset request, and the verify mail resend skip the per-IP limit and keep the per-email limit. Every other flow keeps core's shared bucket. Core stores the user agent; the hook that dropped it has no replacement until plan 9d.
+- `databaseHooks.session.create.before` runs unchanged since plan 9d: core stores the `userAgent: null` it answers. To store no IP, keep `advanced.ipAddress.disableIpTracking: true`; the factory logs a note. For a request with no client IP, only the password sign-in, the magic link, the reset request, and the verify mail resend skip the per-IP limit and keep the per-email limit. Every other flow keeps core's shared bucket.
 - The `socialProviders` config of GitHub and LinkedIn runs unchanged since plan 9c, and the redirect URI at each provider changes (see the cutover list). Their Better Auth-era accounts sign in to the same users.
 - Run Drizzle on postgres.js (`drizzle-orm/postgres-js`), not on Neon's driver.
 - `sendVerificationEmail` with a `callbackURL` answers NOT_SUPPORTED; leave the `callbackURL` out.
@@ -365,15 +453,15 @@ consumere (small edits):
 consumer-i (small edits):
 - Add `emailAndPassword.sendResetPassword` and `emailVerification.sendVerificationEmail`, and `sendInvitationEmail` in `organization()`.
 - Remove `rateLimit.window`, `max`, `customStorage`, and `customRules`. Core's owned limiter in `ta_limit` replaces them, with its own fixed limits per flow.
-- Remove `organizationLimit` (core has no such limit) and `organizationHooks.afterCreateOrganization` (plan 9d). Create the tenant row from the app after `organization.create` answers.
+- `organizationLimit: 5` and `organizationHooks.afterCreateOrganization` run unchanged since plan 9d. A throw in the hook no longer answers an error for an organization that exists: core logs it and answers success. To keep no organization without its tenant row, write the row in `beforeCreateOrganization` with `organization.id`.
 - The invite dialog posts to `/api/auth/organization/invite-member` by hand. Call `authClient.organization.inviteMember` instead.
 - Add the `passkey` table. Migration 0001 adds and fills `account.issuer` on Postgres (consumer-i's tables are from before Better Auth 1.7).
 
-consumerc (follow-ups first): `hooks`, `databaseHooks`, and `organizationHooks` (plan 9d); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts`; the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
-The factory refuses exactly these: `databaseHooks`, `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
+consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write; custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
-consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (plan 9d), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, `membershipLimit`, the rate limit storage.
-The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[email-otp]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].membershipLimit`, `plugins[organization].organizationLimit`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
+consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, the rate limit storage. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d.
+The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[email-otp]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
 
 consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.requireEmailVerification`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.

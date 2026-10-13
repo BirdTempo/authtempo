@@ -209,10 +209,19 @@ export interface OrganizationHookOptions {
   }) => HookResult<void>;
 }
 
+/** The session fields core fills before the write, in Better Auth's names (plan 9d). */
+export interface SessionDraftFields {
+  userId: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  activeOrganizationId: null;
+}
+
 export interface OrganizationOptions {
   allowUserToCreateOrganization?: boolean | ((user: User) => boolean | Promise<boolean>);
   organizationLimit?: number | ((user: User) => boolean | Promise<boolean>);
   membershipLimit?: number;
+  invitationLimit?: number;
   creatorRole?: string;
   invitationExpiresIn?: number;
   requireEmailVerificationOnInvitation?: boolean;
@@ -338,6 +347,23 @@ export interface BetterAuthOptions {
   rateLimit?: { enabled?: boolean };
   plugins?: readonly BetterAuthPlugin[];
   telemetry?: { enabled?: boolean };
+  /**
+   * Plan 9d: `session.create.before` and `session.create.after` only
+   * (@better-auth/core 1.7.2 dist/types/init-options.d.mts, the databaseHooks
+   * type, read 2026-10-13). `before` may answer `{ data }` with `ipAddress`,
+   * `userAgent`, or `activeOrganizationId` changed, or `false` to refuse.
+   */
+  databaseHooks?: {
+    session?: {
+      create?: {
+        before?: (
+          session: SessionDraftFields,
+          context: null,
+        ) => HookResult<boolean | BeforeHookAnswer>;
+        after?: (session: Session, context: null) => HookResult<void>;
+      };
+    };
+  };
   /**
    * The one key that is not Better Auth's. `passwordHash` replaces
    * `betterAuthPasswordHash()`, for example with a low cost in tests.

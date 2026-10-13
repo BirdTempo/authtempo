@@ -70,7 +70,7 @@ describe("betterAuth", () => {
         secondaryStorage: {},
       }),
     ).toThrowError(
-      "tempo-auth compat: this config uses 2 items that tempo-auth cannot keep:\n- hooks: plan 9d (hooks on organizations and sessions) is not written yet\n- secondaryStorage: core keeps sessions in the session table; secondary storage is refused",
+      "tempo-auth compat: this config uses 2 items that tempo-auth cannot keep:\n- hooks: core has no request hooks: wrap auth.handler and read auth.tempo.caller(request); see the README recipe\n- secondaryStorage: core keeps sessions in the session table; secondary storage is refused",
     );
   });
 
@@ -87,7 +87,7 @@ describe("betterAuth", () => {
         hooks: {},
       } as BetterAuthOptions),
     ).toThrowError(
-      "tempo-auth compat: this config uses 3 items that tempo-auth cannot keep:\n- database.casing: drizzleAdapter accepts provider, schema, usePlural, transaction, and debugLogs only\n- database: drizzleAdapter needs a Drizzle database on postgres.js (drizzle-orm/postgres-js); other drivers are refused\n- hooks: plan 9d (hooks on organizations and sessions) is not written yet",
+      "tempo-auth compat: this config uses 3 items that tempo-auth cannot keep:\n- database.casing: drizzleAdapter accepts provider, schema, usePlural, transaction, and debugLogs only\n- database: drizzleAdapter needs a Drizzle database on postgres.js (drizzle-orm/postgres-js); other drivers are refused\n- hooks: core has no request hooks: wrap auth.handler and read auth.tempo.caller(request); see the README recipe",
     );
   });
 
@@ -126,6 +126,8 @@ describe("betterAuth", () => {
       magicLinkExpiresIn: 300,
       emailVerificationExpiresIn: 3600,
       invitationExpiresIn: 172800,
+      membershipLimit: 100,
+      invitationLimit: 100,
       basePath: "/api/auth",
     });
     expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1 });
