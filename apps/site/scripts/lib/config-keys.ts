@@ -29,7 +29,9 @@ type Part<K extends keyof AuthConfig> = NonNullable<Exclude<AuthConfig[K], false
  * rows. Each `satisfies` ties a list to its type: a key that core adds and
  * this list lacks fails `typecheck`, and a key that this list adds and core
  * lacks fails it too (an excess property). The config check (check-config.ts)
- * then holds the page to this list.
+ * then holds the page to this list. The tie reaches the object-valued keys of
+ * `AuthConfig` (see `NESTED_LISTS_PRESENT` below), but not a new nested object inside a
+ * nested type: a block that core adds there gets no forced list.
  */
 export const CONFIG_KEYS = {
   "": {
@@ -178,6 +180,38 @@ export const CONFIG_KEYS = {
   } satisfies Keys<NonNullable<OAuthConfig["registration"]>>,
   hooks: { organization: true, session: true } satisfies Keys<HooksConfig>,
 } as const;
+
+/**
+ * Every object-valued key of `AuthConfig` needs a nested list in CONFIG_KEYS.
+ * A new object block in core, such as a `rateLimits` block, fails typecheck
+ * here until its list exists. Block fields that this check does not count as
+ * objects are named in `Flat`: they are functions, arrays, and ports.
+ */
+type Flat =
+  | "storage"
+  | "mail"
+  | "limiter"
+  | "clock"
+  | "clientIp"
+  | "trustedOrigins"
+  | "jwt"
+  | "webauthn";
+type ObjectKeys = Exclude<
+  {
+    [K in keyof AuthConfig]-?: Part<K> extends
+      | string
+      | number
+      | boolean
+      | readonly unknown[]
+      | ((...a: never[]) => unknown)
+      ? never
+      : K;
+  }[keyof AuthConfig],
+  Flat
+>;
+/** The compile-time tie: each object-valued key of AuthConfig has a nested list above. */
+const NESTED_LISTS_PRESENT: ObjectKeys extends keyof typeof CONFIG_KEYS ? true : never = true;
+void NESTED_LISTS_PRESENT;
 
 /** Every key by its dotted path: `basePath`, `password.minLength`, `social.oidc[].issuer`. */
 export function configKeyPaths(): string[] {

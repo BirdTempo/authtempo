@@ -36,7 +36,9 @@ export function checkErrors(
       continue;
     }
     const status = /\s(\d{3})$/.exec(text)?.[1];
-    if (status !== String(e.status))
+    if (status === undefined)
+      r.failures.push(`#${id} states no status; ${e.table} says ${e.status}`);
+    else if (status !== String(e.status))
       r.failures.push(`#${id} says status ${status}; ${e.table} says ${e.status}`);
   }
   for (const h of headings)

@@ -30,6 +30,11 @@ describe("checkErrors", () => {
     ]);
   });
 
+  it("says a heading states no status, not undefined", () => {
+    const r = checkErrors('<h3 id="a"><code>a</code></h3>', { a: 400 }, {});
+    expect(r.failures).toEqual(["#a states no status; ERRORS says 400"]);
+  });
+
   it("fails on an empty page", () => {
     expect(checkErrors("", {}, {}).failures).toEqual(["read 0 codes", "read 0 anchors"]);
   });
