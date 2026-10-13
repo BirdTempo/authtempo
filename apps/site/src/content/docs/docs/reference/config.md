@@ -1,0 +1,226 @@
+---
+title: Configuration
+description: Every key that createAuth accepts, with its type, its default, and the rule that construction checks.
+type: reference
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
+  - packages/core/src/config.ts
+  - apps/site/scripts/lib/config-keys.ts
+---
+
+**For:** a developer who writes the config of `createAuth`, or reads an error of construction.
+
+**What it does:** this page lists every key, one row for each. `createAuth` refuses a value that breaks a rule, with a `ConfigError` that names the key.
+
+## Before you start
+
+- Read [Choose your stack](/docs/start/) for `storage` and `limiter`.
+
+## Top level
+
+The keys of `createAuth(config)`. `baseURL`, `secret`, `trustedOrigins`, `storage`, and `mail` are required.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `basePath` | string | `"/auth"` | Starts with `/` and does not end with `/`. |
+| `baseURL` | string | required | The origin of the server that mounts `handle`: no path, no trailing slash. |
+| `secret` | string | required | At least 32 characters. It keys the stored codes and seals the factor secrets and the signing keys. |
+| `appName` | string | the host of `baseURL` | 1 to 80 characters with no control character. It names the app in the pages and the mail subjects. |
+| `trustedOrigins` | string list | required | Exact origins and app schemes. A `*` is refused. |
+| `appURL` | string | `baseURL` | An exact origin that is `baseURL` or a member of `trustedOrigins`. Sign-ins land here. |
+| `cookie` | object | `{ sameSite: "Lax" }` | See `cookie.sameSite`. |
+| `storage` | `StorageAdapter` | required | An adapter that passes the conformance suite. |
+| `mail` | `MailPort` | required | `{ send(message) }`. Core calls it once per mail. |
+| `limiter` | `LimiterPort` | the memory limiter | The memory limiter counts per isolate and is for tests. Use the owned limiter of the adapter. |
+| `clientIp` | function of the request | reads `cf-connecting-ip` | Answers the client IP, or null. Off Workers, read the header of your trusted proxy. |
+| `clock` | `Clock` | the system clock | `{ now(): Date }`. Tests inject one. |
+| `cookieName` | string | `"tempo_session"` | The session cookie. The binding cookie is this name plus `_oauth`. |
+| `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }` | See the keys under Session. |
+| `magicLink` | object | the defaults below | See the keys under Magic link. |
+| `social` | object | no provider | See the keys under Social. |
+| `jwt` | `JwtSeam` | jose 6.2.12 | The ID token verifier and the Apple secret signer. Tests inject a fake. |
+| `passkey` | object | off | Passkeys are on when it is set. |
+| `webauthn` | `WebAuthnSeam` | @simplewebauthn/server 14.0.3 | The WebAuthn ceremonies. Tests inject a fake. |
+| `handoff` | object | off | The handoff is on when it is set. |
+| `organizations` | object or `false` | off | `{}` turns organizations on with the defaults. |
+| `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
+| `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
+| `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
+| `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, and `api.jwt`. The OAuth provider needs it. |
+| `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
+| `hooks` | object | no hook | The groups `organization` and `session`. Any other group is refused. |
+
+## Cookie
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `cookie.sameSite` | `"Lax"` or `"None"` | `"Lax"` | An app on another site needs `"None"`. Another value is refused. |
+
+## Session
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `session.ttlDays` | number | 30 | The life of a session in days. |
+| `session.slidingRefreshDays` | number | 7 | A session older than this moves its expiry forward when it is used. |
+
+## Magic link
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `magicLink.ttlMinutes` | number | 15 | The life of a link in minutes. |
+| `magicLink.linkBuilder` | function of the token and `next` | `<baseURL><basePath>/magic-link/verify?token=<token>` | The link in the mail. It must open the verify route with the token. |
+| `magicLink.confirmPage` | function of `ConfirmPageInput` | `defaultConfirmPage` | Answers the markup of the confirm page. |
+
+## Social
+
+Each provider adds a start route and a callback route. A field of a preset must be a string that is not empty.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `social.google` | `GoogleConfig` | none | Google sign-in. |
+| `social.apple` | `AppleConfig` | none | Apple sign-in. |
+| `social.github` | `GitHubConfig` | none | The GitHub preset, with the scope `read:user user:email`. |
+| `social.linkedin` | `LinkedInConfig` | none | The LinkedIn preset, on the user info endpoint, with the scope `openid profile email`. |
+| `social.oidc` | `OidcEntry` list | empty | OpenID Connect providers. |
+| `social.oauth2` | `OAuth2Entry` list | empty | OAuth 2.0 providers that issue no ID token. |
+| `social.fetch` | fetch | the global fetch | The fetch of every provider call. Tests inject one. |
+| `social.google.clientId` | string | required | The client id of the Google OAuth client. |
+| `social.google.clientSecret` | string | required | Core sends it in the token request body. |
+| `social.apple.clientId` | string | required | The Services ID, such as `com.example.web`. |
+| `social.apple.teamId` | string | required | The team id of the Apple developer account. |
+| `social.apple.keyId` | string | required | The id of the Sign in with Apple key. |
+| `social.apple.privateKey` | string | required | The PKCS#8 PEM of the key. Core signs a client secret of five minutes for each exchange. |
+| `social.github.clientId` | string | required | The client id of the GitHub OAuth app. |
+| `social.github.clientSecret` | string | required | The client secret of the GitHub OAuth app. |
+| `social.linkedin.clientId` | string | required | The client id of the LinkedIn app. |
+| `social.linkedin.clientSecret` | string | required | The client secret of the LinkedIn app. |
+| `social.oidc[].name` | string | required | `^[a-z][a-z0-9-]{0,31}$`, unique in both lists, not a preset, `email`, or `credential`. |
+| `social.oidc[].label` | string | required | The button text: 1 to 80 characters with no control character. |
+| `social.oidc[].issuer` | string | required | An `https:` URL with no query, fragment, or credentials. A path is allowed. |
+| `social.oidc[].clientId` | string | required | The client id at the provider. |
+| `social.oidc[].clientSecret` | string | required | The client secret at the provider. |
+| `social.oidc[].scope` | string | `"openid email profile"` | Must hold `openid`. No control character. |
+| `social.oidc[].endpoints` | object | none | With it, core never reads the discovery document. |
+| `social.oidc[].endpoints.authorizeUrl` | string | required in `endpoints` | An `https:` URL. |
+| `social.oidc[].endpoints.tokenUrl` | string | required in `endpoints` | An `https:` URL. |
+| `social.oidc[].endpoints.jwksUrl` | string | required in `endpoints` | An `https:` URL. |
+| `social.oauth2[].name` | string | required | The rule of `social.oidc[].name`. |
+| `social.oauth2[].label` | string | required | The rule of `social.oidc[].label`. |
+| `social.oauth2[].authorizeUrl` | string | required | An `https:` URL. |
+| `social.oauth2[].tokenUrl` | string | required | An `https:` URL. |
+| `social.oauth2[].clientId` | string | required | The client id at the provider. |
+| `social.oauth2[].clientSecret` | string | required | The client secret at the provider. |
+| `social.oauth2[].scope` | string | required | Not empty. No control character. |
+| `social.oauth2[].authorizeParams` | string map | none | Extra authorize parameters. A key that core sets is refused: `client_id`, `redirect_uri`, `response_type`, `scope`, `state`, `nonce`, `code_challenge`, `code_challenge_method`. |
+| `social.oauth2[].userinfo` | function of the access token and a fetch | required | Answers a `SocialProfile`. It stops at 10 seconds. |
+
+## Passkeys
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. |
+| `passkey.rpName` | string | required | The name that the device shows. Not empty. |
+| `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be `baseURL` or in `trustedOrigins`. |
+
+## Handoff
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `handoff.schemes` | string list | required | App schemes such as `myapp://`, not empty. `http://` and `https://` are refused. |
+| `handoff.devRedirectPattern` | `RegExp` | none | Development only. The `g` and `y` flags are refused. An `http` or `https` match must be on a loopback host. |
+| `handoff.signInPage` | function of `SignInPageInput` | `defaultSignInPage` | Answers the markup of the sign-in page. It must put the nonce on its script tag. |
+| `handoff.confirmPage` | function of `HandoffConfirmPageInput` | `defaultHandoffConfirmPage` | Answers the markup of the continue page. |
+
+## Organizations
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `organizations.ranks` | map of role to number | `{ viewer: 1, member: 2, admin: 3, owner: 4 }` | Positive integers. Must name `owner`. A role name holds no comma. |
+| `organizations.reservedSlugs` | string list | `admin`, `api`, `auth`, `internal`, `operator`, `ops`, `platform`, `system`, `www` | Each entry must be a slug. |
+| `organizations.platformOrganization` | string | none | A slug. Core reserves it. |
+| `organizations.platformRole` | string | none | A role of `ranks`. It needs `platformOrganization`. |
+| `organizations.invitationTtlDays` | number | 7 | A positive integer. |
+| `organizations.invitationLinkBuilder` | function of the token and the organization | `<appURL>/?invitation=<token>` | The link in the invitation mail. |
+| `organizations.limits` | object | no limit | See the three limits. |
+| `organizations.limits.perUser` | number | none | A positive integer. Create answers `organization_limit` at it. |
+| `organizations.limits.membersPerOrganization` | number | none | A positive integer. Add and accept answer `member_limit` at it. |
+| `organizations.limits.pendingInvitationsPerOrganization` | number | none | A positive integer. Invite answers `invitation_limit` at it. |
+
+## Passwords
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `password.hash` | `PasswordHashSeam` | `createPbkdf2PasswordHash()` | PBKDF2-HMAC-SHA256, 100000 iterations. |
+| `password.minLength` | number | 8 | An integer from 8 to 128, in code points. |
+| `password.breachCheck` | async function of the password | none | True refuses the password with `password_breached`. |
+| `password.resetTtlMinutes` | number | 15 | An integer from 1 to 1440. |
+| `password.resetPage` | function of `ResetPageInput` | `defaultResetPage` | Answers the markup of the reset form. |
+| `password.legacyVerify` | `LegacyVerifyConfig` | none | The old system's check, for users with `LEGACY_VERIFY_HASH`. |
+| `password.legacyVerify.verify` | async function of the address, the password, and a signal | required in `legacyVerify` | Only `true` is a match. |
+| `password.legacyVerify.timeoutMs` | number | 5000 | An integer from 100 to 30000. Every failed sign-in waits this long. |
+
+## Email codes
+
+Another key of `emailOtp` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `emailOtp.ttlMinutes` | number | 10 | An integer from 1 to 60. |
+| `emailOtp.length` | 6 or 8 | 6 | The digits of a code. |
+| `emailOtp.maxAttempts` | number | 5 | An integer from 3 to 10. |
+| `emailOtp.mail` | function of `EmailOtpMailInput` | `defaultEmailOtpMail` | Answers the sign-in code mail. Core sends it to the code's address. |
+| `emailOtp.resetMail` | function of `EmailOtpMailInput` | `defaultResetOtpMail` | Answers the reset code mail, with the same rule. |
+
+## Second factor
+
+Another key of `totp` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `totp.issuer` | string | `appName`, else the host of `baseURL` with no port | 1 to 80 characters, no control character, no colon. A default with a colon is refused. |
+| `totp.backupCodes` | number | 10 | An integer from 5 to 20. |
+| `totp.backupCodeLength` | number | 8 | An integer from 8 to 12. |
+| `totp.trustDays` | number | 30 | An integer from 1 to 365. |
+| `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName`. |
+| `totp.challengePage` | function of `TotpChallengePageInput` | `defaultTotpPage` | Answers the markup of the challenge form. |
+
+## JWT minting
+
+Another key of `jwtMint` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `jwtMint.alg` | `"EdDSA"` or `"ES256"` | `"EdDSA"` | A change retires the signing key at the next signature. |
+| `jwtMint.audience` | string or string list | `[baseURL]` | 1 to 10 strings of 1 to 2048 characters with no control character, and none an `oauth.resources` entry. |
+| `jwtMint.ttlMinutes` | number | 15 | An integer from 1 to 60. |
+| `jwtMint.claims` | function of the user and the session | none | Answers an object of claims. Core sets the reserved claims itself. |
+
+## OAuth provider
+
+Another key of `oauth` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `oauth.resources` | string list | required | 1 to 20 distinct absolute `http` or `https` URLs with no query, fragment, or credentials. |
+| `oauth.scopes` | map of scope to text | none | A scope is 1 to 64 printable ASCII characters with no space, quote, or backslash. Its text is 1 to 200 characters. |
+| `oauth.registration` | object | `{ dynamic: true, cimd: true }` | See the two registration keys. |
+| `oauth.fetch` | fetch | none | Required while `registration.cimd` is on. It must refuse private addresses. |
+| `oauth.consentPage` | function of `ConsentPageInput` | `defaultConsentPage` | Answers the markup of the consent page. |
+| `oauth.accessTtlMinutes` | number | `jwtMint.ttlMinutes` | An integer from 1 to 60. |
+| `oauth.refreshTtlDays` | number | 30 | An integer from 1 to 365. |
+| `oauth.codeTtlMinutes` | number | 5 | An integer from 1 to 10. |
+| `oauth.registration.dynamic` | boolean | true | Serves `POST /oauth/register` of RFC 7591. |
+| `oauth.registration.cimd` | boolean | true | Accepts a client id that is the https URL of its metadata document. |
+
+## Hooks
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `hooks.organization` | `OrganizationHooks` | none | Needs `organizations`. A name that is no hook point is refused. |
+| `hooks.session` | `SessionHooks` | none | `beforeCreate`, `afterCreate`, and `afterEnd`. |
+
+## Next
+
+- [Routes](/docs/reference/routes/)
+- [The API reference](/docs/reference/api/)
+- [Secrets](/docs/operations/secrets/)

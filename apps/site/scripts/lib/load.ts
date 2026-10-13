@@ -31,6 +31,15 @@ export function distPage(urlPath: string): string {
   return readFileSync(`${DIST}${urlPath.slice(1)}index.html`, "utf8");
 }
 
+/**
+ * The built page of a URL path, or "" when it is missing. A coverage check
+ * then reports each code, route, key, or export as missing, and does not throw.
+ */
+export function distPageOrEmpty(urlPath: string): string {
+  const file = `${DIST}${urlPath.slice(1)}index.html`;
+  return existsSync(file) ? readFileSync(file, "utf8") : "";
+}
+
 /** The sample files that a page must include: every .ts under samples/ except tests and support. */
 export function sampleFiles(): string[] {
   // Until the first sample lands (Task 6), samples/ does not exist. The fence
