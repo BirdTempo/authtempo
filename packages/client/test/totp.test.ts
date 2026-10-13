@@ -18,7 +18,7 @@ async function enrolled() {
     token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
   });
   if (!verified.ok) throw new Error(verified.code);
-  const setup = await browser.totp.setup();
+  const setup = await browser.totp.setup({ password: PW });
   if (!setup.ok) throw new Error(setup.code);
   const secret = base32Decode(setup.value.secret);
   const enabled = await browser.totp.enable({ code: await totpCode(secret, server.clock.now()) });
@@ -40,6 +40,33 @@ describe("totp (plan 9f)", () => {
       trustedDevices: 0,
     });
     expect(await browser.totp.status()).toEqual({ ok: true, value: enabled });
+  });
+
+  it("sends the password at the setup: a wrong one answers invalid_credentials and writes no setup (review I-1)", async () => {
+    const server = makeServer({ password: { hash: FAST } });
+    const { fetch } = inProcessFetch(server.auth);
+    const browser = createClient({ baseURL: BASE_URL, fetch });
+    await browser.password.signUp({ email: EMAIL, password: PW });
+    await browser.password.verifyEmail({ token: tokenFromMail(server.mail.at(-1)?.text ?? "") });
+    expect(await browser.totp.setup({ password: "not the password" })).toEqual({
+      ok: false,
+      code: "invalid_credentials",
+      status: 401,
+    });
+    expect(await server.storage.findMany("totp", [])).toEqual([]);
+    expect((await browser.totp.setup({ password: PW })).ok).toBe(true);
+  });
+
+  it("verifies with a backup code, and signIn sends next to the challenge (parked Minor 6.1)", async () => {
+    const { fetch, setup } = await enrolled();
+    const native = createClient({ baseURL: BASE_URL, fetch, credentials: "omit" });
+    const first = await native.password.signIn({ email: EMAIL, password: PW, next: "/inbox" });
+    if (!first.ok || !("twoFactor" in first.value)) throw new Error("no challenge");
+    const v = await native.totp.verify({
+      challenge: first.value.twoFactor.challenge,
+      backupCode: setup.backupCodes[0] ?? "",
+    });
+    expect(v).toMatchObject({ ok: true, value: { next: "/inbox", backupCodesLeft: 9 } });
   });
 
   it("signs in with a challenge, and a native client verifies it with a code and keeps the token", async () => {

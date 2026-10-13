@@ -212,8 +212,14 @@ export interface Client {
    * when the server runs without `password` or with `totp: false`.
    */
   totp: {
-    /** The secret, the key URI, and the backup codes, each answered once. */
-    setup(): Promise<ClientResult<{ secret: string; uri: string; backupCodes: string[] }>>;
+    /**
+     * The secret, the key URI, and the backup codes, each answered once. Takes
+     * the user's password: a wrong one answers `invalid_credentials`, and no
+     * setup is written.
+     */
+    setup(input: {
+      password: string;
+    }): Promise<ClientResult<{ secret: string; uri: string; backupCodes: string[] }>>;
     enable(input: { code: string }): Promise<ClientResult<TotpStatusJSON>>;
     verify(input: {
       challenge: string;
@@ -424,8 +430,10 @@ export function createClient(options: ClientOptions): Client {
         ),
     },
     totp: {
-      setup: () =>
-        call<{ secret: string; uri: string; backupCodes: string[] }>("POST", "/totp/setup", {}),
+      setup: (input) =>
+        call<{ secret: string; uri: string; backupCodes: string[] }>("POST", "/totp/setup", {
+          password: input.password,
+        }),
       enable: (input) => call<TotpStatusJSON>("POST", "/totp/enable", input),
       verify: ({ code, backupCode, trustDevice, ...rest }) =>
         call<TwoFactorSessionJSON>("POST", "/totp/verify", {
