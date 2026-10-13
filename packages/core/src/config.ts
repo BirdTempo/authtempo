@@ -1009,9 +1009,9 @@ function resolveOAuth(
       scopes.set(name, text);
     }
   }
-  const registration: Record<string, unknown> = input.registration ?? {};
-  if (!isPlainObject(registration as unknown))
-    throw new ConfigError("oauth.registration must be an object");
+  // Not `??`: `null` must reach the check and be refused, as `emailOtp: null` is.
+  const registration: unknown = input.registration === undefined ? {} : input.registration;
+  if (!isPlainObject(registration)) throw new ConfigError("oauth.registration must be an object");
   for (const [key, value] of Object.entries(registration)) {
     if (value === undefined) continue;
     if (key !== "dynamic" && key !== "cimd")

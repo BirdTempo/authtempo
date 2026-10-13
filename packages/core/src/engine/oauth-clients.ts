@@ -42,7 +42,15 @@ const BLOCKED_SCHEMES: ReadonlySet<string> = new Set([
   "ftp:",
 ]);
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:$/;
-const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
+/**
+ * The loopback hosts of an http redirect URI. Not `[::1]`: a CSP host-source
+ * has no IPv6 literal form, so the consent page cannot name it in
+ * `form-action`, and the browser would stop at the allow. A client on the
+ * loopback uses 127.0.0.1.
+ */
+const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
+/** A parsed IPv4 host. The URL parser writes every IPv4 form (`127.1`, `0x7f.0.0.1`) as four decimal parts. */
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 export interface CimdEntry {
   name: string | null;
@@ -77,6 +85,9 @@ export function validRedirectUri(value: unknown): value is string {
   }
   if (u.username !== "" || u.password !== "") return false;
   if (u.protocol === "https:") return true;
+  // `hostname` is the parsed form, so `127.1` and `0x7f.0.0.1` pass as
+  // 127.0.0.1. The list keeps the raw value, and the authorize step matches
+  // the raw value exactly, so an odd form is still a loopback URI: harmless.
   if (u.protocol === "http:") return LOOPBACK.has(u.hostname);
   return SCHEME_RE.test(u.protocol) && !BLOCKED_SCHEMES.has(u.protocol);
 }
@@ -141,9 +152,12 @@ export async function registerClient(
 /**
  * A client id that may name a metadata document (the CIMD draft section 3,
  * read 2026-10-13): https, a path other than `/`, no dot segment, no query,
- * no fragment, and no credentials.
+ * no fragment, and no credentials. Core also refuses the hosts that only an
+ * internal network reaches. `oauth.fetch` should refuse them too, but no
+ * supplier's fetch may be the only guard: on Node or Bun a plain `fetch`
+ * reaches internal hosts.
  */
-export function validCimdUrl(value: string): boolean {
+export function validCimdUrl(value: string, baseURL: string): boolean {
   if (value.length > URI_MAX || value.includes("#") || hasControlChar(value)) return false;
   if (/\/\.\.?(\/|$)/.test(value)) return false;
   let u: URL;
@@ -152,13 +166,23 @@ export function validCimdUrl(value: string): boolean {
   } catch {
     return false;
   }
-  return (
-    u.protocol === "https:" &&
-    u.username === "" &&
-    u.password === "" &&
-    u.search === "" &&
-    u.pathname !== "/"
-  );
+  // The canonical form only. The parser folds `%2e%2e`, `.%2E`, a backslash,
+  // a capital in the host, and a default port, so without this one document
+  // answers for many client ids.
+  if (u.href !== value) return false;
+  if (u.protocol !== "https:" || u.username !== "" || u.password !== "") return false;
+  if (u.search !== "" || u.pathname === "/") return false;
+  // A trailing dot names the same host: `localhost.` is `localhost`.
+  const host = u.hostname.replace(/\.$/, "");
+  // An IP literal (IPv4 or IPv6, 127.0.0.1 and [::1] too): a public client has a DNS name, and an address may be internal.
+  if (host.startsWith("[") || IPV4_RE.test(host)) return false;
+  // `localhost` and `*.localhost` resolve to the loopback (RFC 6761 section 6.3).
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  // A single label (no dot) is an intranet name.
+  if (!host.includes(".")) return false;
+  // This instance's own host: a document there would make core fetch itself.
+  if (host === new URL(baseURL).hostname) return false;
+  return true;
 }
 
 /** The body as text, or null past `max` bytes, on a read error, or when `signal` aborts. */
@@ -293,9 +317,12 @@ async function writeCimdRow(
     return await config.storage.create("oauthClient", { id: url, ...data, createdAt: now });
   } catch (e) {
     if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
-    // A parallel request wrote the row first: this document's values win.
+    // A parallel request wrote the row first: this document's values win, and
+    // the row comes back from storage, with the winner's `createdAt`.
     await config.storage.update("oauthClient", where, data);
-    return { id: url, ...data, createdAt: now };
+    const winner = await config.storage.findOne("oauthClient", where);
+    if (!winner) throw e;
+    return winner;
   }
 }
 
@@ -352,6 +379,6 @@ export async function findClient(
     }
     return row;
   }
-  if (!oauth.cimd || !validCimdUrl(clientId)) return null;
+  if (!oauth.cimd || !validCimdUrl(clientId, config.baseURL)) return null;
   return cimdClient(config, oauth, clientId, now);
 }

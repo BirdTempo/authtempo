@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { findClient, registerClient, validRedirectUri } from "../src/engine/oauth-clients.js";
+import {
+  findClient,
+  registerClient,
+  validCimdUrl,
+  validRedirectUri,
+} from "../src/engine/oauth-clients.js";
 import { BASE_URL, makeAuth, post } from "./helpers.js";
 import { oauthHandle, REDIRECT, RESOURCE } from "./oauth-helpers.js";
 
@@ -77,13 +82,14 @@ describe("client registration, RFC 7591 (plan 9g)", () => {
       "https://client.example.com/cb?x=1",
       "http://127.0.0.1:5173/cb",
       "http://localhost:1/cb",
-      "http://[::1]:9/cb",
       "com.example.app:/callback",
       "myapp://callback",
     ])
       expect({ uri, ok: validRedirectUri(uri) }).toEqual({ uri, ok: true });
     for (const uri of [
       "http://client.example.com/cb",
+      // The consent page policy cannot name an IPv6 literal in form-action.
+      "http://[::1]:9/cb",
       "https://client.example.com/cb#frag",
       "javascript:alert(1)",
       "data:text/html,x",
@@ -138,6 +144,26 @@ describe("client registration, RFC 7591 (plan 9g)", () => {
       error: "rate_limited",
       status: 429,
     });
+  });
+
+  it("moves a registered client's lastSeenAt at most once a day", async () => {
+    const auth = dynAuth();
+    const r = await registerClient(
+      auth.config,
+      meta({ redirect_uris: ["https://a.example.com/cb"] }),
+    );
+    if (!r.ok) throw new Error(r.error);
+    const id = r.value.client_id;
+    const seen = async () =>
+      (await auth.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: id }]))
+        ?.lastSeenAt;
+    const first = auth.clock.now();
+    auth.clock.advance(86_400_000 - 1);
+    expect((await findClient(auth.config, id))?.lastSeenAt).toEqual(first);
+    expect(await seen()).toEqual(first);
+    auth.clock.advance(1);
+    expect((await findClient(auth.config, id))?.lastSeenAt).toEqual(auth.clock.now());
+    expect(await seen()).toEqual(auth.clock.now());
   });
 
   it("POST /oauth/register answers 201 with the client, 400 with the RFC 7591 error, and 404 while registration is off", async () => {
@@ -248,10 +274,79 @@ describe("client ID metadata documents (plan 9g)", () => {
       "https://client.example.com/meta.json#a",
       "https://u:p@client.example.com/meta.json",
       "https://client.example.com/a/../meta.json",
+      // Not canonical: each parses to /b/meta.json.
+      "https://client.example.com/a/%2e%2e/b/meta.json",
+      "https://client.example.com/a/.%2E/b/meta.json",
+      "https://client.example.com/a\\..\\b/meta.json",
+      // Hosts that only an internal network reaches, and this instance's own host.
+      "https://127.0.0.1/meta.json",
+      "https://10.0.0.1/meta.json",
+      "https://[::1]/meta.json",
+      "https://localhost/meta.json",
+      "https://localhost./meta.json",
+      "https://app.localhost/meta.json",
+      "https://intranet/meta.json",
+      "https://api.example.com/meta.json",
       "not a url",
     ])
       expect({ id, client: await findClient(auth.config, id) }).toEqual({ id, client: null });
     expect(f.calls).toEqual([]);
+  });
+
+  it("takes a public host in canonical form, with a port too", () => {
+    for (const id of [DOC_URL, "https://client.example.com:8443/meta.json"])
+      expect({ id, ok: validCimdUrl(id, BASE_URL) }).toEqual({ id, ok: true });
+  });
+
+  it("refuses each host rule on its own", () => {
+    for (const id of [
+      "https://127.0.0.1/meta.json",
+      "https://[::1]/meta.json",
+      "https://localhost/meta.json",
+      "https://app.localhost/meta.json",
+      "https://intranet/meta.json",
+      "https://api.example.com/meta.json",
+      "https://Client.example.com/meta.json",
+    ])
+      expect({ id, ok: validCimdUrl(id, BASE_URL) }).toEqual({ id, ok: false });
+  });
+
+  it("writes one row when two requests read the same new document at once", async () => {
+    let open: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let calls = 0;
+    const fetch = (async () => {
+      calls++;
+      await gate;
+      return jsonDoc(doc());
+    }) as typeof globalThis.fetch;
+    const auth = cimdAuth(fetch);
+    const both = Promise.all([findClient(auth.config, DOC_URL), findClient(auth.config, DOC_URL)]);
+    open();
+    const [a, b] = await both;
+    expect(calls).toBe(2);
+    expect(a).toMatchObject({ id: DOC_URL, kind: "cimd" });
+    expect(b).toEqual(a);
+    expect(await auth.storage.findMany("oauthClient", [])).toHaveLength(1);
+  });
+
+  it("keeps at most 500 documents, and the oldest goes first", async () => {
+    const calls: string[] = [];
+    const fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return jsonDoc(doc({ client_id: String(input) }));
+    }) as typeof globalThis.fetch;
+    const auth = cimdAuth(fetch);
+    const url = (i: number) => `https://client.example.com/m/${i}.json`;
+    for (let i = 0; i <= 500; i++) expect(await findClient(auth.config, url(i))).not.toBeNull();
+    expect(auth.config.oauth?.cimdCache.size).toBe(500);
+    expect(auth.config.oauth?.cimdCache.has(url(0))).toBe(false);
+    await findClient(auth.config, url(1));
+    expect(calls).toHaveLength(501);
+    await findClient(auth.config, url(0));
+    expect(calls).toHaveLength(502);
   });
 
   it("gives up after 10 seconds, on a fetch that never answers and on a body that stops", async () => {

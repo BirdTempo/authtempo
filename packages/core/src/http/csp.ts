@@ -87,6 +87,10 @@ export function pageHeaders(_config: ResolvedConfig, policy: string): Record<str
  * to the redirect that answers the allow or the deny, so without it the
  * browser stops at this origin. An IPv6 literal has no source form and adds
  * nothing: a client on the loopback uses 127.0.0.1.
+ *
+ * Precondition: `redirectUri` already matched the client's registered list
+ * exactly. Never pass a raw request parameter: the policy would then let
+ * the form go to any origin that the request names.
  */
 export function consentPagePolicy(config: ResolvedConfig, redirectUri: string): string {
   const parts = formActionSources(config);

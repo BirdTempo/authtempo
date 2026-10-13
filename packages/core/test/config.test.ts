@@ -734,6 +734,7 @@ describe("oauth (plan 9g)", () => {
         { resources: [R], registration: { dynamic: false, cimd: false } },
         "oauth.registration must leave dynamic or cimd on, or no client can register",
       ],
+      [{ resources: [R], fetch, registration: null }, "oauth.registration must be an object"],
       [
         { resources: [R], fetch, registration: { cimd: "yes" } },
         "oauth.registration.cimd must be a boolean",
