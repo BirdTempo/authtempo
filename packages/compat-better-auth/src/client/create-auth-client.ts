@@ -469,6 +469,9 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
             // A user with the second factor on (plan 9f): keep the challenge for verifyTotp.
             if (!("token" in v)) {
               challenge = v.twoFactor.challenge;
+              // The bearer of an earlier sign-in is not this sign-in's. Kept, it
+              // sends a later verify to the enable path of that user (review M-6).
+              dropToken();
               return { twoFactorRedirect: true, twoFactorMethods: ["totp"] };
             }
             keepToken(v.token);

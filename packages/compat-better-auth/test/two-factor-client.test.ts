@@ -49,7 +49,12 @@ async function setup(tf: TwoFactorClientOptions = { onTwoFactorRedirect: vi.fn()
       }),
     },
   });
-  const fetchImpl: typeof fetch = async (input, init) => auth.handler(new Request(input, init));
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const req = new Request(input, init);
+    calls.push(new URL(req.url).pathname);
+    return auth.handler(req);
+  };
   const storage = memoryStorage();
   const c = createAuthClient({
     baseURL: BASE,
@@ -74,7 +79,7 @@ async function setup(tf: TwoFactorClientOptions = { onTwoFactorRedirect: vi.fn()
   await register(EMAIL, "Pat");
   const signedIn = await c.signIn.email({ email: EMAIL, password: PASSWORD });
   if (signedIn.error) throw new Error(signedIn.error.code);
-  return { auth, c, storage, register, onTwoFactorRedirect: tf.onTwoFactorRedirect };
+  return { auth, c, storage, register, calls, onTwoFactorRedirect: tf.onTwoFactorRedirect };
 }
 
 /** The factor on through the client: enable with the password, then verifyTotp with the session. */
@@ -122,11 +127,44 @@ describe("twoFactorClient (plan 9f)", () => {
     expect((await c.twoFactor.verifyTotp({ code: wrong })).error).toMatchObject({
       code: "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE",
     });
-    // The capped challenge is gone: the next call does not send it. It takes the session path of the
-    // bearer that the enrolment stored, where the factor is already on.
+    // The capped challenge is gone: the next call does not send it. The gated sign-in dropped the
+    // enrolment's bearer (review M-6), so the shim path has no session and no cookie.
     expect((await c.twoFactor.verifyTotp({ code: right })).error).toMatchObject({
-      code: "TOTP_ALREADY_ENABLED",
+      code: "INVALID_TWO_FACTOR_COOKIE",
+      status: 401,
     });
+  });
+
+  it("drops the stored bearer when the sign-in answers a challenge (review M-6)", async () => {
+    const { c, storage } = await enrolled();
+    expect(storage.map.get("reception_tempo_session")).toMatch(/^ts_/);
+    const r = await c.signIn.email({ email: EMAIL, password: PASSWORD });
+    expect(r.data).toMatchObject({ twoFactorRedirect: true });
+    expect(storage.map.get("reception_tempo_session")).toBe("");
+    expect(c.getCookie()).toBe("");
+  });
+
+  it("drops a dead challenge at INVALID_TWO_FACTOR_COOKIE: the next verify goes to the shim, not to core's verify", async () => {
+    const { c, secret, calls } = await enrolled();
+    await c.signIn.email({ email: EMAIL, password: PASSWORD });
+    vi.useFakeTimers({ now: Date.now() + 300_000, toFake: ["Date"] });
+    const code = await totpCode(secret, new Date());
+    calls.length = 0;
+    expect((await c.twoFactor.verifyTotp({ code })).error).toMatchObject({
+      code: "INVALID_TWO_FACTOR_COOKIE",
+    });
+    expect(calls).toEqual(["/api/auth/totp/verify"]);
+    calls.length = 0;
+    await c.twoFactor.verifyTotp({ code });
+    expect(calls).toEqual(["/api/auth/two-factor/verify-totp"]);
+  });
+
+  it("sends verifyBackupCode to the shim with no kept challenge: with a session the shim answers NOT_SUPPORTED", async () => {
+    const { c, backupCodes, calls } = await enrolled();
+    calls.length = 0;
+    const r = await c.twoFactor.verifyBackupCode({ code: backupCodes[0] ?? "" });
+    expect(r.error).toMatchObject({ code: "NOT_SUPPORTED", status: 501 });
+    expect(calls).toEqual(["/api/auth/two-factor/verify-backup-code"]);
   });
 
   it("signs in with a backup code once, and keeps the trusted device for the next sign-in", async () => {
