@@ -12,6 +12,7 @@ import {
   type CompatPlugin,
 } from "../types.js";
 import { appSchemes, pluginOf } from "./check-options.js";
+import { compatHooks } from "./hooks.js";
 import { compatMail, INVITATION_LINK_PREFIX } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
 
@@ -234,6 +235,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
         }
       : {}),
     ...pluginConfig(options),
+    hooks: compatHooks(options),
   };
   return {
     config,

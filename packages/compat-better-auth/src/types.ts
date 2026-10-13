@@ -62,7 +62,7 @@ export interface Invitation {
   organizationId: string;
   email: string;
   role: string;
-  status: "pending" | "canceled";
+  status: "pending" | "accepted" | "rejected" | "canceled";
   inviterId: string;
   expiresAt: Date;
   createdAt: Date;
@@ -99,6 +99,116 @@ export interface InvitationEmailData {
 
 export const COMPAT_PLUGIN = "tempo-auth-compat-plugin";
 
+/** A Better Auth hook may answer a value or a promise. */
+type HookResult<T> = T | Promise<T>;
+
+/** A before hook's answer: nothing, or Better Auth's `{ data }`. A hook with no return statement returns void. */
+// biome-ignore lint/suspicious/noConfusingVoidType: with undefined, a hook with no return statement does not type-check.
+type BeforeHookAnswer = void | { data: object };
+
+/**
+ * `organization({ organizationHooks })` (plan 9d): Better Auth 1.7.2's names
+ * and argument shapes (dist/plugins/organization/types.d.mts:296-690, read
+ * 2026-10-13), with the fields tempo-auth fills. A before hook may return
+ * `{ data }` only with the values it was given: a core hook cannot change a
+ * row. The team hooks, `beforeCancelInvitation`, and `beforeRejectInvitation`
+ * are not here, so a literal that names one fails the compile; the start
+ * check refuses them by name.
+ */
+export interface OrganizationHookOptions {
+  beforeCreateOrganization?: (data: {
+    organization: {
+      id: string;
+      name: string;
+      slug: string;
+      logo: null;
+      metadata: Record<string, unknown> | null;
+    };
+    user: User;
+  }) => HookResult<BeforeHookAnswer>;
+  afterCreateOrganization?: (data: {
+    organization: Organization;
+    member: Member;
+    user: User;
+  }) => HookResult<void>;
+  beforeUpdateOrganization?: (data: {
+    organization: { name?: string; slug?: string; metadata?: Record<string, unknown> | null };
+    user: User;
+    member: Member;
+  }) => HookResult<BeforeHookAnswer>;
+  afterUpdateOrganization?: (data: {
+    organization: Organization;
+    user: User;
+    member: Member;
+  }) => HookResult<void>;
+  beforeDeleteOrganization?: (data: { organization: Organization; user: User }) => HookResult<void>;
+  afterDeleteOrganization?: (data: { organization: Organization; user: User }) => HookResult<void>;
+  beforeAddMember?: (data: {
+    member: { userId: string; organizationId: string; role: string };
+    user: User;
+    organization: Organization;
+  }) => HookResult<BeforeHookAnswer>;
+  afterAddMember?: (data: {
+    member: Member;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeRemoveMember?: (data: {
+    member: Member;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  afterRemoveMember?: (data: {
+    member: Member;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeUpdateMemberRole?: (data: {
+    member: Member;
+    newRole: string;
+    user: User;
+    organization: Organization;
+  }) => HookResult<BeforeHookAnswer>;
+  afterUpdateMemberRole?: (data: {
+    member: Member;
+    previousRole: string;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeCreateInvitation?: (data: {
+    invitation: { email: string; role: string; organizationId: string; inviterId: string };
+    inviter: User;
+    organization: Organization;
+  }) => HookResult<BeforeHookAnswer>;
+  afterCreateInvitation?: (data: {
+    invitation: Invitation;
+    inviter: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeAcceptInvitation?: (data: {
+    invitation: Invitation;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  afterAcceptInvitation?: (data: {
+    invitation: Invitation;
+    member: Member;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  /** `user` is null when the decline request carried no session: core's decline needs the token only. */
+  afterRejectInvitation?: (data: {
+    invitation: Invitation;
+    user: User | null;
+    organization: Organization;
+  }) => HookResult<void>;
+  afterCancelInvitation?: (data: {
+    invitation: Invitation;
+    cancelledBy: User;
+    organization: Organization;
+  }) => HookResult<void>;
+}
+
 export interface OrganizationOptions {
   allowUserToCreateOrganization?: boolean | ((user: User) => boolean | Promise<boolean>);
   organizationLimit?: number | ((user: User) => boolean | Promise<boolean>);
@@ -108,6 +218,7 @@ export interface OrganizationOptions {
   requireEmailVerificationOnInvitation?: boolean;
   cancelPendingInvitationsOnReInvite?: boolean;
   sendInvitationEmail?: (data: InvitationEmailData, request?: Request) => Promise<void> | void;
+  organizationHooks?: OrganizationHookOptions;
 }
 
 export interface PasskeyOptions {

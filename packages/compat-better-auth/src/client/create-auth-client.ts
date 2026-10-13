@@ -254,10 +254,12 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
               .catch(() => null)) as { code?: unknown } | null
           )?.code
         : undefined;
-    const error = clientError(
-      typeof named === "string" ? named : (code?.(r) ?? BETTER_AUTH_CODES[r.code]),
-      r.status,
-    );
+    const errorCode = typeof named === "string" ? named : (code?.(r) ?? BETTER_AUTH_CODES[r.code]);
+    // A hook refusal carries the app's own text (plan 9d). Every other code keeps the text of its name.
+    const error =
+      r.message !== undefined
+        ? clientError(errorCode, r.status, r.message)
+        : clientError(errorCode, r.status);
     if (fo.onError)
       await fo.onError({
         error,

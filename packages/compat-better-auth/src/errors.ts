@@ -85,6 +85,16 @@ const STATUS_NAMES: Record<number, string> = {
   501: "NOT_IMPLEMENTED",
 };
 
+const STATUS_CODES: Record<string, number> = Object.fromEntries(
+  Object.entries(STATUS_NAMES).map(([code, name]) => [name, Number(code)]),
+);
+
+/** The body of Better Auth's form (better-call 1.4.0, dist/error.mjs:102, read 2026-10-13). */
+export interface APIErrorBody {
+  message?: string;
+  code?: string;
+}
+
 const REASONS: Record<number, string> = {
   0: "",
   400: "Bad Request",
@@ -127,17 +137,28 @@ export function passwordPolicyCode(
   return "INVALID_PASSWORD";
 }
 
-/** Better Auth's server error (better-call's APIError): `status` is the name, `statusCode` the number, `body.code` the code. */
+/**
+ * Better Auth's server error (better-call's APIError): `status` is the name,
+ * `statusCode` the number, `body.code` the code. Two forms: this package's
+ * own, `new APIError(403, "FORBIDDEN", message?)`, and Better Auth's, which
+ * an app's hook throws, `new APIError("FORBIDDEN", { message })` (plan 9d).
+ * A status name this table does not know reads as 500.
+ */
 export class APIError extends Error {
   readonly status: string;
   readonly statusCode: number;
   readonly body: { code: string; message: string };
-  constructor(statusCode: number, code: string, message: string = messageOf(code)) {
-    super(message);
+  constructor(status: number | string, codeOrBody?: string | APIErrorBody, message?: string) {
+    const statusCode = typeof status === "number" ? status : (STATUS_CODES[status] ?? 500);
+    const statusName = STATUS_NAMES[statusCode] ?? "INTERNAL_SERVER_ERROR";
+    const code = typeof codeOrBody === "string" ? codeOrBody : (codeOrBody?.code ?? statusName);
+    const text =
+      (typeof codeOrBody === "string" ? message : codeOrBody?.message) ?? messageOf(code);
+    super(text);
     this.name = "APIError";
     this.statusCode = statusCode;
-    this.status = STATUS_NAMES[statusCode] ?? "INTERNAL_SERVER_ERROR";
-    this.body = { code, message };
+    this.status = statusName;
+    this.body = { code, message: text };
   }
 }
 

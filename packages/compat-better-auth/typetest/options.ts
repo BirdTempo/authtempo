@@ -88,7 +88,6 @@ export const consumeri = {
       allowUserToCreateOrganization: true,
       organizationLimit: 5,
       creatorRole: "owner",
-      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (organizationHooks)
       organizationHooks: {
         afterCreateOrganization: async (_: { organization: { id: string } }) => {},
       },
@@ -207,8 +206,9 @@ export const consumerb = {
 // One guard per option type that lost its index signature in plan 9b. Each
 // line below the directive holds a key the type does not name. If an index
 // signature comes back on that type, the key compiles, the directive is
-// unused, and the typecheck fails (TS2578). The four organization() literals
-// above guard OrganizationOptions.
+// unused, and the typecheck fails (TS2578). The organization() literals of
+// consumerc, consumerd, and consumerb above guard OrganizationOptions:
+// consumer-i's has no refused key since plan 9d.
 export const strictOptionGuards = [
   passkey({
     rpID: "example.com",

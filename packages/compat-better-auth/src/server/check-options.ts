@@ -1,6 +1,11 @@
 import { isAppScheme } from "@tempo-auth/core";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
-import { type BetterAuthOptions, COMPAT_PLUGIN, type CompatPlugin } from "../types.js";
+import {
+  type BetterAuthOptions,
+  COMPAT_PLUGIN,
+  type CompatPlugin,
+  type OrganizationHookOptions,
+} from "../types.js";
 
 export interface OptionCheck {
   /** `<path>: <reason>`, sorted. Any entry stops the construction. */
@@ -73,6 +78,54 @@ const seconds =
 const DAY = 86_400;
 const MINUTES = seconds(60, 60, 86_400, "core takes whole minutes from 1 to 1440");
 
+/**
+ * Better Auth 1.7.2's organization hook names that core maps (plan 9d;
+ * dist/plugins/organization/types.d.mts:296-690, read 2026-10-13). A
+ * Record, so a name added to OrganizationHookOptions and not listed here
+ * fails the compile.
+ */
+const MAPPED_ORGANIZATION_HOOKS: Record<keyof OrganizationHookOptions, Rule> = {
+  beforeCreateOrganization: fn,
+  afterCreateOrganization: fn,
+  beforeUpdateOrganization: fn,
+  afterUpdateOrganization: fn,
+  beforeDeleteOrganization: fn,
+  afterDeleteOrganization: fn,
+  beforeAddMember: fn,
+  afterAddMember: fn,
+  beforeRemoveMember: fn,
+  afterRemoveMember: fn,
+  beforeUpdateMemberRole: fn,
+  afterUpdateMemberRole: fn,
+  beforeCreateInvitation: fn,
+  afterCreateInvitation: fn,
+  beforeAcceptInvitation: fn,
+  afterAcceptInvitation: fn,
+  afterRejectInvitation: fn,
+  afterCancelInvitation: fn,
+};
+
+/** Better Auth 1.7.2's team hooks, refused by name: core has no teams. */
+const TEAM_HOOKS = [
+  "beforeCreateTeam",
+  "afterCreateTeam",
+  "beforeUpdateTeam",
+  "afterUpdateTeam",
+  "beforeDeleteTeam",
+  "afterDeleteTeam",
+  "beforeAddTeamMember",
+  "afterAddTeamMember",
+  "beforeRemoveTeamMember",
+  "afterRemoveTeamMember",
+];
+
+const organizationHooks = object({
+  ...MAPPED_ORGANIZATION_HOOKS,
+  ...Object.fromEntries(TEAM_HOOKS.map((name) => [name, refused("core has no teams")])),
+  beforeCancelInvitation: refused("core runs no hook before a revoke; use afterCancelInvitation"),
+  beforeRejectInvitation: refused("core runs no hook before a decline; use afterRejectInvitation"),
+});
+
 const PLUGIN_RULES: Record<string, Rule> = {
   organization: object(
     {
@@ -93,7 +146,7 @@ const PLUGIN_RULES: Record<string, Rule> = {
         "core replaces a pending invitation on a second invite",
       ),
       sendInvitationEmail: fn,
-      organizationHooks: refused(PLAN_9D),
+      organizationHooks,
     },
     "core's organizations have fixed ranks; custom roles, access control, teams, and this option are refused",
   ),

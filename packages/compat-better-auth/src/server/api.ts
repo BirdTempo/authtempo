@@ -1,6 +1,12 @@
 import type { ClientCode } from "@tempo-auth/client";
 import type { Auth, Result } from "@tempo-auth/core";
-import { APIError, apiError, compatApiError, passwordPolicyCode } from "../errors.js";
+import {
+  APIError,
+  apiError,
+  BETTER_AUTH_CODES,
+  compatApiError,
+  passwordPolicyCode,
+} from "../errors.js";
 import type { CompatServerApi } from "../types.js";
 import type { Mapped } from "./map-options.js";
 import { readToken, toInvitation, toNext, toOrganization, toSession, toUser } from "./shapes.js";
@@ -11,8 +17,11 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi {
   const requestOf = (headers?: Headers) =>
     new Request(`${origin}${basePath}/session`, { headers: headers ?? new Headers() });
   const unwrap = <T>(r: Result<T>): T => {
-    if (!r.ok) throw apiError(r.code as ClientCode, r.status);
-    return r.value;
+    if (r.ok) return r.value;
+    // A hook refusal carries the app's own text (plan 9d). Every other code keeps the text of its name.
+    if (r.message !== undefined)
+      throw new APIError(r.status, BETTER_AUTH_CODES[r.code as ClientCode], r.message);
+    throw apiError(r.code as ClientCode, r.status);
   };
   const caller = async (headers: Headers) => {
     const s = await auth.session(requestOf(headers));
