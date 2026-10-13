@@ -39,7 +39,9 @@ const STEP_MS = 30_000;
  */
 async function enrolled(email: string) {
   const cookie = await verifiedUser(email);
-  const setup = await SELF.fetch(`${BASE}/auth/totp/setup`, json({}, cookie));
+  // The setup takes the password (plan 9f final fix wave): a session alone sets up no factor.
+  const setup = await SELF.fetch(`${BASE}/auth/totp/setup`, json({ password: PW }, cookie));
+  expect(setup.status).toBe(200);
   const body = (await setup.json()) as { secret: string; backupCodes: string[] };
   const secret = base32Decode(body.secret);
   const enabledAt = new Date();
@@ -213,7 +215,10 @@ it("turns the factor off with a code on D1: the sign-in opens a session again, a
   const email = "totp-d@example.com";
   const f = await enrolled(email);
   // A trusted device for the disable to delete. The verify spends a backup code, so the
-  // TOTP code of the next step is still unspent for the disable.
+  // TOTP code of the next step is still unspent for the disable. The step arithmetic: the
+  // enable wrote `lastStep = enableStep`, and a backup-code verify does not move `lastStep`
+  // by design (a backup code is no TOTP step). So `f.next()`, the code of `enableStep + 1`,
+  // is still above `lastStep` and passes the disable's `lastStep lt step` update.
   const first = (await (await challengeFor(email)).json()) as { twoFactor: { challenge: string } };
   const verify = await SELF.fetch(
     `${BASE}/auth/totp/verify`,
