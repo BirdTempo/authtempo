@@ -19,7 +19,7 @@ type Rule = (value: unknown, path: string, out: OptionCheck) => void;
 /** Plan 9c maps google, apple, github, and linkedin. Core takes any other provider as a list entry. */
 const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.oauth2";
 const NO_REQUEST_HOOKS =
-  "core has no request hooks: wrap auth.handler and read auth.tempo.caller(request); see the README recipe";
+  "core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe";
 const noRowHook = (name: string) => `core has no row hook on ${name}; see the plan index`;
 const PLAN_9G = "plan 9g (JWT minting and an OIDC provider mode) is not written yet";
 const NO_SUCH_OPTION = "tempo-auth has no such option";

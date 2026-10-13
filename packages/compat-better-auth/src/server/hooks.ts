@@ -51,8 +51,10 @@ async function refusingApiErrors<T>(work: () => T | Promise<T>): Promise<T> {
  * `{ data }` to change the row; a core hook cannot change a row. So a `data`
  * field whose value differs from the value in `given` stops the write: one
  * line names the hook and the fields, and core answers `hook_failed`. A
- * `data` that changes nothing passes. `given` is null for a hook whose
- * return Better Auth ignores.
+ * `data` that changes nothing passes. The compare is `Object.is`, so an
+ * object or array field compares by reference: a new copy of `metadata`
+ * with the same content counts as a change and stops the write (parked
+ * Minor 15). `given` is null for a hook whose return Better Auth ignores.
  */
 async function callHook(
   name: keyof OrganizationHookOptions,

@@ -369,12 +369,25 @@ README, "Hooks").
 - A before hook runs inside core's transaction.
   `throw new APIError("FORBIDDEN", { message })` answers 403 `HOOK_REFUSED`
   with that message, on the server `api` and on the client. Any other throw
-  answers 500 `HOOK_FAILED`. No row is written.
+  answers 500 `HOOK_FAILED`. No row is written. The status of the
+  `APIError` is not kept: every thrown `APIError` answers 403
+  `HOOK_REFUSED`, also `new APIError("BAD_REQUEST")`.
+- On Postgres, do not query the client that core's adapter uses from a
+  before hook while its pool has one connection (`max: 1`, the setup the
+  adapter README gives for Workers). The transaction holds that one
+  connection and waits for the hook, and the hook's query waits for the
+  connection: the request hangs until the pool times out. A before hook
+  that writes the app's own row uses a second connection (a pool of two or
+  more, or a separate client), or the app writes from the after hook and
+  accepts that a failed write leaves the core row without it. On D1, a
+  write through the binding is a separate request and takes no lock.
 - An after hook runs after the commit. A throw is logged with the hook name
   and the row id, and the call answers success. In Better Auth the same
   throw answers an error for a row that exists.
 - A before hook cannot change the row. A `{ data }` answer that changes a
   field it was given stops the write with `HOOK_FAILED` and one log line.
+  The compare is by `Object.is`, so an object field compares by reference:
+  a new copy of `metadata` with the same content counts as a change.
   `beforeCreateOrganization` gets `organization.id`, the id core writes: an
   app that keeps its own row writes it with this id and returns nothing.
 - `beforeAcceptInvitation` runs on every accept. `beforeAddMember` and
@@ -383,6 +396,11 @@ README, "Hooks").
   run on a leave too; Better Auth 1.7.2 runs neither there.
   `afterAcceptInvitation` runs on every successful accept, whether the
   accept created the member row or found it, as in Better Auth 1.7.2.
+  An accept that raises an existing member's role runs
+  `beforeUpdateMemberRole` and `afterUpdateMemberRole` too, with the
+  inviter as the caller. A refusal keeps the role and the invitation
+  pending. Better Auth 1.7.2 refuses to invite an existing member, so
+  there the role hooks see every role change; core keeps that promise.
   `afterRejectInvitation` gets `user: null` when the decline request
   carried no session.
 - `databaseHooks.session.create.before` gets `{ userId, ipAddress,
@@ -399,14 +417,20 @@ README, "Hooks").
   function `organizationLimit` runs before `beforeCreateOrganization`, and a
   true answer refuses with "You have reached the maximum number of
   organizations". A function `membershipLimit` or `invitationLimit` is
-  refused. The limits answer 409, not Better Auth's 403.
+  refused. The number limits answer 409, not Better Auth's 403. The
+  function `organizationLimit` answers 403 `HOOK_REFUSED` with that text,
+  because it runs as a before hook.
 - Hooks have no timeout. A hook that never settles holds the request.
 
 ### Request hooks
 
 Core has no request hooks, so `hooks` is refused. Wrap the handler, and
-read the caller from `auth.tempo.caller(request)`. consumerd's two uses, as a
-wrapper:
+read the session from `auth.tempo.session(request)`. Do not use
+`auth.tempo.caller(request)` here: it also answers for an API token. The
+read can move the session expiry forward. Send the renewed cookie from
+`auth.tempo.sessionCookie(request, session)` on the response when it is not
+null, or the browser drops the cookie at its old Max-Age. consumerd's two
+uses, as a wrapper:
 
 ```ts
 const auth = betterAuth(options);
@@ -418,22 +442,39 @@ export async function handler(request: Request): Promise<Response> {
     pathname === "/api/auth/organizations/members" ||
     pathname === "/api/auth/organizations/invitations"
   ) {
-    const caller = await auth.tempo.caller(request);
-    if (!caller) return Response.json({ error: "unauthorized" }, { status: 401 });
-    const list = await auth.tempo.api.listOrganizations({ user: caller.user });
+    const session = await auth.tempo.session(request);
+    if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
+    const list = await auth.tempo.api.listOrganizations({ user: session.user });
     const id = searchParams.get("organizationId");
     const role = list.ok ? list.value.find((x) => x.organization.id === id)?.role : undefined;
     if (role !== "admin" && role !== "owner")
       return Response.json({ error: "forbidden_rank" }, { status: 403 });
+    return withCookie(await auth.handler(request), auth.tempo.sessionCookie(request, session));
   }
   const response = await auth.handler(request);
   if (pathname === "/api/auth/organizations/members/remove" && response.ok) {
-    const caller = await auth.tempo.caller(request);
-    if (caller) await recordMemberChange(caller.user.id);
+    const session = await auth.tempo.session(request);
+    if (session) {
+      await recordMemberChange(session.user.id);
+      return withCookie(response, auth.tempo.sessionCookie(request, session));
+    }
   }
   return response;
 }
+
+/** The response with the renewed session cookie appended, when there is one. */
+function withCookie(response: Response, cookie: string | null): Response {
+  if (cookie === null) return response;
+  const headers = new Headers(response.headers);
+  headers.append("set-cookie", cookie);
+  return new Response(response.body, { status: response.status, headers });
+}
 ```
+
+The guard on `/organizations/members` also answers 403 to
+`authClient.organization.getFullOrganization` for a plain member, because
+that call lists the members. To let a plain member open the organization,
+guard only `/organizations/invitations`.
 
 The audit row of a leave is simpler as `organizationHooks.afterRemoveMember`,
 which runs on a leave.
@@ -453,11 +494,11 @@ consumere (small edits):
 consumer-i (small edits):
 - Add `emailAndPassword.sendResetPassword` and `emailVerification.sendVerificationEmail`, and `sendInvitationEmail` in `organization()`.
 - Remove `rateLimit.window`, `max`, `customStorage`, and `customRules`. Core's owned limiter in `ta_limit` replaces them, with its own fixed limits per flow.
-- `organizationLimit: 5` and `organizationHooks.afterCreateOrganization` run unchanged since plan 9d. A throw in the hook no longer answers an error for an organization that exists: core logs it and answers success. To keep no organization without its tenant row, write the row in `beforeCreateOrganization` with `organization.id`.
+- `organizationLimit: 5` and `organizationHooks.afterCreateOrganization` run unchanged since plan 9d. A throw in the hook no longer answers an error for an organization that exists: core logs it and answers success. To keep no organization without its tenant row, write the row in `beforeCreateOrganization` with `organization.id`. On Postgres with `max: 1`, write it on a second connection (see "Hooks"), or the request hangs.
 - The invite dialog posts to `/api/auth/organization/invite-member` by hand. Call `authClient.organization.inviteMember` instead.
 - Add the `passkey` table. Migration 0001 adds and fills `account.issuer` on Postgres (consumer-i's tables are from before Better Auth 1.7).
 
-consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write; custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
 consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, the rate limit storage. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d.

@@ -287,6 +287,137 @@ describe("organizationHooks (plan 9d)", () => {
     ).toBe(true);
   });
 
+  it("stops beforeAddMember and beforeCreateInvitation on data that changes a field, and passes data that changes nothing (parked Minor 17)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    let change = true;
+    const { api, storage, lastToken } = instance({
+      beforeAddMember: async ({ member }) =>
+        change ? { data: { ...member, role: "admin" } } : { data: { ...member } },
+      beforeCreateInvitation: async ({ invitation }) =>
+        change ? { data: { ...invitation, role: "admin" } } : { data: { ...invitation } },
+    });
+    const owner = await seed(storage, "owner@example.com");
+    const bob = await seed(storage, "bob@example.com");
+    change = false;
+    const created = await api.createOrganization({ user: owner, slug: "acme", name: "Acme" });
+    if (!created.ok) throw new Error(created.code);
+    const organizationId = created.value.organization.id;
+    change = true;
+    expect(
+      await api.addMember({ user: owner, organizationId, userId: bob.id, role: "member" }),
+    ).toEqual({ ok: false, code: "hook_failed", status: 500 });
+    expect(
+      await api.inviteMember({
+        user: owner,
+        organizationId,
+        email: "carol@example.com",
+        role: "member",
+      }),
+    ).toEqual({ ok: false, code: "hook_failed", status: 500 });
+    expect(await storage.findMany("member", [])).toHaveLength(1);
+    expect(await storage.findMany("invitation", [])).toEqual([]);
+    expect(lastToken()).toBe("");
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      "tempo-auth compat: organizationHooks.beforeAddMember returned data that changes role; a core hook cannot change a row, so the write stops",
+      "tempo-auth: before hook failed",
+      "tempo-auth compat: organizationHooks.beforeCreateInvitation returned data that changes role; a core hook cannot change a row, so the write stops",
+      "tempo-auth: before hook failed",
+    ]);
+    change = false;
+    expect(
+      (await api.addMember({ user: owner, organizationId, userId: bob.id, role: "member" })).ok,
+    ).toBe(true);
+    expect(
+      (
+        await api.inviteMember({
+          user: owner,
+          organizationId,
+          email: "carol@example.com",
+          role: "member",
+        })
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("calls beforeRemoveMember and afterRemoveMember in Better Auth's shape on a leave (parked Minor 18)", async () => {
+    const calls: [string, Record<string, unknown>][] = [];
+    const record = (name: string) => async (data: Record<string, unknown>) => {
+      calls.push([name, data]);
+    };
+    const { api, storage } = instance({
+      beforeRemoveMember: record("beforeRemoveMember"),
+      afterRemoveMember: record("afterRemoveMember"),
+    });
+    const owner = await seed(storage, "owner@example.com");
+    const bob = await seed(storage, "bob@example.com");
+    const created = await api.createOrganization({ user: owner, slug: "acme", name: "Acme" });
+    if (!created.ok) throw new Error(created.code);
+    const organizationId = created.value.organization.id;
+    expect(
+      (await api.addMember({ user: owner, organizationId, userId: bob.id, role: "member" })).ok,
+    ).toBe(true);
+    expect((await api.removeMember({ user: bob, organizationId, userId: bob.id })).ok).toBe(true);
+    expect(calls.map(([name]) => name)).toEqual(["beforeRemoveMember", "afterRemoveMember"]);
+    for (const [name, data] of calls) {
+      expect(Object.keys(data).sort()).toEqual(SHAPES[name as keyof OrganizationHookOptions]);
+      expect(data).toMatchObject({
+        member: { userId: bob.id, organizationId, role: "member" },
+        user: { id: bob.id },
+        organization: { id: organizationId },
+      });
+    }
+  });
+
+  it("calls the role hooks when an accept raises an existing member's role, and a refusal keeps the invitation (final fix wave I-1)", async () => {
+    const calls: [string, Record<string, unknown>][] = [];
+    let refuse = true;
+    const { api, storage, lastToken } = instance({
+      beforeUpdateMemberRole: async (data) => {
+        calls.push(["beforeUpdateMemberRole", data]);
+        if (refuse) throw new APIError("FORBIDDEN", { message: "Admins need a paid plan." });
+      },
+      afterUpdateMemberRole: async (data) => {
+        calls.push(["afterUpdateMemberRole", data]);
+      },
+    });
+    const owner = await seed(storage, "owner@example.com");
+    const bob = await seed(storage, "bob@example.com");
+    const created = await api.createOrganization({ user: owner, slug: "acme", name: "Acme" });
+    if (!created.ok) throw new Error(created.code);
+    const organizationId = created.value.organization.id;
+    expect(
+      (await api.addMember({ user: owner, organizationId, userId: bob.id, role: "member" })).ok,
+    ).toBe(true);
+    expect(
+      (
+        await api.inviteMember({
+          user: owner,
+          organizationId,
+          email: "bob@example.com",
+          role: "admin",
+        })
+      ).ok,
+    ).toBe(true);
+    const token = lastToken();
+    expect(await api.acceptInvitation({ user: bob, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "hook_refused",
+      message: "Admins need a paid plan.",
+    });
+    expect(await storage.findMany("invitation", [])).toEqual([
+      expect.objectContaining({ acceptedAt: null }),
+    ]);
+    refuse = false;
+    calls.length = 0;
+    expect((await api.acceptInvitation({ user: bob, token, ip: null })).ok).toBe(true);
+    expect(calls.map(([name]) => name)).toEqual([
+      "beforeUpdateMemberRole",
+      "afterUpdateMemberRole",
+    ]);
+    expect(calls[0]?.[1]).toMatchObject({ newRole: "admin", member: { role: "member" } });
+    expect(calls[1]?.[1]).toMatchObject({ previousRole: "member", member: { role: "admin" } });
+  });
+
   it("refuses the team hooks, beforeCancelInvitation, beforeRejectInvitation, an unknown name, and a value that is not a function", () => {
     const f = async () => {};
     const c = checkOptions({
@@ -441,6 +572,10 @@ describe("databaseHooks.session.create (plan 9d)", () => {
     ]);
     organizationId = "01JNOSUCHORGANIZATION000";
     expect(await signIn("ada@example.com")).toMatchObject({ ok: false, code: "not_found" });
+    // The refused patch writes no session: the one row is still the first sign-in's (parked Minor 22).
+    expect(await storage.findMany("session", [])).toEqual([
+      expect.objectContaining({ activeOrganizationId: created.value.organization.id }),
+    ]);
   });
 
   it("answers hook_refused with the default text when the before hook returns false, and writes no session", async () => {
@@ -501,7 +636,7 @@ describe("databaseHooks.session.create (plan 9d)", () => {
       "databaseHooks.session.create.other: core has no row hook on session.create.other; see the plan index",
       "databaseHooks.session.update: core has no row hook on session.update; see the plan index",
       "databaseHooks.user: core has no row hook on user; see the plan index",
-      "hooks: core has no request hooks: wrap auth.handler and read auth.tempo.caller(request); see the README recipe",
+      "hooks: core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe",
     ]);
   });
 });
