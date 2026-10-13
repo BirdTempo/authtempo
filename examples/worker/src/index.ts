@@ -8,6 +8,9 @@ import { LEGACY_FORMATS } from "./legacy-formats.js";
 import { testProvider, testProviderFetch, testProviderRoute } from "./test-provider.js";
 
 let lastLink: string | null = null;
+// Keyed by address, so a test never reads the stale code of another address
+// (an isolate serves many tests in turn).
+const lastCodes = new Map<string, string>();
 let auth: Auth | null = null;
 
 // Built once per isolate. Bindings in `env` are fixed for the isolate's life,
@@ -24,9 +27,15 @@ function getAuth(env: Env): Auth {
     limiter: createD1Limiter(env.DB),
     mail: {
       async send(message) {
-        // The example has no mail transport. It records the last link for the test.
+        // The example has no mail transport. It records the last link for the
+        // test, or, per address, the code of a mail that carries no link (plan 9e).
         const m = /https?:\/\/\S+/.exec(message.text);
-        lastLink = m?.[0] ?? null;
+        if (m) lastLink = m[0];
+        else {
+          const code = /\b(\d{8}|\d{6})\b/.exec(message.text)?.[1];
+          if (code) lastCodes.set(message.to, code);
+          else lastCodes.delete(message.to);
+        }
       },
     },
     // Google sign-in is on only when both vars are set. The example has no
@@ -58,6 +67,10 @@ function getAuth(env: Env): Auth {
     })(),
     // Organizations, members, and mailed invitations. The routes need the 0002 migration.
     organizations: {},
+    // Email codes (plan 9e): /auth/otp/request and /auth/otp/verify, and with the password
+    // config below the reset by code. They are on by default; `{}` keeps the defaults (6 digits,
+    // 10 minutes, 5 guesses), and `emailOtp: false` turns them off.
+    emailOtp: {},
     // TEST_MODE only (plan 9d): the hooks the end-to-end test proves on D1. They write
     // app_tenant, a table of the test setup, so a deploy without the table sets none.
     ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
@@ -117,6 +130,12 @@ export default {
     if (url.pathname === "/__test/last-link") {
       if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
       return Response.json({ link: lastLink });
+    }
+    // TEST_MODE only (plan 9e): the last code mailed to `?email=`. A deploy must never
+    // serve it: anyone could read a live sign-in code. The gate answers 404 without TEST_MODE.
+    if (url.pathname === "/__test/last-code") {
+      if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+      return Response.json({ code: lastCodes.get(url.searchParams.get("email") ?? "") ?? null });
     }
     // The Better Auth compatibility instance (plan 9) on BA_DB. Core's routes above do not change.
     if (url.pathname.startsWith("/api/auth/")) return getCompat(env).handler(request);

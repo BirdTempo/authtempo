@@ -17,7 +17,7 @@ import {
 } from "../src/client/index.js";
 import { COMPAT_CODES } from "../src/errors.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
-import { bearer, magicLink, organization, passkey } from "../src/plugins.js";
+import { bearer, emailOTP, magicLink, organization, passkey } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { BetterAuthOptions, CompatDatabase, InvitationEmailData } from "../src/types.js";
 
@@ -856,5 +856,154 @@ describe("createAuthClient: the residual throws (plan 9b2)", () => {
     // Ceiling 3: a guarded store reads twice (first subscriber, sign-up refresh); one more is slack.
     expect(reads).toBeLessThanOrEqual(3);
     stop();
+  });
+});
+
+describe("email codes on the client (plan 9e)", () => {
+  function otpSetup(storage?: ReturnType<typeof memoryStorage>) {
+    const codes: { email: string; otp: string; type: string }[] = [];
+    const s = server({
+      minPasswordLength: 12,
+      plugins: [
+        emailOTP({
+          sendVerificationOTP: async (d) => {
+            codes.push(d);
+          },
+        }),
+      ],
+    });
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      ...(storage ? { plugins: [expoClient({ scheme: "reception", storage })] } : {}),
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    return { s, c, codes };
+  }
+
+  it("sends a sign-in code and signs in with signIn.emailOtp, in Better Auth's shapes", async () => {
+    const { s, c, codes } = otpSetup();
+    expect(
+      await c.emailOtp.sendVerificationOtp({ email: "otp@example.com", type: "sign-in" }),
+    ).toEqual({ data: { success: true }, error: null });
+    expect(codes).toEqual([
+      { email: "otp@example.com", otp: expect.stringMatching(/^\d{6}$/), type: "sign-in" },
+    ]);
+    const otp = codes[0]?.otp ?? "";
+    expect(
+      await c.signIn.emailOtp({
+        email: "otp@example.com",
+        otp: otp === "000000" ? "111111" : "000000",
+      }),
+    ).toEqual({
+      data: null,
+      error: {
+        code: "INVALID_OTP",
+        message: "Invalid otp",
+        status: 400,
+        statusText: "Bad Request",
+      },
+    });
+    const r = await c.signIn.emailOtp({ email: "otp@example.com", otp });
+    expect(r.error).toBeNull();
+    expect(r.data?.token).toMatch(/^ts_/);
+    expect(Object.keys(r.data?.user ?? {}).sort()).toEqual([...CLIENT_USER_KEYS].sort());
+    const me = await s.auth.api.getSession({
+      headers: new Headers({ authorization: `Bearer ${r.data?.token}` }),
+    });
+    expect(me?.user.email).toBe("otp@example.com");
+  });
+
+  it("answers NOT_SUPPORTED for the other types and for a name, and sends no request", async () => {
+    const { s, c } = otpSetup();
+    const before = s.seen.length;
+    for (const type of ["email-verification", "change-email"] as const)
+      expect(
+        (await c.emailOtp.sendVerificationOtp({ email: "otp@example.com", type })).error,
+      ).toMatchObject({ code: "NOT_SUPPORTED", status: 501 });
+    expect(
+      (await c.signIn.emailOtp({ email: "otp@example.com", otp: "123456", name: "Pat" })).error,
+    ).toMatchObject({ code: "NOT_SUPPORTED", status: 501 });
+    expect(s.seen.length).toBe(before);
+  });
+
+  it("requests a reset code by forgetPassword.emailOtp and emailOtp.requestPasswordReset, and resets with emailOtp.resetPassword", async () => {
+    const { s, c, codes } = otpSetup();
+    await s.auth.api.signUpEmail({
+      body: { email: "pat@example.com", password: PASSWORD, name: "Pat" },
+    });
+    expect(await c.forgetPassword.emailOtp({ email: "pat@example.com" })).toEqual({
+      data: { success: true },
+      error: null,
+    });
+    expect(await c.emailOtp.requestPasswordReset({ email: "pat@example.com" })).toEqual({
+      data: { success: true },
+      error: null,
+    });
+    expect(codes.map((x) => x.type)).toEqual(["forget-password", "forget-password"]);
+    // 10 code points under minPasswordLength 12: core spends the code, and the client names the case.
+    expect(
+      (
+        await c.emailOtp.resetPassword({
+          email: "pat@example.com",
+          otp: codes.at(-1)?.otp ?? "",
+          password: "ten chars!",
+        })
+      ).error,
+    ).toMatchObject({ code: "PASSWORD_TOO_SHORT", status: 400 });
+    await c.emailOtp.requestPasswordReset({ email: "pat@example.com" });
+    expect(
+      await c.emailOtp.resetPassword({
+        email: "pat@example.com",
+        otp: codes.at(-1)?.otp ?? "",
+        password: "a new correct horse",
+      }),
+    ).toEqual({ data: { success: true }, error: null });
+    const signedIn = await s.auth.api.signInEmail({
+      body: { email: "pat@example.com", password: "a new correct horse" },
+    });
+    expect(signedIn.user.email).toBe("pat@example.com");
+  });
+
+  it("answers success for a malformed address and sends no code; every policy refusal of resetPassword spends the code (README, M-8)", async () => {
+    const { s, c, codes } = otpSetup();
+    for (const type of ["sign-in", "forget-password"] as const)
+      expect(await c.emailOtp.sendVerificationOtp({ email: "not-an-email", type })).toEqual({
+        data: { success: true },
+        error: null,
+      });
+    expect(codes).toEqual([]);
+    await s.auth.api.signUpEmail({
+      body: { email: "pat@example.com", password: PASSWORD, name: "Pat" },
+    });
+    for (const [password, code] of [
+      ["ten chars!", "PASSWORD_TOO_SHORT"],
+      ["x".repeat(129), "PASSWORD_TOO_LONG"],
+    ] as const) {
+      await c.emailOtp.requestPasswordReset({ email: "pat@example.com" });
+      const otp = codes.at(-1)?.otp ?? "";
+      expect(
+        (await c.emailOtp.resetPassword({ email: "pat@example.com", otp, password })).error,
+      ).toMatchObject({ code, status: 400 });
+      // The refusal spent the code: the same code with a good password answers INVALID_OTP.
+      expect(
+        (
+          await c.emailOtp.resetPassword({
+            email: "pat@example.com",
+            otp,
+            password: "a new correct horse",
+          })
+        ).error,
+      ).toMatchObject({ code: "INVALID_OTP", status: 400 });
+    }
+  });
+
+  it("keeps the session token in the Expo store after signIn.emailOtp", async () => {
+    const storage = memoryStorage();
+    const { c, codes } = otpSetup(storage);
+    await c.emailOtp.sendVerificationOtp({ email: "otp@example.com", type: "sign-in" });
+    const r = await c.signIn.emailOtp({ email: "otp@example.com", otp: codes[0]?.otp ?? "" });
+    expect(r.error).toBeNull();
+    expect(storage.map.get("better-auth_tempo_session")).toBe(r.data?.token);
   });
 });

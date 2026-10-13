@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { systemClock } from "../src/primitives/clock.js";
 import {
   constantTimeEqual,
   fromBase64Url,
+  hmacSha256Hex,
   randomBase64Url,
+  randomDigits,
   randomToken,
   sha256Base64Url,
   sha256Hex,
@@ -81,5 +83,39 @@ describe("base64url round trip", () => {
   it("rejects a character outside the alphabet", () => {
     expect(() => fromBase64Url("ab+/")).toThrow();
     expect(() => fromBase64Url("ab=")).toThrow();
+  });
+});
+
+describe("hmacSha256Hex (plan 9e)", () => {
+  it("matches RFC 4231 test case 2", async () => {
+    expect(await hmacSha256Hex("Jefe", "what do ya want for nothing?")).toBe(
+      "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+    );
+  });
+
+  it("changes with the key", async () => {
+    expect(await hmacSha256Hex("key-a", "text")).not.toBe(await hmacSha256Hex("key-b", "text"));
+  });
+});
+
+describe("randomDigits (plan 9e)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("answers 6 or 8 decimal digits", () => {
+    expect(randomDigits(6)).toMatch(/^\d{6}$/);
+    expect(randomDigits(8)).toMatch(/^\d{8}$/);
+  });
+
+  it("draws again for a byte of 250 or more, so no digit is more likely", () => {
+    const bytes = [250, 255, 3, 251, 14, 249, 0, 129];
+    vi.spyOn(crypto, "getRandomValues").mockImplementation(((array: Uint8Array) => {
+      for (let i = 0; i < array.length; i++) array[i] = bytes[i % bytes.length] ?? 0;
+      return array;
+    }) as typeof crypto.getRandomValues);
+    // 250, 255, and 251 are drawn again. 3, 14, 249, 0, 129, then 3 again (the
+    // buffer of 12 bytes wraps the list) give 3, 4, 9, 0, 9, 3.
+    expect(randomDigits(6)).toBe("349093");
   });
 });

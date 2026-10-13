@@ -2,6 +2,8 @@ import {
   type BearerOptions,
   type BearerPlugin,
   COMPAT_PLUGIN,
+  type EmailOtpOptions,
+  type EmailOtpPlugin,
   type ExpoOptions,
   type ExpoPlugin,
   type MagicLinkOptions,
@@ -24,6 +26,9 @@ export function passkey(options: PasskeyOptions = {}): PasskeyPlugin {
 }
 export function magicLink(options: MagicLinkOptions): MagicLinkPlugin {
   return { kind: COMPAT_PLUGIN, id: "magic-link", options };
+}
+export function emailOTP(options: EmailOtpOptions): EmailOtpPlugin {
+  return { kind: COMPAT_PLUGIN, id: "email-otp", options };
 }
 export function bearer(options: BearerOptions = {}): BearerPlugin {
   return { kind: COMPAT_PLUGIN, id: "bearer", options };

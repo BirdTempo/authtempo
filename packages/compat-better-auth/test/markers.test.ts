@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import manifest from "../package.json?raw";
-import { magicLinkClient, organizationClient, passkeyClient } from "../src/client/plugins.js";
-import { bearer, COMPAT_PLUGIN, expo, magicLink, organization, passkey } from "../src/plugins.js";
+import {
+  emailOTPClient,
+  magicLinkClient,
+  organizationClient,
+  passkeyClient,
+} from "../src/client/plugins.js";
+import {
+  bearer,
+  COMPAT_PLUGIN,
+  emailOTP,
+  expo,
+  magicLink,
+  organization,
+  passkey,
+} from "../src/plugins.js";
 
 describe("plugin markers", () => {
   it("carry the Better Auth plugin id and the options as given", async () => {
@@ -15,17 +28,20 @@ describe("plugin markers", () => {
       "passkey",
     );
     expect(magicLink({ sendMagicLink: send }).id).toBe("magic-link");
+    expect(emailOTP({ sendVerificationOTP: send })).toEqual({
+      kind: COMPAT_PLUGIN,
+      id: "email-otp",
+      options: { sendVerificationOTP: send },
+    });
     expect(bearer().id).toBe("bearer");
     expect(expo().id).toBe("expo");
     expect(organization().options).toEqual({});
   });
 
   it("client markers carry the id", () => {
-    expect([organizationClient(), passkeyClient(), magicLinkClient()].map((p) => p.id)).toEqual([
-      "organization",
-      "passkey",
-      "magic-link",
-    ]);
+    expect(
+      [organizationClient(), passkeyClient(), magicLinkClient(), emailOTPClient()].map((p) => p.id),
+    ).toEqual(["organization", "passkey", "magic-link", "email-otp"]);
   });
 });
 

@@ -73,3 +73,8 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   `activeOrganizationId` of the user's own organizations only.
 - An organization limit is a count in core (`organizations.limits`), never
   only a hook: the compatibility package maps Better Auth's numbers onto it.
+- An email code is a proof of the address, as a magic link is. Core stores
+  HMAC-SHA256 under the app secret of the row id and the code, keeps one
+  live code per address, and spends a code at its fifth wrong guess. The
+  guess count is a compare-and-set, so parallel guesses all count, on D1
+  too.

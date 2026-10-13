@@ -44,6 +44,10 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
 | POST | `/password/reset` | form or JSON `token`, `password` | form body: 302 to `next` with the cookie, or back to the form on `password_policy` or `password_breached`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited` |
 | POST | `/password/change` | session, `{ currentPassword?, newPassword }` | `{ ok: true }`; 400 `invalid_body`, `password_policy`, `password_breached`; 401 without a session; 401 `invalid_credentials` for a missing or wrong current password; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited` |
+| POST | `/otp/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a sign-in code |
+| POST | `/otp/verify` | `{ email, code }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `invalid_code` (a wrong, expired, spent, or unknown code), `too_many_attempts` (the code took `maxAttempts` wrong guesses: request a new one); 429 `rate_limited` |
+| POST | `/otp/reset/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a reset code. Only with a `password` config |
+| POST | `/otp/reset` | `{ email, code, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `invalid_code`, `too_many_attempts`, `password_policy` and `password_breached` (both spend the code); 429 `rate_limited`. Only with a `password` config |
 | GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the confirm page when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
 | GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
 | POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
@@ -56,6 +60,8 @@ const s = await auth.session(request);     // { user, session } or null
 Without a `passkey` config none of these routes exist, and the router answers 404.
 
 Without a `password` config none of the password routes exist, and the router answers 404. The token routes exist in every deployment.
+
+With `emailOtp: false` none of the code routes exist, and the router answers 404. Without a `password` config the two reset code routes do not exist.
 
 The organization routes follow.
 
@@ -363,6 +369,78 @@ The reset POST checks its limit, then reads the link row, then the policy,
 then the breach check, then hashes. A transaction consumes the link first.
 A spent or expired link costs no breach call and no hash.
 
+## Email codes
+
+Since plan 9e core signs a person in by a code from the mail, and resets a
+password by a code. A code is for a device whose mailbox is elsewhere, such
+as a phone app, a desktop app, or a CLI, or whose mail client strips links.
+It follows the magic link's rules: the request tells nothing about the
+account, a right code proves the address, and the claim rule applies. The
+sign-in page does not change: a browser has the magic link.
+
+Email codes are on by default. `emailOtp: false` turns them off.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `ttlMinutes` | 10 | The life of a code, 1 to 60. |
+| `length` | 6 | The digits of a code, 6 or 8. |
+| `maxAttempts` | 5 | The wrong guesses that spend a code, 3 to 10. |
+| `mail` | `defaultEmailOtpMail` | `({ email, code, ttlMinutes, appName }) => MailMessage` for the sign-in code. |
+| `resetMail` | `defaultResetOtpMail` | The same, for the reset code. |
+
+Core sends each code mail to the address the code belongs to, whatever
+`to` the builder answers.
+
+- One code per address and purpose is live. A new request spends the
+  earlier code, so the code of an older mail answers `invalid_code`.
+- A wrong code counts one guess. The guess that reaches `maxAttempts`
+  spends the code and every other live code of the address and purpose,
+  and answers `too_many_attempts`. Every later try answers the same until a
+  new request, also when two parallel requests left two live codes. A right
+  code after the cap does not sign in.
+- A wrong code, an expired code, a spent code, and an address with no code
+  answer `invalid_code`. Core does not tell them apart.
+- The stored value is HMAC-SHA256 under `secret` of the row id and the
+  code. A copy of the verification table gives no code without the secret.
+  After a change of `secret`, every live code answers `invalid_code`.
+- The guess count is a compare-and-set on the row's `updatedAt`, so
+  parallel guesses all count, on D1 and on Postgres. The storage
+  conformance suite pins `eq` on a date to the millisecond on every
+  adapter. The count stops after `maxAttempts + 1` rounds and answers
+  `invalid_code`, with the log line `tempo-auth: email code count gave up`
+  and the row id, so a storage that never matches cannot hold a request.
+- One address gets at most 20 codes per 24 hours, for both purposes
+  together (`otp:email-day:<address>`), after the 15-minute limits. So one
+  address takes at most 100 guesses a day with the defaults.
+- A reset by code runs the reset link's path: the policy, the breach
+  check, the new password, the end of every session, the claim rule, and a
+  new session. A password that the policy or the breach check refuses
+  spends the code: request a new one. A reset of either kind spends the
+  live reset links and codes of the address, and so does a password change.
+
+The odds that an attacker who never sees the mail guesses a code, with the
+defaults and a limiter that the product owns (D1 or Postgres):
+
+| Scope | Guesses at most | Odds of a takeover |
+| --- | --- | --- |
+| One code | 5 | 5 × 10⁻⁶ |
+| One address, one day | 100 (20 codes × 5) | 1 × 10⁻⁴ |
+| One address, one year | about 36,500 | about 3.6 % |
+
+The attack is loud: at full rate the address gets 20 code mails a day.
+`length: 8` divides each figure by 100, so use it for high-value accounts.
+The memory limiter is per isolate: on Workers the request and verify
+budgets, the daily cap too, multiply by the isolate count. The per-code cap
+stays global, because it lives in the row.
+
+```ts
+import { createClient } from "@tempo-auth/client";
+
+const client = createClient({ baseURL: "https://api.example.com" });
+await client.emailOtp.request({ email });
+const signedIn = await client.emailOtp.verify({ email, code }); // { token, user, session }
+```
+
 ## API tokens
 
 A script or a CLI signs in with an API token, not with a password. A
@@ -581,7 +659,8 @@ const auth = createAuth({
   gone). A refusal keeps the role and the invitation pending. A delete
   runs no member hook for the rows it removes.
 - Session points: `beforeCreate` and `afterCreate` (`via`: `password`,
-  `magic_link`, `social`, `passkey`, or `handoff`), and `afterEnd`
+  `magic_link`, `social`, `passkey`, `handoff`, or `email_otp`; a reset by
+  code is `password`), and `afterEnd`
   (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`, or
   `expired`), once per ended row. `sweepExpired` deletes expired rows in
   bulk and fires no hook, so `expired` fires only when a request presents
@@ -751,6 +830,14 @@ Without a trigger, expired rows stay in the database.
   about ML-DSA. It is the library's post-quantum probe, not a tempo-auth
   setting, and workerd prints nothing.
 - Invitation accept is limited to 20 per IP per 15 minutes, in the same per-isolate limiter.
+- Email codes: a request is limited to 3 per address and 20 per IP, and a
+  verify or a reset to 10 per address and 30 per IP, per 15 minutes, in the
+  same limiter. The sign-in code and the reset code share each budget. Two
+  parallel requests for one address can leave two live codes; the verify
+  reads the newest.
+- Email codes (amended 2026-10-13 by the plan 9e final fix wave): a request
+  is also limited to 20 per address per 24 hours, for both purposes, in the
+  same limiter. The odds table is in "Email codes".
 - Core at version 4 needs the `0004_schema_v4` migration in both adapters. Version 4 adds the password table.
 - Core at version 5 needs the `0005_schema_v5` migration in both adapters. Version 5 adds the API token table, `ta_api_token`.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15

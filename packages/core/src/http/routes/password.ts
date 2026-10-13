@@ -13,15 +13,15 @@ import {
   verifyPasswordEmail,
 } from "../../engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
-import { publicSession, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
-import { sessionCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage } from "../password-pages.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
+import { sessionCookieFor, signedInResponse } from "../session-answer.js";
 
 const signUpBody = z.object({
   email: z.string().max(320),
@@ -68,22 +68,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
   const failed = (code: string) => redirect(authErrorUrl(config, code));
   const page = (html: string) =>
     new Response(html, { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) });
-  const cookieFor = (token: string) =>
-    sessionCookie(
-      config.cookieName,
-      token,
-      config.session.ttlDays * 86_400,
-      config.cookie.sameSite,
-    );
-  /** `{ token, user, session }` with the session cookie: a browser keeps the cookie, a native app keeps the token. */
-  const signedIn = (v: PasswordSession): Response =>
-    json(
-      { token: v.token, ...publicSession({ user: v.user, session: v.session, refreshed: false }) },
-      200,
-      {
-        "set-cookie": cookieFor(v.token),
-      },
-    );
+  const cookieFor = (token: string) => sessionCookieFor(config, token);
+  const signedIn = (v: PasswordSession): Response => signedInResponse(config, v);
   return [
     {
       method: "POST",

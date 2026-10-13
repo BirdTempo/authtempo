@@ -2,21 +2,35 @@ export const VERSION = "0.0.0";
 
 export type {
   AuthConfig,
+  EmailOtpConfig,
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
+  ResolvedEmailOtp,
 } from "./config.js";
 export { ConfigError, DEFAULT_RESERVED_SLUGS, isAppScheme } from "./config.js";
 export {
   type Auth,
   type AuthApi,
   createAuth,
+  type EmailOtpApi,
   type PasswordApi,
   type TokensApi,
 } from "./create-auth.js";
+export type {
+  EmailOtpRequest,
+  EmailOtpReset,
+  EmailOtpSession,
+  EmailOtpVerify,
+} from "./engine/email-otp.js";
+export {
+  defaultEmailOtpMail,
+  defaultResetOtpMail,
+  type EmailOtpMailInput,
+} from "./engine/email-otp-mail.js";
 export type { HandoffStart } from "./engine/handoff.js";
 export {
   type Awaitable,

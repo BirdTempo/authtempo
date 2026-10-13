@@ -48,6 +48,11 @@ export const BETTER_AUTH_CODES = {
   // tempo-auth's own names: Better Auth has no code for a hook's refusal or failure.
   hook_refused: "HOOK_REFUSED",
   hook_failed: "HOOK_FAILED",
+  // Plan 9e. Better Auth 1.7.2's own names (dist/plugins/email-otp/error-codes.mjs:4-8, read
+  // 2026-10-13). Core answers an expired code invalid_code, so OTP_EXPIRED never appears.
+  // Better Auth answers TOO_MANY_ATTEMPTS 403; the status stays core's, 400.
+  invalid_code: "INVALID_OTP",
+  too_many_attempts: "TOO_MANY_ATTEMPTS",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

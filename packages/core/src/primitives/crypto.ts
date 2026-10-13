@@ -55,3 +55,37 @@ export function constantTimeEqual(a: string, b: string): boolean {
   for (let i = 0; i < n; i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
   return diff === 0;
 }
+
+/** HMAC-SHA256 of `text` under the key `secret` (its UTF-8 bytes), as lowercase hex (plan 9e). */
+export async function hmacSha256Hex(secret: string, text: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(text));
+  return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * `length` decimal digits from `crypto.getRandomValues` (plan 9e). A byte of
+ * 250 or more is drawn again, so each digit is uniform: 250 is the largest
+ * multiple of 10 below 256, and `byte % 10` on 0 to 255 makes 0 to 5 more
+ * likely than 6 to 9.
+ */
+export function randomDigits(length: number): string {
+  let out = "";
+  const buf = new Uint8Array(length * 2);
+  while (out.length < length) {
+    crypto.getRandomValues(buf);
+    for (const b of buf) {
+      if (b >= 250) continue;
+      out += String(b % 10);
+      if (out.length === length) break;
+    }
+  }
+  return out;
+}

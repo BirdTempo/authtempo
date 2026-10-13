@@ -38,7 +38,11 @@ export type VerificationPurpose =
   /** data: { passwordId: string } */
   | "password-verify"
   /** data: { next: string } */
-  | "password-reset";
+  | "password-reset"
+  /** data: { attempts: number }. valueHash is HMAC-SHA256(secret, `<id>:<code>`) in hex (plan 9e). */
+  | "email-otp"
+  /** As `email-otp`, for a password reset by code (plan 9e). */
+  | "password-reset-otp";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;

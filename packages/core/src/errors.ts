@@ -36,6 +36,9 @@ export const ERRORS = {
   organization_limit: 409,
   member_limit: 409,
   invitation_limit: 409,
+  // plan 9e: email codes. A wrong, expired, spent, or unknown code is one code: no probe.
+  invalid_code: 400,
+  too_many_attempts: 400,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

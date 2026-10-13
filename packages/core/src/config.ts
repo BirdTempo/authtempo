@@ -1,4 +1,9 @@
 import {
+  defaultEmailOtpMail,
+  defaultResetOtpMail,
+  type EmailOtpMailInput,
+} from "./engine/email-otp-mail.js";
+import {
   type HooksConfig,
   ORGANIZATION_HOOK_POINTS,
   type OrganizationHooks,
@@ -157,6 +162,12 @@ export interface AuthConfig {
    */
   password?: PasswordConfig;
   /**
+   * Email codes (plan 9e, spec 8.10): a sign-in by a code from the mail, and
+   * a password reset by a code. On by default; `false` removes the routes
+   * and `api.emailOtp`. The two reset routes also need `password`.
+   */
+  emailOtp?: EmailOtpConfig | false;
+  /**
    * The app's code at named points of the organization and session flows
    * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
    * refuses with `throw hookRefusal(message)`; an after hook runs after the
@@ -187,6 +198,27 @@ export interface PasswordConfig {
    * stop its call when `signal` aborts.
    */
   legacyVerify?: LegacyVerifyConfig;
+}
+
+export interface EmailOtpConfig {
+  /** The life of a code, 1 to 60. Default 10. */
+  ttlMinutes?: number;
+  /** The digits of a code, 6 or 8. Default 6. */
+  length?: 6 | 8;
+  /** The wrong codes that spend a code, 3 to 10. Default 5. */
+  maxAttempts?: number;
+  /** The sign-in code mail. Core sends it to the code's address, whatever `to` it answers. Default `defaultEmailOtpMail`. */
+  mail?: (input: EmailOtpMailInput) => MailMessage;
+  /** The reset code mail, with the same rule. Default `defaultResetOtpMail`. */
+  resetMail?: (input: EmailOtpMailInput) => MailMessage;
+}
+
+export interface ResolvedEmailOtp {
+  ttlMinutes: number;
+  length: 6 | 8;
+  maxAttempts: number;
+  mail: (input: EmailOtpMailInput) => MailMessage;
+  resetMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
 export interface LegacyVerifyConfig {
@@ -274,6 +306,7 @@ export interface ResolvedConfig {
     resetPage: (input: ResetPageInput) => string;
     legacyVerify: Required<LegacyVerifyConfig> | null;
   } | null;
+  emailOtp: ResolvedEmailOtp | null;
   hooks: ResolvedHooks;
 }
 
@@ -543,6 +576,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     handoff,
     organizations,
     password,
+    emailOtp: resolveEmailOtp(input.emailOtp),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
@@ -595,6 +629,47 @@ function resolveLimits(input: OrganizationLimits | undefined): ResolvedLimits {
     out[key as keyof ResolvedLimits] = value;
   }
   return out;
+}
+
+const EMAIL_OTP_KEYS: Readonly<Record<keyof EmailOtpConfig, true>> = {
+  ttlMinutes: true,
+  length: true,
+  maxAttempts: true,
+  mail: true,
+  resetMail: true,
+};
+
+/** `emailOtp` (plan 9e). Absent: on, with the defaults. `false`: off. */
+function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEmailOtp | null {
+  if (input === false) return null;
+  // Only `undefined` means the defaults: `null` from a JS caller or a JSON
+  // config must not turn the feature on, so it falls to the guard below.
+  const o: EmailOtpConfig = input === undefined ? {} : input;
+  // `as unknown`: the guard must not narrow `o`, or its fields lose their types.
+  if (!isPlainObject(o as unknown)) throw new ConfigError("emailOtp must be an object or false");
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(EMAIL_OTP_KEYS, key))
+      throw new ConfigError(
+        `emailOtp.${key} is not an option; core has ttlMinutes, length, maxAttempts, mail, and resetMail`,
+      );
+  const ttlMinutes = o.ttlMinutes ?? 10;
+  if (!Number.isSafeInteger(ttlMinutes) || ttlMinutes < 1 || ttlMinutes > 60)
+    throw new ConfigError("emailOtp.ttlMinutes must be an integer from 1 to 60");
+  const length = o.length ?? 6;
+  if (length !== 6 && length !== 8) throw new ConfigError("emailOtp.length must be 6 or 8");
+  const maxAttempts = o.maxAttempts ?? 5;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 3 || maxAttempts > 10)
+    throw new ConfigError("emailOtp.maxAttempts must be an integer from 3 to 10");
+  for (const key of ["mail", "resetMail"] as const)
+    if (o[key] !== undefined && typeof o[key] !== "function")
+      throw new ConfigError(`emailOtp.${key} must be a function`);
+  return {
+    ttlMinutes,
+    length,
+    maxAttempts,
+    mail: o.mail ?? defaultEmailOtpMail,
+    resetMail: o.resetMail ?? defaultResetOtpMail,
+  };
 }
 
 /** An object literal. A class instance keeps its methods on the prototype, where `Object.entries` does not see them. */

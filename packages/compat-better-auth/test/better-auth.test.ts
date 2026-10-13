@@ -128,6 +128,8 @@ describe("betterAuth", () => {
       invitationExpiresIn: 172800,
       membershipLimit: 100,
       invitationLimit: 100,
+      emailOtpExpiresIn: 300,
+      emailOtpAllowedAttempts: 3,
       basePath: "/api/auth",
     });
     expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1 });
@@ -198,7 +200,7 @@ describe("betterAuth", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ advanced: { ipAddress: { disableIpTracking: true } } });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
+      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, the email codes, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit, and can guess 10 email codes on each of many addresses per 15 minutes (at most 100 a day per address), about 1 takeover per 100,000 addresses per window, and each address gets the code mails",
     );
     info.mockRestore();
     const m = mapOptions({
@@ -434,6 +436,28 @@ describe("betterAuth", () => {
     expect(keys).toEqual(["password-resend:email:a@example.com", "password-sign-up:ip:unknown"]);
   });
 
+  it("skips the unknown-IP keys of the email codes, which have per-email limits, and keeps their per-email and daily keys (plan 9e)", async () => {
+    const keys: string[] = [];
+    const limiter = skipUnknownIp({
+      allow: async (key) => {
+        keys.push(key);
+        return true;
+      },
+    });
+    await limiter.allow("otp:ip:unknown", { seconds: 900, max: 20 });
+    await limiter.allow("otp:email:a@example.com", { seconds: 900, max: 3 });
+    await limiter.allow("otp:email-day:a@example.com", { seconds: 86_400, max: 20 });
+    await limiter.allow("otp-verify:ip:unknown", { seconds: 900, max: 30 });
+    await limiter.allow("otp-verify:email:a@example.com", { seconds: 900, max: 10 });
+    await limiter.allow("otp:ip:1.2.3.4", { seconds: 900, max: 20 });
+    expect(keys).toEqual([
+      "otp:email:a@example.com",
+      "otp:email-day:a@example.com",
+      "otp-verify:email:a@example.com",
+      "otp:ip:1.2.3.4",
+    ]);
+  });
+
   it("maps every core and client code to one Better Auth code", () => {
     expect(Object.keys(BETTER_AUTH_CODES).sort()).toEqual(
       [...Object.keys(ERRORS), "cancelled", "network", "unexpected"].sort(),
@@ -448,6 +472,8 @@ describe("betterAuth", () => {
       token_expired: "TOKEN_EXPIRED",
       email_unverified: "EMAIL_NOT_VERIFIED",
       slug_taken: "ORGANIZATION_SLUG_ALREADY_TAKEN",
+      invalid_code: "INVALID_OTP",
+      too_many_attempts: "TOO_MANY_ATTEMPTS",
     });
     expect([
       passwordPolicyCode("1234567", 8),
@@ -498,6 +524,20 @@ describe("the mail routes through compatMail (fix round 1: I-1, M-7)", () => {
       json("/password/reset/request", { email: "nobody@example.com" }),
     );
     expect(res.status).toBe(200);
+    expect(sent).toEqual([]);
+  });
+
+  it("answers 404 on core's email code routes without the email-otp plugin (plan 9e)", async () => {
+    const { auth, sent } = app();
+    for (const path of ["/otp/request", "/otp/verify", "/otp/reset/request", "/otp/reset"])
+      expect({
+        path,
+        status: (
+          await auth.handler(
+            json(path, { email: "a@example.com", code: "123456", password: "a long password" }),
+          )
+        ).status,
+      }).toEqual({ path, status: 404 });
     expect(sent).toEqual([]);
   });
 

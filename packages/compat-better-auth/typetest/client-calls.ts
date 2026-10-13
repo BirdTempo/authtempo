@@ -1,5 +1,10 @@
 import { expoClient } from "../src/client/expo.js";
-import { magicLinkClient, organizationClient, passkeyClient } from "../src/client/plugins.js";
+import {
+  emailOTPClient,
+  magicLinkClient,
+  organizationClient,
+  passkeyClient,
+} from "../src/client/plugins.js";
 import { createAuthClient } from "../src/react.js";
 
 declare const importMetaEnv: { VITE_API_URL: string | undefined };
@@ -104,4 +109,19 @@ export async function consumercSignIn(email: string) {
   await consumerc.signIn.passkey();
   await consumerc.signIn.magicLink({ email, callbackURL: "/" });
   await consumerc.signIn.social({ provider: "google", callbackURL: "/" });
+}
+
+// Better Auth 1.7.2's email OTP call names (dist/plugins/email-otp/client.d.mts and the
+// route paths, read 2026-10-13), as an app that posts consumerd's flows through the client calls them.
+export const codes = createAuthClient({
+  baseURL: "https://api.example.com/api/auth",
+  plugins: [emailOTPClient(), magicLinkClient(), organizationClient()],
+});
+export async function codeFlows(email: string, otp: string) {
+  await codes.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+  await codes.signIn.emailOtp({ email, otp });
+  await codes.forgetPassword.emailOtp({ email });
+  await codes.emailOtp.requestPasswordReset({ email });
+  await codes.emailOtp.resetPassword({ email, otp, password: "a new correct horse" });
+  await codes.forgetPassword({ email, redirectTo: "/reset" });
 }

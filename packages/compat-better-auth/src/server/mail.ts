@@ -1,5 +1,6 @@
-import type { MailPort, StorageAdapter } from "@tempo-auth/core";
+import type { MailMessage, MailPort, StorageAdapter } from "@tempo-auth/core";
 import type {
+  EmailOtpOptions,
   InvitationEmailData,
   MagicLinkOptions,
   OrganizationOptions,
@@ -14,6 +15,26 @@ import { toInvitation, toOrganization, toUser } from "./shapes.js";
  */
 export const INVITATION_LINK_PREFIX = "tempo-compat-invitation:";
 
+/**
+ * The marker line of an email code mail (plan 9e). It never leaves this
+ * process: the port hands the code to `sendVerificationOTP`, as it hands the
+ * invitation token to `sendInvitationEmail`.
+ */
+export const OTP_LINK_PREFIX = "tempo-compat-otp:";
+
+/** The mail that core's `emailOtp.mail` and `emailOtp.resetMail` answer here. */
+export function otpMail(
+  to: string,
+  type: "sign-in" | "forget-password",
+  code: string,
+): MailMessage {
+  return {
+    to,
+    subject: "tempo-auth compat email code",
+    text: `\n\n${OTP_LINK_PREFIX}${type}:${code}\n\n`,
+  };
+}
+
 export interface MailRoutes {
   origin: string;
   basePath: string;
@@ -21,6 +42,7 @@ export interface MailRoutes {
   sendResetPassword?: SendEmail | undefined;
   sendVerificationEmail?: SendEmail | undefined;
   sendMagicLink?: MagicLinkOptions["sendMagicLink"] | undefined;
+  sendVerificationOTP?: EmailOtpOptions["sendVerificationOTP"] | undefined;
   sendInvitationEmail?: OrganizationOptions["sendInvitationEmail"] | undefined;
 }
 
@@ -83,6 +105,20 @@ export function compatMail(routes: MailRoutes): MailPort {
           invitation,
         };
         await cb(data);
+        return;
+      }
+      if (link.startsWith(OTP_LINK_PREFIX)) {
+        const cb = routes.sendVerificationOTP;
+        if (!cb) throw new Error("tempo-auth compat: no sendVerificationOTP");
+        const [type, otp] = link.slice(OTP_LINK_PREFIX.length).split(":");
+        if ((type !== "sign-in" && type !== "forget-password") || !otp)
+          throw new Error("tempo-auth compat: the email code mail is malformed");
+        // Better Auth sends a reset code only to an address with a user
+        // (routes.mjs requestPasswordResetEmailOTP, read 2026-10-13). Send
+        // nothing and do not throw: a throw answers 500, and that difference
+        // is the tell.
+        if (type === "forget-password" && !(await userByEmail(message.to))) return;
+        await cb({ email: message.to, otp, type });
         return;
       }
       const token = new URL(link).searchParams.get("token") ?? "";
