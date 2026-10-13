@@ -33,6 +33,10 @@ export interface SweepResult {
 // answers `invalid_token` because the row is gone, not because it stays.
 const CONSUMED_GRACE_MS = 24 * 60 * 60 * 1000;
 
+// A client that no authorize and no metadata fetch saw for 90 days, and
+// that holds no consent and no refresh token, has nothing a user could lose:
+// no grant names it. Without this sweep every dynamic registration stays in
+// ta_oauth_client forever (spec 8.13 item 7, plan 9g).
 const CLIENT_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
 /** One sweep stays short; the next one takes the rest. */
 const CLIENT_SWEEP_MAX = 100;
@@ -40,7 +44,8 @@ const CLIENT_SWEEP_MAX = 100;
 /**
  * The port has no join, so each idle client costs two reads. The delete
  * repeats the `lastSeenAt` guard: a client that an authorize saw since the
- * read stays.
+ * read stays. The lookups by client use the consent unique key, which starts
+ * with clientId, and the refresh token index on clientId.
  */
 async function sweepClients(storage: StorageAdapter, now: Date): Promise<number> {
   const before = new Date(now.getTime() - CLIENT_IDLE_MS);
@@ -51,10 +56,24 @@ async function sweepClients(storage: StorageAdapter, now: Date): Promise<number>
     { limit: CLIENT_SWEEP_MAX },
   );
   for (const c of idle) {
-    if (await storage.findOne("oauthConsent", [{ field: "clientId", op: "eq", value: c.id }]))
+    const kept =
+      (await storage.findOne("oauthConsent", [{ field: "clientId", op: "eq", value: c.id }])) ??
+      (await storage.findOne("oauthToken", [{ field: "clientId", op: "eq", value: c.id }]));
+    if (kept) {
+      // A kept client counts as seen by the sweep. The move takes it out of
+      // the idle set for 90 days, so the next read reaches other clients:
+      // without it, 100 kept clients fill every read and no client goes.
+      // The guard on the read value keeps a newer time that an authorize wrote.
+      await storage.update(
+        "oauthClient",
+        [
+          { field: "id", op: "eq", value: c.id },
+          { field: "lastSeenAt", op: "eq", value: c.lastSeenAt },
+        ],
+        { lastSeenAt: now },
+      );
       continue;
-    if (await storage.findOne("oauthToken", [{ field: "clientId", op: "eq", value: c.id }]))
-      continue;
+    }
     n += await storage.delete("oauthClient", [
       { field: "id", op: "eq", value: c.id },
       { field: "lastSeenAt", op: "lt", value: before },

@@ -7,12 +7,13 @@ import {
   type Auth,
   createAuth,
   createPbkdf2PasswordHash,
+  type ModelName,
   SCHEMA_VERSION,
   type StorageAdapter,
   schema,
 } from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
-import { columnName, columnsOf, TABLES } from "@tempo-auth/core/sql";
+import { columnName, columnsOf, TABLES, uniqueIndexName } from "@tempo-auth/core/sql";
 import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -23,6 +24,23 @@ import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG } from "./fixtures.js";
 import { freshBetterAuthSchema } from "./pg.js";
+
+/** Core's unique indexes and indexes of one model, with core's names and column order. */
+function expectedIndexes(model: ModelName) {
+  const cols = (fields: readonly string[]) => fields.map(columnName);
+  return [
+    ...schema[model].unique.map((f) => ({
+      name: uniqueIndexName(model, f),
+      unique: true,
+      columns: cols(f),
+    })),
+    ...schema[model].indexes.map((f) => ({
+      name: `ix_${TABLES[model]}__${cols(f).join("__")}`,
+      unique: false,
+      columns: cols(f),
+    })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+}
 
 const VECTOR_HASH =
   "8b963491c29137940a209e5a26de719e:b4ce8a3b919a25198f84eebbede27d1cd0fda32747c6489f0997b993a16de0a2381351c5595013552488269e72aa6507da171fac50e68ce5ff7173ff58b554d3";
@@ -538,6 +556,36 @@ describe("the compat migration on postgres", () => {
           ]),
         );
         expect({ model, columns: actual }).toEqual({ model, columns: expected });
+      }
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("has core's unique indexes and indexes on core's own tables, with core's names and column order (core's parity check, plan 9g fix round 1)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate();
+      for (const model of [
+        "totp",
+        "trustedDevice",
+        "jwk",
+        "oauthClient",
+        "oauthConsent",
+        "oauthToken",
+      ] as const) {
+        const rows = await pg.sql.unsafe<{ indexname: string; indexdef: string }[]>(
+          "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",
+          [TABLES[model], `${TABLES[model]}_pkey`],
+        );
+        const actual = rows
+          .map((r) => ({
+            name: r.indexname,
+            unique: r.indexdef.includes("CREATE UNIQUE INDEX"),
+            columns: (/\(([^)]*)\)$/.exec(r.indexdef)?.[1] ?? r.indexdef).split(", "),
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        expect({ model, indexes: actual }).toEqual({ model, indexes: expectedIndexes(model) });
       }
     } finally {
       await pg.close();

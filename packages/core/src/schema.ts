@@ -418,7 +418,9 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       clientId: { type: "string" },
       scopes: { type: "json" },
     },
-    unique: [["userId", "clientId"]],
+    // clientId first: the sweep looks up the consents of one client, and the
+    // authorize compares both fields, so the one index serves both.
+    unique: [["clientId", "userId"]],
     indexes: [],
   },
   // plan 9g: one row per refresh token. The table holds the hash, never the token.
@@ -435,6 +437,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       usedAt: { type: "date", nullable: true },
     },
     unique: [["tokenHash"]],
-    indexes: [["userId"], ["familyId"]],
+    // clientId: the sweep looks up the refresh tokens of one client.
+    indexes: [["userId"], ["familyId"], ["clientId"]],
   },
 };

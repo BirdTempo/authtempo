@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { setupTotp } from "../src/engine/totp.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
 import { enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
@@ -218,5 +219,70 @@ describe("sweepExpired", () => {
     expect(left).toEqual([on.id, fresh].sort());
     expect(left).not.toContain(stale);
     expect(await sweepExpired(auth.config)).toMatchObject({ totpSetups: 0 });
+  });
+
+  describe("the idle OAuth clients (plan 9g)", () => {
+    const idleClient = (storage: StorageAdapter, id: string, lastSeenAt: Date, now: Date) =>
+      storage.create("oauthClient", {
+        id,
+        kind: "registered",
+        name: null,
+        redirectUris: ["https://client.example.com/cb"],
+        lastSeenAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    it("moves a kept idle client out of the idle set, so the bounded read reaches a deletable client behind 100 kept ones (fix round 1)", async () => {
+      const { config, storage, clock } = makeAuth();
+      const now = clock.now();
+      const idle = new Date(now.getTime() - 91 * DAY);
+      // 101 kept clients come first in the read, then the one client the sweep may delete.
+      const kept = Array.from({ length: 101 }, (_, i) => `c-${String(i).padStart(3, "0")}`);
+      for (const id of kept) {
+        await idleClient(storage, id, idle, now);
+        await storage.create("oauthConsent", {
+          id: `consent-${id}`,
+          userId: "u1",
+          clientId: id,
+          scopes: ["openid"],
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await idleClient(storage, "c-zzz", idle, now);
+
+      const first = await sweepExpired(config);
+      const second = await sweepExpired(config);
+      expect(first.oauthClients + second.oauthClients).toBe(1);
+      const left = await storage.findMany("oauthClient", []);
+      expect(left.map((r) => r.id).sort()).toEqual(kept);
+      // A kept client counts as seen by the sweep.
+      expect(left.every((r) => r.lastSeenAt.getTime() === now.getTime())).toBe(true);
+    });
+
+    it("keeps a client that an authorize saw between the read and the delete (fix round 1)", async () => {
+      const { config, storage, clock } = makeAuth();
+      const now = clock.now();
+      await idleClient(storage, "c-seen", new Date(now.getTime() - 91 * DAY), now);
+      // The authorize runs while the sweep reads the refresh tokens of the client.
+      const racing: StorageAdapter = {
+        ...storage,
+        findOne: async (model, where, ...rest) => {
+          if (model === "oauthToken" && where.some((w) => w.value === "c-seen")) {
+            await storage.update("oauthClient", [{ field: "id", op: "eq", value: "c-seen" }], {
+              lastSeenAt: now,
+            });
+          }
+          return storage.findOne(model, where, ...rest);
+        },
+      };
+      expect(await sweepExpired({ ...config, storage: racing })).toMatchObject({
+        oauthClients: 0,
+      });
+      expect(
+        await storage.findOne("oauthClient", [{ field: "id", op: "eq", value: "c-seen" }]),
+      ).toMatchObject({ lastSeenAt: now });
+    });
   });
 });

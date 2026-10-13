@@ -91,9 +91,11 @@ describe("names", () => {
     expect(TABLES.oauthClient).toBe("ta_oauth_client");
     expect(TABLES.oauthConsent).toBe("ta_oauth_consent");
     expect(TABLES.oauthToken).toBe("ta_oauth_token");
-    expect(uniqueIndexName("oauthConsent", ["userId", "clientId"])).toBe(
-      "ux_ta_oauth_consent__user_id__client_id",
+    expect(uniqueIndexName("oauthConsent", ["clientId", "userId"])).toBe(
+      "ux_ta_oauth_consent__client_id__user_id",
     );
+    expect(schema.oauthConsent.unique).toEqual([["clientId", "userId"]]);
+    expect(schema.oauthToken.indexes).toEqual([["userId"], ["familyId"], ["clientId"]]);
     expect(fieldsFromUniqueIndex("jwk", "ux_ta_jwk__slot")).toEqual(["slot"]);
   });
   it("rejects unknown models and fields", () => {

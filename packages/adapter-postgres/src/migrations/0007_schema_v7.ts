@@ -35,7 +35,7 @@ CREATE TABLE ta_oauth_consent (
   client_id text NOT NULL,
   scopes jsonb NOT NULL
 );
-CREATE UNIQUE INDEX ux_ta_oauth_consent__user_id__client_id ON ta_oauth_consent (user_id, client_id);
+CREATE UNIQUE INDEX ux_ta_oauth_consent__client_id__user_id ON ta_oauth_consent (client_id, user_id);
 CREATE TABLE ta_oauth_token (
   id text PRIMARY KEY,
   created_at timestamptz NOT NULL,
@@ -52,6 +52,7 @@ CREATE TABLE ta_oauth_token (
 CREATE UNIQUE INDEX ux_ta_oauth_token__token_hash ON ta_oauth_token (token_hash);
 CREATE INDEX ix_ta_oauth_token__user_id ON ta_oauth_token (user_id);
 CREATE INDEX ix_ta_oauth_token__family_id ON ta_oauth_token (family_id);
+CREATE INDEX ix_ta_oauth_token__client_id ON ta_oauth_token (client_id);
 
 UPDATE ta_meta SET value = '7' WHERE key = 'schema_version';
 `;

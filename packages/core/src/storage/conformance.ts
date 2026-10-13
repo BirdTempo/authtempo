@@ -888,7 +888,7 @@ export function runAdapterConformance(
       await db.create("oauthConsent", consent);
       await expect(db.create("oauthConsent", { ...consent, id: "c2" })).rejects.toMatchObject({
         code: "unique_violation",
-        fields: ["userId", "clientId"],
+        fields: ["clientId", "userId"],
       });
 
       const token: OAuthTokenRow = {
