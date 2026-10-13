@@ -5,6 +5,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { hookGuard, type OrganizationPatch, runAfter, runBefore } from "./hooks.js";
 import {
   needs,
   normalizeSlug,
@@ -212,27 +213,77 @@ export async function createOrganization(
     createdAt: now,
     updatedAt: now,
   };
+  const summary = publicOrganization(organization);
+  const owner: MemberSummary = {
+    id: member.id,
+    userId: member.userId,
+    role: member.role,
+    email: input.user.email,
+    name: input.user.name,
+    createdAt: member.createdAt,
+  };
+  const hooks = config.hooks.organization;
+  const limit = o.limits.perUser;
   try {
-    await config.storage.transaction(async (tx) => {
-      await tx.create("organization", organization);
-      await tx.create("member", member);
-    });
+    const written = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // The count and the slug read run before any write, so a refusal commits nothing.
+        // perUser counts the user's member rows at any rank, as Better Auth's numeric limit does.
+        if (limit !== null) {
+          const held = await tx.findMany(
+            "member",
+            [{ field: "userId", op: "eq", value: input.user.id }],
+            { limit },
+          );
+          if (held.length >= limit) return fail("organization_limit");
+        }
+        // A hook must not run for a taken slug. The unique key stays the guard for a race.
+        if (await tx.findOne("organization", [{ field: "slug", op: "eq", value: slug }]))
+          return fail("slug_taken");
+        await runBefore("organization.beforeCreate", hooks.beforeCreate, {
+          organization: summary,
+          user: input.user,
+        });
+        await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+          organization: summary,
+          member: { userId: input.user.id, role: member.role },
+          memberUser: input.user,
+          by: input.user,
+          via: "create",
+          invitation: null,
+        });
+        await tx.create("organization", organization);
+        await tx.create("member", member);
+        return ok(true);
+      }),
+    );
+    if (!written.ok) return written;
   } catch (err) {
     // Caught outside the transaction: inside, Postgres has already aborted it.
     if (err instanceof StorageError && err.code === "unique_violation") return fail("slug_taken");
     throw err;
   }
-  return ok({
-    organization: publicOrganization(organization),
-    member: {
-      id: member.id,
-      userId: member.userId,
-      role: member.role,
-      email: input.user.email,
-      name: input.user.name,
-      createdAt: member.createdAt,
+  // Better Auth's order: the member's after hook, then the organization's.
+  await runAfter(
+    "organization.afterAddMember",
+    hooks.afterAddMember,
+    {
+      organization: summary,
+      member: owner,
+      memberUser: input.user,
+      by: input.user,
+      via: "create",
+      invitation: null,
     },
-  });
+    member.id,
+  );
+  await runAfter(
+    "organization.afterCreate",
+    hooks.afterCreate,
+    { organization: summary, member: owner, user: input.user },
+    organization.id,
+  );
+  return ok({ organization: summary, member: owner });
 }
 
 export async function listOrganizations(
@@ -279,7 +330,7 @@ export async function updateOrganization(
   if (!v.ok) return v;
   const s = await standing(config, o, input.user, input.organizationId, "update");
   if (!s.ok) return s;
-  const data: Partial<OrganizationRow> = {};
+  const data: OrganizationPatch = {};
   if (input.name !== undefined) {
     if (!validOrganizationName(input.name)) return fail("invalid_body");
     data.name = input.name;
@@ -296,17 +347,54 @@ export async function updateOrganization(
   }
   if (Object.keys(data).length === 0) return ok(publicOrganization(s.value.organization));
   const now = config.clock.now();
+  const hooks = config.hooks.organization;
+  const current = publicOrganization(s.value.organization);
+  // The caller's own member row: Better Auth's update hooks name it.
+  const callerMember: MemberSummary = {
+    id: s.value.member.id,
+    userId: input.user.id,
+    role: s.value.member.role,
+    email: input.user.email,
+    name: input.user.name,
+    createdAt: s.value.member.createdAt,
+  };
+  const newSlug = data.slug;
   try {
-    await config.storage.update(
-      "organization",
-      [{ field: "id", op: "eq", value: input.organizationId }],
-      { ...data, updatedAt: now },
+    const written = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // A hook must not run for a taken slug. The unique key stays the guard for a race.
+        if (
+          newSlug !== undefined &&
+          newSlug !== s.value.organization.slug &&
+          (await tx.findOne("organization", [{ field: "slug", op: "eq", value: newSlug }]))
+        )
+          return fail("slug_taken");
+        await runBefore("organization.beforeUpdate", hooks.beforeUpdate, {
+          organization: current,
+          patch: data,
+          member: callerMember,
+          user: input.user,
+        });
+        await tx.update("organization", [{ field: "id", op: "eq", value: input.organizationId }], {
+          ...data,
+          updatedAt: now,
+        });
+        return ok(true);
+      }),
     );
+    if (!written.ok) return written;
   } catch (err) {
     if (err instanceof StorageError && err.code === "unique_violation") return fail("slug_taken");
     throw err;
   }
-  return ok(publicOrganization({ ...s.value.organization, ...data, updatedAt: now }));
+  const stored = publicOrganization({ ...s.value.organization, ...data, updatedAt: now });
+  await runAfter(
+    "organization.afterUpdate",
+    hooks.afterUpdate,
+    { organization: stored, member: callerMember, user: input.user },
+    stored.id,
+  );
+  return ok(stored);
 }
 
 export async function deleteOrganization(
@@ -322,15 +410,32 @@ export async function deleteOrganization(
   // The app seeds the platform organization; the engine never deletes it, because no route could create it again.
   if (s.value.organization.slug === o.platformOrganization) return fail("slug_reserved");
   const id = input.organizationId;
-  await config.storage.transaction(async (tx) => {
-    await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
-    await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
-    // A session that points at a deleted organization would make every later rank check read a missing row.
-    await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
-      activeOrganizationId: null,
-    });
-    await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
-  });
+  const hooks = config.hooks.organization;
+  const organization = publicOrganization(s.value.organization);
+  const deleted = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<true>> => {
+      await runBefore("organization.beforeDelete", hooks.beforeDelete, {
+        organization,
+        user: input.user,
+      });
+      await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
+      await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
+      // A session that points at a deleted organization would make every later rank check read a missing row.
+      await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
+        activeOrganizationId: null,
+      });
+      await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+      return ok(true);
+    }),
+  );
+  if (!deleted.ok) return deleted;
+  // The member and invitation rows go with the organization and fire no member hook, as in Better Auth.
+  await runAfter(
+    "organization.afterDelete",
+    hooks.afterDelete,
+    { organization, user: input.user },
+    id,
+  );
   return ok({ ok: true });
 }
 
