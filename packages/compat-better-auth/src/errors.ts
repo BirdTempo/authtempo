@@ -39,6 +39,15 @@ export const BETTER_AUTH_CODES = {
   // limiter slot, because the model is unmapped (spec 8.8 item 9). Only core's
   // api.tokens on its own storage can answer `token_limit`.
   token_limit: "TOKEN_LIMIT_REACHED",
+  // Plan 9d. Better Auth 1.7.2's own names for its limits
+  // (dist/plugins/organization/error-codes.mjs:5, :35, :40, read 2026-10-13).
+  // Better Auth answers them 403; the status stays core's, 409.
+  organization_limit: "YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS",
+  member_limit: "ORGANIZATION_MEMBERSHIP_LIMIT_REACHED",
+  invitation_limit: "INVITATION_LIMIT_REACHED",
+  // tempo-auth's own names: Better Auth has no code for a hook's refusal or failure.
+  hook_refused: "HOOK_REFUSED",
+  hook_failed: "HOOK_FAILED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

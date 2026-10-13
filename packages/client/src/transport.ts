@@ -1,5 +1,5 @@
 import { ERRORS } from "@tempo-auth/core/errors";
-import { type ClientResult, fail, ok } from "./result.js";
+import { type ClientResult, fail, failWith, ok } from "./result.js";
 
 export interface TransportOptions {
   /** The API origin, for example `https://api.example.com`. One trailing slash is stripped. */
@@ -62,7 +62,11 @@ export function createTransport(options: TransportOptions): Call {
       return fail("unexpected", res.status);
     }
     if (res.ok) return ok(parsed as T);
-    const code = (parsed as { error?: unknown } | null)?.error;
-    return isKnownCode(code) ? fail(code, res.status) : fail("unexpected", res.status);
+    const answer = parsed as { error?: unknown; message?: unknown } | null;
+    const code = answer?.error;
+    if (!isKnownCode(code)) return fail("unexpected", res.status);
+    return typeof answer?.message === "string"
+      ? failWith(code, res.status, answer.message)
+      : fail(code, res.status);
   };
 }

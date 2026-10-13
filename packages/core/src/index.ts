@@ -5,6 +5,7 @@ export type {
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
+  OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
 } from "./config.js";
@@ -17,6 +18,24 @@ export {
   type TokensApi,
 } from "./create-auth.js";
 export type { HandoffStart } from "./engine/handoff.js";
+export {
+  type Awaitable,
+  HOOK_REFUSED_TEXT,
+  HookRefusal,
+  type HooksConfig,
+  hookRefusal,
+  type MemberVia,
+  type OrganizationHookEvent,
+  type OrganizationHooks,
+  type OrganizationPatch,
+  type ProposedMember,
+  type RemoveVia,
+  type SessionDraft,
+  type SessionEndReason,
+  type SessionHooks,
+  type SessionPatch,
+  type SessionVia,
+} from "./engine/hooks.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
