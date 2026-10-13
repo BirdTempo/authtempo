@@ -78,3 +78,9 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   live code per address, and spends a code at its fifth wrong guess. The
   guess count is a compare-and-set, so parallel guesses all count, on D1
   too.
+- A TOTP code passes once. The check and the write of the last accepted
+  step are one conditional update, so a replayed code fails on D1 and on
+  Postgres. The secret is sealed with AES-256-GCM under a key from the app
+  secret and bound to its user; the backup codes are keyed hashes. A
+  second-factor challenge is a session in waiting: a reset and a password
+  change delete it before they end the sessions.
