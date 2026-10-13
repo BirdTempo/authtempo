@@ -34,10 +34,10 @@ pnpm turbo run test --filter=my-app
 ```
 
 3. Find the line `bun-e2e: PASS` in the output. It comes after the line of the Node run.
-4. Start the server with Bun and the settings of your deploy.
+4. At the root of the repo, start the server with Bun and the settings of your deploy.
 
 ```sh
-DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" AUTH_SECRET="<32 characters or more>" BASE_URL="https://api.example.com" HOST=0.0.0.0 PORT=3000 pnpm exec bun src/main.ts
+DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" AUTH_SECRET="<32 characters or more>" BASE_URL="https://api.example.com" HOST=0.0.0.0 PORT=3000 pnpm --filter my-app exec bun src/main.ts
 ```
 
 `src/main.ts` picks `Bun.serve` when it runs under Bun, and Node's `http` module when it runs under Node. The app code is the same under both.

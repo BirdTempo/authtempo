@@ -32,7 +32,7 @@ import test from "../../../../../samples/start/first-sign-in.test.ts?raw";
 
 <Code code={api} lang="ts" title="The API config" />
 
-2. In the app, add the client package: `pnpm add "@authtempo/client@workspace:*"`.
+2. At the root of the repo, add the client package to your app: `pnpm --filter <your-app> add "@authtempo/client@workspace:*"`.
 3. Make one client for the app, and write the three calls of the sign-in.
 
 <Code code={client} lang="ts" title="The browser app" />

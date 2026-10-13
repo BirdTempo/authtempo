@@ -54,10 +54,10 @@ pnpm turbo run test --filter=my-app
 
 9. Find the line `node-e2e: PASS` in the output.
 10. Replace the body of `mail.send` in `src/app.ts` with a call to your mail provider.
-11. Start the server with the settings of your deploy.
+11. At the root of the repo, start the server with the settings of your deploy.
 
 ```sh
-DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" AUTH_SECRET="<32 characters or more>" BASE_URL="https://api.example.com" HOST=0.0.0.0 PORT=3000 node src/main.ts
+DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" AUTH_SECRET="<32 characters or more>" BASE_URL="https://api.example.com" HOST=0.0.0.0 PORT=3000 pnpm --filter my-app exec node src/main.ts
 ```
 
 :::caution
