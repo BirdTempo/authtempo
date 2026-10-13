@@ -68,6 +68,13 @@ describe("createTransport", () => {
       code: "not_found",
       status: 404,
     });
+    // A message on another code is dropped (parked Minor 2).
+    const other = answering(404, `{"error":"not_found","message":"from a proxy"}`);
+    expect(await createTransport({ baseURL: BASE, fetch: other.fetch })("GET", "/x")).toEqual({
+      ok: false,
+      code: "not_found",
+      status: 404,
+    });
   });
 
   it("maps an unknown code, a non-JSON body, and an error status with a JSON body to unexpected", async () => {

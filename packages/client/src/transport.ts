@@ -65,7 +65,9 @@ export function createTransport(options: TransportOptions): Call {
     const answer = parsed as { error?: unknown; message?: unknown } | null;
     const code = answer?.error;
     if (!isKnownCode(code)) return fail("unexpected", res.status);
-    return typeof answer?.message === "string"
+    // Only hook_refused carries a message (plan 9d): a message on another
+    // code, as from a proxy, is dropped, so ClientFailure keeps its promise.
+    return code === "hook_refused" && typeof answer?.message === "string"
       ? failWith(code, res.status, answer.message)
       : fail(code, res.status);
   };
