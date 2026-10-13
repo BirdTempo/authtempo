@@ -398,6 +398,7 @@ describe("session create hooks (plan 9d)", () => {
     expect(read("social.ts")).toContain('via: "social"');
     expect(read("passkeys.ts")).toContain('via: "passkey"');
     expect(read("handoff.ts")).toContain('via: "handoff"');
+    expect(read("email-otp.ts")).toContain('via: "email_otp"');
     expect(read("password.ts").split('via: "password"')).toHaveLength(5);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
     const opened = (file: string, via: string) =>
@@ -408,7 +409,8 @@ describe("session create hooks (plan 9d)", () => {
       passkey: opened("passkeys.ts", "passkey"),
       handoff: opened("handoff.ts", "handoff"),
       password: opened("password.ts", "password"),
-    }).toEqual({ magicLink: 1, social: 1, passkey: 1, handoff: 1, password: 4 });
+      emailOtp: opened("email-otp.ts", "email_otp"),
+    }).toEqual({ magicLink: 1, social: 1, passkey: 1, handoff: 1, password: 4, emailOtp: 1 });
   });
 });
 
