@@ -231,6 +231,13 @@ describe("Better Auth's email OTP paths (plan 9e)", () => {
     });
     expect(reset.status).toBe(200);
     expect(await json(reset)).toEqual({ success: true });
+    // The compat reset opens a session (a plan deviation): the cookie carries it.
+    const cookie = /tempo_session=(ts_[^;]+)/.exec(reset.headers.get("set-cookie") ?? "")?.[1];
+    expect(cookie).toMatch(/^ts_/);
+    const me = await auth.api.getSession({
+      headers: new Headers({ cookie: `tempo_session=${cookie}` }),
+    });
+    expect(me?.user.email).toBe(EMAIL);
     const signedIn = await auth.api.signInEmail({
       body: { email: EMAIL, password: "a new correct horse" },
     });
@@ -299,6 +306,18 @@ describe("Better Auth's email OTP paths (plan 9e)", () => {
     expect({ status: named.status, code: (await json(named)).code }).toEqual({
       status: 501,
       code: "NOT_SUPPORTED",
+    });
+    const imaged = await post("/sign-in/email-otp", {
+      email: EMAIL,
+      otp: "123456",
+      image: "https://example.com/a.png",
+    });
+    expect({ status: imaged.status, body: await json(imaged) }).toEqual({
+      status: 501,
+      body: {
+        code: "NOT_SUPPORTED",
+        message: "core takes no image at the email code sign-in",
+      },
     });
   });
 

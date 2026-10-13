@@ -200,7 +200,7 @@ describe("betterAuth", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ advanced: { ipAddress: { disableIpTracking: true } } });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, the email codes, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
+      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, the email codes, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit, and can guess 10 email codes on each of many addresses per 15 minutes (at most 100 a day per address), about 1 takeover per 100,000 addresses per window, and each address gets the code mails",
     );
     info.mockRestore();
     const m = mapOptions({
@@ -434,6 +434,28 @@ describe("betterAuth", () => {
     await limiter.allow("password-resend:email:a@example.com", { seconds: 900, max: 3 });
     await limiter.allow("password-sign-up:ip:unknown", { seconds: 3600, max: 10 });
     expect(keys).toEqual(["password-resend:email:a@example.com", "password-sign-up:ip:unknown"]);
+  });
+
+  it("skips the unknown-IP keys of the email codes, which have per-email limits, and keeps their per-email and daily keys (plan 9e)", async () => {
+    const keys: string[] = [];
+    const limiter = skipUnknownIp({
+      allow: async (key) => {
+        keys.push(key);
+        return true;
+      },
+    });
+    await limiter.allow("otp:ip:unknown", { seconds: 900, max: 20 });
+    await limiter.allow("otp:email:a@example.com", { seconds: 900, max: 3 });
+    await limiter.allow("otp:email-day:a@example.com", { seconds: 86_400, max: 20 });
+    await limiter.allow("otp-verify:ip:unknown", { seconds: 900, max: 30 });
+    await limiter.allow("otp-verify:email:a@example.com", { seconds: 900, max: 10 });
+    await limiter.allow("otp:ip:1.2.3.4", { seconds: 900, max: 20 });
+    expect(keys).toEqual([
+      "otp:email:a@example.com",
+      "otp:email-day:a@example.com",
+      "otp-verify:email:a@example.com",
+      "otp:ip:1.2.3.4",
+    ]);
   });
 
   it("maps every core and client code to one Better Auth code", () => {

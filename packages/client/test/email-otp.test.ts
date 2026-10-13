@@ -23,6 +23,9 @@ describe("emailOtp (plan 9e)", () => {
       value: { sent: true },
     });
     const code = codeOf(server);
+    // The attempt budget: one wrong code of the default maxAttempts 5, so
+    // the right code that follows is still live. A config with maxAttempts 1
+    // is refused (3 to 10), so this test cannot spend the code by accident.
     expect(
       await client.emailOtp.verify({ email: EMAIL, code: code === "000000" ? "111111" : "000000" }),
     ).toEqual({ ok: false, code: "invalid_code", status: 400 });

@@ -965,6 +965,39 @@ describe("email codes on the client (plan 9e)", () => {
     expect(signedIn.user.email).toBe("pat@example.com");
   });
 
+  it("answers success for a malformed address and sends no code; every policy refusal of resetPassword spends the code (README, M-8)", async () => {
+    const { s, c, codes } = otpSetup();
+    for (const type of ["sign-in", "forget-password"] as const)
+      expect(await c.emailOtp.sendVerificationOtp({ email: "not-an-email", type })).toEqual({
+        data: { success: true },
+        error: null,
+      });
+    expect(codes).toEqual([]);
+    await s.auth.api.signUpEmail({
+      body: { email: "pat@example.com", password: PASSWORD, name: "Pat" },
+    });
+    for (const [password, code] of [
+      ["ten chars!", "PASSWORD_TOO_SHORT"],
+      ["x".repeat(129), "PASSWORD_TOO_LONG"],
+    ] as const) {
+      await c.emailOtp.requestPasswordReset({ email: "pat@example.com" });
+      const otp = codes.at(-1)?.otp ?? "";
+      expect(
+        (await c.emailOtp.resetPassword({ email: "pat@example.com", otp, password })).error,
+      ).toMatchObject({ code, status: 400 });
+      // The refusal spent the code: the same code with a good password answers INVALID_OTP.
+      expect(
+        (
+          await c.emailOtp.resetPassword({
+            email: "pat@example.com",
+            otp,
+            password: "a new correct horse",
+          })
+        ).error,
+      ).toMatchObject({ code: "INVALID_OTP", status: 400 });
+    }
+  });
+
   it("keeps the session token in the Expo store after signIn.emailOtp", async () => {
     const storage = memoryStorage();
     const { c, codes } = otpSetup(storage);

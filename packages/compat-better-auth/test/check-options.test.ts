@@ -21,6 +21,10 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     expect(c.notes.find((n) => n.startsWith("advanced.ipAddress.disableIpTracking"))).toContain(
       "one caller can try one password on many addresses, bounded only by each address's limit",
     );
+    // The email code cost too (plan 9e final fix wave, M-2).
+    expect(c.notes.find((n) => n.startsWith("advanced.ipAddress.disableIpTracking"))).toContain(
+      "can guess 10 email codes on each of many addresses per 15 minutes (at most 100 a day per address)",
+    );
   });
 
   it("maps github and linkedin, refuses their unknown keys, and refuses another provider with a pointer to core's lists (plan 9c)", () => {
