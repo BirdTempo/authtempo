@@ -2,8 +2,9 @@ import type { ResolvedConfig } from "../config.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { InvitationRow, MemberRow, OrganizationRow } from "../schema.js";
+import type { InvitationRow, MemberRow, OrganizationRow, UserRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { HookStop, hookGuard, runAfter, runBefore } from "./hooks.js";
 import {
   type Caller,
   type MemberSummary,
@@ -95,15 +96,48 @@ export async function inviteMember(
     createdAt: now,
     updatedAt: now,
   };
-  await config.storage.transaction(async (tx) => {
-    // One pending invitation per address: a new invite replaces the old one, so the old link dies.
-    await tx.delete("invitation", [
-      { field: "organizationId", op: "eq", value: input.organizationId },
-      { field: "email", op: "eq", value: email },
-      { field: "acceptedAt", op: "eq", value: null },
-    ]);
-    await tx.create("invitation", row);
-  });
+  const hooks = config.hooks.organization;
+  const organization = publicOrganization(s.value.organization);
+  const limit = o.limits.pendingInvitationsPerOrganization;
+  const written = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<true>> => {
+      if (limit !== null) {
+        // The address's own pending row does not count: the invite below replaces it.
+        const pending = await tx.findMany(
+          "invitation",
+          [
+            { field: "organizationId", op: "eq", value: input.organizationId },
+            { field: "acceptedAt", op: "eq", value: null },
+            { field: "expiresAt", op: "gt", value: now },
+            { field: "email", op: "ne", value: email },
+          ],
+          { limit },
+        );
+        if (pending.length >= limit) return fail("invitation_limit");
+      }
+      await runBefore("organization.beforeInvite", hooks.beforeInvite, {
+        organization,
+        invitation: { email, role: input.role },
+        by: input.user,
+      });
+      // One pending invitation per address: a new invite replaces the old one, so the old link dies.
+      await tx.delete("invitation", [
+        { field: "organizationId", op: "eq", value: input.organizationId },
+        { field: "email", op: "eq", value: email },
+        { field: "acceptedAt", op: "eq", value: null },
+      ]);
+      await tx.create("invitation", row);
+      return ok(true);
+    }),
+  );
+  if (!written.ok) return written;
+  // Right after the commit, before the mail: the row exists whatever the mail does.
+  await runAfter(
+    "organization.afterInvite",
+    hooks.afterInvite,
+    { organization, invitation: summary(row), by: input.user },
+    row.id,
+  );
   const link = o.invitationLinkBuilder(token, {
     slug: s.value.organization.slug,
     name: s.value.organization.name,
@@ -152,11 +186,25 @@ export async function revokeInvitation(
   const s = await adminStanding(config, o, input, "revoke");
   if (!s.ok) return s;
   // The organization id is in the where, so an admin of another organization cannot reach this row.
-  const n = await config.storage.delete("invitation", [
+  const where = [
     { field: "id", op: "eq", value: input.invitationId },
     { field: "organizationId", op: "eq", value: input.organizationId },
-  ]);
-  return n === 0 ? fail("not_found") : ok({ ok: true });
+  ] as const;
+  // Read first, for the after hook's event.
+  const row = await config.storage.findOne("invitation", [...where]);
+  if (!row) return fail("not_found");
+  if ((await config.storage.delete("invitation", [...where])) === 0) return fail("not_found");
+  await runAfter(
+    "organization.afterRevokeInvitation",
+    config.hooks.organization.afterRevokeInvitation,
+    {
+      organization: publicOrganization(s.value.organization),
+      invitation: summary(row),
+      by: input.user,
+    },
+    row.id,
+  );
+  return ok({ ok: true });
 }
 
 async function liveInvitation(
@@ -172,6 +220,9 @@ async function liveInvitation(
   return ok(row);
 }
 
+/** What the accept transaction answers: the member row and whether it is new, or why it stopped. */
+type Accepted = { row: MemberRow; created: boolean } | "inviter_lost" | "member_limit" | null;
+
 export async function acceptInvitation(
   config: ResolvedConfig,
   input: Caller & { token: string; ip: string | null },
@@ -186,14 +237,18 @@ export async function acceptInvitation(
   // The same rule as a social claim: only the verified holder of the invited address may accept.
   if (!input.user.emailVerified) return fail("email_unverified");
   if (input.user.email !== inv.email) return fail("email_mismatch");
-  const organization = await config.storage.findOne("organization", [
+  const organizationRow = await config.storage.findOne("organization", [
     { field: "id", op: "eq", value: inv.organizationId },
   ]);
-  if (!organization) return fail("invalid_token");
+  if (!organizationRow) return fail("invalid_token");
   const now = config.clock.now();
-  let member: MemberRow | "inviter_lost" | null = null;
+  const hooks = config.hooks.organization;
+  const organization = publicOrganization(organizationRow);
+  const invitation = summary(inv);
+  const limit = o.limits.membersPerOrganization;
+  let accepted: Accepted = null;
   try {
-    member = await config.storage.transaction(async (tx) => {
+    accepted = await config.storage.transaction(async (tx): Promise<Accepted> => {
       // An invitation carries its inviter's rank at the time of the invite. If the inviter was
       // removed or demoted since, the grant must die with their right; the check runs here because
       // a removal cannot find every pending invitation by rank.
@@ -209,15 +264,38 @@ export async function acceptInvitation(
         inviterRank < needs(o, "invite") ||
         inviterRank < grantRank ||
         grantRank === 0 ||
-        !roleAllowedIn(o, inv.role, organization.slug)
+        !roleAllowedIn(o, inv.role, organizationRow.slug)
       ) {
         // Only a pending row: an accepted row is a record of a grant that already happened.
         await tx.delete("invitation", [
           { field: "id", op: "eq", value: inv.id },
           { field: "acceptedAt", op: "eq", value: null },
         ]);
-        return "inviter_lost" as const;
+        return "inviter_lost";
       }
+      const existing = await tx.findOne("member", [
+        { field: "organizationId", op: "eq", value: inv.organizationId },
+        { field: "userId", op: "eq", value: input.user.id },
+      ]);
+      // The limit counts a new member row only: a raise of an existing member adds none.
+      if (!existing && limit !== null) {
+        const held = await tx.findMany(
+          "member",
+          [{ field: "organizationId", op: "eq", value: inv.organizationId }],
+          { limit },
+        );
+        if (held.length >= limit) return "member_limit";
+      }
+      // Before the consume, on every accept, as Better Auth's beforeAcceptInvitation.
+      // A refusal throws, so the invitation stays pending.
+      await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+        organization,
+        member: { userId: input.user.id, role: inv.role },
+        memberUser: input.user,
+        by: input.user,
+        via: "invitation",
+        invitation,
+      });
       // One conditional update consumes the token: two accepts race for one row and only one wins.
       const n = await tx.update(
         "invitation",
@@ -228,19 +306,15 @@ export async function acceptInvitation(
         { acceptedAt: now, updatedAt: now },
       );
       if (n === 0) return null;
-      const existing = await tx.findOne("member", [
-        { field: "organizationId", op: "eq", value: inv.organizationId },
-        { field: "userId", op: "eq", value: input.user.id },
-      ]);
       if (existing) {
         if (rankOf(o.ranks, inv.role) > rankOf(o.ranks, existing.role)) {
           await tx.update("member", [{ field: "id", op: "eq", value: existing.id }], {
             role: inv.role,
             updatedAt: now,
           });
-          return { ...existing, role: inv.role, updatedAt: now };
+          return { row: { ...existing, role: inv.role, updatedAt: now }, created: false };
         }
-        return existing;
+        return { row: existing, created: false };
       }
       const row: MemberRow = {
         id: newId(now),
@@ -251,41 +325,86 @@ export async function acceptInvitation(
         updatedAt: now,
       };
       await tx.create("member", row);
-      return row;
+      return { row, created: true };
     });
   } catch (err) {
+    if (err instanceof HookStop) return err.result;
     // A concurrent addMember won the unique key; the transaction rolled back, so the token is still live. The person retries.
     if (err instanceof StorageError && err.code === "unique_violation")
       return fail("already_member");
     throw err;
   }
+  // The limit answers before any write, so the invitation stays pending.
+  if (accepted === "member_limit") return fail("member_limit");
   // Both a lost race for the token and a lost inviter answer invalid_token: the link is dead either way.
-  if (member === null || member === "inviter_lost") return fail("invalid_token");
-  return ok({
-    organization: publicOrganization(organization),
-    member: {
-      id: member.id,
-      userId: member.userId,
-      role: member.role,
-      email: input.user.email,
-      name: input.user.name,
-      createdAt: member.createdAt,
-    },
-  });
+  if (accepted === null || accepted === "inviter_lost") return fail("invalid_token");
+  const member: MemberSummary = {
+    id: accepted.row.id,
+    userId: accepted.row.userId,
+    role: accepted.row.role,
+    email: input.user.email,
+    name: input.user.name,
+    createdAt: accepted.row.createdAt,
+  };
+  if (accepted.created)
+    await runAfter(
+      "organization.afterAddMember",
+      hooks.afterAddMember,
+      {
+        organization,
+        member,
+        memberUser: input.user,
+        by: input.user,
+        via: "invitation",
+        invitation,
+      },
+      member.id,
+    );
+  await runAfter(
+    "organization.afterAcceptInvitation",
+    hooks.afterAcceptInvitation,
+    { organization, invitation, member, user: input.user },
+    inv.id,
+  );
+  return ok({ organization, member });
 }
 
+/**
+ * Decline needs the token only: the link in the mail is the credential.
+ * `user` is the user of the session the request carried, if any, for the
+ * after hook's event. It is not checked against the invitation's address.
+ */
 export async function declineInvitation(
   config: ResolvedConfig,
-  input: { token: string },
+  input: { token: string; user?: UserRow | null },
 ): Promise<Result<{ ok: true }>> {
   if (!config.organizations) return fail("not_found");
   const live = await liveInvitation(config, input.token);
   if (!live.ok) return live;
+  const inv = live.value;
   const n = await config.storage.delete("invitation", [
-    { field: "id", op: "eq", value: live.value.id },
+    { field: "id", op: "eq", value: inv.id },
     { field: "acceptedAt", op: "eq", value: null },
   ]);
-  return n === 0 ? fail("invalid_token") : ok({ ok: true });
+  if (n === 0) return fail("invalid_token");
+  const hook = config.hooks.organization.afterDeclineInvitation;
+  if (hook) {
+    const organization = await config.storage.findOne("organization", [
+      { field: "id", op: "eq", value: inv.organizationId },
+    ]);
+    if (organization)
+      await runAfter(
+        "organization.afterDeclineInvitation",
+        hook,
+        {
+          organization: publicOrganization(organization),
+          invitation: summary(inv),
+          user: input.user ?? null,
+        },
+        inv.id,
+      );
+  }
+  return ok({ ok: true });
 }
 
 export async function setActiveOrganization(

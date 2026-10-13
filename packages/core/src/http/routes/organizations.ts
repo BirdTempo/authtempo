@@ -199,7 +199,14 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, tokenBody);
         if (!body.ok) return respond(body);
-        return respond(await declineInvitation(config, { token: body.value.token }));
+        // A session is optional: the after hook names its user when the request carries one.
+        const s = await withSession(ctx);
+        return send(
+          respond(
+            await declineInvitation(config, { token: body.value.token, user: s?.user ?? null }),
+          ),
+          s?.renewed ?? null,
+        );
       },
     },
     // Active answers { user, session } as the engine returns it.

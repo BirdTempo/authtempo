@@ -604,11 +604,12 @@ describe("stale reads and removal (Review I-2, I-3, M-1)", () => {
 
   it("a role change answers conflict when the target was promoted to owner after the read", async () => {
     const { auth, owner, admin, b, org } = await team();
-    const original = auth.storage.update.bind(auth.storage);
+    const original = auth.storage.transaction.bind(auth.storage);
     let promoted = false;
     // The owner promotes B after the admin's standing read and before the admin's write.
-    auth.storage.update = (async (model, where, data) => {
-      if (model === "member" && !promoted) {
+    // The write runs in a transaction (plan 9d), so the promotion goes in before the transaction opens.
+    auth.storage.transaction = async <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+      if (!promoted) {
         promoted = true;
         const r = await updateMemberRole(auth.config, {
           user: owner,
@@ -618,8 +619,8 @@ describe("stale reads and removal (Review I-2, I-3, M-1)", () => {
         });
         if (!r.ok) throw new Error(r.code);
       }
-      return original(model, where, data);
-    }) as StorageAdapter["update"];
+      return original(fn);
+    };
     expect(
       await updateMemberRole(auth.config, {
         user: admin,
