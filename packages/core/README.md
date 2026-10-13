@@ -539,7 +539,10 @@ const auth = createAuth({
 ```
 
 - A before hook runs inside the flow's transaction, after core's rank
-  checks and limits, and before the first write. `throw hookRefusal(message)`
+  checks and limits, and before the first write. The exception is
+  `session.beforeCreate`, which runs just before the session insert, after
+  the sign-in's own writes in the same transaction (see "Session points").
+  A refusal undoes those writes with the transaction. `throw hookRefusal(message)`
   answers 403 `{ "error": "hook_refused", "message": "…" }`. A message that
   is empty, longer than 200 characters, or holds a control character becomes
   "The app refused this request.". Any other throw answers 500
@@ -571,7 +574,24 @@ const auth = createAuth({
   (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`, or
   `expired`), once per ended row. `sweepExpired` deletes expired rows in
   bulk and fires no hook, so `expired` fires only when a request presents
-  the token after its expiry.
+  the token after its expiry. A claim ends a claimant's sessions with
+  `claim` in every flow that proves the address: the magic link, the
+  social sign-in, the verify link, and the reset of an unverified user. A
+  reset of a verified user ends that user's sessions with `password_reset`.
+- Where `session.beforeCreate` runs in each sign-in's transaction:
+
+  | Flow | Writes before the hook |
+  | --- | --- |
+  | Password sign-up | None: the hook gets the user core minted, then core writes the user, the password, and the session |
+  | Password sign-in, passkey, handoff | None: the session insert is the first write of the transaction |
+  | Magic link | The new user and its email identity, or the email identity repair and the claim |
+  | Social sign-in | The new user or the claim, the identity link, the email identity, and the user's name and image |
+  | Verify link | The password row check, the claim, and the email identity |
+  | Reset | The link consume, the user, the new password, the claim or the session delete, the link delete, and the email identity |
+
+- A refused sign-in has spent what it presented. A refused magic link or
+  verify link is consumed, and a refused passkey sign-in has spent its
+  challenge and moved the passkey counter. The person starts again.
 - A before hook can run for a sign-in that then fails: a claim race guard
   deletes the new session in the same transaction and answers an error, and
   `afterCreate` does not run. A flow that retries after a unique key race

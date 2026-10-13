@@ -125,18 +125,24 @@ async function patchedInput(
   return input;
 }
 
+/** The session fields after `session.beforeCreate` and its patch check, not yet written (plan 9d). */
+export interface PreparedSession {
+  readonly input: SessionInput;
+}
+
 /**
- * The one way an engine flow opens a session (plan 9d). It runs
- * `session.beforeCreate` on the flow's transaction (`storage`), applies the
- * patch, and writes the row. A refusal or a bad patch throws `HookStop`,
- * which undoes the flow's transaction; the flow's `hookGuard` answers it.
- * The flow calls `sessionOpened` after its commit.
+ * The hook step of `openSession` (plan 9d): it runs `session.beforeCreate`
+ * and checks the patch on the flow's transaction (`storage`), and writes
+ * nothing. A refusal or a bad patch throws `HookStop`, which undoes the
+ * flow's transaction; the flow's `hookGuard` answers it. A flow calls it
+ * apart from `writeSession` only when the hook must run before its first
+ * write: the password sign-up.
  */
-export async function openSession(
+export async function prepareSession(
   config: ResolvedConfig,
   input: SessionOpen,
   storage: StorageAdapter = config.storage,
-): Promise<{ token: string; session: SessionRow }> {
+): Promise<PreparedSession> {
   const draft: SessionDraft = {
     userId: input.user.id,
     ip: input.ip,
@@ -148,7 +154,29 @@ export async function openSession(
     user: input.user,
     via: input.via,
   });
-  return createSession(config, await patchedInput(config, storage, draft, patch), storage);
+  return { input: await patchedInput(config, storage, draft, patch) };
+}
+
+/** The write step of `openSession`: the session row of a `prepareSession` answer. */
+export function writeSession(
+  config: ResolvedConfig,
+  prepared: PreparedSession,
+  storage: StorageAdapter = config.storage,
+): Promise<{ token: string; session: SessionRow }> {
+  return createSession(config, prepared.input, storage);
+}
+
+/**
+ * The one way an engine flow opens a session (plan 9d): `prepareSession`,
+ * then `writeSession`, on the flow's transaction. The flow calls
+ * `sessionOpened` after its commit.
+ */
+export async function openSession(
+  config: ResolvedConfig,
+  input: SessionOpen,
+  storage: StorageAdapter = config.storage,
+): Promise<{ token: string; session: SessionRow }> {
+  return writeSession(config, await prepareSession(config, input, storage), storage);
 }
 
 /** `session.afterCreate` for a sign-in that committed (plan 9d). */

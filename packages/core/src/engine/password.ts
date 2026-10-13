@@ -7,7 +7,14 @@ import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
-import { openSession, type ResolvedSession, sessionOpened, sessionsEnded } from "./sessions.js";
+import {
+  openSession,
+  prepareSession,
+  type ResolvedSession,
+  sessionOpened,
+  sessionsEnded,
+  writeSession,
+} from "./sessions.js";
 import {
   claimEmail,
   ensureEmailIdentity,
@@ -193,7 +200,7 @@ function insertSignUp(
     // (`undoCreateWhere`), so the owner's verified user stays, and the retry
     // reads it and answers `email_taken`. Postgres isolates the transaction,
     // so the order is no guard there. Checked 2026-10-10.
-    const user = await tx.create("user", {
+    const minted: UserRow = {
       id: newId(now),
       email: row.email,
       emailVerified: false,
@@ -201,7 +208,19 @@ function insertSignUp(
       image: null,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    // The session hook before the first write, with the minted user (plan
+    // 9d, fix round 1). On D1 a refusal after a create makes the undo
+    // delete the created row by id (`undoCreateWhere`), and only the user
+    // row has a guard. After an owner's reset inside this transaction, the
+    // pending password row holds the owner's hash, so an undo of it would
+    // delete the owner's password. A refusal here undoes nothing.
+    const prepared = await prepareSession(
+      config,
+      { user: minted, ip: input.ip, userAgent: input.userAgent, via: "password" },
+      tx,
+    );
+    const user = await tx.create("user", minted);
     // Pending until the guard below passed: see `PENDING_HASH_PREFIX`.
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
     const password = await tx.create("password", {
@@ -211,11 +230,7 @@ function insertSignUp(
       createdAt: now,
       updatedAt: now,
     });
-    const s = await openSession(
-      config,
-      { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
-      tx,
-    );
+    const s = await writeSession(config, prepared, tx);
     // claimEmail flips the flag in its first statement, so any claim since
     // the user create makes this match zero rows. The user row is the
     // owner's now. A throw would undo the password create, and the D1 undo
@@ -679,7 +694,7 @@ export async function resetPassword(
   if (refused) return fail(refused);
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
-  const ended: SessionRow[] = [];
+  const ended: ResetEnded = { claim: [], reset: [] };
   let reset: Result<PasswordSession & { next: string }> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
@@ -701,10 +716,19 @@ export async function resetPassword(
     }
   }
   if (reset.ok) {
-    await sessionsEnded(config, ended, "password_reset");
+    // One reason for one cause: the claim's rows end with `claim`, the
+    // verified user's own rows with `password_reset` (fix round 1).
+    await sessionsEnded(config, ended.claim, "claim");
+    await sessionsEnded(config, ended.reset, "password_reset");
     await sessionOpened(config, reset.value.session, reset.value.user, "password");
   }
   return reset;
+}
+
+/** The session rows a reset deleted, by cause. Only one list fills in one reset. */
+interface ResetEnded {
+  claim: SessionRow[];
+  reset: SessionRow[];
 }
 
 function applyReset(
@@ -713,12 +737,13 @@ function applyReset(
   valueHash: string,
   hash: string,
   now: Date,
-  ended: SessionRow[],
+  ended: ResetEnded,
 ): Promise<Result<PasswordSession & { next: string }>> {
   return config.storage.transaction(
     async (tx): Promise<Result<PasswordSession & { next: string }>> => {
       // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
-      ended.length = 0;
+      ended.claim.length = 0;
+      ended.reset.length = 0;
       // The first statement. Two POSTs of one token race here, and only one
       // wins. A refusal comes before any write, so nothing is left to undo.
       const consumed = await consumeVerification(tx, { purpose: "password-reset", valueHash, now });
@@ -747,10 +772,10 @@ function applyReset(
       if (!user.emailVerified) {
         // The claim deletes the claimant's sessions, identities, passkeys,
         // handoff codes, and every other password row, and keeps the new password.
-        await claimEmail(tx, user.id, { passwordId }, now, ended);
+        await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
         user = { ...user, emailVerified: true, updatedAt: now };
       } else {
-        ended.push(
+        ended.reset.push(
           ...(await tx.findMany("session", [{ field: "userId", op: "eq", value: user.id }])),
         );
         await tx.delete("session", [{ field: "userId", op: "eq", value: user.id }]);

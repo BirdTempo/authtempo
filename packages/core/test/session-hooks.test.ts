@@ -9,9 +9,11 @@ import {
   passwordSignUp,
   requestPasswordReset,
   resetPassword,
+  verifyPasswordEmail,
 } from "../src/engine/password.js";
 import { createSession, destroySession, resolveSession } from "../src/engine/sessions.js";
 import { sweepExpired } from "../src/engine/sweep.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 
@@ -70,8 +72,43 @@ const signIn = (auth: ReturnType<typeof makeAuth>) =>
     userAgent: null,
   });
 
-async function reset(auth: ReturnType<typeof makeAuth>) {
-  const asked = await requestPasswordReset(auth.config, { email: "ada@example.com", ip: null });
+/**
+ * Records each write of the next transaction as `op:model`, in order, as
+ * `recordNextTransaction` in password.test.ts does.
+ */
+function recordNextTransaction(storage: StorageAdapter): string[] {
+  const writes: string[] = [];
+  const original = storage.transaction.bind(storage);
+  let armed = true;
+  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+    if (!armed) return original(fn);
+    armed = false;
+    return original((tx) =>
+      fn({
+        ...tx,
+        create: (m, d) => {
+          writes.push(`create:${m}`);
+          return tx.create(m, d);
+        },
+        update: (m, w, d) => {
+          writes.push(`update:${m}`);
+          return tx.update(m, w, d);
+        },
+        delete: (m, w) => {
+          writes.push(`delete:${m}`);
+          return tx.delete(m, w);
+        },
+      }),
+    );
+  };
+  return writes;
+}
+
+const signUp = (auth: ReturnType<typeof makeAuth>, email: string) =>
+  passwordSignUp(auth.config, { email, password: PASSWORD, ip: null, userAgent: null });
+
+async function reset(auth: ReturnType<typeof makeAuth>, email = "ada@example.com") {
+  const asked = await requestPasswordReset(auth.config, { email, ip: null });
   if (!asked.ok) throw new Error(asked.code);
   const token = tokenFromMail(auth.mail.at(-1)?.text ?? "");
   return resetPassword(auth.config, {
@@ -175,10 +212,33 @@ describe("session create hooks (plan 9d)", () => {
         userAgent: null,
       }),
     ).toEqual({ ok: false, code: "hook_refused", status: 403, message: "Sign-ups are closed." });
-    // The session is the sign-up's last write: the refusal undid the user and password rows before it.
+    // The hook runs before the sign-up's first write, so no row was written.
     expect(await refusing.auth.storage.findMany("user", [])).toEqual([]);
     expect(await refusing.auth.storage.findMany("password", [])).toEqual([]);
     expect(refusing.auth.mail).toHaveLength(mails);
+  });
+
+  it("runs the sign-up's session hook before its first write: a refusal makes no create (fix round 1)", async () => {
+    let writesAtHook: string[] | null = null;
+    const refusing = recorded({
+      beforeCreate() {
+        writesAtHook = [...writes];
+        throw hookRefusal("Sign-ups are closed.");
+      },
+    });
+    const writes = recordNextTransaction(refusing.auth.storage);
+    expect((await signUp(refusing.auth, "new@example.com")).ok).toBe(false);
+    // No user create and no pending password create ran, so on D1 no undo can
+    // delete a row by id: the hook ran first.
+    expect(writesAtHook).toEqual([]);
+    expect(writes).toEqual([]);
+    expect(await refusing.auth.storage.findMany("session", [])).toEqual([]);
+
+    // Without a refusal the order is the hook, then the user, password, and session creates.
+    const { auth } = recorded();
+    const ok = recordNextTransaction(auth.storage);
+    expect((await signUp(auth, "ada@example.com")).ok).toBe(true);
+    expect(ok.slice(0, 3)).toEqual(["create:user", "create:password", "create:session"]);
   });
 
   it("names the flow in via: password on the sign-up, the verify link, the sign-in, and the reset", async () => {
@@ -221,6 +281,16 @@ describe("session create hooks (plan 9d)", () => {
     expect(read("passkeys.ts")).toContain('via: "passkey"');
     expect(read("handoff.ts")).toContain('via: "handoff"');
     expect(read("password.ts").split('via: "password"')).toHaveLength(5);
+    // The after hook too: each flow passes its via to sessionOpened after its commit.
+    const opened = (file: string, via: string) =>
+      read(file).match(new RegExp(`sessionOpened\\([^;]*?"${via}",?\\s*\\)`, "g"))?.length ?? 0;
+    expect({
+      magicLink: opened("magic-link.ts", "magic_link"),
+      social: opened("social.ts", "social"),
+      passkey: opened("passkeys.ts", "passkey"),
+      handoff: opened("handoff.ts", "handoff"),
+      password: opened("password.ts", "password"),
+    }).toEqual({ magicLink: 1, social: 1, passkey: 1, handoff: 1, password: 4 });
   });
 });
 
@@ -241,7 +311,24 @@ describe("session end hooks (plan 9d)", () => {
     ]);
   });
 
-  it("fires afterEnd once per session, with password_reset, on a reset that ends three sessions", async () => {
+  it("fires afterEnd with claim for the claimant's session when the verify link proves the address", async () => {
+    const { auth, calls } = recorded();
+    const up = await signUp(auth, "ada@example.com");
+    if (!up.ok) throw new Error(up.code);
+    calls.length = 0;
+    const mail = auth.mail.findLast((m) => m.subject.startsWith("Confirm"));
+    const verified = await verifyPasswordEmail(auth.config, {
+      token: tokenFromMail(mail?.text ?? ""),
+      ip: null,
+      userAgent: null,
+    });
+    expect(verified.ok && verified.value.signedIn !== null).toBe(true);
+    expect(calls.filter(([name]) => name === "afterEnd")).toEqual([
+      ["afterEnd", { session: up.value.session, reason: "claim" }],
+    ]);
+  });
+
+  it("fires afterEnd once per session, with password_reset, on a reset that ends three sessions, and with claim on the reset of an unverified user", async () => {
     const { auth, calls } = recorded();
     await signUpAndVerify(auth, "ada@example.com", PASSWORD);
     expect((await signIn(auth)).ok).toBe(true);
@@ -259,6 +346,16 @@ describe("session end hooks (plan 9d)", () => {
     expect(ended.map((e) => (e as { session: { id: string } }).session.id).sort()).toEqual(
       before.map((s) => s.id).sort(),
     );
+
+    // An unverified user's sessions are a claimant's: the reset claims the
+    // address, and the reason is the claim's (fix round 1).
+    const bob = await signUp(auth, "bob@example.com");
+    if (!bob.ok) throw new Error(bob.code);
+    calls.length = 0;
+    expect((await reset(auth, "bob@example.com")).ok).toBe(true);
+    expect(calls.filter(([name]) => name === "afterEnd")).toEqual([
+      ["afterEnd", { session: bob.value.session, reason: "claim" }],
+    ]);
   });
 
   it("fires afterEnd with password_change for every other session, never the changer's", async () => {
