@@ -11,9 +11,12 @@ import {
   SESSION_HOOK_POINTS,
   type SessionHooks,
 } from "./engine/hooks.js";
+import type { CimdEntry } from "./engine/oauth-clients.js";
+import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
+import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 import {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -184,6 +187,12 @@ export interface AuthConfig {
    */
   jwtMint?: JwtMintConfig | false;
   /**
+   * The OAuth 2.1 and OIDC provider (plan 9g, spec 8.13), for agents and MCP
+   * clients. Off when absent or `false`; on when `resources` is set. Needs
+   * `jwtMint`: an access token is a JWT that core signs.
+   */
+  oauth?: OAuthConfig | false;
+  /**
    * The app's code at named points of the organization and session flows
    * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
    * refuses with `throw hookRefusal(message)`; an after hook runs after the
@@ -297,6 +306,49 @@ export interface ResolvedJwtMint {
     | null;
 }
 
+export interface OAuthConfig {
+  /**
+   * The resource indicators (RFC 8707) that a client may ask for: 1 to 20
+   * absolute http or https URLs, no query, fragment, or credentials. Each is
+   * the `aud` of the access tokens for it, and `auth.caller` reads a request
+   * under its path as that resource.
+   */
+  resources: string[];
+  /** The app's scopes, name to the consent page's text. `openid`, `profile`, `email`, and `offline_access` are built in. */
+  scopes?: Record<string, string>;
+  /** `dynamic`: RFC 7591 at `POST /oauth/register`. `cimd`: a client id that is the URL of its metadata document. Both default true. */
+  registration?: { dynamic?: boolean; cimd?: boolean };
+  /**
+   * The fetch for a client metadata document: the app's own guarded fetch,
+   * which refuses private addresses (SSRF). Required while `cimd` is on.
+   * Core adds the timeout, the size cap, and `redirect: "manual"`.
+   */
+  fetch?: typeof fetch;
+  /** The HTML of the consent page. Default `defaultConsentPage`. */
+  consentPage?: (input: ConsentPageInput) => string;
+  /** The life of an access token, 1 to 60. Default `jwtMint.ttlMinutes`. */
+  accessTtlMinutes?: number;
+  /** The life of a refresh token from its issue, 1 to 365. Default 30. */
+  refreshTtlDays?: number;
+  /** The life of an authorization code, 1 to 10. Default 5. */
+  codeTtlMinutes?: number;
+}
+
+export interface ResolvedOAuth {
+  resources: readonly string[];
+  /** Name to text, the built-in four first. */
+  scopes: ReadonlyMap<string, string>;
+  dynamic: boolean;
+  cimd: boolean;
+  fetch: typeof fetch | null;
+  consentPage: (input: ConsentPageInput) => string;
+  accessTtlMinutes: number;
+  refreshTtlDays: number;
+  codeTtlMinutes: number;
+  /** The metadata documents this isolate read, by URL, each for one hour. */
+  cimdCache: Map<string, CimdEntry>;
+}
+
 export interface LegacyVerifyConfig {
   verify: (email: string, password: string, signal: AbortSignal) => Promise<boolean>;
   /**
@@ -385,6 +437,7 @@ export interface ResolvedConfig {
   emailOtp: ResolvedEmailOtp | null;
   totp: ResolvedTotp | null;
   jwtMint: ResolvedJwtMint | null;
+  oauth: ResolvedOAuth | null;
   hooks: ResolvedHooks;
 }
 
@@ -623,6 +676,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   }
   // One source for the session cookie name: the trust cookie check of `totp` reads it too.
   const cookieName = input.cookieName ?? "tempo_session";
+  const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
   return {
     basePath,
     baseURL: input.baseURL,
@@ -658,7 +712,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
-    jwtMint: resolveJwtMint(input.jwtMint, input.baseURL),
+    jwtMint,
+    oauth: resolveOAuth(input.oauth, jwtMint),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
@@ -878,6 +933,125 @@ function resolveJwtMint(
   if (o.claims !== undefined && typeof o.claims !== "function")
     throw new ConfigError("jwtMint.claims must be a function");
   return { alg, audience: [...(audience as string[])], ttlMinutes, claims: o.claims ?? null };
+}
+
+const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
+  resources: true,
+  scopes: true,
+  registration: true,
+  fetch: true,
+  consentPage: true,
+  accessTtlMinutes: true,
+  refreshTtlDays: true,
+  codeTtlMinutes: true,
+};
+
+function isResourceUrl(value: unknown): boolean {
+  if (typeof value !== "string" || value.length > 2048 || value.includes("#")) return false;
+  try {
+    const u = new URL(value);
+    return (
+      (u.protocol === "https:" || u.protocol === "http:") &&
+      u.search === "" &&
+      u.username === "" &&
+      u.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function integerIn(path: string, value: number, min: number, max: number): number {
+  if (!Number.isSafeInteger(value) || value < min || value > max)
+    throw new ConfigError(`${path} must be an integer from ${min} to ${max}`);
+  return value;
+}
+
+/** `oauth` (plan 9g). Absent or `false`: off. */
+function resolveOAuth(
+  input: OAuthConfig | false | undefined,
+  jwtMint: ResolvedJwtMint | null,
+): ResolvedOAuth | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("oauth must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
+      throw new ConfigError(
+        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, and codeTtlMinutes`,
+      );
+  if (!jwtMint)
+    throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
+  const resources: unknown = input.resources;
+  if (
+    !Array.isArray(resources) ||
+    resources.length < 1 ||
+    resources.length > 20 ||
+    !resources.every(isResourceUrl) ||
+    new Set(resources).size !== resources.length
+  )
+    throw new ConfigError(
+      "oauth.resources must be 1 to 20 distinct absolute http or https URLs with no query, fragment, or credentials",
+    );
+  const scopes = new Map(BUILT_IN_SCOPES);
+  if (input.scopes !== undefined) {
+    if (!isPlainObject(input.scopes as unknown))
+      throw new ConfigError("oauth.scopes must be an object of names to texts");
+    for (const [name, text] of Object.entries(input.scopes)) {
+      if (!SCOPE_RE.test(name))
+        throw new ConfigError(
+          "oauth.scopes has a name that is not a scope token: 1 to 64 printable ASCII characters with no space, quote, or backslash",
+        );
+      if (BUILT_IN_SCOPES.has(name)) throw new ConfigError(`oauth.scopes.${name} is built in`);
+      if (typeof text !== "string" || text.length < 1 || text.length > 200 || hasControlChar(text))
+        throw new ConfigError(
+          `oauth.scopes.${name} must be 1 to 200 characters with no control character`,
+        );
+      scopes.set(name, text);
+    }
+  }
+  const registration: Record<string, unknown> = input.registration ?? {};
+  if (!isPlainObject(registration as unknown))
+    throw new ConfigError("oauth.registration must be an object");
+  for (const [key, value] of Object.entries(registration)) {
+    if (value === undefined) continue;
+    if (key !== "dynamic" && key !== "cimd")
+      throw new ConfigError(
+        `oauth.registration.${key} is not an option; core has dynamic and cimd`,
+      );
+    if (typeof value !== "boolean")
+      throw new ConfigError(`oauth.registration.${key} must be a boolean`);
+  }
+  const dynamic = registration.dynamic !== false;
+  const cimd = registration.cimd !== false;
+  if (!dynamic && !cimd)
+    throw new ConfigError(
+      "oauth.registration must leave dynamic or cimd on, or no client can register",
+    );
+  if (input.fetch !== undefined && typeof input.fetch !== "function")
+    throw new ConfigError("oauth.fetch must be a function");
+  if (cimd && input.fetch === undefined)
+    throw new ConfigError(
+      "oauth.fetch is required while registration.cimd is on: pass the app's guarded fetch for client metadata documents, or set registration.cimd to false",
+    );
+  if (input.consentPage !== undefined && typeof input.consentPage !== "function")
+    throw new ConfigError("oauth.consentPage must be a function");
+  return {
+    resources: [...(resources as string[])],
+    scopes,
+    dynamic,
+    cimd,
+    fetch: input.fetch ?? null,
+    consentPage: input.consentPage ?? defaultConsentPage,
+    accessTtlMinutes: integerIn(
+      "oauth.accessTtlMinutes",
+      input.accessTtlMinutes ?? jwtMint.ttlMinutes,
+      1,
+      60,
+    ),
+    refreshTtlDays: integerIn("oauth.refreshTtlDays", input.refreshTtlDays ?? 30, 1, 365),
+    codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
+    cimdCache: new Map(),
+  };
 }
 
 /** An object literal. A class instance keeps its methods on the prototype, where `Object.entries` does not see them. */

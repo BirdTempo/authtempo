@@ -130,6 +130,7 @@ import { emailOtpRoutes } from "./http/routes/email-otp.js";
 import { handoffRoutes } from "./http/routes/handoff.js";
 import { jwtRoutes } from "./http/routes/jwt.js";
 import { magicLinkRoutes } from "./http/routes/magic-link.js";
+import { oauthRoutes } from "./http/routes/oauth.js";
 import { organizationRoutes } from "./http/routes/organizations.js";
 import { passkeyRoutes } from "./http/routes/passkeys.js";
 import { passwordRoutes } from "./http/routes/password.js";
@@ -370,6 +371,7 @@ export function createAuth(input: AuthConfig): Auth {
     ...organizationRoutes(config),
     ...tokenRoutes(config),
     ...jwtRoutes(config),
+    ...oauthRoutes(config),
   ]);
   return {
     handle,

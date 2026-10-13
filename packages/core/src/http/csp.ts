@@ -80,3 +80,17 @@ export function pageHeaders(_config: ResolvedConfig, policy: string): Record<str
     "content-security-policy": policy,
   };
 }
+
+/**
+ * The policy of the OAuth consent page (plan 9g): the no-script policy plus
+ * the source of the client's redirect URI. Chromium applies `form-action`
+ * to the redirect that answers the allow or the deny, so without it the
+ * browser stops at this origin. An IPv6 literal has no source form and adds
+ * nothing: a client on the loopback uses 127.0.0.1.
+ */
+export function consentPagePolicy(config: ResolvedConfig, redirectUri: string): string {
+  const parts = formActionSources(config);
+  const source = devRedirectSource(redirectUri);
+  if (source !== null && !parts.includes(source)) parts.push(source);
+  return noScriptPolicyWith(parts);
+}

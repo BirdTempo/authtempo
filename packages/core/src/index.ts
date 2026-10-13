@@ -7,6 +7,7 @@ export type {
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
+  OAuthConfig,
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
@@ -96,8 +97,9 @@ export type {
 /** The shape of a `tf_` challenge token (plan 9f): the compat shim checks a cookie against it before core's verify. */
 export { TWO_FACTOR_TOKEN_RE } from "./engine/totp.js";
 export { normalizeEmail, validUserName } from "./engine/users.js";
-export { ERRORS, type ErrorCode } from "./errors.js";
+export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
+export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 export {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
