@@ -7,7 +7,7 @@ sources:
   - packages/adapter-d1/README.md "Migrations"
   - packages/adapter-d1/README.md "Limiter"
   - packages/core/README.md "Sweep"
-  - examples/worker/wrangler.jsonc
+  - examples/worker-d1/wrangler.jsonc
 sidebar:
   order: 2
 ---
@@ -48,18 +48,18 @@ pnpm turbo run test --filter=my-app
 
 <Code code={test} lang="ts" title="examples/my-app/test/sign-in.test.ts" />
 
-7. Create the real database with `pnpm exec wrangler d1 create my-app`.
+7. Create the real database with `pnpm --filter my-app exec wrangler d1 create my-app`.
 8. Copy the `database_id` that the command prints into `wrangler.jsonc`.
 9. Apply the migrations to the real database.
 
 ```sh
-pnpm exec wrangler d1 migrations apply my-app --remote
+pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
 ```
 
 10. Replace the body of `mail.send` in `src/index.ts` with a call to your mail provider.
 11. Set `BASE_URL` in `wrangler.jsonc` to the origin of your Worker.
-12. Store a secret of 32 characters or more with `pnpm exec wrangler secret put AUTH_SECRET`.
-13. Deploy the Worker with `pnpm exec wrangler deploy`.
+12. Store a secret of 32 characters or more with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`.
+13. Deploy the Worker with `pnpm --filter my-app exec wrangler deploy`.
 
 :::caution
 Warning: a new `AUTH_SECRET` makes every live email code fail and locks every user out of the second factor. Do not change it without the steps on [Secrets](/docs/operations/secrets/).

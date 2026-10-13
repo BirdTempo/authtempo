@@ -1,3 +1,4 @@
+// Run this script through `pnpm typecheck:configs`. tsc is on PATH only there.
 // Plan 9b: fail the config typecheck when it finds fewer config files than
 // the known count. An empty or shrunken include in tsconfig.configs.json
 // would otherwise pass with no file checked.
