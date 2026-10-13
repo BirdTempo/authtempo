@@ -4,7 +4,7 @@ export class BetterAuthCompatError extends Error {
   constructor(refusals: readonly string[]) {
     const sorted = [...refusals].sort();
     super(
-      `tempo-auth compat: this config uses ${sorted.length} ${sorted.length === 1 ? "item" : "items"} that tempo-auth cannot keep:\n${sorted.map((r) => `- ${r}`).join("\n")}`,
+      `authtempo compat: this config uses ${sorted.length} ${sorted.length === 1 ? "item" : "items"} that authtempo cannot keep:\n${sorted.map((r) => `- ${r}`).join("\n")}`,
     );
     this.name = "BetterAuthCompatError";
     this.refusals = sorted;

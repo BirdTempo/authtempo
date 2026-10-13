@@ -1,6 +1,6 @@
-# @tempo-auth/compat-better-auth
+# @authtempo/compat-better-auth
 
-Run an app written for Better Auth 1.7 on tempo-auth. The app keeps its code
+Run an app written for Better Auth 1.7 on authtempo. The app keeps its code
 and its tables. A package alias points the Better Auth package names at this
 package.
 
@@ -11,15 +11,15 @@ pnpm and npm, in the app's `package.json`:
 ```json
 {
   "dependencies": {
-    "better-auth": "npm:@tempo-auth/compat-better-auth@0.0.0",
-    "@better-auth/drizzle-adapter": "npm:@tempo-auth/compat-better-auth@0.0.0",
-    "@better-auth/expo": "npm:@tempo-auth/compat-better-auth@0.0.0",
-    "@better-auth/passkey": "npm:@tempo-auth/compat-better-auth@0.0.0",
-    "@tempo-auth/core": "0.0.0",
-    "@tempo-auth/client": "0.0.0",
-    "@tempo-auth/handoff": "0.0.0",
-    "@tempo-auth/adapter-d1": "0.0.0",
-    "@tempo-auth/adapter-postgres": "0.0.0"
+    "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@authtempo/core": "0.0.0",
+    "@authtempo/client": "0.0.0",
+    "@authtempo/handoff": "0.0.0",
+    "@authtempo/adapter-d1": "0.0.0",
+    "@authtempo/adapter-postgres": "0.0.0"
   }
 }
 ```
@@ -66,7 +66,7 @@ row until that sign-in rehashes it. So during the migration window the
 response time shows which accounts are not yet migrated. Each account loses
 this tell at its first right sign-in.
 At most two legacy derives run at once per isolate, also when the app chains
-`@tempo-auth/legacy-hashes` before this seam: both use core's `deriveGate`.
+`@authtempo/legacy-hashes` before this seam: both use core's `deriveGate`.
 The others wait, and no sign-in is refused.
 
 ## Storage: in place on the Better Auth tables
@@ -85,10 +85,10 @@ await betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate();
 
 What the migration does (`0001_compat_better_auth`, append-only):
 
-- It adds two tables, `ta_meta` and `ta_limit`, and no other table. A schema that already holds core's own `ta_meta` and `ta_limit` (from `@tempo-auth/adapter-postgres` migrations) makes `migrate()` stop with `relation "ta_limit" already exists`, and the migration changes nothing. Run the compat storage on a schema without core's tables.
+- It adds two tables, `ta_meta` and `ta_limit`, and no other table. A schema that already holds core's own `ta_meta` and `ta_limit` (from `@authtempo/adapter-postgres` migrations) makes `migrate()` stop with `relation "ta_limit" already exists`, and the migration changes nothing. Run the compat storage on a schema without core's tables.
 - It adds nullable `ta` columns for core fields with no Better Auth column: `session.taLastSeenAt`, `account.taLinkedAt`, `verification.taPurpose`, `taValueHash`, `taConsumedAt`, `taData`, `passkey.taUpdatedAt`, `organization.taUpdatedAt`, `member.taUpdatedAt`, `invitation.taTokenHash`, `taAcceptedAt`, `taUpdatedAt`.
 - It fills the date columns `session.taLastSeenAt`, `account.taLinkedAt`, and the four `taUpdatedAt` columns for existing rows from the nearest Better Auth date (`session.updatedAt`, else `createdAt`), cut to milliseconds. On Postgres these columns also get the default `date_trunc('milliseconds', now())`, so a row that another writer adds later (an old replica during the deploy, the app's own SQL) has a value. Without a value core cannot read the row. The milliseconds matter: core reads dates with millisecond precision, and the organization owner guard compares the read value for equality.
-- The other `ta` columns stay null on rows that tempo-auth did not write. Core reads only verification rows with a `taPurpose` and invitations with a `taTokenHash`.
+- The other `ta` columns stay null on rows that authtempo did not write. Core reads only verification rows with a `taPurpose` and invitations with a `taTokenHash`.
 - It adds the unique keys core needs: `verification (taValueHash)`, `passkey (credentialID)`, `member (organizationId, userId)`, `invitation (taTokenHash)`, and `account (issuer, accountId)` when the table has no unique index on these two columns under any name (Better Auth 1.7 has `account_issuer_accountId_uidx`).
 - `account.issuer` on both dialects: on Postgres it adds the column when it is missing (a table from before Better Auth 1.7, such as consumer-i's) and fills every row that has none from `providerId`. On D1 a static file cannot test for a column, so two files ship: `migrations/d1/` for 1.7 tables (it fills only) and `migrations/d1-before-1.7/` (it adds the column and the unique index, then fills). Copy the one that fits the tables, as the D1 steps below say.
 - It stops with "every Better Auth date column must be timestamptz" when a date column has no time zone.
@@ -120,7 +120,7 @@ number lower than the Better Auth table migration makes every new database
 (CI, a preview database, `--local`) fail at the compat file with
 `no such table`.
 
-- Better Auth 1.7 tables: copy `node_modules/@tempo-auth/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`.
+- Better Auth 1.7 tables: copy `node_modules/@authtempo/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`.
 - Tables from before Better Auth 1.7 (no `account.issuer` column): copy the file of the same name from `migrations/d1-before-1.7/`.
 - Every app: then copy `0002_compat_schema_v5.sql` from the same directory and give it the next number.
 - Tables with other names: write the file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`.
@@ -134,7 +134,7 @@ and drops it. The errors that a refused file gives:
 - `no such column: issuer`: the 1.7 file on tables from before 1.7. Use the `d1-before-1.7` file.
 - `duplicate column name: issuer`: the `d1-before-1.7` file on 1.7 tables. Use the `d1` file.
 - `table ta_limit already exists`: the compat migration ran already.
-- `CHECK constraint failed: tempo_auth_compat_every_better_auth_date_must_be_text`: a Better Auth date column holds a number (a Drizzle `integer({ mode: "timestamp" })` schema) or text that is not a date. tempo-auth on D1 reads dates as ISO 8601 text only.
+- `CHECK constraint failed: tempo_auth_compat_every_better_auth_date_must_be_text`: a Better Auth date column holds a number (a Drizzle `integer({ mode: "timestamp" })` schema) or text that is not a date. authtempo on D1 reads dates as ISO 8601 text only.
 
 Dates are ISO 8601 text and booleans are 1 and 0, as Better Auth's Kysely
 adapter writes them. The migration fills the added dates as ISO text with
@@ -160,12 +160,12 @@ with another time zone it is wrong by the zone offset (probe with Node and
 A `credential` account row with a null `password` (Better Auth never writes
 one) reads as no password row: the sign-in answers `invalid_credentials`
 after the dummy verify, a reset writes a real hash, and the storage logs one
-line, `tempo-auth compat: a credential account row has no password; it reads
+line, `authtempo compat: a credential account row has no password; it reads
 as no password row (account <id>)`.
 
 On D1, do not delete a user or an organization inside a `transaction` of
 your own while its child rows exist: the foreign keys delete them, and a
-rollback does not bring them back (`@tempo-auth/adapter-d1` README).
+rollback does not bring them back (`@authtempo/adapter-d1` README).
 
 These D1 facts come from the local Workers pool only and are not verified on
 a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound
@@ -177,7 +177,7 @@ per-query limit). A plan 9b input verifies them on a real D1 database.
 
 `betterAuth(options)` checks every option against an allow list. One
 `BetterAuthCompatError` lists every option, plugin, and provider that
-tempo-auth cannot keep, so the app fails at start and never at run time. The
+authtempo cannot keep, so the app fails at start and never at run time. The
 error's `refusals` holds the list. Options that change only speed, such as
 `session.cookieCache`, are accepted and log one line.
 
@@ -186,10 +186,10 @@ a reset link lives 1 hour, a magic link 5 minutes, an invitation 2 days.
 
 Better Auth defaults that core does not keep:
 
-| Better Auth default | tempo-auth |
+| Better Auth default | authtempo |
 | --- | --- |
 | The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, the reset request, and the verify mail resend, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
-| An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `tempoAuth.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
+| An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `authtempo.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
 | `trustedOrigins` takes a function and wildcards such as `https://*.example.com` | Each entry is an exact origin (`https://app.example.com`, no path or trailing slash) or an app scheme (`myapp://`). Any other entry is refused at start. |
@@ -214,7 +214,7 @@ first. A challenge lives 5 minutes, where Better Auth's cookie lives 10.
 `api.signInEmail` answers `{ twoFactorRedirect: true, twoFactorMethods:
 ["totp"] }`; its type says so only when the options name the plugin in a
 literal list. The backup codes of a Better Auth user do not move: each user
-sets the factor up again on tempo-auth. A new `secret` opens no sealed secret,
+sets the factor up again on authtempo. A new `secret` opens no sealed secret,
 so every user with the factor on fails the code and the backup codes until the
 factor is turned off for them. The setup takes the password at every path:
 `/two-factor/enable` passes it into core's setup, and core's own `POST
@@ -244,7 +244,7 @@ code (`body.code`, `error.code`) and core's HTTP status. The table is
 ## Client
 
 `createAuthClient` from `better-auth/react` or `better-auth/client` talks to
-tempo-auth's routes under `basePath`. A hand-written `fetch` to a Better Auth
+authtempo's routes under `basePath`. A hand-written `fetch` to a Better Auth
 path does not work. consumer-i's invite dialog posts to
 `/organization/invite-member`; call `authClient.organization.inviteMember`
 instead.
@@ -286,7 +286,7 @@ answers `invalid_token`. Without the plugin, it answers 404.
 - Expo: `/expo-authorization-proxy`.
 
 Results keep Better Auth's `{ data, error }` shape. `error.code` is Better
-Auth's code from `BETTER_AUTH_CODES`; `error.status` is tempo-auth's HTTP
+Auth's code from `BETTER_AUTH_CODES`; `error.status` is authtempo's HTTP
 status. A password that core's policy refuses answers `PASSWORD_TOO_SHORT`
 below the server's `minPasswordLength`, `PASSWORD_TOO_LONG` over 128, and
 `INVALID_PASSWORD` otherwise. The server's handler names the case, so the
@@ -306,7 +306,7 @@ client, every policy refusal of `emailOtp.resetPassword` spends the code,
 the length cases too.
 
 An absolute `callbackURL` or `redirectTo` keeps its path only when its origin
-is the page's origin, and the server's `tempoAuth.appURL` must be that
+is the page's origin, and the server's `authtempo.appURL` must be that
 origin, because core lands every sign-in on `appURL`. Any other absolute value
 answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL` with status 403, as
 Better Auth's origin check does. A trusted origin that is not `appURL` is
@@ -316,7 +316,7 @@ On Expo, `expoClient({ scheme, storagePrefix, storage })` keeps the session
 token in `storage` and sends it as the bearer header. `getCookie()` answers
 `tempo_session=<token>`, which the server reads as the session cookie.
 `signIn.email` and `signUp.email` run in the app. `signIn.social` and
-`signIn.magicLink` run in the system browser through tempo-auth's handoff and
+`signIn.magicLink` run in the system browser through authtempo's handoff and
 need `webBrowser` (the `expo-web-browser` module) and `crypto` (the
 `expo-crypto` module) in `expoClient`; without them they answer `NOT_SUPPORTED`.
 
@@ -392,7 +392,7 @@ answer type holds `twoFactorRedirect` only when the client options name
 
 ## Plugins
 
-| Plugin | What it does on tempo-auth |
+| Plugin | What it does on authtempo |
 | --- | --- |
 | `organization` | Core's organizations: ranked roles viewer < member < admin < owner, mailed invitations. `sendInvitationEmail` is required. Its `data.id` and `data.invitation.id` hold the invitation token, not the row id: build the accept link from it, and `acceptInvitation({ invitationId })` sends it back. `api.createInvitation` and `api.cancelInvitation` use the row id. |
 | `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. |
@@ -427,7 +427,7 @@ Only `auth.handler` keeps the plugin behavior in this table: the magic link 404,
 `auth.handler` serves these Better Auth paths in Better Auth's shapes. They
 are the one set of Better Auth paths that the handler serves in Better
 Auth's shapes, because apps post them by hand. An error answers `{ code,
-message }` with tempo-auth's status.
+message }` with authtempo's status.
 
 | Path | Body | Answer |
 | --- | --- | --- |
@@ -440,7 +440,7 @@ message }` with tempo-auth's status.
 `/email-otp/request-email-change`, and `/email-otp/change-email` answer 501
 `NOT_SUPPORTED`. A wrong, expired, or spent code answers `INVALID_OTP`:
 core does not tell expiry from a wrong code, so `OTP_EXPIRED` never
-appears. Better Auth answers `TOO_MANY_ATTEMPTS` with 403; tempo-auth with
+appears. Better Auth answers `TOO_MANY_ATTEMPTS` with 403; authtempo with
 400. A password that the policy refuses for another reason than its length
 spends the code: request a new one.
 

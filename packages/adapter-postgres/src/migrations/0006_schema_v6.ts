@@ -1,5 +1,5 @@
 /**
- * tempo-auth schema version 6 for Postgres: the TOTP second factor (plan
+ * authtempo schema version 6 for Postgres: the TOTP second factor (plan
  * 9f). Append-only: never edit a shipped migration. ta_totp holds one row
  * per user: the sealed secret, never the secret, the last accepted
  * 30-second step, and the keyed hashes of the backup codes. ta_trusted_device

@@ -5,7 +5,7 @@ import {
   type OrganizationHooks,
   type SessionHooks,
   type SessionPatch,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import type {
   BetterAuthOptions,
   OrganizationHookOptions,
@@ -68,9 +68,9 @@ async function callHook(
   const changed = Object.keys(returned).filter((key) => !Object.is(returned[key], given[key]));
   if (changed.length === 0) return;
   console.error(
-    `tempo-auth compat: organizationHooks.${name} returned data that changes ${changed.join(", ")}; a core hook cannot change a row, so the write stops`,
+    `authtempo compat: organizationHooks.${name} returned data that changes ${changed.join(", ")}; a core hook cannot change a row, so the write stops`,
   );
-  throw new Error(`tempo-auth compat: organizationHooks.${name} returned data`);
+  throw new Error(`authtempo compat: organizationHooks.${name} returned data`);
 }
 
 /** Core's organization hooks from Better Auth's `organizationHooks`. A core point is set only when a mapped hook exists. */
@@ -376,7 +376,7 @@ function sessionHooksOf(create: SessionCreateHooks | undefined): SessionHooks {
       if (dropped.length > 0 && !warned) {
         warned = true;
         console.error(
-          `tempo-auth compat: databaseHooks.session.create.before changed ${dropped.join(", ")}; core takes ipAddress, userAgent, and activeOrganizationId only and drops the rest (one line per instance)`,
+          `authtempo compat: databaseHooks.session.create.before changed ${dropped.join(", ")}; core takes ipAddress, userAgent, and activeOrganizationId only and drops the rest (one line per instance)`,
         );
       }
       return patch;

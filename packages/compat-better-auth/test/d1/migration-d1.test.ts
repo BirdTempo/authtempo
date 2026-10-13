@@ -1,5 +1,5 @@
 import { applyD1Migrations, env } from "cloudflare:test";
-import { createAuth, createPbkdf2PasswordHash } from "@tempo-auth/core";
+import { createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import { BETTER_AUTH_SQLITE } from "../fixtures.js";

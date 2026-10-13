@@ -1,4 +1,4 @@
-import { normalizeEmail } from "@tempo-auth/core";
+import { normalizeEmail } from "@authtempo/core";
 import { formatName } from "../import.js";
 import type { ImportOrganization, ImportUser, SkipReason, Source } from "../types.js";
 import {
@@ -72,7 +72,7 @@ export function auth0Source(input: Auth0Export): Source {
         const v = JSON.parse(input.organizations) as unknown;
         if (!Array.isArray(v))
           throw new Error(
-            "tempo-auth import: the Auth0 organizations input is not a JSON array (save the organizations array, not the page object)",
+            "authtempo import: the Auth0 organizations input is not a JSON array (save the organizations array, not the page object)",
           );
         organizations = v;
       }

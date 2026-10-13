@@ -250,7 +250,7 @@ export async function fetchCimd(
   url: string,
 ): Promise<{ name: string | null; redirectUris: string[] } | null> {
   const refuse = (why: string) => {
-    console.error("tempo-auth: client metadata document refused", why);
+    console.error("authtempo: client metadata document refused", why);
     return null;
   };
   if (!fetchFn) return refuse("no fetch");

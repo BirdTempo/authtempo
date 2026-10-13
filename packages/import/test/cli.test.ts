@@ -1,8 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMemoryAdapter, type StorageAdapter, StorageError } from "@tempo-auth/core";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
+import { createMemoryAdapter, type StorageAdapter, StorageError } from "@authtempo/core";
+import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { type CliIo, exitCode, runCli, USAGE, writePrivate } from "../src/cli.js";
 import { importId } from "../src/ids.js";
@@ -111,7 +111,7 @@ function report(over: Partial<ImportReport>): ImportReport {
   };
 }
 
-describe("tempo-auth-import", () => {
+describe("authtempo-import", () => {
   it("imports, prints the report, and exits 1 because two hashes were refused", async () => {
     const t = io(FILES);
     expect(await runCli(BASE, t.value)).toBe(1);
@@ -230,7 +230,7 @@ describe("tempo-auth-import", () => {
     ]) {
       const t = io(FILES);
       expect(await runCli(argv, t.value), argv.join(" ")).toBe(2);
-      expect(t.err.at(-1)).toMatch(/^tempo-auth-import <provider>/);
+      expect(t.err.at(-1)).toMatch(/^authtempo-import <provider>/);
       expect(t.opened).toEqual([]);
       // Every flag check runs before the first file read (review M-1).
       expect(t.reads, argv.join(" ")).toEqual([]);
@@ -338,7 +338,7 @@ describe("tempo-auth-import", () => {
         2,
       );
       expect(t.err.at(-2)).toBe("firebase needs --firebase-rounds and --firebase-mem-cost");
-      expect(t.err.at(-1)).toMatch(/^tempo-auth-import <provider>/);
+      expect(t.err.at(-1)).toMatch(/^authtempo-import <provider>/);
     }
     expect(t.reads).toEqual([]);
   });
@@ -351,7 +351,7 @@ describe("tempo-auth-import", () => {
     expect(t.err[0]).toBe(
       "supabase needs --formats: the formats list of the app's createLegacyPasswordHash, or none",
     );
-    expect(t.err.at(-1)).toMatch(/^tempo-auth-import <provider>/);
+    expect(t.err.at(-1)).toMatch(/^authtempo-import <provider>/);
     expect(t.reads).toEqual([]);
     expect(t.opened).toEqual([]);
   });
@@ -437,7 +437,7 @@ describe("tempo-auth-import", () => {
   });
 
   it("writes the bundle and the report file with mode 0600, also over a wider file", () => {
-    const dir = mkdtempSync(join(tmpdir(), "tempo-auth-cli-"));
+    const dir = mkdtempSync(join(tmpdir(), "authtempo-cli-"));
     try {
       const path = join(dir, "bundle.json");
       writeFileSync(path, "old", { mode: 0o644 });
@@ -603,7 +603,7 @@ describe("tempo-auth-import", () => {
       expect(await runCli(argv, t.value)).toBe(2);
       expect(t.err).toEqual([
         expect.stringMatching(
-          /^stopped: tempo-auth import: the Cognito users input has no Users array.*; nothing was written$/,
+          /^stopped: authtempo import: the Cognito users input has no Users array.*; nothing was written$/,
         ),
       ]);
       expect(t.opened).toEqual([]);

@@ -1,4 +1,4 @@
-import { type Clock, type LimiterPort, limiterKey, systemClock } from "@tempo-auth/core";
+import { type Clock, type LimiterPort, limiterKey, systemClock } from "@authtempo/core";
 
 /**
  * One statement: insert the key at count 1, or on conflict reset the window
@@ -33,7 +33,7 @@ export function createD1Limiter(db: D1Database, clock: Clock = systemClock): Lim
         .prepare(ALLOW)
         .bind(id, clock.now().getTime(), window.seconds * 1000)
         .first<{ count: number }>();
-      if (row === null) throw new Error("tempo-auth limiter: the upsert returned no row");
+      if (row === null) throw new Error("authtempo limiter: the upsert returned no row");
       return Number(row.count) <= window.max;
     },
     async sweep(now) {

@@ -164,7 +164,7 @@ export async function verifyPasskeyRegistration(
     });
   } catch (e) {
     console.error(
-      "tempo-auth: passkey registration rejected",
+      "authtempo: passkey registration rejected",
       e instanceof Error ? e.name : typeof e,
     );
     return fail("passkey_failed");
@@ -189,7 +189,7 @@ export async function verifyPasskeyRegistration(
     // The credential id is unique across users. A second registration of
     // the same authenticator answers like any other failed ceremony.
     if (e instanceof StorageError && e.code === "unique_violation" && e.model === "passkey") {
-      console.error("tempo-auth: passkey credential already registered");
+      console.error("authtempo: passkey credential already registered");
       return fail("passkey_failed");
     }
     throw e;
@@ -246,7 +246,7 @@ export async function verifyPasskeyAuthentication(
     });
   } catch (e) {
     console.error(
-      "tempo-auth: passkey authentication rejected",
+      "authtempo: passkey authentication rejected",
       e instanceof Error ? e.name : typeof e,
     );
     return fail("passkey_failed");
@@ -266,7 +266,7 @@ export async function verifyPasskeyAuthentication(
     { counter: verified.newCounter, backedUp: verified.backedUp, updatedAt: now },
   );
   if (moved !== 1) {
-    console.error("tempo-auth: passkey counter moved");
+    console.error("authtempo: passkey counter moved");
     return fail("passkey_failed");
   }
   // One transaction, so a session hook's membership check and the write read the same state.

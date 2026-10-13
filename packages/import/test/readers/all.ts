@@ -1,4 +1,4 @@
-import { FIREBASE as VECTOR_PROJECT, VECTORS } from "@tempo-auth/legacy-hashes/testing";
+import { FIREBASE as VECTOR_PROJECT, VECTORS } from "@authtempo/legacy-hashes/testing";
 import type { ImportRecord, Source } from "../../src/types.js";
 
 export const now = () => new Date("2026-10-11T00:00:00.000Z");

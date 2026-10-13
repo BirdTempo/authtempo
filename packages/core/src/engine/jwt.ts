@@ -72,7 +72,7 @@ export function issuerOf(config: ResolvedConfig): string {
 
 /** The minting config. A route or an API call that reaches here exists only while it is on. */
 export function mintConfig(config: ResolvedConfig): ResolvedJwtMint {
-  if (!config.jwtMint) throw new Error("tempo-auth: jwtMint is off");
+  if (!config.jwtMint) throw new Error("authtempo: jwtMint is off");
   return config.jwtMint;
 }
 
@@ -130,7 +130,7 @@ export async function signingKey(config: ResolvedConfig, alg: JwsAlg): Promise<J
       if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
     }
   }
-  throw new Error("tempo-auth: no signing key after three tries");
+  throw new Error("authtempo: no signing key after three tries");
 }
 
 /**
@@ -148,10 +148,10 @@ export async function signToken(
     const row = await signingKey(config, alg);
     const key = await openPrivateKey(config.secret, row.id, row.privateKey, alg);
     if (key) return signJws({ alg, kid: row.id, typ, key, payload });
-    console.error("tempo-auth: a signing key does not open under this secret; it retires", row.id);
+    console.error("authtempo: a signing key does not open under this secret; it retires", row.id);
     await retireKey(config, row);
   }
-  throw new Error("tempo-auth: no signing key opens under this secret");
+  throw new Error("authtempo: no signing key opens under this secret");
 }
 
 /**
@@ -229,9 +229,9 @@ async function appClaims(
     const value: unknown = await mint.claims(user, session);
     if (typeof value === "object" && value !== null && !Array.isArray(value))
       return value as Record<string, unknown>;
-    console.error("tempo-auth: jwtMint.claims answered a value that is not an object");
+    console.error("authtempo: jwtMint.claims answered a value that is not an object");
   } catch (e) {
-    console.error("tempo-auth: jwtMint.claims threw", e instanceof Error ? e.name : typeof e);
+    console.error("authtempo: jwtMint.claims threw", e instanceof Error ? e.name : typeof e);
   }
   return null;
 }

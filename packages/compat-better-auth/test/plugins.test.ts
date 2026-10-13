@@ -3,7 +3,7 @@ import {
   createMemoryLimiter,
   createPbkdf2PasswordHash,
   systemClock,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, expo, magicLink, organization, passkey } from "../src/plugins.js";
@@ -15,7 +15,7 @@ import type { BetterAuthOptions, CompatDatabase, InvitationEmailData } from "../
 const BASE = "https://api.example.com";
 const APP = "https://app.example.com";
 const memoryDatabase = (): CompatDatabase => ({
-  kind: "tempo-auth-compat-database",
+  kind: "authtempo-compat-database",
   dialect: "postgres",
   storage: createMemoryAdapter(),
   limiter: createMemoryLimiter(systemClock),
@@ -38,7 +38,7 @@ function base(extra: Partial<BetterAuthOptions> = {}): BetterAuthOptions {
       sendVerificationEmail: async (d) =>
         void verifyLinks.push({ email: d.user.email, url: d.url }),
     },
-    tempoAuth: { passwordHash: fast },
+    authtempo: { passwordHash: fast },
     ...extra,
   };
 }
@@ -193,7 +193,7 @@ describe("magicLink()", () => {
     // appURL: the callbackURL is absolute on the app origin, which toNext keeps only for appURL.
     const options = base({
       plugins: [magicLink({ expiresIn: 600, sendMagicLink: async (d) => void sent.push(d) })],
-      tempoAuth: { passwordHash: fast, appURL: APP },
+      authtempo: { passwordHash: fast, appURL: APP },
     });
     expect(mapOptions(options).config.magicLink).toEqual({ ttlMinutes: 10 });
     const auth = betterAuth(options);

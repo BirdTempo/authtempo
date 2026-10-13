@@ -1,4 +1,4 @@
-// The no-Node proof of @tempo-auth/legacy-hashes (plan 9b, spec 17.2).
+// The no-Node proof of @authtempo/legacy-hashes (plan 9b, spec 17.2).
 //
 // Why not a vitest pool test: @cloudflare/vitest-plugin 1.4.0 removes
 // no_nodejs_compat_v2 and adds Node.js modules to the runner Worker

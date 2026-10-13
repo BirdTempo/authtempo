@@ -36,7 +36,7 @@ export function githubProvider(c: GitHubConfig): OAuth2Provider {
  * The one GitHub subject rule: the decimal text of a positive safe integer,
  * with no sign, no leading zero, and no exponent. This preset answers only
  * such a subject (`String(id)`), so an identity with another subject can
- * never sign in. The importer (`@tempo-auth/import`) drops one with this
+ * never sign in. The importer (`@authtempo/import`) drops one with this
  * rule, so the two never drift.
  */
 export function isGithubSubject(subject: string): boolean {
@@ -100,6 +100,6 @@ function githubHeaders(accessToken: string): Record<string, string> {
     // The version of the shapes above. GitHub keeps a version for at least 24 months after its successor (docs, read 2026-10-12).
     "x-github-api-version": "2022-11-28",
     // GitHub refuses a REST request with no User-Agent (docs, read 2026-10-12).
-    "user-agent": "tempo-auth",
+    "user-agent": "authtempo",
   };
 }

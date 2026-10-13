@@ -1,8 +1,8 @@
-# tempo-auth
+# authtempo
 
-Authentication that the BirdTempo apps own. The engine, the flows, the
-tokens, the cookies, and the tables are our code. Small audited libraries
-supply primitives only, each behind a named seam.
+Authentication you own. The engine, the flows, the tokens, the cookies,
+and the tables are your code. Small audited libraries supply primitives
+only, each behind a named seam.
 
 Spec: `docs/superpowers/specs/2026-10-09-tempo-auth-design.md`.
 Plans: `docs/superpowers/plans/README.md`.
@@ -11,14 +11,14 @@ Plans: `docs/superpowers/plans/README.md`.
 
 | Package | Role |
 | --- | --- |
-| `@tempo-auth/core` | The engine: `createAuth(config)` returns `handle`, `session`, and `api`. |
-| `@tempo-auth/adapter-d1` | Storage on Cloudflare D1. Ships the migration. No compatibility flag. |
-| `@tempo-auth/adapter-postgres` | Storage on Postgres through postgres.js. `nodejs_compat` on Workers. |
-| `@tempo-auth/client` | The app side: `createClient` calls the routes and returns typed results. It runs in a browser, Expo, and Electron. |
-| `@tempo-auth/handoff` | Native and desktop sign-in through the system browser, with openers for Expo and Electron. |
-| `@tempo-auth/compat-better-auth` | Runs a Better Auth 1.7 app on tempo-auth through a package alias, on the app's own Better Auth tables. Fails at start on an option core cannot keep. |
-| `@tempo-auth/legacy-hashes` | Verifies bcrypt, Argon2id, PBKDF2, scrypt, and Firebase scrypt hashes at sign-in and rehashes to PBKDF2. Pure JavaScript. bcryptjs is BSD-3-Clause (see `NOTICE`). |
-| `@tempo-auth/import` | `tempo-auth-import`: moves users from Supabase Auth, Clerk, Auth0, Firebase, Auth.js, and Cognito through the storage port. A second run writes nothing. |
+| `@authtempo/core` | The engine: `createAuth(config)` returns `handle`, `session`, and `api`. |
+| `@authtempo/adapter-d1` | Storage on Cloudflare D1. Ships the migration. No compatibility flag. |
+| `@authtempo/adapter-postgres` | Storage on Postgres through postgres.js. `nodejs_compat` on Workers. |
+| `@authtempo/client` | The app side: `createClient` calls the routes and returns typed results. It runs in a browser, Expo, and Electron. |
+| `@authtempo/handoff` | Native and desktop sign-in through the system browser, with openers for Expo and Electron. |
+| `@authtempo/compat-better-auth` | Runs a Better Auth 1.7 app on authtempo through a package alias, on the app's own Better Auth tables. Fails at start on an option core cannot keep. |
+| `@authtempo/legacy-hashes` | Verifies bcrypt, Argon2id, PBKDF2, scrypt, and Firebase scrypt hashes at sign-in and rehashes to PBKDF2. Pure JavaScript. bcryptjs is BSD-3-Clause (see `NOTICE`). |
+| `@authtempo/import` | `authtempo-import`: moves users from Supabase Auth, Clerk, Auth0, Firebase, Auth.js, and Cognito through the storage port. A second run writes nothing. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
 The example pins `@cloudflare/vitest-plugin` 1.4.0 and runs vitest 5.0.3, the same as core.
@@ -62,7 +62,7 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
 - An importer writes only rows that a core flow writes. An unverified source
   row stays unverified, and a second run of the same export writes nothing.
 - At most two legacy password derives run at once per isolate, whatever
-  seams an app chains: `@tempo-auth/legacy-hashes` and the Better Auth seam
+  seams an app chains: `@authtempo/legacy-hashes` and the Better Auth seam
   share core's `deriveGate`. The gate never refuses a sign-in.
 - An import repair (`--repair`) writes only the rows that a `partial` record
   lacks, and never for a user that a claim verified since the import.

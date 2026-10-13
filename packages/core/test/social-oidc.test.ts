@@ -128,7 +128,7 @@ describe("an oidc entry with discovery (plan 9c)", () => {
       code: "oauth_failed",
     });
     expect(await auth.storage.findMany("verification", [])).toEqual([]);
-    expect(error).toHaveBeenCalledWith("tempo-auth: oidc discovery issuer mismatch", "entra");
+    expect(error).toHaveBeenCalledWith("authtempo: oidc discovery issuer mismatch", "entra");
     // A trailing slash is another issuer: `iss` is compared as a string.
     issuer = `${ISSUER}/`;
     expect(await startSocial(auth.config, { provider: "entra", ip: "1.1.1.1" })).toMatchObject({
@@ -169,10 +169,10 @@ describe("an oidc entry with discovery (plan 9c)", () => {
     }
     expect(error.mock.calls.map((c) => c[0])).toEqual(
       expect.arrayContaining([
-        "tempo-auth: oidc discovery answered",
-        "tempo-auth: oidc discovery request failed",
-        "tempo-auth: oidc discovery is not JSON",
-        "tempo-auth: oidc discovery lacks an endpoint",
+        "authtempo: oidc discovery answered",
+        "authtempo: oidc discovery request failed",
+        "authtempo: oidc discovery is not JSON",
+        "authtempo: oidc discovery lacks an endpoint",
       ]),
     );
   });

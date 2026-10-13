@@ -1,4 +1,4 @@
-import { LEGACY_VERIFY_HASH } from "@tempo-auth/core";
+import { LEGACY_VERIFY_HASH } from "@authtempo/core";
 import type { ImportUser, SkipReason, Source } from "../types.js";
 import { asArray, asRecord, parseTime, str } from "./common.js";
 
@@ -86,7 +86,7 @@ export function cognitoSource(input: CognitoExport): Source {
       const users = asRecord(top).Users;
       if (Array.isArray(top) || !Array.isArray(users))
         throw new Error(
-          'tempo-auth import: the Cognito users input has no Users array (save the whole list-users output, as { "Users": [...] })',
+          'authtempo import: the Cognito users input has no Users array (save the whole list-users output, as { "Users": [...] })',
         );
       const list = users.map(asRecord);
       const attrs = list.map(

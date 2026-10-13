@@ -1,6 +1,6 @@
-import { createD1Adapter, createD1Limiter } from "@tempo-auth/adapter-d1";
-import { type Auth, createAuth, createPbkdf2PasswordHash } from "@tempo-auth/core";
-import { createLegacyPasswordHash } from "@tempo-auth/legacy-hashes";
+import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
+import { type Auth, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
+import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
 import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 import { exampleHooks } from "./hooks.js";
@@ -20,7 +20,7 @@ function getAuth(env: Env): Auth {
   if (auth) return auth;
   auth = createAuth({
     baseURL: env.BASE_URL,
-    appName: "tempo-auth example",
+    appName: "authtempo example",
     secret: env.AUTH_SECRET,
     trustedOrigins: [env.BASE_URL],
     storage: createD1Adapter(env.DB),
@@ -52,7 +52,7 @@ function getAuth(env: Env): Auth {
     // rpID to its registrable domain and lists every web origin.
     passkey: {
       rpID: new URL(env.BASE_URL).hostname,
-      rpName: "tempo-auth example",
+      rpName: "authtempo example",
       origins: [env.BASE_URL],
     },
     // The handoff for a desktop or native app. The example admits one scheme. In development,

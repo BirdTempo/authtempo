@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { PROVIDER_NAME_RE } from "@tempo-auth/core";
+import { PROVIDER_NAME_RE } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import { issuerFor } from "../src/storage/mapping.js";

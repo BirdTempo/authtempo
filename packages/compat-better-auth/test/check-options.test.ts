@@ -37,7 +37,7 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     } as unknown as BetterAuthOptions);
     expect(c.refusals.filter((r) => r.startsWith("socialProviders"))).toEqual([
       "socialProviders.discord: not mapped; add it through core's social.oidc or social.oauth2",
-      "socialProviders.github.scope: tempo-auth has no such option",
+      "socialProviders.github.scope: authtempo has no such option",
     ]);
   });
 
@@ -154,7 +154,7 @@ describe("checkOptions: the allow list fails closed", () => {
     baseURL: "https://api.example.com",
     secret: "0123456789abcdef0123456789abcdef",
     database: {
-      kind: "tempo-auth-compat-database" as const,
+      kind: "authtempo-compat-database" as const,
       dialect: "postgres" as const,
       storage: {} as never,
       limiter: {} as never,
@@ -290,7 +290,7 @@ describe("checkOptions: the JWT and OAuth provider plugins (plan 9g)", () => {
       baseURL: "https://api.example.com",
       secret: "0123456789abcdef0123456789abcdef",
       database: {
-        kind: "tempo-auth-compat-database",
+        kind: "authtempo-compat-database",
         dialect: "postgres",
         storage: {} as never,
         limiter: {} as never,

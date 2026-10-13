@@ -1,10 +1,10 @@
-import type { BrowserWebAuthn } from "@tempo-auth/client";
-import type { Auth, LimiterPort, PasswordHashSeam, StorageAdapter } from "@tempo-auth/core";
-import type { ExpoCryptoLike, ExpoWebBrowserLike } from "@tempo-auth/handoff/expo";
+import type { BrowserWebAuthn } from "@authtempo/client";
+import type { Auth, LimiterPort, PasswordHashSeam, StorageAdapter } from "@authtempo/core";
+import type { ExpoCryptoLike, ExpoWebBrowserLike } from "@authtempo/handoff/expo";
 
 // Shapes copied from Better Auth 1.7.2 (@better-auth/core src/db/schema/*.ts and
 // better-auth dist/client/react/index.d.mts), read on 2026-10-10. Only the fields
-// that tempo-auth can fill are here. The converters in src/server/shapes.ts and
+// that authtempo can fill are here. The converters in src/server/shapes.ts and
 // src/client/create-auth-client.ts build object literals under these types, so a
 // field added here and not filled there fails the compile (Review Focus 4).
 
@@ -70,7 +70,7 @@ export interface Invitation {
 
 /** What `drizzleAdapter` and `betterAuthSchemaStorage` answer. `betterAuth` refuses any other `database`. */
 export interface CompatDatabase {
-  readonly kind: "tempo-auth-compat-database";
+  readonly kind: "authtempo-compat-database";
   readonly dialect: "postgres" | "d1";
   readonly storage: StorageAdapter;
   /** The owned limiter on the same database, in `ta_limit`. */
@@ -97,7 +97,7 @@ export interface InvitationEmailData {
   invitation: Invitation;
 }
 
-export const COMPAT_PLUGIN = "tempo-auth-compat-plugin";
+export const COMPAT_PLUGIN = "authtempo-compat-plugin";
 
 /** A Better Auth hook may answer a value or a promise. */
 type HookResult<T> = T | Promise<T>;
@@ -109,7 +109,7 @@ type BeforeHookAnswer = void | { data: object };
 /**
  * `organization({ organizationHooks })` (plan 9d): Better Auth 1.7.2's names
  * and argument shapes (dist/plugins/organization/types.d.mts:296-690, read
- * 2026-10-13), with the fields tempo-auth fills. A before hook may return
+ * 2026-10-13), with the fields authtempo fills. A before hook may return
  * `{ data }` only with the values it was given: a core hook cannot change a
  * row. The team hooks, `beforeCancelInvitation`, and `beforeRejectInvitation`
  * are not here, so a literal that names one fails the compile; the start
@@ -309,7 +309,7 @@ export interface BearerOptions {
   requireSignature?: boolean;
 }
 
-/** `expo()` takes no option that tempo-auth maps. */
+/** `expo()` takes no option that authtempo maps. */
 export type ExpoOptions = Record<string, never>;
 
 interface Marker<I extends string, O> {
@@ -342,7 +342,7 @@ export interface ForeignPlugin {
 export type BetterAuthPlugin = CompatPlugin | ForeignPlugin;
 
 /**
- * Better Auth 1.7's option object, with the keys tempo-auth maps. Since plan
+ * Better Auth 1.7's option object, with the keys authtempo maps. Since plan
  * 9b no option type has an index signature, so a refused key in an object
  * literal of a plugin's options, or of an object that `satisfies` this type,
  * fails the compile. `betterAuth(options)` infers its type parameter from the
@@ -435,7 +435,7 @@ export interface BetterAuthOptions {
    * `trustedOrigins`. An absolute `callbackURL` or `redirectTo` must have
    * this origin, because core lands every sign-in on it.
    */
-  tempoAuth?: { passwordHash?: PasswordHashSeam; appURL?: string };
+  authtempo?: { passwordHash?: PasswordHashSeam; appURL?: string };
 }
 
 /** Better Auth 1.7.2's sign-in answer for a user with the factor on (dist/plugins/two-factor/index.mjs, the after hook, read 2026-10-13). */
@@ -593,7 +593,7 @@ export interface TwoFactorClientOptions {
   onTwoFactorRedirect?: (ctx: { twoFactorMethods: string[] }) => void | Promise<void>;
 }
 
-export const COMPAT_CLIENT_PLUGIN = "tempo-auth-compat-client-plugin";
+export const COMPAT_CLIENT_PLUGIN = "authtempo-compat-client-plugin";
 
 export type ClientPlugin =
   | {
@@ -628,7 +628,7 @@ export interface ClientOptions {
   fetchOptions?: ClientFetchOptions;
   plugins?: readonly ClientPlugin[];
   /** The one key that is not Better Auth's. `webauthn` replaces the browser's WebAuthn, for example with a soft authenticator in tests. */
-  tempoAuth?: { webauthn?: BrowserWebAuthn };
+  authtempo?: { webauthn?: BrowserWebAuthn };
 }
 
 export interface SessionState {

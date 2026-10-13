@@ -1,4 +1,4 @@
-import { isAppScheme } from "@tempo-auth/core";
+import { isAppScheme } from "@authtempo/core";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
 import {
   type BetterAuthOptions,
@@ -10,7 +10,7 @@ import {
 export interface OptionCheck {
   /** `<path>: <reason>`, sorted. Any entry stops the construction. */
   refusals: string[];
-  /** `<path>: <reason>` for accepted options that change nothing tempo-auth promises. */
+  /** `<path>: <reason>` for accepted options that change nothing authtempo promises. */
   notes: string[];
 }
 
@@ -31,7 +31,7 @@ const JWT_NOT_MAPPED =
   "core mints JWTs on its own routes (`/jwks`, `/token`, `api.jwt`); the Better Auth plugin is not mapped, and a token it issued stops verifying at the cutover; see the plan index";
 const PROVIDER_NOT_MAPPED =
   "core has an OAuth 2.1 and OIDC provider on its own routes (`/oauth/*`, the well-known handler); the Better Auth plugin is not mapped; see the plan index";
-const NO_SUCH_OPTION = "tempo-auth has no such option";
+const NO_SUCH_OPTION = "authtempo has no such option";
 
 const refuse = (out: OptionCheck, path: string, why: string) =>
   out.refusals.push(`${path}: ${why}`);
@@ -307,15 +307,15 @@ const PLUGIN_RULES: Record<string, Rule> = {
 };
 
 const FOREIGN_PLUGINS: Record<string, string> = {
-  admin: "tempo-auth has no admin plugin",
+  admin: "authtempo has no admin plugin",
   jwt: JWT_NOT_MAPPED,
   mcp: PROVIDER_NOT_MAPPED,
   cimd: PROVIDER_NOT_MAPPED,
   "oidc-provider": PROVIDER_NOT_MAPPED,
   "oauth-provider": PROVIDER_NOT_MAPPED,
   "api-key": "not mapped; see the plan index",
-  anonymous: "tempo-auth has no anonymous sign-in",
-  username: "tempo-auth has no username sign-in",
+  anonymous: "authtempo has no anonymous sign-in",
+  username: "authtempo has no username sign-in",
 };
 
 const plugins: Rule = (v, p, out) => {
@@ -335,7 +335,7 @@ const plugins: Rule = (v, p, out) => {
     seen.add(id);
     const rule = PLUGIN_RULES[id];
     if (plugin?.kind === COMPAT_PLUGIN && rule) rule(plugin.options ?? {}, path, out);
-    else refuse(out, path, FOREIGN_PLUGINS[id] ?? "tempo-auth has no such plugin");
+    else refuse(out, path, FOREIGN_PLUGINS[id] ?? "authtempo has no such plugin");
   }
 };
 
@@ -397,7 +397,7 @@ const TOP: Record<string, Rule> = {
     // drizzleAdapter's own refusals join this one list (plan 9b), each already a `<path>: <reason>`.
     for (const r of (v as { refusals?: readonly string[] } | null)?.refusals ?? [])
       out.refusals.push(r);
-    if ((v as { kind?: unknown } | null)?.kind !== "tempo-auth-compat-database") {
+    if ((v as { kind?: unknown } | null)?.kind !== "authtempo-compat-database") {
       refuse(
         out,
         p,
@@ -489,8 +489,8 @@ const TOP: Record<string, Rule> = {
     "core's owned limiter has fixed limits per flow; custom windows, rules, and storage are refused",
   ),
   plugins,
-  telemetry: object({ enabled: only(false, "tempo-auth sends no telemetry") }),
-  tempoAuth: object({
+  telemetry: object({ enabled: only(false, "authtempo sends no telemetry") }),
+  authtempo: object({
     passwordHash: (v, p, out) => {
       const s = v as { hash?: unknown; verify?: unknown; dummy?: unknown } | null;
       if (

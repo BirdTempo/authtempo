@@ -1,4 +1,4 @@
-import { decodeBase64, encodeBase64 } from "@tempo-auth/legacy-hashes";
+import { decodeBase64, encodeBase64 } from "@authtempo/legacy-hashes";
 import type { ImportPasskey, ImportUser, Source } from "../types.js";
 import {
   asArray,
@@ -57,14 +57,14 @@ export function authjsSource(input: AuthjsExport): Source {
       // import nothing and exit 0.
       const top = JSON.parse(input.tables) as unknown;
       if (typeof top !== "object" || top === null || Array.isArray(top))
-        throw new Error("tempo-auth import: the Auth.js tables input is not a JSON object");
+        throw new Error("authtempo import: the Auth.js tables input is not a JSON object");
       const t = top as Record<string, unknown>;
       if (!Array.isArray(t.users))
-        throw new Error("tempo-auth import: the Auth.js tables input has no users array");
+        throw new Error("authtempo import: the Auth.js tables input has no users array");
       for (const table of ["accounts", "authenticators"] as const)
         if (t[table] !== undefined && !Array.isArray(t[table]))
           throw new Error(
-            `tempo-auth import: the Auth.js tables input field ${table} is not an array`,
+            `authtempo import: the Auth.js tables input field ${table} is not an array`,
           );
       const accounts = asArray(t.accounts).map(asRecord);
       const keys = asArray(t.authenticators).map(asRecord);
@@ -73,7 +73,7 @@ export function authjsSource(input: AuthjsExport): Source {
       // A column name that no row has is a typo, not "no passwords".
       if (column !== undefined && users.length > 0 && !users.some((u) => Object.hasOwn(u, column)))
         throw new Error(
-          `tempo-auth import: no Auth.js user row has the password column "${column}"`,
+          `authtempo import: no Auth.js user row has the password column "${column}"`,
         );
       // A credential id on two rows has no known owner: neither row imports.
       // The count is by the base64url form core stores, so `AQ==` and `AQ`

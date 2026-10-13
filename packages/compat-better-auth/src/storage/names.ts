@@ -159,7 +159,7 @@ export function resolveNames(options: NamingOptions = {}): Names {
   const rawTable = (t: BetterAuthTable) => tables.get(t) ?? t;
   const rawColumn = (t: BetterAuthTable, field: string) => {
     const c = forward.get(t)?.get(field);
-    if (c === undefined) throw new Error(`tempo-auth compat: no column for ${t}.${field}`);
+    if (c === undefined) throw new Error(`authtempo compat: no column for ${t}.${field}`);
     return c;
   };
   return {

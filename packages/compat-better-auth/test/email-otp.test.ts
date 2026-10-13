@@ -3,7 +3,7 @@ import {
   createMemoryLimiter,
   createPbkdf2PasswordHash,
   systemClock,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import readme from "../README.md?raw";
 import { betterAuthPasswordHash } from "../src/hash.js";
@@ -21,7 +21,7 @@ type Sent = { email: string; otp: string; type: string };
 
 function memoryDatabase(): CompatDatabase {
   return {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect: "postgres",
     storage: createMemoryAdapter(),
     limiter: createMemoryLimiter(systemClock),
@@ -49,7 +49,7 @@ function options(otp: Partial<EmailOtpOptions>, sent: Sent[] = []): BetterAuthOp
       }),
       bearer(),
     ],
-    tempoAuth: {
+    authtempo: {
       passwordHash: betterAuthPasswordHash({
         pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }),
       }),
@@ -141,7 +141,7 @@ describe("the email-otp options (plan 9e)", () => {
       "plugins[email-otp].disableSignUp: core creates the user at the first code",
       "plugins[email-otp].expiresIn: core takes 60 to 3600 seconds, rounded up to whole minutes",
       "plugins[email-otp].generateOTP: core makes the code itself, from crypto.getRandomValues",
-      "plugins[email-otp].other: tempo-auth has no such option",
+      "plugins[email-otp].other: authtempo has no such option",
       "plugins[email-otp].otpLength: core generates 6 or 8 digits",
       "plugins[email-otp].overrideDefaultEmailVerification: core's verify mail is a link; a code for it is a later input (see the plan index)",
       "plugins[email-otp].rateLimit: core's owned limiter has fixed limits per flow",

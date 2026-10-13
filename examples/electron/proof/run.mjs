@@ -37,11 +37,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The unregister error is ignored here: a stale folder may never have been registered.
 for (const name of readdirSync(PKG_DIR)) {
   if (!name.startsWith(BUNDLE_PREFIX)) continue;
-  unregisterBundle(join(PKG_DIR, name, "TempoAuthExample.app"));
+  unregisterBundle(join(PKG_DIR, name, "AuthTempoExample.app"));
   rmSync(join(PKG_DIR, name), { recursive: true, force: true });
 }
 
-const proofDir = mkdtempSync(join(tmpdir(), "tempo-auth-electron-proof-"));
+const proofDir = mkdtempSync(join(tmpdir(), "authtempo-electron-proof-"));
 // LaunchServices marks an app in a temporary folder "launch-disabled in-temp-dir" and binds no
 // URL scheme to it: `open` then fails with -10814 (lsregister -dump, macOS 27.0, 2026-10-10).
 // So the bundle lives in the package folder, which .gitignore excludes, and the run removes it.
@@ -171,7 +171,7 @@ try {
   // takes about 10 s; 5 min allows a loaded machine.
   execFileSync(
     "pnpm",
-    ["exec", "turbo", "run", "build", "--force", "--filter=tempo-auth-example-electron..."],
+    ["exec", "turbo", "run", "build", "--force", "--filter=authtempo-example-electron..."],
     { cwd: ROOT, stdio: "inherit", timeout: 300_000 },
   );
   deleteKeychainItem();

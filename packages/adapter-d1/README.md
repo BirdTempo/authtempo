@@ -1,10 +1,10 @@
-# @tempo-auth/adapter-d1
+# @authtempo/adapter-d1
 
 The storage adapter for Cloudflare D1. No Node dependency and no compatibility flag.
 
 ```ts
-import { createAuth } from "@tempo-auth/core";
-import { createD1Adapter } from "@tempo-auth/adapter-d1";
+import { createAuth } from "@authtempo/core";
+import { createD1Adapter } from "@authtempo/adapter-d1";
 
 const auth = createAuth({ ...config, storage: createD1Adapter(env.DB) });
 ```
@@ -19,7 +19,7 @@ Point wrangler at this package's migrations and apply them:
   "binding": "DB",
   "database_name": "my-app",
   "database_id": "...",
-  "migrations_dir": "node_modules/@tempo-auth/adapter-d1/migrations"
+  "migrations_dir": "node_modules/@authtempo/adapter-d1/migrations"
 }]
 ```
 
@@ -113,11 +113,11 @@ key deletes with `ON DELETE CASCADE`. SQLite deletes the child rows itself,
 so the undo log holds no entry for them, and a rollback restores the parent
 row without its children. Delete the child rows first, then the parent, as
 core's organization delete does. Core's own tables have no foreign key; the
-Better Auth tables of `@tempo-auth/compat-better-auth` have seven, and app
+Better Auth tables of `@authtempo/compat-better-auth` have seven, and app
 code that uses `createD1AdapterOn` on them must follow this rule (plan 9b2).
 
 ## Tests
 
-`pnpm --filter @tempo-auth/adapter-d1 test` runs the core conformance
+`pnpm --filter @authtempo/adapter-d1 test` runs the core conformance
 suite on a real D1 through the Workers test pool, with the migration
 applied by `applyD1Migrations`.

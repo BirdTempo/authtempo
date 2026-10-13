@@ -1,4 +1,4 @@
-import { SoftAuthenticator } from "@tempo-auth/core/testing";
+import { SoftAuthenticator } from "@authtempo/core/testing";
 import { describe, expect, it } from "vitest";
 import { createClient } from "../src/client.js";
 import type { BrowserWebAuthn } from "../src/webauthn.js";

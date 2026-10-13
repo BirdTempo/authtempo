@@ -1,5 +1,5 @@
-import { type ModelName, StorageError } from "@tempo-auth/core";
-import { fieldsFromColumns } from "@tempo-auth/core/sql";
+import { type ModelName, StorageError } from "@authtempo/core";
+import { fieldsFromColumns } from "@authtempo/core/sql";
 
 const UNIQUE_RE = /UNIQUE constraint failed: ((?:\w+\.\w+)(?:, \w+\.\w+)*)/;
 

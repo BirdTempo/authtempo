@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { base32Decode, totpCode } from "@tempo-auth/core/testing";
+import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { expect, it } from "vitest";
 import { BASE, lastLink } from "./helpers.js";
 

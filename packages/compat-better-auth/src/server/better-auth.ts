@@ -1,4 +1,4 @@
-import { type Auth, ConfigError, createAuth } from "@tempo-auth/core";
+import { type Auth, ConfigError, createAuth } from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { passwordPolicyCode } from "../errors.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
@@ -101,11 +101,11 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
   };
 }
 
-/** Better Auth's `betterAuth(options)` on tempo-auth. Throws one BetterAuthCompatError at construction (spec 16.1). */
+/** Better Auth's `betterAuth(options)` on authtempo. Throws one BetterAuthCompatError at construction (spec 16.1). */
 export function betterAuth<O extends BetterAuthOptions>(options: O): BetterAuthInstance<O> {
   const check = checkOptions(options);
   if (check.refusals.length > 0) throw new BetterAuthCompatError(check.refusals);
-  for (const n of check.notes) console.info(`tempo-auth compat: ${n}`);
+  for (const n of check.notes) console.info(`authtempo compat: ${n}`);
   const mapped = mapOptions(options);
   let auth: Auth;
   try {

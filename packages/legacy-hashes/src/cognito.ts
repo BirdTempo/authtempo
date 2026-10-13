@@ -30,9 +30,9 @@ import { encodeBase64 } from "./grammar.js";
  * Every challenge answers false. Cognito asks for a challenge only after the
  * password is right, but no challenge is safe to skip: an MFA challenge
  * (SMS_MFA, SOFTWARE_TOKEN_MFA) would drop the user's second factor, which
- * tempo-auth does not carry over (plan 9f), and NEW_PASSWORD_REQUIRED means
+ * authtempo does not carry over (plan 9f), and NEW_PASSWORD_REQUIRED means
  * the password is a temporary one that an admin set and mailed. A user with
- * a challenge must reset the password in tempo-auth.
+ * a challenge must reset the password in authtempo.
  *
  * A password longer than core's policy (128 code points) never reaches
  * Cognito: core refuses it before it asks the old system. Such a user cannot
@@ -84,7 +84,7 @@ export interface CognitoLegacyVerifyOptions {
 const REGION_RE = /^[a-z]{2}(-[a-z]+)+-\d$/;
 
 /** The default `onFailure` line, followed by one space and the reason. */
-export const COGNITO_FAILURE_LOG = "tempo-auth: cognito legacy verify failed";
+export const COGNITO_FAILURE_LOG = "authtempo: cognito legacy verify failed";
 /** The longest reason from a Cognito `__type` that reaches the log (M-3 of the plan 9b2 final review). */
 const REASON_MAX = 80;
 const logFailure = (reason: string) => console.error(`${COGNITO_FAILURE_LOG} ${reason}`);
@@ -136,10 +136,10 @@ export function createCognitoLegacyVerify(
 ): (email: string, password: string, signal: AbortSignal) => Promise<boolean> {
   if (!REGION_RE.test(options.region))
     throw new Error(
-      `tempo-auth legacy-hashes: cognito region ${options.region} is not a region name`,
+      `authtempo legacy-hashes: cognito region ${options.region} is not a region name`,
     );
   if (options.clientId.length === 0)
-    throw new Error("tempo-auth legacy-hashes: cognito clientId is empty");
+    throw new Error("authtempo legacy-hashes: cognito clientId is empty");
   // The China partition has its own domain (AWS service endpoints, read 2026-10-11).
   const domain = options.region.startsWith("cn-") ? "amazonaws.com.cn" : "amazonaws.com";
   const url = `https://cognito-idp.${options.region}.${domain}/`;

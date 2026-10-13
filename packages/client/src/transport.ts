@@ -1,4 +1,4 @@
-import { ERRORS } from "@tempo-auth/core/errors";
+import { ERRORS } from "@authtempo/core/errors";
 import { type ClientResult, fail, failWith, ok } from "./result.js";
 
 export interface TransportOptions {

@@ -1,5 +1,5 @@
-import type { ClientCode } from "@tempo-auth/client";
-import type { Auth, Result } from "@tempo-auth/core";
+import type { ClientCode } from "@authtempo/client";
+import type { Auth, Result } from "@authtempo/core";
 import {
   APIError,
   apiError,

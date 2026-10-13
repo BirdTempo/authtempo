@@ -1,5 +1,5 @@
-import { type ModelName, StorageError } from "@tempo-auth/core";
-import { fieldsFromUniqueIndex } from "@tempo-auth/core/sql";
+import { type ModelName, StorageError } from "@authtempo/core";
+import { fieldsFromUniqueIndex } from "@authtempo/core/sql";
 
 /** Maps a Postgres 23505 error to a StorageError by its constraint name, or null for any other error. */
 export function toStorageError(model: ModelName, err: unknown): StorageError | null {

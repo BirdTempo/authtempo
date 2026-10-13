@@ -3,7 +3,7 @@ import {
   createMemoryAdapter,
   createPbkdf2PasswordHash,
   LEGACY_VERIFY_HASH,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import { describe, expect, it, vi } from "vitest";
 import { COGNITO_FAILURE_LOG, createCognitoLegacyVerify } from "../src/cognito.js";
 

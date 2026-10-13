@@ -3,7 +3,7 @@ import {
   createAuthClient,
   expoClient,
   organizationClient,
-} from "@tempo-auth/compat-better-auth/client";
+} from "@authtempo/compat-better-auth/client";
 import { expect, it } from "vitest";
 
 const BASE = "https://example.test";

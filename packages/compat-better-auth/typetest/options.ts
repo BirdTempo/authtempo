@@ -1,4 +1,4 @@
-import type { LimiterPort, StorageAdapter } from "@tempo-auth/core";
+import type { LimiterPort, StorageAdapter } from "@authtempo/core";
 import type { DrizzleAdapterConfig } from "../src/adapters/drizzle.js";
 import { expoClient } from "../src/client/expo.js";
 import {
@@ -16,7 +16,7 @@ import type { BetterAuthOptions, ClientOptions, CompatDatabase } from "../src/ty
 // Real values, not `declare const`: test/check-options.test.ts (Task 7) imports
 // these objects at run time. The check never calls the storage or the limiter.
 const database: CompatDatabase = {
-  kind: "tempo-auth-compat-database",
+  kind: "authtempo-compat-database",
   dialect: "postgres",
   storage: {} as StorageAdapter,
   limiter: {} as LimiterPort,

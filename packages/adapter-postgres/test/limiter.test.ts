@@ -1,5 +1,5 @@
-import { limiterKey } from "@tempo-auth/core";
-import { runLimiterConformance } from "@tempo-auth/core/limiter-conformance";
+import { limiterKey } from "@authtempo/core";
+import { runLimiterConformance } from "@authtempo/core/limiter-conformance";
 import { expect, it } from "vitest";
 import { createPostgresLimiter } from "../src/index.js";
 import { freshDatabase } from "./db.js";

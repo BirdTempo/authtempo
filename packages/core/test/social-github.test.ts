@@ -72,7 +72,7 @@ describe("the github preset (plan 9c)", () => {
         authorization: `Bearer ${ACCESS}`,
         accept: "application/vnd.github+json",
         "x-github-api-version": "2022-11-28",
-        "user-agent": "tempo-auth",
+        "user-agent": "authtempo",
       });
   });
 
@@ -253,7 +253,7 @@ describe("GitHub through the engine (plan 9c)", () => {
       () => Response.json(EMAILS),
     );
     expect(await signIn(auth)).toMatchObject({ ok: false, code: "oauth_failed" });
-    expect(error).toHaveBeenCalledWith("tempo-auth: social user info failed", "github", "Error");
+    expect(error).toHaveBeenCalledWith("authtempo: social user info failed", "github", "Error");
     expect(JSON.stringify(error.mock.calls)).not.toContain(ACCESS);
   });
 });

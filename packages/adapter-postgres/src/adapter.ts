@@ -1,5 +1,5 @@
-import type { ModelName, StorageAdapter, StorageError } from "@tempo-auth/core";
-import { assertModel, type SqlStatements, type Statement } from "@tempo-auth/core/sql";
+import type { ModelName, StorageAdapter, StorageError } from "@authtempo/core";
+import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
 import type { Sql, TransactionSql } from "postgres";
 
 type Row = Record<string, unknown>;

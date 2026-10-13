@@ -317,7 +317,7 @@ describe("email code verify (plan 9e)", () => {
       expect(await verify(auth, wrong)).toEqual({ ok: false, code: "invalid_code", status: 400 });
       expect(updates).toBe(6);
       const [row] = await inner.findMany("verification", []);
-      expect(errors).toHaveBeenCalledWith("tempo-auth: email code count gave up", row?.id);
+      expect(errors).toHaveBeenCalledWith("authtempo: email code count gave up", row?.id);
     } finally {
       errors.mockRestore();
     }

@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const out = mkdtempSync(join(tmpdir(), "tempo-auth-bundle-"));
+const out = mkdtempSync(join(tmpdir(), "authtempo-bundle-"));
 try {
   const run = spawnSync("pnpm", ["exec", "wrangler", "deploy", "--dry-run", "--outdir", out], {
     encoding: "utf8",

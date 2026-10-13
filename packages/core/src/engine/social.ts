@@ -240,7 +240,7 @@ async function exchangeCode(
     clientSecret = await provider.clientSecret({ jwt: config.jwt, now });
   } catch (e) {
     console.error(
-      "tempo-auth: social client secret failed",
+      "authtempo: social client secret failed",
       provider.name,
       e instanceof Error ? e.name : typeof e,
     );
@@ -263,14 +263,14 @@ async function exchangeCode(
     });
   } catch (e) {
     console.error(
-      "tempo-auth: social token request failed",
+      "authtempo: social token request failed",
       provider.name,
       e instanceof Error ? e.name : typeof e,
     );
     return null;
   }
   if (!res.ok) {
-    console.error("tempo-auth: social token endpoint answered", provider.name, res.status);
+    console.error("authtempo: social token endpoint answered", provider.name, res.status);
     return null;
   }
   let body: unknown;
@@ -283,7 +283,7 @@ async function exchangeCode(
   const token = (body as Record<string, unknown> | null)?.[field];
   if (typeof token === "string" && token.length > 0) return token;
   // GitHub answers a bad code with 200 and an `error` field. Log no value of the body.
-  console.error("tempo-auth: social token answer has no token", provider.name);
+  console.error("authtempo: social token answer has no token", provider.name);
   return null;
 }
 
@@ -307,7 +307,7 @@ async function idTokenProfile(
     });
   } catch (e) {
     console.error(
-      "tempo-auth: social id token rejected",
+      "authtempo: social id token rejected",
       provider.name,
       e instanceof Error ? e.name : typeof e,
     );
@@ -315,7 +315,7 @@ async function idTokenProfile(
   }
   const nonce = claims.nonce;
   if (typeof nonce !== "string" || !constantTimeEqual(await sha256Hex(nonce), nonceHash)) {
-    console.error("tempo-auth: social nonce mismatch", provider.name);
+    console.error("authtempo: social nonce mismatch", provider.name);
     return null;
   }
   return provider.profile(claims, { user });
@@ -359,7 +359,7 @@ async function userinfoProfile(
       image: stringClaim(a, "image"),
     };
   } catch (e) {
-    console.error("tempo-auth: social user info failed", provider.name, appErrorName(e));
+    console.error("authtempo: social user info failed", provider.name, appErrorName(e));
     return null;
   }
 }
@@ -379,7 +379,7 @@ function boundProfile(profile: SocialProfile, providerName: string): SocialProfi
     hasControlChar(subject) ||
     subject.trim().length === 0
   ) {
-    console.error("tempo-auth: social user info has a bad subject", providerName);
+    console.error("authtempo: social user info has a bad subject", providerName);
     return null;
   }
   const { name, image } = profile;
@@ -519,7 +519,7 @@ async function linkInTransaction(
   ]);
   if (identity) {
     const user = await tx.findOne("user", [{ field: "id", op: "eq", value: identity.userId }]);
-    if (!user) throw new Error("tempo-auth: identity without a user");
+    if (!user) throw new Error("authtempo: identity without a user");
     // The provider's address is proof for this user only when it is this
     // user's address. A claimant who changes the provider address to one
     // they own must not verify the address they claimed.

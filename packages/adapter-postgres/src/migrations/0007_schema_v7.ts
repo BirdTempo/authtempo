@@ -1,5 +1,5 @@
 /**
- * tempo-auth schema version 7 for Postgres: JWT signing keys and the OAuth
+ * authtempo schema version 7 for Postgres: JWT signing keys and the OAuth
  * 2.1 and OIDC provider (plan 9g). Append-only: never edit a shipped
  * migration. ta_jwk holds the public JWK and the sealed private key, never
  * the clear key; the unique index on slot keeps one signing key, and a

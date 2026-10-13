@@ -1,5 +1,5 @@
-import { createMemoryAdapter } from "@tempo-auth/core";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
+import { createMemoryAdapter } from "@authtempo/core";
+import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { parseCsv } from "../../src/csv.js";
 import { importUsers } from "../../src/import.js";
@@ -183,13 +183,13 @@ describe("supabaseSource", () => {
     );
     expect(() =>
       supabaseSource({ users: withoutColumn(users, "banned_until"), identities, now }),
-    ).toThrow("tempo-auth import: the Supabase users file has no banned_until column");
+    ).toThrow("authtempo import: the Supabase users file has no banned_until column");
     expect(() =>
       supabaseSource({ users: withoutColumn(users, "is_sso_user"), identities, now }),
-    ).toThrow("tempo-auth import: the Supabase users file has no is_sso_user column");
+    ).toThrow("authtempo import: the Supabase users file has no is_sso_user column");
     expect(() =>
       supabaseSource({ users, identities: withoutColumn(identities, "provider_id"), now }),
-    ).toThrow("tempo-auth import: the Supabase identities file has no provider_id column");
+    ).toThrow("authtempo import: the Supabase identities file has no provider_id column");
   });
 
   it("imports the fixture: the bcrypt and Firebase rows, a refused argon2i, the github identity off the unverified user", async () => {

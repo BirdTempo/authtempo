@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tempo-auth-import-test",
+  "name": "authtempo-import-test",
   "compatibility_date": "2026-09-30",
   // Every Worker config sets both flags: Workers turn nodejs_compat on by
   // default from compatibility date 2026-08-04 (Cloudflare changelog, read
@@ -16,8 +16,8 @@
     // A placeholder: the Workers test pool runs D1 locally and never reads it.
     {
       "binding": "DB",
-      "database_name": "tempo-auth-import-test",
-      "database_id": "tempo-auth-import-test"
+      "database_name": "authtempo-import-test",
+      "database_id": "authtempo-import-test"
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { StorageError } from "@tempo-auth/core";
+import { StorageError } from "@authtempo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveNames } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";

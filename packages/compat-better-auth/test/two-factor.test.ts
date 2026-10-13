@@ -3,8 +3,8 @@ import {
   createMemoryLimiter,
   createPbkdf2PasswordHash,
   systemClock,
-} from "@tempo-auth/core";
-import { base32Decode, totpCode } from "@tempo-auth/core/testing";
+} from "@authtempo/core";
+import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import readme from "../README.md?raw";
 import { betterAuthPasswordHash } from "../src/hash.js";
@@ -21,7 +21,7 @@ const PASSWORD = "correct horse battery";
 
 function memoryDatabase(): CompatDatabase {
   return {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect: "postgres",
     storage: createMemoryAdapter(),
     limiter: createMemoryLimiter(systemClock),
@@ -40,7 +40,7 @@ function options(tf: TwoFactorOptions | null, links: string[] = []): BetterAuthO
       },
     },
     plugins: tf ? [twoFactor({ accountLockout: { enabled: false }, ...tf }), bearer()] : [bearer()],
-    tempoAuth: {
+    authtempo: {
       passwordHash: betterAuthPasswordHash({
         pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }),
       }),

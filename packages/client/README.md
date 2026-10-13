@@ -1,13 +1,13 @@
-# @tempo-auth/client
+# @authtempo/client
 
-This package is the app side of tempo-auth. It calls the routes of
-`@tempo-auth/core` and returns typed results. It runs in a browser, in
-Expo, and in Electron. Its only dependency is `@tempo-auth/core`.
+This package is the app side of authtempo. It calls the routes of
+`@authtempo/core` and returns typed results. It runs in a browser, in
+Expo, and in Electron. Its only dependency is `@authtempo/core`.
 
 ## Install
 
 ```sh
-pnpm add @tempo-auth/client
+pnpm add @authtempo/client
 ```
 
 ## Create a client
@@ -15,7 +15,7 @@ pnpm add @tempo-auth/client
 A browser app sends the session cookie to the API origin.
 
 ```ts
-import { createClient } from "@tempo-auth/client";
+import { createClient } from "@authtempo/client";
 
 const client = createClient({ baseURL: "https://api.example.com" });
 ```
@@ -103,7 +103,7 @@ The client has no token store. `signUp`, `signIn`, and `reset` answer the
 bearer token. A browser app ignores it, because the cookie carries the
 session. A native app stores the token in its own store and returns it
 from the `token` option. An Electron app can use `createTokenStore` from
-`@tempo-auth/handoff`.
+`@authtempo/handoff`.
 
 The password goes in the request body only. It never goes in a URL.
 

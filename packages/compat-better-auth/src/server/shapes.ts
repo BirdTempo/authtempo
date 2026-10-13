@@ -5,7 +5,7 @@ import {
   readSessionToken,
   type SessionRow,
   type UserRow,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import type { Invitation, Member, Organization, Session, User } from "../types.js";
 
 // Each converter builds an object literal under the declared return type, so

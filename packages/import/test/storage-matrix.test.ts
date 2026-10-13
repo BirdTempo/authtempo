@@ -1,7 +1,7 @@
-import { applyPostgresMigrations, createPostgresAdapter } from "@tempo-auth/adapter-postgres";
-import { betterAuthSchemaStorage } from "@tempo-auth/compat-better-auth";
-import { createMemoryAdapter, type StorageAdapter } from "@tempo-auth/core";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
+import { applyPostgresMigrations, createPostgresAdapter } from "@authtempo/adapter-postgres";
+import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
+import { createMemoryAdapter, type StorageAdapter } from "@authtempo/core";
+import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import type { Sql } from "postgres";
 import { describe, expect, it } from "vitest";
 import betterAuthPg from "../../compat-better-auth/test/fixtures/better-auth-1.7.2.postgres.sql?raw";

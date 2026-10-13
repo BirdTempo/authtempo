@@ -7,8 +7,8 @@ import {
   createPbkdf2PasswordHash,
   type MailMessage,
   type StorageAdapter,
-} from "@tempo-auth/core";
-import { TABLES, USER_CHILD_MODELS } from "@tempo-auth/core/sql";
+} from "@authtempo/core";
+import { TABLES, USER_CHILD_MODELS } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 

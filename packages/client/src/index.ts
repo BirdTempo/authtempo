@@ -1,4 +1,4 @@
-export { ERRORS, type ErrorCode } from "@tempo-auth/core/errors";
+export { ERRORS, type ErrorCode } from "@authtempo/core/errors";
 export {
   type ApiTokenSummaryJSON,
   type Client,

@@ -1,4 +1,4 @@
-import { deriveGate, type PasswordHashSeam } from "@tempo-auth/core";
+import { deriveGate, type PasswordHashSeam } from "@authtempo/core";
 import {
   type Derives,
   decodeFirebase,
@@ -60,11 +60,11 @@ export function createLegacyPasswordHash(options: LegacyPasswordHashOptions): Pa
   const enabled = new Set<LegacyFormat>();
   for (const f of options.formats) {
     if (!LEGACY_FORMATS.includes(f))
-      throw new Error(`tempo-auth legacy-hashes: unknown format ${String(f)}`);
+      throw new Error(`authtempo legacy-hashes: unknown format ${String(f)}`);
     enabled.add(f);
   }
   if (enabled.has("firescrypt") && !options.firebase)
-    throw new Error("tempo-auth legacy-hashes: the firescrypt format needs the firebase option");
+    throw new Error("authtempo legacy-hashes: the firescrypt format needs the firebase option");
   const firebase = options.firebase ? decodeFirebase(options.firebase) : null;
   const derives = options.derives ?? NOBLE_DERIVES;
   const { next } = options;

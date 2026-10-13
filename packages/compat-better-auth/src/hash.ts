@@ -1,5 +1,5 @@
+import { createPbkdf2PasswordHash, deriveGate, type PasswordHashSeam } from "@authtempo/core";
 import { scryptAsync } from "@noble/hashes/scrypt.js";
-import { createPbkdf2PasswordHash, deriveGate, type PasswordHashSeam } from "@tempo-auth/core";
 
 /**
  * Better Auth 1.7's scrypt (@better-auth/utils 0.4.2 password.mjs, read
@@ -53,7 +53,7 @@ function equalHex(a: string, b: string): boolean {
  * yet migrated. The tell ends for each account at its first right sign-in.
  *
  * Every derive runs through core's `deriveGate`, the one gate of the isolate,
- * which `@tempo-auth/legacy-hashes` shares. One derive holds 128 * r * N =
+ * which `@authtempo/legacy-hashes` shares. One derive holds 128 * r * N =
  * 32 MiB (N=16384, r=16), and a Workers isolate has 128 MiB for all its
  * requests (Workers limits page, checked 2026-10-10).
  */

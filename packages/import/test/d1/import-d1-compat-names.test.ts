@@ -1,5 +1,5 @@
 import { applyD1Migrations, env } from "cloudflare:test";
-import { betterAuthSchemaStorage } from "@tempo-auth/compat-better-auth";
+import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
 import { expect, it } from "vitest";
 import betterAuthSqlite from "../../../compat-better-auth/test/fixtures/better-auth-1.7.2.sqlite.sql?raw";
 import { runImport } from "../../worker/src/run.js";

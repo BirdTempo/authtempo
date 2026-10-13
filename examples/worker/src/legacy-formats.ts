@@ -1,4 +1,4 @@
-import type { LegacyFormat } from "@tempo-auth/legacy-hashes";
+import type { LegacyFormat } from "@authtempo/legacy-hashes";
 
 /**
  * The legacy formats the example verifies, chained before PBKDF2 in index.ts.

@@ -13,7 +13,7 @@ The Worker writes one of two sets of tables, chosen by the `TARGET` var:
 
 - `core` (the default): core's tables, through core's D1 adapter.
 - `compat`: an app's Better Auth 1.7 tables, through
-  `@tempo-auth/compat-better-auth` (`betterAuthSchemaStorage`), the same
+  `@authtempo/compat-better-auth` (`betterAuthSchemaStorage`), the same
   mapping that the app's `betterAuth` serves with Better Auth's default table
   and column names. It serves the default names only. An app with custom
   names (for example snake_case columns or plural tables) has no Worker path
@@ -58,7 +58,7 @@ Run every command from `packages/import/worker`.
 
    - For `TARGET=compat`, apply the compatibility package's migrations in the
      app's folder, not core's: `migrations/d1/` of
-     `@tempo-auth/compat-better-auth` for Better Auth 1.7 tables, or
+     `@authtempo/compat-better-auth` for Better Auth 1.7 tables, or
      `migrations/d1-before-1.7/` for older tables (its README). The Worker
      refuses with `schema_mismatch` until they are applied.
 
@@ -69,7 +69,7 @@ Run every command from `packages/import/worker`.
 
    ```bash
    mkdir -p input
-   tempo-auth-import supabase --users users.csv --identities identities.csv \
+   authtempo-import supabase --users users.csv --identities identities.csv \
      --formats bcrypt,argon2id --d1-bundle input/import.local.json --dry-run
    ```
 
@@ -97,7 +97,7 @@ Run every command from `packages/import/worker`.
    Read the report in the first terminal. It is one line:
 
    ```text
-   {"tempoAuthImport": {...}, "target": "core", "status": 0}
+   {"authtempoImport": {...}, "target": "core", "status": 0}
    ```
 
    `target` is `core` or `compat`. `status` is the CLI's exit status: 1
@@ -111,7 +111,7 @@ Run every command from `packages/import/worker`.
    password hashes. After a rehearsal on the local copy, also delete
    `.wrangler/state`: the local database in it holds the imported hashes.
 
-The Worker imports `@tempo-auth/import`, the package's public entry, and the
+The Worker imports `@authtempo/import`, the package's public entry, and the
 D1 adapter, so it builds the same from this repo and from an installed
 package. It runs with Node.js compatibility off: `proof/bundle-no-node.mjs`
 bundles it with both flags, fails on any `node:` module, and fails unless the

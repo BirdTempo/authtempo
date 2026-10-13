@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
-import { createD1Adapter } from "@tempo-auth/adapter-d1";
-import { importUsers, supabaseSource } from "@tempo-auth/import";
+import { createD1Adapter } from "@authtempo/adapter-d1";
+import { importUsers, supabaseSource } from "@authtempo/import";
 import { expect, it } from "vitest";
 import identities from "../../../packages/import/test/fixtures/supabase-identities.csv?raw";
 import users from "../../../packages/import/test/fixtures/supabase-users.csv?raw";

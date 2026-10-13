@@ -78,11 +78,11 @@ export function createPbkdf2PasswordHash(
   const maxIterations = options.maxIterations ?? PBKDF2_ITERATIONS;
   const iterations = options.iterations ?? Math.min(PBKDF2_ITERATIONS, maxIterations);
   if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > MAX_ITERATIONS) {
-    throw new Error(`tempo-auth: maxIterations must be an integer from 1 to ${MAX_ITERATIONS}`);
+    throw new Error(`authtempo: maxIterations must be an integer from 1 to ${MAX_ITERATIONS}`);
   }
   if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > maxIterations) {
     throw new Error(
-      `tempo-auth: iterations must be an integer from 1 to maxIterations (${maxIterations})`,
+      `authtempo: iterations must be an integer from 1 to maxIterations (${maxIterations})`,
     );
   }
   let dummy: Promise<string> | null = null;

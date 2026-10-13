@@ -1,4 +1,4 @@
-@tempo-auth/legacy-hashes ships with two third-party packages as runtime dependencies.
+@authtempo/legacy-hashes ships with two third-party packages as runtime dependencies.
 
 bcryptjs 3.0.3, BSD-3-Clause license.
 Copyright (c) 2012 Nevins Bartolomeo <nevins.bartolomeo@gmail.com>

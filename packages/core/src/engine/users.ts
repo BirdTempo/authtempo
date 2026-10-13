@@ -114,7 +114,7 @@ export type BeforeResolveWrite = (tx: StorageAdapter, user: UserRow) => Promise<
  */
 export class ClaimRacedError extends Error {
   constructor() {
-    super("tempo-auth: a claim raced this session insert");
+    super("authtempo: a claim raced this session insert");
     this.name = "ClaimRacedError";
   }
 }

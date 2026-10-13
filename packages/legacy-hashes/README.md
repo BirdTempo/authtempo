@@ -1,11 +1,11 @@
-# @tempo-auth/legacy-hashes
+# @authtempo/legacy-hashes
 
 Password hashes from another auth provider, verified at sign-in and rewritten
 as PBKDF2 on the first right sign-in (spec 17.2). Chain it before core's seam:
 
 ```ts
-import { createPbkdf2PasswordHash } from "@tempo-auth/core";
-import { createLegacyPasswordHash } from "@tempo-auth/legacy-hashes";
+import { createPbkdf2PasswordHash } from "@authtempo/core";
+import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
 
 const hash = createLegacyPasswordHash({
   formats: ["bcrypt"], // only what your import brought; give the importer the same --formats
@@ -24,7 +24,7 @@ createAuth({ ..., password: { hash } });
 
 Base64 segments are standard base64, with or without padding. Salts and
 hashes are 4 to 64 and 16 to 64 bytes (Argon2id salts at least 8). A string
-outside a bound does not parse. No reader of `@tempo-auth/import` writes the
+outside a bound does not parse. No reader of `@authtempo/import` writes the
 `pbkdf2-sha256` or `scrypt` form; a custom source or an app's own column can.
 
 `firebase.signerKey` is base64 of 16 to 64 bytes and `firebase.saltSeparator`
@@ -52,10 +52,10 @@ is base64 of 0 to 16 bytes. Another value stops the seam at construction.
 At most two derives of any legacy format run at once per isolate; the rest
 wait in order, and the gate never refuses. The gate is core's `deriveGate`
 (plan 9b2): one gate per isolate, which every seam of this package and the
-Better Auth seam of `@tempo-auth/compat-better-auth` share. An app that chains
+Better Auth seam of `@authtempo/compat-better-auth` share. An app that chains
 both seams still runs at most two derives at once. One Argon2id or scrypt
 derive holds up to 32 MiB. The share holds only with one copy of
-`@tempo-auth/core` in the app: a second copy has a second gate, and a chain
+`@authtempo/core` in the app: a second copy has a second gate, and a chain
 can then run four derives. This package and the compatibility package
 declare core as a peer dependency, so a package manager warns on a version
 that does not match. Keep one version of core.
@@ -67,7 +67,7 @@ Cognito exports no hash. That fact is unverified in an AWS primary source
 at the first sign-in:
 
 ```ts
-import { createCognitoLegacyVerify } from "@tempo-auth/legacy-hashes/cognito";
+import { createCognitoLegacyVerify } from "@authtempo/legacy-hashes/cognito";
 import { waitUntil } from "cloudflare:workers";
 
 password: {
@@ -98,14 +98,14 @@ password: {
   user stored as `Ada@Example.com`. Unverified whether the email alias follows
   that setting. Such a user must reset the password.
 - Every Cognito challenge answers false: an MFA challenge, and
-  `NEW_PASSWORD_REQUIRED`. tempo-auth has no second factor until plan 9f. A
+  `NEW_PASSWORD_REQUIRED`. authtempo has no second factor until plan 9f. A
   user with a challenge must reset the password.
 - A password longer than core's policy (128 code points) never reaches
   Cognito. Such a user must reset the password.
 - Every failure answers false, and each one calls `onFailure` once with only
   the reason: the Cognito error type, or `timeout`, `network`, `malformed`,
   `challenge`. It never gets the email or the password. The default writes
-  one line, `tempo-auth: cognito legacy verify failed <reason>`, with
+  one line, `authtempo: cognito legacy verify failed <reason>`, with
   `console.error`. An `onFailure` of your own replaces that line.
 - `onFailure` runs after the answer, on a 0 ms timer, and its errors are
   dropped. Workers can drop a timer after the response, so pass `waitUntil`:

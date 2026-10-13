@@ -123,7 +123,7 @@ describe("organization create hooks (plan 9d)", () => {
     expect(await auth.storage.findMany("organization", [])).toEqual([]);
     expect(await auth.storage.findMany("member", [])).toEqual([]);
     expect(log.mock.calls).toEqual([
-      ["tempo-auth: before hook failed", "organization.beforeCreate", "Error"],
+      ["authtempo: before hook failed", "organization.beforeCreate", "Error"],
     ]);
   });
 
@@ -161,7 +161,7 @@ describe("organization create hooks (plan 9d)", () => {
       [ada.id, "owner"],
     ]);
     expect(log.mock.calls).toEqual([
-      ["tempo-auth: after hook failed", "organization.afterCreate", body.organization.id, "Error"],
+      ["authtempo: after hook failed", "organization.afterCreate", body.organization.id, "Error"],
     ]);
   });
 

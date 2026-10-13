@@ -106,21 +106,21 @@ export async function discover(
     });
   } catch (e) {
     console.error(
-      "tempo-auth: oidc discovery request failed",
+      "authtempo: oidc discovery request failed",
       name,
       e instanceof Error ? e.name : typeof e,
     );
     return null;
   }
   if (!res.ok) {
-    console.error("tempo-auth: oidc discovery answered", name, res.status);
+    console.error("authtempo: oidc discovery answered", name, res.status);
     return null;
   }
   let doc: unknown;
   try {
     doc = await res.json();
   } catch {
-    console.error("tempo-auth: oidc discovery is not JSON", name);
+    console.error("authtempo: oidc discovery is not JSON", name);
     return null;
   }
   const d = (typeof doc === "object" && doc !== null && !Array.isArray(doc) ? doc : {}) as Record<
@@ -128,14 +128,14 @@ export async function discover(
     unknown
   >;
   if (d.issuer !== issuer) {
-    console.error("tempo-auth: oidc discovery issuer mismatch", name);
+    console.error("authtempo: oidc discovery issuer mismatch", name);
     return null;
   }
   const authorizeUrl = d.authorization_endpoint;
   const tokenUrl = d.token_endpoint;
   const jwksUrl = d.jwks_uri;
   if (!isHttpsUrl(authorizeUrl) || !isHttpsUrl(tokenUrl) || !isHttpsUrl(jwksUrl)) {
-    console.error("tempo-auth: oidc discovery lacks an endpoint", name);
+    console.error("authtempo: oidc discovery lacks an endpoint", name);
     return null;
   }
   return { authorizeUrl, tokenUrl, jwksUrl };

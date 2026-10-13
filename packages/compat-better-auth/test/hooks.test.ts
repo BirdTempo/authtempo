@@ -6,7 +6,7 @@ import {
   type StorageAdapter,
   systemClock,
   type UserRow,
-} from "@tempo-auth/core";
+} from "@authtempo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthClient, organizationClient } from "../src/client/index.js";
 import { APIError } from "../src/errors.js";
@@ -55,7 +55,7 @@ function instance(
 ) {
   const invitations: InvitationEmailData[] = [];
   const database: CompatDatabase = {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect: "postgres",
     storage: createMemoryAdapter(),
     limiter: createMemoryLimiter(systemClock),
@@ -274,9 +274,9 @@ describe("organizationHooks (plan 9d)", () => {
     expect(await changing.storage.findMany("organization", [])).toEqual([]);
     expect(log.mock.calls).toEqual([
       [
-        "tempo-auth compat: organizationHooks.beforeCreateOrganization returned data that changes id; a core hook cannot change a row, so the write stops",
+        "authtempo compat: organizationHooks.beforeCreateOrganization returned data that changes id; a core hook cannot change a row, so the write stops",
       ],
-      ["tempo-auth: before hook failed", "organization.beforeCreate", "Error"],
+      ["authtempo: before hook failed", "organization.beforeCreate", "Error"],
     ]);
     const same = instance({
       beforeCreateOrganization: async ({ organization: o }) => ({ data: { ...o } }),
@@ -318,10 +318,10 @@ describe("organizationHooks (plan 9d)", () => {
     expect(await storage.findMany("invitation", [])).toEqual([]);
     expect(lastToken()).toBe("");
     expect(log.mock.calls.map(([line]) => line)).toEqual([
-      "tempo-auth compat: organizationHooks.beforeAddMember returned data that changes role; a core hook cannot change a row, so the write stops",
-      "tempo-auth: before hook failed",
-      "tempo-auth compat: organizationHooks.beforeCreateInvitation returned data that changes role; a core hook cannot change a row, so the write stops",
-      "tempo-auth: before hook failed",
+      "authtempo compat: organizationHooks.beforeAddMember returned data that changes role; a core hook cannot change a row, so the write stops",
+      "authtempo: before hook failed",
+      "authtempo compat: organizationHooks.beforeCreateInvitation returned data that changes role; a core hook cannot change a row, so the write stops",
+      "authtempo: before hook failed",
     ]);
     change = false;
     expect(
@@ -444,7 +444,7 @@ describe("organizationHooks (plan 9d)", () => {
       "plugins[organization].organizationHooks.beforeCancelInvitation: core runs no hook before a revoke; use afterCancelInvitation",
       "plugins[organization].organizationHooks.beforeCreateTeam: core has no teams",
       "plugins[organization].organizationHooks.beforeRejectInvitation: core runs no hook before a decline; use afterRejectInvitation",
-      "plugins[organization].organizationHooks.beforeSomething: tempo-auth has no such option",
+      "plugins[organization].organizationHooks.beforeSomething: authtempo has no such option",
     ]);
   });
 
@@ -470,7 +470,7 @@ describe("organizationHooks (plan 9d)", () => {
 });
 
 const memory = (): CompatDatabase => ({
-  kind: "tempo-auth-compat-database",
+  kind: "authtempo-compat-database",
   dialect: "postgres",
   storage: createMemoryAdapter(),
   limiter: createMemoryLimiter(systemClock),
@@ -550,7 +550,7 @@ describe("databaseHooks.session.create (plan 9d)", () => {
     ]);
     expect(log.mock.calls).toEqual([
       [
-        "tempo-auth compat: databaseHooks.session.create.before changed userId; core takes ipAddress, userAgent, and activeOrganizationId only and drops the rest (one line per instance)",
+        "authtempo compat: databaseHooks.session.create.before changed userId; core takes ipAddress, userAgent, and activeOrganizationId only and drops the rest (one line per instance)",
       ],
     ]);
   });

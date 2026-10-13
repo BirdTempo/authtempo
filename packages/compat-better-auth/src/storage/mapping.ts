@@ -1,4 +1,4 @@
-import { type ModelName, type Models, StorageError } from "@tempo-auth/core";
+import { type ModelName, type Models, StorageError } from "@authtempo/core";
 import type { BetterAuthTable } from "./names.js";
 
 /**

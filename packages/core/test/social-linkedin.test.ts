@@ -174,7 +174,7 @@ describe("LinkedIn through the engine (plan 9c)", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const auth = linkedinAuth(() => new Response("{}", { status: 401 }));
     expect(await signIn(auth)).toMatchObject({ ok: false, code: "oauth_failed" });
-    expect(error).toHaveBeenCalledWith("tempo-auth: social user info failed", "linkedin", "Error");
+    expect(error).toHaveBeenCalledWith("authtempo: social user info failed", "linkedin", "Error");
     expect(JSON.stringify(error.mock.calls)).not.toContain(ACCESS);
   });
 });

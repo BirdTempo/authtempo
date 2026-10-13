@@ -1,6 +1,6 @@
-import { createD1Adapter } from "@tempo-auth/adapter-d1";
-import { betterAuthSchemaStorage } from "@tempo-auth/compat-better-auth";
-import type { StorageAdapter } from "@tempo-auth/core";
+import { createD1Adapter } from "@authtempo/adapter-d1";
+import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
+import type { StorageAdapter } from "@authtempo/core";
 import {
   bundleOf,
   type ImportBundle,
@@ -9,9 +9,9 @@ import {
   importUsers,
   optionsOf,
   readSource,
-} from "@tempo-auth/import";
+} from "@authtempo/import";
 
-/** What `tempo-auth-import ... --d1-bundle <file>` writes. */
+/** What `authtempo-import ... --d1-bundle <file>` writes. */
 export interface D1Bundle {
   bundle: ImportBundle;
   options: Omit<ImportOptions, "now">;
@@ -34,7 +34,7 @@ export function targetOf(value: string | undefined): ImportTarget {
   if (value === undefined || value === "core") return "core";
   if (value === "compat") return "compat";
   throw new Error(
-    `tempo-auth import: TARGET is core or compat, not ${JSON.stringify(value)}; nothing was written`,
+    `authtempo import: TARGET is core or compat, not ${JSON.stringify(value)}; nothing was written`,
   );
 }
 
@@ -59,7 +59,7 @@ export function storageFor(db: D1Database, target: ImportTarget): StorageAdapter
  */
 export function d1BundleOf(value: unknown): D1Bundle {
   if (typeof value !== "object" || value === null || Array.isArray(value))
-    throw new Error("tempo-auth import: the D1 input field (root) is not an object");
+    throw new Error("authtempo import: the D1 input field (root) is not an object");
   const { bundle, options } = value as Record<string, unknown>;
   return { bundle: bundleOf(bundle), options: optionsOf(options) };
 }

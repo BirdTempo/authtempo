@@ -1,5 +1,5 @@
 import { SELF } from "cloudflare:test";
-import { createClient } from "@tempo-auth/client";
+import { createClient } from "@authtempo/client";
 
 export const BASE = "https://example.test";
 

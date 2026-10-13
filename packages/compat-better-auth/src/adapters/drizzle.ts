@@ -49,7 +49,7 @@ export function namesFromDrizzle(
     if (typeof s === "string") {
       if (pgSchema !== undefined && pgSchema !== s) {
         throw new BetterAuthCompatError([
-          `database.schema: the tables sit in two Postgres schemas (${pgSchema}, ${s}); tempo-auth needs one`,
+          `database.schema: the tables sit in two Postgres schemas (${pgSchema}, ${s}); authtempo needs one`,
         ]);
       }
       pgSchema = s;
@@ -128,7 +128,7 @@ function refusedDatabase(dialect: "postgres" | "d1", refusals: string[]): Compat
   };
   const refuse = new Proxy({}, { get: () => fail });
   return {
-    kind: "tempo-auth-compat-database",
+    kind: "authtempo-compat-database",
     dialect,
     storage: refuse as CompatDatabase["storage"],
     limiter: refuse as CompatDatabase["limiter"],
@@ -170,14 +170,14 @@ export function drizzleAdapter(
       );
     for (const c of integerTimestampColumns(config.schema))
       refused.push(
-        `database.schema.${c}: an integer timestamp column is refused; on D1 tempo-auth reads Better Auth's dates as ISO 8601 text`,
+        `database.schema.${c}: an integer timestamp column is refused; on D1 authtempo reads Better Auth's dates as ISO 8601 text`,
       );
     if (refused.length > 0 || !naming || !isD1(db.$client)) return refusedDatabase("d1", refused);
     const { pgSchema: _, ...d1Naming } = naming;
     return betterAuthSchemaStorage({ dialect: "d1", db: db.$client, ...d1Naming });
   }
   refused.push(
-    `database.provider: "${config.provider}" is refused; tempo-auth runs on Postgres and D1`,
+    `database.provider: "${config.provider}" is refused; authtempo runs on Postgres and D1`,
   );
   // "postgres" is a placeholder: a refused database is never used as storage,
   // and the refusal text above names the provider it saw.

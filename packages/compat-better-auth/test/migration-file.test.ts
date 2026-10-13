@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { columnsOf, TABLES } from "@tempo-auth/core/sql";
+import { columnsOf, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";

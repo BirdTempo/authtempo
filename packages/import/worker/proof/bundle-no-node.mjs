@@ -10,7 +10,7 @@
 // and on any `node:` import left in the bundle. The same check as
 // examples/worker/proof/bundle-no-node.mjs.
 //
-// Plan 9b2: the Worker imports `@tempo-auth/import`, the package's public
+// Plan 9b2: the Worker imports `@authtempo/import`, the package's public
 // entry, which esbuild resolves by the package's own name to ../dist. So the
 // bundle is what a published package would build. This script fails when the
 // bundle reads any file of ../src (the metafile of `--metafile`, whose input
@@ -55,14 +55,14 @@ let distTime = 0;
 try {
   distTime = statSync(distIndex).mtimeMs;
 } catch {
-  failures.push("dist/index.js is missing; run pnpm turbo run build --filter=@tempo-auth/import");
+  failures.push("dist/index.js is missing; run pnpm turbo run build --filter=@authtempo/import");
 }
 if (distTime > 0 && distTime < newest(join(pkgDir, "src")))
   failures.push(
-    "dist is older than src; run pnpm turbo run build --filter=@tempo-auth/import, then this check",
+    "dist is older than src; run pnpm turbo run build --filter=@authtempo/import, then this check",
   );
 
-const out = mkdtempSync(join(tmpdir(), "tempo-auth-import-bundle-"));
+const out = mkdtempSync(join(tmpdir(), "authtempo-import-bundle-"));
 try {
   const run = spawnSync(
     "pnpm",
@@ -76,7 +76,7 @@ try {
       "--metafile",
       join(out, "meta.json"),
       "--alias",
-      "tempo-auth-import-input:./input/import.json",
+      "authtempo-import-input:./input/import.json",
     ],
     {
       encoding: "utf8",

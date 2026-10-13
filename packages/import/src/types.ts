@@ -1,4 +1,4 @@
-import type { LegacyFormat } from "@tempo-auth/legacy-hashes";
+import type { LegacyFormat } from "@authtempo/legacy-hashes";
 
 export type SourceName = "supabase" | "clerk" | "auth0" | "firebase" | "authjs" | "cognito";
 
@@ -11,7 +11,7 @@ export type SkipReason =
   | "deleted"
   | "disabled"
   | "banned"
-  /** Supabase `is_sso_user` true: a SAML user, which tempo-auth has no mapping for. */
+  /** Supabase `is_sso_user` true: a SAML user, which authtempo has no mapping for. */
   | "sso_user"
   /** Two export files of one provider disagree on this id (Clerk CSV and API, Auth0 users and hashes). */
   | "unmatched_row"
@@ -278,7 +278,7 @@ export class ImportConflictError extends Error {
     readonly reason: SkipReason,
     readonly report: ImportReport,
   ) {
-    super(`tempo-auth import: ${reason} for source record ${sourceId}; the run stopped`);
+    super(`authtempo import: ${reason} for source record ${sourceId}; the run stopped`);
     this.name = "ImportConflictError";
   }
 }

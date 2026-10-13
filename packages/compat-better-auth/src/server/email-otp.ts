@@ -1,5 +1,5 @@
-import type { ClientCode } from "@tempo-auth/client";
-import { type Auth, normalizeEmail } from "@tempo-auth/core";
+import type { ClientCode } from "@authtempo/client";
+import { type Auth, normalizeEmail } from "@authtempo/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED, passwordPolicyCode } from "../errors.js";
 import type { Mapped } from "./map-options.js";
 import { toUser } from "./shapes.js";
@@ -133,7 +133,7 @@ export async function emailOtpRoute(
         typeof id === "string"
           ? await mapped.config.storage.findOne("user", [{ field: "id", op: "eq", value: id }])
           : null;
-      if (!row) throw new Error("tempo-auth compat: the signed-in user is gone");
+      if (!row) throw new Error("authtempo compat: the signed-in user is gone");
       return { token: b.token, user: toUser(row) };
     });
   }

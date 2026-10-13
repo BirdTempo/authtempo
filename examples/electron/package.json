@@ -1,9 +1,9 @@
 {
-  "name": "tempo-auth-example-electron",
+  "name": "authtempo-example-electron",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "productName": "TempoAuthExample",
+  "productName": "AuthTempoExample",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -12,8 +12,8 @@
     "proof": "node proof/run.mjs"
   },
   "devDependencies": {
-    "@tempo-auth/client": "workspace:*",
-    "@tempo-auth/handoff": "workspace:*",
+    "@authtempo/client": "workspace:*",
+    "@authtempo/handoff": "workspace:*",
     "@types/node": "24.19.1",
     "electron": "44.7.0",
     "typescript": "7.0.2"

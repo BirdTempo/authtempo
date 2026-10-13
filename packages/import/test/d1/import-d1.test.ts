@@ -1,7 +1,7 @@
 import { applyD1Migrations, createScheduledController, env } from "cloudflare:test";
-import { createD1Adapter } from "@tempo-auth/adapter-d1";
-import { LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
-import { FIREBASE } from "@tempo-auth/legacy-hashes/testing";
+import { createD1Adapter } from "@authtempo/adapter-d1";
+import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
+import { FIREBASE } from "@authtempo/legacy-hashes/testing";
 import { describe, expect, it, vi } from "vitest";
 import { importId } from "../../src/ids.js";
 import { importUsers } from "../../src/import.js";
@@ -53,7 +53,7 @@ describe("the D1 import (worker/src/run.ts on core's D1 adapter)", () => {
       await worker.scheduled(createScheduledController(), { ...env, LOCAL_IMPORT: "1" });
       expect(log).toHaveBeenCalledTimes(1);
       const line = JSON.parse(String(log.mock.calls[0]?.[0]));
-      expect(line.tempoAuthImport).toMatchObject({ dryRun: true, created: NONE });
+      expect(line.authtempoImport).toMatchObject({ dryRun: true, created: NONE });
       // The CLI's exit status beside the report: 0, because the sample refuses nothing.
       expect(line.status).toBe(0);
     } finally {
@@ -68,7 +68,7 @@ describe("the D1 import (worker/src/run.ts on core's D1 adapter)", () => {
     // log line fails here.
     const start = await everyRow();
     vi.resetModules();
-    vi.doMock("tempo-auth-import-input", () => ({
+    vi.doMock("authtempo-import-input", () => ({
       default: { bundle, options: { dryRun: true, formats: [] } },
     }));
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -76,11 +76,11 @@ describe("the D1 import (worker/src/run.ts on core's D1 adapter)", () => {
       const fresh = (await import("../../worker/src/index.js")).default;
       await fresh.scheduled(createScheduledController(), { ...env, LOCAL_IMPORT: "1" });
       const line = JSON.parse(String(log.mock.calls[0]?.[0]));
-      expect(line.tempoAuthImport.refusedHashes.length).toBeGreaterThan(0);
+      expect(line.authtempoImport.refusedHashes.length).toBeGreaterThan(0);
       expect(line.status).toBe(1);
     } finally {
       log.mockRestore();
-      vi.doUnmock("tempo-auth-import-input");
+      vi.doUnmock("authtempo-import-input");
       vi.resetModules();
     }
     expect(await everyRow()).toEqual(start);
@@ -97,7 +97,7 @@ describe("the D1 import (worker/src/run.ts on core's D1 adapter)", () => {
             ...(LOCAL_IMPORT !== undefined ? { LOCAL_IMPORT } : {}),
           }),
         ).rejects.toThrow(
-          "tempo-auth import: the D1 Worker runs only under wrangler dev with --var LOCAL_IMPORT:1 (worker/README.md); nothing was written",
+          "authtempo import: the D1 Worker runs only under wrangler dev with --var LOCAL_IMPORT:1 (worker/README.md); nothing was written",
         );
       expect(log).not.toHaveBeenCalled();
     } finally {
@@ -130,7 +130,7 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
       options: { formats: LEGACY_FORMATS },
     });
     await expect(runImport(env.DB, clerk(JSON.stringify({ data: [] })))).rejects.toThrow(
-      "tempo-auth import: the Clerk organizations input is not a JSON array",
+      "authtempo import: the Clerk organizations input is not a JSON array",
     );
     expect(await everyRow()).toEqual(start);
     // The same bundle with valid organizations writes the user: the refusal
@@ -205,10 +205,10 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
       ],
     ];
     for (const [input, message] of cases)
-      await expect(runImport(env.DB, input)).rejects.toThrow(`tempo-auth import: ${message}`);
+      await expect(runImport(env.DB, input)).rejects.toThrow(`authtempo import: ${message}`);
     // bundleOf refuses an unknown provider first; sourceOf refuses it too, for a caller that skips the check.
     expect(() => sourceOf({ provider: "okta", files: {} } as unknown as ImportBundle)).toThrow(
-      "tempo-auth import: unknown provider okta",
+      "authtempo import: unknown provider okta",
     );
     expect(await everyRow()).toEqual(start);
   });
@@ -247,7 +247,7 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
     ];
     for (const [options, message] of cases)
       await expect(runImport(env.DB, { bundle: cognito, options })).rejects.toThrow(
-        `tempo-auth import: the D1 input field ${message}`,
+        `authtempo import: the D1 input field ${message}`,
       );
     // No row at all, so no marker row either.
     expect(await everyRow()).toEqual(start);
@@ -261,7 +261,7 @@ user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9Lusf
         bundle: { ...bundle, files: { users: noColumn, identities } },
         options: { formats: LEGACY_FORMATS },
       }),
-    ).rejects.toThrow("tempo-auth import: the Supabase users file has no is_sso_user column");
+    ).rejects.toThrow("authtempo import: the Supabase users file has no is_sso_user column");
     expect(await everyRow()).toEqual(start);
   });
 

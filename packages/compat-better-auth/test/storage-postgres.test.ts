@@ -2,7 +2,7 @@ import {
   applyPostgresMigrations,
   type CoreFieldType,
   postgresColumnType,
-} from "@tempo-auth/adapter-postgres";
+} from "@authtempo/adapter-postgres";
 import {
   type Auth,
   createAuth,
@@ -11,9 +11,9 @@ import {
   SCHEMA_VERSION,
   type StorageAdapter,
   schema,
-} from "@tempo-auth/core";
-import { runAdapterConformance } from "@tempo-auth/core/conformance";
-import { columnName, columnsOf, TABLES, uniqueIndexName } from "@tempo-auth/core/sql";
+} from "@authtempo/core";
+import { runAdapterConformance } from "@authtempo/core/conformance";
+import { columnName, columnsOf, TABLES, uniqueIndexName } from "@authtempo/core/sql";
 import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";

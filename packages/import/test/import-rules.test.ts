@@ -3,8 +3,8 @@ import {
   createMemoryAdapter,
   createPbkdf2PasswordHash,
   type StorageAdapter,
-} from "@tempo-auth/core";
-import { createLegacyPasswordHash, LEGACY_FORMATS } from "@tempo-auth/legacy-hashes";
+} from "@authtempo/core";
+import { createLegacyPasswordHash, LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importId } from "../src/ids.js";
 import { importUsers } from "../src/import.js";

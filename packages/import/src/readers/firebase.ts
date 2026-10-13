@@ -1,4 +1,4 @@
-import { firescryptParamsValid, SCRYPT_MAX_N_TIMES_R } from "@tempo-auth/legacy-hashes";
+import { firescryptParamsValid, SCRYPT_MAX_N_TIMES_R } from "@authtempo/legacy-hashes";
 import type { ImportUser, Source } from "../types.js";
 import { asArray, asRecord, noSourceIdUser, parseMillis, str } from "./common.js";
 
@@ -40,7 +40,7 @@ export function firebaseSource(input: FirebaseExport): Source {
   // grammar's n (log2 N) and rounds its r, so one function holds both bounds.
   if (!firescryptParamsValid(memCost, rounds))
     throw new Error(
-      `tempo-auth import: firebase hashConfig rounds and memCost must be integers of 1 to 99 with 2^memCost * rounds at most ${SCRYPT_MAX_N_TIMES_R}`,
+      `authtempo import: firebase hashConfig rounds and memCost must be integers of 1 to 99 with 2^memCost * rounds at most ${SCRYPT_MAX_N_TIMES_R}`,
     );
   return {
     name: "firebase",
@@ -50,7 +50,7 @@ export function firebaseSource(input: FirebaseExport): Source {
       // The export is `{ "users": [...] }`; a bare array is accepted too.
       const wrapped = asRecord(parsed).users;
       if (!Array.isArray(parsed) && !Array.isArray(wrapped))
-        throw new Error("tempo-auth import: the firebase export has no users array");
+        throw new Error("authtempo import: the firebase export has no users array");
       const list = Array.isArray(parsed) ? parsed : asArray(wrapped);
       for (const [n, raw] of list.entries()) {
         const u = asRecord(raw);

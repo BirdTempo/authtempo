@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tempo-auth-adapter-d1-test",
+  "name": "authtempo-adapter-d1-test",
   "compatibility_date": "2026-09-30",
   // No compatibility_flags: @cloudflare/vitest-plugin 1.4.0 turns Node.js
   // modules on for its runner whatever the flags say (dist/pool/index.mjs,
@@ -10,9 +10,9 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "tempo-auth-test",
+      "database_name": "authtempo-test",
       // A placeholder: the Workers test pool runs D1 locally and never reads it.
-      "database_id": "tempo-auth-test",
+      "database_id": "authtempo-test",
       // Relative to this config file.
       "migrations_dir": "migrations"
     }

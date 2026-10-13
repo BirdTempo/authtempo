@@ -10,8 +10,8 @@ import {
   StorageError,
   validOrganizationName,
   validUserName,
-} from "@tempo-auth/core";
-import { type LegacyFormat, parseLegacyHash } from "@tempo-auth/legacy-hashes";
+} from "@authtempo/core";
+import { type LegacyFormat, parseLegacyHash } from "@authtempo/legacy-hashes";
 import { importId } from "./ids.js";
 import {
   ImportConflictError,
@@ -182,7 +182,7 @@ function reservedSet(options: ImportOptions): Set<string> {
   for (const s of all) {
     const n = normalizeSlug(s);
     if (n === null)
-      throw new Error(`tempo-auth import: a reserved or platform slug is not a slug: ${s}`);
+      throw new Error(`authtempo import: a reserved or platform slug is not a slug: ${s}`);
     out.add(n);
   }
   return out;
@@ -200,7 +200,7 @@ function roleMap(source: Source, options: ImportOptions): Map<string, ImportRole
       // The CLI reads the map from text, so a value outside core's three names is an error.
       if (!Object.hasOwn(RANK, to))
         throw new Error(
-          `tempo-auth import: role ${from} maps to ${to}, not owner, admin, or member`,
+          `authtempo import: role ${from} maps to ${to}, not owner, admin, or member`,
         );
       out.set(from, to);
     }

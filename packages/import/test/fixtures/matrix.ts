@@ -1,5 +1,5 @@
-import { LEGACY_VERIFY_HASH } from "@tempo-auth/core";
-import { VECTORS } from "@tempo-auth/legacy-hashes/testing";
+import { LEGACY_VERIFY_HASH } from "@authtempo/core";
+import { VECTORS } from "@authtempo/legacy-hashes/testing";
 import type { ImportPasskey, ImportRecord, Source } from "../../src/types.js";
 
 /**

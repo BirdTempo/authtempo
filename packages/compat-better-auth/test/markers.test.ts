@@ -54,7 +54,7 @@ describe("plugin markers", () => {
   it("the two-factor client marker carries its options (plan 9f)", () => {
     const onTwoFactorRedirect = () => {};
     expect(twoFactorClient({ onTwoFactorRedirect })).toEqual({
-      kind: "tempo-auth-compat-client-plugin",
+      kind: "authtempo-compat-client-plugin",
       id: "two-factor",
       options: { onTwoFactorRedirect },
     });

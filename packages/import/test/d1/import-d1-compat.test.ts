@@ -3,10 +3,10 @@ import {
   betterAuth,
   betterAuthPasswordHash,
   betterAuthSchemaStorage,
-} from "@tempo-auth/compat-better-auth";
-import { createPbkdf2PasswordHash } from "@tempo-auth/core";
-import { createLegacyPasswordHash } from "@tempo-auth/legacy-hashes";
-import { VECTORS } from "@tempo-auth/legacy-hashes/testing";
+} from "@authtempo/compat-better-auth";
+import { createPbkdf2PasswordHash } from "@authtempo/core";
+import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
+import { VECTORS } from "@authtempo/legacy-hashes/testing";
 import { describe, expect, it, vi } from "vitest";
 import betterAuthSqlite from "../../../compat-better-auth/test/fixtures/better-auth-1.7.2.sqlite.sql?raw";
 import worker from "../../worker/src/index.js";
@@ -45,7 +45,7 @@ describe("the D1 Worker's TARGET (plan 9b2)", () => {
     expect(targetOf("compat")).toBe("compat");
     for (const bad of ["", "Compat", "better-auth", "postgres"])
       expect(() => targetOf(bad)).toThrow(
-        `tempo-auth import: TARGET is core or compat, not ${JSON.stringify(bad)}; nothing was written`,
+        `authtempo import: TARGET is core or compat, not ${JSON.stringify(bad)}; nothing was written`,
       );
   });
 
@@ -53,7 +53,7 @@ describe("the D1 Worker's TARGET (plan 9b2)", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     // An input that no read accepts shows that the TARGET check runs before the input is read.
     vi.resetModules();
-    vi.doMock("tempo-auth-import-input", () => ({ default: { bundle: 5 } }));
+    vi.doMock("authtempo-import-input", () => ({ default: { bundle: 5 } }));
     const { default: fresh } = await import("../../worker/src/index.js");
     try {
       await expect(
@@ -65,7 +65,7 @@ describe("the D1 Worker's TARGET (plan 9b2)", () => {
       ).rejects.toThrow('TARGET is core or compat, not "better-auth"; nothing was written');
       expect(log).not.toHaveBeenCalled();
     } finally {
-      vi.doUnmock("tempo-auth-import-input");
+      vi.doUnmock("authtempo-import-input");
       log.mockRestore();
     }
     expect(await count("user")).toBe(0);
@@ -96,7 +96,7 @@ describe("the D1 Worker's TARGET (plan 9b2)", () => {
       });
       const line = JSON.parse(String(log.mock.calls[0]?.[0]));
       expect(line).toMatchObject({ target: "compat", status: 0 });
-      expect(line.tempoAuthImport).toMatchObject({ dryRun: true, created: NONE });
+      expect(line.authtempoImport).toMatchObject({ dryRun: true, created: NONE });
     } finally {
       log.mockRestore();
     }
@@ -120,7 +120,7 @@ describe("the D1 Worker's TARGET (plan 9b2)", () => {
       database: betterAuthSchemaStorage({ dialect: "d1", db: env.DB }),
       emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
       emailVerification: { sendVerificationEmail: async () => {} },
-      tempoAuth: {
+      authtempo: {
         passwordHash: createLegacyPasswordHash({
           formats: ["bcrypt"],
           next: betterAuthPasswordHash({ pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }) }),
