@@ -100,6 +100,21 @@ describe("signing keys (plan 9g)", () => {
         alg,
         ok: false,
       });
+      // The alg guard alone (final fix wave): the header names the other alg,
+      // and the key's own algorithm signs the input, so the signature itself
+      // verifies under this key. Only the compare of the header alg refuses it.
+      const otherAlg = alg === "EdDSA" ? "ES256" : "EdDSA";
+      const input = `${part({ alg: otherAlg, kid: k.kid, typ: "JWT" })}.${part({ sub: "u1" })}`;
+      const sig = new Uint8Array(
+        await crypto.subtle.sign(
+          alg === "EdDSA" ? { name: "Ed25519" } : { name: "ECDSA", hash: "SHA-256" },
+          k.key,
+          new TextEncoder().encode(input),
+        ),
+      );
+      const forged = decodeJws(`${input}.${toBase64Url(sig)}`);
+      expect(forged?.header.alg).toBe(otherAlg);
+      expect(forged ? await verifyJws(forged, k.publicJwk) : "no decode").toBe(false);
       const header = decodeJws(`${part({ alg, kid: k.kid, typ: "at+jwt" })}.${p}.${s}`);
       expect(header ? await verifyJws(header, k.publicJwk) : "no decode").toBe(false);
       const changed = decodeJws(`${h}.${part({ sub: "u2" })}.${s}`);

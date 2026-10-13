@@ -5,6 +5,8 @@ import {
   validCimdUrl,
   validRedirectUri,
 } from "../src/engine/oauth-clients.js";
+import type { OAuthClientRow } from "../src/schema.js";
+import { StorageError } from "../src/storage/port.js";
 import { BASE_URL, makeAuth, post } from "./helpers.js";
 import { oauthHandle, REDIRECT, RESOURCE } from "./oauth-helpers.js";
 
@@ -309,6 +311,58 @@ describe("client ID metadata documents (plan 9g)", () => {
       "https://Client.example.com/meta.json",
     ])
       expect({ id, ok: validCimdUrl(id, BASE_URL) }).toEqual({ id, ok: false });
+  });
+
+  it("refuses the hosts that only a local network resolves: .local, .home.arpa, and .internal (final fix wave)", () => {
+    for (const id of [
+      "https://printer.local/meta.json",
+      "https://nas.home.arpa/meta.json",
+      "https://home.arpa/meta.json",
+      "https://svc.corp.internal/meta.json",
+      "https://svc.internal./meta.json",
+    ])
+      expect({ id, ok: validCimdUrl(id, BASE_URL) }).toEqual({ id, ok: false });
+    // A label that only looks like a suffix is a public name.
+    for (const id of [
+      "https://internal.example.com/meta.json",
+      "https://local.example.com/meta.json",
+      "https://myhome.arpa.example.com/meta.json",
+    ])
+      expect({ id, ok: validCimdUrl(id, BASE_URL) }).toEqual({ id, ok: true });
+  });
+
+  it("refuses this instance's own host on any port: the compare is by hostname (final fix wave)", () => {
+    expect(validCimdUrl("https://api.example.com:8443/meta.json", BASE_URL)).toBe(false);
+    expect(validCimdUrl("https://api.example.com/meta.json", "https://api.example.com:8443")).toBe(
+      false,
+    );
+    expect(validCimdUrl("https://api2.example.com/meta.json", "https://api.example.com:8443")).toBe(
+      true,
+    );
+  });
+
+  it("a create that loses the unique key reads the winner's row: this document's values, the winner's createdAt (final fix wave)", async () => {
+    const auth = cimdAuth(docFetch(() => jsonDoc(doc())).fetch);
+    const earlier = new Date(auth.clock.now().getTime() - 60_000);
+    const create = auth.storage.create.bind(auth.storage);
+    let lost = 0;
+    // A parallel request writes the row between this call's read and its create.
+    auth.storage.create = (async (model: string, data: Record<string, unknown>) => {
+      if (model === "oauthClient" && lost === 0) {
+        lost++;
+        await create("oauthClient", {
+          ...(data as unknown as OAuthClientRow),
+          name: "Winner name",
+          createdAt: earlier,
+        });
+        throw new StorageError("unique_violation", "oauthClient", ["id"]);
+      }
+      return create(model as "oauthClient", data as unknown as OAuthClientRow);
+    }) as typeof auth.storage.create;
+    const row = await findClient(auth.config, DOC_URL);
+    expect(lost).toBe(1);
+    expect(row).toMatchObject({ id: DOC_URL, name: "Doc client", createdAt: earlier });
+    expect(await auth.storage.findMany("oauthClient", [])).toEqual([row]);
   });
 
   it("writes one row when two requests read the same new document at once", async () => {

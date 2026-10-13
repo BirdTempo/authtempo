@@ -92,6 +92,20 @@ describe("the JWT routes (plan 9g)", () => {
     expect((await h.auth.api.jwt?.jwks())?.keys.map((k) => k.kid)).toEqual(after);
   });
 
+  it("api.jwt.sessionLive answers for the sid of a minted JWT until the sign-out (review M-1)", async () => {
+    const h = jwtHandle();
+    const s = await signedIn(h);
+    const res = await h.auth.handle(get("/auth/token", { cookie: `tempo_session=${s.token}` }));
+    const { token } = (await res.json()) as { token: string };
+    const claims = await h.auth.api.jwt?.verify(token);
+    expect(claims?.sid).toBe(s.session.id);
+    expect(await h.auth.api.jwt?.sessionLive({ sid: claims?.sid ?? "" })).toBe(true);
+    await h.auth.api.signOut(s.token);
+    // The JWT still verifies: it is a bearer for its life. The session check ends it.
+    expect(await h.auth.api.jwt?.verify(token)).not.toBeNull();
+    expect(await h.auth.api.jwt?.sessionLive({ sid: claims?.sid ?? "" })).toBe(false);
+  });
+
   it("answers 404 on /jwks and /token with jwtMint: false, and api.jwt is absent", async () => {
     const h = jwtHandle({ jwtMint: false });
     for (const path of ["/auth/jwks", "/auth/token"])

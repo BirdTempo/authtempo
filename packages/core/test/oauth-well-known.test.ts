@@ -92,6 +92,21 @@ describe("the well-known documents (plan 9g)", () => {
     );
   });
 
+  it("answers 404 for the root protected-resource form on an origin with no resource (Task 7 review)", async () => {
+    const h = oauthHandle();
+    for (const origin of [
+      "https://other.example.com",
+      "http://api.example.com",
+      "https://api.example.com:8443",
+    ])
+      expect({
+        origin,
+        status: (
+          await h.auth.wellKnown(new Request(`${origin}/.well-known/oauth-protected-resource`))
+        ).status,
+      }).toEqual({ origin, status: 404 });
+  });
+
   it("answers 405 with allow GET to another method, 204 to OPTIONS, and 404 to another path", async () => {
     const h = oauthHandle();
     const posted = await h.auth.wellKnown(
@@ -164,6 +179,25 @@ describe("auth.caller with an access token (plan 9g)", () => {
       });
   });
 
+  it("the reverse: a token of the other resource answers kind oauth under it and null under /mcp (Task 7 review)", async () => {
+    const h = oauthHandle();
+    const c = await codeFor(h, "mcp:read", { resource: OTHER_RESOURCE });
+    const res = await h.auth.handle(
+      exchange(c.code, c.clientId, c.verifier, { resource: OTHER_RESOURCE }),
+    );
+    const { access_token } = (await res.json()) as { access_token: string };
+    const bearer = { authorization: `Bearer ${access_token}` };
+    expect(await h.auth.caller(get("/files/a", bearer))).toMatchObject({
+      kind: "oauth",
+      resource: OTHER_RESOURCE,
+    });
+    for (const path of ["/mcp", "/mcp/tools/list"])
+      expect({ path, caller: await h.auth.caller(get(path, bearer)) }).toEqual({
+        path,
+        caller: null,
+      });
+  });
+
   it("lets the cookie win, and answers null for an expired token, a session JWT, an ID token, and a token of another instance", async () => {
     const h = oauthHandle();
     const c = await accessToken(h, "openid mcp:read");
@@ -176,7 +210,10 @@ describe("auth.caller with an access token (plan 9g)", () => {
     expect(await h.auth.caller(get("/mcp", bearer(jwt.value.token)))).toBeNull();
     expect(await h.auth.caller(get("/mcp", bearer(c.idToken)))).toBeNull();
     expect(await oauthHandle().auth.caller(get("/mcp", bearer(c.access)))).toBeNull();
-    h.clock.advance(15 * 60_000);
+    // Off the boundary on each side: one second before the lifetime ends, then one minute past it.
+    h.clock.advance(15 * 60_000 - 1000);
+    expect((await h.auth.caller(get("/mcp", bearer(c.access))))?.kind).toBe("oauth");
+    h.clock.advance(61_000);
     expect(await h.auth.caller(get("/mcp", bearer(c.access)))).toBeNull();
   });
 

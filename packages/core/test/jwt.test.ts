@@ -1,9 +1,10 @@
 import { createLocalJWKSet, jwtVerify } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   mintSessionJwt,
   publicKeySet,
   rotateKey,
+  sessionLive,
   signToken,
   verifyLocal,
   verifySessionJwt,
@@ -39,6 +40,11 @@ const header = (token: string) => decodeJws(token)?.header;
 const sameStore = (auth: Auth, extra: Parameters<typeof makeAuth>[0]) =>
   makeAuth({ storage: auth.storage, clock: auth.clock, limiter: auth.config.limiter, ...extra });
 
+// A spy restores after each test, also when an assertion fails (Task 3 review).
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("the signing key (plan 9g)", () => {
   it("writes one signing key at the first JWKS read, and two first reads at once leave one row", async () => {
     const auth = makeAuth();
@@ -51,6 +57,31 @@ describe("the signing key (plan 9g)", () => {
     expect(a.keys[0]).toMatchObject({ kty: "OKP", crv: "Ed25519", alg: "EdDSA", use: "sig" });
     expect(rows[0]).toMatchObject({ slot: "signing", retiredAt: null });
     expect(rows[0]?.publicJwk).not.toHaveProperty("d");
+  });
+
+  it("lists at most 100 retired keys, the newest by createdAt first (Task 3 review)", async () => {
+    const auth = makeAuth();
+    const current = (await publicKeySet(auth.config)).keys[0]?.kid;
+    const t0 = auth.clock.now().getTime();
+    // Two live versions with different secrets retire a key at each mint: 105 in one hour.
+    for (let i = 0; i < 105; i++) {
+      const at = new Date(t0 - 3_600_000 + i * 1000);
+      const id = `k${String(i).padStart(3, "0")}`;
+      await auth.storage.create("jwk", {
+        id,
+        publicJwk: { kty: "OKP", crv: "Ed25519", x: "AAAA", kid: id, alg: "EdDSA", use: "sig" },
+        privateKey: "sealed",
+        slot: null,
+        retiredAt: at,
+        createdAt: at,
+        updatedAt: at,
+      });
+    }
+    const kids = (await publicKeySet(auth.config)).keys.map((k) => k.kid);
+    expect(kids).toHaveLength(101);
+    expect(kids[0]).toBe(current);
+    expect(kids[1]).toBe("k104");
+    expect(kids.at(-1)).toBe("k005");
   });
 
   it("rotate retires the old key: it verifies for 24 hours, signs nothing, and then fails (Review Focus 4)", async () => {
@@ -85,7 +116,6 @@ describe("the signing key (plan 9g)", () => {
     expect((await publicKeySet(es.config)).keys.map((k) => k.alg)).toEqual(["ES256", "EdDSA"]);
     expect(await verifySessionJwt(es.config, ed.token)).not.toBeNull();
     expect(log).not.toHaveBeenCalled();
-    log.mockRestore();
   });
 
   it("retires a key sealed under another app secret at the next signature, with one log line, and signs with a new key", async () => {
@@ -98,7 +128,6 @@ describe("the signing key (plan 9g)", () => {
     if (!r.ok) throw new Error(r.code);
     expect(header(r.value.token)?.kid).not.toBe(header(before.token)?.kid);
     expect(log).toHaveBeenCalledTimes(1);
-    log.mockRestore();
   });
 });
 
@@ -198,7 +227,6 @@ describe("the session JWT (plan 9g)", () => {
       expect(await auth.storage.findMany("jwk", [])).toEqual([]);
     }
     expect(log).toHaveBeenCalledTimes(2);
-    log.mockRestore();
   });
 
   it("answers unauthorized for an unknown session, another user's session, and an expired session", async () => {
@@ -216,6 +244,19 @@ describe("the session JWT (plan 9g)", () => {
     expect(
       await mintSessionJwt(auth.config, { userId: ada.user.id, sessionId: ada.session.id }),
     ).toEqual(no);
+  });
+
+  it("sessionLive answers true for a live session and false for an unknown, an expired, a deleted, and an odd sid (review M-1)", async () => {
+    const auth = makeAuth();
+    const { session } = await sessionOf(auth);
+    expect(await sessionLive(auth.config, { sid: session.id })).toBe(true);
+    for (const sid of ["", "nope", "x".repeat(65), 7 as unknown as string])
+      expect({ sid, live: await sessionLive(auth.config, { sid }) }).toEqual({ sid, live: false });
+    const other = await sessionOf(auth, "bea@example.com");
+    await auth.storage.delete("session", [{ field: "id", op: "eq", value: other.session.id }]);
+    expect(await sessionLive(auth.config, { sid: other.session.id })).toBe(false);
+    auth.clock.advance(31 * DAY);
+    expect(await sessionLive(auth.config, { sid: session.id })).toBe(false);
   });
 
   it("verify answers null after exp, for another audience, on another instance, and for another typ", async () => {

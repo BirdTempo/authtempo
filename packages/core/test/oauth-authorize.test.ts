@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { escapeHtml } from "../src/http/confirm-page.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import type { OAuthConsentRow } from "../src/schema.js";
+import { StorageError } from "../src/storage/port.js";
 import { APP_ORIGIN, BASE_URL, get } from "./helpers.js";
 import {
   authorized,
@@ -9,6 +11,7 @@ import {
   consentPost,
   type Handle,
   ISSUER,
+  OTHER_RESOURCE,
   oauthHandle,
   pkce,
   REDIRECT,
@@ -82,6 +85,10 @@ describe("the authorize step (plan 9g)", () => {
     expect(html).toContain(`<input type="hidden" name="code_challenge" value="${s.challenge}">`);
     expect(html).toContain('<input type="hidden" name="state" value="st-1">');
     expect(html).not.toContain("<script");
+    // The resource of the request, and the other one that the consent covers too (review M-3).
+    expect(html).toContain(
+      `For <code>${RESOURCE}</code>. If you allow, it may also use these scopes at <code>${OTHER_RESOURCE}</code> with no new question.`,
+    );
     expect(await codes(h)).toEqual([]);
   });
 
@@ -107,13 +114,6 @@ describe("the authorize step (plan 9g)", () => {
       authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt: "consent" }, s.cookie),
     );
     expect(forced.status).toBe(200);
-    const listed = await h.auth.handle(
-      authorizeGet(
-        { clientId: s.clientId, challenge: s.challenge, prompt: "login consent" },
-        s.cookie,
-      ),
-    );
-    expect(listed.status).toBe(200);
   });
 
   it("a consent for a b does not cover a b c: the page shows again, and allow then covers all three (Review Focus 5)", async () => {
@@ -237,6 +237,143 @@ describe("the authorize step (plan 9g)", () => {
     const input = { clientId: s.clientId, challenge: s.challenge, prompt: "none" };
     expect(errorOf(await h.auth.handle(authorizeGet(input)))).toBe("login_required");
     expect(errorOf(await h.auth.handle(authorizeGet(input, s.cookie)))).toBe("consent_required");
+  });
+
+  it("prompt=login answers login_required to a session; with no session the sign-in page lands back with login dropped (OIDC Core 3.1.2.1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    for (const prompt of ["login", "login consent", "consent login"])
+      expect({
+        prompt,
+        error: errorOf(
+          await h.auth.handle(
+            authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt }, s.cookie),
+          ),
+        ),
+      }).toEqual({ prompt, error: "login_required" });
+    expect(await codes(h)).toEqual([]);
+    const nextOf = async (prompt: string) => {
+      const res = await h.auth.handle(
+        authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt }),
+      );
+      const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
+      return new URLSearchParams(next.slice(next.indexOf("?") + 1)).get("prompt");
+    };
+    expect(await nextOf("login")).toBeNull();
+    expect(await nextOf("login consent")).toBe("consent");
+    // After the sign-in the way back passes: the consent page, not login_required.
+    const res = await h.auth.handle(
+      authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt: "login" }),
+    );
+    const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
+    const back = await h.auth.handle(get(next, { cookie: s.cookie }));
+    expect(back.status).toBe(200);
+  });
+
+  it("redirects invalid_request to the client when the authorize URL is too long to ride through the sign-in page (Task 5 review)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    // 400 characters is within the 512 limit of state; each one is 6 characters in the URL, so next is longer than 2048.
+    const state = "\u00e9".repeat(400);
+    const res = await h.auth.handle(
+      authorizeGet({ clientId: s.clientId, challenge: s.challenge, state }),
+    );
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(`${location.origin}${location.pathname}`).toBe(REDIRECT);
+    expect(location.searchParams.get("error")).toBe("invalid_request");
+    expect(location.searchParams.get("state")).toBe(state);
+    // A shorter request still goes to the sign-in page.
+    const short = await h.auth.handle(
+      authorizeGet({ clientId: s.clientId, challenge: s.challenge }),
+    );
+    expect(new URL(short.headers.get("location") ?? "").pathname).toBe("/auth/oauth/sign-in");
+  });
+
+  it("refuses a state or a nonce over 512 characters or with a control character (Task 5 review)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const base = { clientId: s.clientId, challenge: s.challenge };
+    expect(
+      errorOf(await h.auth.handle(authorizeGet({ ...base, state: "s".repeat(512) }, s.cookie))),
+    ).toBeNull();
+    for (const state of ["s".repeat(513), "a\u0000b", "a\nb"]) {
+      const res = await h.auth.handle(authorizeGet({ ...base, state }, s.cookie));
+      const loc = new URL(res.headers.get("location") ?? "");
+      // A bad state is not echoed back.
+      expect({
+        state,
+        error: loc.searchParams.get("error"),
+        echoed: loc.searchParams.has("state"),
+      }).toEqual({
+        state,
+        error: "invalid_request",
+        echoed: false,
+      });
+    }
+    for (const nonce of ["n".repeat(513), "a\u0007b"])
+      expect({
+        nonce,
+        error: errorOf(await h.auth.handle(authorizeGet({ ...base, nonce }, s.cookie))),
+      }).toEqual({ nonce, error: "invalid_request" });
+    expect(await codes(h)).toEqual([]);
+  });
+
+  it("the consent POST counts against the same per-IP limit as the GET (Task 5 review)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const input = { clientId: s.clientId, challenge: s.challenge };
+    const ip = { "cf-connecting-ip": "8.8.8.8" };
+    for (let i = 0; i < 30; i++)
+      expect(
+        (
+          await h.auth.handle(
+            new Request(authorizeGet(input, s.cookie), { headers: { ...ip, cookie: s.cookie } }),
+          )
+        ).status,
+      ).toBe(200);
+    for (let i = 0; i < 30; i++)
+      expect(
+        (
+          await h.auth.handle(
+            consentPost(
+              { ...authorizeParams(input), decision: "deny" },
+              { ...ip, cookie: s.cookie },
+            ),
+          )
+        ).status,
+      ).toBe(302);
+    const limited = await h.auth.handle(
+      consentPost({ ...authorizeParams(input), decision: "allow" }, { ...ip, cookie: s.cookie }),
+    );
+    expect(limited.status).toBe(429);
+    expect(await h.storage.findMany("oauthConsent", [])).toEqual([]);
+  });
+
+  it("an allow that loses the consent unique key adds its scopes to the winner's row (Task 5 review)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const create = h.storage.create.bind(h.storage);
+    let lost = 0;
+    // A parallel allow writes the row between this allow's read and its create.
+    h.storage.create = (async (model: string, data: Record<string, unknown>) => {
+      if (model === "oauthConsent" && lost === 0) {
+        lost++;
+        await create("oauthConsent", {
+          ...(data as unknown as OAuthConsentRow),
+          id: "winner",
+          scopes: ["openid"],
+        });
+        throw new StorageError("unique_violation", "oauthConsent", ["clientId", "userId"]);
+      }
+      return create(model as "oauthConsent", data as unknown as OAuthConsentRow);
+    }) as typeof h.storage.create;
+    await authorized(h, s.cookie, { clientId: s.clientId, challenge: s.challenge });
+    expect(lost).toBe(1);
+    const rows = await h.storage.findMany("oauthConsent", []);
+    expect(rows.map((r) => [r.id, [...r.scopes].sort()])).toEqual([
+      ["winner", ["mcp:read", "offline_access", "openid"]],
+    ]);
   });
 
   it("answers access_denied to an unverified user, on the GET and on the POST", async () => {

@@ -11,6 +11,8 @@ const input = {
   redirectTo: "https://client.example.com",
   email: "ada@example.com",
   scopes: [{ name: "mcp:read", description: "Read <your> documents" }],
+  resource: "https://api.example.com/mcp",
+  otherResources: [] as string[],
   fields: { client_id: "cl_x", state: `"><script>` },
 };
 
@@ -28,6 +30,19 @@ describe("the consent page (plan 9g)", () => {
     expect(html).toContain("After your answer, the browser goes to https://client.example.com.");
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<b>");
+  });
+
+  it("names the resource of the request, and the other resources that the same consent covers (review M-3)", () => {
+    const one = defaultConsentPage(input);
+    expect(one).toContain("For <code>https://api.example.com/mcp</code>.</p>");
+    expect(one).not.toContain("may also use");
+    const many = defaultConsentPage({
+      ...input,
+      otherResources: ["https://api.example.com/files", "https://x.example.com/<b>"],
+    });
+    expect(many).toContain(
+      "For <code>https://api.example.com/mcp</code>. If you allow, it may also use these scopes at <code>https://api.example.com/files</code>, <code>https://x.example.com/&lt;b&gt;</code> with no new question.</p>",
+    );
   });
 
   it("adds the redirect's origin or scheme to form-action, and nothing for an IPv6 literal", () => {

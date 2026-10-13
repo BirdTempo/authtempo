@@ -30,6 +30,7 @@ import {
   publicKeySet,
   rotateKey,
   type SessionJwtClaims,
+  sessionLive,
   verifySessionJwt,
 } from "./engine/jwt.js";
 import {
@@ -38,6 +39,7 @@ import {
   requestMagicLink,
   verifyMagicLink,
 } from "./engine/magic-link.js";
+import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
 import {
   addMember,
   createOrganization,
@@ -197,6 +199,25 @@ export interface JwtApi {
   /** A new signing key. The old one retires: it verifies for 24 hours and signs nothing. */
   rotate(): Promise<{ kid: string }>;
   jwks(): Promise<{ keys: PublicJwk[] }>;
+  /**
+   * True while the session of `sid` exists and is not expired. A resource
+   * server that must end access at a sign-out checks the `sid` of a
+   * verified session JWT here (plan 9g final fix wave).
+   */
+  sessionLive(input: { sid: string }): Promise<boolean>;
+}
+
+/**
+ * The OAuth grants of a user (plan 9g final fix wave). Present when `oauth`
+ * is set. A grant is one consent of the user for one client, with the
+ * client's refresh tokens. `revoke` deletes the consent and every refresh
+ * token of the user and the client, and answers `{ ok: true }` also when
+ * nothing existed. An access token that a client holds lives on to its
+ * `exp`, at most `oauth.accessTtlMinutes`.
+ */
+export interface OAuthApi {
+  grants(input: { userId: string }): Promise<Result<OAuthGrantSummary[]>>;
+  revoke(input: { userId: string; clientId: string }): Promise<Result<{ ok: true }>>;
 }
 
 /** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
@@ -332,6 +353,7 @@ export interface AuthApi {
   emailOtp?: EmailOtpApi;
   totp?: TotpApi;
   jwt?: JwtApi;
+  oauth?: OAuthApi;
 }
 
 export interface Auth {
@@ -474,7 +496,16 @@ export function createAuth(input: AuthConfig): Auth {
               verify: (token) => verifySessionJwt(config, token),
               rotate: () => rotateKey(config),
               jwks: () => publicKeySet(config),
+              sessionLive: (i) => sessionLive(config, i),
             } satisfies JwtApi,
+          }
+        : {}),
+      ...(config.oauth
+        ? {
+            oauth: {
+              grants: (i) => listGrants(config, i),
+              revoke: (i) => revokeGrant(config, i),
+            } satisfies OAuthApi,
           }
         : {}),
     },

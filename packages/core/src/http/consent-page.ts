@@ -13,6 +13,14 @@ export interface ConsentPageInput {
   /** The signed-in user's address. */
   email: string;
   scopes: { name: string; description: string }[];
+  /** The resource of the request: the `aud` of the access tokens. */
+  resource: string;
+  /**
+   * The other configured resources. A consent is one decision per client
+   * for every resource of this instance, so the client may ask for these
+   * with the same scopes and no new consent (plan 9g final fix wave, review M-3).
+   */
+  otherResources: string[];
   /** The authorization request, posted back as hidden fields. */
   fields: Record<string, string>;
 }
@@ -35,6 +43,12 @@ export function defaultConsentPage(input: ConsentPageInput): string {
   const scopes = input.scopes
     .map((s) => `<li>${escapeHtml(s.description)} <code>${escapeHtml(s.name)}</code></li>`)
     .join("\n");
+  const others =
+    input.otherResources.length === 0
+      ? ""
+      : ` If you allow, it may also use these scopes at ${input.otherResources
+          .map((r) => `<code>${escapeHtml(r)}</code>`)
+          .join(", ")} with no new question.`;
   const fields = Object.entries(input.fields)
     .map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}">`)
     .join("\n");
@@ -57,6 +71,7 @@ ${STYLE}
 <ul>
 ${scopes}
 </ul>
+<p class="small">For <code>${escapeHtml(input.resource)}</code>.${others}</p>
 <p class="small">Signed in as ${escapeHtml(input.email)}. Client id: <code>${escapeHtml(input.clientId)}</code>.</p>
 <p class="small">After your answer, the browser goes to ${escapeHtml(input.redirectTo)}.</p>
 <form method="post" action="${escapeHtml(input.action)}">

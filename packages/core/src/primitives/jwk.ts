@@ -159,6 +159,9 @@ export function decodeJws(token: string): DecodedJws | null {
 }
 
 function jwkForImport(jwk: PublicJwk): JsonWebKey {
+  // `y ?? ""`: every EC key that core writes has `y` (`publicJwkOf`). A row
+  // without it imports as an empty coordinate, which `importKey` refuses, so
+  // the verify answers false: the fallback only satisfies the type.
   return jwk.kty === "OKP"
     ? { kty: "OKP", crv: jwk.crv, x: jwk.x }
     : { kty: "EC", crv: jwk.crv, x: jwk.x, y: jwk.y ?? "" };

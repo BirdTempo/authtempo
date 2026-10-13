@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import {
   type AuthorizeStep,
@@ -5,6 +6,7 @@ import {
   decideAuthorize,
 } from "../../engine/oauth-authorize.js";
 import { registerClient } from "../../engine/oauth-clients.js";
+import { listGrants, revokeGrant } from "../../engine/oauth-grants.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
 import {
   exchangeCode,
@@ -14,15 +16,18 @@ import {
   type TokenAnswer,
   userinfoClaims,
 } from "../../engine/oauth-token.js";
-import { readBearer, sessionFromRequest } from "../../engine/sessions.js";
+import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { OAUTH_ERRORS } from "../../errors.js";
 import { consentPagePolicy, pageHeaders } from "../csp.js";
-import { json } from "../json.js";
+import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
 import { authorizationServerMetadata, PUBLIC_METADATA_HEADERS } from "../well-known.js";
+
+/** A client id of either kind: a `cl_` id or a metadata document URL of at most 2048 characters. */
+const revokeGrantBody = z.object({ clientId: z.string().min(1).max(2048) });
 
 /** An OAuth answer: the value with `status`, or `{ error }` with the status of `OAUTH_ERRORS`. No cache keeps either. */
 export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {
@@ -90,6 +95,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           : target.protocol,
       email: user.email,
       scopes: request.scopes.map((name) => ({ name, description: oauth.scopes.get(name) ?? name })),
+      resource: request.resource,
+      otherResources: oauth.resources.filter((r) => r !== request.resource),
       fields: {
         response_type: "code",
         client_id: request.clientId,
@@ -218,6 +225,45 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     },
     { method: "GET", path: "/oauth/userinfo", handler: userinfo },
     { method: "POST", path: "/oauth/userinfo", handler: userinfo },
+  );
+  // The grants of the signed-in person (plan 9g final fix wave, review I-1).
+  // A session only, through `sessionFromRequest`: a `tk_` bearer and an
+  // access token answer 401, so an agent cannot list or end grants. The
+  // POST takes the router's Origin rule, as every session POST does.
+  const withSession = async (ctx: RouteContext) => {
+    const resolved = await sessionFromRequest(config, ctx.request);
+    if (!resolved) return null;
+    return { user: resolved.user, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+  };
+  const send = (res: Response, renewed: string | null) => {
+    if (renewed) res.headers.append("set-cookie", renewed);
+    return res;
+  };
+  routes.push(
+    {
+      method: "GET",
+      path: "/oauth/grants",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return json({ error: "unauthorized" }, 401);
+        const r = await listGrants(config, { userId: s.user.id });
+        return send(r.ok ? json({ grants: r.value }) : respond(r), s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/oauth/grants/revoke",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return json({ error: "unauthorized" }, 401);
+        const body = await readJson(ctx.request, revokeGrantBody);
+        if (!body.ok) return send(respond(body), s.renewed);
+        return send(
+          respond(await revokeGrant(config, { userId: s.user.id, clientId: body.value.clientId })),
+          s.renewed,
+        );
+      },
+    },
   );
   // The issuer's own well-known paths under basePath (RFC 8414 as consumerb's
   // clients read it, and OIDC Discovery). The protected-resource document has

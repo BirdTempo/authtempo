@@ -49,6 +49,8 @@ const SCHEME_RE = /^[a-z][a-z0-9+.-]*:$/;
  * loopback uses 127.0.0.1.
  */
 const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
+/** Host suffixes of names that only a local network resolves. A host equal to the name without its dot is refused too. */
+const PRIVATE_SUFFIXES: readonly string[] = [".local", ".home.arpa", ".internal"];
 /** A parsed IPv4 host. The URL parser writes every IPv4 form (`127.1`, `0x7f.0.0.1`) as four decimal parts. */
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
@@ -180,7 +182,13 @@ export function validCimdUrl(value: string, baseURL: string): boolean {
   if (host === "localhost" || host.endsWith(".localhost")) return false;
   // A single label (no dot) is an intranet name.
   if (!host.includes(".")) return false;
+  // The special-use and private names that only a local network resolves:
+  // `.local` (RFC 6762 mDNS), `.home.arpa` (RFC 8375), and `.internal`
+  // (the ICANN private-use name, 2024).
+  if (PRIVATE_SUFFIXES.some((s) => host === s.slice(1) || host.endsWith(s))) return false;
   // This instance's own host: a document there would make core fetch itself.
+  // The compare is by `hostname`, with no port: a document on another port
+  // of this host is refused too, which is stricter than the host and port.
   if (host === new URL(baseURL).hostname) return false;
   return true;
 }

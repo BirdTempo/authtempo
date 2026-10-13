@@ -21,6 +21,7 @@ export {
   createAuth,
   type EmailOtpApi,
   type JwtApi,
+  type OAuthApi,
   type PasswordApi,
   type TokensApi,
   type TotpApi,
@@ -58,6 +59,7 @@ export {
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
+export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
 export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";

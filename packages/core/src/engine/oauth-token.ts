@@ -10,7 +10,7 @@ import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import type { OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
-import type { OAuthCodeData } from "./oauth-authorize.js";
+import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import { findClient } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { consumeVerification } from "./verification.js";
@@ -127,6 +127,27 @@ async function writeRefresh(
   return { token, id };
 }
 
+/**
+ * True while the grant still stands: at a refresh, the spent row exists;
+ * at the code exchange, the consent of the user for the client exists. A
+ * grant revoke deletes both (`revokeGrant`), and a reset or a password
+ * change deletes the refresh rows (`deleteRefreshTokens`).
+ */
+async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> {
+  if (g.spentId !== null)
+    return (
+      (await config.storage.findOne("oauthToken", [
+        { field: "id", op: "eq", value: g.spentId },
+      ])) !== null
+    );
+  return (
+    (await config.storage.findOne("oauthConsent", [
+      { field: "clientId", op: "eq", value: g.clientId },
+      { field: "userId", op: "eq", value: g.user.id },
+    ])) !== null
+  );
+}
+
 /** The access token, a refresh token with `offline_access`, and an ID token with `openid` at the code exchange. */
 async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResult<TokenAnswer>> {
   const oauth = oauthOf(config);
@@ -154,13 +175,22 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
   };
   if (g.grantScopes.includes("offline_access")) {
     const fresh = await writeRefresh(config, g, now);
-    // The race of refreshGrant: a reuse deleted the family before this write,
-    // so the spent row is gone. The new row goes too, and the refresh fails.
-    if (
-      g.spentId !== null &&
-      !(await config.storage.findOne("oauthToken", [{ field: "id", op: "eq", value: g.spentId }]))
-    ) {
-      await config.storage.delete("oauthToken", [{ field: "id", op: "eq", value: fresh.id }]);
+    // The race of refreshGrant: a reuse, a reset, or a grant revoke deleted
+    // the family before this write, so the spent row is gone. At the code
+    // exchange, a grant revoke deleted the consent. The new row goes too,
+    // and the request fails.
+    if (!(await stillGranted(config, g))) {
+      try {
+        await config.storage.delete("oauthToken", [{ field: "id", op: "eq", value: fresh.id }]);
+      } catch (e) {
+        // The row was never answered, so no client holds its token; the sweep
+        // deletes it at its `expiresAt`. The answer stays `invalid_grant`.
+        console.error(
+          "tempo-auth: the delete of a refresh row in a revoked grant failed",
+          fresh.id,
+          e instanceof Error ? e.name : typeof e,
+        );
+      }
       return oauthFail("invalid_grant");
     }
     answer.refresh_token = fresh.token;
@@ -239,6 +269,10 @@ export async function exchangeCode(
     return oauthFail("invalid_target");
   const user = await liveUser(config, data.userId);
   if (!user) return oauthFail("invalid_grant");
+  // Every code comes from a consent that covers its scopes. A grant revoke
+  // after the authorize step deletes the consent, and the code gives nothing.
+  if (!(await consentCovers(config, user.id, client.id, data.scopes)))
+    return oauthFail("invalid_grant");
   return issueTokens(config, {
     user,
     clientId: client.id,

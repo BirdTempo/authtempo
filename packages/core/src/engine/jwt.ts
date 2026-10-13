@@ -27,6 +27,8 @@ import { StorageError } from "../storage/port.js";
 
 export const SIGNING_SLOT = "signing";
 const KID_MAX = 64;
+/** A session id is a ULID of 26 characters; a longer value names no row and costs no read. */
+const SID_MAX = 64;
 
 /** The claims a session JWT carries from core. `jwtMint.claims` adds names, never these. */
 export const RESERVED_CLAIMS: ReadonlySet<string> = new Set([
@@ -152,7 +154,14 @@ export async function signToken(
   throw new Error("tempo-auth: no signing key opens under this secret");
 }
 
-/** The JWKS document: the signing key first, then each key retired less than 24 hours ago, newest first. */
+/**
+ * The retired keys the JWKS lists at most. Two live versions of an app with
+ * different secrets or algs retire a key at each mint, so the list can grow
+ * by one key per mint for 24 hours; the bound keeps the newest (Task 3 review).
+ */
+export const JWKS_RETIRED_MAX = 100;
+
+/** The JWKS document: the signing key first, then at most 100 keys retired less than 24 hours ago, newest first. */
 export async function publicKeySet(config: ResolvedConfig): Promise<{ keys: PublicJwk[] }> {
   const current = await signingKey(config, mintConfig(config).alg);
   const since = new Date(config.clock.now().getTime() - RETIRED_KEY_MS);
@@ -161,9 +170,10 @@ export async function publicKeySet(config: ResolvedConfig): Promise<{ keys: Publ
     [{ field: "retiredAt", op: "gt", value: since }],
     {
       sort: [
-        { field: "retiredAt", dir: "desc" },
+        { field: "createdAt", dir: "desc" },
         { field: "id", dir: "desc" },
       ],
+      limit: JWKS_RETIRED_MAX,
     },
   );
   // A rotation between the two reads can list one key twice.
@@ -278,4 +288,22 @@ export async function verifySessionJwt(
   const aud: unknown[] = typeof p.aud === "string" ? [p.aud] : Array.isArray(p.aud) ? p.aud : [];
   if (!aud.some((a) => typeof a === "string" && mint.audience.includes(a))) return null;
   return p as SessionJwtClaims;
+}
+
+/**
+ * True while the session of `sid` exists and is not expired (plan 9g final
+ * fix wave, review M-1). A resource server that must end access at a
+ * sign-out asks this with the `sid` of a verified session JWT. It reads the
+ * row by id only: it renews nothing and resolves no user.
+ */
+export async function sessionLive(
+  config: ResolvedConfig,
+  input: { sid: string },
+): Promise<boolean> {
+  if (typeof input.sid !== "string" || input.sid.length < 1 || input.sid.length > SID_MAX)
+    return false;
+  const row = await config.storage.findOne("session", [
+    { field: "id", op: "eq", value: input.sid },
+  ]);
+  return row !== null && row.expiresAt.getTime() > config.clock.now().getTime();
 }

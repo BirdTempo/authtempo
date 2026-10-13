@@ -22,6 +22,8 @@ export const CODE_PREFIX = "oc_";
 /** RFC 7636 section 4.2: 43 to 128 unreserved characters. The S256 of a verifier is 43. */
 const CHALLENGE_RE = /^[A-Za-z0-9._~-]{43,128}$/;
 const PARAM_MAX = 512;
+/** The longest `next` that `safeNext` keeps. A longer authorize URL cannot ride through the sign-in page. */
+const NEXT_MAX = 2048;
 const CLIENT_ID_MAX = 2048;
 export const AUTHORIZE_PER_IP = { seconds: 900, max: 60 };
 
@@ -35,6 +37,8 @@ export interface AuthorizeRequest {
   resource: string;
   nonce: string | null;
   prompt: "none" | "consent" | null;
+  /** `prompt` holds `login`: the person must sign in again (OIDC Core 1.0 section 3.1.2.1). */
+  login: boolean;
 }
 
 /** The data of an `oauth-code` verification row. */
@@ -141,6 +145,7 @@ export async function checkAuthorize(
       resource,
       nonce,
       prompt: prompts.has("none") ? "none" : prompts.has("consent") ? "consent" : null,
+      login: prompts.has("login"),
     },
   };
 }
@@ -277,12 +282,29 @@ export async function authorizeStep(
   const { session } = input;
   if (!session) {
     if (request.prompt === "none") return denied(config, request, "login_required");
-    const next = `${config.basePath}/oauth/authorize?${input.params.toString()}`;
+    // The sign-in page is the fresh sign-in that `login` asks for. The way
+    // back drops `login`, or the new session would answer `login_required`.
+    const back = new URLSearchParams(input.params);
+    if (request.login) {
+      const rest = (back.get("prompt") ?? "")
+        .split(" ")
+        .filter((p) => p.length > 0 && p !== "login");
+      if (rest.length > 0) back.set("prompt", rest.join(" "));
+      else back.delete("prompt");
+    }
+    const next = `${config.basePath}/oauth/authorize?${back.toString()}`;
+    // `safeNext` sends a longer `next` to the app root, a dead end: tell the client now.
+    if (next.length > NEXT_MAX) return denied(config, request, "invalid_request");
     return {
       kind: "sign-in",
       location: `${config.baseURL}${config.basePath}/oauth/sign-in?next=${encodeURIComponent(next)}`,
     };
   }
+  // OIDC Core 1.0 section 3.1.2.1: with `login` the server must sign the
+  // person in again or answer an error. Core does not end a live session
+  // to sign it in again, so it answers `login_required`; the client may
+  // send the person to sign out first.
+  if (request.login) return denied(config, request, "login_required");
   if (!session.user.emailVerified) return denied(config, request, "access_denied");
   if (
     request.prompt !== "consent" &&

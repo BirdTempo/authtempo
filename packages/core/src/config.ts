@@ -992,6 +992,15 @@ function resolveOAuth(
     throw new ConfigError(
       "oauth.resources must be 1 to 20 distinct absolute http or https URLs with no query, fragment, or credentials",
     );
+  // One key signs the session JWTs and the access tokens with one issuer. A
+  // server whose audience is in both lists would take an access token of any
+  // client and scope as a session JWT and lose the scope limit (plan 9g
+  // final fix wave, review I-2).
+  const shared = jwtMint.audience.find((a) => (resources as string[]).includes(a));
+  if (shared !== undefined)
+    throw new ConfigError(
+      `jwtMint.audience and oauth.resources both hold ${shared}: a server of that audience would take an OAuth access token as a session JWT; give the session JWT its own audience`,
+    );
   const scopes = new Map(BUILT_IN_SCOPES);
   if (input.scopes !== undefined) {
     if (!isPlainObject(input.scopes as unknown))

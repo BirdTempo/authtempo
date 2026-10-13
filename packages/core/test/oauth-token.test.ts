@@ -404,14 +404,21 @@ describe("userinfo and the endpoint's edges (plan 9g)", () => {
   });
 
   it("answers 401 for a session JWT whose audience is a resource and whose app claims add client_id and scope: the typ and jti checks refuse it", async () => {
-    const h = oauthHandle({
+    const h = oauthHandle();
+    // One config cannot hold the overlap (review I-2: construction refuses
+    // it). A second config on the same storage and secret can, such as an
+    // app version without oauth during a deployment: it mints the token.
+    const minter = oauthHandle({
+      storage: h.storage,
+      clock: h.clock,
+      oauth: false,
       jwtMint: {
         audience: RESOURCE,
         claims: () => ({ client_id: "cl_app", scope: "openid email" }),
       },
     });
     const s = await signedIn(h);
-    const minted = await h.auth.handle(get("/auth/token", { cookie: s.cookie }));
+    const minted = await minter.auth.handle(get("/auth/token", { cookie: s.cookie }));
     const { token } = (await minted.json()) as { token: string };
     expect(minted.status).toBe(200);
     expect(decodeJws(token)?.payload).toMatchObject({

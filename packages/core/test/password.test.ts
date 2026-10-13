@@ -17,7 +17,14 @@ import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/c
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "../src/seams/password-hash.js";
 import type { StorageAdapter, Where } from "../src/storage/port.js";
 import { makeAuth, post, tokenFromMail } from "./helpers.js";
-import { FAST, pwAuth, pwHandle, sessionOnly, signUpAndVerify } from "./password-helpers.js";
+import {
+  FAST,
+  pwAuth,
+  pwHandle,
+  recordNextTransaction,
+  sessionOnly,
+  signUpAndVerify,
+} from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
@@ -688,38 +695,6 @@ const resetToken = (auth: ReturnType<typeof pwAuth>) =>
 const req = { ip: "1.1.1.1", userAgent: "ua" };
 
 /**
- * Records each write of the next transaction as `op:model`, in order, so a
- * test can read the statement order of one flow.
- */
-function recordNextTransaction(storage: StorageAdapter): string[] {
-  const writes: string[] = [];
-  const original = storage.transaction.bind(storage);
-  let armed = true;
-  storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
-    if (!armed) return original(fn);
-    armed = false;
-    return original((tx) =>
-      fn({
-        ...tx,
-        create: (m, d) => {
-          writes.push(`create:${m}`);
-          return tx.create(m, d);
-        },
-        update: (m, w, d) => {
-          writes.push(`update:${m}`);
-          return tx.update(m, w, d);
-        },
-        delete: (m, w) => {
-          writes.push(`delete:${m}`);
-          return tx.delete(m, w);
-        },
-      }),
-    );
-  };
-  return writes;
-}
-
-/**
  * An auth whose mail port records, for each mail, whether a transaction
  * was open and which verification rows existed at the send.
  */
@@ -1065,6 +1040,9 @@ describe("requestPasswordReset and resetPassword", () => {
     ).toBe(true);
     expect(verified.indexOf("update:password")).toBeGreaterThanOrEqual(0);
     expect(verified.indexOf("update:password")).toBeLessThan(verified.indexOf("delete:session"));
+    // The OAuth refresh tokens go in the same transaction, after the sessions, in each branch (plan 9g final fix wave).
+    for (const writes of [claim, verified])
+      expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
   });
 });
 
@@ -1173,6 +1151,8 @@ describe("changePassword", () => {
       // The second-factor challenges, before the session delete (plan 9f).
       "delete:verification",
       "delete:session",
+      // The OAuth refresh tokens, in the same transaction (plan 9g final fix wave).
+      "delete:oauthToken",
       "delete:verification",
       "delete:verification",
     ]);

@@ -773,4 +773,24 @@ describe("oauth (plan 9g)", () => {
       resolveConfig({ ...base, jwtMint: false, oauth: { resources: [R], fetch } }),
     ).toThrowError("oauth needs jwtMint: an access token is a JWT that core signs");
   });
+
+  it("refuses a jwtMint.audience entry that is also an oauth.resources entry, by either form of audience (final fix wave, review I-2)", () => {
+    const message = `jwtMint.audience and oauth.resources both hold ${R}: a server of that audience would take an OAuth access token as a session JWT; give the session JWT its own audience`;
+    for (const audience of [R, ["https://app.example.com", R]])
+      expect(() =>
+        resolveConfig({ ...base, jwtMint: { audience }, oauth: { resources: [R], fetch } }),
+      ).toThrowError(message);
+    // The default audience is baseURL: a resource equal to it is refused too.
+    expect(() =>
+      resolveConfig({ ...base, oauth: { resources: [base.baseURL], fetch } }),
+    ).toThrowError("jwtMint.audience and oauth.resources both hold");
+    // A resource under the audience at another path is another string: it passes.
+    expect(
+      resolveConfig({
+        ...base,
+        jwtMint: { audience: base.baseURL },
+        oauth: { resources: [R], fetch },
+      }).oauth?.resources,
+    ).toEqual([R]);
+  });
 });
