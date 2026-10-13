@@ -8,6 +8,7 @@ import {
   authorized,
   authorizeGet,
   authorizeParams,
+  consentPage,
   consentPost,
   type Handle,
   ISSUER,
@@ -17,11 +18,24 @@ import {
   REDIRECT,
   RESOURCE,
   registered,
+  requestIdOf,
   signedIn,
 } from "./oauth-helpers.js";
 
 const codes = (h: Handle) =>
   h.storage.findMany("verification", [{ field: "purpose", op: "eq", value: "oauth-code" }]);
+const held = (h: Handle) =>
+  h.storage.findMany("verification", [{ field: "purpose", op: "eq", value: "oauth-request" }]);
+/** The short id at the end of a sign-in `next`. */
+const idOfNext = (next: string) => next.slice(next.indexOf("request_id=") + "request_id=".length);
+/** The query that a held request holds, by its short id. */
+async function heldParams(h: Handle, id: string): Promise<URLSearchParams> {
+  const row = await h.storage.findOne("verification", [
+    { field: "valueHash", op: "eq", value: await sha256Hex(id) },
+    { field: "purpose", op: "eq", value: "oauth-request" },
+  ]);
+  return new URLSearchParams(String(row?.data?.params ?? ""));
+}
 const errorOf = (res: Response) =>
   new URL(res.headers.get("location") ?? "about:blank").searchParams.get("error");
 
@@ -34,8 +48,9 @@ async function setup(h: Handle, verified = true) {
 }
 
 describe("the authorize step (plan 9g)", () => {
-  it("sends a browser with no session to the sign-in page with next back to the authorize URL; the page lands there", async () => {
+  it("sends a browser with no session to the sign-in page with next back to a held request; after the sign-in it shows the consent page (plan 9h)", async () => {
     const h = oauthHandle();
+    const s = await signedIn(h);
     const clientId = await registered(h);
     const { challenge } = await pkce();
     const res = await h.auth.handle(authorizeGet({ clientId, challenge }));
@@ -43,14 +58,29 @@ describe("the authorize step (plan 9g)", () => {
     const location = new URL(res.headers.get("location") ?? "");
     expect(`${location.origin}${location.pathname}`).toBe(`${BASE_URL}/auth/oauth/sign-in`);
     const next = location.searchParams.get("next") ?? "";
-    expect(next.startsWith("/auth/oauth/authorize?")).toBe(true);
-    expect(Object.fromEntries(new URLSearchParams(next.slice(next.indexOf("?") + 1)))).toEqual(
+    expect(next).toMatch(/^\/auth\/oauth\/authorize\?request_id=oq_[A-Za-z0-9_-]{43}$/);
+    const id = idOfNext(next);
+    const rows = await held(h);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      identifier: clientId,
+      valueHash: await sha256Hex(id),
+      consumedAt: null,
+      expiresAt: new Date(h.clock.now().getTime() + 600_000),
+      data: { userId: null },
+    });
+    expect(Object.fromEntries(await heldParams(h, id))).toEqual(
       authorizeParams({ clientId, challenge }),
     );
     const page = await h.auth.handle(get(`/auth/oauth/sign-in?next=${encodeURIComponent(next)}`));
     expect(page.status).toBe(200);
     expect(page.headers.get("content-security-policy")).toContain("script-src 'nonce-");
     expect(await page.text()).toContain(`data-continue="${escapeHtml(next)}"`);
+    // After the sign-in, the way back shows the consent page of the same held request, now bound to the user.
+    const back = await h.auth.handle(get(next, { cookie: s.cookie }));
+    expect(back.status).toBe(200);
+    expect(requestIdOf(await back.text())).toBe(id);
+    expect((await held(h)).map((r) => r.data?.userId)).toEqual([s.user.id]);
   });
 
   it("refuses the sign-in page for a next that is not an authorize URL", async () => {
@@ -64,7 +94,7 @@ describe("the authorize step (plan 9g)", () => {
     }
   });
 
-  it("shows the consent page with the client name, the scopes, and the request as hidden fields; the policy admits the redirect origin", async () => {
+  it("shows the consent page with the client name, the scopes, and the held request's short id as the one hidden field; the policy admits the redirect origin (plan 9h)", async () => {
     const h = oauthHandle();
     const s = await setup(h);
     const res = await h.auth.handle(
@@ -82,8 +112,14 @@ describe("the authorize step (plan 9g)", () => {
     expect(html).toContain("Allow Test MCP client to use your api.example.com account?");
     expect(html).toContain("Read your documents");
     expect(html).toContain("Confirm who you are");
-    expect(html).toContain(`<input type="hidden" name="code_challenge" value="${s.challenge}">`);
-    expect(html).toContain('<input type="hidden" name="state" value="st-1">');
+    // The request stays on the server (plan 9h): no hidden field repeats it.
+    const id = requestIdOf(html);
+    expect(html.match(/type="hidden"/g)).toHaveLength(1);
+    expect(html).not.toContain(s.challenge);
+    expect(Object.fromEntries(await heldParams(h, id))).toEqual(
+      authorizeParams({ clientId: s.clientId, challenge: s.challenge, scope: "openid mcp:read" }),
+    );
+    expect((await held(h))[0]?.data?.userId).toBe(s.user.id);
     expect(html).not.toContain("<script");
     // The resource of the request, and the other one that the consent covers too (review M-3).
     expect(html).toContain(
@@ -131,14 +167,15 @@ describe("the authorize step (plan 9g)", () => {
     expect((await h.auth.handle(authorizeGet(ask("mcp:write"), s.cookie))).status).toBe(302);
   });
 
-  it("deny redirects with access_denied, the state, and iss, and writes no consent and no code", async () => {
+  it("deny redirects with access_denied, the state, and iss, spends the held request, and writes no consent and no code", async () => {
     const h = oauthHandle();
     const s = await setup(h);
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
     const res = await h.auth.handle(
-      consentPost(
-        { ...authorizeParams({ clientId: s.clientId, challenge: s.challenge }), decision: "deny" },
-        { cookie: s.cookie },
-      ),
+      consentPost({ request_id: requestId, decision: "deny" }, { cookie: s.cookie }),
     );
     expect(res.status).toBe(302);
     const loc = new URL(res.headers.get("location") ?? "");
@@ -147,6 +184,7 @@ describe("the authorize step (plan 9g)", () => {
       state: "st-1",
       iss: ISSUER,
     });
+    expect((await held(h))[0]?.consumedAt).not.toBeNull();
     expect(await h.storage.findMany("oauthConsent", [])).toEqual([]);
     expect(await codes(h)).toEqual([]);
   });
@@ -154,10 +192,11 @@ describe("the authorize step (plan 9g)", () => {
   it("refuses the consent post from another origin and with no origin (403), and with no session (401)", async () => {
     const h = oauthHandle();
     const s = await setup(h);
-    const body = {
-      ...authorizeParams({ clientId: s.clientId, challenge: s.challenge }),
-      decision: "allow",
-    };
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    const body = { request_id: requestId, decision: "allow" };
     expect(
       (await h.auth.handle(consentPost(body, { cookie: s.cookie, origin: APP_ORIGIN }))).status,
     ).toBe(403);
@@ -239,7 +278,7 @@ describe("the authorize step (plan 9g)", () => {
     expect(errorOf(await h.auth.handle(authorizeGet(input, s.cookie)))).toBe("consent_required");
   });
 
-  it("prompt=login answers login_required to a session; with no session the sign-in page lands back with login dropped (OIDC Core 3.1.2.1)", async () => {
+  it("prompt=login answers login_required to a session; with no session the held request drops login, and the way back shows the page (OIDC Core 3.1.2.1)", async () => {
     const h = oauthHandle();
     const s = await setup(h);
     for (const prompt of ["login", "login consent", "consent login"])
@@ -256,38 +295,43 @@ describe("the authorize step (plan 9g)", () => {
       const res = await h.auth.handle(
         authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt }),
       );
-      const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
-      return new URLSearchParams(next.slice(next.indexOf("?") + 1)).get("prompt");
+      return new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
     };
-    expect(await nextOf("login")).toBeNull();
-    expect(await nextOf("login consent")).toBe("consent");
-    // After the sign-in the way back passes: the consent page, not login_required.
-    const res = await h.auth.handle(
-      authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt: "login" }),
+    expect((await heldParams(h, idOfNext(await nextOf("login")))).get("prompt")).toBeNull();
+    expect((await heldParams(h, idOfNext(await nextOf("login consent")))).get("prompt")).toBe(
+      "consent",
     );
-    const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
-    const back = await h.auth.handle(get(next, { cookie: s.cookie }));
+    // After the sign-in the way back passes: the consent page, not login_required.
+    const back = await h.auth.handle(get(await nextOf("login"), { cookie: s.cookie }));
     expect(back.status).toBe(200);
   });
 
-  it("redirects invalid_request to the client when the authorize URL is too long to ride through the sign-in page (Task 5 review)", async () => {
+  it("holds a request too long for next: the sign-in page lands back on it, and the code carries the state (plan 9h, Review Focus 2)", async () => {
     const h = oauthHandle();
     const s = await setup(h);
-    // 400 characters is within the 512 limit of state; each one is 6 characters in the URL, so next is longer than 2048.
-    const state = "\u00e9".repeat(400);
-    const res = await h.auth.handle(
-      authorizeGet({ clientId: s.clientId, challenge: s.challenge, state }),
+    // 400 characters is within the 512 limit of state; each one is 6 characters in the URL.
+    const state = "é".repeat(400);
+    const input = { clientId: s.clientId, challenge: s.challenge, state };
+    // Longer than the 2048 of safeNext, which refused this request before plan 9h.
+    expect(authorizeGet(input).url.length).toBeGreaterThan(2048);
+    const res = await h.auth.handle(authorizeGet(input));
+    const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
+    expect(next).toMatch(/^\/auth\/oauth\/authorize\?request_id=oq_/);
+    expect(
+      (await h.auth.handle(get(`/auth/oauth/sign-in?next=${encodeURIComponent(next)}`))).status,
+    ).toBe(200);
+    const page = await h.auth.handle(get(next, { cookie: s.cookie }));
+    expect(page.status).toBe(200);
+    const done = await h.auth.handle(
+      consentPost(
+        { request_id: requestIdOf(await page.text()), decision: "allow" },
+        { cookie: s.cookie },
+      ),
     );
-    expect(res.status).toBe(302);
-    const location = new URL(res.headers.get("location") ?? "");
-    expect(`${location.origin}${location.pathname}`).toBe(REDIRECT);
-    expect(location.searchParams.get("error")).toBe("invalid_request");
-    expect(location.searchParams.get("state")).toBe(state);
-    // A shorter request still goes to the sign-in page.
-    const short = await h.auth.handle(
-      authorizeGet({ clientId: s.clientId, challenge: s.challenge }),
-    );
-    expect(new URL(short.headers.get("location") ?? "").pathname).toBe("/auth/oauth/sign-in");
+    const back = new URL(done.headers.get("location") ?? "");
+    expect(`${back.origin}${back.pathname}`).toBe(REDIRECT);
+    expect(back.searchParams.get("state")).toBe(state);
+    expect(back.searchParams.get("code")).toMatch(/^oc_/);
   });
 
   it("refuses a state or a nonce over 512 characters or with a control character (Task 5 review)", async () => {
@@ -324,27 +368,25 @@ describe("the authorize step (plan 9g)", () => {
     const s = await setup(h);
     const input = { clientId: s.clientId, challenge: s.challenge };
     const ip = { "cf-connecting-ip": "8.8.8.8" };
-    for (let i = 0; i < 30; i++)
+    const ids: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      const res = await h.auth.handle(
+        new Request(authorizeGet(input, s.cookie), { headers: { ...ip, cookie: s.cookie } }),
+      );
+      expect(res.status).toBe(200);
+      ids.push(requestIdOf(await res.text()));
+    }
+    for (const id of ids)
       expect(
         (
           await h.auth.handle(
-            new Request(authorizeGet(input, s.cookie), { headers: { ...ip, cookie: s.cookie } }),
-          )
-        ).status,
-      ).toBe(200);
-    for (let i = 0; i < 30; i++)
-      expect(
-        (
-          await h.auth.handle(
-            consentPost(
-              { ...authorizeParams(input), decision: "deny" },
-              { ...ip, cookie: s.cookie },
-            ),
+            consentPost({ request_id: id, decision: "deny" }, { ...ip, cookie: s.cookie }),
           )
         ).status,
       ).toBe(302);
+    // The 61st count. The limit runs before the read of the held request.
     const limited = await h.auth.handle(
-      consentPost({ ...authorizeParams(input), decision: "allow" }, { ...ip, cookie: s.cookie }),
+      consentPost({ request_id: ids[0] ?? "", decision: "allow" }, { ...ip, cookie: s.cookie }),
     );
     expect(limited.status).toBe(429);
     expect(await h.storage.findMany("oauthConsent", [])).toEqual([]);
@@ -376,16 +418,23 @@ describe("the authorize step (plan 9g)", () => {
     ]);
   });
 
-  it("answers access_denied to an unverified user, on the GET and on the POST", async () => {
+  it("answers access_denied to an unverified user on the GET; a post of a request held before the sign-in decides nothing (plan 9h)", async () => {
     const h = oauthHandle();
     const s = await setup(h, false);
     const input = { clientId: s.clientId, challenge: s.challenge };
     expect(errorOf(await h.auth.handle(authorizeGet(input, s.cookie)))).toBe("access_denied");
+    // A request held at the sign-in step names no user; the person posts its id by hand.
+    const res = await h.auth.handle(authorizeGet(input));
+    const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
     const post = await h.auth.handle(
-      consentPost({ ...authorizeParams(input), decision: "allow" }, { cookie: s.cookie }),
+      consentPost({ request_id: idOfNext(next), decision: "allow" }, { cookie: s.cookie }),
     );
-    expect(errorOf(post)).toBe("access_denied");
+    expect({ status: post.status, body: await post.json() }).toEqual({
+      status: 400,
+      body: { error: "invalid_request" },
+    });
     expect(await h.storage.findMany("oauthConsent", [])).toEqual([]);
+    expect(await codes(h)).toEqual([]);
   });
 
   it("limits the authorize step to 60 per IP per 15 minutes", async () => {
@@ -430,5 +479,95 @@ describe("the authorize step (plan 9g)", () => {
         sessionId: s.session.id,
       },
     });
+  });
+
+  it("the consent POST binds to the held request: a changed hidden field changes nothing, and a second post and another user's post answer invalid_request (plan 9h, Review Focus 1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const bob = await signedIn(h, "bob@example.com");
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+      scope: "mcp:read",
+    });
+    const invalid = { status: 400, body: { error: "invalid_request" } };
+    const answer = async (res: Response) => ({ status: res.status, body: await res.json() });
+    // Another user's post decides nothing, and the request stays for its own user.
+    expect(
+      await answer(
+        await h.auth.handle(
+          consentPost({ request_id: requestId, decision: "allow" }, { cookie: bob.cookie }),
+        ),
+      ),
+    ).toEqual(invalid);
+    // Fields beside the id are not read: the scope and the redirect URI are the held ones.
+    const done = await h.auth.handle(
+      consentPost(
+        {
+          request_id: requestId,
+          decision: "allow",
+          scope: "mcp:read mcp:write",
+          redirect_uri: "https://evil.example.com/cb",
+        },
+        { cookie: s.cookie },
+      ),
+    );
+    const back = new URL(done.headers.get("location") ?? "");
+    expect(`${back.origin}${back.pathname}`).toBe(REDIRECT);
+    expect((await h.storage.findMany("oauthConsent", [])).map((r) => r.scopes)).toEqual([
+      ["mcp:read"],
+    ]);
+    expect(
+      await answer(
+        await h.auth.handle(
+          consentPost({ request_id: requestId, decision: "allow" }, { cookie: s.cookie }),
+        ),
+      ),
+    ).toEqual(invalid);
+    expect(await codes(h)).toHaveLength(1);
+  });
+
+  it("a held request lives 10 minutes: the way back after that answers invalid_request with no redirect (plan 9h)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const res = await h.auth.handle(authorizeGet({ clientId: s.clientId, challenge: s.challenge }));
+    const next = new URL(res.headers.get("location") ?? "").searchParams.get("next") ?? "";
+    h.clock.advance(10 * 60_000);
+    const late = await h.auth.handle(get(next, { cookie: s.cookie }));
+    expect({
+      status: late.status,
+      location: late.headers.get("location"),
+      body: await late.json(),
+    }).toEqual({ status: 400, location: null, body: { error: "invalid_request" } });
+  });
+
+  it("refuses a request_id with another parameter beside it, a repeated one, and an unknown one (plan 9h)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: s.clientId,
+      challenge: s.challenge,
+    });
+    for (const query of [
+      `request_id=${requestId}&scope=mcp:write`,
+      `request_id=${requestId}&request_id=${requestId}`,
+      `request_id=oq_${"A".repeat(43)}`,
+      "request_id=x",
+    ]) {
+      const res = await h.auth.handle(get(`/auth/oauth/authorize?${query}`, { cookie: s.cookie }));
+      expect({ query, status: res.status, body: await res.json() }).toEqual({
+        query,
+        status: 400,
+        body: { error: "invalid_request" },
+      });
+    }
+    // The id alone still shows the page.
+    expect(
+      (
+        await h.auth.handle(
+          get(`/auth/oauth/authorize?request_id=${requestId}`, { cookie: s.cookie }),
+        )
+      ).status,
+    ).toBe(200);
   });
 });

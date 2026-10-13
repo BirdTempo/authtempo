@@ -3,7 +3,7 @@ import type { OAuthErrorCode } from "../errors.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
-import type { OAuthClientRow, UserRow } from "../schema.js";
+import type { OAuthClientRow, UserRow, VerificationRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { issuerOf } from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
@@ -22,9 +22,12 @@ export const CODE_PREFIX = "oc_";
 /** RFC 7636 section 4.2: 43 to 128 unreserved characters. The S256 of a verifier is 43. */
 const CHALLENGE_RE = /^[A-Za-z0-9._~-]{43,128}$/;
 const PARAM_MAX = 512;
-/** The longest `next` that `safeNext` keeps. A longer authorize URL cannot ride through the sign-in page. */
-const NEXT_MAX = 2048;
 const CLIENT_ID_MAX = 2048;
+/** The short id of a held authorize request (plan 9h). Not `or_`: that is the refresh token's prefix. */
+export const REQUEST_PREFIX = "oq_";
+const REQUEST_RE = /^oq_[A-Za-z0-9_-]{43}$/;
+/** A held request lives 10 minutes (owner decision 4a of 2026-10-14): the sign-in and the consent answer fit in it. */
+export const REQUEST_TTL_MS = 10 * 60_000;
 export const AUTHORIZE_PER_IP = { seconds: 900, max: 60 };
 
 export interface AuthorizeRequest {
@@ -53,11 +56,26 @@ export interface OAuthCodeData {
   sessionId: string;
 }
 
+/** The data of an `oauth-request` verification row (plan 9h). */
+export interface OAuthRequestData {
+  /** The authorize query as checked, with `login` dropped from `prompt`. */
+  params: string;
+  /** The user the consent page showed the request to; null before the sign-in. */
+  userId: string | null;
+}
+
 export type AuthorizeStep =
   | { kind: "error"; error: OAuthErrorCode }
   | { kind: "redirect"; location: string }
   | { kind: "sign-in"; location: string }
-  | { kind: "consent"; request: AuthorizeRequest; client: OAuthClientRow; user: UserRow };
+  | {
+      kind: "consent";
+      request: AuthorizeRequest;
+      client: OAuthClientRow;
+      user: UserRow;
+      /** The short id of the held request, the one field the form posts back (plan 9h). */
+      requestId: string;
+    };
 
 type Checked =
   | { ok: true; request: AuthorizeRequest; client: OAuthClientRow }
@@ -267,63 +285,222 @@ async function codeRedirect(
 const limited = async (config: ResolvedConfig, ip: string | null) =>
   !(await config.limiter.allow(`oauth-authorize:ip:${ip ?? "unknown"}`, AUTHORIZE_PER_IP));
 
+/** A held request as read: its clear short id, its row, and its data. */
+interface HeldRequest {
+  id: string;
+  row: VerificationRow;
+  data: OAuthRequestData;
+}
+
 /**
- * The GET of the authorization endpoint. With no session: the sign-in page,
- * with `next` back to this request. An unverified user is refused: a grant
- * would outlive a claim of the address (spec 8.7). A consent that covers
- * every scope asked gives the code at once, unless `prompt=consent`.
+ * Holds the checked query in an `oauth-request` verification row for 10
+ * minutes and answers its short id (plan 9h, owner decision 4a). The way
+ * back through the sign-in page and the consent form carry the id, not the
+ * query: a long client id or state fits in `next`, and the consent POST
+ * decides on the request that core checked, not on hidden form fields.
+ */
+async function holdRequest(
+  config: ResolvedConfig,
+  clientId: string,
+  params: URLSearchParams,
+  userId: string | null,
+): Promise<string> {
+  const now = config.clock.now();
+  const id = randomToken(REQUEST_PREFIX);
+  const data: OAuthRequestData = { params: params.toString(), userId };
+  await config.storage.create("verification", {
+    id: newId(now),
+    purpose: "oauth-request",
+    // The client: before the sign-in the row names no user.
+    identifier: clientId,
+    valueHash: await sha256Hex(id),
+    expiresAt: new Date(now.getTime() + REQUEST_TTL_MS),
+    consumedAt: null,
+    data: { ...data },
+    createdAt: now,
+    updatedAt: now,
+  });
+  return id;
+}
+
+/** The live held request of `id`, or null: malformed, unknown, spent, expired, or with bad data. */
+async function readHeld(config: ResolvedConfig, id: string): Promise<HeldRequest | null> {
+  if (!REQUEST_RE.test(id)) return null;
+  const row = await config.storage.findOne("verification", [
+    { field: "valueHash", op: "eq", value: await sha256Hex(id) },
+    { field: "purpose", op: "eq", value: "oauth-request" },
+  ]);
+  if (!row || row.consumedAt !== null || row.expiresAt.getTime() <= config.clock.now().getTime())
+    return null;
+  const params = row.data?.params;
+  const userId = row.data?.userId;
+  if (typeof params !== "string") return null;
+  if (userId === null) return { id, row, data: { params, userId: null } };
+  if (typeof userId !== "string") return null;
+  return { id, row, data: { params, userId } };
+}
+
+/** Spends the held request in one conditional update: one request, one final answer, also for two parallel ones. */
+async function spendHeld(config: ResolvedConfig, held: HeldRequest): Promise<boolean> {
+  const now = config.clock.now();
+  const n = await config.storage.update(
+    "verification",
+    [
+      { field: "id", op: "eq", value: held.row.id },
+      { field: "consumedAt", op: "eq", value: null },
+      { field: "expiresAt", op: "gt", value: now },
+    ],
+    { consumedAt: now, updatedAt: now },
+  );
+  return n === 1;
+}
+
+/** Binds the held request to the user the consent page shows it to. False: it was spent since the read. */
+async function bindHeld(
+  config: ResolvedConfig,
+  held: HeldRequest,
+  userId: string,
+): Promise<boolean> {
+  if (held.data.userId === userId) return true;
+  const n = await config.storage.update(
+    "verification",
+    [
+      { field: "id", op: "eq", value: held.row.id },
+      { field: "consumedAt", op: "eq", value: null },
+    ],
+    { data: { params: held.data.params, userId }, updatedAt: config.clock.now() },
+  );
+  return n === 1;
+}
+
+/** A final answer: a held request is spent first, so it ends once. A lost spend answers invalid_request. */
+async function settle(
+  config: ResolvedConfig,
+  held: HeldRequest | null,
+  step: () => Promise<AuthorizeStep>,
+): Promise<AuthorizeStep> {
+  if (held && !(await spendHeld(config, held))) return { kind: "error", error: "invalid_request" };
+  return step();
+}
+
+/** Core's sign-in page, with `next` back to the held request. */
+function signInStep(config: ResolvedConfig, requestId: string): AuthorizeStep {
+  const next = `${config.basePath}/oauth/authorize?request_id=${requestId}`;
+  return {
+    kind: "sign-in",
+    location: `${config.baseURL}${config.basePath}/oauth/sign-in?next=${encodeURIComponent(next)}`,
+  };
+}
+
+/** `params` with `login` dropped from `prompt`: the sign-in page is the fresh sign-in that `login` asks for. */
+function withoutLogin(params: URLSearchParams): URLSearchParams {
+  const back = new URLSearchParams(params);
+  const rest = (back.get("prompt") ?? "").split(" ").filter((p) => p.length > 0 && p !== "login");
+  if (rest.length > 0) back.set("prompt", rest.join(" "));
+  else back.delete("prompt");
+  return back;
+}
+
+/**
+ * The steps with a session, for a fresh request and a held one. An
+ * unverified user is refused: a grant would outlive a claim of the address
+ * (spec 8.7). A consent that covers every scope asked gives the code at
+ * once, unless `prompt=consent`. Else the consent page shows the held
+ * request, bound to this user.
+ */
+async function sessionStep(
+  config: ResolvedConfig,
+  checked: { request: AuthorizeRequest; client: OAuthClientRow },
+  params: URLSearchParams,
+  session: ResolvedSession,
+  held: HeldRequest | null,
+): Promise<AuthorizeStep> {
+  const { request, client } = checked;
+  if (!session.user.emailVerified)
+    return settle(config, held, () => Promise.resolve(denied(config, request, "access_denied")));
+  if (
+    request.prompt !== "consent" &&
+    (await consentCovers(config, session.user.id, request.clientId, request.scopes))
+  )
+    return settle(config, held, () => codeRedirect(config, request, session));
+  if (request.prompt === "none")
+    return settle(config, held, () => Promise.resolve(denied(config, request, "consent_required")));
+  if (held && !(await bindHeld(config, held, session.user.id)))
+    return { kind: "error", error: "invalid_request" };
+  const requestId = held
+    ? held.id
+    : await holdRequest(config, request.clientId, params, session.user.id);
+  return { kind: "consent", request, client, user: session.user, requestId };
+}
+
+/** The GET with `request_id`: the held query, checked again, because the client and the config may have changed. */
+async function heldStep(
+  config: ResolvedConfig,
+  requestId: string,
+  session: ResolvedSession | null,
+): Promise<AuthorizeStep> {
+  const held = await readHeld(config, requestId);
+  if (!held) return { kind: "error", error: "invalid_request" };
+  const params = new URLSearchParams(held.data.params);
+  const c = await checkAuthorize(config, params);
+  if (!c.ok) {
+    const { step } = c;
+    return settle(config, held, () => Promise.resolve(step));
+  }
+  if (!session) return signInStep(config, held.id);
+  return sessionStep(config, c, params, session, held);
+}
+
+/**
+ * The GET of the authorization endpoint. With no session: the request is
+ * held, and the browser goes to the sign-in page with `next` back to it.
+ * With `request_id`: the held request, which comes alone.
  */
 export async function authorizeStep(
   config: ResolvedConfig,
   input: { params: URLSearchParams; session: ResolvedSession | null; ip: string | null },
 ): Promise<AuthorizeStep> {
   if (await limited(config, input.ip)) return { kind: "error", error: "rate_limited" };
+  const requestId = single(input.params, "request_id");
+  if (requestId !== null) {
+    // A parameter beside the id would be a second request in one URL.
+    if (requestId === undefined || [...input.params.keys()].length !== 1)
+      return { kind: "error", error: "invalid_request" };
+    return heldStep(config, requestId, input.session);
+  }
   const c = await checkAuthorize(config, input.params);
   if (!c.ok) return c.step;
   const { request } = c;
-  const { session } = input;
-  if (!session) {
+  if (!input.session) {
     if (request.prompt === "none") return denied(config, request, "login_required");
-    // The sign-in page is the fresh sign-in that `login` asks for. The way
-    // back drops `login`, or the new session would answer `login_required`.
-    const back = new URLSearchParams(input.params);
-    if (request.login) {
-      const rest = (back.get("prompt") ?? "")
-        .split(" ")
-        .filter((p) => p.length > 0 && p !== "login");
-      if (rest.length > 0) back.set("prompt", rest.join(" "));
-      else back.delete("prompt");
-    }
-    const next = `${config.basePath}/oauth/authorize?${back.toString()}`;
-    // `safeNext` sends a longer `next` to the app root, a dead end: tell the client now.
-    if (next.length > NEXT_MAX) return denied(config, request, "invalid_request");
-    return {
-      kind: "sign-in",
-      location: `${config.baseURL}${config.basePath}/oauth/sign-in?next=${encodeURIComponent(next)}`,
-    };
+    // The way back drops `login`, or the new session would answer `login_required`.
+    const back = request.login ? withoutLogin(input.params) : input.params;
+    return signInStep(config, await holdRequest(config, request.clientId, back, null));
   }
   // OIDC Core 1.0 section 3.1.2.1: with `login` the server must sign the
   // person in again or answer an error. Core does not end a live session
   // to sign it in again, so it answers `login_required`; the client may
   // send the person to sign out first.
   if (request.login) return denied(config, request, "login_required");
-  if (!session.user.emailVerified) return denied(config, request, "access_denied");
-  if (
-    request.prompt !== "consent" &&
-    (await consentCovers(config, session.user.id, request.clientId, request.scopes))
-  )
-    return codeRedirect(config, request, session);
-  if (request.prompt === "none") return denied(config, request, "consent_required");
-  return { kind: "consent", request, client: c.client, user: session.user };
+  return sessionStep(config, c, input.params, input.session, null);
 }
 
-/** The POST of the consent form. The route checked the session and the Origin; the request is checked again here. */
+/**
+ * The POST of the consent form (plan 9h: it binds to the held request). The
+ * route checked the session and the Origin. The form carries the short id
+ * and the decision only, so a changed field changes nothing. The page
+ * showed the request to one user; a post of another user decides nothing.
+ */
 export async function decideAuthorize(
   config: ResolvedConfig,
-  input: { params: URLSearchParams; decision: string; session: ResolvedSession; ip: string | null },
+  input: { requestId: string; decision: string; session: ResolvedSession; ip: string | null },
 ): Promise<AuthorizeStep> {
   if (await limited(config, input.ip)) return { kind: "error", error: "rate_limited" };
-  const c = await checkAuthorize(config, input.params);
+  const held = await readHeld(config, input.requestId);
+  if (!held || held.data.userId !== input.session.user.id)
+    return { kind: "error", error: "invalid_request" };
+  if (!(await spendHeld(config, held))) return { kind: "error", error: "invalid_request" };
+  const c = await checkAuthorize(config, new URLSearchParams(held.data.params));
   if (!c.ok) return c.step;
   if (input.decision !== "allow" || !input.session.user.emailVerified)
     return denied(config, c.request, "access_denied");

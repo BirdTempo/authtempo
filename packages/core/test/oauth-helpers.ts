@@ -129,6 +129,22 @@ export function consentPost(
   });
 }
 
+/** The short id of the held request that a consent page carries (plan 9h). */
+export function requestIdOf(html: string): string {
+  const m = /<input type="hidden" name="request_id" value="(oq_[A-Za-z0-9_-]{43})">/.exec(html);
+  if (!m?.[1]) throw new Error("no held request on the page");
+  return m[1];
+}
+
+/** The consent page of `i` for the session `cookie`, and the short id it carries. */
+export async function consentPage(h: Handle, cookie: string, i: AuthorizeInput) {
+  const page = await h.auth.handle(authorizeGet(i, cookie));
+  if (page.status !== 200)
+    throw new Error(`authorize answered ${page.status}, not the consent page`);
+  const html = await page.text();
+  return { page, html, requestId: requestIdOf(html) };
+}
+
 /** A token request as a native client sends it: form encoded, no Origin. */
 export function tokenPost(
   body: Record<string, string>,
@@ -146,8 +162,9 @@ export async function authorized(h: Handle, cookie: string, i: AuthorizeInput) {
   const page = await h.auth.handle(authorizeGet(i, cookie));
   let location = page.headers.get("location");
   if (page.status === 200) {
+    // The form posts the held request's short id, not the request (plan 9h).
     const done = await h.auth.handle(
-      consentPost({ ...authorizeParams(i), decision: "allow" }, { cookie }),
+      consentPost({ request_id: requestIdOf(await page.text()), decision: "allow" }, { cookie }),
     );
     location = done.headers.get("location");
   }

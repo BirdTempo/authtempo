@@ -110,9 +110,12 @@ async function connect(email: string, scope: string, resource = RESOURCE) {
     redirect: "manual",
     headers: { cookie, ...IP },
   });
+  // The form posts the held request's short id (plan 9h). A clone: the test reads the page again.
+  const requestId =
+    /name="request_id" value="(oq_[A-Za-z0-9_-]{43})"/.exec(await page.clone().text())?.[1] ?? "";
   const allowed = await SELF.fetch(
     `${ISSUER}/oauth/authorize`,
-    form({ ...params, decision: "allow" }, { origin: BASE, cookie }),
+    form({ request_id: requestId, decision: "allow" }, { origin: BASE, cookie }),
   );
   const back = new URL(allowed.headers.get("location") ?? "about:blank");
   const exchanged = await SELF.fetch(

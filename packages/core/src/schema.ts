@@ -49,11 +49,18 @@ export type VerificationPurpose =
    */
   | "two-factor"
   /**
-   * An OAuth authorization code (plan 9g). identifier: the client id;
+   * An OAuth authorization code (plan 9g). identifier: the user id (plan 9g
+   * final fix wave, round 2: a reset deletes the user's codes by it);
    * valueHash: the SHA-256 hex of the `oc_` code; data: { clientId,
    * redirectUri, codeChallenge, scopes, resource, userId, nonce, sessionId }.
    */
-  | "oauth-code";
+  | "oauth-code"
+  /**
+   * A held authorize request (plan 9h). identifier: the client id;
+   * valueHash: the SHA-256 hex of the `oq_` id; data: { params, userId }.
+   * Lives 10 minutes; spent at the decision, the code, or another final answer.
+   */
+  | "oauth-request";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;
