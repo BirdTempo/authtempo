@@ -5,6 +5,16 @@ import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
 import { enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
+/**
+ * The one node:fs call the README check uses. Core's typecheck has no Node
+ * types, because core runs on Workers; vitest runs in Node. A specifier in a
+ * constant keeps the import out of the typecheck (as session-hooks.test.ts does).
+ */
+interface ReadmeFs {
+  readFileSync(file: URL, encoding: "utf8"): string;
+}
+const FS_MODULE = "node:fs";
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -284,5 +294,19 @@ describe("sweepExpired", () => {
         await storage.findOne("oauthClient", [{ field: "id", op: "eq", value: "c-seen" }]),
       ).toMatchObject({ lastSeenAt: now });
     });
+  });
+
+  it("the README's Sweep section has one bullet per count that sweepExpired answers, and no other (plan 9h)", async () => {
+    const { readFileSync }: ReadmeFs = await import(/* @vite-ignore */ FS_MODULE);
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+    const start = readme.indexOf("\n## Sweep\n");
+    const end = readme.indexOf("\n## ", start + 1);
+    expect(start).toBeGreaterThan(-1);
+    const section = readme.slice(start, end);
+    const listed = [...section.matchAll(/^- `([A-Za-z]+)`: /gm)].map((m) => m[1]).sort();
+    const counts = Object.keys(await sweepExpired(makeAuth().config)).sort();
+    expect(listed).toEqual(counts);
+    // The README is not a record: the dated paragraphs of plans 8b to 9g are folded into the list.
+    expect(section).not.toMatch(/five counts|a sixth count|Since plan/);
   });
 });

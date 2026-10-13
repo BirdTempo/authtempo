@@ -858,25 +858,25 @@ The API token cap has the same rule.
 
 ## Sweep
 
-`auth.api.sweepExpired()` deletes the rows that no flow can use any more.
-It removes every verification row past its expiry, consumed or not. It
-removes a consumed verification row one day after the consume; this only
-matters when `magicLink.ttlMinutes` is above one day. It removes
-invitations that are accepted or expired, and sessions past their expiry.
-It also calls the limiter's `sweep`, when the limiter has one, to delete
-the limit windows that ended. It answers five counts:
-`verificationExpired`, `verificationConsumed`, `invitations`, `sessions`,
-and `limits`. It is an `api` function and not a route. Call it from a
-scheduled handler. It is safe to run at any time. A replayed token
+`auth.api.sweepExpired()` deletes the rows that no flow can use any more,
+and calls the limiter's `sweep`, when the limiter has one, to delete the
+limit windows that ended. It is an `api` function and not a route. Call it
+from a scheduled handler. It is safe to run at any time. A replayed token
 answers `invalid_token` after the sweep because its row is gone.
 
-Since plan 8b it also deletes API tokens past their expiry and answers a sixth count, `apiTokens`. A token with no expiry stays.
+It answers one count for each kind of row:
 
-Since plan 9f it also deletes trusted devices past their expiry and answers `trustedDevices`.
-
-Since the plan 9f final fix wave it also deletes TOTP setups that no enable confirmed within 15 minutes and answers `totpSetups`.
-
-Since plan 9g it also deletes signing keys retired more than 24 hours ago (`jwks`), refresh tokens past their expiry (`oauthTokens`), and up to 100 OAuth clients unseen for 90 days with no consent and no refresh token (`oauthClients`).
+- `verificationExpired`: verification rows past their expiry, consumed or not.
+- `verificationConsumed`: consumed verification rows one day after the consume. This only matters when `magicLink.ttlMinutes` is above one day.
+- `invitations`: invitations that are accepted or expired.
+- `sessions`: sessions past their expiry.
+- `apiTokens`: API tokens past their expiry. A token with no expiry stays.
+- `trustedDevices`: trusted devices past their expiry.
+- `totpSetups`: TOTP setups that no enable confirmed within 15 minutes.
+- `jwks`: signing keys retired more than 24 hours ago.
+- `oauthTokens`: refresh tokens past their expiry.
+- `oauthClients`: up to 100 OAuth clients unseen for 90 days with no consent and no refresh token.
+- `limits`: limit windows that ended; 0 when the limiter has no `sweep`.
 
 ```ts
 export default {
