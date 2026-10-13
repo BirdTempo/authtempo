@@ -603,7 +603,7 @@ The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `e
 
 ## JWT and the OAuth provider
 
-Since plan 9g core mints JWTs (`/jwks`, `/token`, `api.jwt`) and is an OAuth 2.1 and OIDC provider (`/oauth/*` and `auth.wellKnown`). This package maps none of the Better Auth plugins for them (owner decision of 2026-10-13): `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused at construction, and core's minting is off under the package (`jwtMint: false`), so `/api/auth/jwks` and `/api/auth/token` answer 404.
+Since plan 9g, core mints JWTs (`/jwks`, `/token`, `api.jwt`) and is an OAuth 2.1 and OIDC provider (`/oauth/*` and `auth.wellKnown`). This package maps none of the Better Auth plugins for them (owner decision of 2026-10-13): `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused at construction, and core's minting is off under the package (`jwtMint: false`), so `/api/auth/jwks` and `/api/auth/token` answer 404.
 
 - To keep the provider, move the app from this package to core's own `createAuth` with `jwtMint` and `oauth`, and mount `auth.wellKnown` at the origin root. Migration 0004 already holds core's four tables.
 - The Better Auth `jwks` table (`id`, `publicKey`, `privateKey`, `createdAt`, `expiresAt`, `alg`, `crv` in 1.7.2) is neither read nor written. A JWT that Better Auth issued stops verifying at the cutover, and each OAuth client signs in again: its Better Auth refresh tokens and consents do not carry over.
