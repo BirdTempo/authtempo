@@ -1,0 +1,64 @@
+---
+title: Sign in with a passkey
+description: Register a passkey for a signed-in person, and sign in with a discoverable passkey.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.4
+  - packages/core/README.md "Passkeys"
+  - packages/client/README.md "Passkeys"
+  - docs/superpowers/plans/2026-10-10-06c-device-proofs.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/passkeys.ts?raw";
+import client from "../../../../../samples/guides/passkeys-client.ts?raw";
+import test from "../../../../../samples/guides/passkeys.test.ts?raw";
+
+**For:** an app developer who wants people to sign in with the fingerprint, the face, or the PIN of their device.
+
+**What it does:** core runs the two WebAuthn ceremonies, and the client package runs the browser side of each.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- A registrable domain that the API and the app share, such as `example.com`.
+
+## Steps
+
+1. Set `passkey.rpID` to the registrable domain.
+2. Set `passkey.origins` to the web origins where the ceremonies run. Add each of them to `trustedOrigins` too.
+
+<Code code={config} lang="ts" title="The passkey config" />
+
+3. Call `supportsPasskeys()` before you show a passkey button.
+4. On "Add a passkey", call `client.passkey.register({ name })`. The person must be signed in with a verified address.
+5. On "Sign in with a passkey", call `client.passkey.signIn()`.
+6. Treat the code `cancelled` as a normal event. Show no error.
+
+<Code code={client} lang="ts" title="The two buttons" />
+
+<Code code={test} lang="ts" title="The options as a test" />
+
+## How it behaves
+
+- A challenge is 32 random bytes, valid for five minutes and for one use. A replayed answer fails on the spent challenge.
+- Both ceremonies require user verification. Registration asks for a discoverable passkey, so the sign-in options list no passkey.
+- The client converts the options itself when the browser has no `parseCreationOptionsFromJSON`, as in older Firefox and Safari.
+- `@authtempo/core/testing` exports `SoftAuthenticator`, a software authenticator, so a test runs both ceremonies with no browser.
+- An Electron or Expo app runs the ceremonies in the system browser through the [handoff](/docs/guides/handoff/).
+- The options have a limit of 30 per IP, and the verify has a limit of 20 per IP, in 15 minutes.
+
+## If it fails
+
+- [`unauthorized`](/docs/reference/errors/#unauthorized): a registration needs a session.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): a registration needs a verified address.
+- [`passkey_failed`](/docs/reference/errors/#passkey_failed): an unknown passkey, a bad signature, or a passkey that is already registered.
+- [`invalid_token`](/docs/reference/errors/#invalid_token) and [`token_expired`](/docs/reference/errors/#token_expired): the challenge is spent or older than five minutes. Start again.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many ceremonies from the IP.
+- [`not_found`](/docs/reference/errors/#not_found): the passkey to delete does not belong to the caller.
+
+## Next
+
+- [Sign in from a native or desktop app](/docs/guides/handoff/)
+- [The client package](/docs/reference/client/)
+- [Proof of an address and the claim rule](/docs/concepts/claim-rule/)

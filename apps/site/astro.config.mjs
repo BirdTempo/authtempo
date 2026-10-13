@@ -12,8 +12,9 @@ import { defineConfig } from "astro/config";
  */
 const sidebar = [
   { label: "Home", slug: "docs" },
-  { label: "Getting started", items: [{ autogenerate: { directory: "docs/start" } }] },
   // Starlight 0.39 and later: a group has `items`, and `autogenerate` is an item.
+  { label: "Getting started", items: [{ autogenerate: { directory: "docs/start" } }] },
+  { label: "How-to guides", items: [{ autogenerate: { directory: "docs/guides" } }] },
   { label: "Reference", items: [{ autogenerate: { directory: "docs/reference" } }] },
 ];
 

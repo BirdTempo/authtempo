@@ -1,0 +1,61 @@
+---
+title: Sign in with a magic link
+description: Send a single-use link by mail, and open a session when the person confirms it.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.2
+  - packages/core/README.md "Routes under"
+  - packages/core/README.md "Limits in version 1"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/magic-link.ts?raw";
+import test from "../../../../../samples/guides/magic-link.test.ts?raw";
+
+**For:** an app developer who wants people to sign in with a link by mail.
+
+**What it does:** core mails a single-use link. The link opens a confirm page, and the button of that page opens a session.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- A mail transport in `mail.send` of the config.
+
+## Steps
+
+1. Set `appName`. Core puts it in the mail subject and on the confirm page.
+2. Set `magicLink.ttlMinutes` when the default of 15 minutes does not fit your app.
+3. Set `magicLink.linkBuilder` only when the link needs another form. It must open `GET /auth/magic-link/verify` with the token.
+
+<Code code={config} lang="ts" title="The magic link config" />
+
+4. From the app, post the address and `next` to [`POST /magic-link/request`](/docs/reference/routes/#post-magic-link-request).
+5. Show the same text for every address. The route answers `{ "sent": true }` for an unknown address too.
+6. The person opens the link. The confirm page has one button and no script.
+7. The button posts the token. Core opens the session, sets the cookie, and sends the browser to `appURL` plus `next`.
+
+<Code code={test} lang="ts" title="The flow as a test" />
+
+## How it behaves
+
+- The GET of the link reads no row and counts no limit. A mail scanner that fetches the link spends nothing.
+- A link works once. A second post of the same token answers `invalid_token`.
+- A JSON post of the token answers `{ user, session }` with the cookie, and never a redirect. A native app uses this form.
+- A `next` value must start with `/` and not with `//`. Core replaces any other value with `/`.
+- A `next` under `basePath` stays on `baseURL`. The handoff uses this rule.
+- The request has two limits: 5 per address and 20 per IP in 15 minutes.
+- A link that proves the address of an unverified account claims it. [The claim rule](/docs/concepts/claim-rule/) tells what core deletes.
+
+## If it fails
+
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the request has no valid `email`.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many requests for the address or the IP. Wait 15 minutes.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the link is spent, malformed, or unknown. Ask for a new link.
+- [`token_expired`](/docs/reference/errors/#token_expired): the link is older than `magicLink.ttlMinutes`. Ask for a new link.
+- [`hook_refused`](/docs/reference/errors/#hook_refused): a session hook of the app refused the sign-in.
+
+## Next
+
+- [Sign in with an email code](/docs/guides/email-code/)
+- [Run the app on another origin](/docs/guides/split-origins/)
+- [Replace the default pages](/docs/guides/pages/)
