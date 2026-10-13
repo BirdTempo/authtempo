@@ -30,19 +30,44 @@ async function verifiedUser(email: string): Promise<string> {
   return named(verified, "tempo_session");
 }
 
-/** The factor on. The code of the next step is the one a later verify sends: the enable spent this step. */
+const STEP_MS = 30_000;
+
+/**
+ * The factor on. `next` answers the code of the step after the step that the enable spent.
+ * It does not read the wall clock, so a step boundary between the enable and a later verify
+ * does not move it two steps ahead (the verify accepts one step on each side of now).
+ */
 async function enrolled(email: string) {
   const cookie = await verifiedUser(email);
   const setup = await SELF.fetch(`${BASE}/auth/totp/setup`, json({}, cookie));
   const body = (await setup.json()) as { secret: string; backupCodes: string[] };
   const secret = base32Decode(body.secret);
+  const enabledAt = new Date();
+  const enableStep = Math.floor(enabledAt.getTime() / STEP_MS);
   const enable = await SELF.fetch(
     `${BASE}/auth/totp/enable`,
-    json({ code: await totpCode(secret, new Date()) }, cookie),
+    json({ code: await totpCode(secret, enabledAt) }, cookie),
   );
   expect(enable.status).toBe(200);
-  const next = () => totpCode(secret, new Date(Date.now() + 30_000));
-  return { cookie, secret: body.secret, backupCodes: body.backupCodes, next };
+  const next = () => totpCode(secret, new Date((enableStep + 1) * STEP_MS));
+  return { cookie, secret: body.secret, backupCodes: body.backupCodes, enableStep, next };
+}
+
+/** The count of rows of `table` for the user of `email`. */
+async function rowsFor(table: string, email: string): Promise<number | null> {
+  return env.DB.prepare(
+    `SELECT count(*) AS n FROM ${table} r JOIN ta_user u ON u.id = r.user_id WHERE u.email = ?`,
+  )
+    .bind(email)
+    .first<number>("n");
+}
+
+/** The bytes of a base64url value. */
+function fromBase64Url(value: string): Uint8Array {
+  const b64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)), (c) =>
+    c.charCodeAt(0),
+  );
 }
 
 async function challengeFor(email: string, cookie = ""): Promise<Response> {
@@ -63,19 +88,31 @@ it("turns the factor on, gates the password sign-in, and opens the session with 
       backup_codes: string;
     }>();
   expect(row?.enabled_at).not.toBeNull();
-  // The enable's step; a step boundary can pass before this read.
-  expect(row?.last_step).toBeGreaterThanOrEqual(Math.floor(Date.now() / 30_000) - 1);
-  // The sealed secret and the keyed hashes only (Review Focus 5).
-  expect(row?.secret).not.toContain(f.secret);
+  expect(row?.last_step).toBe(f.enableStep);
+  // The sealed secret and the keyed hashes only (Review Focus 5). The stored value is
+  // neither the base32 secret nor the base64url of its bytes: it is the AES-GCM frame,
+  // 12 bytes of IV, the sealed bytes, and the 16-byte tag.
+  const plain = base32Decode(f.secret);
+  expect(row?.secret).not.toBe(f.secret);
+  const stored = fromBase64Url(row?.secret ?? "");
+  expect(stored).not.toEqual(plain);
+  expect(stored).toHaveLength(12 + plain.length + 16);
   const hashes = JSON.parse(row?.backup_codes ?? "[]") as string[];
   expect(hashes).toHaveLength(10);
   for (const h of hashes) expect(h).toMatch(/^[0-9a-f]{64}$/);
   for (const c of f.backupCodes) expect(row?.backup_codes).not.toContain(c);
 
+  // The enable ended every other session, so the enrolling session is the one row.
+  expect(await rowsFor("ta_session", email)).toBe(1);
   const signIn = await challengeFor(email);
   expect(signIn.status).toBe(200);
   expect(signIn.headers.get("set-cookie")).toBeNull();
-  const { twoFactor } = (await signIn.json()) as { twoFactor: { challenge: string } };
+  const { twoFactor } = (await signIn.json()) as {
+    twoFactor: { challenge: string; expiresAt: string };
+  };
+  // The gated sign-in wrote no session row.
+  expect(await rowsFor("ta_session", email)).toBe(1);
+  expect(new Date(twoFactor.expiresAt).getTime()).toBeGreaterThan(Date.now());
   const code = await f.next();
   const verify = await SELF.fetch(
     `${BASE}/auth/totp/verify`,
@@ -135,6 +172,12 @@ it("serves the challenge page and its form on D1, and caps the challenge at five
     "too_many_attempts",
     "too_many_attempts",
   ]);
+  // The cap holds for a right code too.
+  const late = await SELF.fetch(
+    `${BASE}/auth/totp/verify`,
+    json({ challenge: capped.twoFactor.challenge, code: right }),
+  );
+  expect(await late.json()).toEqual({ error: "too_many_attempts" });
 });
 
 it("skips the gate with the trust cookie on D1, and deletes an expired trusted device", async () => {
@@ -153,14 +196,44 @@ it("skips the gate with the trust cookie on D1, and deletes an expired trusted d
   const trust = trustLine.split(";")[0] ?? "";
   const skipped = await challengeFor(email, trust);
   expect(named(skipped, "tempo_session")).toMatch(/^tempo_session=ts_/);
+  expect(await skipped.json()).not.toHaveProperty("twoFactor");
 
-  await env.DB.prepare("UPDATE ta_trusted_device SET expires_at = ?")
-    .bind(Date.now() - 1000)
+  // Only this user's rows: another test of this file also makes a trusted device.
+  await env.DB.prepare(
+    "UPDATE ta_trusted_device SET expires_at = ? WHERE user_id = (SELECT id FROM ta_user WHERE email = ?)",
+  )
+    .bind(Date.now() - 1000, email)
     .run();
   const gated = await challengeFor(email, trust);
   expect(((await gated.json()) as { twoFactor?: unknown }).twoFactor).toBeDefined();
-  const left = await env.DB.prepare("SELECT count(*) AS n FROM ta_trusted_device").first<number>(
-    "n",
+  expect(await rowsFor("ta_trusted_device", email)).toBe(0);
+});
+
+it("turns the factor off with a code on D1: the sign-in opens a session again, and the factor and trusted device rows are gone", async () => {
+  const email = "totp-d@example.com";
+  const f = await enrolled(email);
+  // A trusted device for the disable to delete. The verify spends a backup code, so the
+  // TOTP code of the next step is still unspent for the disable.
+  const first = (await (await challengeFor(email)).json()) as { twoFactor: { challenge: string } };
+  const verify = await SELF.fetch(
+    `${BASE}/auth/totp/verify`,
+    json({ challenge: first.twoFactor.challenge, backupCode: f.backupCodes[0], trustDevice: true }),
   );
-  expect(left).toBe(0);
+  expect(verify.status).toBe(200);
+  expect(await rowsFor("ta_trusted_device", email)).toBe(1);
+  expect(await rowsFor("ta_totp", email)).toBe(1);
+
+  const off = await SELF.fetch(
+    `${BASE}/auth/totp/disable`,
+    json({ code: await f.next() }, f.cookie),
+  );
+  expect(off.status).toBe(200);
+  expect(await off.json()).toEqual({ ok: true });
+  expect(await rowsFor("ta_totp", email)).toBe(0);
+  expect(await rowsFor("ta_trusted_device", email)).toBe(0);
+
+  const signIn = await challengeFor(email);
+  expect(signIn.status).toBe(200);
+  expect(named(signIn, "tempo_session")).toMatch(/^tempo_session=ts_/);
+  expect(await signIn.json()).not.toHaveProperty("twoFactor");
 });
