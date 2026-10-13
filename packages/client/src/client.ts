@@ -94,6 +94,25 @@ export interface Client {
       newPassword: string;
     }): Promise<ClientResult<{ ok: true }>>;
   };
+  /**
+   * Email codes (plan 9e). Every operation answers `not_found` when the
+   * server sets `emailOtp: false`, and the two reset operations also when the
+   * server has no `password` config. `verify` and `reset` answer the bearer
+   * token: a browser app keeps the cookie, and a native app stores the token.
+   */
+  emailOtp: {
+    request(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
+    verify(input: {
+      email: string;
+      code: string;
+    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    requestReset(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
+    reset(input: {
+      email: string;
+      code: string;
+      password: string;
+    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+  };
   /** Every operation answers `not_found` when the server runs without the `organizations` config. */
   organizations: {
     create(input: {
@@ -250,6 +269,14 @@ export function createClient(options: ClientOptions): Client {
           ...(currentPassword !== undefined ? { currentPassword } : {}),
           newPassword,
         }),
+    },
+    emailOtp: {
+      request: ({ email }) => call<{ sent: true }>("POST", "/otp/request", { email }),
+      verify: ({ email, code }) =>
+        call<{ token: string } & PublicSession>("POST", "/otp/verify", { email, code }),
+      requestReset: ({ email }) => call<{ sent: true }>("POST", "/otp/reset/request", { email }),
+      reset: ({ email, code, password }) =>
+        call<{ token: string } & PublicSession>("POST", "/otp/reset", { email, code, password }),
     },
     organizations: {
       create: ({ metadata, ...rest }) =>
