@@ -47,7 +47,13 @@ export type VerificationPurpose =
    * A second-factor challenge (plan 9f). identifier: the user id; valueHash:
    * the SHA-256 hex of the `tf_` token; data: { via, ip, userAgent, next, attempts }.
    */
-  | "two-factor";
+  | "two-factor"
+  /**
+   * An OAuth authorization code (plan 9g). identifier: the client id;
+   * valueHash: the SHA-256 hex of the `oc_` code; data: { clientId,
+   * redirectUri, codeChallenge, scopes, resource, userId, nonce, sessionId }.
+   */
+  | "oauth-code";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;

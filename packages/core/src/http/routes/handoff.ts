@@ -8,12 +8,12 @@ import {
   startHandoff,
 } from "../../engine/handoff.js";
 import { publicSession, sessionFromRequest } from "../../engine/sessions.js";
-import { randomBase64Url } from "../../primitives/crypto.js";
 import { readBody } from "../body.js";
-import { confirmPagePolicy, formAction, pageHeaders } from "../csp.js";
+import { confirmPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import type { Route } from "../router.js";
+import { signInPageResponse } from "../sign-in-response.js";
 
 const continueBody = z.object({ h: z.string().max(64) });
 const redeemBody = z.object({ code: z.string().max(64), verifier: z.string().min(43).max(128) });
@@ -21,29 +21,8 @@ const redeemBody = z.object({ code: z.string().max(64), verifier: z.string().min
 export function handoffRoutes(config: ResolvedConfig): Route[] {
   const handoff = config.handoff;
   if (!handoff) return [];
-  const methods = {
-    magicLink: true as const,
-    google: config.social.providers.some((p) => p.name === "google"),
-    apple: config.social.providers.some((p) => p.name === "apple"),
-    passkey: config.passkey !== null,
-    password: config.password !== null,
-    // Plan 9c: GitHub, LinkedIn, and each list entry, with the label the config gives.
-    providers: config.social.providers
-      .filter((p) => p.name !== "google" && p.name !== "apple")
-      .map((p) => ({ name: p.name, label: p.label })),
-  };
-  const page = (handoffId: string): Response => {
-    const nonce = randomBase64Url(16);
-    const html = handoff.signInPage({
-      basePath: config.basePath,
-      continuePath: continuePath(config, handoffId),
-      methods,
-      nonce,
-      appName: config.appName,
-    });
-    const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
-    return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
-  };
+  const page = (handoffId: string): Response =>
+    signInPageResponse(config, continuePath(config, handoffId));
   const confirm = (handoffId: string, email: string, redirectTo: string): Response => {
     const html = handoff.confirmPage({
       action: `${config.basePath}/handoff/continue`,
