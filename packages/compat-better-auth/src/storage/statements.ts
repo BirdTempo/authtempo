@@ -1,3 +1,5 @@
+import { toStorageError as d1StorageError } from "@tempo-auth/adapter-d1";
+import { toStorageError as postgresStorageError } from "@tempo-auth/adapter-postgres";
 import {
   type ModelName,
   PENDING_HASH_PREFIX,
@@ -8,11 +10,14 @@ import {
 import {
   assertFields,
   assertModel,
+  columnName,
+  coreStatements,
   encodeValue,
   POSTGRES,
   SQLITE,
   type SqlStatements,
   type Statement,
+  TABLES,
   USER_CHILD_MODELS,
   undoCreateWhere,
   whileNoChildRow,
@@ -124,6 +129,61 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
     },
     deleteReturning(model, where) {
       return none(model) ? null : st.deleteReturning(model, where);
+    },
+  };
+}
+
+/**
+ * The core models that keep core's own table in this storage (plan 9f).
+ * Better Auth has no table that fits them, so migration 0003 creates core's
+ * `ta_totp` and `ta_trusted_device` beside the Better Auth tables, with
+ * core's names, and core's own statements and error mapping serve them. The
+ * Better Auth `twoFactor` table and `user.twoFactorEnabled` are neither read
+ * nor written.
+ */
+export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
+  "totp",
+  "trustedDevice",
+]);
+
+function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {
+  const core = coreStatements(dialect === "postgres" ? POSTGRES : SQLITE);
+  // The adapters' own mapping of a unique error on a ta_ table: one copy of each rule.
+  const coreError = dialect === "postgres" ? postgresStorageError : d1StorageError;
+  const own = (model: ModelName) => CORE_TABLE_MODELS.has(model);
+  return {
+    insert(model, data) {
+      return own(model) ? core.insert(model, data) : st.insert(model, data);
+    },
+    select(model, where, opts) {
+      return own(model) ? core.select(model, where, opts) : st.select(model, where, opts);
+    },
+    update(model, where, data) {
+      return own(model) ? core.update(model, where, data) : st.update(model, where, data);
+    },
+    delete(model, where) {
+      return own(model) ? core.delete(model, where) : st.delete(model, where);
+    },
+    decode(model, row) {
+      return own(model) ? core.decode(model, row) : st.decode(model, row);
+    },
+    undoSelect(model, where) {
+      return own(model) ? core.undoSelect(model, where) : st.undoSelect(model, where);
+    },
+    undoCreate(model, data) {
+      return own(model) ? core.undoCreate(model, data) : st.undoCreate(model, data);
+    },
+    restoreRow(model, row, data) {
+      return own(model) ? core.restoreRow(model, row, data) : st.restoreRow(model, row, data);
+    },
+    reinsertRow(model, row) {
+      return own(model) ? core.reinsertRow(model, row) : st.reinsertRow(model, row);
+    },
+    deleteReturning(model, where) {
+      return own(model) ? core.deleteReturning(model, where) : st.deleteReturning(model, where);
+    },
+    toStorageError(model, err) {
+      return own(model) ? coreError(model, err) : st.toStorageError(model, err);
     },
   };
 }
@@ -443,10 +503,14 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       // one term. An unmapped model has no table to check.
       const children = new Map<string, string>();
       for (const m of USER_CHILD_MODELS) {
+        if (UNMAPPED_MODELS.has(m)) continue;
+        // A core table model keeps core's table and column names (plan 9f).
+        const own = CORE_TABLE_MODELS.has(m);
+        const t = own ? TABLES[m] : table(m);
         // The skip is safe only while the models that share a table map `userId`
         // to the same column. Identity and password do today.
-        if (UNMAPPED_MODELS.has(m) || children.has(table(m))) continue;
-        children.set(table(m), column(m, "userId"));
+        if (children.has(t)) continue;
+        children.set(t, own ? columnName("userId") : column(m, "userId"));
       }
       return whileNoChildRow(
         d,
@@ -509,7 +573,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       return new StorageError("unique_violation", model, fieldsFor(model, raw));
     },
   };
-  return withoutUnmapped(st);
+  return withoutUnmapped(withCoreTables(st, dialect));
 }
 
 export type { Statement };

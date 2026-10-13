@@ -26,6 +26,71 @@ export const MIGRATION_0002_NAME = "0002_compat_schema_v5";
 export const COMPAT_MIGRATION_0002_SQL =
   "UPDATE ta_meta SET value = '5' WHERE key = 'schema_version';\nUPDATE ta_meta SET value = '2' WHERE key = 'compat_better_auth';\n";
 
+export const MIGRATION_0003_NAME = "0003_compat_schema_v6";
+
+/**
+ * Migration 0003 (plan 9f): core's schema version 6. Core 6 adds the
+ * `totp` and `trustedDevice` models. Better Auth has no table that fits
+ * them, so this migration creates core's own two tables, with core 0006's
+ * names, columns, and indexes, beside the Better Auth tables
+ * (`CORE_TABLE_MODELS`). The text is the same for every naming and for both
+ * D1 variants: it names `ta_` tables only, in the first schema of the search
+ * path, as ta_meta. The two dialects differ in their column types only.
+ * Append-only.
+ */
+export const COMPAT_MIGRATION_0003_SQL: Readonly<Record<"postgres" | "sqlite", string>> = {
+  postgres: `CREATE TABLE ta_totp (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  user_id text NOT NULL,
+  secret text NOT NULL,
+  enabled_at timestamptz,
+  last_step bigint NOT NULL,
+  backup_codes jsonb NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_totp__user_id ON ta_totp (user_id);
+CREATE TABLE ta_trusted_device (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  user_id text NOT NULL,
+  token_hash text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  last_seen_at timestamptz NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_trusted_device__token_hash ON ta_trusted_device (token_hash);
+CREATE INDEX ix_ta_trusted_device__user_id ON ta_trusted_device (user_id);
+UPDATE ta_meta SET value = '6' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '3' WHERE key = 'compat_better_auth';
+`,
+  sqlite: `CREATE TABLE ta_totp (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  enabled_at INTEGER,
+  last_step INTEGER NOT NULL,
+  backup_codes TEXT NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_totp__user_id ON ta_totp (user_id);
+CREATE TABLE ta_trusted_device (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_trusted_device__token_hash ON ta_trusted_device (token_hash);
+CREATE INDEX ix_ta_trusted_device__user_id ON ta_trusted_device (user_id);
+UPDATE ta_meta SET value = '6' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '3' WHERE key = 'compat_better_auth';
+`,
+};
+
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
 
@@ -277,6 +342,7 @@ export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): P
   const migrations = [
     { version: 1, name: MIGRATION_NAME, text: compatMigrationSql("postgres", names) },
     { version: 2, name: MIGRATION_0002_NAME, text: COMPAT_MIGRATION_0002_SQL },
+    { version: 3, name: MIGRATION_0003_NAME, text: COMPAT_MIGRATION_0003_SQL.postgres },
   ];
   const applied: string[] = [];
   for (const m of migrations) {

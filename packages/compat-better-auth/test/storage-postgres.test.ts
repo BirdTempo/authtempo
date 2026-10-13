@@ -7,6 +7,7 @@ import {
   type StorageAdapter,
 } from "@tempo-auth/core";
 import { runAdapterConformance } from "@tempo-auth/core/conformance";
+import { columnsOf, TABLES } from "@tempo-auth/core/sql";
 import type { Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -80,7 +81,11 @@ describe("the Better Auth mapping on postgres", () => {
     pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     await pg.sql.unsafe(BETTER_AUTH_ERA);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    expect(await s.migrate()).toEqual(["0001_compat_better_auth", "0002_compat_schema_v5"]);
+    expect(await s.migrate()).toEqual([
+      "0001_compat_better_auth",
+      "0002_compat_schema_v5",
+      "0003_compat_schema_v6",
+    ]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
   });
@@ -88,8 +93,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 5; a new core version needs migration 0003 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(5);
+  it("serves core schema version 6; a new core version needs migration 0004 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(6);
   });
 
   it("names only columns the table field list knows", () => {
@@ -447,7 +452,7 @@ describe("the compat migration on postgres", () => {
     }
   });
 
-  it("creates exactly two tables, ta_meta and ta_limit", async () => {
+  it("creates exactly core's four ta_ tables: ta_meta, ta_limit, ta_totp, and ta_trusted_device", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const before = await pg.sql.unsafe<{ t: string }[]>(
@@ -461,11 +466,19 @@ describe("the compat migration on postgres", () => {
         .map((r) => r.t)
         .filter((t) => !before.some((b) => b.t === t))
         .sort();
-      expect(added).toEqual(["ta_limit", "ta_meta"]);
+      expect(added).toEqual(["ta_limit", "ta_meta", "ta_totp", "ta_trusted_device"]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "2" },
-        { key: "schema_version", value: "5" },
+        { key: "compat_better_auth", value: "3" },
+        { key: "schema_version", value: "6" },
       ]);
+      // Core's columns in core's order (plan 9f), so core's statements read these tables.
+      for (const model of ["totp", "trustedDevice"] as const) {
+        const cols = await pg.sql.unsafe<{ c: string }[]>(
+          "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
+          [TABLES[model]],
+        );
+        expect({ model, cols: cols.map((r) => r.c) }).toEqual({ model, cols: columnsOf(model) });
+      }
     } finally {
       await pg.close();
     }
@@ -530,8 +543,10 @@ describe("the compat undo of a created user", () => {
         ' AND NOT EXISTS (SELECT 1 FROM "account" WHERE "user_id" = ?)' +
         ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "user_id" = ?)' +
         ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "user_id" = ?)' +
-        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "user_id" = ?)',
-      params: ["u4", 0, "u4", "u4", "u4", "u4"],
+        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "user_id" = ?)' +
+        " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = ?)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = ?)",
+      params: ["u4", 0, "u4", "u4", "u4", "u4", "u4", "u4"],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
       sql:
@@ -539,8 +554,10 @@ describe("the compat undo of a created user", () => {
         ' AND NOT EXISTS (SELECT 1 FROM "account" WHERE "userId" = $2)' +
         ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "userId" = $3)' +
         ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "userId" = $4)' +
-        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "userId" = $5)',
-      params: ["u5", "u5", "u5", "u5", "u5"],
+        ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "userId" = $5)' +
+        " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = $6)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = $7)",
+      params: ["u5", "u5", "u5", "u5", "u5", "u5", "u5"],
     });
   });
 

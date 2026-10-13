@@ -26,7 +26,9 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
     TABLE_FIELDS[t].includes(f) ? n.column(t, f) : `"${naming.casing === "snake" ? snake(f) : f}"`;
   const truncate = async () => {
     await env.DB.batch(
-      [...BETTER_AUTH_TABLES.map(T), "ta_limit"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+      [...BETTER_AUTH_TABLES.map(T), "ta_limit", "ta_totp", "ta_trusted_device"].map((t) =>
+        env.DB.prepare(`DELETE FROM ${t}`),
+      ),
     );
   };
   return { n, T, C, truncate };

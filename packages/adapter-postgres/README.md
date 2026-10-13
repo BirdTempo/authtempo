@@ -52,6 +52,8 @@ Version 4 (plan 8, 2026-10-10) adds `ta_password`, one row per user, with a uniq
 
 Version 5 (plan 8b, 2026-10-11) adds `ta_api_token`, one row per API token, with a unique index on the token hash and an index on the user. Apply `0005_schema_v5` before you deploy a core at version 5; the adapter refuses a database at version 4.
 
+Version 6 (plan 9f, 2026-10-13) adds `ta_totp`, one row per user with a second factor (unique on the user), and `ta_trusted_device`, one row per trusted device, with a unique index on the token hash and an index on the user. Apply `0006_schema_v6` before you deploy a core at version 6; the adapter refuses a database at version 5.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

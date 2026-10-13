@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ApiTokenRow, IdentityRow, PasskeyRow, UserRow, VerificationRow } from "../schema.js";
+import type {
+  ApiTokenRow,
+  IdentityRow,
+  PasskeyRow,
+  TotpRow,
+  TrustedDeviceRow,
+  UserRow,
+  VerificationRow,
+} from "../schema.js";
 import { type StorageAdapter, StorageError } from "./port.js";
 
 export interface ConformanceTarget {
@@ -739,5 +747,73 @@ export function runAdapterConformance(
         expect((await db.findMany("apiToken", [])).map((r) => r.id)).toEqual(["t3"]);
       });
     }
+    it("round-trips the version 6 totp and trustedDevice models and keeps their unique keys (plan 9f)", async () => {
+      const at = new Date("2026-10-13T00:00:00.000Z");
+      await db.create("user", user("u1", "a@example.com", at));
+      const factor: TotpRow = {
+        id: "f1",
+        userId: "u1",
+        secret: "sealed",
+        enabledAt: null,
+        lastStep: 0,
+        backupCodes: ["h1", "h2"],
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("totp", factor);
+      await expect(db.create("totp", { ...factor, id: "f2" })).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["userId"],
+      });
+      // A 30-second step of October 2025. The replay guard: the second update of one step matches no row.
+      const step = 58_725_000;
+      const guard = [
+        { field: "id" as const, op: "eq" as const, value: "f1" },
+        { field: "lastStep" as const, op: "lt" as const, value: step },
+      ];
+      expect(
+        await db.update("totp", guard, { lastStep: step, enabledAt: at, backupCodes: ["h2"] }),
+      ).toBe(1);
+      expect(await db.update("totp", guard, { lastStep: step })).toBe(0);
+      expect(await db.findOne("totp", [{ field: "userId", op: "eq", value: "u1" }])).toEqual({
+        ...factor,
+        lastStep: step,
+        enabledAt: at,
+        backupCodes: ["h2"],
+      });
+      expect(
+        await db.findMany("totp", [{ field: "enabledAt", op: "ne", value: null }]),
+      ).toHaveLength(1);
+      const device: TrustedDeviceRow = {
+        id: "d1",
+        userId: "u1",
+        tokenHash: "t1",
+        expiresAt: new Date(at.getTime() + 1000),
+        lastSeenAt: at,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("trustedDevice", device);
+      await expect(db.create("trustedDevice", { ...device, id: "d2" })).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["tokenHash"],
+      });
+      await db.create("trustedDevice", {
+        ...device,
+        id: "d3",
+        tokenHash: "t3",
+        expiresAt: new Date(at.getTime() + 5000),
+      });
+      expect(
+        await db.delete("trustedDevice", [
+          { field: "expiresAt", op: "lt", value: new Date(at.getTime() + 2000) },
+        ]),
+      ).toBe(1);
+      expect(
+        (await db.findMany("trustedDevice", [{ field: "userId", op: "eq", value: "u1" }])).map(
+          (r) => r.id,
+        ),
+      ).toEqual(["d3"]);
+    });
   });
 }

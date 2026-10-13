@@ -21,6 +21,8 @@ runAdapterConformance("postgres", async () => {
 /**
  * The Postgres type for each core field type. `counter` is bigint because the
  * WebAuthn sign count is an unsigned 32-bit value and int32 cannot hold it all.
+ * `lastStep` (plan 9f) is bigint because the spec gives a 30-second step
+ * counter a 64-bit column, as RFC 6238 does.
  */
 function pgType(field: string, type: FieldType): string {
   switch (type) {
@@ -33,7 +35,7 @@ function pgType(field: string, type: FieldType): string {
     case "json":
       return "jsonb";
     case "integer":
-      return field === "counter" ? "bigint" : "integer";
+      return field === "counter" || field === "lastStep" ? "bigint" : "integer";
   }
 }
 

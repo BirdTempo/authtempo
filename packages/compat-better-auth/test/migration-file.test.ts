@@ -1,10 +1,17 @@
 import { DatabaseSync } from "node:sqlite";
+import { columnsOf, TABLES } from "@tempo-auth/core/sql";
 import { describe, expect, it } from "vitest";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
+import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
-import { COMPAT_MIGRATION_0002_SQL, compatMigrationSql } from "../src/storage/migration.js";
+import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
+import {
+  COMPAT_MIGRATION_0002_SQL,
+  COMPAT_MIGRATION_0003_SQL,
+  compatMigrationSql,
+} from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { before17 } from "./d1/sql.js";
 import { BETTER_AUTH_SQLITE } from "./fixtures.js";
@@ -181,6 +188,31 @@ describe("migration 0002 (plan 8b)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "2" },
       { key: "schema_version", value: "5" },
+    ]);
+  });
+});
+
+describe("migration 0003 (plan 9f)", () => {
+  it("ships both D1 files as the one constant's SQLite text", () => {
+    expect(normalize(shipped0003)).toBe(normalize(COMPAT_MIGRATION_0003_SQL.sqlite));
+    expect(normalize(shipped0003Before17)).toBe(normalize(COMPAT_MIGRATION_0003_SQL.sqlite));
+  });
+
+  it("creates core's two tables with core's columns in order, and moves the versions to 6 and 3", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    db.exec(shipped);
+    db.exec(shipped0002);
+    db.exec(shipped0003);
+    expect(taTables(db)).toEqual(["ta_limit", "ta_meta", "ta_totp", "ta_trusted_device"]);
+    for (const model of ["totp", "trustedDevice"] as const) {
+      const cols = (
+        db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
+      ).map((c) => c.name);
+      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+    }
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "3" },
+      { key: "schema_version", value: "6" },
     ]);
   });
 });

@@ -8,6 +8,8 @@ export interface SweepResult {
   sessions: number;
   /** API token rows past `expiresAt`. A token with no expiry is never swept. */
   apiTokens: number;
+  /** Trusted device rows past `expiresAt` (plan 9f). */
+  trustedDevices: number;
   /** Limiter windows that ended. 0 when the limiter has no sweep. */
   limits: number;
 }
@@ -52,6 +54,11 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   const apiTokens = await storage.delete("apiToken", [
     { field: "expiresAt", op: "lt", value: now },
   ]);
+  // A trusted device goes on its own only when a sign-in presents its token
+  // after the expiry. A device that never signs in again stays without this.
+  const trustedDevices = await storage.delete("trustedDevice", [
+    { field: "expiresAt", op: "lt", value: now },
+  ]);
   // The owned limiters keep one row per key and window. Without this sweep
   // every address and IP that reached a limiter stays in ta_limit forever.
   const limits = (await config.limiter.sweep?.(now)) ?? 0;
@@ -61,6 +68,7 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     invitations: accepted + expired,
     sessions,
     apiTokens,
+    trustedDevices,
     limits,
   };
 }

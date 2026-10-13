@@ -151,6 +151,27 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         createdAt: t0,
         updatedAt: t0,
       }),
+    totp: (db) =>
+      db.create("totp", {
+        id: "c1",
+        userId: "u1",
+        secret: "sealed",
+        enabledAt: null,
+        lastStep: 0,
+        backupCodes: [],
+        createdAt: t0,
+        updatedAt: t0,
+      }),
+    trustedDevice: (db) =>
+      db.create("trustedDevice", {
+        id: "c1",
+        userId: "u1",
+        tokenHash: "h-c1",
+        expiresAt: t0,
+        lastSeenAt: t0,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
   };
 
   it("covers every child model of the schema", () => {

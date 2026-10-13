@@ -78,6 +78,14 @@ describe("names", () => {
       "ta_password",
     ]);
   });
+  it("names the two version 6 tables in snake case (plan 9f)", () => {
+    expect(TABLES.totp).toBe("ta_totp");
+    expect(TABLES.trustedDevice).toBe("ta_trusted_device");
+    expect(uniqueIndexName("totp", ["userId"])).toBe("ux_ta_totp__user_id");
+    expect(fieldsFromUniqueIndex("trustedDevice", "ux_ta_trusted_device__token_hash")).toEqual([
+      "tokenHash",
+    ]);
+  });
   it("rejects unknown models and fields", () => {
     expect(() => assertModel("nope")).toThrow(/unknown_model/);
     expect(() => assertModel("toString")).toThrow(/unknown_model/);
@@ -481,7 +489,9 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     " AND NOT EXISTS (SELECT 1 FROM ta_passkey WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_member WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_password WHERE user_id = ?)" +
-    " AND NOT EXISTS (SELECT 1 FROM ta_api_token WHERE user_id = ?)";
+    " AND NOT EXISTS (SELECT 1 FROM ta_api_token WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = ?)";
 
   it("lists every model with a userId field as a child, from the schema", () => {
     expect(USER_CHILD_MODELS).toEqual([
@@ -491,6 +501,8 @@ describe("the D1 undo of a user create (plan 8b)", () => {
       "member",
       "password",
       "apiToken",
+      "totp",
+      "trustedDevice",
     ]);
   });
 
@@ -498,18 +510,18 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     const st = coreStatements(SQLITE);
     expect(st.undoCreate("user", user(true))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ?${children}`,
-      params: ["u1", "u1", "u1", "u1", "u1", "u1", "u1"],
+      params: ["u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1"],
     });
     expect(st.undoCreate("user", user(false))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ? AND email_verified = ?${children}`,
-      params: ["u1", 0, "u1", "u1", "u1", "u1", "u1", "u1"],
+      params: ["u1", 0, "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1"],
     });
   });
 
   it("numbers the Postgres placeholders after the where", () => {
     const s = coreStatements(POSTGRES).undoCreate("user", user(true));
-    expect(s.sql.endsWith("FROM ta_api_token WHERE user_id = $7)")).toBe(true);
-    expect(s.params).toHaveLength(7);
+    expect(s.sql.endsWith("FROM ta_trusted_device WHERE user_id = $9)")).toBe(true);
+    expect(s.params).toHaveLength(9);
   });
 
   it("keeps the undo of any other model a delete by id", () => {

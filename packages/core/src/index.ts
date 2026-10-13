@@ -116,6 +116,8 @@ export {
   SCHEMA_VERSION,
   type SessionRow,
   schema,
+  type TotpRow,
+  type TrustedDeviceRow,
   type UserRow,
   type VerificationRow,
 } from "./schema.js";

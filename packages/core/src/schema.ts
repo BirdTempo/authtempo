@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export interface BaseRow {
   id: string;
@@ -110,6 +110,32 @@ export interface ApiTokenRow extends BaseRow {
   organizationId: string | null;
 }
 
+/** One row per user with a second factor (plan 9f). */
+export interface TotpRow extends BaseRow {
+  userId: string;
+  /**
+   * The 20-byte secret, sealed: base64url of the 12-byte IV and the
+   * AES-256-GCM ciphertext, under HKDF-SHA256 of the app secret, with the
+   * user id as additional data. The clear secret is never stored.
+   */
+  secret: string;
+  /** Null while the setup is unconfirmed. */
+  enabledAt: Date | null;
+  /** The last accepted 30-second step. A code of this step or an earlier one never passes again. */
+  lastStep: number;
+  /** HMAC-SHA256 hex under the app secret of `<id>:<code>`, one per unused backup code. */
+  backupCodes: string[];
+}
+
+/** A device that skips the second factor until `expiresAt` (plan 9f). */
+export interface TrustedDeviceRow extends BaseRow {
+  userId: string;
+  /** SHA-256 hex of the `td_` token. The clear token is never stored. */
+  tokenHash: string;
+  expiresAt: Date;
+  lastSeenAt: Date;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -121,6 +147,8 @@ export interface Models {
   invitation: InvitationRow;
   password: PasswordRow;
   apiToken: ApiTokenRow;
+  totp: TotpRow;
+  trustedDevice: TrustedDeviceRow;
 }
 
 export type ModelName = keyof Models;
@@ -269,6 +297,31 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       expiresAt: { type: "date", nullable: true },
       lastUsedAt: { type: "date", nullable: true },
       organizationId: { type: "string", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    indexes: [["userId"]],
+  },
+  // plan 9f: one second factor per user. The table holds the sealed secret, never the secret.
+  totp: {
+    fields: {
+      ...base,
+      userId: { type: "string" },
+      secret: { type: "string" },
+      enabledAt: { type: "date", nullable: true },
+      lastStep: { type: "integer" },
+      backupCodes: { type: "json" },
+    },
+    unique: [["userId"]],
+    indexes: [],
+  },
+  // plan 9f: one row per trusted device. The table holds the hash, never the token.
+  trustedDevice: {
+    fields: {
+      ...base,
+      userId: { type: "string" },
+      tokenHash: { type: "string" },
+      expiresAt: { type: "date" },
+      lastSeenAt: { type: "date" },
     },
     unique: [["tokenHash"]],
     indexes: [["userId"]],
