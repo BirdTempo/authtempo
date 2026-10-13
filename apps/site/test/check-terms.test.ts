@@ -41,6 +41,39 @@ describe("checkTerms", () => {
     ]);
   });
 
+  it("ignores link targets, bare URLs, and autolinks", () => {
+    const r = checkTerms([
+      glossary,
+      body(
+        "Read [the guide](/docs/guides/two-factor/) or https://x.com/login or <https://x.com/log-in>.",
+      ),
+    ]);
+    expect(r.failures).toEqual([]);
+  });
+
+  it("refuses a forbidden term in a heading", () => {
+    expect(checkTerms([glossary, body("## Log in with a passkey")]).failures).toEqual([
+      'docs/a.md:4: "Log in" is forbidden; write "sign in"',
+    ]);
+  });
+
+  it("refuses a forbidden term in a table cell", () => {
+    expect(
+      checkTerms([glossary, body("| A | B |\n| --- | --- |\n| x | can log in |")]).failures,
+    ).toEqual(['docs/a.md:6: "log in" is forbidden; write "sign in"']);
+  });
+
+  it("refuses a forbidden term in the frontmatter title and description", () => {
+    const page = {
+      path: "docs/a.md",
+      source: "---\ntitle: Log in\ndescription: Set up MFA.\n---\nText.\n",
+    };
+    expect(checkTerms([glossary, page]).failures).toEqual([
+      'docs/a.md:2: "Log in" is forbidden; write "sign in"',
+      'docs/a.md:3: "MFA" is forbidden; write "second factor"',
+    ]);
+  });
+
   it("fails when the glossary is missing", () => {
     expect(checkTerms([body("Sign in.")]).failures).toEqual([
       "docs/reference/glossary.md is missing",

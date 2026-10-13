@@ -29,6 +29,19 @@ export const FORBIDDEN_TERMS: readonly { term: string; pattern: RegExp; use: str
   { term: "identity provider", pattern: /\bidentity providers?\b/i, use: "provider" },
 ];
 
+/**
+ * The words a reader reads: a link target, a bare URL, an autolink, a code
+ * span, and a double-quoted name are not prose, so they are removed.
+ */
+function readable(text: string): string {
+  return text
+    .replace(/\]\([^)]*\)/g, "]")
+    .replace(/<https?:[^>]*>/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/"[^"]*"/g, " ");
+}
+
 const GLOSSARY = "docs/reference/glossary.md";
 
 export function checkTerms(pages: readonly Page[]): CheckReport {
@@ -47,9 +60,25 @@ export function checkTerms(pages: readonly Page[]): CheckReport {
   for (const p of pages) {
     const fm = parseFrontmatter(p.source);
     if (!fm) continue;
-    for (const unit of proseUnits(fm.body, fm.bodyLine)) {
+    const sourceLines = p.source.split("\n");
+    const units: { text: string; line: number }[] = proseUnits(fm.body, fm.bodyLine);
+    // Headings and table rows hold prose that proseUnits skips as markup.
+    let fence = false;
+    fm.body.split("\n").forEach((raw, i) => {
+      const t = raw.trim();
+      if (/^(```|~~~)/.test(t)) fence = !fence;
+      else if (!fence && /^(#|\|)/.test(t)) units.push({ text: t, line: fm.bodyLine + i });
+    });
+    for (const key of ["title", "description"] as const) {
+      const text = fm.fields[key];
+      if (text) {
+        const at = sourceLines.findIndex((l) => l.startsWith(`${key}:`));
+        units.push({ text, line: at + 1 });
+      }
+    }
+    for (const unit of units) {
       r.counts.units = (r.counts.units ?? 0) + 1;
-      const text = unit.text.replace(/`[^`]*`/g, " ").replace(/"[^"]*"/g, " ");
+      const text = readable(unit.text);
       for (const t of FORBIDDEN_TERMS) {
         const m = t.pattern.exec(text);
         if (m) r.failures.push(`${p.path}:${unit.line}: "${m[0]}" is forbidden; write "${t.use}"`);
