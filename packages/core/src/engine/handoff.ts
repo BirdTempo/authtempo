@@ -9,7 +9,8 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
-import { createSession } from "./sessions.js";
+import { hookGuard } from "./hooks.js";
+import { openSession, sessionOpened } from "./sessions.js";
 import { ClaimRacedError, undoSessionIfClaimed } from "./users.js";
 
 export const HANDOFF_ID_PREFIX = "hs_";
@@ -253,25 +254,33 @@ export async function redeemHandoff(
     return fail("invalid_token");
   const userId = row.value.identifier;
   const now = config.clock.now();
+  let redeemed: Result<{ token: string; user: UserRow; session: SessionRow }>;
   try {
-    return await config.storage.transaction(async (tx) => {
-      const user = await tx.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-      if (!user) return fail("invalid_token");
-      const { token, session } = await createSession(
-        config,
-        { userId: user.id, ip: input.ip, userAgent: input.userAgent },
-        tx,
-      );
-      // The flag from the mint, not this read: a claim can commit between
-      // the consume and this read, and this read then sees the user verified.
-      if (data.emailVerified !== true) {
-        // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
-        await undoSessionIfClaimed(tx, user.id, now);
-      }
-      return ok({ token, user, session });
-    });
+    redeemed = await hookGuard(() =>
+      config.storage.transaction(
+        async (tx): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> => {
+          const user = await tx.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+          if (!user) return fail("invalid_token");
+          const { token, session } = await openSession(
+            config,
+            { user, ip: input.ip, userAgent: input.userAgent, via: "handoff" },
+            tx,
+          );
+          // The flag from the mint, not this read: a claim can commit between
+          // the consume and this read, and this read then sees the user verified.
+          if (data.emailVerified !== true) {
+            // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
+            await undoSessionIfClaimed(tx, user.id, now);
+          }
+          return ok({ token, user, session });
+        },
+      ),
+    );
   } catch (err) {
     if (err instanceof ClaimRacedError) return fail("invalid_token");
     throw err;
   }
+  if (redeemed.ok)
+    await sessionOpened(config, redeemed.value.session, redeemed.value.user, "handoff");
+  return redeemed;
 }

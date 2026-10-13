@@ -3,7 +3,15 @@ import { readCookie, sessionCookie } from "../http/cookies.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
-import type { StorageAdapter } from "../storage/port.js";
+import type { StorageAdapter, Where } from "../storage/port.js";
+import {
+  runAfter,
+  runBefore,
+  type SessionDraft,
+  type SessionEndReason,
+  type SessionVia,
+  stopWith,
+} from "./hooks.js";
 
 const DAY_MS = 86_400_000;
 export const SESSION_TOKEN_PREFIX = "ts_";
@@ -13,6 +21,16 @@ export interface SessionInput {
   userId: string;
   ip: string | null;
   userAgent: string | null;
+  /** Set only through `openSession`, after the membership check of a hook's patch (plan 9d). */
+  activeOrganizationId?: string | null;
+}
+
+/** What an engine flow passes to `openSession` (plan 9d). */
+export interface SessionOpen {
+  user: UserRow;
+  ip: string | null;
+  userAgent: string | null;
+  via: SessionVia;
 }
 
 export interface ResolvedSession {
@@ -26,6 +44,7 @@ export interface ResolvedSession {
  * `storage` is the adapter to write through. A sign-in that resolves the
  * user in a transaction passes its `tx`, so the session commits with the
  * claim that deletes a claimant's sessions (plan 7 input).
+ * It runs no hook: an engine flow calls openSession (plan 9d).
  */
 export async function createSession(
   config: ResolvedConfig,
@@ -42,11 +61,201 @@ export async function createSession(
     lastSeenAt: now,
     ip: input.ip,
     userAgent: input.userAgent,
-    activeOrganizationId: null,
+    activeOrganizationId: input.activeOrganizationId ?? null,
     createdAt: now,
     updatedAt: now,
   });
   return { token, session };
+}
+
+const PATCH_KEYS: ReadonlySet<string> = new Set(["ip", "userAgent", "activeOrganizationId"]);
+
+function nullableString(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+/** One line that says what was wrong, never a value: a value can be an address or an agent string. */
+function refusePatch(what: string): never {
+  console.error("tempo-auth: session patch refused", what);
+  return stopWith("hook_failed");
+}
+
+/**
+ * The session fields after `session.beforeCreate`'s answer (plan 9d). Only
+ * `ip`, `userAgent`, and `activeOrganizationId` may change. A set
+ * organization must be one the user is a member of, read on the flow's
+ * transaction, as `POST /organizations/active` requires; else `not_found`.
+ */
+async function patchedInput(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  draft: SessionDraft,
+  patch: unknown,
+): Promise<SessionInput> {
+  const input: SessionInput = { userId: draft.userId, ip: draft.ip, userAgent: draft.userAgent };
+  if (patch === undefined || patch === null) return input;
+  if (typeof patch !== "object" || Array.isArray(patch))
+    return refusePatch("a value that is not an object");
+  const fields = patch as Record<string, unknown>;
+  for (const key of Object.keys(fields))
+    if (!PATCH_KEYS.has(key)) return refusePatch(`the field ${key}`);
+  const { ip, userAgent, activeOrganizationId } = fields;
+  if (ip !== undefined) {
+    if (!nullableString(ip)) return refusePatch("an ip that is not a string or null");
+    input.ip = ip;
+  }
+  if (userAgent !== undefined) {
+    if (!nullableString(userAgent)) return refusePatch("a userAgent that is not a string or null");
+    input.userAgent = userAgent;
+  }
+  if (activeOrganizationId !== undefined) {
+    if (!nullableString(activeOrganizationId))
+      return refusePatch("an activeOrganizationId that is not a string or null");
+    if (activeOrganizationId !== null) {
+      const member = config.organizations
+        ? await storage.findOne("member", [
+            { field: "organizationId", op: "eq", value: activeOrganizationId },
+            { field: "userId", op: "eq", value: draft.userId },
+          ])
+        : null;
+      if (!member) stopWith("not_found");
+    }
+    input.activeOrganizationId = activeOrganizationId;
+  }
+  return input;
+}
+
+/** The session fields after `session.beforeCreate` and its patch check, not yet written (plan 9d). */
+export interface PreparedSession {
+  readonly input: SessionInput;
+}
+
+/**
+ * The hook step of `openSession` (plan 9d): it runs `session.beforeCreate`
+ * and checks the patch on the flow's transaction (`storage`), and writes
+ * nothing. A refusal or a bad patch throws `HookStop`, which undoes the
+ * flow's transaction; the flow's `hookGuard` answers it. A flow calls it
+ * apart from `writeSession` only when the hook must run before its first
+ * write: the password sign-up.
+ */
+export async function prepareSession(
+  config: ResolvedConfig,
+  input: SessionOpen,
+  storage: StorageAdapter = config.storage,
+): Promise<PreparedSession> {
+  const draft: SessionDraft = {
+    userId: input.user.id,
+    ip: input.ip,
+    userAgent: input.userAgent,
+    activeOrganizationId: null,
+  };
+  const patch = await runBefore("session.beforeCreate", config.hooks.session.beforeCreate, {
+    session: draft,
+    user: input.user,
+    via: input.via,
+  });
+  return { input: await patchedInput(config, storage, draft, patch) };
+}
+
+/**
+ * The two steps of a sign-in whose user resolution writes before the
+ * session: the magic link and the social sign-in (plan 9d, fix round 2).
+ * The resolver calls `before` with the user as the flow will leave it, before
+ * its first write; the flow's `after` calls `write`. A retry calls `before`
+ * again, and the newer answer wins.
+ */
+export function sessionSteps(
+  config: ResolvedConfig,
+  open: Omit<SessionOpen, "user">,
+): {
+  before(tx: StorageAdapter, user: UserRow): Promise<void>;
+  write(tx: StorageAdapter): Promise<{ token: string; session: SessionRow }>;
+} {
+  let prepared: PreparedSession | null = null;
+  return {
+    async before(tx, user) {
+      prepared = await prepareSession(config, { ...open, user }, tx);
+    },
+    write(tx) {
+      if (!prepared) throw new Error("tempo-auth: the session hook step did not run");
+      return writeSession(config, prepared, tx);
+    },
+  };
+}
+
+/** The write step of `openSession`: the session row of a `prepareSession` answer. */
+export function writeSession(
+  config: ResolvedConfig,
+  prepared: PreparedSession,
+  storage: StorageAdapter = config.storage,
+): Promise<{ token: string; session: SessionRow }> {
+  return createSession(config, prepared.input, storage);
+}
+
+/**
+ * The one way an engine flow opens a session (plan 9d): `prepareSession`,
+ * then `writeSession`, on the flow's transaction. The flow calls
+ * `sessionOpened` after its commit.
+ */
+export async function openSession(
+  config: ResolvedConfig,
+  input: SessionOpen,
+  storage: StorageAdapter = config.storage,
+): Promise<{ token: string; session: SessionRow }> {
+  return writeSession(config, await prepareSession(config, input, storage), storage);
+}
+
+/** `session.afterCreate` for a sign-in that committed (plan 9d). */
+export async function sessionOpened(
+  config: ResolvedConfig,
+  session: SessionRow,
+  user: UserRow,
+  via: SessionVia,
+): Promise<void> {
+  await runAfter(
+    "session.afterCreate",
+    config.hooks.session.afterCreate,
+    { session, user, via },
+    session.id,
+  );
+}
+
+/**
+ * Deletes the sessions that `where` matches, inside the flow's transaction,
+ * and pushes each row it ended to `ended` for the after hook. Each read row
+ * is deleted by id and goes to `ended` only when its delete count is 1: a
+ * sign-out between the read and the delete already fired `afterEnd` for that
+ * row, so a second event would name a row this flow did not end (final fix
+ * wave M-1). The last delete still matches `where`, so a session that
+ * another request adds between the read and the delete goes too, with no
+ * hook. With `ended` null, only the last delete runs.
+ */
+export async function endSessions(
+  tx: StorageAdapter,
+  where: Where<"session">[],
+  ended: SessionRow[] | null,
+): Promise<void> {
+  if (ended)
+    for (const row of await tx.findMany("session", where)) {
+      const n = await tx.delete("session", [{ field: "id", op: "eq", value: row.id }]);
+      if (n === 1) ended.push(row);
+    }
+  await tx.delete("session", where);
+}
+
+/** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). */
+export async function sessionsEnded(
+  config: ResolvedConfig,
+  sessions: readonly SessionRow[],
+  reason: SessionEndReason,
+): Promise<void> {
+  for (const session of sessions)
+    await runAfter(
+      "session.afterEnd",
+      config.hooks.session.afterEnd,
+      { session, reason },
+      session.id,
+    );
 }
 
 /**
@@ -66,7 +275,11 @@ export async function resolveSession(
   ]);
   if (!session) return null;
   if (session.expiresAt.getTime() <= now.getTime()) {
-    await config.storage.delete("session", [{ field: "id", op: "eq", value: session.id }]);
+    const n = await config.storage.delete("session", [
+      { field: "id", op: "eq", value: session.id },
+    ]);
+    // One row: this call ended it. Zero: another call or the sweep did, and the sweep fires no hook.
+    if (n === 1) await sessionsEnded(config, [session], "expired");
     return null;
   }
   const user = await config.storage.findOne("user", [
@@ -92,9 +305,13 @@ export async function resolveSession(
 
 export async function destroySession(config: ResolvedConfig, token: string): Promise<void> {
   if (!TOKEN_RE.test(token)) return;
-  await config.storage.delete("session", [
+  const session = await config.storage.findOne("session", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
   ]);
+  if (!session) return;
+  // By id, so the row the after hook names is the row this call deleted.
+  const n = await config.storage.delete("session", [{ field: "id", op: "eq", value: session.id }]);
+  if (n === 1) await sessionsEnded(config, [session], "sign_out");
 }
 
 /** The value of `Authorization: Bearer <value>`, or null. The one copy of the bearer rule. */

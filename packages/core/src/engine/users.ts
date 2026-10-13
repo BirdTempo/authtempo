@@ -1,7 +1,8 @@
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
-import type { UserRow } from "../schema.js";
+import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { endSessions } from "./sessions.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 const USER_NAME_MAX = 200;
@@ -44,13 +45,16 @@ export interface ClaimKeep {
  * session, every password row (except the one `keep.passwordId` names),
  * every passkey, every pending passkey challenge, and every
  * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
- * Runs inside the caller's transaction.
+ * Runs inside the caller's transaction. When `ended` is given, the session
+ * rows the claim deletes are pushed onto it, so the caller fires
+ * session.afterEnd after the commit (plan 9d).
  */
 export async function claimEmail(
   tx: StorageAdapter,
   userId: string,
   keep: ClaimKeep | null,
   now: Date,
+  ended?: SessionRow[],
 ): Promise<void> {
   // First, so a concurrent session insert for this user sees the verified flag and undoes itself (see the conditional update after each session insert).
   await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
@@ -70,7 +74,9 @@ export async function claimEmail(
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
   await tx.delete("password", passwords);
-  await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
+  // Each row by id, for the after hook; then by user id, so a session that
+  // another request adds between the two statements goes too, with no hook.
+  await endSessions(tx, [{ field: "userId", op: "eq", value: userId }], ended ?? null);
   // A claimant's passkeys would keep the account open after the claim.
   // Registration already needs a verified email; this closes any other path.
   await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);
@@ -91,6 +97,14 @@ export async function claimEmail(
  * claimant's write cannot land between the claim and this work.
  */
 export type AfterResolve<T> = (tx: StorageAdapter, user: UserRow, created: boolean) => Promise<T>;
+
+/**
+ * Work that runs inside the resolution transaction before its first write,
+ * with the user as the resolution will leave it: the sign-in's session hook
+ * (plan 9d, fix round 2). On D1 a throw after a write runs an undo that is
+ * not exact (see `insertSignUp` in password.ts), so the hook goes first.
+ */
+export type BeforeResolveWrite = (tx: StorageAdapter, user: UserRow) => Promise<void>;
 
 /**
  * Thrown inside a transaction when a claim verified the user after this
@@ -179,16 +193,20 @@ export function findOrCreateUserByEmail<T>(
   email: string,
   now: Date,
   after: AfterResolve<T>,
+  ended?: SessionRow[],
+  before?: BeforeResolveWrite,
 ): Promise<{ user: UserRow; created: boolean; after: T }>;
 export async function findOrCreateUserByEmail<T>(
   storage: StorageAdapter,
   email: string,
   now: Date,
   after?: AfterResolve<T>,
+  ended?: SessionRow[],
+  before?: BeforeResolveWrite,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await createOrFindInTransaction(storage, email, now, after);
+      return await createOrFindInTransaction(storage, email, now, after, ended, before);
     } catch (err) {
       // A concurrent call created the user between our read and our create.
       // Run the resolution once more, outside the failed transaction, so it
@@ -212,9 +230,13 @@ function createOrFindInTransaction<T>(
   email: string,
   now: Date,
   after: AfterResolve<T> | undefined,
+  ended: SessionRow[] | undefined,
+  before: BeforeResolveWrite | undefined,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   return storage.transaction(async (tx) => {
-    const { user, created } = await resolveInTransaction(tx, email, now);
+    // A retry runs the claim again. The rows of an attempt that rolled back did not end.
+    if (ended) ended.length = 0;
+    const { user, created } = await resolveInTransaction(tx, email, now, ended, before);
     if (!after) return { user, created };
     return { user, created, after: await after(tx, user, created) };
   });
@@ -224,21 +246,27 @@ async function resolveInTransaction(
   tx: StorageAdapter,
   email: string,
   now: Date,
+  ended: SessionRow[] | undefined,
+  before: BeforeResolveWrite | undefined,
 ): Promise<{ user: UserRow; created: boolean }> {
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (existing) {
+    const resolved = existing.emailVerified
+      ? existing
+      : { ...existing, emailVerified: true, updatedAt: now };
+    // Before the identity repair and the claim: the D1 undo (`BeforeResolveWrite`).
+    if (before) await before(tx, resolved);
     // An isolate that died between the user create and the identity
     // create left a user with no email identity. Repair it here. A
     // concurrent repair fails unique_violation, which the caller catches
     // outside this transaction.
     await ensureEmailIdentity(tx, existing.id, email, now);
     if (!existing.emailVerified) {
-      await claimEmail(tx, existing.id, null, now);
-      return { user: { ...existing, emailVerified: true, updatedAt: now }, created: false };
+      await claimEmail(tx, existing.id, null, now, ended);
     }
-    return { user: existing, created: false };
+    return { user: resolved, created: false };
   }
-  const user = await tx.create("user", {
+  const minted: UserRow = {
     id: newId(now),
     email,
     emailVerified: true,
@@ -246,7 +274,10 @@ async function resolveInTransaction(
     image: null,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  // Before the user create: the D1 undo (`BeforeResolveWrite`).
+  if (before) await before(tx, minted);
+  const user = await tx.create("user", minted);
   await tx.create("identity", {
     id: newId(now),
     userId: user.id,

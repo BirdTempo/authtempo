@@ -78,6 +78,13 @@ The organization routes follow.
 
 Without an `organizations` config none of the organization routes exist, and the router answers 404.
 
+With hooks (see "Hooks" below), every organization write and every sign-in
+can also answer 403 `hook_refused` (with `message`) and 500 `hook_failed`.
+With `organizations.limits`, create answers 409 `organization_limit`, add
+and accept answer 409 `member_limit`, and invite answers 409
+`invitation_limit`. A sign-in whose session hook names an organization the
+user is not a member of answers 404 `not_found`.
+
 Set `appName` in the config to name the app. It is 1 to 80 characters with
 no control character. The default is the host of `baseURL`. The default
 pages show it in the title and the heading. The magic link mail subject is
@@ -493,6 +500,169 @@ Check the member's rank on each request.
 | `already_member` | 409 | The user is already a member |
 | `email_mismatch` | 403 | The invitation is for another address |
 | `conflict` | 409 | A concurrent write changed the organization or the member; retry |
+| `organization_limit` | 409 | The user holds `organizations.limits.perUser` member rows |
+| `member_limit` | 409 | The organization holds `organizations.limits.membersPerOrganization` members |
+| `invitation_limit` | 409 | The organization holds `organizations.limits.pendingInvitationsPerOrganization` pending invitations |
+| `hook_refused` | 403 | A before hook threw `hookRefusal(message)`; the body carries `message` |
+| `hook_failed` | 500 | A before hook threw another error, or a session patch was wrong |
+
+## Hooks
+
+A hook is your code at a named point of a core flow (plan 9d). Pass plain
+objects of functions in `hooks`:
+
+```ts
+import { createAuth, hookRefusal } from "@tempo-auth/core";
+
+const auth = createAuth({
+  // ...
+  organizations: { limits: { perUser: 5, membersPerOrganization: 50 } },
+  hooks: {
+    organization: {
+      async beforeCreate({ organization, user }) {
+        if (organization.slug.startsWith("acme-")) throw hookRefusal("Choose another name.");
+        // Write your own row first, with the id core minted. On Postgres, on a
+        // connection that core's adapter does not hold (see the rule below).
+        await tenants.create({ id: organization.id, ownerId: user.id });
+      },
+      async afterAddMember({ organization, member, via }) {
+        await audit.write("member.added", organization.id, member.userId, via);
+      },
+    },
+    session: {
+      beforeCreate: () => ({ ip: null, userAgent: null }),
+      async afterEnd({ session, reason }) {
+        await audit.write("session.ended", session.id, reason);
+      },
+    },
+  },
+});
+```
+
+- A before hook runs inside the flow's transaction, after core's rank
+  checks and limits, and before the first write. This holds for
+  `session.beforeCreate` in every sign-in too (see "Session points").
+  `throw hookRefusal(message)` answers 403 `{ "error": "hook_refused", "message": "…" }`. A message that
+  is empty, longer than 200 characters, or holds a control character becomes
+  "The app refused this request.". Any other throw answers 500
+  `hook_failed` and logs `tempo-auth: before hook failed <hook> <error name>`.
+  The error name is logged only when it is a plain class name such as
+  `TypeError`; any other name logs as `Error`, because the app sets it.
+  Either way, no row is written.
+- Three flows have a write before the before hook. An owner demotion and
+  an owner removal stamp the owner lock first, and a passkey sign-in moves
+  the passkey counter first. A refusal undoes the stamp. On Postgres the
+  stamp's row lock is held while the hook runs, so a slow hook on an owner
+  write blocks the other owner writes of that organization.
+- An after hook runs after the commit, before the answer. A throw cannot
+  undo the row: core logs `tempo-auth: after hook failed <hook> <row id>
+  <error name>` and answers success. If your app must not keep a core row
+  without its own row, write yours in the before hook, with the id core
+  minted. Then the residual of a failure is your row with no core row. On
+  Postgres, write it on a second connection (see the rule on one
+  connection below).
+- Each hook gets a copy of its event. A before hook cannot change the row,
+  except `session.beforeCreate`, which may answer `{ ip?, userAgent?,
+  activeOrganizationId? }`, each a string or null. The organization must be
+  one the user is a member of, or the sign-in answers 404 `not_found`. Any
+  other field answers 500 `hook_failed`.
+- Organization points: `beforeCreate`, `afterCreate`, `beforeUpdate`,
+  `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember` and
+  `afterAddMember` (`via`: `create` for the creator's owner row, `add`, or
+  `invitation`), `beforeUpdateMemberRole`, `afterUpdateMemberRole`,
+  `beforeRemoveMember` and `afterRemoveMember` (`via`: `remove` or `leave`),
+  `beforeInvite`, `afterInvite`, `afterAcceptInvitation`,
+  `afterDeclineInvitation` (`user` is null when the decline carried no
+  session), and `afterRevokeInvitation`. An accept runs `beforeAddMember`
+  with `via: "invitation"` every time, and `afterAddMember` only when it
+  made a new member row. An accept that raises an existing member's role
+  runs `beforeUpdateMemberRole` and `afterUpdateMemberRole` too, with the
+  inviter as `by` (the accepting user when the inviter's user row is
+  gone). A refusal keeps the role and the invitation pending. A delete
+  runs no member hook for the rows it removes.
+- Session points: `beforeCreate` and `afterCreate` (`via`: `password`,
+  `magic_link`, `social`, `passkey`, or `handoff`), and `afterEnd`
+  (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`, or
+  `expired`), once per ended row. `sweepExpired` deletes expired rows in
+  bulk and fires no hook, so `expired` fires only when a request presents
+  the token after its expiry. A claim ends a claimant's sessions with
+  `claim` in every flow that proves the address: the magic link, the
+  social sign-in, the verify link, and the reset of an unverified user. A
+  reset of a verified user ends that user's sessions with `password_reset`.
+- `session.beforeCreate` runs on a password sign-in only after the password
+  is correct. So `hook_refused` against `invalid_credentials` tells the
+  caller that the password was right. A ban hook should refuse with a text
+  that does not depend on the password. The code still differs from a
+  wrong password, so only the sign-in rate limits bound such a guess, as
+  in Better Auth's ban check.
+- `session.beforeCreate` runs before the first write of the sign-in's
+  transaction in every flow except the reset (see its row). On D1 the undo
+  of a write is not exact, so a refusal after a write could bring back a
+  claimant's rows. The hook sees the user as the flow will leave it:
+
+  | Flow | The `user` the hook sees |
+  | --- | --- |
+  | Password sign-up | A user core minted and has not written yet. The row does not exist at hook time, so an app's own write in the hook cannot rely on a foreign key to core's user row |
+  | Password sign-in, passkey, handoff | The stored user |
+  | Magic link | The stored user, marked verified when the link claims it, or a minted user that does not exist yet |
+  | Social sign-in | The stored user, marked verified when the sign-in claims it and with the name and image filled, or a minted user that does not exist yet |
+  | Verify link | The stored user, marked verified. A user already verified gets no session and no hook |
+  | Reset | The stored user, marked verified when the reset claims it, or a minted user that does not exist yet. The reset consumes its link first, and the hook runs before every other write. The consume belongs to this request alone, so its undo is exact |
+
+  For a minted user, a set `activeOrganizationId` answers `not_found`: the
+  user is a member of nothing yet.
+
+- A refused sign-in has spent what it presented, when the flow spends it
+  before its transaction. A refused magic link, verify link, or social
+  callback is consumed, and a refused passkey sign-in has spent its
+  challenge and moved the passkey counter. The person starts again. A
+  refused reset keeps its link: its consume is in the transaction, and the
+  refusal undoes it.
+- A before hook can run for a sign-in that then fails, and `afterCreate`
+  does not run. A claim race guard deletes the new session in the same
+  transaction and answers an error. A verify link whose password row is
+  gone answers `invalid_token` after the hook. A flow that retries after a unique key race
+  (the magic link, the social sign-in, the sign-up, the reset) runs its
+  before hook again. The organization flows have the same window: a role
+  change or a remove whose member changed since the read answers
+  `conflict` after its before hook, and an accept that loses the consume
+  race answers `invalid_token` after `beforeAddMember`, and for a raise
+  also after `beforeUpdateMemberRole`. No after hook runs
+  for any of these.
+- Hooks have no timeout, as the mail port has none. A hook that never
+  settles holds the request. A before hook holds the transaction, and on
+  Postgres one connection, for as long as it runs. Do not open a
+  transaction on core's storage from a before hook.
+- On Postgres, a before hook must not run a query on the client that core's
+  adapter uses while its pool has one connection (`max: 1`, the setup the
+  adapter README gives for Workers). The transaction holds that one
+  connection and waits for the hook, and the query waits for the
+  connection: with one connection the request hangs until the pool times
+  out. To write your own row from a before hook, use a second connection (a
+  pool of two or more, or a separate client). Or write it from the after
+  hook and accept the orphan rule above. On D1, a write through the
+  binding is a separate request and takes no lock. After hooks run after
+  the commit and are not affected.
+- Core has no request hooks. Wrap `auth.handle`, and read
+  `auth.caller(request)` for the caller.
+- `createAuth` refuses a hook that is not a function, a name that is no
+  hook point, a hook object that is not a plain object, and organization
+  hooks while `organizations` is off.
+
+### Limits
+
+`organizations.limits` takes three positive integers. Each is off by default.
+
+| Limit | Counts | Answer at the limit |
+| --- | --- | --- |
+| `perUser` | the user's member rows at any rank; a leave frees a slot | 409 `organization_limit` on create |
+| `membersPerOrganization` | the organization's member rows, on add and on an accept that makes a member | 409 `member_limit`; the invitation stays pending |
+| `pendingInvitationsPerOrganization` | the pending, unexpired invitations to other addresses | 409 `invitation_limit` on invite |
+
+Core counts inside the transaction, before the before hook. On D1 the count
+and the write are not isolated, so two writes at the same moment can both
+pass at the limit minus one. Postgres read committed has the same window.
+The API token cap has the same rule.
 
 ## Sweep
 

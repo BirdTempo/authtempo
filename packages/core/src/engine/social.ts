@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import { appErrorName } from "../primitives/app-error.js";
 import {
   constantTimeEqual,
   randomBase64Url,
@@ -10,7 +11,7 @@ import {
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { UserRow } from "../schema.js";
+import type { SessionRow, UserRow } from "../schema.js";
 import {
   buildQuery,
   type ConfiguredProvider,
@@ -23,8 +24,10 @@ import {
   stringClaim,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { createSession } from "./sessions.js";
+import { hookGuard } from "./hooks.js";
+import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import {
+  type BeforeResolveWrite,
   ClaimRacedError,
   claimEmail,
   ensureEmailIdentity,
@@ -199,16 +202,24 @@ export async function completeSocial(
 
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
-  const resolved = await resolveSocialUser(
-    config.storage,
-    provider.name,
-    bounded,
-    now,
-    (tx, user) =>
-      createSession(config, { userId: user.id, ip: input.ip, userAgent: input.userAgent }, tx),
+  const ended: SessionRow[] = [];
+  // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
+  const steps = sessionSteps(config, { ip: input.ip, userAgent: input.userAgent, via: "social" });
+  const resolved = await hookGuard(() =>
+    resolveSocialUser(
+      config.storage,
+      provider.name,
+      bounded,
+      now,
+      (tx) => steps.write(tx),
+      ended,
+      steps.before,
+    ),
   );
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
+  await sessionsEnded(config, ended, "claim");
+  await sessionOpened(config, after.session, user, "social");
   return ok({ token: after.token, next: safeNext(data.next), user });
 }
 
@@ -386,18 +397,6 @@ function boundProfile(profile: SocialProfile, providerName: string): SocialProfi
 const SUBJECT_MAX = 255;
 /** An image URL. LinkedIn's signed picture URLs pass 255, so the bound is wider than the subject's. */
 const IMAGE_MAX = 2048;
-const ERROR_CLASS_RE = /^[A-Za-z]+Error$/;
-
-/**
- * The name of an error from app code, safe for a log line. The app sets the
- * name, so it is app data and can hold the access token. Only a plain class
- * name such as `TypeError` passes; anything else logs as `Error`.
- */
-function appErrorName(e: unknown): string {
-  if (!(e instanceof Error)) return typeof e;
-  return ERROR_CLASS_RE.test(e.name) ? e.name : "Error";
-}
-
 /**
  * Links the identity to a user by the spec's rules. One transaction per
  * attempt. A `unique_violation` is caught here, outside the transaction,
@@ -421,6 +420,8 @@ export function resolveSocialUser<T extends AfterSession>(
   profile: SocialProfile,
   now: Date,
   after: (tx: StorageAdapter, user: UserRow) => Promise<T>,
+  ended?: SessionRow[],
+  before?: BeforeResolveWrite,
 ): Promise<Result<{ user: UserRow; after: T }>>;
 export async function resolveSocialUser<T extends AfterSession>(
   storage: StorageAdapter,
@@ -428,12 +429,23 @@ export async function resolveSocialUser<T extends AfterSession>(
   profile: SocialProfile,
   now: Date,
   after?: (tx: StorageAdapter, user: UserRow) => Promise<T>,
+  ended?: SessionRow[],
+  before?: BeforeResolveWrite,
 ): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await storage.transaction(
         async (tx): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> => {
-          const linked = await linkInTransaction(tx, provider, profile, now);
+          // A retry runs the claim again. The rows of an attempt that rolled back did not end.
+          if (ended) ended.length = 0;
+          const linked = await linkInTransaction(
+            tx,
+            provider,
+            profile,
+            now,
+            ended,
+            before ? (user) => before(tx, user) : undefined,
+          );
           if (!linked.ok) return linked;
           const { user, trustedIdentityId, created } = linked.value;
           if (!after) return ok(user);
@@ -496,7 +508,11 @@ async function linkInTransaction(
   provider: string,
   profile: SocialProfile,
   now: Date,
+  ended: SessionRow[] | undefined,
+  before: ((user: UserRow) => Promise<void>) | undefined,
 ): Promise<Result<Linked>> {
+  // Each branch calls `before` with the user it answers, after its checks and
+  // before its first write: the D1 undo (see `insertSignUp` in password.ts).
   const identity = await tx.findOne("identity", [
     { field: "provider", op: "eq", value: provider },
     { field: "subject", op: "eq", value: profile.subject },
@@ -512,27 +528,25 @@ async function linkInTransaction(
       profile.email !== null &&
       normalizeEmail(profile.email) === user.email;
     if (!user.emailVerified && proved) {
-      await claimEmail(tx, user.id, { identityId: identity.id }, now);
+      const claimed = { ...user, emailVerified: true, updatedAt: now };
+      const filled = filledUser(claimed, profile, now);
+      if (before) await before(filled);
+      await claimEmail(tx, user.id, { identityId: identity.id }, now, ended);
       await ensureEmailIdentity(tx, user.id, user.email, now);
-      const filled = await fillUser(
-        tx,
-        { ...user, emailVerified: true, updatedAt: now },
-        profile,
-        now,
-      );
+      await writeFill(tx, claimed, filled);
       return ok({ user: filled, trustedIdentityId: null, created: false });
     }
     if (!user.emailVerified) {
       // No user-row write here. On D1 the undo of a user-row write restores
       // the full row and would revert a claim's emailVerified flip. The
       // verified sign-in later fills name and image.
+      if (before) await before(user);
       return ok({ user, trustedIdentityId: identity.id, created: false });
     }
-    return ok({
-      user: await fillUser(tx, user, profile, now),
-      trustedIdentityId: proved ? null : identity.id,
-      created: false,
-    });
+    const filled = filledUser(user, profile, now);
+    if (before) await before(filled);
+    await writeFill(tx, user, filled);
+    return ok({ user: filled, trustedIdentityId: proved ? null : identity.id, created: false });
   }
   const email = profile.email ? normalizeEmail(profile.email) : null;
   if (!email) return fail("email_required");
@@ -541,20 +555,18 @@ async function linkInTransaction(
     if (!profile.emailVerified) return fail("email_taken_unverified");
     // An unverified account is a claim. The proof revokes earlier claimants
     // before the new identity is linked.
-    let current = existing;
-    if (!existing.emailVerified) {
-      await claimEmail(tx, existing.id, null, now);
-      current = { ...existing, emailVerified: true, updatedAt: now };
-    }
+    const current = existing.emailVerified
+      ? existing
+      : { ...existing, emailVerified: true, updatedAt: now };
+    const filled = filledUser(current, profile, now);
+    if (before) await before(filled);
+    if (!existing.emailVerified) await claimEmail(tx, existing.id, null, now, ended);
     await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
     await ensureEmailIdentity(tx, existing.id, email, now);
-    return ok({
-      user: await fillUser(tx, current, profile, now),
-      trustedIdentityId: null,
-      created: false,
-    });
+    await writeFill(tx, current, filled);
+    return ok({ user: filled, trustedIdentityId: null, created: false });
   }
-  const user = await tx.create("user", {
+  const minted: UserRow = {
     id: newId(now),
     email,
     emailVerified: profile.emailVerified,
@@ -562,7 +574,9 @@ async function linkInTransaction(
     image: profile.image,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  if (before) await before(minted);
+  const user = await tx.create("user", minted);
   const identityId = (
     await tx.create("identity", identityRow(user.id, provider, profile.subject, now))
   ).id;
@@ -585,20 +599,28 @@ function identityRow(userId: string, provider: string, subject: string, now: Dat
   };
 }
 
-/** Fills a null name or image. The caller has already marked the email verified through `claimEmail`. */
-async function fillUser(
-  tx: StorageAdapter,
-  user: UserRow,
-  profile: SocialProfile,
-  now: Date,
-): Promise<UserRow> {
+/**
+ * The user with a null name or image filled from the profile, with no
+ * write, so the session hook sees the row the flow leaves. The caller has
+ * already marked the email verified, or does so through `claimEmail`.
+ */
+function filledUser(user: UserRow, profile: SocialProfile, now: Date): UserRow {
   const patch: Partial<Pick<UserRow, "name" | "image">> = {};
   if (user.name === null && profile.name) patch.name = profile.name;
   if (user.image === null && profile.image) patch.image = profile.image;
   if (Object.keys(patch).length === 0) return user;
+  return { ...user, ...patch, updatedAt: now };
+}
+
+/** Writes the fill of `filledUser`, or nothing when it filled nothing. */
+async function writeFill(tx: StorageAdapter, user: UserRow, filled: UserRow): Promise<void> {
+  // Only the fields the fill changed, as before plan 9d: the other field may hold a concurrent write.
+  const patch: Partial<Pick<UserRow, "name" | "image">> = {};
+  if (filled.name !== user.name) patch.name = filled.name;
+  if (filled.image !== user.image) patch.image = filled.image;
+  if (Object.keys(patch).length === 0) return;
   await tx.update("user", [{ field: "id", op: "eq", value: user.id }], {
     ...patch,
-    updatedAt: now,
+    updatedAt: filled.updatedAt,
   });
-  return { ...user, ...patch, updatedAt: now };
 }

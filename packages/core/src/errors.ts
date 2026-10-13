@@ -29,6 +29,13 @@ export const ERRORS = {
   email_taken: 409,
   // plan 8b: a user holds API_TOKEN_CAP tokens
   token_limit: 409,
+  // plan 9d: a before hook refused (with a message) or threw
+  hook_refused: 403,
+  hook_failed: 500,
+  // plan 9d: organizations.limits
+  organization_limit: 409,
+  member_limit: 409,
+  invitation_limit: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

@@ -4,9 +4,18 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
-import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { hookGuard } from "./hooks.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
-import { createSession, type ResolvedSession } from "./sessions.js";
+import {
+  endSessions,
+  openSession,
+  prepareSession,
+  type ResolvedSession,
+  sessionOpened,
+  sessionsEnded,
+  writeSession,
+} from "./sessions.js";
 import {
   claimEmail,
   ensureEmailIdentity,
@@ -127,7 +136,9 @@ export async function passwordSignUp(
   let created: Result<Created> | null = null;
   for (let attempt = 0; created === null; attempt++) {
     try {
-      created = await insertSignUp(config, input, { email, name: name ?? null, hash }, now);
+      created = await hookGuard(() =>
+        insertSignUp(config, input, { email, name: name ?? null, hash }, now),
+      );
     } catch (err) {
       // A concurrent sign-up or sign-in created the user between our read
       // and our create, or (on D1) an owner's reset wrote this user's
@@ -148,6 +159,13 @@ export async function passwordSignUp(
     }
   }
   if (!created.ok) return created;
+  // Right after the commit, before the mail: the session exists whatever the mail does.
+  await sessionOpened(
+    config,
+    created.value.signedIn.session,
+    created.value.signedIn.user,
+    "password",
+  );
   await sendVerifyMail(config, email, created.value.passwordId, now);
   return ok(created.value.signedIn);
 }
@@ -183,7 +201,7 @@ function insertSignUp(
     // (`undoCreateWhere`), so the owner's verified user stays, and the retry
     // reads it and answers `email_taken`. Postgres isolates the transaction,
     // so the order is no guard there. Checked 2026-10-10.
-    const user = await tx.create("user", {
+    const minted: UserRow = {
       id: newId(now),
       email: row.email,
       emailVerified: false,
@@ -191,7 +209,19 @@ function insertSignUp(
       image: null,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    // The session hook before the first write, with the minted user (plan
+    // 9d, fix round 1). On D1 a refusal after a create makes the undo
+    // delete the created row by id (`undoCreateWhere`), and only the user
+    // row has a guard. After an owner's reset inside this transaction, the
+    // pending password row holds the owner's hash, so an undo of it would
+    // delete the owner's password. A refusal here undoes nothing.
+    const prepared = await prepareSession(
+      config,
+      { user: minted, ip: input.ip, userAgent: input.userAgent, via: "password" },
+      tx,
+    );
+    const user = await tx.create("user", minted);
     // Pending until the guard below passed: see `PENDING_HASH_PREFIX`.
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
     const password = await tx.create("password", {
@@ -201,11 +231,7 @@ function insertSignUp(
       createdAt: now,
       updatedAt: now,
     });
-    const s = await createSession(
-      config,
-      { userId: user.id, ip: input.ip, userAgent: input.userAgent },
-      tx,
-    );
+    const s = await writeSession(config, prepared, tx);
     // claimEmail flips the flag in its first statement, so any claim since
     // the user create makes this match zero rows. The user row is the
     // owner's now. A throw would undo the password create, and the D1 undo
@@ -403,11 +429,11 @@ export async function passwordSignIn(
       proved = current.hash;
     }
   }
-  const signedIn = await config.storage.transaction(
-    async (tx): Promise<Result<PasswordSession>> => {
-      const s = await createSession(
+  const signedIn = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<PasswordSession>> => {
+      const s = await openSession(
         config,
-        { userId: user.id, ip: input.ip, userAgent: input.userAgent },
+        { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
         tx,
       );
       // For every user, verified or not. Between the verify and this point a
@@ -434,10 +460,11 @@ export async function passwordSignIn(
         return fail("invalid_credentials");
       }
       return ok({ token: s.token, user, session: s.session });
-    },
+    }),
   );
   // After the commit, never inside: the floor must not hold a Postgres connection.
   if (!signedIn.ok) await legacyFloor(pw, started);
+  else await sessionOpened(config, signedIn.value.session, signedIn.value.user, "password");
   return signedIn;
 }
 
@@ -533,32 +560,47 @@ export async function verifyPasswordEmail(
   const row = consumed.value;
   const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
   if (typeof passwordId !== "string") return fail("invalid_token");
-  return config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
-    const user = await tx.findOne("user", [{ field: "email", op: "eq", value: row.identifier }]);
-    if (!user) return fail("invalid_token");
-    // A conditional update, not a read, so that it sees a claim's
-    // statements on D1. It is the first write: zero rows refuses with no
-    // change. The row must also belong to this user: a user deleted and
-    // made again under the address does not inherit the link.
-    const kept = await tx.update(
-      "password",
-      [
-        { field: "id", op: "eq", value: passwordId },
-        { field: "userId", op: "eq", value: user.id },
-      ],
-      { updatedAt: now },
-    );
-    if (kept === 0) return fail("invalid_token");
-    if (user.emailVerified) return ok({ user, signedIn: null });
-    await claimEmail(tx, user.id, { passwordId }, now);
-    await ensureEmailIdentity(tx, user.id, user.email, now);
-    const s = await createSession(
-      config,
-      { userId: user.id, ip: input.ip, userAgent: input.userAgent },
-      tx,
-    );
-    return ok({ user: { ...user, emailVerified: true, updatedAt: now }, signedIn: s });
-  });
+  const ended: SessionRow[] = [];
+  const verified = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
+      const user = await tx.findOne("user", [{ field: "email", op: "eq", value: row.identifier }]);
+      if (!user) return fail("invalid_token");
+      const claimed = { ...user, emailVerified: true, updatedAt: now };
+      // The session hook before the first write, for the D1 undo (see `insertSignUp`).
+      // A verified user gets no session, so no hook.
+      const prepared = user.emailVerified
+        ? null
+        : await prepareSession(
+            config,
+            { user: claimed, ip: input.ip, userAgent: input.userAgent, via: "password" },
+            tx,
+          );
+      // A conditional update, not a read, so that it sees a claim's
+      // statements on D1. It is the first write: zero rows refuses with no
+      // change. The row must also belong to this user: a user deleted and
+      // made again under the address does not inherit the link.
+      const kept = await tx.update(
+        "password",
+        [
+          { field: "id", op: "eq", value: passwordId },
+          { field: "userId", op: "eq", value: user.id },
+        ],
+        { updatedAt: now },
+      );
+      if (kept === 0) return fail("invalid_token");
+      if (prepared === null) return ok({ user, signedIn: null });
+      await claimEmail(tx, user.id, { passwordId }, now, ended);
+      await ensureEmailIdentity(tx, user.id, user.email, now);
+      const s = await writeSession(config, prepared, tx);
+      return ok({ user: claimed, signedIn: s });
+    }),
+  );
+  if (verified.ok) {
+    await sessionsEnded(config, ended, "claim");
+    if (verified.value.signedIn)
+      await sessionOpened(config, verified.value.signedIn.session, verified.value.user, "password");
+  }
+  return verified;
 }
 
 export interface PasswordResetRequest {
@@ -658,9 +700,11 @@ export async function resetPassword(
   if (refused) return fail(refused);
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
-  for (let attempt = 0; ; attempt++) {
+  const ended: ResetEnded = { claim: [], reset: [] };
+  let reset: Result<PasswordSession & { next: string }> | null = null;
+  for (let attempt = 0; reset === null; attempt++) {
     try {
-      return await applyReset(config, input, valueHash, hash, now);
+      reset = await hookGuard(() => applyReset(config, input, valueHash, hash, now, ended));
     } catch (err) {
       // Two resets for one address raced: the loser's user, email
       // identity, or password create failed on a unique key. Caught here,
@@ -677,6 +721,20 @@ export async function resetPassword(
       throw err;
     }
   }
+  if (reset.ok) {
+    // One reason for one cause: the claim's rows end with `claim`, the
+    // verified user's own rows with `password_reset` (fix round 1).
+    await sessionsEnded(config, ended.claim, "claim");
+    await sessionsEnded(config, ended.reset, "password_reset");
+    await sessionOpened(config, reset.value.session, reset.value.user, "password");
+  }
+  return reset;
+}
+
+/** The session rows a reset deleted, by cause. Only one list fills in one reset. */
+interface ResetEnded {
+  claim: SessionRow[];
+  reset: SessionRow[];
 }
 
 function applyReset(
@@ -685,18 +743,24 @@ function applyReset(
   valueHash: string,
   hash: string,
   now: Date,
+  ended: ResetEnded,
 ): Promise<Result<PasswordSession & { next: string }>> {
   return config.storage.transaction(
     async (tx): Promise<Result<PasswordSession & { next: string }>> => {
+      // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
+      ended.claim.length = 0;
+      ended.reset.length = 0;
       // The first statement. Two POSTs of one token race here, and only one
       // wins. A refusal comes before any write, so nothing is left to undo.
       const consumed = await consumeVerification(tx, { purpose: "password-reset", valueHash, now });
       if (!consumed.ok) return consumed;
       const email = consumed.value.identifier;
       const next = safeNext((consumed.value.data as { next?: unknown } | null)?.next);
-      let user = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
-      if (!user) {
-        user = await tx.create("user", {
+      const found = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      let minted: UserRow | null = null;
+      let user: UserRow;
+      if (!found) {
+        minted = {
           id: newId(now),
           email,
           emailVerified: true,
@@ -704,8 +768,21 @@ function applyReset(
           image: null,
           createdAt: now,
           updatedAt: now,
-        });
-      }
+        };
+        user = minted;
+      } else user = found.emailVerified ? found : { ...found, emailVerified: true, updatedAt: now };
+      // The reset consumes its link first, and the hook runs before every
+      // other write (plan 9d, fix round 2). The link row belongs to this
+      // request alone, so the D1 undo of the consume is exact; an undo of the
+      // writes below would not be (see `insertSignUp`). A refusal undoes the
+      // consume with the transaction, so the link stays usable.
+      // The user the hook sees is the user this reset leaves: found, claimed, or minted.
+      const prepared = await prepareSession(
+        config,
+        { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
+        tx,
+      );
+      if (minted) await tx.create("user", minted);
       // The new password row before any session delete. A password sign-in
       // in flight re-checks its row by id and by the hash it verified as its
       // last statement. When that re-check still finds the old hash, this
@@ -713,13 +790,12 @@ function applyReset(
       // sign-in's session. The opposite order lets an old-password sign-in
       // commit a session after the delete.
       const passwordId = await setPassword(tx, user.id, hash, now);
-      if (!user.emailVerified) {
+      if (found && !found.emailVerified) {
         // The claim deletes the claimant's sessions, identities, passkeys,
         // handoff codes, and every other password row, and keeps the new password.
-        await claimEmail(tx, user.id, { passwordId }, now);
-        user = { ...user, emailVerified: true, updatedAt: now };
+        await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
       } else {
-        await tx.delete("session", [{ field: "userId", op: "eq", value: user.id }]);
+        await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset);
         await deleteHandoffCodes(tx, user.id);
       }
       // The other links for this address. A person who reads the mailbox
@@ -730,11 +806,7 @@ function applyReset(
         { field: "consumedAt", op: "eq", value: null },
       ]);
       await ensureEmailIdentity(tx, user.id, email, now);
-      const s = await createSession(
-        config,
-        { userId: user.id, ip: input.ip, userAgent: input.userAgent },
-        tx,
-      );
+      const s = await writeSession(config, prepared, tx);
       return ok({ token: s.token, user, session: s.session, next });
     },
   );
@@ -815,8 +887,10 @@ export async function changePassword(
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.newPassword);
   const now = config.clock.now();
+  const ended: SessionRow[] = [];
+  let changed: Result<{ ok: true }>;
   try {
-    return await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
+    changed = await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
       // The new hash before the session delete, for the reason in
       // `applyReset`: the sign-in re-check matches the row by id and hash.
       // Do not read `password.updatedAt` as the change time: the sign-in
@@ -842,10 +916,12 @@ export async function changePassword(
           updatedAt: now,
         });
       }
-      await tx.delete("session", [
+      const others: Where<"session">[] = [
         { field: "userId", op: "eq", value: user.id },
         { field: "id", op: "ne", value: session.id },
-      ]);
+      ];
+      // Each row by id, for the after hook (plan 9d, final fix wave M-1).
+      await endSessions(tx, others, ended);
       // The codes of the changer's own session go too. The row names the
       // user, not the session, and a lost code costs one more handoff.
       await deleteHandoffCodes(tx, user.id);
@@ -866,4 +942,6 @@ export async function changePassword(
       return fail("conflict");
     throw err;
   }
+  if (changed.ok) await sessionsEnded(config, ended, "password_change");
+  return changed;
 }

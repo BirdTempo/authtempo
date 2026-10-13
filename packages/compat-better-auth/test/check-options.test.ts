@@ -11,11 +11,7 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
   it("refuses exactly these consumere options", () => {
     const c = checkOptions(consumere);
     // GitHub and LinkedIn map onto core's presets since plan 9c.
-    expect(paths(c.refusals)).toEqual([
-      "databaseHooks",
-      "secondaryStorage",
-      "session.storeSessionInDatabase",
-    ]);
+    expect(paths(c.refusals)).toEqual(["secondaryStorage", "session.storeSessionInDatabase"]);
     // consumere sets disableIpTracking: accepted, with the note that the per-IP limits are skipped.
     expect(paths(c.notes)).toEqual([
       "advanced.database.generateId",
@@ -75,30 +71,24 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     expect(paths(c.refusals)).toEqual([
       "emailAndPassword.sendResetPassword",
       "emailVerification.sendVerificationEmail",
-      "plugins[organization].organizationHooks",
-      "plugins[organization].organizationLimit",
       "plugins[organization].sendInvitationEmail",
       "rateLimit.customRules",
       "rateLimit.customStorage",
       "rateLimit.max",
       "rateLimit.window",
     ]);
-    expect(paths(c.notes)).toEqual(["plugins[organization]", "session.cookieCache"]);
-    // Better Auth's absent-option defaults, said at start (final review I-2).
-    expect(c.notes).toContain(
-      "plugins[organization]: Better Auth's default limits of 100 members and 100 pending invitations per organization do not apply: core has no count limit",
-    );
+    expect(paths(c.notes)).toEqual(["session.cookieCache"]);
+    // Since plan 9d the package maps Better Auth's limits and their defaults of 100, so no note says that they are missing.
+    expect(c.notes.join("\n")).not.toContain("100 members");
   });
 
   // The exact lists, so a key accepted in silence fails here (final review L-6).
   const EXACT = {
     consumerc: [
-      "databaseHooks",
       "hooks",
       "plugins[expo]",
       "plugins[organization].ac",
       "plugins[organization].dynamicAccessControl",
-      "plugins[organization].organizationHooks",
       "plugins[organization].roles",
       "plugins[organization].sendInvitationEmail",
       "socialProviders.apple.clientSecret",
@@ -112,9 +102,6 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "plugins[email-otp]",
       "plugins[organization].ac",
       "plugins[organization].disableOrganizationDeletion",
-      "plugins[organization].membershipLimit",
-      "plugins[organization].organizationHooks",
-      "plugins[organization].organizationLimit",
       "plugins[organization].roles",
       "plugins[organization].teams",
       "plugins[passkey].origin",
@@ -134,7 +121,6 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "plugins[jwt]",
       "plugins[mcp]",
       "plugins[organization].ac",
-      "plugins[organization].organizationHooks",
       "plugins[organization].roles",
       "plugins[organization].sendInvitationEmail",
       "plugins[passkey].origin",

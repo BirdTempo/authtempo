@@ -5,6 +5,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { hookGuard, type OrganizationPatch, type RemoveVia, runAfter, runBefore } from "./hooks.js";
 import {
   needs,
   normalizeSlug,
@@ -212,27 +213,77 @@ export async function createOrganization(
     createdAt: now,
     updatedAt: now,
   };
+  const summary = publicOrganization(organization);
+  const owner: MemberSummary = {
+    id: member.id,
+    userId: member.userId,
+    role: member.role,
+    email: input.user.email,
+    name: input.user.name,
+    createdAt: member.createdAt,
+  };
+  const hooks = config.hooks.organization;
+  const limit = o.limits.perUser;
   try {
-    await config.storage.transaction(async (tx) => {
-      await tx.create("organization", organization);
-      await tx.create("member", member);
-    });
+    const written = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // The count and the slug read run before any write, so a refusal commits nothing.
+        // perUser counts the user's member rows at any rank, as Better Auth's numeric limit does.
+        if (limit !== null) {
+          const held = await tx.findMany(
+            "member",
+            [{ field: "userId", op: "eq", value: input.user.id }],
+            { limit },
+          );
+          if (held.length >= limit) return fail("organization_limit");
+        }
+        // A hook must not run for a taken slug. The unique key stays the guard for a race.
+        if (await tx.findOne("organization", [{ field: "slug", op: "eq", value: slug }]))
+          return fail("slug_taken");
+        await runBefore("organization.beforeCreate", hooks.beforeCreate, {
+          organization: summary,
+          user: input.user,
+        });
+        await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+          organization: summary,
+          member: { userId: input.user.id, role: member.role },
+          memberUser: input.user,
+          by: input.user,
+          via: "create",
+          invitation: null,
+        });
+        await tx.create("organization", organization);
+        await tx.create("member", member);
+        return ok(true);
+      }),
+    );
+    if (!written.ok) return written;
   } catch (err) {
     // Caught outside the transaction: inside, Postgres has already aborted it.
     if (err instanceof StorageError && err.code === "unique_violation") return fail("slug_taken");
     throw err;
   }
-  return ok({
-    organization: publicOrganization(organization),
-    member: {
-      id: member.id,
-      userId: member.userId,
-      role: member.role,
-      email: input.user.email,
-      name: input.user.name,
-      createdAt: member.createdAt,
+  // Better Auth's order: the member's after hook, then the organization's.
+  await runAfter(
+    "organization.afterAddMember",
+    hooks.afterAddMember,
+    {
+      organization: summary,
+      member: owner,
+      memberUser: input.user,
+      by: input.user,
+      via: "create",
+      invitation: null,
     },
-  });
+    member.id,
+  );
+  await runAfter(
+    "organization.afterCreate",
+    hooks.afterCreate,
+    { organization: summary, member: owner, user: input.user },
+    organization.id,
+  );
+  return ok({ organization: summary, member: owner });
 }
 
 export async function listOrganizations(
@@ -279,7 +330,7 @@ export async function updateOrganization(
   if (!v.ok) return v;
   const s = await standing(config, o, input.user, input.organizationId, "update");
   if (!s.ok) return s;
-  const data: Partial<OrganizationRow> = {};
+  const data: OrganizationPatch = {};
   if (input.name !== undefined) {
     if (!validOrganizationName(input.name)) return fail("invalid_body");
     data.name = input.name;
@@ -296,17 +347,54 @@ export async function updateOrganization(
   }
   if (Object.keys(data).length === 0) return ok(publicOrganization(s.value.organization));
   const now = config.clock.now();
+  const hooks = config.hooks.organization;
+  const current = publicOrganization(s.value.organization);
+  // The caller's own member row: Better Auth's update hooks name it.
+  const callerMember: MemberSummary = {
+    id: s.value.member.id,
+    userId: input.user.id,
+    role: s.value.member.role,
+    email: input.user.email,
+    name: input.user.name,
+    createdAt: s.value.member.createdAt,
+  };
+  const newSlug = data.slug;
   try {
-    await config.storage.update(
-      "organization",
-      [{ field: "id", op: "eq", value: input.organizationId }],
-      { ...data, updatedAt: now },
+    const written = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // A hook must not run for a taken slug. The unique key stays the guard for a race.
+        if (
+          newSlug !== undefined &&
+          newSlug !== s.value.organization.slug &&
+          (await tx.findOne("organization", [{ field: "slug", op: "eq", value: newSlug }]))
+        )
+          return fail("slug_taken");
+        await runBefore("organization.beforeUpdate", hooks.beforeUpdate, {
+          organization: current,
+          patch: data,
+          member: callerMember,
+          user: input.user,
+        });
+        await tx.update("organization", [{ field: "id", op: "eq", value: input.organizationId }], {
+          ...data,
+          updatedAt: now,
+        });
+        return ok(true);
+      }),
     );
+    if (!written.ok) return written;
   } catch (err) {
     if (err instanceof StorageError && err.code === "unique_violation") return fail("slug_taken");
     throw err;
   }
-  return ok(publicOrganization({ ...s.value.organization, ...data, updatedAt: now }));
+  const stored = publicOrganization({ ...s.value.organization, ...data, updatedAt: now });
+  await runAfter(
+    "organization.afterUpdate",
+    hooks.afterUpdate,
+    { organization: stored, member: callerMember, user: input.user },
+    stored.id,
+  );
+  return ok(stored);
 }
 
 export async function deleteOrganization(
@@ -322,15 +410,32 @@ export async function deleteOrganization(
   // The app seeds the platform organization; the engine never deletes it, because no route could create it again.
   if (s.value.organization.slug === o.platformOrganization) return fail("slug_reserved");
   const id = input.organizationId;
-  await config.storage.transaction(async (tx) => {
-    await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
-    await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
-    // A session that points at a deleted organization would make every later rank check read a missing row.
-    await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
-      activeOrganizationId: null,
-    });
-    await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
-  });
+  const hooks = config.hooks.organization;
+  const organization = publicOrganization(s.value.organization);
+  const deleted = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<true>> => {
+      await runBefore("organization.beforeDelete", hooks.beforeDelete, {
+        organization,
+        user: input.user,
+      });
+      await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
+      await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
+      // A session that points at a deleted organization would make every later rank check read a missing row.
+      await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
+        activeOrganizationId: null,
+      });
+      await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+      return ok(true);
+    }),
+  );
+  if (!deleted.ok) return deleted;
+  // The member and invitation rows go with the organization and fire no member hook, as in Better Auth.
+  await runAfter(
+    "organization.afterDelete",
+    hooks.afterDelete,
+    { organization, user: input.user },
+    id,
+  );
   return ok({ ok: true });
 }
 
@@ -416,21 +521,68 @@ export async function addMember(
     createdAt: now,
     updatedAt: now,
   };
+  const hooks = config.hooks.organization;
+  const organization = publicOrganization(s.value.organization);
+  const limit = o.limits.membersPerOrganization;
   try {
-    await config.storage.create("member", member);
+    const written = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // A no-op add runs no hook. The unique key stays the guard for a race.
+        if (
+          await tx.findOne("member", [
+            { field: "organizationId", op: "eq", value: input.organizationId },
+            { field: "userId", op: "eq", value: target.id },
+          ])
+        )
+          return fail("already_member");
+        if (limit !== null) {
+          const held = await tx.findMany(
+            "member",
+            [{ field: "organizationId", op: "eq", value: input.organizationId }],
+            { limit },
+          );
+          if (held.length >= limit) return fail("member_limit");
+        }
+        await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+          organization,
+          member: { userId: target.id, role: input.role },
+          memberUser: target,
+          by: input.user,
+          via: "add",
+          invitation: null,
+        });
+        await tx.create("member", member);
+        return ok(true);
+      }),
+    );
+    if (!written.ok) return written;
   } catch (err) {
     if (err instanceof StorageError && err.code === "unique_violation")
       return fail("already_member");
     throw err;
   }
-  return ok({
+  const added: MemberSummary = {
     id: member.id,
     userId: target.id,
     role: member.role,
     email: target.email,
     name: target.name,
     createdAt: now,
-  });
+  };
+  await runAfter(
+    "organization.afterAddMember",
+    hooks.afterAddMember,
+    {
+      organization,
+      member: added,
+      memberUser: target,
+      by: input.user,
+      via: "add",
+      invitation: null,
+    },
+    member.id,
+  );
+  return ok(added);
 }
 
 export async function updateMemberRole(
@@ -455,9 +607,27 @@ export async function updateMemberRole(
   ]);
   if (!user) return fail("not_found");
   const now = config.clock.now();
+  const hooks = config.hooks.organization;
+  const organization = publicOrganization(s.value.organization);
+  const current: MemberSummary = {
+    id: target.member.id,
+    userId: user.id,
+    role: target.member.role,
+    email: user.email,
+    name: user.name,
+    createdAt: target.member.createdAt,
+  };
+  // The before hook runs inside the write's transaction, after the owner lock when there is one.
   // The role from the read is in the where: if another request changed it since, zero rows match.
-  const setRole = (storage: StorageAdapter) =>
-    storage.update(
+  const setRole = async (storage: StorageAdapter) => {
+    await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
+      organization,
+      member: current,
+      role: input.role,
+      memberUser: user,
+      by: input.user,
+    });
+    return storage.update(
       "member",
       [
         { field: "id", op: "eq", value: target.member.id },
@@ -465,21 +635,30 @@ export async function updateMemberRole(
       ],
       { role: input.role, updatedAt: now },
     );
-  if (isOwner(o, target.rank) && !isOwner(o, g.value)) {
+  };
+  const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
-    const w = await ownerWrite(config, o, s.value.organization, setRole);
-    if (!w.ok) return w;
-  } else if ((await setRole(config.storage)) === 0) {
-    return fail("conflict");
-  }
-  return ok({
-    id: target.member.id,
-    userId: user.id,
-    role: input.role,
-    email: user.email,
-    name: user.name,
-    createdAt: target.member.createdAt,
+    if (isOwner(o, target.rank) && !isOwner(o, g.value))
+      return ownerWrite(config, o, s.value.organization, setRole);
+    // A zero-row update writes nothing, so the commit changes nothing.
+    const n = await config.storage.transaction((tx) => setRole(tx));
+    return n === 0 ? fail("conflict") : ok(true);
   });
+  if (!written.ok) return written;
+  const updated: MemberSummary = { ...current, role: input.role };
+  await runAfter(
+    "organization.afterUpdateMemberRole",
+    hooks.afterUpdateMemberRole,
+    {
+      organization,
+      member: updated,
+      previousRole: target.member.role,
+      memberUser: user,
+      by: input.user,
+    },
+    target.member.id,
+  );
+  return ok(updated);
 }
 
 export async function removeMember(
@@ -503,10 +682,32 @@ export async function removeMember(
   const target = self ? s.value : await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
   if (!self && target.rank > s.value.rank) return fail("forbidden_rank");
+  // The member's user, for the hook event. Read before any write.
+  const memberUser = self
+    ? input.user
+    : await config.storage.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
+  if (!memberUser) return fail("not_found");
   const organizationId = input.organizationId;
+  const hooks = config.hooks.organization;
+  const via: RemoveVia = self ? "leave" : "remove";
+  const event = {
+    organization: publicOrganization(s.value.organization),
+    member: {
+      id: target.member.id,
+      userId: target.member.userId,
+      role: target.member.role,
+      email: memberUser.email,
+      name: memberUser.name,
+      createdAt: target.member.createdAt,
+    },
+    memberUser,
+    by: input.user,
+    via,
+  };
   // The role from the read is in the where: if another request changed it since, zero rows match.
   // The active organization is a choice, not a right; it goes with the membership in the same write.
   const drop = async (storage: StorageAdapter) => {
+    await runBefore("organization.beforeRemoveMember", hooks.beforeRemoveMember, event);
     const n = await storage.delete("member", [
       { field: "id", op: "eq", value: target.member.id },
       { field: "role", op: "eq", value: target.member.role },
@@ -522,14 +723,19 @@ export async function removeMember(
     );
     return n;
   };
-  if (isOwner(o, target.rank)) {
+  const removed = await hookGuard(async (): Promise<Result<true>> => {
     // The removal of an owner: count, lock, and write in one transaction.
-    const w = await ownerWrite(config, o, s.value.organization, drop);
-    if (!w.ok) return w;
-  } else {
+    if (isOwner(o, target.rank)) return ownerWrite(config, o, s.value.organization, drop);
     // A delete of zero rows writes nothing, so the commit changes nothing.
     const n = await config.storage.transaction((tx) => drop(tx));
-    if (n === 0) return fail("conflict");
-  }
+    return n === 0 ? fail("conflict") : ok(true);
+  });
+  if (!removed.ok) return removed;
+  await runAfter(
+    "organization.afterRemoveMember",
+    hooks.afterRemoveMember,
+    event,
+    target.member.id,
+  );
   return ok({ ok: true });
 }

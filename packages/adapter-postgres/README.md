@@ -19,8 +19,12 @@ with `max: 1`, `prepare: false`, and `fetch_types: false`. Create the
 client per request and call `sql.end({ timeout: 5 })` when the request ends.
 
 With `max: 1`, a write outside an open transaction waits for that
-transaction's connection. The engine never does this. If your own code
-does, use `max: 2` or more.
+transaction's connection. The engine itself never does this. Since plan 9d
+(amended 2026-10-13 by the plan 9d final fix wave), a before hook runs the
+app's code inside the engine's open transaction, so the app's hook decides:
+a before hook that queries this client with `max: 1` hangs the request until
+the pool times out. If your own code does this, in a hook or elsewhere, use
+`max: 2` or more, or a second client.
 
 The adapter has not yet run on workerd through Hyperdrive in this repo.
 Its first Workers consumer proves that run.

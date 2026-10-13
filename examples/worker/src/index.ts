@@ -3,6 +3,7 @@ import { type Auth, createAuth, createPbkdf2PasswordHash } from "@tempo-auth/cor
 import { createLegacyPasswordHash } from "@tempo-auth/legacy-hashes";
 import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
+import { exampleHooks } from "./hooks.js";
 import { LEGACY_FORMATS } from "./legacy-formats.js";
 import { testProvider, testProviderFetch, testProviderRoute } from "./test-provider.js";
 
@@ -57,6 +58,9 @@ function getAuth(env: Env): Auth {
     })(),
     // Organizations, members, and mailed invitations. The routes need the 0002 migration.
     organizations: {},
+    // TEST_MODE only (plan 9d): the hooks the end-to-end test proves on D1. They write
+    // app_tenant, a table of the test setup, so a deploy without the table sets none.
+    ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
     // Password sign-in. The default PBKDF2 seam costs 100000 iterations per
     // hash. That needs more CPU than Workers Free allows, so a deployment needs
     // Workers Paid. In TEST_MODE only, use 1000 iterations so the end-to-end

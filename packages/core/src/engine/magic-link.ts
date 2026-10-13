@@ -3,8 +3,9 @@ import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { UserRow } from "../schema.js";
-import { createSession } from "./sessions.js";
+import type { SessionRow, UserRow } from "../schema.js";
+import { hookGuard } from "./hooks.js";
+import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
@@ -86,14 +87,29 @@ export async function verifyMagicLink(
   // requests a new one.
   // The session commits with the claim in one transaction, so a claimant's
   // in-flight callback cannot keep a session the claim deleted.
-  const { user, after } = await findOrCreateUserByEmail(
-    config.storage,
-    row.identifier,
-    now,
-    (tx, resolved) =>
-      createSession(config, { userId: resolved.id, ip: input.ip, userAgent: input.userAgent }, tx),
+  const ended: SessionRow[] = [];
+  // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
+  const steps = sessionSteps(config, {
+    ip: input.ip,
+    userAgent: input.userAgent,
+    via: "magic_link",
+  });
+  const resolved = await hookGuard(async () =>
+    ok(
+      await findOrCreateUserByEmail(
+        config.storage,
+        row.identifier,
+        now,
+        (tx) => steps.write(tx),
+        ended,
+        steps.before,
+      ),
+    ),
   );
-  const { token } = after;
+  if (!resolved.ok) return resolved;
+  const { user, after } = resolved.value;
+  await sessionsEnded(config, ended, "claim");
+  await sessionOpened(config, after.session, user, "magic_link");
   const next = safeNext((row.data as { next?: unknown } | null)?.next);
-  return ok({ token, next, user });
+  return ok({ token: after.token, next, user });
 }

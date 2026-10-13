@@ -66,3 +66,10 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   share core's `deriveGate`. The gate never refuses a sign-in.
 - An import repair (`--repair`) writes only the rows that a `partial` record
   lacks, and never for a user that a claim verified since the import.
+- A hook never widens a rank check or a limit. A before hook runs inside the
+  flow's transaction, so a refusal leaves no row; an after hook runs after
+  the commit, and a throw there is logged, never answered as a failure of a
+  row that exists. The session hook may change `ip`, `userAgent`, and an
+  `activeOrganizationId` of the user's own organizations only.
+- An organization limit is a count in core (`organizations.limits`), never
+  only a hook: the compatibility package maps Better Auth's numbers onto it.

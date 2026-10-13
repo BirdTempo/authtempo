@@ -1,3 +1,11 @@
+import {
+  type HooksConfig,
+  ORGANIZATION_HOOK_POINTS,
+  type OrganizationHooks,
+  type ResolvedHooks,
+  SESSION_HOOK_POINTS,
+  type SessionHooks,
+} from "./engine/hooks.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
@@ -148,6 +156,14 @@ export interface AuthConfig {
    * `api.password`.
    */
   password?: PasswordConfig;
+  /**
+   * The app's code at named points of the organization and session flows
+   * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
+   * refuses with `throw hookRefusal(message)`; an after hook runs after the
+   * commit. Pass plain objects of functions. Organization hooks need
+   * `organizations`.
+   */
+  hooks?: HooksConfig;
 }
 
 export interface PasswordConfig {
@@ -196,7 +212,20 @@ export interface OrganizationsConfig {
   invitationTtlDays?: number;
   /** The link in the invitation mail. Default `${appURL}/?invitation=<token>`. */
   invitationLinkBuilder?: (token: string, organization: { slug: string; name: string }) => string;
+  limits?: OrganizationLimits;
 }
+
+/** Each a positive integer. Absent: no limit (plan 9d). */
+export interface OrganizationLimits {
+  /** The member rows one user may hold, at any rank. Create answers `organization_limit` at it. */
+  perUser?: number;
+  /** The member rows one organization may hold. Add and accept answer `member_limit` at it. */
+  membersPerOrganization?: number;
+  /** The pending, unexpired invitations of one organization. Invite answers `invitation_limit` at it. */
+  pendingInvitationsPerOrganization?: number;
+}
+
+type ResolvedLimits = { [K in keyof OrganizationLimits]-?: number | null };
 
 export interface ResolvedConfig {
   basePath: string;
@@ -235,6 +264,7 @@ export interface ResolvedConfig {
     platformRole: string | null;
     invitationTtlDays: number;
     invitationLinkBuilder: (token: string, organization: { slug: string; name: string }) => string;
+    limits: ResolvedLimits;
   } | null;
   password: {
     hash: PasswordHashSeam;
@@ -244,6 +274,7 @@ export interface ResolvedConfig {
     resetPage: (input: ResetPageInput) => string;
     legacyVerify: Required<LegacyVerifyConfig> | null;
   } | null;
+  hooks: ResolvedHooks;
 }
 
 /**
@@ -404,6 +435,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       invitationLinkBuilder:
         o.invitationLinkBuilder ??
         ((token) => `${appURL}/?invitation=${encodeURIComponent(token)}`),
+      limits: resolveLimits(o.limits),
     };
   }
   const basePath = input.basePath ?? "/auth";
@@ -511,6 +543,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     handoff,
     organizations,
     password,
+    hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
 
@@ -539,6 +572,76 @@ function listOf<T>(path: string, value: T[] | undefined): T[] {
   for (const [i, entry] of value.entries())
     if (!isPlainObject(entry)) throw new ConfigError(`${path}[${i}] must be an object`);
   return value;
+}
+
+const NO_LIMITS: ResolvedLimits = {
+  perUser: null,
+  membersPerOrganization: null,
+  pendingInvitationsPerOrganization: null,
+};
+
+function resolveLimits(input: OrganizationLimits | undefined): ResolvedLimits {
+  const out: ResolvedLimits = { ...NO_LIMITS };
+  if (input === undefined) return out;
+  if (!isPlainObject(input)) throw new ConfigError("organizations.limits must be an object");
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (value === undefined) continue;
+    if (!Object.hasOwn(NO_LIMITS, key))
+      throw new ConfigError(
+        `organizations.limits.${key} is not a limit; core has perUser, membersPerOrganization, and pendingInvitationsPerOrganization`,
+      );
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+      throw new ConfigError(`organizations.limits.${key} must be a positive integer`);
+    out[key as keyof ResolvedLimits] = value;
+  }
+  return out;
+}
+
+/** An object literal. A class instance keeps its methods on the prototype, where `Object.entries` does not see them. */
+function isHookObject(value: unknown): value is Record<string, unknown> {
+  if (!isPlainObject(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** Each hook of one group, bound to the object it came on. A typo in a name fails the start: a hook that never runs is a silent gap. */
+function hookGroup(
+  path: string,
+  group: unknown,
+  points: Readonly<Record<string, true>>,
+): Record<string, unknown> {
+  if (group === undefined) return {};
+  if (!isHookObject(group)) throw new ConfigError(`${path} must be a plain object`);
+  const out: Record<string, unknown> = {};
+  for (const [key, fn] of Object.entries(group)) {
+    if (fn === undefined) continue;
+    if (!Object.hasOwn(points, key)) throw new ConfigError(`${path}.${key} is not a hook point`);
+    if (typeof fn !== "function") throw new ConfigError(`${path}.${key} must be a function`);
+    out[key] = fn.bind(group);
+  }
+  return out;
+}
+
+function resolveHooks(input: HooksConfig | undefined, organizationsOn: boolean): ResolvedHooks {
+  if (input === undefined) return { organization: {}, session: {} };
+  if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
+  for (const key of Object.keys(input))
+    if (key !== "organization" && key !== "session")
+      throw new ConfigError(`hooks.${key} is not a hook group; core has organization and session`);
+  // Each value passed the function check in hookGroup; the interfaces type the events.
+  const organization = hookGroup(
+    "hooks.organization",
+    input.organization,
+    ORGANIZATION_HOOK_POINTS,
+  ) as unknown as OrganizationHooks;
+  if (Object.keys(organization).length > 0 && !organizationsOn)
+    throw new ConfigError("hooks.organization needs organizations: the hooks would never run");
+  const session = hookGroup(
+    "hooks.session",
+    input.session,
+    SESSION_HOOK_POINTS,
+  ) as unknown as SessionHooks;
+  return { organization, session };
 }
 
 /**

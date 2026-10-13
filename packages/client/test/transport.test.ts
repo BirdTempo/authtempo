@@ -53,6 +53,30 @@ describe("createTransport", () => {
     });
   });
 
+  it("keeps the message of a hook refusal, and adds none to another code (plan 9d)", async () => {
+    const refused = answering(403, `{"error":"hook_refused","message":"Choose another name."}`);
+    expect(
+      await createTransport({ baseURL: BASE, fetch: refused.fetch })(
+        "POST",
+        "/organizations/create",
+        {},
+      ),
+    ).toEqual({ ok: false, code: "hook_refused", status: 403, message: "Choose another name." });
+    const missing = answering(404, `{"error":"not_found"}`);
+    expect(await createTransport({ baseURL: BASE, fetch: missing.fetch })("GET", "/x")).toEqual({
+      ok: false,
+      code: "not_found",
+      status: 404,
+    });
+    // A message on another code is dropped (parked Minor 2).
+    const other = answering(404, `{"error":"not_found","message":"from a proxy"}`);
+    expect(await createTransport({ baseURL: BASE, fetch: other.fetch })("GET", "/x")).toEqual({
+      ok: false,
+      code: "not_found",
+      status: 404,
+    });
+  });
+
   it("maps an unknown code, a non-JSON body, and an error status with a JSON body to unexpected", async () => {
     for (const [status, body] of [
       [400, `{"error":"brand_new_code"}`],

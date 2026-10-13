@@ -224,7 +224,8 @@ export interface AuthApi {
     token: string;
     ip: string | null;
   }): Promise<Result<{ organization: OrganizationSummary; member: MemberSummary }>>;
-  declineInvitation(input: { token: string }): Promise<Result<{ ok: true }>>;
+  /** `user`: the caller's user when there is a session, for the after hook (plan 9d). Not checked against the address. */
+  declineInvitation(input: { token: string; user?: UserRow | null }): Promise<Result<{ ok: true }>>;
   setActiveOrganization(input: {
     session: ResolvedSession;
     organizationId: string | null;
