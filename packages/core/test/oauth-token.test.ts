@@ -2,6 +2,7 @@ import { createLocalJWKSet, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
 import { publicKeySet } from "../src/engine/jwt.js";
 import { decodeJws, tokenHashClaim } from "../src/primitives/jwk.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { BASE_URL, get } from "./helpers.js";
 import {
   codeFor,
@@ -40,6 +41,74 @@ const refreshWith = (refreshToken: string, clientId: string, extra: Record<strin
   });
 const answer = async (res: Response) => ({ status: res.status, body: await res.json() });
 const GRANT = { status: 400, body: { error: "invalid_grant" } };
+
+/**
+ * A handle whose storage can hold an `oauthToken` create, update, or delete
+ * until a promise settles, so a test picks the order of two parallel
+ * refreshes. `bothRead` settles at the second `oauthToken` read. A hold also
+ * ends after 500 ms, so a run where the held event never comes does not hang.
+ */
+function gatedHandle() {
+  const outer = oauthHandle();
+  const holds: Record<"create" | "update" | "delete", Promise<unknown> | null> = {
+    create: null,
+    update: null,
+    delete: null,
+  };
+  let reads = 0;
+  let read = () => {};
+  const bothRead = new Promise<void>((r) => {
+    read = r;
+  });
+  let deleted = () => {};
+  const firstDelete = new Promise<void>((r) => {
+    deleted = r;
+  });
+  const wait = (p: Promise<unknown> | null) =>
+    p ? Promise.race([p, new Promise((r) => setTimeout(r, 500))]) : Promise.resolve();
+  const base = outer.storage;
+  const storage = new Proxy(base, {
+    get(target, key, receiver) {
+      if (key === "findOne")
+        return async (model: string, ...args: unknown[]) => {
+          const out = await (base.findOne as (...a: unknown[]) => Promise<unknown>)(model, ...args);
+          if (model === "oauthToken" && holds.update && ++reads === 2) read();
+          return out;
+        };
+      if (key === "create" || key === "update" || key === "delete")
+        return async (model: string, ...args: unknown[]) => {
+          if (model === "oauthToken") await wait(holds[key]);
+          const fn = Reflect.get(target, key, receiver) as (...a: unknown[]) => Promise<unknown>;
+          const out = await fn.call(target, model, ...args);
+          if (key === "delete" && model === "oauthToken") deleted();
+          return out;
+        };
+      return Reflect.get(target, key, receiver);
+    },
+  }) as StorageAdapter;
+  const inner = oauthHandle({ storage, clock: outer.clock });
+  return { ...inner, storage: base, clock: outer.clock, holds, firstDelete, bothRead };
+}
+
+/**
+ * Two parallel refreshes of one refresh token. Both read the unspent row
+ * before either spends it, so the loser's spend matches zero rows. `order`
+ * picks which comes first: the winner's write or the loser's delete.
+ */
+async function parallelRefresh(order: "write-first" | "delete-first" | "free") {
+  const h = gatedHandle();
+  const c = await codeFor(h);
+  const rt =
+    (await tokens(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)))).refresh_token ??
+    "";
+  h.holds.update = h.bothRead;
+  const a = h.auth.handle(refreshWith(rt, c.clientId));
+  const b = h.auth.handle(refreshWith(rt, c.clientId));
+  if (order === "write-first") h.holds.delete = Promise.race([a, b]);
+  if (order === "delete-first") h.holds.create = h.firstDelete;
+  const results = await Promise.all([a, b].map(async (p) => answer(await p)));
+  return { h, statuses: results.map((r) => r.status).sort(), results };
+}
 
 describe("the code exchange (plan 9g)", () => {
   it("exchanges a code for an access JWT with aud, scope, client_id, and sub, and a refresh token; no ID token without openid", async () => {
@@ -222,6 +291,22 @@ describe("the refresh token (plan 9g)", () => {
     expect(
       await answer(await h.auth.handle(refreshWith(second.refresh_token ?? "", c.clientId))),
     ).toEqual(GRANT);
+  });
+
+  it("two parallel refreshes of one token: at most one answers 200, and the family ends with no live row in each order", async () => {
+    const writeFirst = await parallelRefresh("write-first");
+    expect(writeFirst.statuses).toEqual([200, 400]);
+    expect(writeFirst.results.filter((r) => r.status === 400).map((r) => r.body)).toEqual([
+      GRANT.body,
+    ]);
+    expect(await writeFirst.h.storage.findMany("oauthToken", [])).toEqual([]);
+    const deleteFirst = await parallelRefresh("delete-first");
+    expect(deleteFirst.results).toEqual([GRANT, GRANT]);
+    expect(await deleteFirst.h.storage.findMany("oauthToken", [])).toEqual([]);
+    const free = await parallelRefresh("free");
+    expect(free.statuses.filter((s) => s === 200).length).toBeLessThanOrEqual(1);
+    expect(free.statuses).toContain(400);
+    expect(await free.h.storage.findMany("oauthToken", [])).toEqual([]);
   });
 
   it("refuses another client, a scope beyond the grant, and another resource without spending; a narrower scope answers that scope; an expired token answers invalid_grant", async () => {

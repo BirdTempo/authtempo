@@ -67,8 +67,8 @@ interface Grant {
   sessionId: string | null;
   /** The id of the code row at the code exchange; the family of the spent row at a refresh. */
   familyId: string;
-  /** True at the code exchange, which alone answers an ID token. */
-  exchange: boolean;
+  /** The spent refresh row at a refresh; null at the code exchange, which alone answers an ID token. */
+  spentId: string | null;
 }
 
 const strings = (v: unknown): v is string[] =>
@@ -103,11 +103,16 @@ async function liveUser(config: ResolvedConfig, userId: string): Promise<UserRow
   return user?.emailVerified ? user : null;
 }
 
-async function writeRefresh(config: ResolvedConfig, g: Grant, now: Date): Promise<string> {
+async function writeRefresh(
+  config: ResolvedConfig,
+  g: Grant,
+  now: Date,
+): Promise<{ token: string; id: string }> {
   const oauth = oauthOf(config);
   const token = randomToken(REFRESH_PREFIX);
+  const id = newId(now);
   await config.storage.create("oauthToken", {
-    id: newId(now),
+    id,
     tokenHash: await sha256Hex(token),
     familyId: g.familyId,
     userId: g.user.id,
@@ -119,7 +124,7 @@ async function writeRefresh(config: ResolvedConfig, g: Grant, now: Date): Promis
     createdAt: now,
     updatedAt: now,
   });
-  return token;
+  return { token, id };
 }
 
 /** The access token, a refresh token with `offline_access`, and an ID token with `openid` at the code exchange. */
@@ -147,10 +152,21 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
     expires_in: exp - iat,
     scope,
   };
-  if (g.grantScopes.includes("offline_access"))
-    answer.refresh_token = await writeRefresh(config, g, now);
+  if (g.grantScopes.includes("offline_access")) {
+    const fresh = await writeRefresh(config, g, now);
+    // The race of refreshGrant: a reuse deleted the family before this write,
+    // so the spent row is gone. The new row goes too, and the refresh fails.
+    if (
+      g.spentId !== null &&
+      !(await config.storage.findOne("oauthToken", [{ field: "id", op: "eq", value: g.spentId }]))
+    ) {
+      await config.storage.delete("oauthToken", [{ field: "id", op: "eq", value: fresh.id }]);
+      return oauthFail("invalid_grant");
+    }
+    answer.refresh_token = fresh.token;
+  }
   // OIDC Core 1.0 section 3.1.3.3: an ID token at the code exchange. A refresh answers none.
-  if (g.exchange && g.scopes.includes("openid")) {
+  if (g.spentId === null && g.scopes.includes("openid")) {
     const claims: Record<string, unknown> = {
       iss: issuer,
       sub: g.user.id,
@@ -182,7 +198,9 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
  * presented again deletes the family it gave (draft-ietf-oauth-v2-1-16
  * section 4.1.3, read 2026-10-13: the server SHOULD revoke the tokens of
  * a reused code). Two parallel exchanges can race: the loser deletes before
- * the winner writes, and that family stays.
+ * the winner writes, and that family stays. PKCE bounds the cost: only a
+ * request that holds the verifier passes the checks after the consume, so
+ * only a replay that holds the verifier can be the winner.
  */
 export async function exchangeCode(
   config: ResolvedConfig,
@@ -230,7 +248,7 @@ export async function exchangeCode(
     nonce: data.nonce,
     sessionId: data.sessionId,
     familyId: consumed.value.id,
-    exchange: true,
+    spentId: null,
   });
 }
 
@@ -239,7 +257,12 @@ export async function revokeFamily(config: ResolvedConfig, familyId: string): Pr
   await config.storage.delete("oauthToken", [{ field: "familyId", op: "eq", value: familyId }]);
 }
 
-/** A code that did not consume: when its row is spent, the family it gave goes. An expired, unspent code gave none. */
+/**
+ * A code that did not consume: when its row is spent, the family it gave
+ * goes. An expired, unspent code gave none. The detection ends when the
+ * sweep deletes the consumed code row after its `expiresAt`: a later reuse
+ * finds no row and deletes nothing.
+ */
 async function revokeReusedCode(config: ResolvedConfig, valueHash: string): Promise<void> {
   const row = await config.storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: valueHash },
@@ -258,7 +281,11 @@ async function reuse(config: ResolvedConfig, row: OAuthTokenRow): Promise<OAuthR
  * `grant_type=refresh_token`. Every check that can refuse runs before the
  * spend, so a refused request leaves the token usable. The spend is one
  * conditional update on `usedAt`; zero rows means a parallel request spent
- * it first, which is a reuse too.
+ * it first, which is a reuse too. Two parallel refreshes race: the loser's
+ * delete of the family can run before the winner writes its new row. So the
+ * winner reads its spent row again after the write; when the row is gone,
+ * the winner deletes its new row and answers `invalid_grant`. In each order
+ * the family ends with no live row.
  */
 export async function refreshGrant(
   config: ResolvedConfig,
@@ -310,7 +337,7 @@ export async function refreshGrant(
     nonce: null,
     sessionId: null,
     familyId: row.familyId,
-    exchange: false,
+    spentId: row.id,
   });
 }
 
