@@ -3,7 +3,7 @@ import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { SessionRow, UserRow } from "../schema.js";
+import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
@@ -42,6 +42,9 @@ const RESET_PER_EMAIL = { seconds: 900, max: 5 };
 const RESET_POST_PER_IP = { seconds: 900, max: 20 };
 // Per 15 minutes. A stolen session must not run an unlimited guess of the current password.
 const CHANGE_PER_USER = { seconds: 900, max: 10 };
+// The proofs of a reset: the mailed link and the mailed code (plan 9e). A
+// reset of either kind and a password change spend the live ones of both.
+const RESET_PURPOSES = ["password-reset", "password-reset-otp"];
 // Per 15 minutes. Each resend sends one mail from the app's sender, so the
 // product owns this limit (plan 8b).
 const RESEND_PER_IP = { seconds: 900, max: 20 };
@@ -700,11 +703,36 @@ export async function resetPassword(
   if (refused) return fail(refused);
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
+  return runReset(
+    config,
+    input,
+    (tx) => consumeVerification(tx, { purpose: "password-reset", valueHash, now }),
+    hash,
+    now,
+  );
+}
+
+/** What a reset proves the mailbox with: the spend of its row, the first statement of the reset's transaction (plan 9e). */
+export type ResetConsume = (tx: StorageAdapter) => Promise<Result<VerificationRow>>;
+
+/**
+ * The reset's transaction, its retry, and its after hooks, for the reset
+ * link and the reset code (plan 9e). `consume` spends the proof as the
+ * transaction's first statement. `input` carries the session's ip and user
+ * agent.
+ */
+export async function runReset(
+  config: ResolvedConfig,
+  input: { ip: string | null; userAgent: string | null },
+  consume: ResetConsume,
+  hash: string,
+  now: Date,
+): Promise<Result<PasswordSession & { next: string }>> {
   const ended: ResetEnded = { claim: [], reset: [] };
   let reset: Result<PasswordSession & { next: string }> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
-      reset = await hookGuard(() => applyReset(config, input, valueHash, hash, now, ended));
+      reset = await hookGuard(() => applyReset(config, input, consume, hash, now, ended));
     } catch (err) {
       // Two resets for one address raced: the loser's user, email
       // identity, or password create failed on a unique key. Caught here,
@@ -731,6 +759,40 @@ export async function resetPassword(
   return reset;
 }
 
+/**
+ * The reset by code (plan 9e). `proof` is a right code that is not spent
+ * yet. A password that the policy or the breach check refuses spends it: a
+ * right code counts no guess, so one code must not test passwords against
+ * the policy and the breach list with no bound. A refused reset link stays
+ * usable; its POST has its own per-IP limit. Then the reset link's own path:
+ * the hash, and `runReset`, which spends the code as its first statement.
+ */
+export async function resetWithProof(
+  config: ResolvedConfig,
+  input: { password: string; ip: string | null; userAgent: string | null },
+  proof: VerificationRow,
+  consume: ResetConsume,
+  now: Date,
+): Promise<Result<PasswordSession & { next: string }>> {
+  const pw = config.password;
+  if (!pw) return fail("not_found");
+  const refused = await screen(pw, input.password, proof.identifier);
+  if (refused) {
+    await config.storage.update(
+      "verification",
+      [
+        { field: "id", op: "eq", value: proof.id },
+        { field: "consumedAt", op: "eq", value: null },
+      ],
+      { consumedAt: now, updatedAt: now },
+    );
+    return fail(refused);
+  }
+  // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
+  const hash = await pw.hash.hash(input.password);
+  return runReset(config, input, consume, hash, now);
+}
+
 /** The session rows a reset deleted, by cause. Only one list fills in one reset. */
 interface ResetEnded {
   claim: SessionRow[];
@@ -739,8 +801,8 @@ interface ResetEnded {
 
 function applyReset(
   config: ResolvedConfig,
-  input: PasswordReset,
-  valueHash: string,
+  input: { ip: string | null; userAgent: string | null },
+  consume: ResetConsume,
   hash: string,
   now: Date,
   ended: ResetEnded,
@@ -750,9 +812,9 @@ function applyReset(
       // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
       ended.claim.length = 0;
       ended.reset.length = 0;
-      // The first statement. Two POSTs of one token race here, and only one
+      // The first statement. Two POSTs of one proof race here, and only one
       // wins. A refusal comes before any write, so nothing is left to undo.
-      const consumed = await consumeVerification(tx, { purpose: "password-reset", valueHash, now });
+      const consumed = await consume(tx);
       if (!consumed.ok) return consumed;
       const email = consumed.value.identifier;
       const next = safeNext((consumed.value.data as { next?: unknown } | null)?.next);
@@ -798,10 +860,10 @@ function applyReset(
         await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset);
         await deleteHandoffCodes(tx, user.id);
       }
-      // The other links for this address. A person who reads the mailbox
-      // later must not set a password with a second link.
+      // The other links and codes for this address. A person who reads the
+      // mailbox later must not set a password with a second proof (plan 9e).
       await tx.delete("verification", [
-        { field: "purpose", op: "eq", value: "password-reset" },
+        { field: "purpose", op: "in", value: RESET_PURPOSES },
         { field: "identifier", op: "eq", value: email },
         { field: "consumedAt", op: "eq", value: null },
       ]);
@@ -925,11 +987,11 @@ export async function changePassword(
       // The codes of the changer's own session go too. The row names the
       // user, not the session, and a lost code costs one more handoff.
       await deleteHandoffCodes(tx, user.id);
-      // The pending reset links of the address go, as in a reset. A person
-      // who changes the password after a mailbox exposure must not leave a
-      // live link there that sets a password and ends every session.
+      // The pending reset links and codes of the address go, as in a reset.
+      // A person who changes the password after a mailbox exposure must not
+      // leave a live proof there that sets a password and ends every session.
       await tx.delete("verification", [
-        { field: "purpose", op: "eq", value: "password-reset" },
+        { field: "purpose", op: "in", value: RESET_PURPOSES },
         { field: "identifier", op: "eq", value: user.email },
         { field: "consumedAt", op: "eq", value: null },
       ]);

@@ -5,6 +5,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
+import { resetWithProof } from "./password.js";
 import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 
@@ -300,4 +301,48 @@ export async function verifyEmailOtp(
   await sessionsEnded(config, ended, "claim");
   await sessionOpened(config, after.session, user, "email_otp");
   return ok({ token: after.token, user, session: after.session });
+}
+
+export interface EmailOtpReset {
+  email: string;
+  code: string;
+  password: string;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+/**
+ * A reset code (plan 9e), with the sign-in code's rules and budget. An
+ * address with no user, or a user with no password row, still gets a code:
+ * the reset creates them, as the reset link does (spec 8.7).
+ */
+export function requestResetOtp(
+  config: ResolvedConfig,
+  input: EmailOtpRequest,
+): Promise<Result<{ sent: true }>> {
+  if (!config.password) return Promise.resolve(fail("not_found"));
+  return requestCode(config, "password-reset-otp", input);
+}
+
+/**
+ * The reset by code (plan 9e). The sign-in code's check, then the reset
+ * link's apply path (`resetWithProof`): the policy, the breach check, the
+ * hash, and one transaction that spends the code first, sets or creates the
+ * password, ends every session, applies the claim rule, runs the session
+ * hook before its first write, and opens a session.
+ */
+export async function resetPasswordWithOtp(
+  config: ResolvedConfig,
+  input: EmailOtpReset,
+): Promise<Result<EmailOtpSession>> {
+  if (!config.emailOtp || !config.password) return fail("not_found");
+  const gate = await verifyGate(config, input);
+  if (!gate.ok) return gate;
+  const now = config.clock.now();
+  const checked = await checkCode(config, "password-reset-otp", gate.value, input.code, now);
+  if (!checked.ok) return checked;
+  const row = checked.value;
+  const reset = await resetWithProof(config, input, row, (tx) => consumeCode(tx, row, now), now);
+  if (!reset.ok) return reset;
+  return ok({ token: reset.value.token, user: reset.value.user, session: reset.value.session });
 }
