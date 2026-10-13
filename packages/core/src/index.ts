@@ -10,6 +10,7 @@ export type {
   OrganizationsConfig,
   PasswordConfig,
   ResolvedEmailOtp,
+  TotpConfig,
 } from "./config.js";
 export { ConfigError, DEFAULT_RESERVED_SLUGS, isAppScheme } from "./config.js";
 export {
@@ -78,6 +79,7 @@ export {
   type Caller,
   type ResolvedApiToken,
 } from "./engine/tokens.js";
+export type { TotpSetup, TotpStatus } from "./engine/totp.js";
 export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
@@ -92,6 +94,7 @@ export {
   type ResetPageInput,
 } from "./http/password-pages.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
+export { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
 export { type Clock, systemClock } from "./primitives/clock.js";

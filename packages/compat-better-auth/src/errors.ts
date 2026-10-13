@@ -53,6 +53,12 @@ export const BETTER_AUTH_CODES = {
   // Better Auth answers TOO_MANY_ATTEMPTS 403; the status stays core's, 400.
   invalid_code: "INVALID_OTP",
   too_many_attempts: "TOO_MANY_ATTEMPTS",
+  // Plan 9f. TOTP_NOT_ENABLED is Better Auth 1.7.2's own name
+  // (dist/plugins/two-factor/error-code.mjs, read 2026-10-13). Better Auth has
+  // no code for a factor that is on already: its enable replaces the secret.
+  // TOTP_ALREADY_ENABLED is tempo-auth's own name.
+  totp_enabled: "TOTP_ALREADY_ENABLED",
+  totp_not_enabled: "TOTP_NOT_ENABLED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

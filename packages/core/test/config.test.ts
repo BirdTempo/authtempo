@@ -3,6 +3,7 @@ import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/confi
 import { defaultEmailOtpMail, defaultResetOtpMail } from "../src/engine/email-otp-mail.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
+import { defaultTotpPage } from "../src/http/totp-page.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
 import type { OidcEntry } from "../src/social/oidc.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -530,5 +531,81 @@ describe("emailOtp (plan 9e)", () => {
       subject: "Your password reset code for Acme",
       text: "Your password reset code for Acme is 123456. It is valid for 10 minutes.",
     });
+  });
+});
+
+describe("totp (plan 9f)", () => {
+  const pw = { ...base, password: {} };
+
+  it("is on with the defaults when password is set, off with false, and off without password", () => {
+    const on = resolveConfig(pw).totp;
+    expect(on).toMatchObject({
+      issuer: "api.example.com",
+      backupCodes: 10,
+      backupCodeLength: 8,
+      trustDays: 30,
+      trustCookieName: "tempo_totp_trust",
+    });
+    expect(on?.challengePage).toBe(defaultTotpPage);
+    expect(resolveConfig({ ...pw, totp: false }).totp).toBeNull();
+    expect(resolveConfig(base).totp).toBeNull();
+    expect(
+      resolveConfig({
+        ...pw,
+        totp: {
+          issuer: "Acme",
+          backupCodes: 20,
+          backupCodeLength: 12,
+          trustDays: 365,
+          trustCookieName: "better-auth.trust_device",
+        },
+      }).totp,
+    ).toMatchObject({
+      issuer: "Acme",
+      backupCodes: 20,
+      backupCodeLength: 12,
+      trustDays: 365,
+      trustCookieName: "better-auth.trust_device",
+    });
+    expect(resolveConfig({ ...pw, totp: { backupCodes: 5, trustDays: 1 } }).totp).toMatchObject({
+      backupCodes: 5,
+      trustDays: 1,
+    });
+  });
+
+  it("refuses a value out of range, a key core does not have, a page that is not a function, and totp without password", () => {
+    const ISSUER = "totp.issuer must be 1 to 80 characters with no control character and no colon";
+    const CODES = "totp.backupCodes must be an integer from 5 to 20";
+    const LENGTH = "totp.backupCodeLength must be an integer from 8 to 12";
+    const DAYS = "totp.trustDays must be an integer from 1 to 365";
+    const COOKIE =
+      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name";
+    const bad: [unknown, string][] = [
+      [{ issuer: "" }, ISSUER],
+      [{ issuer: "a".repeat(81) }, ISSUER],
+      [{ issuer: "Acme:Co" }, ISSUER],
+      [{ issuer: "Acme\u0007" }, ISSUER],
+      [{ backupCodes: 4 }, CODES],
+      [{ backupCodes: 21 }, CODES],
+      [{ backupCodes: 10.5 }, CODES],
+      [{ backupCodeLength: 7 }, LENGTH],
+      [{ backupCodeLength: 13 }, LENGTH],
+      [{ trustDays: 0 }, DAYS],
+      [{ trustDays: 366 }, DAYS],
+      [{ trustCookieName: "has space" }, COOKIE],
+      [{ trustCookieName: "tempo_session" }, COOKIE],
+      [{ trustCookieName: "" }, COOKIE],
+      [{ challengePage: "html" }, "totp.challengePage must be a function"],
+      [
+        { digits: 8 },
+        "totp.digits is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, and challengePage",
+      ],
+      [true, "totp must be an object or false"],
+    ];
+    for (const [totp, message] of bad)
+      expect(() => resolveConfig({ ...pw, totp: totp as never })).toThrowError(message);
+    expect(() => resolveConfig({ ...base, totp: {} })).toThrowError(
+      "totp needs a password config: the second factor gates the password sign-in only",
+    );
   });
 });

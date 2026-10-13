@@ -1,0 +1,428 @@
+import { describe, expect, it } from "vitest";
+import { passwordSignUp } from "../src/engine/password.js";
+import { resolveSession } from "../src/engine/sessions.js";
+import {
+  disableTotp,
+  disableTotpWithCode,
+  enableTotp,
+  regenerateBackupCodes,
+  regenerateBackupCodesWithCode,
+  revokeTrustedDevices,
+  setupTotp,
+  totpStatus,
+  totpUri,
+} from "../src/engine/totp.js";
+import { countAttempt } from "../src/engine/verification.js";
+import { openSealed } from "../src/primitives/aead.js";
+import { hmacSha256Hex } from "../src/primitives/crypto.js";
+import { base32Decode, otpauthUri, totpCode } from "../src/primitives/totp.js";
+import { makeAuth } from "./helpers.js";
+import {
+  codeNow,
+  EMAIL,
+  enrolled,
+  PASSWORD,
+  totpAuth,
+  verifiedSession,
+  wrongFor,
+} from "./totp-helpers.js";
+
+describe("the setup (plan 9f)", () => {
+  it("answers the secret, the key URI, and ten backup codes, and stores the secret sealed and the codes as keyed hashes (Review Focus 5)", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const r = await setupTotp(auth.config, { user: session.user });
+    if (!r.ok) throw new Error(r.code);
+    const { secret, uri, backupCodes } = r.value;
+    expect(secret).toMatch(/^[A-Z2-7]{32}$/);
+    expect(uri).toBe(
+      otpauthUri({ secret: base32Decode(secret), issuer: "api.example.com", account: EMAIL }),
+    );
+    expect(backupCodes).toHaveLength(10);
+    for (const c of backupCodes) expect(c).toMatch(/^[abcdefghjkmnpqrstuvwxyz23456789]{8}$/);
+    const [row] = await auth.storage.findMany("totp", []);
+    expect(row).toMatchObject({ userId: session.user.id, enabledAt: null, lastStep: 0 });
+    const stored = JSON.stringify(row);
+    expect(stored).not.toContain(secret);
+    for (const c of backupCodes) expect(stored).not.toContain(c);
+    expect(row?.backupCodes).toEqual(
+      await Promise.all(
+        backupCodes.map((c) => hmacSha256Hex(auth.config.secret, `${row?.id}:${c}`)),
+      ),
+    );
+    expect(
+      await openSealed(auth.config.secret, "tempo-auth totp", row?.secret ?? "", session.user.id),
+    ).toEqual(base32Decode(secret));
+    expect(
+      await openSealed(
+        "another secret of 32 characters!",
+        "tempo-auth totp",
+        row?.secret ?? "",
+        session.user.id,
+      ),
+    ).toBeNull();
+  });
+
+  it("takes the issuer, the count, and the length from the config, and an issuer from the call", async () => {
+    const auth = totpAuth({ totp: { issuer: "Acme", backupCodes: 5, backupCodeLength: 12 } });
+    const session = await verifiedSession(auth);
+    const r = await setupTotp(auth.config, { user: session.user });
+    if (!r.ok) throw new Error(r.code);
+    expect(r.value.uri.startsWith("otpauth://totp/Acme:ada%40example.com?")).toBe(true);
+    expect(r.value.backupCodes).toHaveLength(5);
+    expect(r.value.backupCodes[0]).toHaveLength(12);
+    const custom = await setupTotp(auth.config, { user: session.user, issuer: "Other" });
+    expect(custom.ok && custom.value.uri).toContain("&issuer=Other&");
+  });
+
+  it("refuses an unverified user with email_unverified, and a user whose factor is on with totp_enabled", async () => {
+    const auth = totpAuth();
+    const up = await passwordSignUp(auth.config, {
+      email: "bea@example.com",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    expect(await setupTotp(auth.config, { user: up.value.user })).toEqual({
+      ok: false,
+      code: "email_unverified",
+      status: 403,
+    });
+    const { user } = await enrolled(auth);
+    expect(await setupTotp(auth.config, { user })).toEqual({
+      ok: false,
+      code: "totp_enabled",
+      status: 409,
+    });
+  });
+
+  it("replaces an unconfirmed setup, so the code of the first secret no longer enables", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const first = await setupTotp(auth.config, { user: session.user });
+    const second = await setupTotp(auth.config, { user: session.user });
+    if (!first.ok || !second.ok) throw new Error("setup");
+    expect(await auth.storage.findMany("totp", [])).toHaveLength(1);
+    const a = await codeNow(auth, base32Decode(first.value.secret));
+    const b = await codeNow(auth, base32Decode(second.value.secret));
+    // One time in a million the two codes are equal.
+    if (a !== b)
+      expect(await enableTotp(auth.config, { session, code: a })).toMatchObject({
+        code: "invalid_code",
+      });
+    expect((await enableTotp(auth.config, { session, code: b })).ok).toBe(true);
+  });
+
+  it("confirms only within 15 minutes of the setup, and answers totp_not_enabled with no setup", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const r = await setupTotp(auth.config, { user: session.user });
+    if (!r.ok) throw new Error(r.code);
+    auth.clock.advance(15 * 60_000);
+    const code = await codeNow(auth, base32Decode(r.value.secret));
+    expect(await enableTotp(auth.config, { session, code })).toEqual({
+      ok: false,
+      code: "totp_not_enabled",
+      status: 400,
+    });
+    const other = await verifiedSession(auth, "bea@example.com");
+    expect(await enableTotp(auth.config, { session: other, code: "123456" })).toMatchObject({
+      code: "totp_not_enabled",
+    });
+  });
+});
+
+describe("the enable (plan 9f)", () => {
+  it("refuses a wrong code and a code two steps old, enables with a code of the window, and answers the status", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const r = await setupTotp(auth.config, { user: session.user });
+    if (!r.ok) throw new Error(r.code);
+    const secret = base32Decode(r.value.secret);
+    const now = auth.clock.now();
+    expect(
+      await enableTotp(auth.config, { session, code: wrongFor(await codeNow(auth, secret)) }),
+    ).toEqual({ ok: false, code: "invalid_code", status: 400 });
+    const old = await totpCode(secret, new Date(now.getTime() - 60_000));
+    const previous = await totpCode(secret, new Date(now.getTime() - 30_000));
+    const window = [
+      previous,
+      await codeNow(auth, secret),
+      await totpCode(secret, new Date(now.getTime() + 30_000)),
+    ];
+    // About three times in a million the old code equals a code of the window.
+    if (!window.includes(old))
+      expect(await enableTotp(auth.config, { session, code: old })).toMatchObject({
+        code: "invalid_code",
+      });
+    expect(await enableTotp(auth.config, { session, code: previous })).toEqual({
+      ok: true,
+      value: { enabled: true, enabledAt: now, backupCodesLeft: 10, trustedDevices: 0 },
+    });
+    const [row] = await auth.storage.findMany("totp", []);
+    expect(row?.lastStep).toBe(Math.floor(now.getTime() / 30_000) - 1);
+  });
+
+  it("ends every other session with two_factor, keeps the enabler's, and deletes the trusted devices (Review Focus 4)", async () => {
+    const ended: { id: string; reason: string }[] = [];
+    const auth = totpAuth({
+      hooks: {
+        session: {
+          afterEnd(e) {
+            ended.push({ id: e.session.id, reason: e.reason });
+          },
+        },
+      },
+    });
+    const mine = await verifiedSession(auth, EMAIL, "1.1.1.1");
+    const thief = await verifiedSession(auth, EMAIL, "6.6.6.6");
+    const now = auth.clock.now();
+    await auth.storage.create("trustedDevice", {
+      id: "d1",
+      userId: mine.user.id,
+      tokenHash: "h1",
+      expiresAt: new Date(now.getTime() + 86_400_000),
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const r = await setupTotp(auth.config, { user: mine.user });
+    if (!r.ok) throw new Error(r.code);
+    const code = await codeNow(auth, base32Decode(r.value.secret));
+    // The verify link of the sign-up also opened a session: it is another device too.
+    const others = (
+      await auth.storage.findMany("session", [{ field: "userId", op: "eq", value: mine.user.id }])
+    )
+      .filter((s) => s.id !== mine.session.id)
+      .map((s) => s.id);
+    expect(others).toContain(thief.session.id);
+    ended.length = 0;
+    expect((await enableTotp(auth.config, { session: mine, code })).ok).toBe(true);
+    expect(ended.map((e) => e.id).sort()).toEqual([...others].sort());
+    for (const e of ended) expect(e.reason).toBe("two_factor");
+    expect(
+      await auth.storage.findMany("session", [{ field: "userId", op: "eq", value: mine.user.id }]),
+    ).toHaveLength(1);
+    expect(await resolveSession(auth.config, thief.token)).toBeNull();
+    expect((await resolveSession(auth.config, mine.token))?.session.id).toBe(mine.session.id);
+    expect(await auth.storage.findMany("trustedDevice", [])).toEqual([]);
+  });
+
+  it("answers totp_enabled for a second enable", async () => {
+    const auth = totpAuth();
+    const { session, secret } = await enrolled(auth);
+    expect(await enableTotp(auth.config, { session, code: await codeNow(auth, secret) })).toEqual({
+      ok: false,
+      code: "totp_enabled",
+      status: 409,
+    });
+  });
+});
+
+describe("disable, backup codes, status, and devices (plan 9f)", () => {
+  it("disables with a current code; a wrong code keeps the factor", async () => {
+    const auth = totpAuth();
+    const { user, secret } = await enrolled(auth);
+    expect(
+      await disableTotpWithCode(auth.config, { user, code: wrongFor(await codeNow(auth, secret)) }),
+    ).toEqual({ ok: false, code: "invalid_code", status: 400 });
+    expect(await auth.storage.findMany("totp", [])).toHaveLength(1);
+    expect(
+      await disableTotpWithCode(auth.config, { user, code: await codeNow(auth, secret) }),
+    ).toEqual({ ok: true, value: { ok: true } });
+    expect(await auth.storage.findMany("totp", [])).toEqual([]);
+    expect(await totpStatus(auth.config, { userId: user.id })).toMatchObject({
+      ok: true,
+      value: { enabled: false },
+    });
+  });
+
+  it("disables with a backup code, typed in upper case and with a dash", async () => {
+    const auth = totpAuth();
+    const { user, backupCodes } = await enrolled(auth);
+    const code = backupCodes[0] ?? "";
+    const typed = `${code.slice(0, 4).toUpperCase()}-${code.slice(4)}`;
+    expect((await disableTotpWithCode(auth.config, { user, code: typed })).ok).toBe(true);
+  });
+
+  it("refuses a replayed step on a code route and accepts the next one (Review Focus 1)", async () => {
+    const auth = totpAuth();
+    const { user, secret } = await enrolled(auth);
+    const code = await codeNow(auth, secret);
+    expect((await regenerateBackupCodesWithCode(auth.config, { user, code })).ok).toBe(true);
+    expect(await regenerateBackupCodesWithCode(auth.config, { user, code })).toEqual({
+      ok: false,
+      code: "invalid_code",
+      status: 400,
+    });
+    auth.clock.advance(30_000);
+    const next = await codeNow(auth, secret);
+    expect((await regenerateBackupCodesWithCode(auth.config, { user, code: next })).ok).toBe(true);
+  });
+
+  it("regenerates the backup codes: an old code fails and a new code works", async () => {
+    const auth = totpAuth();
+    const { user, secret, backupCodes } = await enrolled(auth);
+    const r = await regenerateBackupCodesWithCode(auth.config, {
+      user,
+      code: await codeNow(auth, secret),
+    });
+    if (!r.ok) throw new Error(r.code);
+    expect(r.value.backupCodes).toHaveLength(10);
+    expect(r.value.backupCodes).not.toContain(backupCodes[0]);
+    expect(
+      await disableTotpWithCode(auth.config, { user, code: backupCodes[0] ?? "" }),
+    ).toMatchObject({ code: "invalid_code" });
+    expect(
+      (await disableTotpWithCode(auth.config, { user, code: r.value.backupCodes[0] ?? "" })).ok,
+    ).toBe(true);
+  });
+
+  it("answers the status: off, unconfirmed, on, and the live trusted devices only", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const off = { enabled: false, enabledAt: null, backupCodesLeft: 0, trustedDevices: 0 };
+    expect(await totpStatus(auth.config, { userId: session.user.id })).toEqual({
+      ok: true,
+      value: off,
+    });
+    const r = await setupTotp(auth.config, { user: session.user });
+    if (!r.ok) throw new Error(r.code);
+    expect(await totpStatus(auth.config, { userId: session.user.id })).toEqual({
+      ok: true,
+      value: off,
+    });
+    const at = auth.clock.now();
+    const code = await codeNow(auth, base32Decode(r.value.secret));
+    expect((await enableTotp(auth.config, { session, code })).ok).toBe(true);
+    const device = (id: string, expiresAt: Date) =>
+      auth.storage.create("trustedDevice", {
+        id,
+        userId: session.user.id,
+        tokenHash: `h-${id}`,
+        expiresAt,
+        lastSeenAt: at,
+        createdAt: at,
+        updatedAt: at,
+      });
+    await device("live", new Date(at.getTime() + 60_000));
+    await device("old", new Date(at.getTime() - 60_000));
+    expect(await totpStatus(auth.config, { userId: session.user.id })).toEqual({
+      ok: true,
+      value: { enabled: true, enabledAt: at, backupCodesLeft: 10, trustedDevices: 1 },
+    });
+  });
+
+  it("revokes every trusted device of the user, and no other user's", async () => {
+    const auth = totpAuth();
+    const at = auth.clock.now();
+    const device = (id: string, userId: string) =>
+      auth.storage.create("trustedDevice", {
+        id,
+        userId,
+        tokenHash: `h-${id}`,
+        expiresAt: new Date(at.getTime() + 60_000),
+        lastSeenAt: at,
+        createdAt: at,
+        updatedAt: at,
+      });
+    await device("a1", "ua");
+    await device("a2", "ua");
+    await device("b1", "ub");
+    expect(await revokeTrustedDevices(auth.config, { userId: "ua" })).toEqual({
+      ok: true,
+      value: { ok: true },
+    });
+    expect((await auth.storage.findMany("trustedDevice", [])).map((r) => r.id)).toEqual(["b1"]);
+  });
+
+  it("limits the code routes to 10 per user per 15 minutes", async () => {
+    const auth = totpAuth();
+    const { user, secret } = await enrolled(auth);
+    const wrong = wrongFor(await codeNow(auth, secret));
+    // The enable of `enrolled` took the first of the 10.
+    for (let i = 0; i < 9; i++)
+      expect(await disableTotpWithCode(auth.config, { user, code: wrong })).toMatchObject({
+        code: "invalid_code",
+      });
+    expect(
+      await disableTotpWithCode(auth.config, { user, code: await codeNow(auth, secret) }),
+    ).toEqual({ ok: false, code: "rate_limited", status: 429 });
+  });
+
+  it("takes a user id and no code in the in-process forms: uri, regenerate, and disable", async () => {
+    const auth = totpAuth();
+    const { user, secret } = await enrolled(auth);
+    expect(await totpUri(auth.config, { userId: user.id })).toEqual({
+      ok: true,
+      value: { uri: otpauthUri({ secret, issuer: "api.example.com", account: EMAIL }) },
+    });
+    const r = await regenerateBackupCodes(auth.config, { userId: user.id });
+    expect(r.ok && r.value.backupCodes).toHaveLength(10);
+    expect(await disableTotp(auth.config, { userId: user.id })).toEqual({
+      ok: true,
+      value: { ok: true },
+    });
+    for (const call of [totpUri, regenerateBackupCodes, disableTotp])
+      expect(await call(auth.config, { userId: user.id })).toMatchObject({
+        code: "totp_not_enabled",
+      });
+  });
+
+  it("answers not_found with totp: false, and resolves no factor without a password config", async () => {
+    const off = totpAuth({ totp: false });
+    const session = await verifiedSession(off);
+    expect(await setupTotp(off.config, { user: session.user })).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+    expect(await totpStatus(off.config, { userId: session.user.id })).toMatchObject({
+      code: "not_found",
+    });
+    expect(makeAuth().config.totp).toBeNull();
+  });
+
+  it("counts an attempt and keeps the other keys of data (countAttempt)", async () => {
+    const auth = totpAuth();
+    const now = auth.clock.now();
+    const row = await auth.storage.create("verification", {
+      id: "v1",
+      purpose: "two-factor",
+      identifier: "u1",
+      valueHash: "h1",
+      expiresAt: new Date(now.getTime() + 60_000),
+      consumedAt: null,
+      data: { next: "/x", attempts: 0 },
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(await countAttempt(auth.storage, row, 5, now)).toBe("invalid_code");
+    expect(
+      (await auth.storage.findOne("verification", [{ field: "id", op: "eq", value: "v1" }]))?.data,
+    ).toEqual({ next: "/x", attempts: 1 });
+  });
+
+  it("spends only the capped challenge at the cap, not another challenge of the same user (countAttempt)", async () => {
+    const auth = totpAuth();
+    const now = auth.clock.now();
+    const challenge = (id: string) =>
+      auth.storage.create("verification", {
+        id,
+        purpose: "two-factor",
+        identifier: "u1",
+        valueHash: `h-${id}`,
+        expiresAt: new Date(now.getTime() + 60_000),
+        consumedAt: null,
+        data: { attempts: 4 },
+        createdAt: now,
+        updatedAt: now,
+      });
+    await challenge("other");
+    const capped = await challenge("capped");
+    expect(await countAttempt(auth.storage, capped, 5, now)).toBe("too_many_attempts");
+    const rows = await auth.storage.findMany("verification", []);
+    expect(rows.find((r) => r.id === "capped")?.consumedAt).toEqual(now);
+    expect(rows.find((r) => r.id === "other")?.consumedAt).toBeNull();
+  });
+});

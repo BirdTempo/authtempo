@@ -8,6 +8,7 @@ import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
 import { sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
+import { attemptsOf, countAttempt } from "./verification.js";
 
 /**
  * Email codes (plan 9e, spec 8.10). A code is a proof of the address, as a
@@ -67,11 +68,6 @@ export interface EmailOtpSession {
 /** The stored value of a code: HMAC-SHA256 under the app secret of `<row id>:<code>`, in hex. */
 export function codeHash(secret: string, rowId: string, code: string): Promise<string> {
   return hmacSha256Hex(secret, `${rowId}:${code}`);
-}
-
-function attemptsOf(row: VerificationRow): number {
-  const n = (row.data as { attempts?: unknown } | null)?.attempts;
-  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : 0;
 }
 
 /**
@@ -178,74 +174,6 @@ async function newestCode(
 }
 
 /**
- * Counts one wrong code (plan 9e). A compare-and-set on `updatedAt`: the
- * update matches the row only as this call read it, and writes a strictly
- * later `updatedAt`. When a parallel guess wrote first, the update matches
- * zero rows, and the call reads the row again and counts on the new value.
- * So no guess goes uncounted, on D1 and on Postgres. A lost round means that
- * another guess counted or the row was spent, so the loop ends.
- *
- * The loop has a hard bound of `max + 1` rounds. Each lost round means that
- * another guess counted, and the row is spent after at most `max` counts, so
- * an honest adapter never reaches the bound. An adapter whose `eq` on a date
- * never matches (whole seconds, a shifted zone) loses every round; without
- * the bound, one wrong code then holds a request and a connection forever.
- * The storage conformance suite pins `eq` on a date on every adapter.
- */
-async function countMiss(
-  storage: StorageAdapter,
-  row: VerificationRow,
-  max: number,
-  now: Date,
-): Promise<"invalid_code" | "too_many_attempts"> {
-  const settled = (r: VerificationRow | null) =>
-    r && attemptsOf(r) >= max ? "too_many_attempts" : "invalid_code";
-  let current: VerificationRow | null = row;
-  for (let round = 0; round <= max; round++) {
-    if (!current || current.consumedAt !== null) return settled(current);
-    const attempts = attemptsOf(current) + 1;
-    const capped = attempts >= max;
-    const n = await storage.update(
-      "verification",
-      [
-        { field: "id", op: "eq", value: current.id },
-        { field: "consumedAt", op: "eq", value: null },
-        { field: "updatedAt", op: "eq", value: current.updatedAt },
-      ],
-      {
-        data: { attempts },
-        updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1)),
-        ...(capped ? { consumedAt: now } : {}),
-      },
-    );
-    if (n === 1) {
-      if (!capped) return "invalid_code";
-      // Two parallel requests can leave two live codes. The cap spends them
-      // all, so every later try answers `too_many_attempts` until a new
-      // request, and the older code gets no more guesses. The `createdAt`
-      // bound keeps a code that a parallel request commits after the cap:
-      // that code is a new request, and its owner must be able to use it
-      // (final re-review of plan 9e, 2026-10-13).
-      await storage.update(
-        "verification",
-        [
-          { field: "purpose", op: "eq", value: current.purpose },
-          { field: "identifier", op: "eq", value: current.identifier },
-          { field: "consumedAt", op: "eq", value: null },
-          { field: "createdAt", op: "lte", value: current.createdAt },
-        ],
-        { consumedAt: now, updatedAt: now },
-      );
-      return "too_many_attempts";
-    }
-    current = await storage.findOne("verification", [{ field: "id", op: "eq", value: current.id }]);
-  }
-  if (!current || current.consumedAt !== null) return settled(current);
-  console.error("tempo-auth: email code count gave up", row.id);
-  return "invalid_code";
-}
-
-/**
  * Compares `code` with the address's live code (plan 9e). A right code is
  * not spent here: the caller spends it with `consumeCode`. A wrong code
  * counts one guess; the guess that reaches `maxAttempts` also spends the
@@ -272,7 +200,7 @@ async function checkCode(
     return fail(attemptsOf(row) >= otp.maxAttempts ? "too_many_attempts" : "invalid_code");
   if (row.expiresAt.getTime() <= now.getTime()) return fail("invalid_code");
   if (right) return ok(row);
-  return fail(await countMiss(config.storage, row, otp.maxAttempts, now));
+  return fail(await countAttempt(config.storage, row, otp.maxAttempts, now));
 }
 
 /**

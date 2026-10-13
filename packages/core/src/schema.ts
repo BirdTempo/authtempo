@@ -42,7 +42,12 @@ export type VerificationPurpose =
   /** data: { attempts: number }. valueHash is HMAC-SHA256(secret, `<id>:<code>`) in hex (plan 9e). */
   | "email-otp"
   /** As `email-otp`, for a password reset by code (plan 9e). */
-  | "password-reset-otp";
+  | "password-reset-otp"
+  /**
+   * A second-factor challenge (plan 9f). identifier: the user id; valueHash:
+   * the SHA-256 hex of the `tf_` token; data: { via, ip, userAgent, next, attempts }.
+   */
+  | "two-factor";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;

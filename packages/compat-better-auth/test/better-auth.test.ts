@@ -474,6 +474,8 @@ describe("betterAuth", () => {
       slug_taken: "ORGANIZATION_SLUG_ALREADY_TAKEN",
       invalid_code: "INVALID_OTP",
       too_many_attempts: "TOO_MANY_ATTEMPTS",
+      totp_enabled: "TOTP_ALREADY_ENABLED",
+      totp_not_enabled: "TOTP_NOT_ENABLED",
     });
     expect([
       passwordPolicyCode("1234567", 8),

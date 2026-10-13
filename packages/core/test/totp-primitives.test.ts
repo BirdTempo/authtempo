@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openSealed, seal } from "../src/primitives/aead.js";
+import { constantTimeEqual } from "../src/primitives/crypto.js";
 import {
   BACKUP_CODE_ALPHABET,
   base32Decode,
@@ -10,8 +11,15 @@ import {
   randomBackupCode,
   totpCode,
   totpStep,
+  verifyTotp,
 } from "../src/primitives/totp.js";
 import * as testing from "../src/testing/soft-authenticator.js";
+
+// The real compare, wrapped so a test counts its calls (the no-early-return check of `verifyTotp`).
+vi.mock("../src/primitives/crypto.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/primitives/crypto.js")>();
+  return { ...real, constantTimeEqual: vi.fn(real.constantTimeEqual) };
+});
 
 const enc = new TextEncoder();
 /** The SHA-1 seed of RFC 4226 Appendix D and RFC 6238 Appendix B: the ASCII bytes of "12345678901234567890". */
@@ -95,6 +103,37 @@ describe("HOTP and TOTP (plan 9f)", () => {
   it("is in the testing entry, so a test computes the code an authenticator shows", () => {
     expect(testing.totpCode).toBe(totpCode);
     expect(testing.base32Decode).toBe(base32Decode);
+  });
+});
+
+describe("verifyTotp (plan 9f)", () => {
+  // 59 seconds is step 1. The RFC 4226 Appendix D values of counts 0, 1, 2, and 3.
+  const NOW = new Date(59_000);
+  const AT = { 0: "755224", 1: "287082", 2: "359152", 3: "969429" };
+
+  it("answers the matched step for a code of each step in the window, and null outside it", async () => {
+    expect(await verifyTotp(SEED, AT[0], NOW, 1)).toBe(0);
+    expect(await verifyTotp(SEED, AT[1], NOW, 1)).toBe(1);
+    expect(await verifyTotp(SEED, AT[2], NOW, 1)).toBe(2);
+    expect(await verifyTotp(SEED, AT[3], NOW, 1)).toBeNull();
+    expect(await verifyTotp(SEED, "000000", NOW, 1)).toBeNull();
+    expect(await verifyTotp(SEED, AT[0], NOW, 0)).toBeNull();
+    expect(await verifyTotp(SEED, AT[1], NOW, 0)).toBe(1);
+  });
+
+  it("runs the constant-time compare on every step of the window, also after a match", async () => {
+    const compare = vi.mocked(constantTimeEqual);
+    for (const [code, window, calls] of [
+      [AT[0], 1, 3],
+      [AT[1], 1, 3],
+      [AT[2], 1, 3],
+      ["000000", 1, 3],
+      [AT[1], 2, 5],
+    ] as const) {
+      compare.mockClear();
+      await verifyTotp(SEED, code, NOW, window);
+      expect(compare).toHaveBeenCalledTimes(calls);
+    }
   });
 });
 

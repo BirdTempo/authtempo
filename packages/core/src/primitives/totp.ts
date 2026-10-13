@@ -1,3 +1,5 @@
+import { constantTimeEqual } from "./crypto.js";
+
 /**
  * HOTP (RFC 4226) and TOTP (RFC 6238) with HMAC-SHA1 on `crypto.subtle`, the
  * base32 of RFC 4648 with no padding, the `otpauth://` key URI, and the
@@ -83,6 +85,27 @@ export function totpStep(at: Date): number {
 /** The 6-digit code of `secret` at the step of `at`. */
 export function totpCode(secret: Uint8Array, at: Date): Promise<string> {
   return hotp(secret, totpStep(at));
+}
+
+/**
+ * The step whose code is `code`, from `window` steps before the step of
+ * `now` to `window` steps after it, or null. The one place of the code
+ * compare (plan 9f): every step of the window runs the HMAC and
+ * `constantTimeEqual`, also after a match, so the time does not tell which
+ * step matched. The caller writes the matched step as `lastStep` in the
+ * same conditional update as its check, so a code passes once.
+ */
+export async function verifyTotp(
+  secret: Uint8Array,
+  code: string,
+  now: Date,
+  window: number,
+): Promise<number | null> {
+  const step = totpStep(now);
+  let matched: number | null = null;
+  for (let s = step - window; s <= step + window; s++)
+    if (constantTimeEqual(await hotp(secret, s), code)) matched = s;
+  return matched;
 }
 
 /**

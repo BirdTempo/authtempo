@@ -29,7 +29,9 @@ export type SessionEndReason =
   | "password_reset"
   | "password_change"
   | "claim"
-  | "expired";
+  | "expired"
+  // plan 9f: the enable of a second factor ends the user's other sessions.
+  | "two_factor";
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {

@@ -20,6 +20,7 @@ import {
 } from "./http/handoff-confirm-page.js";
 import { defaultResetPage, type ResetPageInput } from "./http/password-pages.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
+import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
@@ -168,6 +169,13 @@ export interface AuthConfig {
    */
   emailOtp?: EmailOtpConfig | false;
   /**
+   * The TOTP second factor (plan 9f, spec 8.11). On by default when
+   * `password` is set: a user turns it on for their own account. `false`
+   * removes the routes and `api.totp`. Without `password` there is no
+   * factor, because the gate covers the password sign-in only.
+   */
+  totp?: TotpConfig | false;
+  /**
    * The app's code at named points of the organization and session flows
    * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
    * refuses with `throw hookRefusal(message)`; an after hook runs after the
@@ -219,6 +227,30 @@ export interface ResolvedEmailOtp {
   maxAttempts: number;
   mail: (input: EmailOtpMailInput) => MailMessage;
   resetMail: (input: EmailOtpMailInput) => MailMessage;
+}
+
+export interface TotpConfig {
+  /** The issuer that an authenticator app shows: 1 to 80 characters, no control character, no colon. Default `appName`. */
+  issuer?: string;
+  /** The backup codes per setup and per regeneration, 5 to 20. Default 10. */
+  backupCodes?: number;
+  /** The characters of a backup code, 8 to 12. Default 8. */
+  backupCodeLength?: number;
+  /** The life of a trusted device, 1 to 365 days. Default 30. */
+  trustDays?: number;
+  /** The trust cookie: 1 to 64 letters, digits, `.`, `_`, or `-`, not `cookieName`. Default `tempo_totp_trust`. */
+  trustCookieName?: string;
+  /** The HTML of the challenge page. Default `defaultTotpPage`. */
+  challengePage?: (input: TotpChallengePageInput) => string;
+}
+
+export interface ResolvedTotp {
+  issuer: string;
+  backupCodes: number;
+  backupCodeLength: number;
+  trustDays: number;
+  trustCookieName: string;
+  challengePage: (input: TotpChallengePageInput) => string;
 }
 
 export interface LegacyVerifyConfig {
@@ -307,6 +339,7 @@ export interface ResolvedConfig {
     legacyVerify: Required<LegacyVerifyConfig> | null;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
+  totp: ResolvedTotp | null;
   hooks: ResolvedHooks;
 }
 
@@ -577,6 +610,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     organizations,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
+    totp: resolveTotp(input.totp, password !== null, appName, input.cookieName ?? "tempo_session"),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
@@ -669,6 +703,82 @@ function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEma
     maxAttempts,
     mail: o.mail ?? defaultEmailOtpMail,
     resetMail: o.resetMail ?? defaultResetOtpMail,
+  };
+}
+
+const TOTP_KEYS: Readonly<Record<keyof TotpConfig, true>> = {
+  issuer: true,
+  backupCodes: true,
+  backupCodeLength: true,
+  trustDays: true,
+  trustCookieName: true,
+  challengePage: true,
+};
+const COOKIE_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
+/** `totp` (plan 9f). Absent: on with the defaults when `password` is set. `false`: off. */
+function resolveTotp(
+  input: TotpConfig | false | undefined,
+  hasPassword: boolean,
+  appName: string,
+  cookieName: string,
+): ResolvedTotp | null {
+  if (input === false) return null;
+  if (input !== undefined && !isPlainObject(input))
+    throw new ConfigError("totp must be an object or false");
+  if (!hasPassword) {
+    if (input !== undefined)
+      throw new ConfigError(
+        "totp needs a password config: the second factor gates the password sign-in only",
+      );
+    return null;
+  }
+  const o: TotpConfig = input ?? {};
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(TOTP_KEYS, key))
+      throw new ConfigError(
+        `totp.${key} is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, and challengePage`,
+      );
+  const { issuer } = o;
+  if (
+    issuer !== undefined &&
+    (typeof issuer !== "string" ||
+      issuer.length < 1 ||
+      issuer.length > 80 ||
+      hasControlChar(issuer) ||
+      issuer.includes(":"))
+  )
+    throw new ConfigError(
+      "totp.issuer must be 1 to 80 characters with no control character and no colon",
+    );
+  const backupCodes = o.backupCodes ?? 10;
+  if (!Number.isSafeInteger(backupCodes) || backupCodes < 5 || backupCodes > 20)
+    throw new ConfigError("totp.backupCodes must be an integer from 5 to 20");
+  const backupCodeLength = o.backupCodeLength ?? 8;
+  if (!Number.isSafeInteger(backupCodeLength) || backupCodeLength < 8 || backupCodeLength > 12)
+    throw new ConfigError("totp.backupCodeLength must be an integer from 8 to 12");
+  const trustDays = o.trustDays ?? 30;
+  if (!Number.isSafeInteger(trustDays) || trustDays < 1 || trustDays > 365)
+    throw new ConfigError("totp.trustDays must be an integer from 1 to 365");
+  const trustCookieName = o.trustCookieName ?? "tempo_totp_trust";
+  if (
+    typeof trustCookieName !== "string" ||
+    !COOKIE_NAME_RE.test(trustCookieName) ||
+    trustCookieName === cookieName
+  )
+    throw new ConfigError(
+      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name",
+    );
+  if (o.challengePage !== undefined && typeof o.challengePage !== "function")
+    throw new ConfigError("totp.challengePage must be a function");
+  return {
+    // The default may hold a colon (a host with a port); the key URI encodes it.
+    issuer: issuer ?? appName,
+    backupCodes,
+    backupCodeLength,
+    trustDays,
+    trustCookieName,
+    challengePage: o.challengePage ?? defaultTotpPage,
   };
 }
 
