@@ -1,0 +1,58 @@
+---
+title: Your first sign-in from a web app
+description: Sign a person in from a browser app with a magic link, show the account, and sign the person out.
+type: tutorial
+sources:
+  - packages/client/README.md "Create a client"
+  - packages/client/README.md "Operations"
+  - packages/client/README.md "Results"
+  - packages/client/README.md "Show the signed-in email"
+  - packages/core/README.md "Apps on another origin"
+sidebar:
+  order: 6
+---
+
+import { Code } from "@astrojs/starlight/components";
+import api from "../../../../../samples/start/first-sign-in-api.ts?raw";
+import client from "../../../../../samples/start/first-sign-in.ts?raw";
+import test from "../../../../../samples/start/first-sign-in.test.ts?raw";
+
+**For:** a web developer who has an API with authtempo and a browser app on another origin.
+
+**What it does:** the browser app asks for a magic link, shows the signed-in address, and signs the person out.
+
+## Before you start
+
+- An API with authtempo. Do one of the stack tutorials first, such as [Workers on D1](/docs/start/workers-d1/).
+- A browser app on its own origin. This tutorial uses `https://app.example.com` for the app and `https://api.example.com` for the API.
+
+## Steps
+
+1. On the API, set `appURL` to the origin of the app, and add the same origin to `trustedOrigins`.
+
+<Code code={api} lang="ts" title="The API config" />
+
+2. In the app, add the client package: `pnpm add "@authtempo/client@workspace:*"`.
+3. Make one client for the app, and write the three calls of the sign-in.
+
+<Code code={client} lang="ts" title="The browser app" />
+
+4. On the sign-in form, call `askForLink` with the address that the person types.
+5. Open the mail, and open the link. The API shows a confirm page with one button.
+6. Press the button. The browser goes to `https://app.example.com/welcome` with the session cookie.
+7. On the page at `/welcome`, call `welcome`. It shows the signed-in address.
+8. On the sign-out button, call `signOut`.
+
+The test below runs the same steps against the API in memory. It plays the browser: it keeps the cookie and sends the app's origin.
+
+<Code code={test} lang="ts" title="The test of this tutorial" />
+
+The page at `/welcome` shows "Signed in as" and the address. After the sign-out it shows "Not signed in.".
+
+A client call never throws for an answer. It answers `{ ok: true, value }` or `{ ok: false, code, status }`. Read `code` when `ok` is false.
+
+## Next
+
+- [Sign in with a magic link](/docs/guides/magic-link/)
+- [Run the app on another origin](/docs/guides/split-origins/)
+- [The client package](/docs/reference/client/)

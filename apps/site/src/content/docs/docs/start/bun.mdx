@@ -1,0 +1,48 @@
+---
+title: Bun
+description: Run authtempo in a Bun server on Postgres, and sign in with a magic link.
+type: tutorial
+sources:
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 8"
+  - packages/adapter-postgres/README.md "Migrations"
+sidebar:
+  order: 5
+---
+
+import { Code } from "@astrojs/starlight/components";
+import server from "../../../../../../../examples/node/src/server-bun.ts?raw";
+
+**For:** a developer who wants sign-in in a Bun server with a Postgres database.
+
+**What it does:** you run the Node example app with Bun, through `Bun.serve`. A script signs a person in with a magic link through the real server.
+
+## Before you start
+
+- Do the [Node](/docs/start/node/) tutorial first. This tutorial uses the same app, `examples/my-app`.
+- Bun 1.4.3. The app pins it as a development tool, so `pnpm install` puts it in `node_modules/.bin`.
+
+## Steps
+
+1. Read `src/server-bun.ts`. It serves the same handler with `Bun.serve`, and sets the client IP from Bun's own call.
+
+<Code code={server} lang="ts" title="examples/my-app/src/server-bun.ts" />
+
+2. Run the test of the app.
+
+```sh
+pnpm turbo run test --filter=my-app
+```
+
+3. Find the line `bun-e2e: PASS` in the output. It comes after the line of the Node run.
+4. Start the server with Bun and the settings of your deploy.
+
+```sh
+DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" AUTH_SECRET="<32 characters or more>" BASE_URL="https://api.example.com" HOST=0.0.0.0 PORT=3000 pnpm exec bun src/main.ts
+```
+
+`src/main.ts` picks `Bun.serve` when it runs under Bun, and Node's `http` module when it runs under Node. The app code is the same under both.
+
+## Next
+
+- [Your first sign-in from a web app](/docs/start/first-sign-in/)
+- [Choose your stack](/docs/start/)
