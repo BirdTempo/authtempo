@@ -217,6 +217,32 @@ const PLUGIN_RULES: Record<string, Rule> = {
       else if (v !== "hashed") refuse(out, p, "expected hashed or plain");
     },
   }),
+  // Better Auth 1.7.2's EmailOTPOptions (dist/plugins/email-otp/types.d.mts, read 2026-10-13).
+  "email-otp": object({
+    sendVerificationOTP: fn,
+    otpLength: (v, p, out) => {
+      if (v !== 6 && v !== 8) refuse(out, p, "core generates 6 or 8 digits");
+    },
+    expiresIn: (v, p, out) => {
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 60 || v > 3600)
+        refuse(out, p, "core takes 60 to 3600 seconds, rounded up to whole minutes");
+    },
+    allowedAttempts: (v, p, out) => {
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 3 || v > 10)
+        refuse(out, p, "core takes 3 to 10");
+    },
+    storeOTP: only("hashed", "core stores a keyed hash; pass hashed or leave it out"),
+    disableSignUp: only(false, "core creates the user at the first code"),
+    generateOTP: refused("core makes the code itself, from crypto.getRandomValues"),
+    overrideDefaultEmailVerification: only(
+      false,
+      "core's verify mail is a link; a code for it is a later input (see the plan index)",
+    ),
+    sendVerificationOnSignUp: only(false, "core mails a verify link at sign-up, not a code"),
+    resendStrategy: only("rotate", "core sends a new code at every request"),
+    changeEmail: refused("core has no change of address by code; see the plan index"),
+    rateLimit: refused("core's owned limiter has fixed limits per flow"),
+  }),
   bearer: object({
     requireSignature: only(false, "core's bearer token is opaque and needs no signature"),
   }),
@@ -225,7 +251,6 @@ const PLUGIN_RULES: Record<string, Rule> = {
 
 const FOREIGN_PLUGINS: Record<string, string> = {
   admin: "tempo-auth has no admin plugin",
-  "email-otp": "plan 9e (email OTP) is not written yet",
   "two-factor": "plan 9f (a TOTP second factor) is not written yet",
   jwt: PLAN_9G,
   mcp: PLAN_9G,
@@ -384,7 +409,7 @@ const TOP: Record<string, Rule> = {
           note(
             out,
             p,
-            "accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
+            "accepted: password sign-in, the magic link, the email codes, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
           );
         else if (v !== false) refuse(out, p, "expected a boolean");
       },
@@ -494,6 +519,9 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
   const magic = pluginOf(options, "magic-link")?.options;
   if (magic && typeof magic.sendMagicLink !== "function")
     refuse(out, "plugins[magic-link].sendMagicLink", "required");
+  const otp = pluginOf(options, "email-otp")?.options;
+  if (otp && typeof otp.sendVerificationOTP !== "function")
+    refuse(out, "plugins[email-otp].sendVerificationOTP", "required");
   const verifyTtl = options.emailVerification?.expiresIn;
   if (magic && verifyTtl !== undefined && verifyTtl !== (magic.expiresIn ?? 300)) {
     refuse(

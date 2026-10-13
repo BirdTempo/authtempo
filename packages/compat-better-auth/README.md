@@ -343,12 +343,51 @@ page can read it.
 | `organization` | Core's organizations: ranked roles viewer < member < admin < owner, mailed invitations. `sendInvitationEmail` is required. Its `data.id` and `data.invitation.id` hold the invitation token, not the row id: build the accept link from it, and `acceptInvitation({ invitationId })` sends it back. `api.createInvitation` and `api.cancelInvitation` use the row id. |
 | `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. Without the plugin the magic link paths answer 404. |
+| `emailOTP` | Core's email codes (plan 9e): the sign-in code and the reset code. `sendVerificationOTP` is required. It gets `type: "sign-in"` or `type: "forget-password"`, never another type, and a reset code goes only to an address with a user, as in Better Auth. Without the plugin core's code routes answer 404. See "Email codes". |
 | `bearer` | Core reads `Authorization: Bearer` on every route already. The plugin adds `set-auth-token` to every response that sets the session cookie. |
 | `expo` | Core's handoff for the system browser. `trustedOrigins` must hold the app scheme, for example `reception://`. `expo-origin` becomes `origin` when a request has none. On Expo, `signIn.social` and `signIn.magicLink` open core's sign-in page, which lists every method this server serves: the magic link form only with the `magicLink` plugin, the password form with `emailAndPassword`, a social button per provider, and the passkey button with the `passkey` plugin. The provider is not chosen in advance. A config with `expo` and none of these methods is refused at start. |
 
 Give each plugin once. A second entry with the same id is refused at start, because the server reads only the first.
 
 Only `auth.handler` keeps the plugin behavior in this table: the magic link 404, `set-auth-token`, and the `expo-origin` rule. `auth.tempo.handle` serves core's routes directly, without them.
+
+## Email codes
+
+`emailOTP({ sendVerificationOTP, … })` maps onto core's `emailOtp` (plan 9e).
+
+- `otpLength` is 6 or 8. `allowedAttempts` is 3 to 10; without it the cap
+  is 3, Better Auth's default. Core answers `TOO_MANY_ATTEMPTS` at the
+  allowed-th wrong code, and Better Auth at the next try; both compare the
+  same number of codes.
+- `expiresIn` is 60 to 3600 seconds, rounded up to whole minutes:
+  `expiresIn: 90` lives 2 minutes. Without it a code lives 5 minutes,
+  Better Auth's default.
+- `storeOTP` is `hashed` or absent. Core stores HMAC-SHA256 under the app
+  secret of the row id and the code either way. `plain`, `encrypted`, and an
+  object are refused.
+- Refused by name: `generateOTP`, `disableSignUp: true`,
+  `overrideDefaultEmailVerification: true`, `sendVerificationOnSignUp: true`,
+  `resendStrategy: "reuse"`, `changeEmail`, and `rateLimit`.
+
+`auth.handler` serves these Better Auth paths in Better Auth's shapes. They
+are the one set of Better Auth paths that the handler serves in Better
+Auth's shapes, because apps post them by hand. An error answers `{ code,
+message }` with tempo-auth's status.
+
+| Path | Body | Answer |
+| --- | --- | --- |
+| `/email-otp/send-verification-otp` | `{ email, type }` | `{ success: true }` for `sign-in` and `forget-password`; 400 `INVALID_EMAIL` for a malformed address, as Better Auth does; 501 `NOT_SUPPORTED` for `email-verification` and `change-email` |
+| `/sign-in/email-otp` | `{ email, otp }` | `{ token, user }` with the session cookie; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`; 501 `NOT_SUPPORTED` for `name`, `image`, or another user field |
+| `/forget-password/email-otp`, `/email-otp/request-password-reset` | `{ email }` | `{ success: true }` |
+| `/email-otp/reset-password` | `{ email, otp, password }` | `{ success: true }` with the session cookie of the new session; 400 `PASSWORD_TOO_SHORT` and `PASSWORD_TOO_LONG` before the code check, so the code stays usable, as in Better Auth; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`, `INVALID_PASSWORD`, `PASSWORD_COMPROMISED` |
+
+`/email-otp/verify-email`, `/email-otp/check-verification-otp`,
+`/email-otp/request-email-change`, and `/email-otp/change-email` answer 501
+`NOT_SUPPORTED`. A wrong, expired, or spent code answers `INVALID_OTP`:
+core does not tell expiry from a wrong code, so `OTP_EXPIRED` never
+appears. Better Auth answers `TOO_MANY_ATTEMPTS` with 403; tempo-auth with
+400. A password that the policy refuses for another reason than its length
+spends the code: request a new one.
 
 ## Hooks
 
@@ -501,8 +540,8 @@ consumer-i (small edits):
 consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
-consumerd (follow-ups first): admin and impersonation, email OTP (plan 9e), anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, the rate limit storage. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d.
-The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[email-otp]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
+consumerd (follow-ups first): admin and impersonation, anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, the rate limit storage. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` (`ta_purpose` with snake-case names) instead; the row holds a keyed hash, never the code.
+The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
 
 consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, `jwt` and JWKS (plan 9g), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.requireEmailVerification`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.

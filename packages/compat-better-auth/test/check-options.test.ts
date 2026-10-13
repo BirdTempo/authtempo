@@ -99,7 +99,6 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "hooks",
       "plugins[admin]",
       "plugins[anonymous]",
-      "plugins[email-otp]",
       "plugins[organization].ac",
       "plugins[organization].disableOrganizationDeletion",
       "plugins[organization].roles",

@@ -1,7 +1,7 @@
 import type { LimiterPort, StorageAdapter } from "@tempo-auth/core";
 import type { DrizzleAdapterConfig } from "../src/adapters/drizzle.js";
 import { expoClient } from "../src/client/expo.js";
-import { bearer, expo, magicLink, organization, passkey } from "../src/plugins.js";
+import { bearer, emailOTP, expo, magicLink, organization, passkey } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { BetterAuthOptions, ClientOptions, CompatDatabase } from "../src/types.js";
 
@@ -159,7 +159,14 @@ export const consumerd = {
       organizationHooks: {},
     }),
     { id: "admin", defaultRole: "user", adminRoles: ["admin"] },
-    { id: "email-otp", otpLength: 6 },
+    // Since plan 9e consumerd's emailOTP options run unchanged (apps/api/src/auth/create-auth.ts:175-181).
+    emailOTP({
+      otpLength: 6,
+      expiresIn: 600,
+      allowedAttempts: 5,
+      storeOTP: "hashed",
+      sendVerificationOTP: async () => {},
+    }),
     magicLink({ storeToken: "hashed", sendMagicLink: async () => {} }),
     bearer(),
     { id: "anonymous", emailDomainName: "anon.consumerd.app" },
@@ -218,6 +225,11 @@ export const strictOptionGuards = [
   magicLink({
     sendMagicLink: async () => {},
     // @ts-expect-error since plan 9b a refused key fails the compile
+    notMapped: true,
+  }),
+  emailOTP({
+    sendVerificationOTP: async () => {},
+    // @ts-expect-error since plan 9e a key that Better Auth 1.7.2 does not name fails the compile
     notMapped: true,
   }),
   bearer({

@@ -128,6 +128,8 @@ describe("betterAuth", () => {
       invitationExpiresIn: 172800,
       membershipLimit: 100,
       invitationLimit: 100,
+      emailOtpExpiresIn: 300,
+      emailOtpAllowedAttempts: 3,
       basePath: "/api/auth",
     });
     expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1 });
@@ -198,7 +200,7 @@ describe("betterAuth", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     app({ advanced: { ipAddress: { disableIpTracking: true } } });
     expect(info).toHaveBeenCalledWith(
-      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
+      "tempo-auth compat: advanced.ipAddress.disableIpTracking: accepted: password sign-in, the magic link, the email codes, and the reset request skip their per-IP limits and keep their per-email limits; every other flow counts all requests in one shared per-IP bucket. The cost: one caller can try one password on many addresses, bounded only by each address's limit",
     );
     info.mockRestore();
     const m = mapOptions({

@@ -13,7 +13,7 @@ import {
 } from "../types.js";
 import { appSchemes, pluginOf } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
-import { compatMail, INVITATION_LINK_PREFIX } from "./mail.js";
+import { compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
 
 /** Better Auth 1.7's defaults (read in its source on 2026-10-10). They apply before the mapping. */
@@ -29,6 +29,10 @@ export const BETTER_AUTH_DEFAULTS = {
   // when the option is absent. Core keeps them as organizations.limits (plan 9d).
   membershipLimit: 100,
   invitationLimit: 100,
+  // dist/plugins/email-otp/index.mjs:14 and routes.mjs atomicVerifyOTP
+  // (`opts?.allowedAttempts || 3`), read 2026-10-13 (plan 9e).
+  emailOtpExpiresIn: 300,
+  emailOtpAllowedAttempts: 3,
   basePath: "/api/auth",
 } as const;
 
@@ -57,12 +61,14 @@ export interface Mapped {
  * also have a per-email limit: `password` (sign-in, `password:email:`),
  * `magic-link` (`magic-link:email:`), `password-reset` (the reset
  * request, `password-reset:email:`), and `password-resend` (the verify mail
- * resend, `password-resend:email:`, plan 8b). Every other flow (sign-up, the reset
+ * resend, `password-resend:email:`, plan 8b), and the email codes (`otp` and
+ * `otp-verify`, with `otp:email:` and `otp-verify:email:`, plan 9e). Every other flow (sign-up, the reset
  * POST, invitation accept, handoff, passkey, social start) has only the
  * per-IP limit, so it keeps core's shared unknown bucket: without it such a
  * flow has no limit at all (review I-2).
  */
-const NO_IP_KEY = /^(password|magic-link|password-reset|password-resend):ip:unknown$/;
+const NO_IP_KEY =
+  /^(password|magic-link|password-reset|password-resend|otp|otp-verify):ip:unknown$/;
 
 export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
   const sweep = limiter.sweep?.bind(limiter);
@@ -169,6 +175,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   );
   const magic = pluginOf(options, "magic-link");
   const org = pluginOf(options, "organization");
+  const otp = pluginOf(options, "email-otp");
   const ttlSeconds = magic
     ? (magic.options.expiresIn ?? BETTER_AUTH_DEFAULTS.magicLinkExpiresIn)
     : (options.emailVerification?.expiresIn ?? BETTER_AUTH_DEFAULTS.emailVerificationExpiresIn);
@@ -197,6 +204,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       sendResetPassword: ep?.sendResetPassword,
       sendVerificationEmail: options.emailVerification?.sendVerificationEmail,
       sendMagicLink: magic?.options.sendMagicLink,
+      sendVerificationOTP: otp?.options.sendVerificationOTP,
       sendInvitationEmail: org?.options.sendInvitationEmail,
     }),
     ...(clientIp ? { clientIp } : {}),
@@ -210,8 +218,20 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     },
     magicLink: { ttlMinutes: ttlSeconds / 60 },
     // Core turns email codes on by default; Better Auth serves them only with
-    // its email-otp plugin. Task 6 of plan 9e maps the plugin onto this key.
-    emailOtp: false,
+    // its email-otp plugin (plan 9e).
+    emailOtp: otp
+      ? {
+          // Better Auth counts seconds and core whole minutes, rounded up, so
+          // a code never lives shorter than the app asked: 90 s is 2 minutes.
+          ttlMinutes: Math.ceil(
+            (otp.options.expiresIn ?? BETTER_AUTH_DEFAULTS.emailOtpExpiresIn) / 60,
+          ),
+          length: otp.options.otpLength === 8 ? 8 : 6,
+          maxAttempts: otp.options.allowedAttempts ?? BETTER_AUTH_DEFAULTS.emailOtpAllowedAttempts,
+          mail: ({ email, code }) => otpMail(email, "sign-in", code),
+          resetMail: ({ email, code }) => otpMail(email, "forget-password", code),
+        }
+      : false,
     ...(google || apple || github || linkedin
       ? {
           social: {

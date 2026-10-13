@@ -4,6 +4,7 @@ import { passwordPolicyCode } from "../errors.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { createApi } from "./api.js";
 import { checkOptions } from "./check-options.js";
+import { emailOtpRoute } from "./email-otp.js";
 import { type Mapped, mapOptions } from "./map-options.js";
 import { COOKIE_NAME } from "./shapes.js";
 
@@ -11,6 +12,7 @@ import { COOKIE_NAME } from "./shapes.js";
 const PASSWORD_FIELD: Record<string, string> = {
   "/password/sign-up": "password",
   "/password/reset": "password",
+  "/otp/reset": "password",
   "/password/change": "newPassword",
 };
 
@@ -82,7 +84,9 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
       req = new Request(request, { headers });
     }
     const copy = req.method === "POST" ? req.clone() : null;
-    const res = await withPolicyCode(copy, await auth.handle(req), mapped);
+    // Better Auth's email OTP paths, in Better Auth's shapes (plan 9e). Null for every other request.
+    const otp = plugins.has("email-otp") ? await emailOtpRoute(auth, mapped, req) : null;
+    const res = otp ?? (await withPolicyCode(copy, await auth.handle(req), mapped));
     if (!plugins.has("bearer")) return res;
     const token = sessionTokenOf(res.headers.getSetCookie());
     if (!token) return res;
