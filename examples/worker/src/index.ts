@@ -5,11 +5,12 @@ import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 import { exampleHooks } from "./hooks.js";
 import { LEGACY_FORMATS } from "./legacy-formats.js";
+import { rememberCode } from "./test-capture.js";
 import { testProvider, testProviderFetch, testProviderRoute } from "./test-provider.js";
 
 let lastLink: string | null = null;
 // Keyed by address, so a test never reads the stale code of another address
-// (an isolate serves many tests in turn).
+// (an isolate serves many tests in turn). Bounded by rememberCode (plan 9h).
 const lastCodes = new Map<string, string>();
 let auth: Auth | null = null;
 
@@ -31,11 +32,8 @@ function getAuth(env: Env): Auth {
         // test, or, per address, the code of a mail that carries no link (plan 9e).
         const m = /https?:\/\/\S+/.exec(message.text);
         if (m) lastLink = m[0];
-        else {
-          const code = /\b(\d{8}|\d{6})\b/.exec(message.text)?.[1];
-          if (code) lastCodes.set(message.to, code);
-          else lastCodes.delete(message.to);
-        }
+        else
+          rememberCode(lastCodes, message.to, /\b(\d{8}|\d{6})\b/.exec(message.text)?.[1] ?? null);
       },
     },
     // Google sign-in is on only when both vars are set. The example has no
