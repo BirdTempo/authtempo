@@ -4,6 +4,7 @@ import {
   magicLinkClient,
   organizationClient,
   passkeyClient,
+  twoFactorClient,
 } from "../src/client/plugins.js";
 import { createAuthClient } from "../src/react.js";
 
@@ -124,4 +125,23 @@ export async function codeFlows(email: string, otp: string) {
   await codes.emailOtp.requestPasswordReset({ email });
   await codes.emailOtp.resetPassword({ email, otp, password: "a new correct horse" });
   await codes.forgetPassword({ email, redirectTo: "/reset" });
+}
+
+// Plan 9f: with twoFactorClient() the sign-in answer is a union; without it, it is not.
+export const secured = createAuthClient({
+  baseURL: "https://api.example.com",
+  plugins: [twoFactorClient({ twoFactorPage: "/two-factor" })],
+});
+export async function securedSignIn(email: string, password: string) {
+  const r = await secured.signIn.email({ email, password });
+  if (r.data && "twoFactorRedirect" in r.data) {
+    const v = await secured.twoFactor.verifyTotp({ code: "123456", trustDevice: true });
+    return v.data?.token;
+  }
+  return r.data?.token;
+}
+export async function plainSignIn(email: string, password: string) {
+  const r = await dashboard.signIn.email({ email, password });
+  // @ts-expect-error without twoFactorClient the answer has no twoFactorRedirect
+  return r.data?.twoFactorRedirect;
 }

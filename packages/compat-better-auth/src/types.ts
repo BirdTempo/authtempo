@@ -586,6 +586,13 @@ export interface ExpoClientOptions {
   crypto?: ExpoCryptoLike<unknown>;
 }
 
+/** `twoFactorClient(options)` of Better Auth 1.7.2 (dist/plugins/two-factor/client.mjs, read 2026-10-13). */
+export interface TwoFactorClientOptions {
+  /** Where the browser goes on a challenge, as Better Auth's twoFactorPage. */
+  twoFactorPage?: string;
+  onTwoFactorRedirect?: (ctx: { twoFactorMethods: string[] }) => void | Promise<void>;
+}
+
 export const COMPAT_CLIENT_PLUGIN = "tempo-auth-compat-client-plugin";
 
 export type ClientPlugin =
@@ -597,7 +604,23 @@ export type ClientPlugin =
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
       readonly id: "expo";
       readonly options: ExpoClientOptions;
+    }
+  | {
+      readonly kind: typeof COMPAT_CLIENT_PLUGIN;
+      readonly id: "two-factor";
+      readonly options: TwoFactorClientOptions;
     };
+
+/** True only for client options whose literal plugin list holds `twoFactorClient()`. */
+export type HasTwoFactorClient<O extends ClientOptions> = O extends {
+  plugins: readonly (infer P)[];
+}
+  ? ClientPlugin extends P
+    ? false
+    : [Extract<P, { id: "two-factor" }>] extends [never]
+      ? false
+      : true
+  : false;
 
 export interface ClientOptions {
   baseURL?: string | undefined;
@@ -621,7 +644,7 @@ export interface SessionStore {
   refetch(): Promise<void>;
 }
 
-export interface AuthClient {
+export interface AuthClient<TF extends boolean = false> {
   signIn: {
     email(input: {
       email: string;
@@ -629,7 +652,10 @@ export interface AuthClient {
       callbackURL?: string;
       rememberMe?: boolean;
     }): Promise<
-      CompatClientResult<{ redirect: boolean; token: string; url?: string; user: ClientUser }>
+      CompatClientResult<
+        | { redirect: boolean; token: string; url?: string; user: ClientUser }
+        | (TF extends true ? TwoFactorRedirect : never)
+      >
     >;
     social(input: {
       provider: string;
@@ -726,6 +752,36 @@ export interface AuthClient {
     listUserPasskeys(): Promise<CompatClientResult<ClientPasskey[]>>;
     deletePasskey(input: { id: string }): Promise<CompatClientResult<{ status: true }>>;
   };
+  /**
+   * Better Auth's two-factor calls (plan 9f). `enable`, `disable`,
+   * `getTotpUri`, and `generateBackupCodes` take the password. After a
+   * sign-in that answered `twoFactorRedirect`, `verifyTotp` and
+   * `verifyBackupCode` send the challenge that the client keeps; with a
+   * session and no challenge, `verifyTotp` turns the factor on.
+   */
+  twoFactor: {
+    enable(input: {
+      password: string;
+      issuer?: string;
+    }): Promise<CompatClientResult<{ totpURI: string; backupCodes: string[] }>>;
+    disable(input: { password: string }): Promise<CompatClientResult<{ status: true }>>;
+    getTotpUri(input: { password: string }): Promise<CompatClientResult<{ totpURI: string }>>;
+    generateBackupCodes(input: {
+      password: string;
+    }): Promise<CompatClientResult<{ status: true; backupCodes: string[] }>>;
+    verifyTotp(input: {
+      code: string;
+      trustDevice?: boolean;
+    }): Promise<CompatClientResult<{ token: string; user: ClientUser }>>;
+    verifyBackupCode(input: {
+      code: string;
+      trustDevice?: boolean;
+      disableSession?: boolean;
+    }): Promise<CompatClientResult<{ token: string; user: ClientUser }>>;
+    /** Core has no email or SMS second factor: NOT_SUPPORTED (501). */
+    sendOtp(): Promise<CompatClientResult<never>>;
+    verifyOtp(input: { code: string }): Promise<CompatClientResult<never>>;
+  };
   /** In `./client` a store. `./react` replaces it with the hook. */
   useSession: SessionStore;
   /** Expo only: the stored session as one cookie header value, `tempo_session=<token>`, or "" when none. */
@@ -733,6 +789,7 @@ export interface AuthClient {
   $Infer: { Session: { session: ClientSession; user: ClientUser } };
 }
 
-export interface ReactAuthClient extends Omit<AuthClient, "useSession"> {
+export interface ReactAuthClient<TF extends boolean = false>
+  extends Omit<AuthClient<TF>, "useSession"> {
   useSession(): SessionState & { refetch(): Promise<void> };
 }

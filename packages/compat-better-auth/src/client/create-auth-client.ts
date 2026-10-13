@@ -7,6 +7,7 @@ import {
   type MemberJSON,
   type OrganizationJSON,
   type PasskeySummaryJSON,
+  type TwoFactorSessionJSON,
 } from "@tempo-auth/client";
 import type { PublicSession } from "@tempo-auth/core";
 import { createHandoff } from "@tempo-auth/handoff";
@@ -22,9 +23,11 @@ import type {
   CompatClientError,
   CompatClientResult,
   ExpoClientOptions,
+  HasTwoFactorClient,
   Invitation,
   Member,
   Organization,
+  TwoFactorRedirect,
 } from "../types.js";
 import { createSessionStore } from "./session-store.js";
 
@@ -133,7 +136,9 @@ const NO_BASE =
   "tempo-auth compat: this call has no baseURL and no page location. Pass baseURL to createAuthClient.";
 
 /** Better Auth's `createAuthClient` on `@tempo-auth/client`. Nothing throws for an answer. */
-export function createAuthClient(options: ClientOptions = {}): AuthClient {
+export function createAuthClient<O extends ClientOptions = ClientOptions>(
+  options: O = {} as O,
+): AuthClient<HasTwoFactorClient<O>> {
   // A relative base cannot make a request URL: before plan 9b2 it rejected at the first call.
   // One error at construction names the fix. No baseURL stays legal: the first call reads
   // location (see below).
@@ -166,9 +171,24 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
   const fo = options.fetchOptions ?? {};
   const baseFetch: typeof fetch =
     fo.customFetchImpl ?? ((input, init) => globalThis.fetch(input, init));
-  const expoPlugin = options.plugins?.find((p) => p.id === "expo");
-  const expo: ExpoClientOptions | null =
-    expoPlugin && "options" in expoPlugin ? expoPlugin.options : null;
+  const expoPlugin = options.plugins?.find(
+    (p): p is Extract<typeof p, { id: "expo" }> => p.id === "expo",
+  );
+  const expo: ExpoClientOptions | null = expoPlugin ? expoPlugin.options : null;
+  const twoFactorPlugin = options.plugins?.find(
+    (p): p is Extract<typeof p, { id: "two-factor" }> => p.id === "two-factor",
+  );
+  // The challenge of the last sign-in that answered one (plan 9f). In memory only: on the web
+  // the browser also keeps it as the better-auth.two_factor cookie, for a page that reloads.
+  let challenge: string | null = null;
+  const trustKey = expo ? `${expo.storagePrefix ?? "better-auth"}_trust_device` : null;
+  const readTrust = () => {
+    try {
+      return expo && trustKey ? expo.storage.getItem(trustKey) || undefined : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const storageKey = expo ? `${expo.storagePrefix ?? "better-auth"}_${COOKIE_NAME}` : null;
   // An unreadable store means no token: the call goes out without one.
   const readStored = () => {
@@ -269,6 +289,81 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     return { data: null, error };
   }
 
+  /**
+   * A POST to one of the shim's Better Auth paths (plan 9f), with the same
+   * fetch, headers, credentials, and Expo bearer as `run`. The shim answers
+   * Better Auth's error body `{ code, message }`.
+   */
+  async function shim<T>(path: string, body: unknown): Promise<CompatClientResult<T>> {
+    const resolved = resolveBase();
+    if (!resolved) return noBase();
+    const url = `${resolved.origin}${resolved.basePath}${path}`;
+    const request = { url, method: "POST" };
+    const headers = new Headers({ "content-type": "application/json" });
+    for (const [k, v] of Object.entries(fo.headers ?? {})) headers.set(k, v);
+    const stored = readStored();
+    if (stored) headers.set("authorization", `Bearer ${stored}`);
+    let res: Response;
+    try {
+      res = await baseFetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        credentials: expo ? "omit" : (fo.credentials ?? "include"),
+      });
+    } catch {
+      const error = clientError(BETTER_AUTH_CODES.network, 0);
+      if (fo.onError) await fo.onError({ error, response: null, request });
+      return { data: null, error };
+    }
+    const json = (await res
+      .clone()
+      .json()
+      .catch(() => null)) as Record<string, unknown> | null;
+    if (res.ok && json) {
+      if (fo.onSuccess) await fo.onSuccess({ data: json, response: res, request });
+      return { data: json as T, error: null };
+    }
+    const code = typeof json?.code === "string" ? json.code : BETTER_AUTH_CODES.unexpected;
+    const error =
+      typeof json?.message === "string"
+        ? clientError(code, res.status, json.message)
+        : clientError(code, res.status);
+    if (fo.onError) await fo.onError({ error, response: res, request });
+    return { data: null, error };
+  }
+
+  /** Core's verify of the kept challenge, in Better Auth's shape. */
+  const verifyChallenge = (
+    kept: string,
+    input: { code?: string; backupCode?: string; trustDevice?: boolean },
+  ) =>
+    run(
+      (c) =>
+        c.totp.verify({
+          challenge: kept,
+          ...(input.code !== undefined ? { code: input.code } : {}),
+          ...(input.backupCode !== undefined ? { backupCode: input.backupCode } : {}),
+          ...(input.trustDevice !== undefined ? { trustDevice: input.trustDevice } : {}),
+        }),
+      (v: TwoFactorSessionJSON) => {
+        keepToken(v.token);
+        if (v.trustDevice && expo && trustKey) expo.storage.setItem(trustKey, v.trustDevice.token);
+        challenge = null;
+        return { token: v.token, user: toClientUser(v.user) };
+      },
+      (f) =>
+        f.code === "invalid_code"
+          ? input.backupCode !== undefined
+            ? "INVALID_BACKUP_CODE"
+            : "INVALID_CODE"
+          : f.code === "too_many_attempts"
+            ? "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE"
+            : f.code === "invalid_token"
+              ? "INVALID_TWO_FACTOR_COOKIE"
+              : undefined,
+    );
+
   const readSession = (quiet: boolean) =>
     run(
       (c) => c.session(),
@@ -319,7 +414,7 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
   const activeOrganization = async (): Promise<string | null> =>
     (await readSession(true)).data?.session.activeOrganizationId ?? null;
 
-  const api: AuthClient = {
+  const api: AuthClient<true> = {
     signIn: {
       async email({ email, password, rememberMe, callbackURL }) {
         // The server api refuses the same field: one rule for one argument (final review M-4).
@@ -327,18 +422,27 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         // Core keeps no short session. true is the only behavior core has, so it is accepted.
         if (rememberMe === false)
           return notSupported("core takes no rememberMe: every session lives session.expiresIn");
+        const trustDevice = readTrust();
         const r = await run(
-          async (c): Promise<ClientResult<{ token: string } & PublicSession>> => {
-            const s = await c.password.signIn({ email, password });
-            // The server sets totp: false until Task 7 of plan 9f, and Task 8 maps the challenge.
-            if (s.ok && !("token" in s.value)) return { ok: false, code: "unexpected", status: 0 };
-            return s as ClientResult<{ token: string } & PublicSession>;
-          },
-          (v) => {
+          (c) => c.password.signIn({ email, password, ...(trustDevice ? { trustDevice } : {}) }),
+          (v): { redirect: false; token: string; user: ClientUser } | TwoFactorRedirect => {
+            // A user with the second factor on (plan 9f): keep the challenge for verifyTotp.
+            if (!("token" in v)) {
+              challenge = v.twoFactor.challenge;
+              return { twoFactorRedirect: true, twoFactorMethods: ["totp"] };
+            }
             keepToken(v.token);
             return { redirect: false, token: v.token, user: toClientUser(v.user) };
           },
         );
+        if (r.data && "twoFactorRedirect" in r.data) {
+          const methods = { twoFactorMethods: r.data.twoFactorMethods };
+          const page = twoFactorPlugin?.options.twoFactorPage;
+          if (twoFactorPlugin?.options.onTwoFactorRedirect)
+            await twoFactorPlugin.options.onTwoFactorRedirect(methods);
+          else if (page !== undefined && typeof location !== "undefined") location.href = page;
+          return r;
+        }
         if (r.data) store.refetchIfStarted();
         return r;
       },
@@ -583,6 +687,44 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         );
       },
     },
+    twoFactor: {
+      enable: (input) => shim("/two-factor/enable", input),
+      disable: (input) => shim("/two-factor/disable", input),
+      getTotpUri: (input) => shim("/two-factor/get-totp-uri", input),
+      generateBackupCodes: (input) => shim("/two-factor/generate-backup-codes", input),
+      async verifyTotp({ code, trustDevice }) {
+        const kept = challenge;
+        const r = kept
+          ? await verifyChallenge(kept, {
+              code,
+              ...(trustDevice !== undefined ? { trustDevice } : {}),
+            })
+          : await shim<{ token: string; user: ClientUser }>("/two-factor/verify-totp", {
+              code,
+              ...(trustDevice !== undefined ? { trustDevice } : {}),
+            });
+        if (r.data) store.refetchIfStarted();
+        return r;
+      },
+      async verifyBackupCode({ code, trustDevice, disableSession }) {
+        if (disableSession === true)
+          return notSupported("core opens a session at every second-factor verify");
+        const kept = challenge;
+        const r = kept
+          ? await verifyChallenge(kept, {
+              backupCode: code,
+              ...(trustDevice !== undefined ? { trustDevice } : {}),
+            })
+          : await shim<{ token: string; user: ClientUser }>("/two-factor/verify-backup-code", {
+              code,
+              ...(trustDevice !== undefined ? { trustDevice } : {}),
+            });
+        if (r.data) store.refetchIfStarted();
+        return r;
+      },
+      sendOtp: async () => notSupported("core has no email or SMS second factor"),
+      verifyOtp: async () => notSupported("core has no email or SMS second factor"),
+    },
     useSession: store,
     getCookie() {
       const token = readStored();
@@ -590,7 +732,9 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
     },
     $Infer: {} as AuthClient["$Infer"],
   };
-  return api;
+  // The redirect answer exists only when the server gates the sign-in; the type says so per options.
+  // Through unknown: TypeScript does not compare a deferred conditional type.
+  return api as unknown as AuthClient<HasTwoFactorClient<O>>;
 }
 
 /**

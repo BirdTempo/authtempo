@@ -351,6 +351,8 @@ with `getItem` and `setItem`, as Better Auth does. With a plain store, such as
 `localStorage`, the session token lies readable at rest, and any script on the
 page can read it.
 
+`twoFactorClient({ twoFactorPage?, onTwoFactorRedirect? })` (plan 9f): `signIn.email` answers `{ twoFactorRedirect: true, twoFactorMethods: ["totp"] }` for a user with the factor on and calls `onTwoFactorRedirect`, or sends the browser to `twoFactorPage`. The client keeps the challenge in memory, so `twoFactor.verifyTotp({ code })` and `twoFactor.verifyBackupCode({ code })` work on Expo with no cookie; on the web, after a reload, they send the `better-auth.two_factor` cookie. On Expo, `trustDevice: true` stores the trust token under `<storagePrefix>_trust_device`, and the next `signIn.email` sends it. `twoFactor.enable`, `disable`, `getTotpUri`, and `generateBackupCodes` take the password. `sendOtp`, `verifyOtp`, and `disableSession: true` answer `NOT_SUPPORTED`. The answer type holds `twoFactorRedirect` only when the client options name `twoFactorClient()` in a literal list.
+
 ## Plugins
 
 | Plugin | What it does on tempo-auth |

@@ -1,9 +1,11 @@
 import { useSyncExternalStore } from "react";
 import { createAuthClient as createBaseClient } from "./client/create-auth-client.js";
-import type { ClientOptions, ReactAuthClient } from "./types.js";
+import type { ClientOptions, HasTwoFactorClient, ReactAuthClient } from "./types.js";
 
 /** `better-auth/react`'s createAuthClient: the client with `useSession` as a hook. */
-export function createAuthClient(options: ClientOptions = {}): ReactAuthClient {
+export function createAuthClient<O extends ClientOptions = ClientOptions>(
+  options: O = {} as O,
+): ReactAuthClient<HasTwoFactorClient<O>> {
   const { useSession: store, ...rest } = createBaseClient(options);
   return {
     ...rest,

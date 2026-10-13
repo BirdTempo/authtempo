@@ -1,4 +1,4 @@
-import { type ClientPlugin, COMPAT_CLIENT_PLUGIN } from "../types.js";
+import { type ClientPlugin, COMPAT_CLIENT_PLUGIN, type TwoFactorClientOptions } from "../types.js";
 
 type Simple = Extract<
   ClientPlugin,
@@ -16,4 +16,9 @@ export function magicLinkClient(): Simple {
 }
 export function emailOTPClient(): Simple {
   return { kind: COMPAT_CLIENT_PLUGIN, id: "email-otp" };
+}
+export function twoFactorClient(
+  options: TwoFactorClientOptions = {},
+): Extract<ClientPlugin, { id: "two-factor" }> {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "two-factor", options };
 }

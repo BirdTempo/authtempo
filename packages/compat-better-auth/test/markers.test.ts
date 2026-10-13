@@ -5,6 +5,7 @@ import {
   magicLinkClient,
   organizationClient,
   passkeyClient,
+  twoFactorClient,
 } from "../src/client/plugins.js";
 import {
   bearer,
@@ -48,6 +49,15 @@ describe("plugin markers", () => {
     expect(
       [organizationClient(), passkeyClient(), magicLinkClient(), emailOTPClient()].map((p) => p.id),
     ).toEqual(["organization", "passkey", "magic-link", "email-otp"]);
+  });
+
+  it("the two-factor client marker carries its options (plan 9f)", () => {
+    const onTwoFactorRedirect = () => {};
+    expect(twoFactorClient({ onTwoFactorRedirect })).toEqual({
+      kind: "tempo-auth-compat-client-plugin",
+      id: "two-factor",
+      options: { onTwoFactorRedirect },
+    });
   });
 });
 

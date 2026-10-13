@@ -4,4 +4,10 @@
 export type * from "../types.js";
 export { CLIENT_SESSION_KEYS, CLIENT_USER_KEYS, createAuthClient } from "./create-auth-client.js";
 export { expoClient } from "./expo.js";
-export { emailOTPClient, magicLinkClient, organizationClient, passkeyClient } from "./plugins.js";
+export {
+  emailOTPClient,
+  magicLinkClient,
+  organizationClient,
+  passkeyClient,
+  twoFactorClient,
+} from "./plugins.js";
