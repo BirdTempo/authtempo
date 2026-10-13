@@ -25,6 +25,8 @@ app's code inside the engine's open transaction, so the app's hook decides:
 a before hook that queries this client with `max: 1` hangs the request until
 the pool times out. If your own code does this, in a hook or elsewhere, use
 `max: 2` or more, or a second client.
+`test/hook-one-connection.test.ts` pins the hang with a pool of one and
+the pass with a pool of two (plan 9h).
 
 The adapter has not yet run on workerd through Hyperdrive in this repo.
 Its first Workers consumer proves that run.
