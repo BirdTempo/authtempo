@@ -30,6 +30,23 @@ export type ApiTokenSummaryJSON = Omit<
   createdAt: string;
 };
 
+/** The password sign-in's answer for a user with the second factor on (plan 9f): no session yet. */
+export interface TwoFactorChallengeJSON {
+  twoFactor: { challenge: string; expiresAt: string };
+}
+export interface TotpStatusJSON {
+  enabled: boolean;
+  enabledAt: string | null;
+  backupCodesLeft: number;
+  trustedDevices: number;
+}
+export type TwoFactorSessionJSON = { token: string } & PublicSession & {
+    next: string;
+    backupCodesLeft: number;
+    /** Set when the verify asked for it. A native app sends `token` as `trustDevice` at the next sign-in. */
+    trustDevice: { token: string; expiresAt: string } | null;
+  };
+
 export interface ClientOptions extends TransportOptions {
   /** The browser WebAuthn seam. Default `browserWebAuthn()`. Tests inject a soft one. */
   webauthn?: BrowserWebAuthn | undefined;
@@ -73,10 +90,17 @@ export interface Client {
       password: string;
       name?: string | undefined;
     }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    /**
+     * A session, or `{ twoFactor }` for a user with the second factor on
+     * (plan 9f): then call `totp.verify` with the challenge. `trustDevice` is
+     * a native app's token from an earlier verify; a browser sends the cookie.
+     */
     signIn(input: {
       email: string;
       password: string;
-    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+      trustDevice?: string | undefined;
+      next?: string | undefined;
+    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
     /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
     resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
     /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
@@ -182,6 +206,29 @@ export interface Client {
       ClientResult<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>
     >;
   };
+  /**
+   * The TOTP second factor (plan 9f). Every call but `verify` needs a
+   * session; a token answers `unauthorized`. Every call answers `not_found`
+   * when the server runs without `password` or with `totp: false`.
+   */
+  totp: {
+    /** The secret, the key URI, and the backup codes, each answered once. */
+    setup(): Promise<ClientResult<{ secret: string; uri: string; backupCodes: string[] }>>;
+    enable(input: { code: string }): Promise<ClientResult<TotpStatusJSON>>;
+    verify(input: {
+      challenge: string;
+      code?: string | undefined;
+      backupCode?: string | undefined;
+      trustDevice?: boolean | undefined;
+    }): Promise<ClientResult<TwoFactorSessionJSON>>;
+    /** `code` is a current code or a backup code. */
+    disable(input: { code: string }): Promise<ClientResult<{ ok: true }>>;
+    regenerateBackupCodes(input: {
+      code: string;
+    }): Promise<ClientResult<{ backupCodes: string[] }>>;
+    status(): Promise<ClientResult<TotpStatusJSON>>;
+    revokeTrustedDevices(): Promise<ClientResult<{ ok: true }>>;
+  };
   errors: typeof ERRORS;
 }
 
@@ -254,8 +301,16 @@ export function createClient(options: ClientOptions): Client {
           ...rest,
           ...(name !== undefined ? { name } : {}),
         }),
-      signIn: (input) =>
-        call<{ token: string } & PublicSession>("POST", "/password/sign-in", input),
+      signIn: ({ trustDevice, next, ...rest }) =>
+        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
+          "POST",
+          "/password/sign-in",
+          {
+            ...rest,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+            ...(next !== undefined ? { next } : {}),
+          },
+        ),
       resendVerification: (input) => call<{ sent: true }>("POST", "/password/verify/resend", input),
       verifyEmail: (input) => call<{ verified: true }>("POST", "/password/verify", input),
       requestReset: ({ next, ...rest }) =>
@@ -367,6 +422,23 @@ export function createClient(options: ClientOptions): Client {
           "GET",
           "/tokens/current",
         ),
+    },
+    totp: {
+      setup: () =>
+        call<{ secret: string; uri: string; backupCodes: string[] }>("POST", "/totp/setup", {}),
+      enable: (input) => call<TotpStatusJSON>("POST", "/totp/enable", input),
+      verify: ({ code, backupCode, trustDevice, ...rest }) =>
+        call<TwoFactorSessionJSON>("POST", "/totp/verify", {
+          ...rest,
+          ...(code !== undefined ? { code } : {}),
+          ...(backupCode !== undefined ? { backupCode } : {}),
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
+      disable: (input) => call<{ ok: true }>("POST", "/totp/disable", input),
+      regenerateBackupCodes: (input) =>
+        call<{ backupCodes: string[] }>("POST", "/totp/backup-codes", input),
+      status: () => call<TotpStatusJSON>("GET", "/totp"),
+      revokeTrustedDevices: () => call<{ ok: true }>("POST", "/totp/devices/revoke", {}),
     },
     errors: ERRORS,
   };

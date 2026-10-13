@@ -328,7 +328,12 @@ export function createAuthClient(options: ClientOptions = {}): AuthClient {
         if (rememberMe === false)
           return notSupported("core takes no rememberMe: every session lives session.expiresIn");
         const r = await run(
-          (c) => c.password.signIn({ email, password }),
+          async (c): Promise<ClientResult<{ token: string } & PublicSession>> => {
+            const s = await c.password.signIn({ email, password });
+            // The server sets totp: false until Task 7 of plan 9f, and Task 8 maps the challenge.
+            if (s.ok && !("token" in s.value)) return { ok: false, code: "unexpected", status: 0 };
+            return s as ClientResult<{ token: string } & PublicSession>;
+          },
           (v) => {
             keepToken(v.token);
             return { redirect: false, token: v.token, user: toClientUser(v.user) };

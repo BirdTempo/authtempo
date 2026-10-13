@@ -8,6 +8,9 @@ export {
   type MemberJSON,
   type OrganizationJSON,
   type PasskeySummaryJSON,
+  type TotpStatusJSON,
+  type TwoFactorChallengeJSON,
+  type TwoFactorSessionJSON,
 } from "./client.js";
 export type { ClientCode, ClientFailure, ClientResult } from "./result.js";
 export { type Call, createTransport, type TransportOptions } from "./transport.js";
