@@ -78,7 +78,8 @@ export interface VerifierOptions {
   cache?: { apiTokenSeconds?: number | undefined } | undefined;
   /** The deadline of each call to the auth app, 100 to 30000 ms. Default 5000. */
   timeoutMs?: number | undefined;
-  fetch?: typeof fetch | undefined;
+  /** The fetch of the calls to the auth app. Any function of a request and its init that answers a Response. */
+  fetch?: ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) | undefined;
   /** Tests inject a clock. */
   clock?: { now(): Date } | undefined;
 }

@@ -12,7 +12,8 @@ import { assertFreshBuild, PKG, REPO, runBin } from "./support/bin.js";
 
 /** The lines that each stack's own test prints when it passes. */
 const PASSES: Readonly<Record<Stack, readonly string[]>> = {
-  "workers-d1": ["2 passed"],
+  // The tests line with its label: a bare count also matches the files line (plan 11d Task 14 review, L3).
+  "workers-d1": ["Tests  3 passed (3)"],
   "workers-postgres": ["2 passed", "--dry-run: exiting now."],
   node: ["node-e2e: PASS", "bun-e2e: PASS"],
   bun: ["node-e2e: PASS", "bun-e2e: PASS"],
@@ -55,7 +56,9 @@ for (const stack of STACKS)
       const typecheck = script(dir, "typecheck");
       expect(typecheck.status, `${typecheck.stdout}${typecheck.stderr}`).toBe(0);
       const test = script(dir, "test");
-      const out = `${test.stdout}${test.stderr}`;
+      // Without its colour codes, so a pass line can name its label (vitest colours "Tests").
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: the ANSI escape is the match.
+      const out = `${test.stdout}${test.stderr}`.replace(/\x1b\[[0-9;]*m/g, "");
       expect(test.status, out).toBe(0);
       for (const line of PASSES[stack]) expect(out).toContain(line);
       passed.push(dir);

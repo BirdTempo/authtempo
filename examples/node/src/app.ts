@@ -59,9 +59,7 @@ export function createApp(options: AppOptions): {
     audience: options.baseURL,
     // A sign-out ends access at once: one live check per request.
     checkSessionEnd: true,
-    // Bun's type of fetch adds `preconnect`, which a handler has no use for: hence the cast.
-    fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
-      auth.handle(new Request(input, init))) as typeof fetch,
+    fetch: (input, init) => auth.handle(new Request(input, init)),
   });
   return {
     auth,
@@ -79,9 +77,15 @@ export function createApp(options: AppOptions): {
       }
       if (url.pathname === "/files") {
         const r = await verifier.verifyRequest(request);
-        // The auth app did not answer: try again later, not "sign in again".
-        if (!r.ok) return Response.json({ error: r.code }, { status: 503 });
-        if (r.value?.kind !== "session-jwt") return verifier.unauthorized();
+        // The auth app limited the live checks: 429. It did not answer: try again later, not "sign in again".
+        if (!r.ok)
+          return Response.json(
+            { error: r.code },
+            { status: r.code === "rate_limited" ? 429 : 503 },
+          );
+        // A refused token gets error="invalid_token" (RFC 6750 section 3.1); no token, the plain challenge.
+        if (r.value?.kind !== "session-jwt")
+          return verifier.unauthorized({ invalidToken: request.headers.has("authorization") });
         return Response.json({ owner: r.value.email });
       }
       return new Response("not found", { status: 404 });

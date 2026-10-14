@@ -14,12 +14,19 @@ export const TIMEOUT_MIN_MS = 100;
 export const TIMEOUT_MAX_MS = 30_000;
 
 /**
+ * A fetch as the verifier calls it: one request, one response. Not `typeof fetch`: Bun's type
+ * adds `preconnect`, which a handler such as `(input, init) => auth.handle(...)` has no use for,
+ * and a cast in the app would also hide a wrong return type (plan 11d Task 14 review, M1).
+ */
+export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/**
  * The fetch that every call of the verifier goes through.
  * A 3xx answer comes back with its status and no body, so the reader answers `unexpected` with that status.
  * A browser-like runtime gives an `opaqueredirect` answer under `redirect: "manual"`.
  * That answer has no status to pass on, so it rejects, and the reader answers `network` with status 0.
  */
-export function ownedFetch(fetchFn: typeof fetch, timeoutMs: number): typeof fetch {
+export function ownedFetch(fetchFn: FetchLike, timeoutMs: number): FetchLike {
   return async (input, init) => {
     const res = await fetchFn(input, {
       ...init,

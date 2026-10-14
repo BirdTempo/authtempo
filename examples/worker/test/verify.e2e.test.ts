@@ -19,7 +19,26 @@ it("verifies a session JWT at /notes on Workers with the live check, and refuses
   expect(none.status).toBe(401);
   expect(none.headers.get("www-authenticate")).toBe("Bearer");
   await client.signOut();
-  expect((await notes(minted.value.token)).status).toBe(401);
+  const refused = await notes(minted.value.token);
+  expect(refused.status).toBe(401);
+  // A request that held a refused token gets error="invalid_token" (RFC 6750 section 3.1).
+  expect(refused.headers.get("www-authenticate")).toContain('error="invalid_token"');
+});
+
+it("answers 429 at /notes when the auth app limits the live checks of one session", async () => {
+  const client = await signIn("busy@example.com");
+  const minted = await client.jwt.token();
+  if (!minted.ok) throw new Error(minted.code);
+  let res: Response | null = null;
+  // Core allows 120 live checks a minute for one session (LIVE_PER_SESSION).
+  for (let i = 0; i < 130; i++) {
+    res = await SELF.fetch(`${BASE}/notes`, {
+      headers: { authorization: `Bearer ${minted.value.token}` },
+    });
+    if (res.status !== 200) break;
+  }
+  expect(res?.status).toBe(429);
+  expect(await res?.json()).toEqual({ error: "rate_limited" });
 });
 
 it("verifies the session JWT in the Workers runtime with a verifier of its own, and answers null to a changed token", async () => {

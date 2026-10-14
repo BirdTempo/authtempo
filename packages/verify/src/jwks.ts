@@ -1,5 +1,6 @@
 import type { ClientFailure } from "@authtempo/client";
 import { JWKS_RETIRED_MAX, type PublicJwk } from "@authtempo/core/credentials";
+import type { FetchLike } from "./fetch.js";
 
 /** The key set lives this long when its answer names no max-age. Core sends 300. */
 export const KEY_SET_DEFAULT_SECONDS = 300;
@@ -105,7 +106,7 @@ export function publicKeyOf(entry: unknown): PublicJwk | null {
  */
 export function createKeyCache(input: {
   url: string;
-  fetch: typeof fetch;
+  fetch: FetchLike;
   now: () => number;
 }): KeyCache {
   let keys: Map<string, PublicJwk> | null = null;
