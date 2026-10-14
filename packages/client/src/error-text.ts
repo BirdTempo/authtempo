@@ -22,7 +22,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   invalid_body: "The request has a field that is missing or wrong.",
   invalid_token: "The link or the token is not valid. Ask for a new one.",
   token_expired: "The link or the token expired. Ask for a new one.",
-  oauth_denied: "The sign-in with the provider was cancelled or refused.",
+  oauth_denied:
+    "The sign-in with the provider was cancelled or refused. Try again, or use another sign-in method.",
   oauth_failed: "The sign-in with the provider failed. Try again.",
   email_required: "The provider gave no email address. Use another sign-in method.",
   passkey_failed: "The passkey was not accepted. Try again, or use another method.",
@@ -31,7 +32,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   origin_not_trusted: "The server does not accept requests from this app.",
   not_found: "The server does not have this feature.",
   rate_limited: "There were too many tries. Wait a few minutes, then try again.",
-  email_taken_unverified: "An account with this email address waits for its verification.",
+  email_taken_unverified:
+    "An account with this email address waits for its verification. Sign in with an email link or code.",
   forbidden_rank: "Your role does not allow this action.",
   slug_reserved: "This name is reserved. Choose another name.",
   slug_taken: "Another organization has this name. Choose another name.",
@@ -49,17 +51,18 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   organization_limit: "You are a member of the maximum number of organizations.",
   member_limit: "The organization has the maximum number of members.",
   invitation_limit: "The organization has the maximum number of open invitations.",
-  invalid_code: "The code is wrong or expired.",
+  invalid_code: "The code is wrong or expired. Examine the code, or ask for a new one.",
   too_many_attempts: "There were too many wrong codes. Ask for a new code.",
   totp_enabled: "The second factor is on already.",
   totp_not_enabled: "The second factor is not on.",
   second_factor_last_method:
-    "This passkey is your last second factor. Turn off the passkey method first.",
+    "This is your last passkey, and passkeys are a second factor. Add another passkey, or turn off the passkey method.",
   sign_up_closed: "The app does not accept a new account for this email address.",
   captcha_required: "Complete the captcha, then try again.",
   captcha_failed: "The captcha check failed. Try again.",
   captcha_unavailable: "The captcha check is not available now. Try again later.",
-  breach_check_unavailable: "The password check is not available now. Try again later.",
+  breach_check_unavailable:
+    "The password check is not available now. Wait a few minutes, then start again. A used email code does not work again.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {
@@ -71,7 +74,7 @@ const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {
   invalid_scope: "The app asked for a scope that the provider does not have.",
   invalid_target: "The app asked for a resource that the provider does not serve.",
   unsupported_response_type: "The provider does not support this kind of request.",
-  access_denied: "The person did not allow the app.",
+  access_denied: "You did not allow the app.",
   login_required: "You must sign in first.",
   consent_required: "You must allow the app first.",
   invalid_redirect_uri: "The return address of the app is not valid.",
@@ -83,9 +86,10 @@ const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {
 
 const SDK_TEXT: Readonly<Record<SdkCode, string>> = {
   network: "The server did not answer. Examine the connection, then try again.",
-  unexpected: "The server sent an answer that the app cannot read.",
+  unexpected: "The server sent an answer that the app cannot read. Try again later.",
   cancelled: "The action was cancelled.",
-  redirect_mismatch: "The browser came back to an address that this sign-in did not start.",
+  redirect_mismatch:
+    "The browser came back to an address that this sign-in did not start. Start the sign-in again.",
 };
 
 /** Every text, by table. The site check reads all three. */

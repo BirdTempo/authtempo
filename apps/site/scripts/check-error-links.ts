@@ -17,11 +17,21 @@ export interface ErrorLink {
 export function errorLinks(): ErrorLink[] {
   const out: ErrorLink[] = [];
   for (const [code, text] of Object.entries(ERROR_TEXT.core))
-    out.push({ table: "core", code, url: errorDocsURL(code as never), text });
+    out.push({
+      table: "core",
+      code,
+      url: errorDocsURL(code as keyof typeof ERROR_TEXT.core),
+      text,
+    });
   for (const [code, text] of Object.entries(ERROR_TEXT.oauth))
-    out.push({ table: "oauth", code, url: errorDocsURL(code as never, "oauth"), text });
+    out.push({
+      table: "oauth",
+      code,
+      url: errorDocsURL(code as keyof typeof ERROR_TEXT.oauth, "oauth"),
+      text,
+    });
   for (const [code, text] of Object.entries(ERROR_TEXT.sdk))
-    out.push({ table: "sdk", code, url: errorDocsURL(code as never), text });
+    out.push({ table: "sdk", code, url: errorDocsURL(code as keyof typeof ERROR_TEXT.sdk), text });
   return out;
 }
 
