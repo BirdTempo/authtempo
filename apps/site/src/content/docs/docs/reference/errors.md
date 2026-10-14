@@ -330,6 +330,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes). |
 
+<h3 id="second_factor_last_method"><code>second_factor_last_method</code> 409</h3>
+
+- **Meaning:** The passkey is the last passkey of the user, and the passkey is a second-factor method.
+- **Do:** Turn the passkey method off first, or register another passkey.
+
+| Routes |
+| --- |
+| [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete). |
+
 ## OAuth codes
 
 `OAUTH_ERRORS` of `@authtempo/core` holds these codes. The provider routes answer them, because an OAuth client reads these strings. `invalid_token` and `rate_limited` are in both tables, so an OAuth anchor has the prefix `oauth-`.

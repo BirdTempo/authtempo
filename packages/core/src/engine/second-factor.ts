@@ -25,6 +25,13 @@ export const BACKUP_CODES_VERSION = 2;
  */
 const ROUNDS = 5;
 
+// Per 15 minutes, for the password check of the TOTP setup and of every
+// method's enable and disable (plan 9h, owner decision 3a; plan 12c). Its own
+// key, not the sign-in's `password:ip` and `password:email`: a stolen session
+// that guesses here must not hold the owner's password sign-in at
+// rate_limited. 5 is half the sign-in's per-address budget.
+export const SETUP_PER_USER = { seconds: 900, max: 5 };
+
 /** A write time strictly after `than`, so a compare-and-set on `updatedAt` sees every write. */
 export function later(now: Date, than: Date): Date {
   return new Date(Math.max(now.getTime(), than.getTime() + 1));
@@ -162,6 +169,19 @@ export class FactorRaceError extends Error {
   }
 }
 
+/**
+ * Thrown inside a transaction when the first method has no backup codes: a
+ * TOTP setup made while another method was on, and that method went off
+ * before the enable (plan 12c). The throw undoes the transaction; the caller
+ * answers `totp_not_enabled`, and the person runs the setup again.
+ */
+export class NoBackupCodesError extends Error {
+  constructor() {
+    super("authtempo: the first method has no backup codes");
+    this.name = "NoBackupCodesError";
+  }
+}
+
 export interface AddedMethod {
   /** True when this call wrote the row: the first method. */
   first: boolean;
@@ -192,6 +212,9 @@ export async function addMethod(
 ): Promise<AddedMethod> {
   let current = await factorRow(tx, input.userId);
   if (!current) {
+    // A factor with no backup codes has no last resort. The row is never
+    // written so.
+    if (input.first.backupCodes.length === 0) throw new NoBackupCodesError();
     const row = await tx.create("secondFactor", {
       id: input.first.id,
       userId: input.userId,

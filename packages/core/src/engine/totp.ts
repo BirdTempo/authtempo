@@ -17,14 +17,17 @@ import { hookGuard } from "./hooks.js";
 import { checkUserPassword } from "./password.js";
 import {
   addMethod,
+  challengeMethods,
   challengeOrigin,
   disableSecondFactor,
   FactorRaceError,
   factorRow,
   later,
+  NoBackupCodesError,
   newBackupCodes,
   removeMethod,
   replaceBackupCodes,
+  SETUP_PER_USER,
   spendBackupCode,
   TRUST_PREFIX,
   TRUST_TOKEN_RE,
@@ -32,6 +35,7 @@ import {
   type TwoFactorPending,
   writeChallenge,
 } from "./second-factor.js";
+import { acceptPasskey } from "./second-factor-methods.js";
 import {
   endedList,
   openSession,
@@ -78,12 +82,6 @@ const CODE_PER_USER = { seconds: 900, max: 10 };
 // With 30 a day: one account per day about 9 x 10^-5, per year about 3.2 %,
 // the same order as the email code's daily figure (spec section 9).
 const CODE_PER_USER_DAY = { seconds: 86_400, max: 30 };
-// Per 15 minutes, for the setup's password check (plan 9h, owner decision
-// 3a). Its own key, not the sign-in's `password:ip` and `password:email`:
-// a stolen session that guesses here must not hold the owner's password
-// sign-in at rate_limited. 5 is half the sign-in's per-address budget; the
-// setup needs the password once.
-const SETUP_PER_USER = { seconds: 900, max: 5 };
 /**
  * One code check of the user: true when both per-user keys allow it. Every
  * operation that compares a code or a backup code calls this first.
@@ -345,6 +343,10 @@ export async function enableTotp(
       return ok({ first: added.first });
     });
   } catch (err) {
+    // The setup ran while another method was on, so it made no backup codes,
+    // and that method went off since. The confirm is undone; a new setup
+    // makes the codes.
+    if (err instanceof NoBackupCodesError) return fail("totp_not_enabled");
     // A parallel first enable of another method won the unique `userId`, or
     // the row changed under every round. Caught here, outside: inside,
     // Postgres has already aborted the transaction. The person retries.
@@ -503,12 +505,29 @@ const VERIFY_PER_IP = { seconds: 900, max: 30 };
 
 export interface TwoFactorVerify {
   challenge: string;
-  /** A 6-digit code of the app. Exactly one of `code` and `backupCode`. */
+  /** A 6-digit code of the app. Exactly one of `code`, `backupCode`, and `passkey`. */
   code?: string | undefined;
   backupCode?: string | undefined;
+  /** A WebAuthn assertion over the options of `POST /second-factor/passkey/options` for this challenge (plan 12c). */
+  passkey?: unknown;
   /** True: write a trusted device and answer its token. */
   trustDevice?: boolean | undefined;
   ip: string | null;
+}
+
+/** The one proof of a verify (plan 12c). */
+type Proof =
+  | { method: "totp"; value: string }
+  | { method: "backup"; value: string }
+  | { method: "passkey"; value: unknown };
+
+/** The one proof of a verify, or null for none or for more than one. */
+function proofOf(input: TwoFactorVerify): Proof | null {
+  const proofs: Proof[] = [];
+  if (input.code !== undefined) proofs.push({ method: "totp", value: input.code });
+  if (input.backupCode !== undefined) proofs.push({ method: "backup", value: input.backupCode });
+  if (input.passkey !== undefined) proofs.push({ method: "passkey", value: input.passkey });
+  return proofs.length === 1 ? (proofs[0] ?? null) : null;
 }
 
 export interface TwoFactorSession {
@@ -622,8 +641,8 @@ export async function verifyTwoFactor(
   if (!(await config.limiter.allow(`totp-verify:ip:${input.ip ?? "unknown"}`, VERIFY_PER_IP)))
     return fail("rate_limited");
   if (!TWO_FACTOR_TOKEN_RE.test(input.challenge)) return fail("invalid_token");
-  const { code, backupCode } = input;
-  if ((code === undefined) === (backupCode === undefined)) return fail("invalid_body");
+  const proof = proofOf(input);
+  if (!proof) return fail("invalid_body");
   const now = config.clock.now();
   const challenge = await config.storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: await sha256Hex(input.challenge) },
@@ -635,30 +654,37 @@ export async function verifyTwoFactor(
       attemptsOf(challenge) >= CHALLENGE_MAX_ATTEMPTS ? "too_many_attempts" : "invalid_token",
     );
   if (challenge.expiresAt.getTime() <= now.getTime()) return fail("invalid_token");
+  const factor = await factorRow(config.storage, challenge.identifier);
+  if (!factor) return fail("invalid_token");
+  // The methods of this challenge, read from the current row (plan 12c): a
+  // method that went off after the challenge no longer passes, and an email
+  // code never passes after a mailbox proof.
+  if (!challengeMethods(config, factor, challengeOrigin(challenge.data)).includes(proof.method))
+    return fail("invalid_body");
   // The bounds per user over all challenges (15 minutes and 24 hours), shared
   // with the enable, the disable, and the new backup codes. A capped challenge
   // spends only itself, so without this line each new sign-in gives five more
   // guesses. After the live check: an unknown, spent, or expired challenge
-  // costs the user nothing.
-  if (!(await codeCheckAllowed(config, challenge.identifier))) return fail("rate_limited");
-  const factor = await factorRow(config.storage, challenge.identifier);
-  if (!factor) return fail("invalid_token");
+  // costs the user nothing. A passkey assertion is no guess: it counts on the
+  // challenge only (plan 12c).
+  if (proof.method !== "passkey" && !(await codeCheckAllowed(config, challenge.identifier)))
+    return fail("rate_limited");
+  const miss = async (): Promise<Result<TwoFactorSession>> =>
+    fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
   let backupCodesLeft = factor.backupCodes.length;
-  if (code !== undefined) {
+  if (proof.method === "totp") {
     const row = await enabledRow(config.storage, challenge.identifier);
-    if (!row || !(await acceptCode(config, row, code, now)))
-      return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
-  } else {
+    if (!row || !(await acceptCode(config, row, proof.value, now))) return miss();
+  } else if (proof.method === "backup") {
     // The spend commits here, before the session transaction. So a backup
     // code is spent also when that transaction refuses: a spend of the
     // challenge that matches zero rows (a reset or a change ran), or a
     // `session.beforeCreate` hook that refuses (hookGuard). The person then
     // uses another backup code.
-    const left = await spendBackupCode(config, factor, backupCode ?? "", now);
-    if (left === null)
-      return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
+    const left = await spendBackupCode(config, factor, proof.value, now);
+    if (left === null) return miss();
     backupCodesLeft = left;
-  }
+  } else if (!(await acceptPasskey(config, challenge, proof.value))) return miss();
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: challenge.identifier },
   ]);

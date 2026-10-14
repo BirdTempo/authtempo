@@ -59,6 +59,8 @@ export const BETTER_AUTH_CODES = {
   // TOTP_ALREADY_ENABLED is authtempo's own name.
   totp_enabled: "TOTP_ALREADY_ENABLED",
   totp_not_enabled: "TOTP_NOT_ENABLED",
+  // Plan 12c. Better Auth has no passkey second factor, so the name is authtempo's own.
+  second_factor_last_method: "SECOND_FACTOR_LAST_METHOD",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

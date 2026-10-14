@@ -42,6 +42,9 @@ export const ERRORS = {
   // plan 9f: the TOTP second factor
   totp_enabled: 409,
   totp_not_enabled: 400,
+  // plan 12c: the last passkey of a user whose passkey is a second-factor
+  // method stays; the person turns the method off first.
+  second_factor_last_method: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

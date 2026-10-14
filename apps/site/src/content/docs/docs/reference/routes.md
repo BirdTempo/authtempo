@@ -163,7 +163,7 @@ These routes exist when the config sets `passkey`.
 | Needs | A session |
 | Input | JSON `{ id }` |
 | Answer | `{ ok: true }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`second_factor_last_method`](/docs/reference/errors/#second_factor_last_method), [`conflict`](/docs/reference/errors/#conflict) |
 
 ## Passwords
 
@@ -334,6 +334,33 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Input | A form `challenge`, `code` or `backupCode`, and `trustDevice=1` |
 | Answer | 302 to `next` with the cookies; back to the form on a wrong code |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
+
+<h3 id="post-second-factor-passkey-enable"><code>POST /second-factor/passkey/enable</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session, a verified address, and the `passkey` config |
+| Input | JSON `{ password, response }`, where `response` is an assertion over the options of [`POST /passkey/authenticate/options`](/docs/reference/routes/#post-passkey-authenticate-options) by a passkey of the user |
+| Answer | `{ methods, backupCodes }`. The codes come once, with the first method; else the list is empty. The first method ends every other session. |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`not_found`](/docs/reference/errors/#not_found) |
+
+<h3 id="post-second-factor-passkey-options"><code>POST /second-factor/passkey/options</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A live challenge that offers `passkey`, and the `passkey` config |
+| Input | JSON `{ challenge }` |
+| Answer | WebAuthn request options with the user's passkeys in `allowCredentials`, bound to this challenge |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`not_found`](/docs/reference/errors/#not_found) |
+
+<h3 id="post-second-factor-disable"><code>POST /second-factor/disable</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session |
+| Input | JSON `{ method, password }`, where `method` is `passkey` or `email` |
+| Answer | `{ ok: true, methods }`, the methods left. With none left, the factor is off and the trust cookie is cleared. |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## Email codes
 

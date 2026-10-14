@@ -58,6 +58,12 @@ export interface RegisteredPasskey {
 export interface AuthenticationOptionsInput {
   rpID: string;
   challenge: Uint8Array;
+  /**
+   * The credentials that may answer (plan 12c): the user's passkeys for a
+   * second-factor ceremony. Absent or empty for a sign-in, which takes any
+   * discoverable credential.
+   */
+  allowCredentials?: { id: string; transports: string[] | null }[];
 }
 
 export interface VerifyAuthenticationInput {
@@ -135,7 +141,11 @@ export function createSimpleWebAuthnSeam(): WebAuthnSeam {
         rpID: input.rpID,
         challenge: input.challenge as Uint8Array<ArrayBuffer>,
         userVerification: "required",
-        allowCredentials: [],
+        // The same mapping as `excludeCredentials` of the registration.
+        allowCredentials: (input.allowCredentials ?? []).map((c) => ({
+          id: c.id,
+          ...(c.transports ? { transports: c.transports } : {}),
+        })),
       });
     },
     async verifyAuthentication(input) {

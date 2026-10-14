@@ -1,13 +1,36 @@
 import { describe, expect, it } from "vitest";
 import {
+  passkeyAuthenticationOptions,
+  passkeyRegistrationOptions,
+  verifyPasskeyRegistration,
+} from "../src/engine/passkeys.js";
+import { passwordSignIn } from "../src/engine/password.js";
+import { factorRow } from "../src/engine/second-factor.js";
+import {
+  disableMethod,
+  enablePasskeyMethod,
+  passkeyChallengeOptions,
+} from "../src/engine/second-factor-methods.js";
+import {
   disableTotp,
+  enableTotp,
   regenerateBackupCodesWithCode,
   setupTotp,
   totpStatus,
+  verifyTwoFactor,
 } from "../src/engine/totp.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
-import { normalizeBackupCode } from "../src/primitives/totp.js";
-import { enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
+import { base32Decode, normalizeBackupCode } from "../src/primitives/totp.js";
+import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
+import {
+  type Auth,
+  codeNow,
+  EMAIL,
+  enrolled,
+  PASSWORD,
+  totpAuth,
+  verifiedSession,
+} from "./totp-helpers.js";
 
 /** A backup code of 23 characters of core's alphabet, shown as 5-5-5-4-4. */
 const GROUPED =
@@ -114,5 +137,275 @@ describe("the factor row (plan 12c)", () => {
       code: "totp_not_enabled",
     });
     expect(await auth.storage.findMany("totp", [])).toEqual([before]);
+  });
+});
+
+const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
+
+/** A verified user with a password and one registered passkey. */
+async function withPasskey(auth: Auth, email = EMAIL) {
+  const session = await verifiedSession(auth, email);
+  const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
+  const options = await passkeyRegistrationOptions(auth.config, { user: session.user });
+  if (!options.ok) throw new Error(options.code);
+  const registered = await verifyPasskeyRegistration(auth.config, {
+    user: session.user,
+    response: await soft.register(
+      options.value.challenge,
+      new TextEncoder().encode(session.user.id),
+    ),
+  });
+  if (!registered.ok) throw new Error(registered.code);
+  return { session, soft };
+}
+
+/** A sign-in assertion of `soft`: the enable's proof that the person holds the passkey now. */
+async function signInAssertion(auth: Auth, soft: SoftAuthenticator) {
+  const options = await passkeyAuthenticationOptions(auth.config, { ip: null });
+  if (!options.ok) throw new Error(options.code);
+  return soft.authenticate(options.value.challenge);
+}
+
+describe("a passkey as a second-factor method (plan 12c)", () => {
+  it("turns the method on with the password and a sign-in assertion; as the first method it makes the codes and ends the other sessions", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    const other = await verifiedSession(auth);
+    const r = await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    if (!r.ok) throw new Error(r.code);
+    expect(r.value.methods).toEqual(["passkey"]);
+    expect(r.value.backupCodes).toHaveLength(10);
+    for (const c of r.value.backupCodes) expect(c).toMatch(GROUPED);
+    expect(
+      await auth.storage.findOne("session", [{ field: "id", op: "eq", value: other.session.id }]),
+    ).toBeNull();
+    expect(
+      await auth.storage.findOne("session", [{ field: "id", op: "eq", value: session.session.id }]),
+    ).not.toBeNull();
+  });
+
+  it("refuses a wrong password and an assertion of another user's passkey, and writes no row", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    expect(
+      await enablePasskeyMethod(auth.config, {
+        session,
+        password: "not the password",
+        response: await signInAssertion(auth, soft),
+      }),
+    ).toMatchObject({ code: "invalid_credentials" });
+    // Bea holds a passkey of her own, so only the owner check of the
+    // assertion refuses Ada's passkey here, not the count of Bea's passkeys.
+    const { session: other } = await withPasskey(auth, "bea@example.com");
+    expect(
+      await enablePasskeyMethod(auth.config, {
+        session: other,
+        password: PASSWORD,
+        response: await signInAssertion(auth, soft),
+      }),
+    ).toMatchObject({ code: "passkey_failed" });
+    expect(await auth.storage.findMany("secondFactor", [])).toEqual([]);
+  });
+
+  it("lists passkey first at the sign-in, and the verify with an assertion of the bound options opens the session", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    const on = await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    if (!on.ok) throw new Error(on.code);
+    const first = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!first.ok || !("twoFactor" in first.value)) throw new Error("no challenge");
+    expect(first.value.twoFactor.methods).toEqual(["passkey", "backup"]);
+    const options = await passkeyChallengeOptions(auth.config, {
+      challenge: first.value.twoFactor.challenge,
+      ip: null,
+    });
+    if (!options.ok) throw new Error(options.code);
+    expect(options.value.allowCredentials?.map((c) => c.id)).toEqual([soft.credentialId]);
+    expect(options.value.userVerification).toBe("required");
+    const v = await verifyTwoFactor(auth.config, {
+      challenge: first.value.twoFactor.challenge,
+      passkey: await soft.authenticate(options.value.challenge),
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+  });
+
+  it("refuses at one challenge an assertion of another challenge's options, and counts it on the challenge", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    const challengeOf = async () => {
+      const r = await passwordSignIn(auth.config, {
+        email: EMAIL,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok || !("twoFactor" in r.value)) throw new Error("no challenge");
+      return r.value.twoFactor.challenge;
+    };
+    const a = await challengeOf();
+    const b = await challengeOf();
+    const options = await passkeyChallengeOptions(auth.config, { challenge: a, ip: null });
+    if (!options.ok) throw new Error(options.code);
+    const v = await verifyTwoFactor(auth.config, {
+      challenge: b,
+      passkey: await soft.authenticate(options.value.challenge),
+      ip: null,
+    });
+    expect(v).toMatchObject({ ok: false, code: "invalid_code" });
+    const rows = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "two-factor" },
+    ]);
+    expect(rows.map((r) => (r.data as { attempts?: number } | null)?.attempts).sort()).toEqual([
+      0, 1,
+    ]);
+  });
+
+  it("refuses a proof of a method that the challenge does not offer with invalid_body, and counts nothing", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    const first = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!first.ok || !("twoFactor" in first.value)) throw new Error("no challenge");
+    // The TOTP method is off for this user, so a 6-digit code is no proof here.
+    expect(
+      await verifyTwoFactor(auth.config, {
+        challenge: first.value.twoFactor.challenge,
+        code: "123456",
+        ip: null,
+      }),
+    ).toMatchObject({ ok: false, code: "invalid_body" });
+    const [row] = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "two-factor" },
+    ]);
+    expect((row?.data as { attempts?: number } | null)?.attempts).toBe(0);
+  });
+
+  it("disables the method with the password; the last method turns the factor off", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    expect(
+      await disableMethod(auth.config, {
+        user: session.user,
+        method: "passkey",
+        password: "not the password",
+      }),
+    ).toMatchObject({ code: "invalid_credentials" });
+    expect(
+      await disableMethod(auth.config, {
+        user: session.user,
+        method: "passkey",
+        password: PASSWORD,
+      }),
+    ).toEqual({ ok: true, value: { ok: true, methods: [] } });
+    expect(await auth.storage.findMany("secondFactor", [])).toEqual([]);
+    expect(
+      await disableMethod(auth.config, {
+        user: session.user,
+        method: "passkey",
+        password: PASSWORD,
+      }),
+    ).toMatchObject({ code: "totp_not_enabled" });
+  });
+});
+
+describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 1)", () => {
+  /** A user with the passkey method on, and the factor row that its enable wrote. */
+  async function passkeyOn(auth: Auth) {
+    const { session, soft } = await withPasskey(auth);
+    const on = await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    if (!on.ok) throw new Error(on.code);
+    const factor = await factorRow(auth.storage, session.user.id);
+    if (!factor) throw new Error("no factor row");
+    return { session, factor };
+  }
+
+  it("answers no backup codes at the TOTP setup when the passkey method is on, and the enable keeps the factor's list", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, factor } = await passkeyOn(auth);
+    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    if (!setup.ok) throw new Error(setup.code);
+    expect(setup.value.backupCodes).toEqual([]);
+    const enabled = await enableTotp(auth.config, {
+      session,
+      code: await codeNow(auth, base32Decode(setup.value.secret)),
+    });
+    if (!enabled.ok) throw new Error(enabled.code);
+    expect(enabled.value.methods).toEqual(["passkey", "totp"]);
+    const after = await factorRow(auth.storage, session.user.id);
+    expect(after?.id).toBe(factor.id);
+    expect(after?.backupCodes).toEqual(factor.backupCodes);
+  });
+
+  it("refuses the TOTP enable with totp_not_enabled when the passkey method went off after the setup, and writes no factor row with no backup codes", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session } = await passkeyOn(auth);
+    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    if (!setup.ok) throw new Error(setup.code);
+    expect(setup.value.backupCodes).toEqual([]);
+    const off = await disableMethod(auth.config, {
+      user: session.user,
+      method: "passkey",
+      password: PASSWORD,
+    });
+    expect(off).toEqual({ ok: true, value: { ok: true, methods: [] } });
+    expect(
+      await enableTotp(auth.config, {
+        session,
+        code: await codeNow(auth, base32Decode(setup.value.secret)),
+      }),
+    ).toEqual({ ok: false, code: "totp_not_enabled", status: 400 });
+    expect(await factorRow(auth.storage, session.user.id)).toBeNull();
+    const totp = await auth.storage.findOne("totp", [
+      { field: "userId", op: "eq", value: session.user.id },
+    ]);
+    expect(totp?.enabledAt).toBeNull();
+    // A new setup with the factor off makes the codes, and its enable writes them.
+    const again = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    if (!again.ok) throw new Error(again.code);
+    expect(again.value.backupCodes).toHaveLength(10);
+    auth.clock.advance(30_000);
+    const enabled = await enableTotp(auth.config, {
+      session,
+      code: await codeNow(auth, base32Decode(again.value.secret)),
+    });
+    if (!enabled.ok) throw new Error(enabled.code);
+    expect((await factorRow(auth.storage, session.user.id))?.backupCodes).toHaveLength(10);
   });
 });

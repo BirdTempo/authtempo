@@ -193,4 +193,25 @@ describe("simplewebauthn seam", () => {
       }),
     ).rejects.toThrow(/user verification/i);
   });
+
+  it("puts the given credentials in allowCredentials, with their transports (plan 12c)", async () => {
+    const options = await seam.authenticationOptions({
+      rpID: "example.com",
+      challenge: new Uint8Array(32),
+      allowCredentials: [
+        { id: "AQID", transports: ["internal"] },
+        { id: "BAUG", transports: null },
+      ],
+    });
+    expect(options.allowCredentials).toEqual([
+      { id: "AQID", type: "public-key", transports: ["internal"] },
+      { id: "BAUG", type: "public-key" },
+    ]);
+    expect(options.userVerification).toBe("required");
+    const none = await seam.authenticationOptions({
+      rpID: "example.com",
+      challenge: new Uint8Array(32),
+    });
+    expect(none.allowCredentials ?? []).toEqual([]);
+  });
 });

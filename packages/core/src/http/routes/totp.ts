@@ -32,6 +32,8 @@ const verifyBody = z.object({
   challenge: z.string().max(64),
   code: z.string().max(16).optional(),
   backupCode: z.string().max(64).optional(),
+  // Plan 12c: a WebAuthn assertion; the engine reads only the fields that the seam checks.
+  passkey: z.unknown().optional(),
   trustDevice: z.boolean().optional(),
 });
 /** The challenge page's form: the checkbox posts `trustDevice=1` when checked and nothing else. */

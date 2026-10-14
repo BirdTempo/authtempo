@@ -7,6 +7,7 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
+import { enablePasskeyMethod } from "../src/engine/second-factor-methods.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { passkeyRoutes } from "../src/http/routes/passkeys.js";
@@ -16,6 +17,7 @@ import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { get, makeAuth, post } from "./helpers.js";
+import { FAST, signUpAndVerify } from "./password-helpers.js";
 
 const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
 const ORIGIN = "https://app.example.com";
@@ -530,5 +532,50 @@ describe("passkey routes", () => {
     const auth = makeAuth();
     const handle = createRouter(auth.config, passkeyRoutes(auth.config));
     expect((await handle(post("/auth/passkey/authenticate/options", {}))).status).toBe(404);
+  });
+});
+
+describe("the last passkey of the passkey method (plan 12c)", () => {
+  it("refuses the delete of the last passkey while the passkey method is on, and one of two parallel deletes wins", async () => {
+    const auth = makeAuth({ passkey: RP, password: { hash: FAST } });
+    await signUpAndVerify(auth, "ada@example.com", "correct horse battery");
+    const user = await auth.storage.findOne("user", [
+      { field: "email", op: "eq", value: "ada@example.com" },
+    ]);
+    if (!user) throw new Error("no user");
+    const one = await registered(auth, user, "one");
+    const two = await registered(auth, user, "two");
+    const options = await passkeyAuthenticationOptions(auth.config, { ip: null });
+    if (!options.ok) throw new Error(options.code);
+    const session = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const resolved = await resolveSession(auth.config, session.token);
+    if (!resolved) throw new Error("no session");
+    const on = await enablePasskeyMethod(auth.config, {
+      session: resolved,
+      password: "correct horse battery",
+      response: await one.soft.authenticate(options.value.challenge),
+    });
+    if (!on.ok) throw new Error(on.code);
+    const answers = await Promise.all([
+      deletePasskey(auth.config, { user, id: one.summary.id }),
+      deletePasskey(auth.config, { user, id: two.summary.id }),
+    ]);
+    expect(answers.filter((a) => a.ok)).toHaveLength(1);
+    expect(answers.filter((a) => !a.ok).map((a) => (a.ok ? null : a.code))).toEqual([
+      expect.stringMatching(/^(second_factor_last_method|conflict)$/),
+    ]);
+    const left = await auth.storage.findMany("passkey", [
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    expect(left).toHaveLength(1);
+    expect(await deletePasskey(auth.config, { user, id: left[0]?.id ?? "" })).toEqual({
+      ok: false,
+      code: "second_factor_last_method",
+      status: 409,
+    });
   });
 });

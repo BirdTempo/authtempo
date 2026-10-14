@@ -69,6 +69,11 @@ export const ROUTES: readonly RouteEntry[] = Object.freeze([
   { method: "POST", path: "/totp/verify", feature: "totp" },
   { method: "GET", path: "/totp/challenge", feature: "totp" },
   { method: "POST", path: "/totp/challenge", feature: "totp" },
+  // Plan 12c: the second-factor methods. Mounted with `totp`; a passkey route
+  // answers not_found without the `passkey` config.
+  { method: "POST", path: "/second-factor/passkey/enable", feature: "totp" },
+  { method: "POST", path: "/second-factor/passkey/options", feature: "totp" },
+  { method: "POST", path: "/second-factor/disable", feature: "totp" },
   { method: "POST", path: "/otp/request", feature: "emailOtp" },
   { method: "POST", path: "/otp/verify", feature: "emailOtp" },
   { method: "POST", path: "/otp/reset/request", feature: "emailOtpReset" },
