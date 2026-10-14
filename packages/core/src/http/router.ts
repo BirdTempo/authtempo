@@ -67,7 +67,9 @@ function cors(res: Response, origin: string): Response {
  * with the same token, unless the handler set it, and a clear of the old
  * one. A dead token gets the clear only. One read of the session row, once
  * per browser. Every route core ships builds its own Response, so the
- * headers are mutable here.
+ * headers are mutable here. A route must not return a fetched Response or a
+ * `Response.redirect()` Response: their headers are immutable, and the
+ * append here throws.
  */
 async function moveLegacyCookie(
   config: ResolvedConfig,
