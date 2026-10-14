@@ -50,7 +50,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
 | `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
-| `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, and `api.jwt`. The OAuth provider needs it. |
+| `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
 | `operator` | object or `false` | off | Turns on `POST /operator/keys/rotate`. Refused without `jwtMint`. |
 | `hooks` | object | no hook | The groups `organization` and `session`. Any other group is refused. |

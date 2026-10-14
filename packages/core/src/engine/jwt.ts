@@ -398,3 +398,29 @@ export async function sessionLive(
   ]);
   return row !== null && row.expiresAt.getTime() > config.clock.now().getTime();
 }
+
+/**
+ * The live checks of one session (plan 11d). A resource server checks once
+ * per request of the person; 2 per second is a busy person. The key is the
+ * session, not the IP, because every check of one resource server comes from
+ * its one IP.
+ */
+export const LIVE_PER_SESSION = { seconds: 60, max: 120 };
+
+/**
+ * The check of `POST /token/live` (plan 11d, spec 20). The bearer must be a
+ * session JWT that `verifySessionJwt` accepts; any other value answers
+ * `unauthorized` and spends no count. Then one count on
+ * `token-live:session:<sessionId>`, and the answer of `sessionLive`.
+ */
+export async function checkSessionLive(
+  config: ResolvedConfig,
+  bearer: string | null,
+): Promise<Result<{ live: boolean }>> {
+  if (bearer === null) return fail("unauthorized");
+  const claims = await verifySessionJwt(config, bearer);
+  if (!claims) return fail("unauthorized");
+  if (!(await config.limiter.allow(`token-live:session:${claims.sid}`, LIVE_PER_SESSION)))
+    return fail("rate_limited");
+  return ok({ live: await sessionLive(config, { sid: claims.sid }) });
+}

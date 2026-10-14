@@ -105,6 +105,7 @@ export const ROUTES = Object.freeze([
   { method: "GET", path: "/tokens/current", feature: "tokens" },
   { method: "GET", path: "/jwks", feature: "jwtMint" },
   { method: "GET", path: "/token", feature: "jwtMint" },
+  { method: "POST", path: "/token/live", feature: "jwtMint" },
   { method: "POST", path: "/operator/keys/rotate", feature: "operator" },
   { method: "POST", path: "/oauth/register", feature: "oauthRegistration" },
   { method: "GET", path: "/oauth/authorize", feature: "oauth" },

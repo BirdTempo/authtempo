@@ -628,7 +628,7 @@ The limits are per isolate under the memory limiter: on Workers each isolate cou
 
 ## JWT minting
 
-`jwtMint` (plan 9g) is on by default; `jwtMint: false` removes `/jwks`, `/token`, and `api.jwt`. A session JWT is a signed statement about a session user for a server that cannot call `auth.session`.
+`jwtMint` (plan 9g) is on by default; `jwtMint: false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. A session JWT is a signed statement about a session user for a server that cannot call `auth.session`.
 
 - The key: `jwtMint.alg` is `EdDSA` (Ed25519, the default) or `ES256` (ECDSA P-256). Core writes the first key at the first use, seals the private half with AES-256-GCM under a key from `secret`, and opens it for one signature at a time. `api.jwt.rotate()` makes a new key; the old one verifies for 24 hours and signs nothing, and the sweep deletes it after that. A new app `secret` opens no old key: the key retires at the next signature with one log line, and a new key signs.
 - The timer (plan 11c): `jwtMint.rotateEvery` is a whole number of days from 1 to 365, and off by default. The first signature with a key that old retires the key and signs with a new one. A JWKS read never rotates. Two signatures at once make one new key: the retire matches the old row by id and slot, and the unique key on `slot` keeps one new row. The retired key verifies for 24 hours, as after `api.jwt.rotate()`.
@@ -645,6 +645,7 @@ The limits are per isolate under the memory limiter: on Workers each isolate cou
 - Two live versions: during a gradual deployment, two versions of the app with different secrets, or with different `jwtMint.alg` values, retire each other's key at each mint. The JWKS then grows by one key per mint for 24 hours (core lists the signing key and at most 100 retired keys, the last retired first), and a mint can throw after three tries (`authtempo: no signing key after three tries`). Finish the deployment: when one version serves every request, one key signs again.
 - The token: header `{ alg, kid, typ: "JWT" }`; claims `iss` (`baseURL + basePath`), `sub` (the user id), `aud` (`jwtMint.audience`, default `baseURL`), `iat`, `exp` (`jwtMint.ttlMinutes`, 1 to 60, default 15), `sid` (the session id), `email`, `email_verified`, `name`, and `org` (the active organization id or null). `jwtMint.claims(user, session)` adds names and sets none of these, nor `nbf` or `jti`.
 - A resource server verifies the signature against `<basePath>/jwks`, `iss`, `aud`, `exp`, and the header `typ`: `JWT` for a session JWT, `at+jwt` for an OAuth access token (with jose, `jwtVerify(token, jwks, { issuer, audience, typ: "JWT" })`). One key signs both kinds with one issuer, so a server that skips `typ` can take one kind for the other. It keeps the key set in a cache. The token is a bearer for its life: a sign-out does not end it. Keep `ttlMinutes` short, and where a sign-out must end access at once, check the `sid` claim with `api.jwt.sessionLive({ sid })`: true while the session exists and is not expired.
+- The live check (plan 11d): `POST <basePath>/token/live` with the session JWT as the bearer answers `{ live: true }` while its session exists and is not expired, else `{ live: false }`. Any other bearer answers 401 and counts nothing. A valid JWT counts on `token-live:session:<sessionId>`, 120 per 60 s. A resource server on another host calls it where a sign-out must end access at once; `@authtempo/verify` calls it with `checkSessionEnd: true`.
 - Core refuses a config where a `jwtMint.audience` entry is also an `oauth.resources` entry: a server of that audience would take an access token of any client and scope as a session JWT. The default audience is `baseURL`, so a resource equal to `baseURL` needs its own `jwtMint.audience`.
 - `api.jwt.mint({ userId, sessionId })`, `api.jwt.verify(token)` (this instance's session JWTs only), `api.jwt.rotate()`, `api.jwt.jwks()`, `api.jwt.sessionLive({ sid })`, and `client.jwt.token()` hold the same operations.
 
@@ -1203,6 +1204,7 @@ writes each value under version 1.
   about ML-DSA. It is the library's post-quantum probe, not a authtempo
   setting, and workerd prints nothing.
 - Invitation accept is limited to 20 per IP per 15 minutes, in the same per-isolate limiter.
+- The live check of a session JWT is limited to 120 per session per 60 s (`token-live:session:<sessionId>`, plan 11d). The count runs after the JWT check, so a bearer that is not a session JWT spends nothing.
 - The operator route is limited to 5 calls per IP per hour
   (`operator:ip:<ip>`), right or wrong secret, in the same limiter.
 - Email codes: a request is limited to 3 per address and 20 per IP, and a

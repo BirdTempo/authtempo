@@ -658,6 +658,15 @@ These routes exist unless the config sets `jwtMint: false`.
 | Answer | `{ token }`, a session JWT |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
+<h3 id="post-token-live"><code>POST /token/live</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session JWT of this instance as the bearer; a session token, an API token, an access token, and a cookie answer 401 |
+| Input | None |
+| Answer | `{ live: true }` while the session of the JWT's `sid` claim exists and is not expired, else `{ live: false }`; it counts on `token-live:session:<sessionId>`, 120 per minute ([Limits](/docs/reference/limits/)) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
 ## Operator
 
 This route exists when the config sets `operator`.
