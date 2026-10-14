@@ -303,7 +303,7 @@ describe("the captcha port (plan 12b)", () => {
   it("needs a page while core serves its own sign-in page, so the page can send a token", () => {
     const port = fakePort("pass").port;
     const message =
-      "captcha.port.page is required while core serves its sign-in page (handoff or oauth): without the widget, the page sends no token, and every gated flow on it answers captcha_required. Give the port a page, or set handoff.signInPage";
+      "captcha.port.page is required while core serves its sign-in page (handoff or oauth) with a gated flow on it. Without the widget, the page sends no token, so each gated flow on it answers captcha_required. Give the port a page, or set handoff.signInPage";
     expect(() => setup({ port }, { handoff: { schemes: ["example://"] } })).toThrow(
       new ConfigError(message),
     );
@@ -316,6 +316,26 @@ describe("the captcha port (plan 12b)", () => {
     expect(() =>
       setup({ port }, { handoff: { schemes: ["example://"], signInPage: () => "<p>own</p>" } }),
     ).not.toThrow();
+    // Core's page has no email code form: a config that gates only the email code needs no page.
+    expect(() =>
+      setup({ port, flows: ["email-otp-request"] }, { handoff: { schemes: ["example://"] } }),
+    ).not.toThrow();
+    // With no password config, the page has no password form: password flows alone need no page.
+    const noPassword = (flows: CaptchaFlow[]) =>
+      createAuth({
+        baseURL: BASE,
+        secret: TEST_SECRET,
+        trustedOrigins: ["https://app.example.com"],
+        storage: createMemoryAdapter(),
+        mail: { send: async () => {} },
+        handoff: { schemes: ["example://"] },
+        captcha: { port, flows },
+      });
+    expect(() =>
+      noPassword(["password-sign-in", "password-sign-up", "password-reset-request"]),
+    ).not.toThrow();
+    // The magic link form is always on the page.
+    expect(() => noPassword(["magic-link-request"])).toThrow(new ConfigError(message));
     // No page of core is served: no page is needed.
     expect(() => setup({ port })).not.toThrow();
   });

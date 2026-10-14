@@ -477,7 +477,8 @@ send mail or write rows. Core names no supplier, and
 - No token answers 400 `captcha_required`; a refused token, or a token over 2048 characters, answers 403 `captcha_failed`.
 - When the port gives no answer or throws, `onUnavailable: "allow"` (the default) writes one log line and goes on, and `"refuse"` answers 503 `captcha_unavailable`.
 - An in-process `api` call with no `captchaToken` skips the check. An app that proxies a browser request through `api` must pass the browser's token as `captchaToken`; without it, the check does not run.
-- While core serves its own sign-in page (`handoff` or `oauth`, with no `handoff.signInPage`), `captcha.port.page` is required, or the page sends no token and every gated flow on it answers `captcha_required`.
+- While core serves its own sign-in page (`handoff` or `oauth`, with no `handoff.signInPage`), `captcha.port.page` is required when a gated flow is on that page.
+- The page has the magic link form, and the password forms only with `password`. Without the widget, each gated flow on it answers `captcha_required`.
 - With `port.page`, core's sign-in page loads the widget's script under its nonce, adds the widget to the magic link and password forms, and adds `cspSources` to `script-src` and `frame-src`.
 
 ## Email codes

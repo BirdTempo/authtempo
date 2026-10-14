@@ -892,6 +892,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       // unless the app gives handoff.signInPage.
       (handoff !== null || (input.oauth !== undefined && input.oauth !== false)) &&
         input.handoff?.signInPage === undefined,
+      password !== null,
     ),
   };
 }
@@ -1488,6 +1489,7 @@ const FIELD_RE = /^[A-Za-z0-9_-]{1,64}$/;
 function resolveCaptcha(
   input: CaptchaConfig | undefined,
   defaultPageServed: boolean,
+  passwordOn: boolean,
 ): ResolvedCaptcha | null {
   if (input === undefined) return null;
   if (!isPlainObject(input as unknown)) throw new ConfigError("captcha must be an object");
@@ -1535,9 +1537,18 @@ function resolveCaptcha(
     );
   // Core's page sends a token only from the widget that `page` describes.
   // With no page, every gated flow on that page answers captcha_required.
-  if (page === undefined && defaultPageServed)
+  // The page always has the magic link form, and the password form (sign-in,
+  // sign-up, reset request) only with `password`. It has no email code form.
+  const gated = new Set(flows as CaptchaFlow[]);
+  const gatedOnPage =
+    gated.has("magic-link-request") ||
+    (passwordOn &&
+      (gated.has("password-sign-in") ||
+        gated.has("password-sign-up") ||
+        gated.has("password-reset-request")));
+  if (page === undefined && defaultPageServed && gatedOnPage)
     throw new ConfigError(
-      "captcha.port.page is required while core serves its sign-in page (handoff or oauth): without the widget, the page sends no token, and every gated flow on it answers captcha_required. Give the port a page, or set handoff.signInPage",
+      "captcha.port.page is required while core serves its sign-in page (handoff or oauth) with a gated flow on it. Without the widget, the page sends no token, so each gated flow on it answers captcha_required. Give the port a page, or set handoff.signInPage",
     );
   const onUnavailable = input.onUnavailable ?? "allow";
   if (onUnavailable !== "allow" && onUnavailable !== "refuse")
