@@ -39,14 +39,22 @@ function passwordOptions(extra: Record<string, unknown> = {}): BetterAuthOptions
   };
 }
 
-const refusalsOf = (options: Record<string, unknown>) => {
+const refusalsOf = (options: Partial<BetterAuthOptions>) => {
   try {
-    betterAuth({ baseURL: BASE, database: memoryDatabase(), ...options } as never);
+    betterAuth({ baseURL: BASE, database: memoryDatabase(), ...options });
   } catch (e) {
     return String((e as Error).message);
   }
   return "no refusal";
 };
+
+/**
+ * Only for a refusal case that passes a value the option type forbids (a
+ * JavaScript caller can). A case that expects "no refusal" uses the typed
+ * `refusalsOf`, so a type error cannot hide behind the cast.
+ */
+const refusalsOfUntyped = (options: Record<string, unknown>) =>
+  refusalsOf(options as Partial<BetterAuthOptions>);
 
 describe("the shim and plan 12b", () => {
   it("maps secrets one entry for one entry", () => {
@@ -83,7 +91,9 @@ describe("the shim and plan 12b", () => {
     );
     expect(refusalsOf({})).toContain("- secret: required");
     // Core checks every other rule of an entry; the error names it.
-    expect(refusalsOf({ secrets: [null] })).toContain("- config: secrets[0] must be an object");
+    expect(refusalsOfUntyped({ secrets: [null] })).toContain(
+      "- config: secrets[0] must be an object",
+    );
   });
 
   it("names the session cookie __Host-tempo_session and moves the old cookie", async () => {
@@ -144,11 +154,11 @@ describe("the shim and plan 12b", () => {
     const pair = {
       ...passwordOptions({ autoSignIn: false, requireEmailVerification: true }),
     };
-    expect(refusalsOf(pair as never)).toBe("no refusal");
+    expect(refusalsOf(pair)).toBe("no refusal");
     expect(mapOptions(pair).config.password?.requireVerified).toBe(true);
-    expect(refusalsOf({ secret: TEST_SECRET, emailAndPassword: { autoSignIn: "no" } })).toContain(
-      "- emailAndPassword.autoSignIn: expected a boolean",
-    );
+    expect(
+      refusalsOfUntyped({ secret: TEST_SECRET, emailAndPassword: { autoSignIn: "no" } }),
+    ).toContain("- emailAndPassword.autoSignIn: expected a boolean");
   });
 
   it("answers { token: null, user } for autoSignIn false with requireEmailVerification", async () => {
@@ -176,7 +186,7 @@ describe("the shim and plan 12b", () => {
         apple: { clientId: "a", teamId: "T", keyId: "K", privateKey: "P", disableSignUp: true },
       },
     };
-    expect(refusalsOf(closed as never)).toBe("no refusal");
+    expect(refusalsOf(closed)).toBe("no refusal");
     expect(mapOptions(closed).config.signUp).toBe(false);
     // A provider without the key is open, so the set is a mix.
     expect(
@@ -193,7 +203,7 @@ describe("the shim and plan 12b", () => {
       "- disableSignUp: core's signUp rule covers every method; set disableSignUp on every method or on none (true: emailAndPassword, socialProviders.google; not true: socialProviders.github)",
     );
     expect(
-      refusalsOf({
+      refusalsOfUntyped({
         secret: TEST_SECRET,
         socialProviders: {
           google: { clientId: "g", clientSecret: "s", disableImplicitSignUp: true },

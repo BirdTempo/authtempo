@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveConfig } from "../src/config.js";
+import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { createJoseJwtSeam } from "../src/seams/jwt.js";
+import type { SocialProfile } from "../src/social/provider.js";
 import { ProviderRedirectError, providerFetch } from "../src/social/provider-fetch.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { TEST_SECRET } from "../src/testing/soft-authenticator.js";
@@ -27,7 +28,7 @@ function recording(answer: (url: string) => Response) {
 const steer = () =>
   new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest" } });
 
-function authWith(social: Record<string, unknown>) {
+function authWith(social: NonNullable<AuthConfig["social"]>) {
   return createAuth({
     baseURL: "https://api.example.com",
     secret: TEST_SECRET,
@@ -35,7 +36,7 @@ function authWith(social: Record<string, unknown>) {
     storage: createMemoryAdapter(),
     mail: { send: async () => {} },
     jwt: fakeJwt({}),
-    social: social as never,
+    social,
   });
 }
 
@@ -162,7 +163,7 @@ describe("every provider call carries redirect manual and fails on a redirect (p
                 redirect: "follow",
                 headers: { authorization: `Bearer ${accessToken}` },
               });
-              return (await res.json()) as never;
+              return (await res.json()) as SocialProfile;
             },
           },
         ],

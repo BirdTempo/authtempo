@@ -263,7 +263,9 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
  * allows between two requests.
  */
 describe("a password sign-up on D1 while the owner resets the password (plan 8 I-1, plan 9 Task 4)", () => {
-  function harness() {
+  // The race proofs read the detailed codes, so they turn the uniform answer
+  // off (plan 12b made it the default). One case below keeps the default.
+  function harness(uniformSignUp = false) {
     const base = createD1Adapter(env.DB);
     const clock: Clock = { now: () => t0 };
     const sent: MailMessage[] = [];
@@ -298,7 +300,7 @@ describe("a password sign-up on D1 while the owner resets the password (plan 8 I
       },
       limiter: createMemoryLimiter(clock),
       clock,
-      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) },
+      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp },
     });
     const passwords = (storage: StorageAdapter) => {
       const api = createAuth(config(storage)).api.password;
@@ -390,6 +392,42 @@ describe("a password sign-up on D1 while the owner resets the password (plan 8 I
     const proved = owner as Awaited<ReturnType<typeof h.owner.reset>> | null;
     if (!proved?.ok) throw new Error("the owner's reset failed");
     expect((await h.base.findMany("user", [])).map((u) => u.emailVerified)).toEqual([true]);
+    expect((await signIn(h, "owner password")).ok).toBe(true);
+    expect(await signIn(h, "claimant password")).toMatchObject({
+      ok: false,
+      code: "invalid_credentials",
+    });
+  });
+
+  it("answers { sent: true } under the default uniform answer and keeps the owner's user and password", async () => {
+    const h = harness(true);
+    expect((await h.owner.requestReset({ email: EMAIL, ip: null })).ok).toBe(true);
+    const link = tokenOf(h.sent.at(-1)?.text ?? "");
+    let owner: Awaited<ReturnType<typeof h.owner.reset>> | null = null;
+    h.arm("user", async () => {
+      owner = await h.owner.reset({
+        token: link,
+        password: "owner password",
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    const claimant = await h.claimant.signUp({
+      email: EMAIL,
+      password: "claimant password",
+      ip: null,
+      userAgent: null,
+    });
+    expect(h.fired()).toBe(true);
+    expect(claimant).toEqual({ ok: true, value: { sent: true } });
+    const proved = owner as Awaited<ReturnType<typeof h.owner.reset>> | null;
+    if (!proved?.ok) throw new Error("the owner's reset failed");
+    const userId = proved.value.user.id;
+    const users = await h.base.findMany("user", []);
+    expect(users.map((u) => [u.id, u.emailVerified])).toEqual([[userId, true]]);
+    const rows = await h.base.findMany("password", []);
+    expect(rows.map((p) => p.userId)).toEqual([userId]);
     expect((await signIn(h, "owner password")).ok).toBe(true);
     expect(await signIn(h, "claimant password")).toMatchObject({
       ok: false,
