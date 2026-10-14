@@ -3,9 +3,10 @@ import type { OAuth2Provider, SocialProfile } from "./provider.js";
 /**
  * An entry of `social.oauth2`: a provider that issues no ID token (plan 9c).
  * `userinfo` turns the access token into a profile. Call the provider with
- * the `fetch` it gets: core puts the timeout on that fetch. Answer
- * `emailVerified: true` only when the provider says that this person proved
- * the address; core counts nothing else as verified.
+ * the `fetch` it gets: core puts the timeout on that fetch. Core wraps it:
+ * no redirect is followed. Answer `emailVerified: true` only when the
+ * provider says that this person proved the address; core counts nothing
+ * else as verified.
  */
 export interface OAuth2Entry {
   /** The route segment and the identity provider name. `^[a-z][a-z0-9-]{0,31}$`. */

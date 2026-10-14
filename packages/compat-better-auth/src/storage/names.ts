@@ -63,6 +63,7 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "taValueHash",
     "taConsumedAt",
     "taData",
+    "taSecretVersion",
   ],
   organization: ["id", "name", "slug", "logo", "createdAt", "metadata", "taUpdatedAt"],
   member: ["id", "organizationId", "userId", "role", "createdAt", "taUpdatedAt"],

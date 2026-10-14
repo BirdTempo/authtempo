@@ -13,7 +13,7 @@ it("starts a Google sign-in on D1: one oauth-state row, a redirect, and a bindin
   expect(location.origin).toBe("https://accounts.google.com");
   expect(location.searchParams.get("client_id")).toBe("example-client");
   expect(location.searchParams.get("redirect_uri")).toBe(`${BASE}/auth/social/google/callback`);
-  expect(res.headers.get("set-cookie")).toMatch(/^tempo_session_oauth=.*SameSite=None$/);
+  expect(res.headers.get("set-cookie")).toMatch(/^__Secure-tempo_session_oauth=.*SameSite=None$/);
   const rows = await env.DB.prepare(
     "SELECT count(*) AS n FROM ta_verification WHERE purpose = 'oauth-state' AND consumed_at IS NULL",
   ).first<{ n: number }>();

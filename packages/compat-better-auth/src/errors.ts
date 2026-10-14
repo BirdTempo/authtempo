@@ -61,6 +61,28 @@ export const BETTER_AUTH_CODES = {
   totp_not_enabled: "TOTP_NOT_ENABLED",
   // Plan 12c. Better Auth has no passkey second factor, so the name is authtempo's own.
   second_factor_last_method: "SECOND_FACTOR_LAST_METHOD",
+  // Plan 12b, the sign-up rule. The name is authtempo's own. Better Auth 1.7.2
+  // has no one code for a closed sign-up; it answers four (read 2026-10-15):
+  // the password sign-up EMAIL_PASSWORD_SIGN_UP_DISABLED 400
+  // (dist/api/routes/sign-up.mjs:147), the magic link a redirect with
+  // error=new_user_signup_disabled (dist/plugins/magic-link/index.mjs:176),
+  // social "signup disabled" (dist/oauth2/link-account.mjs:202), and the
+  // email code INVALID_OTP (dist/plugins/email-otp/routes.mjs:413).
+  sign_up_closed: "SIGN_UP_CLOSED",
+  // Plan 12b, the captcha port. The names are Better Auth 1.7.2's captcha
+  // plugin codes (dist/plugins/captcha/error-codes.mjs, read 2026-10-15):
+  // MISSING_RESPONSE, VERIFICATION_FAILED, and UNKNOWN_ERROR, its external
+  // code for a service that gives no answer. The plugin answers 400 for the
+  // refusals (index.mjs:35) and 500 for the rest (index.mjs:71); the shim
+  // keeps core's statuses (400, 403, 503).
+  captcha_required: "MISSING_RESPONSE",
+  captcha_failed: "VERIFICATION_FAILED",
+  captcha_unavailable: "UNKNOWN_ERROR",
+  // Plan 12b, the breach check. The name is authtempo's own. Better Auth
+  // 1.7.2's haveIBeenPwned plugin has one code, PASSWORD_COMPROMISED
+  // (dist/plugins/haveibeenpwned/index.mjs:9, read 2026-10-15). When the
+  // range API gives no answer, it answers 500 with no code (:20, :27).
+  breach_check_unavailable: "BREACH_CHECK_UNAVAILABLE",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

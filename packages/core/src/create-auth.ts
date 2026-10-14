@@ -68,10 +68,10 @@ import {
   type PasswordResend,
   type PasswordReset,
   type PasswordResetRequest,
-  type PasswordSession,
   type PasswordSignIn,
   type PasswordSignInResult,
   type PasswordSignUp,
+  type PasswordSignUpResult,
   type PasswordVerified,
   type PasswordVerify,
   passwordSignIn,
@@ -84,6 +84,12 @@ import {
   verifyPasswordEmail,
 } from "./engine/password.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
+import {
+  rewrapSecrets,
+  type SecretsRewrap,
+  type SecretsStatus,
+  secretsStatus,
+} from "./engine/secrets.js";
 import {
   destroySession,
   type PublicSession,
@@ -143,7 +149,12 @@ import type {
 
 /** Present on `api` only when the config has a `password` section. */
 export interface PasswordApi {
-  signUp(input: PasswordSignUp): Promise<Result<PasswordSession>>;
+  /**
+   * `{ sent: true }` for every address while `password.uniformSignUp` is on
+   * (the default, plan 12b). With it off: a session, or `{ user,
+   * verifyRequired: true }` while `password.requireVerified` is on.
+   */
+  signUp(input: PasswordSignUp): Promise<Result<PasswordSignUpResult>>;
   /** A session, or `{ twoFactor }` for a user with the second factor on (plan 9f). */
   signIn(input: PasswordSignIn): Promise<Result<PasswordSignInResult>>;
   /** The password of a known user again, with the sign-in's limits (plan 9f). */
@@ -219,6 +230,21 @@ export interface TokensApi {
   revoke(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
   /** The token's user and summary, or `unauthorized`. A `ts_` token answers `unauthorized`. */
   current(input: { token: string }): Promise<Result<ResolvedApiToken>>;
+}
+
+/**
+ * The app secrets (plan 12b, spec 22). Present in every deployment, in
+ * process only: no route answers them. The rotation runbook runs passes of
+ * `rewrap` and reads `status` before it removes a version.
+ */
+export interface SecretsApi {
+  status(): Promise<SecretsStatus>;
+  /**
+   * `limit`: 1 to 1000 rows, default 100. `after`: the `next` of the call
+   * before, to go on with the pass. `invalid_body` for a limit outside that
+   * range or a cursor that `rewrap` did not answer.
+   */
+  rewrap(input?: { limit?: number; after?: string }): Promise<Result<SecretsRewrap>>;
 }
 
 /** Present on `api` unless the config sets `emailOtp: false` (plan 9e). */
@@ -341,6 +367,7 @@ export interface AuthApi {
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
+  secrets: SecretsApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
   totp?: TotpApi;
@@ -427,6 +454,10 @@ export function createAuth(input: AuthConfig): Auth {
         list: (i) => listApiTokens(config, i),
         revoke: (i) => revokeApiToken(config, i),
         current: (i) => currentApiToken(config, i),
+      },
+      secrets: {
+        status: () => secretsStatus(config),
+        rewrap: (i) => rewrapSecrets(config, i),
       },
       ...(config.password
         ? {

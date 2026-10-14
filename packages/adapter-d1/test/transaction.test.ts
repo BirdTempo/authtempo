@@ -199,6 +199,7 @@ describe("d1 undo log", () => {
       data: null,
       createdAt: t0,
       updatedAt: t0,
+      secretVersion: 1,
     });
     // The wrapper lets another request consume the row right after this
     // request's first read of the verification table (or before its batch).

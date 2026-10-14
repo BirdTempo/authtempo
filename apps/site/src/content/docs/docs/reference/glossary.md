@@ -23,7 +23,7 @@ sources:
 | sign out | The act that ends the current session. | `log out`, `logout` |
 | session | A row that holds one signed-in browser or device. It ends at its expiry or at a sign-out. | |
 | session token | The secret of a session: `ts_` plus 43 base64url characters. Core stores its SHA-256 only. | `session id`, `session key` |
-| session cookie | The `HttpOnly` cookie that carries the session token in a browser. The default name is `tempo_session`. | |
+| session cookie | The `HttpOnly` cookie that carries the session token in a browser. The default name is `__Host-tempo_session`. | |
 | bearer token | A session token or an API token in the `Authorization: Bearer` header. | |
 | magic link | A single-use link by mail that signs a person in. | |
 | email code | A code of 6 or 8 digits by mail that signs a person in or resets a password. | `OTP` |

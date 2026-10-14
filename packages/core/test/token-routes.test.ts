@@ -167,8 +167,8 @@ describe("token routes", () => {
     });
     for (const headers of [
       bearer(ada.session),
-      { cookie: `tempo_session=${ada.session}` },
-      { cookie: `tempo_session=${token}` },
+      { cookie: `__Host-tempo_session=${ada.session}` },
+      { cookie: `__Host-tempo_session=${token}` },
       {},
     ]) {
       const r = await h.auth.handle(get("/auth/tokens/current", headers));

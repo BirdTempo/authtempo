@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { applyPostgresMigrations, MIGRATIONS } from "../src/migrations.js";
 import { freshSchema } from "./db.js";
@@ -26,7 +27,7 @@ describe("postgres migration runner", () => {
     const db = await freshSchema();
     try {
       // The database as version 7 left it, with the runner's own record, so
-      // the runner applies 0008 alone.
+      // the runner applies 0008 and each later migration (0009 since plan 12b).
       await db.a.unsafe(
         "CREATE TABLE ta_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
       );
@@ -41,7 +42,7 @@ describe("postgres migration runner", () => {
                 ('f2', $1, $1, 'u2', 'sealed', NULL, 0, '["h3"]'::jsonb)`,
         [at],
       );
-      expect(await applyPostgresMigrations(db.a)).toEqual(["0008_schema_v8"]);
+      expect(await applyPostgresMigrations(db.a)).toEqual(MIGRATIONS.slice(7).map((m) => m.name));
       expect(
         await db.a.unsafe(
           "SELECT id, user_id, enabled_at, methods, backup_codes, backup_codes_version FROM ta_second_factor",
@@ -59,7 +60,7 @@ describe("postgres migration runner", () => {
       const meta = await db.a.unsafe<{ value: string }[]>(
         "SELECT value FROM ta_meta WHERE key = 'schema_version'",
       );
-      expect(meta[0]?.value).toBe("8");
+      expect(meta[0]?.value).toBe(String(SCHEMA_VERSION));
     } finally {
       await db.close();
     }
@@ -82,7 +83,7 @@ describe("postgres migration runner", () => {
                 ('f2', $1, $1, 'u2', 'sealed', NULL, 0, '["h2"]'::jsonb)`,
         [at],
       );
-      expect(await applyPostgresMigrations(db.a)).toEqual(["0008_schema_v8"]);
+      expect(await applyPostgresMigrations(db.a)).toEqual(MIGRATIONS.slice(7).map((m) => m.name));
       expect(await db.a.unsafe("SELECT id FROM ta_totp ORDER BY id")).toEqual([{ id: "f1" }]);
     } finally {
       await db.close();

@@ -343,6 +343,15 @@ export interface ForeignPlugin {
 export type BetterAuthPlugin = CompatPlugin | ForeignPlugin;
 
 /**
+ * Better Auth 1.7.2's per-provider `disableSignUp`, which votes in core's one
+ * sign-up rule (plan 12b). `disableImplicitSignUp` is refused, so it is not
+ * here and fails the compile in a literal.
+ */
+export interface ProviderSignUp {
+  disableSignUp?: boolean;
+}
+
+/**
  * Better Auth 1.7's option object, with the keys authtempo maps. Since plan
  * 9b no option type has an index signature, so a refused key in an object
  * literal of a plugin's options, or of an object that `satisfies` this type,
@@ -361,6 +370,8 @@ export interface BetterAuthOptions {
   baseURL?: string;
   basePath?: string;
   secret?: string;
+  /** The app secrets by version, the current first (Better Auth 1.7). Mapped to core's `secrets` (plan 12b). */
+  secrets?: Array<{ version: number; value: string }>;
   trustedOrigins?: string[] | ((request?: Request) => string[] | Promise<string[]>);
   database?: CompatDatabase;
   emailAndPassword?: {
@@ -377,22 +388,23 @@ export interface BetterAuthOptions {
   emailVerification?: {
     sendVerificationEmail?: SendEmail;
     sendOnSignUp?: boolean;
+    sendOnSignIn?: boolean;
     autoSignInAfterVerification?: boolean;
     expiresIn?: number;
   };
   socialProviders?: {
-    google?: { clientId: string; clientSecret: string };
+    google?: { clientId: string; clientSecret: string } & ProviderSignUp;
     apple?: {
       clientId: string;
       teamId?: string;
       keyId?: string;
       privateKey?: string;
       clientSecret?: string;
-    };
+    } & ProviderSignUp;
     /** Core's GitHub preset (plan 9c). */
-    github?: { clientId: string; clientSecret: string };
+    github?: { clientId: string; clientSecret: string } & ProviderSignUp;
     /** Core's LinkedIn preset (plan 9c). */
-    linkedin?: { clientId: string; clientSecret: string };
+    linkedin?: { clientId: string; clientSecret: string } & ProviderSignUp;
   };
   session?: {
     expiresIn?: number;
@@ -460,16 +472,45 @@ export type HasTwoFactor<O extends BetterAuthOptions> = O extends {
       : true
   : false;
 
-export interface CompatServerApi<TF extends boolean = false> {
+/**
+ * True when the option type has the key
+ * `emailAndPassword.requireEmailVerification`, optional or not, with a type
+ * other than `false` (plan 12b Task 15). Then `signUpEmail` can answer
+ * `token: null`. A wide `BetterAuthOptions` has the optional key, so it is
+ * true: its value at run time can be true. Only a literal object with no
+ * such key, or with `false` as a literal type, keeps `token: string`.
+ */
+export type RequiresVerification<O extends BetterAuthOptions> =
+  "requireEmailVerification" extends keyof NonNullable<O["emailAndPassword"]>
+    ? [NonNullable<O["emailAndPassword"]>["requireEmailVerification"]] extends [false | undefined]
+      ? false
+      : true
+    : false;
+
+/**
+ * The token type of `signUpEmail` by the flag. An indexed access, not a
+ * conditional type, so that TypeScript measures `RV` as covariant: an
+ * instance with `RV` false (token `string`) is assignable to the wide
+ * `BetterAuthInstance` with `RV` true (token `string | null`), plan 12b Task 15.
+ */
+interface SignUpTokenOf {
+  false: string;
+  true: string | null;
+}
+
+export interface CompatServerApi<TF extends boolean = false, RV extends boolean = false> {
   /** `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f). */
   getSession(input: {
     headers: Headers;
   }): Promise<{ session: Session; user: User & { twoFactorEnabled?: boolean } } | null>;
-  /** `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
+  /**
+   * `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither.
+   * `token` is null with `emailAndPassword.requireEmailVerification` (plan 12b): no session opens.
+   */
   signUpEmail(input: {
     body: { email: string; password: string; name: string; image?: string; callbackURL?: string };
     headers?: Headers;
-  }): Promise<{ token: string; user: User }>;
+  }): Promise<{ token: SignUpTokenOf[`${RV}`]; user: User }>;
   /** `callbackURL` and `rememberMe: false` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
   signInEmail(input: {
     body: { email: string; password: string; callbackURL?: string; rememberMe?: boolean };
@@ -505,7 +546,7 @@ export interface CompatServerApi<TF extends boolean = false> {
 
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {
   handler(request: Request): Promise<Response>;
-  api: CompatServerApi<HasTwoFactor<O>>;
+  api: CompatServerApi<HasTwoFactor<O>, RequiresVerification<O>>;
   /** Type-only, as in Better Auth: `Auth["$Infer"]["Session"]["user"]`. The runtime value is an empty object. */
   $Infer: { Session: { session: Session; user: User } };
   options: O;
@@ -686,7 +727,8 @@ export interface AuthClient<TF extends boolean = false> {
       name: string;
       image?: string;
       callbackURL?: string;
-    }): Promise<CompatClientResult<{ token: string; user: ClientUser }>>;
+      // null while the server's requireEmailVerification is on (plan 12b): no session opens.
+    }): Promise<CompatClientResult<{ token: string | null; user: ClientUser }>>;
   };
   signOut(): Promise<CompatClientResult<{ success: true }>>;
   getSession(): Promise<CompatClientResult<{ session: ClientSession; user: ClientUser } | null>>;
@@ -785,7 +827,7 @@ export interface AuthClient<TF extends boolean = false> {
   };
   /** In `./client` a store. `./react` replaces it with the hook. */
   useSession: SessionStore;
-  /** Expo only: the stored session as one cookie header value, `tempo_session=<token>`, or "" when none. */
+  /** Expo only: the stored session as one cookie header value, `__Host-tempo_session=<token>`, or "" when none. */
   getCookie(): string;
   $Infer: { Session: { session: ClientSession; user: ClientUser } };
 }

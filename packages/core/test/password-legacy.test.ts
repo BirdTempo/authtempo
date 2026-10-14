@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ConfigError, type LegacyVerifyConfig, resolveConfig } from "../src/config.js";
+import { type LegacyVerifyConfig, resolveConfig } from "../src/config.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import {
   LEGACY_VERIFY_HASH,
@@ -8,6 +8,7 @@ import {
   resetPassword,
 } from "../src/engine/password.js";
 import { newId } from "../src/primitives/ids.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, pwAuth } from "./password-helpers.js";
 
@@ -392,13 +393,13 @@ describe("password.legacyVerify (spec 17.4)", () => {
       expect(() =>
         resolveConfig({
           baseURL: base.baseURL,
-          secret: base.secret,
+          secret: currentSecret(base.keyring),
           trustedOrigins: [],
           storage: base.storage,
           mail: base.mail,
           password: { legacyVerify: { verify: async () => false, timeoutMs } },
         }),
-      ).toThrow(ConfigError);
+      ).toThrow(/password\.legacyVerify\.timeoutMs/);
     }
   });
 });

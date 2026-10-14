@@ -16,7 +16,7 @@ describe("sign in with Google and Apple", () => {
     expect(to.searchParams.get("state")).not.toBeNull();
     expect(to.searchParams.get("nonce")).not.toBeNull();
     const cookie =
-      res.headers.getSetCookie().find((c) => c.startsWith("tempo_session_oauth=")) ?? "";
+      res.headers.getSetCookie().find((c) => c.startsWith("__Secure-tempo_session_oauth=")) ?? "";
     expect(cookie).toContain("Path=/auth/social");
     expect(cookie).toContain("SameSite=None");
   });

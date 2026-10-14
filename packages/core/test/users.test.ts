@@ -225,6 +225,7 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       consumedAt: null,
       data: { kind: "registration" },
       ...row,
+      secretVersion: 1,
     });
     await storage.create("verification", {
       id: "V2",
@@ -235,6 +236,7 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       consumedAt: null,
       data: { kind: "authentication" },
       ...row,
+      secretVersion: 1,
     });
     await storage.transaction((tx) => claimEmail(tx, "U1", null, now));
     expect((await storage.findMany("passkey", [])).map((p) => p.id)).toEqual(["P2"]);
@@ -266,6 +268,7 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
       valueHash: "c1",
       data: { challenge: "x", redirect: "app://auth" },
       ...row,
+      secretVersion: 1,
     });
     await storage.create("verification", {
       id: "H2",
@@ -274,6 +277,7 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
       valueHash: "c2",
       data: { challenge: "y", redirect: "app://auth" },
       ...row,
+      secretVersion: 1,
     });
     await storage.create("verification", {
       id: "H3",
@@ -282,6 +286,7 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
       valueHash: "s1",
       data: { challenge: "z", redirect: "app://auth" },
       ...row,
+      secretVersion: 1,
     });
     await storage.transaction((tx) => claimEmail(tx, "U1", null, now));
     expect((await storage.findMany("verification", [])).map((v) => v.id).sort()).toEqual([

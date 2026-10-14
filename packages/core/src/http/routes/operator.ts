@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../../config.js";
 import { rotateKey } from "../../engine/jwt.js";
+import { ipKey } from "../../limiter/ip-key.js";
 import { isOperatorSecret } from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { json } from "../json.js";
@@ -34,7 +35,7 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
       path: "/operator/keys/rotate",
       async handler(ctx) {
         // The limiter runs first, so every call counts, also one with no header.
-        if (!(await config.limiter.allow(`operator:ip:${ctx.ip ?? "unknown"}`, OPERATOR_PER_IP)))
+        if (!(await config.limiter.allow(`operator:ip:${ipKey(ctx.ip)}`, OPERATOR_PER_IP)))
           return json({ error: "rate_limited" }, 429);
         const secret = OPERATOR_AUTH.exec(ctx.request.headers.get("authorization") ?? "")?.[1];
         // Core keeps the hash only, as for every token; the digests compare in constant time.

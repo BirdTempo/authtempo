@@ -71,7 +71,7 @@ DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" pnpm --filter my-app 
 
 12. Replace the body of `mail.send` in `src/index.ts` with a call to your mail provider.
 13. Set `BASE_URL` in `wrangler.jsonc` to the origin of your Worker.
-14. Store a secret of 32 characters or more with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`.
+14. Make a secret of 32 characters or more and an estimate of 100 bits or more with `openssl rand -base64 32`. Store it with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`.
 15. Deploy the Worker with `pnpm --filter my-app exec wrangler deploy`.
 
 :::caution

@@ -75,6 +75,7 @@ describe("the signing key (plan 9g)", () => {
         retiredAt: at,
         createdAt: at,
         updatedAt: at,
+        secretVersion: 1,
       });
     }
     const kids = (await publicKeySet(auth.config)).keys.map((k) => k.kid);
@@ -96,6 +97,7 @@ describe("the signing key (plan 9g)", () => {
         retiredAt: new Date(retiredAt),
         createdAt: new Date(createdAt),
         updatedAt: new Date(retiredAt),
+        secretVersion: 1,
       });
     // The original key of the long-lived version: made a week ago, retired a minute ago.
     await row("orig", t0 - 7 * DAY, t0 - 60_000);

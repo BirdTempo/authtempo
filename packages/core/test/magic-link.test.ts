@@ -260,7 +260,7 @@ describe("magic link routes", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://api.example.com/home");
     expect(res.headers.get("set-cookie")).toMatch(
-      /^tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
+      /^__Host-tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
     );
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
@@ -276,7 +276,7 @@ describe("magic link routes", () => {
       user: { email: "ada@example.com" },
       session: { id: expect.any(String) },
     });
-    expect(res.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    expect(res.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
     const again = await handle(post(VERIFY, { token }));
     expect(again.status).toBe(400);
     expect(await again.json()).toEqual({ error: "invalid_token" });
@@ -320,7 +320,7 @@ describe("magic link routes", () => {
     const token = tokenFromMail(mail[0]?.text ?? "");
     const first = await handle(verifyForm(token));
     expect(first.status).toBe(302);
-    expect(first.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    expect(first.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
     const second = await handle(verifyForm(token));
     expect(second.status).toBe(302);
     expect(second.headers.get("location")).toBe(
@@ -340,7 +340,7 @@ describe("magic link routes", () => {
     const rows = await storage.findMany("verification", []);
     expect(rows[0]?.consumedAt).toBeNull();
     expect((await handle(verifyForm(token))).headers.get("set-cookie")).toMatch(
-      /^tempo_session=ts_/,
+      /^__Host-tempo_session=ts_/,
     );
   });
 

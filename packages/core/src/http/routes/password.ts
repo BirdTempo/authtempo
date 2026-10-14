@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import {
   changePassword,
@@ -13,12 +14,12 @@ import {
   verifyPasswordEmail,
 } from "../../engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
-import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import { publicUser, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
-import { defaultPasswordVerifyPage } from "../password-pages.js";
+import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import {
@@ -67,8 +68,19 @@ const changeBody = z.object({
   newPassword: z.string().max(1024),
 });
 
+type PageError = NonNullable<ResetPageInput["error"]>;
+
 /** The refusals the reset page shows. The link is still valid after each. */
-const PAGE_ERRORS = new Set(["password_policy", "password_breached"]);
+const PAGE_ERRORS: ReadonlySet<string> = new Set<PageError>([
+  "password_policy",
+  "password_breached",
+  "breach_check_unavailable",
+]);
+
+/** A guard, not a cast: a code outside `PAGE_ERRORS` stays a string. */
+function isPageError(code: string | null): code is PageError {
+  return code !== null && PAGE_ERRORS.has(code);
+}
 
 /** No route without a `password` config, so the router answers 404. */
 export function passwordRoutes(config: ResolvedConfig): Route[] {
@@ -94,8 +106,15 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           name: body.value.name,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
         });
-        return r.ok ? signedIn(r.value) : respond(r);
+        if (!r.ok) return respond(r);
+        // The uniform answer (plan 12b): the same bytes for every address, no cookie.
+        if ("sent" in r.value) return json({ sent: true });
+        // password.requireVerified with uniformSignUp off (plan 12b): the user, no session, and no cookie.
+        if ("verifyRequired" in r.value)
+          return json({ user: publicUser(r.value.user), verifyRequired: true });
+        return signedIn(r.value);
       },
     },
     {
@@ -111,6 +130,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           userAgent: ctx.request.headers.get("user-agent"),
           trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
           next: body.value.next,
+          captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
@@ -173,6 +193,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
             email: body.value.email,
             next: body.value.next,
             ip: ctx.ip,
+            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
           }),
         );
       },
@@ -185,10 +206,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed("invalid_token");
         const raw = ctx.url.searchParams.get("error");
-        const error =
-          raw !== null && PAGE_ERRORS.has(raw)
-            ? (raw as "password_policy" | "password_breached")
-            : null;
+        const error = isPageError(raw) ? raw : null;
         return page(
           pw.resetPage({
             action: resetPath,
@@ -218,7 +236,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         if (!r.ok) {
           if (jsonCaller) return respond(r);
           // The link is still valid after a refused password: send the person back to the form.
-          if (PAGE_ERRORS.has(r.code))
+          if (isPageError(r.code))
             return redirect(
               `${config.baseURL}${resetPath}?token=${encodeURIComponent(body.value.token)}&error=${r.code}`,
             );

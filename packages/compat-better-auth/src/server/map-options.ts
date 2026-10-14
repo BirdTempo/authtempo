@@ -11,7 +11,7 @@ import {
   type CompatDatabase,
   type CompatPlugin,
 } from "../types.js";
-import { appSchemes, pluginOf } from "./check-options.js";
+import { appSchemes, pluginOf, signUpClosed } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
 import { compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
@@ -71,7 +71,9 @@ export interface Mapped {
  * `otp-verify`, with `otp:email:` and `otp-verify:email:`, plan 9e). Every other flow (sign-up, the reset
  * POST, invitation accept, handoff, passkey, social start) has only the
  * per-IP limit, so it keeps core's shared unknown bucket: without it such a
- * flow has no limit at all (review I-2).
+ * flow has no limit at all (review I-2). The sign-up also has a per-email
+ * limit since plan 12b (`password-sign-up:email:`), but it keeps the IP
+ * bucket: one script can sign up many addresses, one per address.
  *
  * One exception has no per-email limit: `totp-verify` (plan 9f). Its binding
  * limits are per user: `totp-code:user` (10 code checks per 15 minutes) and
@@ -202,7 +204,16 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const config: AuthConfig = {
     baseURL: origin,
     basePath,
-    secret: options.secret ?? "",
+    // Plan 12b: secrets map one entry for one entry. With neither key, core's
+    // own refusal of an empty secret names the problem.
+    ...(options.secret !== undefined || options.secrets === undefined
+      ? { secret: options.secret ?? "" }
+      : {}),
+    // A copy, not a rebuild: core checks each entry and names a bad one.
+    ...(options.secrets !== undefined ? { secrets: [...options.secrets] } : {}),
+    // Plan 12b: disableSignUp on every method that creates a user is core's
+    // signUp false. checkOptions refuses a mix, so no other list reaches here.
+    ...(signUpClosed(options) ? { signUp: false as const } : {}),
     trustedOrigins: Array.isArray(options.trustedOrigins) ? [...options.trustedOrigins] : [],
     ...(options.appName !== undefined ? { appName: options.appName } : {}),
     ...(options.authtempo?.appURL !== undefined ? { appURL: options.authtempo.appURL } : {}),
@@ -307,6 +318,14 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             resetTtlMinutes:
               (ep.resetPasswordTokenExpiresIn ?? BETTER_AUTH_DEFAULTS.resetPasswordTokenExpiresIn) /
               60,
+            // Plan 12b Task 15: Better Auth's requireEmailVerification is core's
+            // requireVerified. A sign-up answers no session, and an unverified
+            // sign-in answers EMAIL_NOT_VERIFIED.
+            ...(ep.requireEmailVerification === true ? { requireVerified: true } : {}),
+            // Better Auth's own answer: a session at sign-up, and its error for
+            // a taken address. The shim's signUp.email answers { token, user },
+            // which the uniform answer cannot fill (plan 12b).
+            uniformSignUp: false,
           },
         }
       : {}),

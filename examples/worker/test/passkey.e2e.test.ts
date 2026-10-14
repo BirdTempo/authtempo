@@ -33,7 +33,7 @@ function postJson(path: string, body: unknown, cookie?: string) {
 
 it("registers a passkey after a magic link sign-in and then signs in with it on D1", async () => {
   const cookie = await signInByMagicLink();
-  expect(cookie).toMatch(/^tempo_session=ts_/);
+  expect(cookie).toMatch(/^__Host-tempo_session=ts_/);
   const soft = await SoftAuthenticator.create({ rpID: "example.test", origin: BASE });
   const options = await postJson("/auth/passkey/register/options", {}, cookie);
   expect(options.status).toBe(200);

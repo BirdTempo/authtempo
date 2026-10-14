@@ -8,7 +8,9 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17.2
   - README.md "Rules that the code enforces"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 22
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
+  - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
 ---
 
 **For:** a security reviewer, or a developer who must explain the risks of authtempo to one.
@@ -40,14 +42,24 @@ sources:
 ## The controls
 
 - **Hashes at rest.** Core stores the SHA-256 of every token. A clear token appears once, in the answer that creates it. A copy of the tables holds no usable token.
-- **Keyed and sealed secrets.** An email code and a backup code are HMAC-SHA256 under the app `secret`. The second factor secret and the private signing keys are sealed with AES-256-GCM under a key from `secret`. A copy of the tables without `secret` opens none of them.
+- **Keyed and sealed secrets.** An email code and a backup code are HMAC-SHA256 under the app secret. The second factor secret and the private signing keys are sealed with AES-256-GCM under a key from the app secret. A copy of the tables without the secret opens none of them.
+- **Secret versions.** Each keyed or sealed row names the version of the app secret that made it. An operator who follows [Secrets](/docs/operations/secrets/) changes the secret and locks nobody out.
+- **A strong secret at start.** `createAuth` refuses a current secret under 32 characters or under an estimate of 100 bits.
 - **Constant time.** Every compare of a secret is constant time. An unknown address runs the same hash work as a wrong password.
 - **No account probe.** A magic link request, an email code request, and a reset request answer the same for every address.
-- **Limits.** Every flow that starts a mail or accepts a guess has a limit per IP, and most have a limit per address. The verify routes of a link, the social callbacks, and the token resolve have no limit, because each checks a token of 32 random bytes. [Limits](/docs/reference/limits/) lists each key.
+- **A uniform sign-up.** By default a password sign-up answers `{ sent: true }` for every address. A known address gets a mail, not a second account.
+- **The sign-up rule.** `signUp: false` or `"invited"` stops strangers from making accounts. Under `"invited"`, a person must prove the address before a session opens.
+- **A captcha.** An app can put a captcha on the flows that send mail or write rows. It runs after the per-IP limit and before the per-email limits.
+- **A breach check that fails closed.** An app can refuse a password that a breach exposed. When the check gives no answer, core refuses the password with 503. A throw of the app's own function answers 500.
+- **Limits.** Every flow that starts a mail or accepts a guess has a limit per IP, and most have a limit per address. The verify routes of a link, the social callbacks, and the token resolve have no limit, because each checks a token of 32 random bytes. A per-IP limit counts an IPv6 address by its `/64`. [Limits](/docs/reference/limits/) lists each key.
 - **Bounded guesses.** An email code admits 5 guesses, and an address gets at most 20 codes a day. A second-factor challenge admits 5 guesses, and an account at most 30 a day.
 - **Single use.** A magic link, a code, a challenge, and an OAuth code are spent in one conditional update. Two uses race for one row, and one wins.
 - **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how.
 - **Trusted origins.** A POST with an `Origin` header outside `trustedOrigins` answers 403. A `next` path must start with `/` and not `//`.
+- **A `__Host-` session cookie.** By default the session cookie is `__Host-tempo_session`. A host on a sibling subdomain cannot set it.
+- **An absolute session lifetime.** With `session.absoluteDays`, a session ends that many days after it opened, whatever its refresh.
+- **Fetch Metadata.** A page of another site cannot post a form to core: the browser's `Sec-Fetch-Site` header must say the post came from the API's own origin.
+- **No provider redirect.** Core follows no redirect on a provider call. A provider endpoint cannot steer a request to an internal address.
 - **No secrets in logs.** A log line holds an event name and ids. It never holds a token, a code, a cookie, an address, or an error message.
 
 ## The odds
@@ -72,7 +84,10 @@ An email code of 8 digits divides each figure of its row by 100.
 - A session JWT and an OAuth access token live to their `exp`. A sign-out does not end them.
 - A legacy password hash verifies slower than PBKDF2. The response time shows an address that is not yet migrated.
 - Off Workers, a caller can set `cf-connecting-ip`. The app must pass `clientIp`, or every per-IP limit fails open.
-- A sign-up answers `email_taken` or `email_taken_unverified`, so it shows that an address has an account.
+- A uniform sign-up of a new address writes rows, and one of a known address does not. The time of the answer can differ by that work, so core does not claim ASVS 5.0.0 6.3.8 in full.
+- With `password.uniformSignUp: false`, a sign-up answers `email_taken` or `email_taken_unverified`, so it shows that an address has an account.
+- The PBKDF2 cost stays at 100000 iterations until a measurement on a deployed Worker proves a higher count.
+- A call to `auth.api` with no `captchaToken` skips the captcha. A server route that proxies a browser and drops the token turns the captcha off for that flow.
 - The timing of the verify-mail resend shows an unverified account.
 - An API token survives a password reset and a sign-out.
 - There is no lockout per account. The limits bound the guesses instead.

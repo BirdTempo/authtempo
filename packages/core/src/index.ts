@@ -1,5 +1,16 @@
 export const VERSION = "0.0.0";
 
+export {
+  CAPTCHA_FLOWS,
+  CAPTCHA_HEADER,
+  CAPTCHA_TOKEN_MAX,
+  type CaptchaConfig,
+  type CaptchaFlow,
+  type CaptchaPage,
+  type CaptchaPort,
+  checkCaptcha,
+  DEFAULT_CAPTCHA_FLOWS,
+} from "./captcha.js";
 export type {
   AuthConfig,
   EmailOtpConfig,
@@ -25,6 +36,7 @@ export {
   type JwtApi,
   type OAuthApi,
   type PasswordApi,
+  type SecretsApi,
   type TokensApi,
   type TotpApi,
 } from "./create-auth.js";
@@ -68,6 +80,7 @@ export type { MemberSummary, OrganizationSummary } from "./engine/organizations.
 export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
+  ExistingAccountMailInput,
   PasswordChange,
   PasswordReauth,
   PasswordResend,
@@ -77,15 +90,22 @@ export type {
   PasswordSignIn,
   PasswordSignInResult,
   PasswordSignUp,
+  PasswordSignUpPending,
+  PasswordSignUpResult,
   PasswordVerified,
   PasswordVerify,
   ResetChallenge,
   ResetResult,
 } from "./engine/password.js";
-export { LEGACY_VERIFY_HASH, PENDING_HASH_PREFIX } from "./engine/password.js";
+export {
+  defaultExistingAccountMail,
+  LEGACY_VERIFY_HASH,
+  PENDING_HASH_PREFIX,
+} from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { SignInChallenge } from "./engine/second-factor.js";
 export type { MethodEnabled } from "./engine/second-factor-methods.js";
+export type { SecretsRewrap, SecretsStatus, SecretVersionCount } from "./engine/secrets.js";
 export { type PublicSession, type ResolvedSession, readSessionToken } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
@@ -112,6 +132,7 @@ export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
+export { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
 export {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -124,6 +145,7 @@ export {
 } from "./http/password-pages.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 export { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
+export { ipKey } from "./limiter/ip-key.js";
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
 export { type Clock, systemClock } from "./primitives/clock.js";
@@ -135,6 +157,7 @@ export {
 } from "./primitives/derive-gate.js";
 export { newId } from "./primitives/ids.js";
 export type { JwsAlg, PublicJwk } from "./primitives/jwk.js";
+export type { Keyring, SecretVersion } from "./primitives/keyring.js";
 export type { Result } from "./result.js";
 export {
   type ApiTokenRow,

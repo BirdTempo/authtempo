@@ -1,4 +1,12 @@
 import {
+  CAPTCHA_FLOWS,
+  type CaptchaConfig,
+  type CaptchaFlow,
+  type CaptchaPort,
+  DEFAULT_CAPTCHA_FLOWS,
+  type ResolvedCaptcha,
+} from "./captcha.js";
+import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
   defaultSecondFactorMail,
@@ -14,10 +22,12 @@ import {
 } from "./engine/hooks.js";
 import type { CimdEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
+import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
+import { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
 import {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -29,6 +39,15 @@ import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import type { JwsAlg } from "./primitives/jwk.js";
+import {
+  createKeyring,
+  ENTROPY_REFUSE_BITS,
+  ENTROPY_WARN_BITS,
+  entropyBits,
+  type Keyring,
+  SECRET_VERSION_MAX,
+  type SecretVersion,
+} from "./primitives/keyring.js";
 import { hasControlChar } from "./primitives/text.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
@@ -47,6 +66,7 @@ import {
   PROVIDER_NAME_RE,
   RESERVED_PROVIDER_NAMES,
 } from "./social/provider.js";
+import { providerFetch } from "./social/provider-fetch.js";
 import type { StorageAdapter } from "./storage/port.js";
 
 export interface MailMessage {
@@ -65,8 +85,19 @@ export interface AuthConfig {
   basePath?: string;
   /** Origin of the server that mounts `handle`, no path, no trailing slash. */
   baseURL: string;
-  /** At least 32 characters. */
-  secret: string;
+  /**
+   * The app secret, read as version 1 (plan 12b). At least 32 characters and
+   * an estimate of 100 bits or more: use 32 random bytes, for example
+   * `openssl rand -base64 32`. Give `secret`, `secrets`, or both.
+   */
+  secret?: string;
+  /**
+   * The app secrets by version, the current version first (plan 12b, spec
+   * 22). The current version seals and keys every new value. An old version
+   * stays here until `api.secrets.status` counts no row under it. With
+   * `secret` too, `secret` is version 1.
+   */
+  secrets?: SecretVersion[];
   /**
    * The name of the app, shown on the sign-in pages and in the mail
    * subjects. 1 to 80 characters, no control character. Default: the host
@@ -99,8 +130,22 @@ export interface AuthConfig {
    */
   clientIp?: (request: Request) => string | null;
   clock?: Clock;
+  /**
+   * The session cookie. Default `__Host-tempo_session` (plan 12b). With that
+   * name, core also reads the old `tempo_session` for one release and moves
+   * it. Another name gets no such read.
+   */
   cookieName?: string;
-  session?: { ttlDays?: number; slidingRefreshDays?: number };
+  session?: {
+    ttlDays?: number;
+    slidingRefreshDays?: number;
+    /**
+     * The absolute lifetime of a session, 1 to 365 days (plan 12b, ASVS
+     * 5.0.0 7.3.2). Off by default. A session ends at `createdAt` plus this,
+     * whatever its sliding refresh, and the person signs in again.
+     */
+    absoluteDays?: number;
+  };
   magicLink?: {
     ttlMinutes?: number;
     linkBuilder?: (token: string, next: string) => string;
@@ -134,7 +179,10 @@ export interface AuthConfig {
      * and a name given twice.
      */
     oauth2?: OAuth2Entry[];
-    /** The fetch for every provider call. Default: the global fetch. Tests inject one. */
+    /**
+     * The fetch for every provider call. Default: the global fetch. Tests
+     * inject one. Core wraps it: no redirect is followed.
+     */
     fetch?: typeof fetch;
   };
   /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
@@ -162,6 +210,13 @@ export interface AuthConfig {
   };
   /** Off when absent or `false`. `{}` turns it on with the defaults. */
   organizations?: OrganizationsConfig | false;
+  /**
+   * Who may become a user (plan 12b). `"open"` (default): anyone who proves
+   * an address or signs up. `"invited"`: only an address with a pending
+   * invitation; needs `organizations`. `false`: nobody new; existing users
+   * sign in as before. A refusal answers 403 `sign_up_closed`.
+   */
+  signUp?: "open" | "invited" | false;
   /**
    * Password sign-in is on when set. `{}` turns it on with the defaults.
    * Absent: no password route, no form on the sign-in page, no
@@ -207,6 +262,12 @@ export interface AuthConfig {
    * `organizations`.
    */
   hooks?: HooksConfig;
+  /**
+   * A captcha on the flows that send mail or write rows (plan 12b). The token
+   * comes in the header `x-captcha-response`, after the flow's limits. Off
+   * when absent. `@authtempo/captcha-turnstile` answers the port.
+   */
+  captcha?: CaptchaConfig;
 }
 
 export interface PasswordConfig {
@@ -214,8 +275,14 @@ export interface PasswordConfig {
   hash?: PasswordHashSeam;
   /** 8 to 128. Default 8. */
   minLength?: number;
-  /** True when the password is in a known breach. Default: no check. */
-  breachCheck?: (plain: string) => Promise<boolean>;
+  /**
+   * True when the password is in a known breach: `password_breached`.
+   * `"unavailable"` when the check got no answer: the password is refused
+   * with 503 `breach_check_unavailable`, so the check fails closed (plan 12b).
+   * A throw answers 500: it is a fault of the function, not an outage.
+   * Default: no check. `@authtempo/breach-check` answers this port.
+   */
+  breachCheck?: (plain: string) => Promise<boolean | "unavailable">;
   /** 1 to 1440. Default 15. */
   resetTtlMinutes?: number;
   /** The HTML of the reset page. The default is `defaultResetPage`. */
@@ -230,6 +297,24 @@ export interface PasswordConfig {
    * stop its call when `signal` aborts.
    */
   legacyVerify?: LegacyVerifyConfig;
+  /**
+   * True refuses a password sign-in of a user whose address is not
+   * verified: the right password answers `email_unverified` (403) and
+   * mails a new verify link, at most 3 per 15 minutes. A sign-up then
+   * opens no session. Default `false`, because core signs in an
+   * unverified password user since plan 8 (spec 8.7). A default of `true`
+   * would lock out each unverified user of a live app at the upgrade.
+   */
+  requireVerified?: boolean;
+  /**
+   * The answer of a sign-up (plan 12b, ASVS 5.0.0 6.3.8). Default true: every
+   * sign-up answers `{ sent: true }` with no session, and a known address
+   * gets a mail. False: the answer of plan 8, a session or `email_taken`.
+   * `requireVerified` changes only the answer of `false`.
+   */
+  uniformSignUp?: boolean;
+  /** The mail to an address that has an account, at a uniform sign-up. Core sends it to the address, whatever `to` it answers. Default `defaultExistingAccountMail`. */
+  existingAccountMail?: (input: ExistingAccountMailInput) => MailMessage;
 }
 
 export interface EmailOtpConfig {
@@ -449,7 +534,8 @@ export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
   appName: string;
-  secret: string;
+  /** The app secrets by version (plan 12b). No code reads one secret string: each read names its version. */
+  keyring: Keyring;
   trustedOrigins: ReadonlySet<string>;
   appURL: string;
   cookie: { sameSite: "Lax" | "None" };
@@ -459,7 +545,9 @@ export interface ResolvedConfig {
   clientIp: (request: Request) => string | null;
   clock: Clock;
   cookieName: string;
-  session: { ttlDays: number; slidingRefreshDays: number };
+  /** The old session cookie that the router moves, or null when `cookieName` is not the default (plan 12b). */
+  legacyCookieName: string | null;
+  session: { ttlDays: number; slidingRefreshDays: number; absoluteDays: number | null };
   magicLink: {
     ttlMinutes: number;
     linkBuilder: (token: string, next: string) => string;
@@ -484,13 +572,17 @@ export interface ResolvedConfig {
     invitationLinkBuilder: (token: string, organization: { slug: string; name: string }) => string;
     limits: ResolvedLimits;
   } | null;
+  signUp: "open" | "invited" | false;
   password: {
     hash: PasswordHashSeam;
     minLength: number;
-    breachCheck: ((plain: string) => Promise<boolean>) | null;
+    breachCheck: ((plain: string) => Promise<boolean | "unavailable">) | null;
     resetTtlMinutes: number;
     resetPage: (input: ResetPageInput) => string;
     legacyVerify: Required<LegacyVerifyConfig> | null;
+    requireVerified: boolean;
+    uniformSignUp: boolean;
+    existingAccountMail: (input: ExistingAccountMailInput) => MailMessage;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
   totp: ResolvedTotp | null;
@@ -498,6 +590,7 @@ export interface ResolvedConfig {
   oauth: ResolvedOAuth | null;
   operator: { secretHash: string } | null;
   hooks: ResolvedHooks;
+  captcha: ResolvedCaptcha | null;
 }
 
 /**
@@ -548,7 +641,7 @@ export class ConfigError extends Error {
 
 /** Applies defaults and refuses a config that cannot keep the security rules. */
 export function resolveConfig(input: AuthConfig): ResolvedConfig {
-  if (input.secret.length < 32) throw new ConfigError("secret must be at least 32 characters");
+  const keyring = resolveSecrets(input.secret, input.secrets);
   let origin: URL;
   try {
     origin = new URL(input.baseURL);
@@ -668,7 +761,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   const clock = input.clock ?? systemClock;
   const providers = socialProviders(input.social);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
-  const fetchFn = input.social?.fetch ?? globalThis.fetch.bind(globalThis);
+  // Every provider call goes through providerFetch: no redirect is followed
+  // (plan 12b). The jose seam gets the same fetch, so the JWKS read has the
+  // rule twice: jose's own and ours.
+  const fetchFn = providerFetch(input.social?.fetch ?? globalThis.fetch.bind(globalThis));
   let passkey: ResolvedConfig["passkey"] = null;
   if (input.passkey) {
     requireFields("passkey", input.passkey, ["rpID", "rpName"]);
@@ -724,6 +820,14 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         throw new ConfigError("password.legacyVerify.verify must be a function");
       legacyVerify = { verify: p.legacyVerify.verify, timeoutMs };
     }
+    // Default false: see `PasswordConfig.requireVerified`.
+    const requireVerified = p.requireVerified ?? false;
+    if (typeof requireVerified !== "boolean")
+      throw new ConfigError("password.requireVerified must be a boolean");
+    if (p.uniformSignUp !== undefined && typeof p.uniformSignUp !== "boolean")
+      throw new ConfigError("password.uniformSignUp must be a boolean");
+    if (p.existingAccountMail !== undefined && typeof p.existingAccountMail !== "function")
+      throw new ConfigError("password.existingAccountMail must be a function");
     password = {
       hash: p.hash ?? createPbkdf2PasswordHash(),
       minLength,
@@ -731,16 +835,24 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       resetTtlMinutes,
       resetPage: p.resetPage ?? defaultResetPage,
       legacyVerify,
+      requireVerified,
+      uniformSignUp: p.uniformSignUp ?? true,
+      existingAccountMail: p.existingAccountMail ?? defaultExistingAccountMail,
     };
   }
+  const signUp = input.signUp ?? "open";
+  if (signUp !== "open" && signUp !== "invited" && signUp !== false)
+    throw new ConfigError('signUp must be "open", "invited", or false');
+  if (signUp === "invited" && !organizations)
+    throw new ConfigError("signUp invited needs organizations: an invitation is the only way in");
   // One source for the session cookie name: the trust cookie check of `totp` reads it too.
-  const cookieName = input.cookieName ?? "tempo_session";
+  const cookieName = input.cookieName ?? DEFAULT_SESSION_COOKIE;
   const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
   return {
     basePath,
     baseURL: input.baseURL,
     appName,
-    secret: input.secret,
+    keyring,
     trustedOrigins: new Set(input.trustedOrigins),
     appURL,
     cookie: { sameSite },
@@ -750,10 +862,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     clientIp: input.clientIp ?? workersClientIp,
     clock,
     cookieName,
-    session: {
-      ttlDays: input.session?.ttlDays ?? 30,
-      slidingRefreshDays: input.session?.slidingRefreshDays ?? 7,
-    },
+    legacyCookieName: cookieName === DEFAULT_SESSION_COOKIE ? LEGACY_SESSION_COOKIE : null,
+    session: resolveSessionConfig(input.session),
     magicLink: {
       ttlMinutes: input.magicLink?.ttlMinutes ?? 15,
       linkBuilder:
@@ -768,6 +878,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
     handoff,
     organizations,
+    signUp,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
@@ -775,6 +886,14 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     oauth: resolveOAuth(input.oauth, jwtMint),
     operator: resolveOperator(input.operator, jwtMint),
     hooks: resolveHooks(input.hooks, organizations !== null),
+    captcha: resolveCaptcha(
+      input.captcha,
+      // Core's own sign-in page serves the handoff and the OAuth login step,
+      // unless the app gives handoff.signInPage.
+      (handoff !== null || (input.oauth !== undefined && input.oauth !== false)) &&
+        input.handoff?.signInPage === undefined,
+      password !== null,
+    ),
   };
 }
 
@@ -805,11 +924,118 @@ function listOf<T>(path: string, value: T[] | undefined): T[] {
   return value;
 }
 
+/** The shortest secret value, in UTF-16 code units, as before plan 12b. */
+const SECRET_MIN_LENGTH = 32;
+
+/**
+ * `secret` and `secrets` as one keyring (plan 12b, spec 22). The rules:
+ * one of the two at least; a version is an integer from 1 to 999999; no
+ * version and no value twice; with both keys, `secret` is version 1. The
+ * entropy rule refuses only the current value: a weak old version gets one
+ * warning line, because a refusal would block the move away from it.
+ */
+function resolveSecrets(secret: unknown, secrets: unknown): Keyring {
+  if (secret === undefined && secrets === undefined)
+    throw new ConfigError("secret or secrets is required");
+  if (secret !== undefined && typeof secret !== "string")
+    throw new ConfigError("secret must be a string");
+  const entries: Array<SecretVersion & { path: string }> = [];
+  if (secrets !== undefined) {
+    if (!Array.isArray(secrets) || secrets.length < 1)
+      throw new ConfigError("secrets must be a list of 1 or more { version, value } entries");
+    for (const [i, entry] of secrets.entries()) {
+      if (!isPlainObject(entry)) throw new ConfigError(`secrets[${i}] must be an object`);
+      for (const key of Object.keys(entry))
+        if (key !== "version" && key !== "value")
+          throw new ConfigError(
+            `secrets[${i}].${key} is not an option; an entry has version and value`,
+          );
+      const { version, value } = entry;
+      if (
+        typeof version !== "number" ||
+        !Number.isSafeInteger(version) ||
+        version < 1 ||
+        version > SECRET_VERSION_MAX
+      )
+        throw new ConfigError(
+          `secrets[${i}].version must be an integer from 1 to ${SECRET_VERSION_MAX}`,
+        );
+      if (typeof value !== "string") throw new ConfigError(`secrets[${i}].value must be a string`);
+      entries.push({ version, value, path: `secrets[${i}]` });
+    }
+  }
+  if (secret !== undefined) {
+    const one = entries.find((e) => e.version === 1);
+    if (one && one.value !== secret)
+      throw new ConfigError(
+        "secret and secrets version 1 hold different values; give the old secret once, as version 1",
+      );
+    if (!one) entries.push({ version: 1, value: secret, path: "secret" });
+  }
+  const seen = new Set<number>();
+  for (const e of entries) {
+    if (seen.has(e.version)) throw new ConfigError(`secrets has version ${e.version} twice`);
+    seen.add(e.version);
+  }
+  if (new Set(entries.map((e) => e.value)).size !== entries.length)
+    throw new ConfigError(
+      "secrets has one value under two versions; each version needs its own value",
+    );
+  for (const e of entries)
+    if (e.value.length < SECRET_MIN_LENGTH)
+      throw new ConfigError(
+        `${e.path === "secret" ? "secret" : `${e.path}.value`} must be at least ${SECRET_MIN_LENGTH} characters`,
+      );
+  for (const [i, e] of entries.entries()) {
+    const bits = Math.floor(entropyBits(e.value));
+    // The message names the key and the estimate, never the value.
+    if (i === 0 && bits < ENTROPY_REFUSE_BITS)
+      throw new ConfigError(
+        `${e.path} has an estimated ${bits} bits of entropy; at least ${ENTROPY_REFUSE_BITS} are required. Make a new one with 32 random bytes, for example: openssl rand -base64 32`,
+      );
+    if (bits < ENTROPY_WARN_BITS)
+      console.warn(
+        `authtempo: ${e.path} has an estimated ${bits} bits of entropy; ${ENTROPY_WARN_BITS} or more is recommended`,
+      );
+  }
+  return createKeyring(entries.map(({ version, value }) => ({ version, value })));
+}
+
 const NO_LIMITS: ResolvedLimits = {
   perUser: null,
   membersPerOrganization: null,
   pendingInvitationsPerOrganization: null,
 };
+
+const SESSION_KEYS: Readonly<Record<keyof NonNullable<AuthConfig["session"]>, true>> = {
+  ttlDays: true,
+  slidingRefreshDays: true,
+  absoluteDays: true,
+};
+
+/** `session`. ttlDays and slidingRefreshDays keep the defaults of version 1; absoluteDays is off by default (plan 12b). */
+function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["session"] {
+  const o = input ?? {};
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(SESSION_KEYS, key))
+      throw new ConfigError(
+        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, and absoluteDays`,
+      );
+  const { absoluteDays } = o;
+  if (
+    absoluteDays !== undefined &&
+    (typeof absoluteDays !== "number" ||
+      !Number.isSafeInteger(absoluteDays) ||
+      absoluteDays < 1 ||
+      absoluteDays > 365)
+  )
+    throw new ConfigError("session.absoluteDays must be an integer from 1 to 365");
+  return {
+    ttlDays: o.ttlDays ?? 30,
+    slidingRefreshDays: o.slidingRefreshDays ?? 7,
+    absoluteDays: absoluteDays ?? null,
+  };
+}
 
 function resolveLimits(input: OrganizationLimits | undefined): ResolvedLimits {
   const out: ResolvedLimits = { ...NO_LIMITS };
@@ -966,10 +1192,11 @@ function resolveTotp(
   if (
     typeof trustCookieName !== "string" ||
     !COOKIE_NAME_RE.test(trustCookieName) ||
-    trustCookieName === cookieName
+    trustCookieName === cookieName ||
+    trustCookieName === LEGACY_SESSION_COOKIE
   )
     throw new ConfigError(
-      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name",
+      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name or tempo_session",
     );
   if (o.challengePage !== undefined && typeof o.challengePage !== "function")
     throw new ConfigError("totp.challengePage must be a function");
@@ -1249,6 +1476,98 @@ function resolveHooks(input: HooksConfig | undefined, organizationsOn: boolean):
     SESSION_HOOK_POINTS,
   ) as unknown as SessionHooks;
   return { organization, session };
+}
+
+const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {
+  port: true,
+  flows: true,
+  onUnavailable: true,
+};
+const FIELD_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** `captcha` (plan 12b). Absent: off. */
+function resolveCaptcha(
+  input: CaptchaConfig | undefined,
+  defaultPageServed: boolean,
+  passwordOn: boolean,
+): ResolvedCaptcha | null {
+  if (input === undefined) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("captcha must be an object");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(CAPTCHA_KEYS, key))
+      throw new ConfigError(
+        `captcha.${key} is not an option; core has port, flows, and onUnavailable`,
+      );
+  const port = input.port as unknown;
+  if (
+    typeof port !== "object" ||
+    port === null ||
+    typeof (port as CaptchaPort).verify !== "function"
+  )
+    throw new ConfigError("captcha.port must have a verify function");
+  const page = (port as CaptchaPort).page;
+  if (page !== undefined) {
+    if (!isPlainObject(page as unknown))
+      throw new ConfigError("captcha.port.page must be an object");
+    if (!isHttpsUrl(page.scriptSrc))
+      throw new ConfigError("captcha.port.page.scriptSrc must be an https URL");
+    if (typeof page.widgetHtml !== "string" || page.widgetHtml.length > 4096)
+      throw new ConfigError(
+        "captcha.port.page.widgetHtml must be a string of at most 4096 characters",
+      );
+    if (typeof page.responseField !== "string" || !FIELD_RE.test(page.responseField))
+      throw new ConfigError(
+        "captcha.port.page.responseField must be 1 to 64 letters, digits, _, or -",
+      );
+    if (
+      !Array.isArray(page.cspSources) ||
+      !page.cspSources.every((s) => isHttpsUrl(s) && new URL(s).origin === s)
+    )
+      throw new ConfigError("captcha.port.page.cspSources must hold https origins with no path");
+  }
+  const flows: unknown = input.flows ?? [...DEFAULT_CAPTCHA_FLOWS];
+  if (
+    !Array.isArray(flows) ||
+    flows.length < 1 ||
+    new Set(flows).size !== flows.length ||
+    !flows.every((f) => (CAPTCHA_FLOWS as readonly unknown[]).includes(f))
+  )
+    throw new ConfigError(
+      `captcha.flows must be a list of 1 or more distinct flows: ${CAPTCHA_FLOWS.join(", ")}`,
+    );
+  // Core's page sends a token only from the widget that `page` describes.
+  // With no page, every gated flow on that page answers captcha_required.
+  // The page always has the magic link form, and the password form (sign-in,
+  // sign-up, reset request) only with `password`. It has no email code form.
+  const gated = new Set(flows as CaptchaFlow[]);
+  const gatedOnPage =
+    gated.has("magic-link-request") ||
+    (passwordOn &&
+      (gated.has("password-sign-in") ||
+        gated.has("password-sign-up") ||
+        gated.has("password-reset-request")));
+  if (page === undefined && defaultPageServed && gatedOnPage)
+    throw new ConfigError(
+      "captcha.port.page is required while core serves its sign-in page (handoff or oauth) with a gated flow on it. Without the widget, the page sends no token, so each gated flow on it answers captcha_required. Give the port a page, or set handoff.signInPage",
+    );
+  const onUnavailable = input.onUnavailable ?? "allow";
+  if (onUnavailable !== "allow" && onUnavailable !== "refuse")
+    throw new ConfigError('captcha.onUnavailable must be "allow" or "refuse"');
+  return {
+    port: port as CaptchaPort,
+    flows: new Set(flows as CaptchaFlow[]),
+    onUnavailable,
+    // A copy of the checked values: a later change to the port object does not reach the page.
+    page:
+      page === undefined
+        ? null
+        : Object.freeze({
+            scriptSrc: page.scriptSrc,
+            widgetHtml: page.widgetHtml,
+            responseField: page.responseField,
+            cspSources: Object.freeze([...page.cspSources]),
+          }),
+  };
 }
 
 /**

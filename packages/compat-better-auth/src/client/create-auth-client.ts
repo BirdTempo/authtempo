@@ -9,7 +9,7 @@ import {
   type PasskeySummaryJSON,
   type TwoFactorSessionJSON,
 } from "@authtempo/client";
-import type { PublicSession } from "@authtempo/core";
+import { LEGACY_SESSION_COOKIE, type PublicSession } from "@authtempo/core";
 import { createHandoff } from "@authtempo/handoff";
 import { expoCrypto, expoOpener } from "@authtempo/handoff/expo";
 import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
@@ -204,7 +204,11 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       return undefined;
     }
   };
-  const storageKey = expo ? `${expo.storagePrefix ?? "better-auth"}_${COOKIE_NAME}` : null;
+  // The key in the app's storage keeps the name of plan 9: a new key would
+  // sign every Expo user out (plan 12b). getCookie() names the cookie COOKIE_NAME.
+  const storageKey = expo
+    ? `${expo.storagePrefix ?? "better-auth"}_${LEGACY_SESSION_COOKIE}`
+    : null;
   // An unreadable store means no token: the call goes out without one.
   const readStored = () => {
     try {
@@ -546,11 +550,28 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         // Core's verify link lands on the app origin. The server api refuses it too.
         if (callbackURL !== undefined) return notSupported("core takes no callbackURL at sign-up");
         const r = await run(
-          (c) => c.password.signUp({ email, password, ...(name !== "" ? { name } : {}) }),
+          async (c) => {
+            const up = await c.password.signUp({
+              email,
+              password,
+              ...(name !== "" ? { name } : {}),
+            });
+            if (!up.ok) return up;
+            // Core's uniform answer (plan 12b) carries no user, and Better
+            // Auth's answer needs one. The shim's server sets uniformSignUp
+            // false, so only a core server with its default answers this.
+            if ("sent" in up.value) return { ok: false, code: "unexpected", status: 200 } as const;
+            return { ok: true, value: up.value } as const;
+          },
           (v) => {
+            // The server's requireEmailVerification (plan 12b): no session, so
+            // no token to keep. Better Auth answers token null.
+            if (!("token" in v)) return { token: null, user: toClientUser(v.user) };
             keepToken(v.token);
             return { token: v.token, user: toClientUser(v.user) };
           },
+          // The server's disableSignUp (plan 12b): Better Auth's own code, as the server api answers.
+          (f) => (f.code === "sign_up_closed" ? "EMAIL_PASSWORD_SIGN_UP_DISABLED" : undefined),
         );
         if (r.data) store.refetchIfStarted();
         return r;

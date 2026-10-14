@@ -6,6 +6,7 @@ import {
   type LimiterPort,
   systemClock,
 } from "@authtempo/core";
+import { TEST_SECRET } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { type DrizzleAdapterConfig, drizzleAdapter } from "../src/adapters/drizzle.js";
 import {
@@ -64,7 +65,7 @@ describe("betterAuth", () => {
     expect(() =>
       betterAuth({
         baseURL: BASE,
-        secret: "x".repeat(32),
+        secret: TEST_SECRET,
         database: memoryDatabase(),
         hooks: {},
         secondaryStorage: {},
@@ -82,7 +83,7 @@ describe("betterAuth", () => {
     expect(() =>
       betterAuth({
         baseURL: BASE,
-        secret: "x".repeat(32),
+        secret: TEST_SECRET,
         database,
         hooks: {},
       } as BetterAuthOptions),
@@ -117,7 +118,7 @@ describe("betterAuth", () => {
   });
 
   it("applies Better Auth's defaults before the mapping", () => {
-    const m = mapOptions({ baseURL: BASE, secret: "x".repeat(32), database: memoryDatabase() });
+    const m = mapOptions({ baseURL: BASE, secret: TEST_SECRET, database: memoryDatabase() });
     expect(BETTER_AUTH_DEFAULTS).toEqual({
       sessionExpiresIn: 604800,
       sessionUpdateAge: 86400,
@@ -143,7 +144,7 @@ describe("betterAuth", () => {
   it("moves the path of baseURL to basePath, as Better Auth reads it", () => {
     const m = mapOptions({
       baseURL: `${BASE}/auth`,
-      secret: "x".repeat(32),
+      secret: TEST_SECRET,
       database: memoryDatabase(),
     });
     expect([m.origin, m.basePath, m.config.baseURL]).toEqual([BASE, "/auth", BASE]);
@@ -152,7 +153,7 @@ describe("betterAuth", () => {
   it("maps the client IP options", () => {
     const off = mapOptions({
       baseURL: BASE,
-      secret: "x".repeat(32),
+      secret: TEST_SECRET,
       database: memoryDatabase(),
       advanced: { ipAddress: { disableIpTracking: true } },
     });
@@ -161,7 +162,7 @@ describe("betterAuth", () => {
     ).toBeNull();
     const list = mapOptions({
       baseURL: BASE,
-      secret: "x".repeat(32),
+      secret: TEST_SECRET,
       database: memoryDatabase(),
       advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip", "x-forwarded-for"] } },
     });
@@ -175,7 +176,7 @@ describe("betterAuth", () => {
   it("answers null for a listed IP header value that is not an IPv4 or IPv6 literal (M-6)", () => {
     const list = mapOptions({
       baseURL: BASE,
-      secret: "x".repeat(32),
+      secret: TEST_SECRET,
       database: memoryDatabase(),
       advanced: { ipAddress: { ipAddressHeaders: ["x-real-ip"] } },
     });
@@ -207,7 +208,7 @@ describe("betterAuth", () => {
     info.mockRestore();
     const m = mapOptions({
       baseURL: BASE,
-      secret: "x".repeat(32),
+      secret: TEST_SECRET,
       database: memoryDatabase(),
       advanced: { ipAddress: { disableIpTracking: true } },
     });
@@ -229,7 +230,7 @@ describe("betterAuth", () => {
     const privateKey = "-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----";
     const m = mapOptions({
       baseURL: BASE,
-      secret: "x".repeat(32),
+      secret: TEST_SECRET,
       database: memoryDatabase(),
       socialProviders: {
         google: { clientId: "g", clientSecret: "gs" },
@@ -251,17 +252,16 @@ describe("betterAuth", () => {
       linkedin: { clientId: "l", clientSecret: "ls" },
     });
     expect(m.config.cookie).toEqual({ sameSite: "None" });
-    expect(m.config.cookieName).toBe("tempo_session");
+    expect(m.config.cookieName).toBe("__Host-tempo_session");
     const lax = mapOptions({
       baseURL: BASE,
-      secret: "x".repeat(32),
+      secret: TEST_SECRET,
       database: memoryDatabase(),
       advanced: { defaultCookieAttributes: { sameSite: "lax" } },
     });
     expect(lax.config.cookie).toEqual({ sameSite: "Lax" });
     expect(
-      mapOptions({ baseURL: BASE, secret: "x".repeat(32), database: memoryDatabase() }).config
-        .cookie,
+      mapOptions({ baseURL: BASE, secret: TEST_SECRET, database: memoryDatabase() }).config.cookie,
     ).toBeUndefined();
   });
 
@@ -336,7 +336,9 @@ describe("betterAuth", () => {
     expect(s?.session.expiresAt).toBeInstanceOf(Date);
     expect(s?.user.name).toBe("");
     expect(await auth.api.getSession({ headers: new Headers() })).toBeNull();
-    await auth.api.signOut({ headers: new Headers({ cookie: `tempo_session=${up.token}` }) });
+    await auth.api.signOut({
+      headers: new Headers({ cookie: `__Host-tempo_session=${up.token}` }),
+    });
     expect(
       await auth.api.getSession({ headers: new Headers({ authorization: `Bearer ${up.token}` }) }),
     ).toBeNull();
@@ -632,7 +634,7 @@ describe("withPolicyCode on the reset and change routes (M-7)", () => {
     const verified = await auth.handler(json("/password/verify", { token: verifyToken }));
     expect(verified.status).toBe(200);
     const session =
-      /tempo_session=([^;]+)/.exec(verified.headers.get("set-cookie") ?? "")?.[1] ?? "";
+      /__Host-tempo_session=([^;]+)/.exec(verified.headers.get("set-cookie") ?? "")?.[1] ?? "";
     const res = await auth.handler(
       json(
         "/password/change",

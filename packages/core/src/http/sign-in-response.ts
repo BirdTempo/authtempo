@@ -21,6 +21,7 @@ export function signInPageResponse(config: ResolvedConfig, continuePath: string)
       .map((p) => ({ name: p.name, label: p.label })),
   };
   const nonce = randomBase64Url(16);
+  const page = config.captcha?.page ?? null;
   const render = config.handoff?.signInPage ?? defaultSignInPage;
   const html = render({
     basePath: config.basePath,
@@ -28,7 +29,18 @@ export function signInPageResponse(config: ResolvedConfig, continuePath: string)
     methods,
     nonce,
     appName: config.appName,
+    captcha: page
+      ? {
+          scriptSrc: page.scriptSrc,
+          widgetHtml: page.widgetHtml,
+          responseField: page.responseField,
+        }
+      : null,
   });
-  const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
+  // The widget's origins (plan 12b): its script and its frame. With no captcha the policy is as before.
+  const sources = page?.cspSources ?? [];
+  const extra = sources.length > 0 ? ` ${sources.join(" ")}` : "";
+  const frame = sources.length > 0 ? ` frame-src ${sources.join(" ")};` : "";
+  const policy = `default-src 'none'; script-src 'nonce-${nonce}'${extra};${frame} style-src 'unsafe-inline'; connect-src 'self'; form-action ${formAction(config)}; base-uri 'none'; frame-ancestors 'none'`;
   return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
 }

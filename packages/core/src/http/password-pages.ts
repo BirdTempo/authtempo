@@ -16,7 +16,7 @@ export interface ResetPageInput {
   minLength: number;
   maxLength: number;
   /** Set when the last post was refused; the token is still valid then. */
-  error: "password_policy" | "password_breached" | null;
+  error: "password_policy" | "password_breached" | "breach_check_unavailable" | null;
 }
 
 const STYLE = `body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #f6f6f6; color: #111; }
@@ -73,6 +73,8 @@ const POLICY = (i: ResetPageInput) =>
 const RESET_ERRORS = {
   password_policy: POLICY,
   password_breached: () => "This password is in a known data breach. Choose a different password.",
+  breach_check_unavailable: () =>
+    "The password check is not available now. Try again in a few minutes.",
 } as const;
 
 /**

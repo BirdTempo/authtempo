@@ -1,6 +1,6 @@
 import { createAuth, type MailPort, type StorageAdapter } from "@authtempo/core";
 
-/** Known breached passwords. Replace this set with a call to your breach check service. */
+/** Known breached passwords. In an app, use `createBreachCheck()` of @authtempo/breach-check. */
 const BREACHED = new Set(["password1234", "qwertyuiop12"]);
 
 export function createPasswordAuth(deps: {

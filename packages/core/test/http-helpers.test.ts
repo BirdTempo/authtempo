@@ -25,24 +25,26 @@ import { createMemoryAdapter } from "../src/storage/memory.js";
 
 describe("cookies", () => {
   it("sets an HttpOnly Secure SameSite=Lax cookie on /", () => {
-    const c = sessionCookie("tempo_session", "ts_abc", 60, "Lax");
-    expect(sessionCookie("tempo_session", "ts_abc", 60, "None")).toBe(
-      "tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=None",
+    const c = sessionCookie("__Host-tempo_session", "ts_abc", 60, "Lax");
+    expect(sessionCookie("__Host-tempo_session", "ts_abc", 60, "None")).toBe(
+      "__Host-tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=None",
     );
-    expect(c).toBe("tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax");
+    expect(c).toBe(
+      "__Host-tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax",
+    );
   });
   it("clears with Max-Age=0", () => {
-    expect(clearSessionCookie("tempo_session", "Lax")).toBe(
-      "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+    expect(clearSessionCookie("__Host-tempo_session", "Lax")).toBe(
+      "__Host-tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
     );
   });
   it("reads one cookie among several", () => {
     const req = new Request("https://x/", {
-      headers: { cookie: "a=1; tempo_session=ts_abc; b=2" },
+      headers: { cookie: "a=1; __Host-tempo_session=ts_abc; b=2" },
     });
-    expect(readCookie(req, "tempo_session")).toBe("ts_abc");
+    expect(readCookie(req, "__Host-tempo_session")).toBe("ts_abc");
     expect(readCookie(req, "nope")).toBeNull();
-    expect(readCookie(new Request("https://x/"), "tempo_session")).toBeNull();
+    expect(readCookie(new Request("https://x/"), "__Host-tempo_session")).toBeNull();
   });
   it("sets the trust cookie on the auth path, and clears it there (plan 9f)", () => {
     expect(trustCookie("tempo_totp_trust", "td_abc", "/auth/", 2_592_000, "Lax")).toBe(
@@ -183,11 +185,11 @@ describe("confirm page", () => {
 
 describe("oauth binding cookie", () => {
   it("is HttpOnly, Secure, SameSite=None on the social path", () => {
-    expect(oauthCookie("tempo_session_oauth", "abc", "/auth/social", 600)).toBe(
-      "tempo_session_oauth=abc; Path=/auth/social; Max-Age=600; HttpOnly; Secure; SameSite=None",
+    expect(oauthCookie("__Secure-tempo_session_oauth", "abc", "/auth/social", 600)).toBe(
+      "__Secure-tempo_session_oauth=abc; Path=/auth/social; Max-Age=600; HttpOnly; Secure; SameSite=None",
     );
-    expect(clearOauthCookie("tempo_session_oauth", "/auth/social")).toBe(
-      "tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
+    expect(clearOauthCookie("__Secure-tempo_session_oauth", "/auth/social")).toBe(
+      "__Secure-tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
     );
   });
 });
@@ -459,7 +461,9 @@ describe("sign-in page", () => {
     expect(on).toContain(`autocomplete="current-password"`);
     expect(on).toContain(`<button id="forgot" type="button">Forgot password</button>`);
     expect(on).toContain(`postJson("/password/sign-in"`);
-    expect(on).toContain(`postJson("/password/reset/request", { email: email, next: cont })`);
+    expect(on).toContain(
+      `postJson("/password/reset/request", { email: email, next: cont }, pwForm)`,
+    );
     const off = defaultSignInPage({ ...pw, methods: { ...pw.methods, password: false } });
     expect(off).not.toContain(`id="password"`);
     expect(off).not.toContain(`id="forgot"`);
@@ -484,8 +488,12 @@ describe("sign-in page", () => {
     const start = on.indexOf(`postJson("/password/sign-up"`);
     expect(start).toBeGreaterThan(-1);
     const handler = on.slice(start, on.indexOf(".catch(", start));
-    // The same success path as the sign-in: the sign-up answer sets the cookie (spec 8.7 item 1).
-    expect(handler).toContain(`if (res.ok) { location.href = cont; return; }`);
+    // The uniform answer (plan 12b) asks the person to read the mail. With
+    // password.requireVerified on, the detailed answer sets no cookie, and the
+    // page asks for the link. A session answer goes on as the sign-in does.
+    expect(handler).toContain(
+      `if (body && body.sent) fail("Check your email to continue.");\n          else if (body && body.verifyRequired) fail("Check your email for a link to confirm your address.");\n          else location.href = cont;`,
+    );
     expect(handler).toContain(`fail("An account with this address exists. Sign in instead.");`);
     expect(handler).toContain(`fail("Too many attempts. Try again later.");`);
     // The click handler, from its first line to the post: the form check and the lock
@@ -502,6 +510,9 @@ describe("sign-in page", () => {
     // Every code the handler names is a real core code, so a renamed code fails here.
     const codes = [...handler.matchAll(/code === "([a-z_]+)"/g)].map((m) => m[1]);
     expect(codes.sort()).toEqual([
+      "breach_check_unavailable",
+      "captcha_failed",
+      "captcha_required",
       "email_taken",
       "email_taken_unverified",
       "password_breached",
@@ -555,7 +566,7 @@ describe("sign-in page", () => {
     const start = html.indexOf(`postJson("/password/sign-in"`);
     const handler = html.slice(start, html.indexOf(".catch(", start));
     expect(handler).toContain(
-      `postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont })`,
+      `postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont }, pwForm)`,
     );
     expect(handler).toContain(
       `if (body && body.twoFactor) location.href = base + "/totp/challenge?challenge=" + encodeURIComponent(body.twoFactor.challenge);`,

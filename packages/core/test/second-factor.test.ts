@@ -29,10 +29,12 @@ import {
 } from "../src/engine/totp.js";
 import { MAILED_CODES_PER_EMAIL_DAY } from "../src/engine/verification.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import { base32Decode, normalizeBackupCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { tokenFromMail } from "./helpers.js";
+import { upSession } from "./password-helpers.js";
 import {
   type Auth,
   codeNow,
@@ -64,7 +66,10 @@ describe("the factor row (plan 12c)", () => {
     expect(factor?.backupCodes).toEqual(
       await Promise.all(
         backupCodes.map((c) =>
-          hmacSha256Hex(auth.config.secret, `${factor?.id}:${normalizeBackupCode(c)}`),
+          hmacSha256Hex(
+            currentSecret(auth.config.keyring),
+            `${factor?.id}:${normalizeBackupCode(c)}`,
+          ),
         ),
       ),
     );
@@ -80,7 +85,7 @@ describe("the factor row (plan 12c)", () => {
     // The list that migration 0008 copies from a plan 9f row: 8 characters, version 1.
     const old = "abcd2345";
     await auth.storage.update("secondFactor", [{ field: "id", op: "eq", value: factor.id }], {
-      backupCodes: [await hmacSha256Hex(auth.config.secret, `${factor.id}:${old}`)],
+      backupCodes: [await hmacSha256Hex(currentSecret(auth.config.keyring), `${factor.id}:${old}`)],
       backupCodesVersion: 1,
     });
     expect(await totpStatus(auth.config, { userId: user.id })).toMatchObject({
@@ -122,6 +127,7 @@ describe("the factor row (plan 12c)", () => {
       data: { attempts: 0 },
       createdAt: at,
       updatedAt: at,
+      secretVersion: 1,
     });
     expect(await disableTotp(auth.config, { userId: user.id })).toEqual({
       ok: true,
@@ -450,7 +456,7 @@ describe("a passkey as a second-factor method (plan 12c)", () => {
       userAgent: null,
     });
     if (!up.ok) throw new Error(up.code);
-    const bea = await resolveSession(auth.config, up.value.token);
+    const bea = await resolveSession(auth.config, upSession(up.value).token);
     if (!bea) throw new Error("no session");
     expect(bea.user.emailVerified).toBe(false);
     expect(

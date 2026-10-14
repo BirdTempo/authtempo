@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import {
   constantTimeEqual,
   randomToken,
@@ -87,7 +88,7 @@ export async function startHandoff(
   if (!config.handoff) return fail("not_found");
   if (!CHALLENGE_RE.test(input.challenge)) return fail("invalid_body");
   if (!redirectAllowed(config, input.redirect)) return fail("invalid_body");
-  if (!(await config.limiter.allow(`handoff-start:ip:${input.ip ?? "unknown"}`, START_LIMIT))) {
+  if (!(await config.limiter.allow(`handoff-start:ip:${ipKey(input.ip)}`, START_LIMIT))) {
     return fail("rate_limited");
   }
   const now = config.clock.now();
@@ -108,6 +109,7 @@ export async function startHandoff(
     data: { ...data },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   return ok({ handoffId });
 }
@@ -205,6 +207,7 @@ export async function continueHandoff(
         data: { ...codeData },
         createdAt: now,
         updatedAt: now,
+        secretVersion: config.keyring.current,
       });
       // The session was checked before this transaction. A claim in between deleted it and verified the user; the conditional update sees the deletion and undoes the code, which would otherwise skip the redeem guard.
       // The user id is in the where too: an api caller passes the two
@@ -238,7 +241,7 @@ export async function redeemHandoff(
   input: { code: string; verifier: string; ip: string | null; userAgent: string | null },
 ): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
   if (!config.handoff) return fail("not_found");
-  if (!(await config.limiter.allow(`handoff-redeem:ip:${input.ip ?? "unknown"}`, REDEEM_LIMIT))) {
+  if (!(await config.limiter.allow(`handoff-redeem:ip:${ipKey(input.ip)}`, REDEEM_LIMIT))) {
     return fail("rate_limited");
   }
   if (!CODE_RE.test(input.code)) return fail("invalid_token");

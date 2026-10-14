@@ -1,5 +1,7 @@
+import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -7,7 +9,7 @@ import type { UserRow } from "../schema.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
-import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
+import { findOrCreateUserByEmail, normalizeEmail, signUpGuard } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
 export const MAGIC_LINK_PREFIX = "ml_";
@@ -19,6 +21,8 @@ export interface MagicLinkRequest {
   email: string;
   next?: string | undefined;
   ip: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 export interface MagicLinkVerify {
@@ -41,8 +45,11 @@ export async function requestMagicLink(
 ): Promise<Result<{ sent: true }>> {
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`magic-link:ip:${input.ip ?? "unknown"}`, PER_IP)))
+  if (!(await config.limiter.allow(`magic-link:ip:${ipKey(input.ip)}`, PER_IP)))
     return fail("rate_limited");
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  const captcha = await checkCaptcha(config, "magic-link-request", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   if (!(await config.limiter.allow(`magic-link:email:${email}`, PER_EMAIL)))
     return fail("rate_limited");
   const now = config.clock.now();
@@ -58,6 +65,7 @@ export async function requestMagicLink(
     data: { next },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const link = config.magicLink.linkBuilder(token, next);
   await config.mail.send({
@@ -115,7 +123,7 @@ export async function verifyMagicLink(
         now,
         (tx) => steps.write(tx),
         ended,
-        steps.before,
+        signUpGuard(config, steps.before),
       ),
     ),
   );

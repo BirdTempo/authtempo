@@ -18,7 +18,7 @@ import type { ModelName, UserRow } from "../src/schema.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { undoCreateWhere } from "../src/storage/sql.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST, sessionOnly } from "./password-helpers.js";
+import { FAST, sessionOnly, upSession } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, socialAuth } from "./social-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -395,6 +395,9 @@ async function magicLinkToken(auth: ReturnType<typeof makeAuth>): Promise<string
   return tokenFromMail(auth.mail.at(-1)?.text ?? "");
 }
 
+// The password sign-ups below set `uniformSignUp: false`: they pin the races
+// of the detailed answer of plan 8 (a session at sign-up, `email_taken`). The
+// uniform answer has its own tests in uniform-sign-up.test.ts (plan 12b).
 describe("the session is created inside the claim transaction (plan 7 input, Review Focus 1)", () => {
   it("leaves no claimant session when the claimant's callback races the owner's magic link", async () => {
     const tokens: Record<string, FakeIdToken> = {};
@@ -923,7 +926,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("leaves no password on the owner's account when the claim lands just after the sign-up's user create (plan 8, Review Focus 4)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const link = await magicLinkToken(auth);
 
     // On D1 the owner's whole claim runs inside the claimant's open sign-up
@@ -973,7 +976,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("undoes the claimant's password sign-in session when the claim lands inside it (plan 8, Review Focus 2)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     // Reachable: the claimant signs up and never uses the verify link.
     const up = await passwordSignUp(auth.config, {
       email: EMAIL,
@@ -1009,7 +1012,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     if (!proved?.ok) throw new Error("the owner's verify failed");
     if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const userId = proved.value.user.id;
-    expect(userId).toBe(up.value.user.id);
+    expect(userId).toBe(upSession(up.value).user.id);
     expect(
       await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
     ).toMatchObject({ email: EMAIL, emailVerified: true });
@@ -1024,7 +1027,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("answers the loser of two sign-ups for one new address with email_taken and keeps one user (plan 8, unique_violation retry)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const inner = auth.storage;
     // The loser's first user read misses. On that miss the winner's whole
     // sign-up commits through the outer adapter, as a second isolate would.
@@ -1060,16 +1063,16 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     if (!won?.ok) throw new Error("the winner's sign-up failed");
     expect(loser).toMatchObject({ ok: false, code: "email_taken", status: 409 });
     const users = await inner.findMany("user", []);
-    expect(users.map((u) => u.id)).toEqual([won.value.user.id]);
+    expect(users.map((u) => u.id)).toEqual([upSession(won.value).user.id]);
     const passwords = await inner.findMany("password", []);
-    expect(passwords.map((p) => p.userId)).toEqual([won.value.user.id]);
+    expect(passwords.map((p) => p.userId)).toEqual([upSession(won.value).user.id]);
     const sessions = await inner.findMany("session", []);
-    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(won.value.token)]);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(upSession(won.value).token)]);
     expect(auth.mail).toHaveLength(1);
   });
 
   it("answers email_taken_unverified on the unique_violation retry when the winner is an unverified social user (plan 8)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const inner = auth.storage;
     // The winner is a social sign-in whose provider does not verify the
     // address. It commits on the loser's first user read. The retry reads
@@ -1109,7 +1112,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("keeps a password sign-in when the verify link that confirms this password lands inside it (plan 8, Review Focus 2)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const up = await passwordSignUp(auth.config, {
       email: EMAIL,
       password: "owner password",
@@ -1140,7 +1143,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("answers invalid_token and keeps the owner's session when a claim lands inside the verify link (plan 8, verify fails closed)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     // Reachable: a sign-up, then the owner of the address uses a magic link
     // while the sign-up's verify link runs, as on D1.
     const up = await passwordSignUp(auth.config, {
@@ -1176,7 +1179,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("leaves one user when two resets for an address with no user race (plan 8, reset unique_violation retry)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     // A new millisecond, so the second link's id sorts after the first. The
     // loser deletes the older pending rows first (plan 12c, Task 12), so the
@@ -1239,7 +1242,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("answers conflict when another change wins between the verify and the write (plan 8, change conflict)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     const set = await resetPassword(auth.config, {
       token: tokenFromMail(auth.mail.at(-1)?.text ?? ""),
@@ -1274,7 +1277,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("answers conflict when a reset sets the first password between the read and the create (plan 8, change conflict)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     // Reachable: a verified user with no password, from a magic link.
     const link = await magicLinkToken(auth);
     const ml = await verifyMagicLink(auth.config, { token: link, ip: null, userAgent: null });
@@ -1321,7 +1324,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   }
 
   it("keeps the owner's user, identity, session, and password when the owner's reset lands between the sign-up's two creates (plan 8 final review I-1)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     // Reachable: a reset request mails a link for an address with no user.
     const link = await resetLinkToken(auth);
 
@@ -1375,7 +1378,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("keeps the owner's new password when the owner's reset lands after the sign-up's two creates (plan 8 final review I-2)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const link = await resetLinkToken(auth);
 
     // On D1 the owner's whole reset runs inside the claimant's open sign-up
@@ -1413,7 +1416,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("keeps the owner's new password when the owner's reset lands just before the sign-up's session insert (plan 8 final review I-2)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const link = await resetLinkToken(auth);
 
     let owner: Awaited<ReturnType<typeof resetPassword>> | null = null;
@@ -1447,7 +1450,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   });
 
   it("leaves the claimant no session when the owner's magic link lands just before the sign-up's session insert (plan 8 final review M-2)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const link = await magicLinkToken(auth);
 
     // On D1 the owner's whole claim runs inside the claimant's open sign-up
@@ -1503,7 +1506,7 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
     passwordSignIn(config, { email: EMAIL, password, ip: null, userAgent: null });
 
   it("refuses a claimant sign-in when the owner's magic link lands between the sign-up's two creates", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const link = await magicLinkToken(auth);
     const claimantConfig = d1Like(auth.config);
     let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
@@ -1549,7 +1552,7 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
         return FAST.verify(plain, stored);
       },
     };
-    const auth = makeAuth({ password: { hash } });
+    const auth = makeAuth({ password: { hash, uniformSignUp: false } });
     const claimantConfig = d1Like(auth.config);
     let early: Awaited<ReturnType<typeof passwordSignIn>> | null = null;
     // Reachable on D1: a sign-in runs inside the open sign-up, after its password create.
@@ -1565,7 +1568,7 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
   });
 
   it("activates the password row of a plain sign-up, so a later sign-in works", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const created = await signUp(d1Like(auth.config));
     expect(created.ok).toBe(true);
     const rows = await auth.storage.findMany("password", []);
@@ -1575,7 +1578,7 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
   });
 
   it("answers email_taken_unverified with no session when a claim lands between the guard and the activation", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const link = await magicLinkToken(auth);
     const claimantConfig = d1Like(auth.config);
     let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
@@ -1603,7 +1606,7 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
 
 describe("an update undo restores only the columns the update set (plan 9 final review M-1, R-1)", () => {
   it("keeps the owner's verified user and session when the sign-up's activation throws after the owner's claim", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const link = await magicLinkToken(auth);
     const claimantConfig = d1Like(auth.config);
     let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;

@@ -65,7 +65,7 @@ describe("email code routes (plan 9e)", () => {
     expect(Object.keys(body).sort()).toEqual(["session", "token", "user"]);
     expect(body.token).toMatch(/^ts_/);
     expect(body.user.email).toBe(EMAIL);
-    expect(res.headers.get("set-cookie")).toContain(`tempo_session=${body.token}`);
+    expect(res.headers.get("set-cookie")).toContain(`__Host-tempo_session=${body.token}`);
     await auth.handle(post("/auth/otp/request", { email: EMAIL }));
     const other = wrongFor(code());
     for (let i = 0; i < 4; i++)
@@ -93,7 +93,7 @@ describe("email code routes (plan 9e)", () => {
       token: expect.stringMatching(/^ts_/),
       user: { email: EMAIL, emailVerified: true },
     });
-    expect(res.headers.get("set-cookie")).toContain(`tempo_session=${body.token}`);
+    expect(res.headers.get("set-cookie")).toContain(`__Host-tempo_session=${body.token}`);
     const signIn = await auth.handle(
       post("/auth/password/sign-in", { email: EMAIL, password: "a new long password" }),
     );

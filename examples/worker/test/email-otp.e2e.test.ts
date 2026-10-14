@@ -82,7 +82,14 @@ it("resets a password by an email code on D1: a weak password spends the code, a
     headers: { "content-type": "application/json", origin: BASE },
     body: JSON.stringify({ email, password: "correct horse battery" }),
   });
-  const oldToken = ((await up.json()) as { token: string }).token;
+  expect(await up.json()).toEqual({ sent: true });
+  // The uniform sign-up opens no session (plan 12b); the password sign-in does.
+  const signIn = await SELF.fetch(`${BASE}/auth/password/sign-in`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE },
+    body: JSON.stringify({ email, password: "correct horse battery" }),
+  });
+  const oldToken = ((await signIn.json()) as { token: string }).token;
   const client = cookieClient();
   expect(await client.emailOtp.requestReset({ email })).toEqual({
     ok: true,

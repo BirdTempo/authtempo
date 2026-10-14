@@ -70,6 +70,7 @@ authtempo migrate --target d1 --database my-app --remote
 - With `--tables core`, the `migrations_dir` of the binding must hold each file of `@authtempo/adapter-d1` with the same text.
 - Another folder stops the run, and the message names both folders. wrangler would apply the wrong files and report success.
 - With `--tables compat`, the command copies each compat file into the `migrations_dir` of the app under its next number.
+- The compat files hold the default table and column names of Better Auth. On tables with other names, the shipped 0001 and 0006 fail with `no such table`. Such an app writes 0001 from `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for tables from before 1.7, and 0006 from `compatMigration0006Sql("sqlite", storage.names)`.
 - With `--tables compat`, a `migrations_dir` in a package or under `node_modules` stops the run with exit 2, before the first write. The default folder of a core D1 app is that of `@authtempo/adapter-d1`, so point `migrations_dir` at a folder of the app first.
 - A file whose text the folder holds already is not copied again.
 - wrangler records each applied file in its table `d1_migrations`.

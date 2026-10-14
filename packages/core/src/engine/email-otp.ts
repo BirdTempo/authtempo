@@ -1,6 +1,9 @@
+import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
@@ -8,7 +11,7 @@ import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
 import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
-import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
+import { findOrCreateUserByEmail, normalizeEmail, signUpGuard } from "./users.js";
 import { attemptsOf, countAttempt, MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
@@ -51,6 +54,8 @@ const NEWEST_FIRST: Sort<"verification">[] = [
 export interface EmailOtpRequest {
   email: string;
   ip: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 export interface EmailOtpVerify {
@@ -92,8 +97,17 @@ async function requestCode(
   // Before any limit key and before the row: both trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`otp:ip:${input.ip ?? "unknown"}`, REQUEST_PER_IP)))
+  if (!(await config.limiter.allow(`otp:ip:${ipKey(input.ip)}`, REQUEST_PER_IP)))
     return fail("rate_limited");
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  // The reset code is a reset request.
+  const captcha = await checkCaptcha(
+    config,
+    purpose === "email-otp" ? "email-otp-request" : "password-reset-request",
+    input.captchaToken,
+    input.ip,
+  );
+  if (captcha) return captcha;
   if (!(await config.limiter.allow(`otp:email:${email}`, REQUEST_PER_EMAIL)))
     return fail("rate_limited");
   if (!(await config.limiter.allow(`otp:email-day:${email}`, MAILED_CODES_PER_EMAIL_DAY)))
@@ -129,13 +143,14 @@ async function requestCode(
     id,
     purpose,
     identifier: email,
-    valueHash: await codeHash(config.secret, id, code),
+    valueHash: await codeHash(currentSecret(config.keyring), id, code),
     // From the request time: the bump above moves the order, not the life.
     expiresAt: new Date(now.getTime() + otp.ttlMinutes * 60_000),
     consumedAt: null,
     data: { attempts: 0 },
     createdAt,
     updatedAt: createdAt,
+    secretVersion: config.keyring.current,
   });
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });
@@ -157,7 +172,7 @@ async function verifyGate(
   config: ResolvedConfig,
   input: { email: string; ip: string | null },
 ): Promise<Result<string | null>> {
-  if (!(await config.limiter.allow(`otp-verify:ip:${input.ip ?? "unknown"}`, VERIFY_PER_IP)))
+  if (!(await config.limiter.allow(`otp-verify:ip:${ipKey(input.ip)}`, VERIFY_PER_IP)))
     return fail("rate_limited");
   const email = normalizeEmail(input.email);
   if (
@@ -215,8 +230,13 @@ async function checkCode(
   if (!otp) return fail("not_found");
   const row = email === null ? null : await newestCode(config.storage, purpose, email);
   // One HMAC and one compare on every path, against a fixed value when no row exists.
-  const candidate = await codeHash(config.secret, row?.id ?? NO_ROW_ID, code);
-  const right = constantTimeEqual(candidate, row?.valueHash ?? NO_ROW_HASH);
+  // The row's version keys the HMAC (plan 12b). With no row, the current
+  // version runs it against NO_ROW_HASH. One HMAC and one compare on every path.
+  const key = row
+    ? hashSecretFor(config.keyring, row.secretVersion, row.id)
+    : { secret: currentSecret(config.keyring), known: true };
+  const candidate = await codeHash(key.secret, row?.id ?? NO_ROW_ID, code);
+  const right = constantTimeEqual(candidate, row?.valueHash ?? NO_ROW_HASH) && key.known;
   if (!row) return fail("invalid_code");
   if (row.consumedAt !== null)
     return fail(attemptsOf(row) >= otp.maxAttempts ? "too_many_attempts" : "invalid_code");
@@ -291,7 +311,7 @@ export async function verifyEmailOtp(
         now,
         (tx) => steps.write(tx),
         ended,
-        steps.before,
+        signUpGuard(config, steps.before),
       ),
     ),
   );

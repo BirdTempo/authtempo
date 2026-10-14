@@ -12,7 +12,9 @@ export type Auth = ReturnType<typeof makeAuth>;
 
 /** The engine view with password sign-in and the second factor on (plan 9f). */
 export function totpAuth(extra: Partial<AuthConfig> = {}): Auth {
-  return makeAuth({ password: { hash: FAST }, ...extra });
+  // The detailed answer of plan 8 (a session and the user at sign-up), which
+  // these tests read. The uniform answer has its own tests (plan 12b).
+  return makeAuth({ password: { hash: FAST, uniformSignUp: false }, ...extra });
 }
 
 /** A 6-digit code that is not `code`. */

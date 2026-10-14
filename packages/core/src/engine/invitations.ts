@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -249,7 +250,7 @@ export async function acceptInvitation(
 ): Promise<Result<{ organization: OrganizationSummary; member: MemberSummary }>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
-  if (!(await config.limiter.allow(`invitation-accept:ip:${input.ip ?? "unknown"}`, ACCEPT_LIMIT)))
+  if (!(await config.limiter.allow(`invitation-accept:ip:${ipKey(input.ip)}`, ACCEPT_LIMIT)))
     return fail("rate_limited");
   const live = await liveInvitation(config, input.token);
   if (!live.ok) return live;

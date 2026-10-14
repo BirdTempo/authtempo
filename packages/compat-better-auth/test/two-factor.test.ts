@@ -76,7 +76,7 @@ async function app(tf: TwoFactorOptions | null = {}) {
   await post("/password/sign-up", { email: EMAIL, password: PASSWORD });
   await post("/password/verify", { token: links.at(-1) });
   const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
-  const session = pair(cookieOf(signIn, "tempo_session"));
+  const session = pair(cookieOf(signIn, "__Host-tempo_session"));
   return { auth, post, get, session, storage };
 }
 
@@ -294,7 +294,7 @@ describe("the two-factor paths (plan 9f)", () => {
       expect(cookieOf(v, "better-auth.two_factor")).toBe(
         "better-auth.two_factor=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
       );
-      expect(cookieOf(v, "tempo_session")).not.toBeNull();
+      expect(cookieOf(v, "__Host-tempo_session")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -303,7 +303,7 @@ describe("the two-factor paths (plan 9f)", () => {
   it("answers a challenge at the sign-in with the two_factor cookie, and verify-totp opens the session", async () => {
     const { post, secret } = await enrolled();
     const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
-    expect(cookieOf(signIn, "tempo_session")).toBeNull();
+    expect(cookieOf(signIn, "__Host-tempo_session")).toBeNull();
     const challenge = cookieOf(signIn, "better-auth.two_factor");
     expect(challenge).toMatch(
       /^better-auth\.two_factor=tf_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=600; HttpOnly; Secure; SameSite=Lax$/,
@@ -328,7 +328,7 @@ describe("the two-factor paths (plan 9f)", () => {
         { email: EMAIL, password: PASSWORD },
         pair(trust),
       );
-      expect(cookieOf(again, "tempo_session")).not.toBeNull();
+      expect(cookieOf(again, "__Host-tempo_session")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -513,7 +513,7 @@ describe("the reset of a user with the factor on (plan 12c)", () => {
     const session = pair(
       cookieOf(
         await post("/password/sign-in", { email: EMAIL, password: PASSWORD }),
-        "tempo_session",
+        "__Host-tempo_session",
       ),
     );
     const enable = await post("/two-factor/enable", { password: PASSWORD }, session);
@@ -546,7 +546,7 @@ describe("the reset of a user with the factor on (plan 12c)", () => {
     const r = await reset();
     expect(r.status).toBe(200);
     expect(await json(r)).toEqual({ success: true });
-    expect(cookieOf(r, "tempo_session")).toBeNull();
+    expect(cookieOf(r, "__Host-tempo_session")).toBeNull();
     expect(cookieOf(r, "better-auth.two_factor")).toBeNull();
     const signIn = await post("/password/sign-in", {
       email: EMAIL,
@@ -574,7 +574,7 @@ describe("the reset of a user with the factor on (plan 12c)", () => {
     const r = await post("/sign-in/email-otp", { email: EMAIL, otp });
     expect(r.status).toBe(200);
     expect(await json(r)).toMatchObject({ user: { email: EMAIL } });
-    expect(cookieOf(r, "tempo_session")).not.toBeNull();
+    expect(cookieOf(r, "__Host-tempo_session")).not.toBeNull();
   });
 
   it("opens the session at the reset on a trusted device: core reads the trust cookie the shim forwards (plan 12c)", async () => {
@@ -593,7 +593,7 @@ describe("the reset of a user with the factor on (plan 12c)", () => {
       const r = await reset(trust);
       expect(r.status).toBe(200);
       expect(await json(r)).toEqual({ success: true });
-      expect(cookieOf(r, "tempo_session")).not.toBeNull();
+      expect(cookieOf(r, "__Host-tempo_session")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }

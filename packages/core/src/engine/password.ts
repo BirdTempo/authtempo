@@ -1,6 +1,8 @@
-import type { ResolvedConfig } from "../config.js";
+import { checkCaptcha } from "../captcha.js";
+import type { MailMessage, ResolvedConfig } from "../config.js";
 import type { ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -25,6 +27,7 @@ import { deleteTwoFactorChallenges, type TwoFactorPending, twoFactorGate } from 
 import {
   claimEmail,
   ensureEmailIdentity,
+  mayCreateUser,
   normalizeEmail,
   userStillUnverified,
   validUserName,
@@ -37,6 +40,11 @@ export const PASSWORD_RESET_PREFIX = "pr_";
 export const PASSWORD_RESET_TOKEN_RE = /^pr_[A-Za-z0-9_-]{43}$/;
 // 10 per hour per IP: a person makes one account; a script that makes many is slowed.
 const SIGN_UP_PER_IP = { seconds: 3600, max: 10 };
+// Per hour, per address, in both answers (plan 12b). A uniform sign-up of a
+// known address mails its owner, so a bound per address stops many IP
+// addresses from sending that mail without end. A new and a known address
+// get the same 429, so the limit tells nothing.
+const SIGN_UP_PER_EMAIL = { seconds: 3600, max: 5 };
 // Per 15 minutes. The email limit stops a guess run on one account from many
 // addresses; the IP limit stops one address that tries many accounts.
 const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
@@ -83,12 +91,47 @@ export interface PasswordSession {
   session: SessionRow;
 }
 
+/**
+ * The sign-up answer while `password.requireVerified` is on, or `signUp` is
+ * `"invited"` (plan 12b): the new user and no session. The verify link
+ * signs the person in.
+ */
+export interface PasswordSignUpPending {
+  user: UserRow;
+  verifyRequired: true;
+}
+
+/**
+ * `{ sent: true }` for every address while `password.uniformSignUp` is on
+ * (the default, plan 12b). With it off: a session, or the user with no
+ * session while `password.requireVerified` is on or `signUp` is `"invited"`.
+ */
+export type PasswordSignUpResult = PasswordSession | PasswordSignUpPending | { sent: true };
+
+/** What the mail to a known address gets (plan 12b). */
+export interface ExistingAccountMailInput {
+  email: string;
+  appName: string;
+  appURL: string;
+}
+
+/** The default mail to an address that has an account. `password.existingAccountMail` replaces it. */
+export function defaultExistingAccountMail(input: ExistingAccountMailInput): MailMessage {
+  return {
+    to: input.email,
+    subject: `Your account at ${input.appName}`,
+    text: `Someone asked to create an account for ${input.appName} with this address. You already have an account. Sign in at ${input.appURL}. If you forgot your password, ask for a reset on the sign-in page.\n\nIf it was not you, ignore this message. Nothing changed.`,
+  };
+}
+
 export interface PasswordSignUp {
   email: string;
   password: string;
   name?: string | undefined;
   ip: string | null;
   userAgent: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 export interface PasswordSignIn {
@@ -100,6 +143,8 @@ export interface PasswordSignIn {
   trustDevice?: string | undefined;
   /** Where the challenge page lands after the second factor (plan 9f). `safeNext` applies. */
   next?: string | undefined;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 /** A session, or a second-factor challenge for a user with the factor on (plan 9f). */
@@ -117,47 +162,65 @@ type Resolved = NonNullable<ResolvedConfig["password"]>;
 
 /**
  * The policy, then the breach check. `email` must be normalized: the
- * policy compares the password with it. A breach check that throws fails
- * closed: the route answers 500.
+ * policy compares the password with it. The check fails closed: an
+ * `"unavailable"` answer refuses with `breach_check_unavailable` (plan 12b),
+ * and a throw answers 500. The sign-up and both resets run it before any
+ * read of a user, so the refusal is the same for a known and an unknown address.
  */
 async function screen(
   pw: Resolved,
   password: string,
   email: string,
-): Promise<"password_policy" | "password_breached" | null> {
+): Promise<"password_policy" | "password_breached" | "breach_check_unavailable" | null> {
   const policy = passwordPolicyError(password, email, pw.minLength);
   if (policy) return policy;
-  if (pw.breachCheck && (await pw.breachCheck(password))) return "password_breached";
-  return null;
+  if (!pw.breachCheck) return null;
+  const answer = await pw.breachCheck(password);
+  if (answer === "unavailable") return "breach_check_unavailable";
+  return answer === true ? "password_breached" : null;
 }
 
 interface Created {
-  signedIn: PasswordSession;
+  answer: PasswordSession | PasswordSignUpPending;
   passwordId: string;
 }
 
 /**
- * Creates an unverified user with a password and a session, then mails a
- * link that confirms the address.
+ * Creates an unverified user with a password, then mails a link that
+ * confirms the address. While `password.uniformSignUp` is on (the default),
+ * it opens no session and answers `{ sent: true }` for every address (plan
+ * 12b, see `uniformSignUp`). With it off, it opens a session; while
+ * `password.requireVerified` is on, or `signUp` is `"invited"`, it opens none
+ * and answers the user with `verifyRequired: true`.
  */
 export async function passwordSignUp(
   config: ResolvedConfig,
   input: PasswordSignUp,
-): Promise<Result<PasswordSession>> {
+): Promise<Result<PasswordSignUpResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
-  if (!(await config.limiter.allow(`password-sign-up:ip:${input.ip ?? "unknown"}`, SIGN_UP_PER_IP)))
+  if (!(await config.limiter.allow(`password-sign-up:ip:${ipKey(input.ip)}`, SIGN_UP_PER_IP)))
     return fail("rate_limited");
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  const captcha = await checkCaptcha(config, "password-sign-up", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   // Before the policy and before any read: the policy and the lookups trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return fail("invalid_body");
+  // Before any read of a user: the answer is the same for every address (plan 12b).
+  if (config.signUp === false) return fail("sign_up_closed");
   const name = input.name;
   if (name !== undefined && !validUserName(name)) return fail("invalid_body");
   const refused = await screen(pw, input.password, email);
   if (refused) return fail(refused);
+  // After the body checks, which answer the same for every address and send
+  // no mail, and before the hash: only a sign-up that can mail counts.
+  if (!(await config.limiter.allow(`password-sign-up:email:${email}`, SIGN_UP_PER_EMAIL)))
+    return fail("rate_limited");
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
   const now = config.clock.now();
+  if (pw.uniformSignUp) return uniformSignUp(config, pw, { email, name: name ?? null, hash }, now);
   let created: Result<Created> | null = null;
   for (let attempt = 0; created === null; attempt++) {
     try {
@@ -184,15 +247,11 @@ export async function passwordSignUp(
     }
   }
   if (!created.ok) return created;
+  const answer = created.value.answer;
   // Right after the commit, before the mail: the session exists whatever the mail does.
-  await sessionOpened(
-    config,
-    created.value.signedIn.session,
-    created.value.signedIn.user,
-    "password",
-  );
+  if ("session" in answer) await sessionOpened(config, answer.session, answer.user, "password");
   await sendVerifyMail(config, email, created.value.passwordId, now);
-  return ok(created.value.signedIn);
+  return ok(answer);
 }
 
 /**
@@ -200,7 +259,10 @@ export async function passwordSignUp(
  * (the owner's magic link) can find this user before the commit, so a
  * conditional update of the user row where `emailVerified` is false runs
  * after the session insert. The last statement activates the password row,
- * which the sign-up wrote pending (`PENDING_HASH_PREFIX`).
+ * which the sign-up wrote pending (`PENDING_HASH_PREFIX`). While
+ * `password.requireVerified` is on, or `signUp` is `"invited"`, no session
+ * hook runs and no session row is written (plan 12b); the guard and the
+ * activation stay.
  */
 function insertSignUp(
   config: ResolvedConfig,
@@ -209,6 +271,9 @@ function insertSignUp(
   now: Date,
 ): Promise<Result<Created>> {
   return config.storage.transaction(async (tx): Promise<Result<Created>> => {
+    // "invited": before the existence read, so a known address with no
+    // invitation gets the same answer as a new one (plan 12b).
+    if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
     const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: row.email }]);
     if (existing) {
       if (existing.emailVerified) return fail("email_taken");
@@ -241,11 +306,17 @@ function insertSignUp(
     // row has a guard. After an owner's reset inside this transaction, the
     // pending password row holds the owner's hash, so an undo of it would
     // delete the owner's password. A refusal here undoes nothing.
-    const prepared = await prepareSession(
-      config,
-      { user: minted, ip: input.ip, userAgent: input.userAgent, via: "password" },
-      tx,
-    );
+    // Under "invited" the address must be proved too (owner ruling,
+    // 2026-10-15): else a stranger who knows an invited address gets a
+    // session. The verify link opens it, as under `requireVerified`.
+    const opens = !config.password?.requireVerified && config.signUp !== "invited";
+    const prepared = opens
+      ? await prepareSession(
+          config,
+          { user: minted, ip: input.ip, userAgent: input.userAgent, via: "password" },
+          tx,
+        )
+      : null;
     const user = await tx.create("user", minted);
     // Pending until the guard below passed: see `PENDING_HASH_PREFIX`.
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
@@ -256,7 +327,10 @@ function insertSignUp(
       createdAt: now,
       updatedAt: now,
     });
-    const s = await writeSession(config, prepared, tx);
+    const s = prepared ? await writeSession(config, prepared, tx) : null;
+    const dropSession = async () => {
+      if (s) await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+    };
     // claimEmail flips the flag in its first statement, so any claim since
     // the user create makes this match zero rows. The user row is the
     // owner's now. A throw would undo the password create, and the D1 undo
@@ -267,7 +341,7 @@ function insertSignUp(
     // owner's reset keeps this row id and writes the owner's hash into it,
     // and that row must stay.
     if (!(await userStillUnverified(tx, user.id, now))) {
-      await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+      await dropSession();
       await tx.delete("password", [
         { field: "id", op: "eq", value: password.id },
         { field: "hash", op: "eq", value: pending },
@@ -288,11 +362,116 @@ function insertSignUp(
       { hash: row.hash, updatedAt: now },
     );
     if (active === 0) {
-      await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+      await dropSession();
       return fail("email_taken_unverified");
     }
-    return ok({ signedIn: { token: s.token, user, session: s.session }, passwordId: password.id });
+    const answer: PasswordSignUpResult = s
+      ? { token: s.token, user, session: s.session }
+      : { user, verifyRequired: true };
+    return ok({ answer, passwordId: password.id });
   });
+}
+
+type UniformOutcome =
+  | { outcome: "created"; passwordId: string }
+  | { outcome: "existing" | "quiet" };
+
+/**
+ * The uniform sign-up (plan 12b): `{ sent: true }` on every path, no
+ * session. A new address gets the verify mail, a known one the
+ * existing-account mail, and a refused or raced one no mail. The retry on
+ * a unique violation runs outside the transaction (plan 3 rule).
+ */
+async function uniformSignUp(
+  config: ResolvedConfig,
+  pw: Resolved,
+  row: { email: string; name: string | null; hash: string },
+  now: Date,
+): Promise<Result<{ sent: true }>> {
+  let done: UniformOutcome | null = null;
+  for (let attempt = 0; done === null; attempt++) {
+    try {
+      const r = await hookGuard(() => insertUniform(config, row, now));
+      if (r.ok) done = r.value;
+      // The "invited" rule refused: the same answer as every other path, and no mail.
+      else if (r.code === "sign_up_closed") done = { outcome: "quiet" };
+      else return r;
+    } catch (err) {
+      // A parallel sign-up created the user between the read and the create.
+      // Run once more outside the failed transaction: the read finds the row.
+      if (
+        attempt === 0 &&
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        (err.model === "user" || err.model === "password")
+      )
+        continue;
+      throw err;
+    }
+  }
+  if (done.outcome === "created") await sendVerifyMail(config, row.email, done.passwordId, now);
+  if (done.outcome === "existing") await sendExistingAccountMail(config, pw, row.email);
+  return ok({ sent: true });
+}
+
+/**
+ * One transaction with no session: the user and the pending password row,
+ * the claim guard, and the activation, as `insertSignUp` writes them. A
+ * known address writes nothing.
+ */
+function insertUniform(
+  config: ResolvedConfig,
+  row: { email: string; name: string | null; hash: string },
+  now: Date,
+): Promise<Result<UniformOutcome>> {
+  return config.storage.transaction(async (tx): Promise<Result<UniformOutcome>> => {
+    // "invited": before the existence read, as in `insertSignUp` (plan 12b
+    // Task 8). A known and a new address with no invitation then do the
+    // same reads and get no mail, so the time of the answer tells nothing.
+    if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
+    const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: row.email }]);
+    if (existing) return ok({ outcome: "existing" });
+    // The order and the guards of `insertSignUp`, with no session.
+    const user = await tx.create("user", {
+      id: newId(now),
+      email: row.email,
+      emailVerified: false,
+      name: row.name,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
+    const password = await tx.create("password", {
+      id: newId(now),
+      userId: user.id,
+      hash: pending,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const own = [
+      { field: "id" as const, op: "eq" as const, value: password.id },
+      { field: "hash" as const, op: "eq" as const, value: pending },
+    ];
+    if (!(await userStillUnverified(tx, user.id, now))) {
+      await tx.delete("password", own);
+      return ok({ outcome: "quiet" });
+    }
+    const active = await tx.update("password", own, { hash: row.hash, updatedAt: now });
+    return ok(
+      active === 0 ? { outcome: "quiet" } : { outcome: "created", passwordId: password.id },
+    );
+  });
+}
+
+/** The mail to a known address, after the commit. To the address, whatever the builder wrote. */
+async function sendExistingAccountMail(
+  config: ResolvedConfig,
+  pw: Resolved,
+  email: string,
+): Promise<void> {
+  const message = pw.existingAccountMail({ email, appName: config.appName, appURL: config.appURL });
+  await config.mail.send({ ...message, to: email });
 }
 
 /** One `password-verify` row and one mail. The link opens a confirm page with no side effect. */
@@ -313,6 +492,7 @@ async function sendVerifyMail(
     data: { passwordId },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const link = `${config.baseURL}${config.basePath}/password/verify?token=${encodeURIComponent(token)}`;
   await config.mail.send({
@@ -350,23 +530,55 @@ export async function resendPasswordVerification(
   // Before any limit key: both keys trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`password-resend:ip:${input.ip ?? "unknown"}`, RESEND_PER_IP)))
+  if (!(await config.limiter.allow(`password-resend:ip:${ipKey(input.ip)}`, RESEND_PER_IP)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`password-resend:email:${email}`, RESEND_PER_EMAIL)))
-    return fail("rate_limited");
+  // The email limit counts before the reads, so an unknown address spends
+  // the same budget as a known one.
+  if (!(await allowResendMail(config, email))) return fail("rate_limited");
   const user = await config.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (!user || user.emailVerified) return ok({ sent: true });
   const row = await config.storage.findOne("password", [
     { field: "userId", op: "eq", value: user.id },
   ]);
   if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) return ok({ sent: true });
+  await replaceVerifyMail(config, email, row.id);
+  return ok({ sent: true });
+}
+
+/** The per-email limit of a new verify link: the resend route's key (plan 8b). */
+function allowResendMail(config: ResolvedConfig, email: string): Promise<boolean> {
+  return config.limiter.allow(`password-resend:email:${email}`, RESEND_PER_EMAIL);
+}
+
+/** Deletes the pending `password-verify` rows of the address, then mails one new link. */
+async function replaceVerifyMail(
+  config: ResolvedConfig,
+  email: string,
+  passwordId: string,
+): Promise<void> {
   await config.storage.delete("verification", [
     { field: "purpose", op: "eq", value: "password-verify" },
     { field: "identifier", op: "eq", value: email },
     { field: "consumedAt", op: "eq", value: null },
   ]);
-  await sendVerifyMail(config, email, row.id, config.clock.now());
-  return ok({ sent: true });
+  await sendVerifyMail(config, email, passwordId, config.clock.now());
+}
+
+/**
+ * A new verify link for a known unverified user with an active password
+ * row (plan 12b): the per-email limit of the resend route, then the other
+ * pending links go, then one mail. No IP key: the caller counted its own.
+ * False when the limit is full and no mail went. A mail throw reaches the
+ * caller, as at the resend.
+ */
+export async function mailVerifyAgain(
+  config: ResolvedConfig,
+  email: string,
+  passwordId: string,
+): Promise<boolean> {
+  if (!(await allowResendMail(config, email))) return false;
+  await replaceVerifyMail(config, email, passwordId);
+  return true;
 }
 
 /**
@@ -382,8 +594,11 @@ export async function passwordSignIn(
 ): Promise<Result<PasswordSignInResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
-  if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
+  if (!(await config.limiter.allow(`password:ip:${ipKey(input.ip)}`, SIGN_IN_PER_IP)))
     return fail("rate_limited");
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  const captcha = await checkCaptcha(config, "password-sign-in", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   // Before any lookup: the lookup and the email limit key trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email !== null && !(await config.limiter.allow(`password:email:${email}`, SIGN_IN_PER_EMAIL)))
@@ -453,6 +668,18 @@ export async function passwordSignIn(
         return refuse();
       proved = current.hash;
     }
+  }
+  // Plan 12b Task 15 (Better Auth docs audit gap 1). After the password
+  // check, so only a person who knows the password learns that the address
+  // is unverified. A new link goes out, at most 3 per 15 minutes. Before the
+  // second-factor gate: no challenge opens either. Under signUp "invited"
+  // too (plan 12b, Task 9 review M1): a stranger who knows an invited
+  // address could sign up with their own password and sign in before the
+  // address is proved. The ruling of 2026-10-15 closed it for social and
+  // for the sign-up session; this closes it for the sign-in.
+  if ((pw.requireVerified || config.signUp === "invited") && !user.emailVerified) {
+    await mailVerifyAgain(config, user.email, row.id);
+    return fail("email_unverified");
   }
   // The second factor (plan 9f, owner decision 1b): a user with the factor on
   // gets a challenge in place of the session. The gate keeps the guard below
@@ -657,6 +884,8 @@ export interface PasswordResetRequest {
   email: string;
   next?: string | undefined;
   ip: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 /**
@@ -673,8 +902,16 @@ export async function requestPasswordReset(
   // Before any limit key and before the row: both trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`password-reset:ip:${input.ip ?? "unknown"}`, RESET_PER_IP)))
+  if (!(await config.limiter.allow(`password-reset:ip:${ipKey(input.ip)}`, RESET_PER_IP)))
     return fail("rate_limited");
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  const captcha = await checkCaptcha(
+    config,
+    "password-reset-request",
+    input.captchaToken,
+    input.ip,
+  );
+  if (captcha) return captcha;
   if (!(await config.limiter.allow(`password-reset:email:${email}`, RESET_PER_EMAIL)))
     return fail("rate_limited");
   const now = config.clock.now();
@@ -689,6 +926,7 @@ export async function requestPasswordReset(
     data: { next: safeNext(input.next) },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const link = `${config.baseURL}${config.basePath}/password/reset?token=${encodeURIComponent(token)}`;
   await config.mail.send({
@@ -744,12 +982,7 @@ export async function resetPassword(
   // Before any read, the breach call, and the hash: each POST costs one
   // breach call and one hash at full cost. The limiter is the owned one,
   // so a refusal holds whatever a supplier does.
-  if (
-    !(await config.limiter.allow(
-      `password-reset-post:ip:${input.ip ?? "unknown"}`,
-      RESET_POST_PER_IP,
-    ))
-  )
+  if (!(await config.limiter.allow(`password-reset-post:ip:${ipKey(input.ip)}`, RESET_POST_PER_IP)))
     return fail("rate_limited");
   const valueHash = await sha256Hex(input.token);
   const now = config.clock.now();
@@ -944,6 +1177,10 @@ function applyReset(
     let minted: UserRow | null = null;
     let user: UserRow;
     if (!found) {
+      // The sign-up rule (plan 12b): a read, after the consume and before
+      // the session hook, so a refused user never reaches the hook. The stop
+      // undoes the consume, so the link stays usable.
+      await mayCreateUser(config, tx, email);
       minted = {
         id: newId(now),
         email,
@@ -1210,7 +1447,7 @@ export async function verifyPassword(
   input: PasswordReauth,
 ): Promise<Result<{ verified: true }>> {
   if (!config.password) return fail("not_found");
-  if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
+  if (!(await config.limiter.allow(`password:ip:${ipKey(input.ip)}`, SIGN_IN_PER_IP)))
     return fail("rate_limited");
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },

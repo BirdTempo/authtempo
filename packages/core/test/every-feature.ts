@@ -1,0 +1,65 @@
+import { type AuthConfig, type ResolvedConfig, resolveConfig } from "../src/config.js";
+import { createMemoryAdapter } from "../src/storage/memory.js";
+
+export const BASE = "https://api.example.com";
+export const base = {
+  baseURL: BASE,
+  secret: "0123456789abcdef0123456789abcdef",
+  trustedOrigins: [],
+  storage: createMemoryAdapter(),
+  mail: { send: async () => {} },
+};
+
+/** Every kind of social provider, so each provider route exists. */
+export const SOCIAL: NonNullable<AuthConfig["social"]> = {
+  google: { clientId: "g", clientSecret: "g" },
+  apple: { clientId: "a", teamId: "t", keyId: "k", privateKey: "pem" },
+  github: { clientId: "h", clientSecret: "h" },
+  linkedin: { clientId: "l", clientSecret: "l" },
+  oidc: [
+    {
+      name: "acme",
+      label: "Acme",
+      issuer: "https://id.acme.example",
+      clientId: "c",
+      clientSecret: "s",
+      endpoints: {
+        authorizeUrl: "https://id.acme.example/authorize",
+        tokenUrl: "https://id.acme.example/token",
+        jwksUrl: "https://id.acme.example/jwks",
+      },
+    },
+  ],
+  oauth2: [
+    {
+      name: "chat",
+      label: "Chat",
+      authorizeUrl: "https://chat.example/authorize",
+      tokenUrl: "https://chat.example/token",
+      clientId: "c",
+      clientSecret: "s",
+      scope: "email",
+      userinfo: async () => ({
+        subject: "1",
+        email: null,
+        emailVerified: false,
+        name: null,
+        image: null,
+      }),
+    },
+  ],
+};
+
+/** A config with every feature on: every route that core can serve exists. */
+export function everyFeature(): ResolvedConfig {
+  return resolveConfig({
+    ...base,
+    social: SOCIAL,
+    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] },
+    handoff: { schemes: ["example://"] },
+    organizations: {},
+    password: {},
+    oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false } },
+    operator: { secretHash: "0".repeat(64) },
+  });
+}

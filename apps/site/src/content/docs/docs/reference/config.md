@@ -18,13 +18,16 @@ sources:
 
 ## Top level
 
-The keys of `createAuth(config)`. `baseURL`, `secret`, `trustedOrigins`, `storage`, and `mail` are required.
+The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `mail` are required, and `secret` or `secrets`.
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `basePath` | string | `"/auth"` | Starts with `/` and does not end with `/`. |
 | `baseURL` | string | required | The origin of the server that mounts `handle`: no path, no trailing slash. |
-| `secret` | string | required | At least 32 characters. It keys the stored codes and seals the factor secrets and the signing keys. |
+| `secret` | string | `secrets` | Version 1 of the app secret. At least 32 characters. When it is the current version, it needs an estimate of 100 bits or more. It keys the stored codes and seals the factor secrets and the signing keys. |
+| `secrets` | list of `{ version, value }` | `[{ version: 1, value: secret }]` | The app secrets, the current version first. The current version seals and keys every new value. See [Secrets](/docs/operations/secrets/). |
+| `secrets[].version` | number | required | An integer from 1 to 999999. A row from before version 9 of the schema reads as version 1. |
+| `secrets[].value` | string | required | At least 32 characters. The first entry needs an estimate of 100 bits or more. An entry under 120 bits writes one warning line. |
 | `appName` | string | the host of `baseURL` | 1 to 80 characters with no control character. It names the app in the pages and the mail subjects. |
 | `trustedOrigins` | string list | required | Exact origins and app schemes. A `*` is refused. |
 | `appURL` | string | `baseURL` | An exact origin that is `baseURL` or a member of `trustedOrigins`. Sign-ins land here. |
@@ -34,8 +37,8 @@ The keys of `createAuth(config)`. `baseURL`, `secret`, `trustedOrigins`, `storag
 | `limiter` | `LimiterPort` | the memory limiter | The memory limiter counts per isolate and is for tests. Use the owned limiter of the adapter. |
 | `clientIp` | function of the request | reads `cf-connecting-ip` | Answers the client IP, or null. Off Workers, read the header of your trusted proxy. |
 | `clock` | `Clock` | the system clock | `{ now(): Date }`. Tests inject one. |
-| `cookieName` | string | `"tempo_session"` | The session cookie. The binding cookie is this name plus `_oauth`. |
-| `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }` | See the keys under Session. |
+| `cookieName` | string | `"__Host-tempo_session"` | The session cookie. The binding cookie drops a `__Host-` or `__Secure-` prefix, takes `__Secure-`, and adds `_oauth`. With the default name, core moves the old `tempo_session` cookie for one release. |
+| `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }`, no `absoluteDays` | See the keys under Session. |
 | `magicLink` | object | the defaults below | See the keys under Magic link. |
 | `social` | object | no provider | See the keys under Social. |
 | `jwt` | `JwtSeam` | jose 6.2.12 | The ID token verifier and the Apple secret signer. Tests inject a fake. |
@@ -43,6 +46,7 @@ The keys of `createAuth(config)`. `baseURL`, `secret`, `trustedOrigins`, `storag
 | `webauthn` | `WebAuthnSeam` | @simplewebauthn/server 14.0.3 | The WebAuthn ceremonies. Tests inject a fake. |
 | `handoff` | object | off | The handoff is on when it is set. |
 | `organizations` | object or `false` | off | `{}` turns organizations on with the defaults. |
+| `signUp` | `"open"` \| `"invited"` \| `false` | `"open"` | Who may become a user. `"invited"` needs `organizations` and a pending invitation of the address. `false` lets nobody new in. |
 | `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
 | `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
@@ -63,6 +67,7 @@ The keys of `createAuth(config)`. `baseURL`, `secret`, `trustedOrigins`, `storag
 | --- | --- | --- | --- |
 | `session.ttlDays` | number | 30 | The life of a session in days. |
 | `session.slidingRefreshDays` | number | 7 | A session older than this moves its expiry forward when it is used. |
+| `session.absoluteDays` | number | none | 1 to 365. A session ends this many days after it opened, whatever its sliding refresh. |
 
 ## Magic link
 
@@ -153,12 +158,15 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | --- | --- | --- | --- |
 | `password.hash` | `PasswordHashSeam` | `createPbkdf2PasswordHash()` | PBKDF2-HMAC-SHA256, 100000 iterations. |
 | `password.minLength` | number | 8 | An integer from 8 to 128, in code points. |
-| `password.breachCheck` | async function of the password | none | True refuses the password with `password_breached`. |
+| `password.breachCheck` | async function of the password | none | `true` refuses the password with `password_breached`. `"unavailable"` refuses it with 503 `breach_check_unavailable`: the check fails closed. A throw answers 500. Core sets no deadline on the function, so an app's own function sets its own. `@authtempo/breach-check` answers it, with a default deadline of 2000 ms. |
 | `password.resetTtlMinutes` | number | 15 | An integer from 1 to 1440. |
 | `password.resetPage` | function of `ResetPageInput` | `defaultResetPage` | Answers the markup of the reset form. |
 | `password.legacyVerify` | `LegacyVerifyConfig` | none | The old system's check, for users with `LEGACY_VERIFY_HASH`. |
 | `password.legacyVerify.verify` | async function of the address, the password, and a signal | required in `legacyVerify` | Only `true` is a match. |
 | `password.legacyVerify.timeoutMs` | number | 5000 | An integer from 100 to 30000. Every failed sign-in waits this long. |
+| `password.requireVerified` | boolean | `false` | True refuses the right password of an unverified address with `email_unverified` and mails a new link. A sign-up then opens no session. The default keeps the sign-in of an unverified user that core allows since plan 8. |
+| `password.uniformSignUp` | boolean | `true` | Every sign-up answers `{ sent: true }` with no session, and a known address gets a mail (ASVS 5.0.0 6.3.8). False keeps a session at sign-up and `email_taken`. `requireVerified` changes only the answer of `false`. |
+| `password.existingAccountMail` | function of `{ email, appName, appURL }` to a mail | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address, whatever `to` it answers. |
 
 ## Email codes
 
@@ -182,7 +190,7 @@ Another key of `totp` is refused.
 | `totp.backupCodes` | number | 10 | An integer from 5 to 20. |
 | `totp.backupCodeLength` | number | 23 | An integer from 23 to 32. A code of 23 characters holds 113.9 bits, above the 112 bits of ASVS 5.0 6.5.2. |
 | `totp.trustDays` | number | 30 | An integer from 1 to 365. |
-| `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName`. |
+| `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName` or `tempo_session`. |
 | `totp.challengePage` | function of `TotpChallengePageInput` | `defaultTotpPage` | Answers the markup of the challenge form. |
 | `totp.gate` | object | all three on | The second factor's gate on the sign-in methods other than the password. Another key is refused. The handoff has no key: it continues a browser session that passed the gate. |
 | `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |
@@ -233,6 +241,18 @@ Another key of `operator` is refused.
 | --- | --- | --- | --- |
 | `hooks.organization` | `OrganizationHooks` | none | Needs `organizations`. A name that is no hook point is refused. |
 | `hooks.session` | `SessionHooks` | none | `beforeCreate`, `afterCreate`, and `afterEnd`. |
+
+## Captcha
+
+The token comes in the header `x-captcha-response`. Core checks it after the per-IP limit of the flow. The check runs before every per-email limit, the password policy, the breach check, and the first read of a user. So a request with no token spends no per-email limit of an address, and costs no breach call. An in-process `api` call with no `captchaToken` skips the check. An app that proxies a browser request through `api` must pass the browser's token as `captchaToken`; without it, the check does not run.
+Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.signInPage` replaces it. Then `captcha.port.page` is required when a gated flow is on that page. The page has the magic link form, and the password forms only with `password`. It has no email code form. Without the widget, the page sends no token, and every gated flow on it answers `captcha_required`.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `captcha` | object | off | Turns the check on for the flows in `captcha.flows`. |
+| `captcha.port` | `CaptchaPort` | required | An object with `verify`. `@authtempo/captcha-turnstile` gives one. Its optional `page` puts the widget on core's sign-in page: `scriptSrc` is an https URL, `responseField` is 1 to 64 letters, digits, `_`, or `-`, and `cspSources` holds https origins with no path. |
+| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in` is the fifth flow, and it is off by default. `password-reset-request` covers the reset link and the reset code. |
+| `captcha.onUnavailable` | `"allow"` \| `"refuse"` | `"allow"` | What happens when the captcha gives no answer. `"allow"` writes one log line and goes on: the limits still bound the flow. `"refuse"` answers 503 `captcha_unavailable`. |
 
 ## Next
 

@@ -31,6 +31,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `handoff-start:ip:<ip>` | 15 minutes | 30 | Handoff start |
 | `handoff-redeem:ip:<ip>` | 15 minutes | 20 | Handoff redeem |
 | `password-sign-up:ip:<ip>` | 1 hour | 10 | Password sign-up |
+| `password-sign-up:email:<email>` | 1 hour | 5 | Password sign-up |
 | `password:ip:<ip>` | 15 minutes | 20 | Password sign-in |
 | `password:email:<email>` | 15 minutes | 10 | Password sign-in |
 | `password-resend:ip:<ip>` | 15 minutes | 20 | Verify mail resend |
@@ -60,6 +61,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |
 
+For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.
+
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
@@ -83,7 +86,7 @@ These counts live in their rows, so they hold under every limiter.
 
 | Item | Life |
 | --- | --- |
-| Session | `session.ttlDays`, 30 days by default, with a sliding refresh after `session.slidingRefreshDays` |
+| Session | `session.ttlDays`, 30 days by default, with a sliding refresh after `session.slidingRefreshDays`. With `session.absoluteDays`, at most that many days after the sign-in |
 | Magic link | `magicLink.ttlMinutes`, 15 minutes by default |
 | Email code | `emailOtp.ttlMinutes`, 10 minutes by default |
 | Reset link | `password.resetTtlMinutes`, 15 minutes by default |

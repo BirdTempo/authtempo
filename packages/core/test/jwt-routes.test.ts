@@ -51,7 +51,7 @@ describe("the JWT routes (plan 9g)", () => {
     const h = jwtHandle();
     const s = await signedIn(h);
     for (const headers of [
-      { cookie: `tempo_session=${s.token}` },
+      { cookie: `__Host-tempo_session=${s.token}` },
       { authorization: `Bearer ${s.token}` },
     ]) {
       const res = await h.auth.handle(get("/auth/token", headers));
@@ -95,7 +95,9 @@ describe("the JWT routes (plan 9g)", () => {
   it("api.jwt.sessionLive answers for the sid of a minted JWT until the sign-out (review M-1)", async () => {
     const h = jwtHandle();
     const s = await signedIn(h);
-    const res = await h.auth.handle(get("/auth/token", { cookie: `tempo_session=${s.token}` }));
+    const res = await h.auth.handle(
+      get("/auth/token", { cookie: `__Host-tempo_session=${s.token}` }),
+    );
     const { token } = (await res.json()) as { token: string };
     const claims = await h.auth.api.jwt?.verify(token);
     expect(claims?.sid).toBe(s.session.id);

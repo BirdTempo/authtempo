@@ -24,14 +24,14 @@ it("signs up, confirms by the mailed link, signs in, resets, and signs in again 
     json({ email: EMAIL, password: "correct horse battery" }),
   );
   expect(up.status).toBe(200);
-  const created = (await up.json()) as { user: { id: string } };
-  expect(created).toMatchObject({
-    token: expect.stringMatching(/^ts_/),
-    user: { emailVerified: false },
-  });
+  // The uniform answer (plan 12b): no session at sign-up; the verify link opens it.
+  expect(await up.json()).toEqual({ sent: true });
+  expect(up.headers.get("set-cookie")).toBeNull();
   // The example uses 1000 iterations in TEST_MODE. The stored hash shows the seam ran in workerd.
-  const stored = await env.DB.prepare("SELECT hash FROM ta_password WHERE user_id = ?")
-    .bind(created.user.id)
+  const stored = await env.DB.prepare(
+    "SELECT p.hash FROM ta_password p JOIN ta_user u ON u.id = p.user_id WHERE u.email = ?",
+  )
+    .bind(EMAIL)
     .first<{ hash: string }>();
   expect(stored?.hash).toMatch(/^pbkdf2-sha256\$1000\$/);
 
@@ -47,7 +47,7 @@ it("signs up, confirms by the mailed link, signs in, resets, and signs in again 
   );
   expect(verified.status).toBe(302);
   expect(verified.headers.get("location")).toBe(`${BASE}/`);
-  expect(verified.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+  expect(verified.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
   const user = await env.DB.prepare("SELECT email_verified FROM ta_user WHERE email = ?")
     .bind(EMAIL)
     .first<{ email_verified: number }>();

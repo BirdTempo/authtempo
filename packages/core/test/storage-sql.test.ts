@@ -200,8 +200,9 @@ describe("statements", () => {
       data: { n: 1 },
       createdAt: t0,
       updatedAt: t0,
+      secretVersion: 1,
     });
-    expect(p.sql).toContain("VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::jsonb)");
+    expect(p.sql).toContain("VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::jsonb, $10)");
     expect(p.params[8]).toBe('{"n":1}');
   });
   it("builds selects with the null rules and the sort rules", () => {

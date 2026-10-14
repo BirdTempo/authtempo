@@ -16,9 +16,11 @@ import {
 import { countAttempt } from "../src/engine/verification.js";
 import { openSealed } from "../src/primitives/aead.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import { base32Decode, normalizeBackupCode, otpauthUri, totpCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
+import { upSession } from "./password-helpers.js";
 import {
   codeNow,
   EMAIL,
@@ -51,12 +53,17 @@ describe("the setup (plan 9f)", () => {
     expect(row?.backupCodes).toEqual(
       await Promise.all(
         backupCodes.map((c) =>
-          hmacSha256Hex(auth.config.secret, `${row?.id}:${normalizeBackupCode(c)}`),
+          hmacSha256Hex(currentSecret(auth.config.keyring), `${row?.id}:${normalizeBackupCode(c)}`),
         ),
       ),
     );
     expect(
-      await openSealed(auth.config.secret, "tempo-auth totp", row?.secret ?? "", session.user.id),
+      await openSealed(
+        currentSecret(auth.config.keyring),
+        "tempo-auth totp",
+        row?.secret ?? "",
+        session.user.id,
+      ),
     ).toEqual(base32Decode(secret));
     expect(
       await openSealed(
@@ -127,7 +134,9 @@ describe("the setup (plan 9f)", () => {
       userAgent: null,
     });
     if (!up.ok) throw new Error(up.code);
-    expect(await setupTotp(auth.config, { userId: up.value.user.id, password: PASSWORD })).toEqual({
+    expect(
+      await setupTotp(auth.config, { userId: upSession(up.value).user.id, password: PASSWORD }),
+    ).toEqual({
       ok: false,
       code: "email_unverified",
       status: 403,
@@ -611,6 +620,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       data: { next: "/x", attempts: 0 },
       createdAt: now,
       updatedAt: now,
+      secretVersion: 1,
     });
     expect(await countAttempt(auth.storage, row, 5, now)).toBe("invalid_code");
     expect(
@@ -632,6 +642,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
         data: { attempts: 4 },
         createdAt: now,
         updatedAt: now,
+        secretVersion: 1,
       });
     await challenge("other");
     const capped = await challenge("capped");

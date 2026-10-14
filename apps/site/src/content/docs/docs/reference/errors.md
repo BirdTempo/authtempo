@@ -107,8 +107,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="origin_not_trusted"><code>origin_not_trusted</code> 403</h3>
 
-- **Meaning:** The `Origin` header is not `baseURL` and not in `trustedOrigins`.
-- **Do:** Add the origin of the app to `trustedOrigins`.
+- **Meaning:** The `Origin` header is not `baseURL` and not in `trustedOrigins`. Or the request is a form post that the browser marks as not same-origin.
+- **Do:** Add the origin of the app to `trustedOrigins`. Post JSON, or post the form from `baseURL`.
 
 | Routes |
 | --- |
@@ -213,6 +213,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup). |
 
+<h3 id="sign_up_closed"><code>sign_up_closed</code> 403</h3>
+
+- **Meaning:** `signUp` is `false`, or it is `"invited"` and the address has no pending invitation. No user was created.
+- **Do:** Tell the person that this app takes no new accounts, or that an invitation is needed.
+
+| Routes |
+| --- |
+| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback). The social callbacks redirect with `?auth_error=sign_up_closed`. |
+
 <h3 id="password_policy"><code>password_policy</code> 400</h3>
 
 - **Meaning:** The password is too short, too long, holds a control character, or equals the address.
@@ -230,6 +239,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset). |
+
+<h3 id="breach_check_unavailable"><code>breach_check_unavailable</code> 503</h3>
+
+- **Meaning:** `password.breachCheck` answered `"unavailable"`, so core refused the password. The check fails closed.
+- **Do:** Try again in a few minutes. A reset link stays usable. A reset code is spent, so ask for a new code.
+
+| Routes |
+| --- |
+| The routes of [`password_breached`](#password_breached). |
 
 <h3 id="email_taken"><code>email_taken</code> 409</h3>
 
@@ -338,6 +356,33 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete). |
+
+<h3 id="captcha_required"><code>captcha_required</code> 400</h3>
+
+- **Meaning:** The flow has a captcha, and the request has no `x-captcha-response` header.
+- **Do:** Show the widget, and send its token in the header.
+
+| Routes |
+| --- |
+| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/reset/request`](/docs/reference/routes/#post-password-reset-request), [`POST /magic-link/request`](/docs/reference/routes/#post-magic-link-request), [`POST /otp/request`](/docs/reference/routes/#post-otp-request), [`POST /otp/reset/request`](/docs/reference/routes/#post-otp-reset-request), each when `captcha.flows` names its flow. |
+
+<h3 id="captcha_failed"><code>captcha_failed</code> 403</h3>
+
+- **Meaning:** The captcha refused the token, or the token is longer than 2048 characters. A token passes once.
+- **Do:** Show the widget again, and send its new token.
+
+| Routes |
+| --- |
+| The routes of [`captcha_required`](#captcha_required). |
+
+<h3 id="captcha_unavailable"><code>captcha_unavailable</code> 503</h3>
+
+- **Meaning:** The captcha gave no answer, and `captcha.onUnavailable` is `"refuse"`.
+- **Do:** Try again later.
+
+| Routes |
+| --- |
+| The routes of [`captcha_required`](#captcha_required). |
 
 ## OAuth codes
 

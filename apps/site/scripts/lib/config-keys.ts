@@ -1,6 +1,7 @@
 import type {
   AppleConfig,
   AuthConfig,
+  CaptchaConfig,
   EmailOtpConfig,
   GitHubConfig,
   GoogleConfig,
@@ -16,6 +17,7 @@ import type {
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
+  SecretVersion,
   TotpConfig,
   TotpGateConfig,
 } from "@authtempo/core";
@@ -40,6 +42,7 @@ export const CONFIG_KEYS = {
     basePath: true,
     baseURL: true,
     secret: true,
+    secrets: true,
     appName: true,
     trustedOrigins: true,
     appURL: true,
@@ -58,6 +61,7 @@ export const CONFIG_KEYS = {
     webauthn: true,
     handoff: true,
     organizations: true,
+    signUp: true,
     password: true,
     emailOtp: true,
     totp: true,
@@ -65,9 +69,13 @@ export const CONFIG_KEYS = {
     oauth: true,
     operator: true,
     hooks: true,
+    captcha: true,
   } satisfies Keys<AuthConfig>,
+  "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
-  session: { ttlDays: true, slidingRefreshDays: true } satisfies Keys<Part<"session">>,
+  session: { ttlDays: true, slidingRefreshDays: true, absoluteDays: true } satisfies Keys<
+    Part<"session">
+  >,
   magicLink: {
     ttlMinutes: true,
     linkBuilder: true,
@@ -144,6 +152,9 @@ export const CONFIG_KEYS = {
     resetTtlMinutes: true,
     resetPage: true,
     legacyVerify: true,
+    requireVerified: true,
+    uniformSignUp: true,
+    existingAccountMail: true,
   } satisfies Keys<PasswordConfig>,
   "password.legacyVerify": { verify: true, timeoutMs: true } satisfies Keys<LegacyVerifyConfig>,
   emailOtp: {
@@ -191,6 +202,7 @@ export const CONFIG_KEYS = {
   } satisfies Keys<NonNullable<OAuthConfig["registration"]>>,
   operator: { secretHash: true } satisfies Keys<OperatorConfig>,
   hooks: { organization: true, session: true } satisfies Keys<HooksConfig>,
+  captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
 } as const;
 
 /**

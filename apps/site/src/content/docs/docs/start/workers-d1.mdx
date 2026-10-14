@@ -60,7 +60,7 @@ pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
 
 10. Replace the body of `mail.send` in `src/index.ts` with a call to your mail provider.
 11. Set `BASE_URL` in `wrangler.jsonc` to the origin of your Worker.
-12. Store a secret of 32 characters or more with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`.
+12. Make a secret of 32 characters or more and an estimate of 100 bits or more with `openssl rand -base64 32`. Store it with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`.
 13. Deploy the Worker with `pnpm --filter my-app exec wrangler deploy`.
 
 :::caution

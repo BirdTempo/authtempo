@@ -69,8 +69,15 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 | An absolute `callbackURL` on any trusted origin | Only the origin of `authtempo.appURL` keeps its path. Any other answers 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour | It lives as long as the magic link. |
+| `requireEmailVerification: true` mails a new link at an unverified sign-in only with `sendOnSignIn: true` | It maps to `password.requireVerified`. The sign-in answers `EMAIL_NOT_VERIFIED` and always mails a new link, at most 3 per 15 minutes. `sendOnSignIn: false` is refused at start. |
 | `trustedOrigins` takes a function and wildcards | Each entry is an exact origin or an app scheme. |
-| The session cookie `better-auth.session_token` | The session cookie `tempo_session`. |
+| The session cookie `better-auth.session_token` | The session cookie `__Host-tempo_session`. For one release the shim also reads `tempo_session`, the name before plan 12b, and the handler moves it. |
+| `secrets: [{ version, value }]` accepts version 0 | It maps to core's `secrets`, one entry for one entry. Version 0 is refused: core reads a row from before plan 12b as version 1, so renumber from 1. With `secret`, version 1 must be the value of `secret`. |
+| `BETTER_AUTH_SECRETS` in the environment | Not read: the shim maps options only. Pass the list as `secrets`. |
+| A secret under 32 characters, or with low entropy, gets a warning | Refused at start. Each value needs 32 characters or more. The current value, `secrets[0]` or `secret`, also needs an estimated 100 bits of entropy. Make one with `openssl rand -base64 32`. |
+| `autoSignIn: false` answers `{ token: null, user }` | Refused at start, unless `requireEmailVerification` is true: core opens a session at sign-up without it. With it, the pair acts as `requireEmailVerification` alone, as in Better Auth. |
+| A sign-up answers a session unless `requireEmailVerification` is true, and `USER_ALREADY_EXISTS` for a taken address | The same. The shim sets core's `password.uniformSignUp: false`, so a caller can learn that an address has an account, as with Better Auth. |
+| `disableSignUp` on each method and provider, and a provider's `disableImplicitSignUp` | Core has one sign-up rule. `true` on every method and social provider that creates a user maps to core's `signUp: false`. A mix is refused at start, with the methods of each group. `disableImplicitSignUp` is refused. `api.signUpEmail` then answers `EMAIL_PASSWORD_SIGN_UP_DISABLED` with 400. The client's `signUp.email` answers the same code with core's status, 403. |
 
 - `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with no `ipAddressHeaders` and no `disableIpTracking: true`.
 - A call argument that core cannot keep, such as `rememberMe: false`, answers `APIError` `NOT_SUPPORTED` with status 501.

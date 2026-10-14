@@ -27,7 +27,9 @@ const NEW_PASSWORD = "a new long password";
 function endAuth(listen: boolean) {
   const events: { id: string; reason: string }[] = [];
   const auth = makeAuth({
-    password: { hash: FAST },
+    // The detailed answer of plan 8 (a session and the user at sign-up), which
+    // these tests read. The uniform answer has its own tests (plan 12b).
+    password: { hash: FAST, uniformSignUp: false },
     ...(listen
       ? {
           hooks: {

@@ -1,4 +1,5 @@
 import type { ResolvedConfig, ResolvedOAuth } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { randomToken } from "../primitives/crypto.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { OAuthClientRow } from "../schema.js";
@@ -119,7 +120,7 @@ export async function registerClient(
   input: { metadata: Record<string, unknown>; ip: string | null },
 ): Promise<OAuthResult<RegisteredClient>> {
   if (!config.oauth?.dynamic) return oauthFail("invalid_request");
-  if (!(await config.limiter.allow(`oauth-register:ip:${input.ip ?? "unknown"}`, REGISTER_PER_IP)))
+  if (!(await config.limiter.allow(`oauth-register:ip:${ipKey(input.ip)}`, REGISTER_PER_IP)))
     return oauthFail("rate_limited");
   const m = input.metadata;
   const redirectUris = redirectList(m.redirect_uris);

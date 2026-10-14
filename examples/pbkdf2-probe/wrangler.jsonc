@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The owner deploys this Worker for one measurement (plan 12b) and deletes it after.
+  "name": "authtempo-pbkdf2-probe",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  // The flags of a real authtempo Worker: Node.js compatibility off.
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  // Off, so a plain `wrangler deploy` makes no public URL that spends CPU.
+  // The default of workers_dev is true (the wrangler 4.148.0 schema).
+  "workers_dev": false,
+  // Off, so no version upload makes a preview URL either.
+  "preview_urls": false,
+  // No binding. PROBE_KEY is a secret: `wrangler secret put PROBE_KEY --env measure`.
+  "env": {
+    // The one run of the measurement: `wrangler deploy --env measure`. It
+    // deploys the Worker `authtempo-pbkdf2-probe-measure` on workers.dev, so
+    // the owner can call it. The README runbook deletes it after the run.
+    "measure": {
+      "workers_dev": true,
+      "preview_urls": false,
+      // The invocation logs hold the CPU time of each call, the fallback of `wrangler tail`.
+      "observability": { "enabled": true }
+    }
+  }
+}

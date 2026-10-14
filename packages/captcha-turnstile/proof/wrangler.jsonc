@@ -1,0 +1,14 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "authtempo-captcha-turnstile-proof",
+  "main": "index.ts",
+  "compatibility_date": "2026-09-30",
+  // Workers turn nodejs_compat on by default from compatibility date
+  // 2026-08-04 (Cloudflare changelog, read 2026-10-11). These two flags turn
+  // it off, so this Worker has no Node.js module and no `process` global.
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  // This Worker is only bundled (`wrangler deploy --dry-run`), never deployed.
+  // If a deploy runs by mistake, it gets no workers.dev URL and no preview URL.
+  "workers_dev": false,
+  "preview_urls": false
+}

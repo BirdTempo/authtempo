@@ -25,7 +25,7 @@ async function withPasskey(h: Handle) {
   if (!token) throw new Error("no confirm mail");
   await h.auth.handle(post("/auth/password/verify", { token }));
   const res = await h.auth.handle(post("/auth/password/sign-in", { email: EMAIL, password: PW }));
-  const c = cookieNamed(res, "tempo_session");
+  const c = cookieNamed(res, "__Host-tempo_session");
   if (!c) throw new Error(`the sign-in answered ${res.status} with no session cookie`);
   const user = await h.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
   if (!user) throw new Error("no user");
@@ -115,7 +115,7 @@ describe("the second-factor method routes (plan 12c)", () => {
     );
     expect(verify.status).toBe(200);
     const trust = cookieNamed(verify, "tempo_totp_trust");
-    const session = cookieNamed(verify, "tempo_session");
+    const session = cookieNamed(verify, "__Host-tempo_session");
     if (!trust || !session) throw new Error("the verify set no trust or session cookie");
     expect(
       await h.storage.findMany("trustedDevice", [{ field: "userId", op: "eq", value: user.id }]),

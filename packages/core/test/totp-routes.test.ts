@@ -27,7 +27,7 @@ function form(path: string, body: string, headers: Record<string, string> = {}):
 
 async function signedIn(h: Handle, email = EMAIL): Promise<string> {
   const res = await h.auth.handle(post("/auth/password/sign-in", { email, password: PW }));
-  const c = cookieNamed(res, "tempo_session");
+  const c = cookieNamed(res, "__Host-tempo_session");
   if (!c) throw new Error(`the sign-in answered ${res.status} with no session cookie`);
   return pair(c);
 }
@@ -178,8 +178,8 @@ describe("the TOTP routes (plan 9f)", () => {
       trustDevice: { token: string; expiresAt: string };
     };
     expect(v).toMatchObject({ user: { email: EMAIL }, next: "/", backupCodesLeft: 10 });
-    expect(cookieNamed(verify, "tempo_session")).toBe(
-      `tempo_session=${v.token}; Path=/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax`,
+    expect(cookieNamed(verify, "__Host-tempo_session")).toBe(
+      `__Host-tempo_session=${v.token}; Path=/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax`,
     );
     expect(cookieNamed(verify, "tempo_totp_trust")).toBe(
       `tempo_totp_trust=${v.trustDevice.token}; Path=/auth/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax`,
@@ -191,7 +191,7 @@ describe("the TOTP routes (plan 9f)", () => {
         { cookie: `tempo_totp_trust=${v.trustDevice.token}` },
       ),
     );
-    expect(cookieNamed(again, "tempo_session")).not.toBeNull();
+    expect(cookieNamed(again, "__Host-tempo_session")).not.toBeNull();
     // A native app sends the token in the body.
     const native = await h.auth.handle(
       post("/auth/password/sign-in", {
@@ -274,13 +274,13 @@ describe("the TOTP routes (plan 9f)", () => {
       }),
     );
     expect(foreign.status).toBe(403);
-    expect(cookieNamed(foreign, "tempo_session")).toBeNull();
+    expect(cookieNamed(foreign, "__Host-tempo_session")).toBeNull();
     const done = await h.auth.handle(
       form("/auth/totp/challenge", `challenge=${c}&code=${right}&trustDevice=1`),
     );
     expect(done.status).toBe(302);
     expect(done.headers.get("location")).toBe(`${BASE_URL}/inbox`);
-    expect(cookieNamed(done, "tempo_session")).not.toBeNull();
+    expect(cookieNamed(done, "__Host-tempo_session")).not.toBeNull();
     expect(cookieNamed(done, "tempo_totp_trust")).not.toBeNull();
   });
 
@@ -374,7 +374,7 @@ describe("the TOTP routes (plan 9f)", () => {
     const signIn = await h.auth.handle(
       post("/auth/password/sign-in", { email: EMAIL, password: PW }),
     );
-    expect(cookieNamed(signIn, "tempo_session")).not.toBeNull();
+    expect(cookieNamed(signIn, "__Host-tempo_session")).not.toBeNull();
     expect(h.auth.api.totp).toBeUndefined();
     expect(pwHandle({ hash: FAST }).auth.api.totp).toBeDefined();
   });
@@ -438,7 +438,7 @@ describe("the reset gate on the routes (plan 12c)", () => {
     expect(res.status).toBe(302);
     // appURL is baseURL in this test config, so `next` lands on the API origin.
     expect(res.headers.get("location")).toBe(`${BASE_URL}/after`);
-    expect(cookieNamed(res, "tempo_session")).toMatch(/^tempo_session=ts_/);
+    expect(cookieNamed(res, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
   });
 });
 
@@ -506,12 +506,12 @@ describe("the gated sign-ins on the routes (plan 12c)", () => {
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(`${BASE_URL}/inbox`);
-    expect(cookieNamed(res, "tempo_session")).toMatch(/^tempo_session=ts_/);
+    expect(cookieNamed(res, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
     const json = await h.auth.handle(
       post("/auth/magic-link/verify", { token: await magicToken(h), trustDevice: t.token }),
     );
     expect(json.status).toBe(200);
-    expect(cookieNamed(json, "tempo_session")).toMatch(/^tempo_session=ts_/);
+    expect(cookieNamed(json, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
   });
 
   it("opens the email code session on a trusted device: the body token, and the trust cookie", async () => {
@@ -525,12 +525,12 @@ describe("the gated sign-ins on the routes (plan 12c)", () => {
       post("/auth/otp/verify", { email: EMAIL, code: await codeOf(), trustDevice: t.token }),
     );
     expect(body.status).toBe(200);
-    expect(cookieNamed(body, "tempo_session")).toMatch(/^tempo_session=ts_/);
+    expect(cookieNamed(body, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
     const cookie = await h.auth.handle(
       post("/auth/otp/verify", { email: EMAIL, code: await codeOf() }, { cookie: t.cookie }),
     );
     expect(cookie.status).toBe(200);
-    expect(cookieNamed(cookie, "tempo_session")).toMatch(/^tempo_session=ts_/);
+    expect(cookieNamed(cookie, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
   });
 });
 
@@ -583,7 +583,7 @@ describe("the challenge page (plan 12c)", () => {
     );
     expect(done.status).toBe(302);
     expect(done.headers.get("location")).toBe(`${BASE_URL}/inbox`);
-    expect(cookieNamed(done, "tempo_session")).not.toBeNull();
+    expect(cookieNamed(done, "__Host-tempo_session")).not.toBeNull();
     const none = await h.auth.handle(
       form("/auth/totp/challenge", `challenge=${await challenge(h)}&action=trusted`),
     );
@@ -606,7 +606,7 @@ describe("the challenge page (plan 12c)", () => {
     const done = await h.auth.handle(
       form("/auth/totp/challenge", `challenge=${c}&action=trusted`, { cookie: trust }),
     );
-    expect(cookieNamed(done, "tempo_session")).not.toBeNull();
+    expect(cookieNamed(done, "__Host-tempo_session")).not.toBeNull();
     const rows = await h.storage.findMany("trustedDevice", []);
     expect(rows.map((r) => r.lastSeenAt)).toEqual([h.clock.now()]);
   });

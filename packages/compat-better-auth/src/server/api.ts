@@ -1,5 +1,5 @@
 import type { ClientCode } from "@authtempo/client";
-import type { Auth, Result } from "@authtempo/core";
+import { type Auth, newId, normalizeEmail, type Result } from "@authtempo/core";
 import {
   APIError,
   apiError,
@@ -13,7 +13,7 @@ import type { Mapped } from "./map-options.js";
 import { readToken, toInvitation, toNext, toOrganization, toSession, toUser } from "./shapes.js";
 import { cookieValue, TRUST_DEVICE_COOKIE } from "./two-factor.js";
 
-export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true> {
+export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, true> {
   const { origin, basePath, clientIp, plugins, appOrigin, minPasswordLength } = mapped;
   const storage = mapped.config.storage;
   const requestOf = (headers?: Headers) =>
@@ -67,7 +67,45 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true> {
       });
       if (!r.ok && r.code === "password_policy")
         throw new APIError(400, passwordPolicyCode(body.password, minPasswordLength));
+      // disableSignUp on every method maps to core's signUp: false (plan 12b).
+      // Better Auth 1.7.2 answers that sign-up with its own code and 400
+      // (dist/api/routes/sign-up.mjs lines 145 to 147, read 2026-10-15).
+      if (!r.ok && r.code === "sign_up_closed")
+        throw new APIError(400, "EMAIL_PASSWORD_SIGN_UP_DISABLED");
+      // With requireEmailVerification, Better Auth 1.7.2 answers a taken
+      // address as a new one: { token: null, user } with a synthetic user
+      // under a new id (dist/api/routes/sign-up.mjs lines 163 to 199,
+      // buildGenericDuplicateResponse, read 2026-10-14). Core has hashed the
+      // password before its check, as Better Auth does.
+      if (
+        !r.ok &&
+        (r.code === "email_taken" || r.code === "email_taken_unverified") &&
+        mapped.config.password?.requireVerified === true
+      ) {
+        const now = new Date();
+        return {
+          token: null,
+          user: toUser({
+            id: newId(now),
+            // Core answered email_taken, so the address is well-formed.
+            email: normalizeEmail(body.email) ?? body.email,
+            emailVerified: false,
+            name: body.name !== "" ? body.name : null,
+            image: null,
+            createdAt: now,
+            updatedAt: now,
+          }),
+        };
+      }
       const v = unwrap(r);
+      // This line cannot run: createApi takes only the config of mapOptions,
+      // which sets uniformSignUp: false, so core never answers `{ sent: true }`.
+      // The type cannot know that, because the setting is a value, so no typed
+      // exhaustiveness check fits. The throw keeps a later change of the map a
+      // clear fault, not a wrong answer.
+      if ("sent" in v) throw compatApiError("NOT_SUPPORTED", "core answered the uniform sign-up");
+      // Core's answer while requireVerified is on: the user and no session.
+      if (!("token" in v)) return { token: null, user: toUser(v.user) };
       return { token: v.token, user: toUser(v.user) };
     },
     async signInEmail({ body, headers }) {

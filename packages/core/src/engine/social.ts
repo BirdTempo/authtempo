@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { appErrorName } from "../primitives/app-error.js";
 import {
   constantTimeEqual,
@@ -33,6 +34,7 @@ import {
   claimEmail,
   ensureEmailIdentity,
   normalizeEmail,
+  signUpGuard,
   undoSessionIfIdentityGone,
   userStillUnverified,
   validUserName,
@@ -106,7 +108,7 @@ export async function startSocial(
 ): Promise<Result<SocialStarted>> {
   const entry = findProvider(config, input.provider);
   if (!entry) return fail("not_found");
-  if (!(await config.limiter.allow(`social-start:ip:${input.ip ?? "unknown"}`, START_LIMIT))) {
+  if (!(await config.limiter.allow(`social-start:ip:${ipKey(input.ip)}`, START_LIMIT))) {
     return fail("rate_limited");
   }
   // After the limit, so the limit bounds the discovery reads.
@@ -133,6 +135,7 @@ export async function startSocial(
     data: { ...data },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const query = buildQuery({
     client_id: provider.clientId,
@@ -232,7 +235,7 @@ export async function completeSocial(
       now,
       (tx) => steps.write(tx),
       ended,
-      steps.before,
+      signUpGuard(config, steps.before),
     ),
   );
   if (!resolved.ok) return resolved;
@@ -465,7 +468,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
             profile,
             now,
             ended,
-            before ? (user) => before(tx, user) : undefined,
+            before ? (user, created) => before(tx, user, created) : undefined,
           );
           if (!linked.ok) return linked;
           const { user, trustedIdentityId, created } = linked.value;
@@ -532,7 +535,7 @@ async function linkInTransaction(
   profile: SocialProfile,
   now: Date,
   ended: SessionRow[] | undefined,
-  before: ((user: UserRow) => Promise<void>) | undefined,
+  before: ((user: UserRow, created: boolean) => Promise<void>) | undefined,
 ): Promise<Result<Linked>> {
   // Each branch calls `before` with the user it answers, after its checks and
   // before its first write: the D1 undo (see `insertSignUp` in password.ts).
@@ -553,7 +556,7 @@ async function linkInTransaction(
     if (!user.emailVerified && proved) {
       const claimed = { ...user, emailVerified: true, updatedAt: now };
       const filled = filledUser(claimed, profile, now);
-      if (before) await before(filled);
+      if (before) await before(filled, false);
       await claimEmail(tx, user.id, { identityId: identity.id }, now, ended);
       await ensureEmailIdentity(tx, user.id, user.email, now);
       await writeFill(tx, claimed, filled);
@@ -563,11 +566,11 @@ async function linkInTransaction(
       // No user-row write here. On D1 the undo of a user-row write restores
       // the full row and would revert a claim's emailVerified flip. The
       // verified sign-in later fills name and image.
-      if (before) await before(user);
+      if (before) await before(user, false);
       return ok({ user, trustedIdentityId: identity.id, created: false });
     }
     const filled = filledUser(user, profile, now);
-    if (before) await before(filled);
+    if (before) await before(filled, false);
     await writeFill(tx, user, filled);
     return ok({ user: filled, trustedIdentityId: proved ? null : identity.id, created: false });
   }
@@ -582,7 +585,7 @@ async function linkInTransaction(
       ? existing
       : { ...existing, emailVerified: true, updatedAt: now };
     const filled = filledUser(current, profile, now);
-    if (before) await before(filled);
+    if (before) await before(filled, false);
     if (!existing.emailVerified) await claimEmail(tx, existing.id, null, now, ended);
     await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
     await ensureEmailIdentity(tx, existing.id, email, now);
@@ -598,7 +601,7 @@ async function linkInTransaction(
     createdAt: now,
     updatedAt: now,
   };
-  if (before) await before(minted);
+  if (before) await before(minted, true);
   const user = await tx.create("user", minted);
   const identityId = (
     await tx.create("identity", identityRow(user.id, provider, profile.subject, now))

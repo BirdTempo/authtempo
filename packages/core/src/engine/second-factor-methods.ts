@@ -1,6 +1,8 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
@@ -111,7 +113,7 @@ export async function enableMethod(
           userId: session.user.id,
           keepSessionId: session.session.id,
           method,
-          first: { id, backupCodes: hashes },
+          first: { id, backupCodes: hashes, secretVersion: config.keyring.current },
         },
         now,
         ended,
@@ -218,7 +220,7 @@ export async function passkeyChallengeOptions(
   if (!config.totp || !config.passkey) return fail("not_found");
   if (
     !(await config.limiter.allow(
-      `second-factor-passkey:ip:${input.ip ?? "unknown"}`,
+      `second-factor-passkey:ip:${ipKey(input.ip)}`,
       PASSKEY_OPTIONS_PER_IP,
     ))
   )
@@ -309,11 +311,13 @@ export async function sendSecondFactorEmail(
     {
       data: {
         ...data,
-        emailCodeHash: await emailCodeHash(config.secret, row.id, code),
+        emailCodeHash: await emailCodeHash(currentSecret(config.keyring), row.id, code),
         emailSends: sends + 1,
         emailSentAt: now.toISOString(),
       },
       updatedAt: later(now, row.updatedAt),
+      // The version that keys `emailCodeHash` (plan 12b). The challenge row holds no other keyed value.
+      secretVersion: config.keyring.current,
     },
   );
   if (n === 0) return fail("conflict");
@@ -336,7 +340,9 @@ export async function acceptEmailCode(
   code: string,
 ): Promise<boolean> {
   const stored = (challenge.data as { emailCodeHash?: unknown } | null)?.emailCodeHash;
-  const candidate = await emailCodeHash(config.secret, challenge.id, code.replace(/\s/g, ""));
+  // The row's version keys the HMAC (plan 12b); an unknown version matches nothing.
+  const key = hashSecretFor(config.keyring, challenge.secretVersion, challenge.id);
+  const candidate = await emailCodeHash(key.secret, challenge.id, code.replace(/\s/g, ""));
   const right = constantTimeEqual(candidate, typeof stored === "string" ? stored : NO_HASH);
-  return typeof stored === "string" && right;
+  return typeof stored === "string" && right && key.known;
 }

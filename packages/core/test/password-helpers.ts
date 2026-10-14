@@ -4,6 +4,7 @@ import { createAuth } from "../src/create-auth.js";
 import {
   type PasswordSession,
   type PasswordSignInResult,
+  type PasswordSignUpResult,
   passwordSignUp,
   verifyPasswordEmail,
 } from "../src/engine/password.js";
@@ -19,7 +20,10 @@ export const FAST = createPbkdf2PasswordHash({ iterations: 1000 });
 
 /** The engine view: a resolved config with password sign-in on and the fast hash. */
 export function pwAuth(password: PasswordConfig = {}) {
-  return makeAuth({ password: { hash: FAST, ...password } });
+  // The detailed answer of plan 8 (a session at sign-up, 409 for a known
+  // address), which these tests pin. The default answer has its own tests
+  // in uniform-sign-up.test.ts (plan 12b).
+  return makeAuth({ password: { hash: FAST, uniformSignUp: false, ...password } });
 }
 
 /** A mail the fake mail port recorded, with the token its link carries, or null. */
@@ -51,7 +55,10 @@ export function pwHandle(password: PasswordConfig | undefined, extra: Partial<Au
     clock: base.clock,
     // One limiter for the route and the engine view, so a limit counts both.
     limiter: createMemoryLimiter(base.clock),
-    ...(password ? { password } : {}),
+    // The detailed answer of plan 8 (a session at sign-up, 409 for a known
+    // address), which these tests pin. The default answer has its own tests
+    // in uniform-sign-up.test.ts (plan 12b).
+    ...(password ? { password: { uniformSignUp: false, ...password } } : {}),
     ...extra,
   };
   return {
@@ -82,8 +89,10 @@ export async function signUpAndVerify(
     userAgent: null,
   });
   if (!v.ok || !v.value.signedIn) throw new Error("the verify link did not sign in");
+  // By the address: the uniform answer (plan 12b) carries no user.
+  const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
   const row = await auth.storage.findOne("password", [
-    { field: "userId", op: "eq", value: up.value.user.id },
+    { field: "userId", op: "eq", value: user?.id ?? "" },
   ]);
   if (!row) throw new Error("no password row");
   return row;
@@ -102,6 +111,16 @@ export async function sessionOnly(
   if (v.ok && !("token" in v.value))
     throw new Error("the sign-in answered a second-factor challenge");
   return v as Result<PasswordSession>;
+}
+
+/**
+ * The session of a sign-up answer. Since plan 12b a sign-up with
+ * `password.requireVerified` on answers no session. A test that expects a
+ * session reads it through this call: a pending answer throws.
+ */
+export function upSession(v: PasswordSignUpResult): PasswordSession {
+  if (!("session" in v)) throw new Error("the sign-up answered no session");
+  return v;
 }
 
 /**

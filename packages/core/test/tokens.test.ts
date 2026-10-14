@@ -288,7 +288,7 @@ describe("callerFromRequest", () => {
     const tk = r.value.token;
     const byCookie = await callerFromRequest(
       auth.config,
-      request({ cookie: `tempo_session=${session}` }),
+      request({ cookie: `__Host-tempo_session=${session}` }),
     );
     expect(byCookie).toMatchObject({ kind: "session", user: { id: ada.id }, refreshed: false });
     const byBearer = await callerFromRequest(
@@ -308,12 +308,12 @@ describe("callerFromRequest", () => {
     });
     // A token never rides in a cookie, and the cookie wins over the header, as for a session.
     expect(
-      await callerFromRequest(auth.config, request({ cookie: `tempo_session=${tk}` })),
+      await callerFromRequest(auth.config, request({ cookie: `__Host-tempo_session=${tk}` })),
     ).toBeNull();
     expect(
       await callerFromRequest(
         auth.config,
-        request({ cookie: `tempo_session=${tk}`, authorization: `Bearer ${tk}` }),
+        request({ cookie: `__Host-tempo_session=${tk}`, authorization: `Bearer ${tk}` }),
       ),
     ).toBeNull();
     expect(await callerFromRequest(auth.config, request({}))).toBeNull();
@@ -327,7 +327,7 @@ describe("callerFromRequest", () => {
       ip: null,
       userAgent: null,
     });
-    const req = request({ cookie: `tempo_session=${token}` });
+    const req = request({ cookie: `__Host-tempo_session=${token}` });
     const fresh = await callerFromRequest(auth.config, req);
     if (fresh?.kind !== "session") throw new Error("no session caller");
     expect(fresh.refreshed).toBe(false);
@@ -337,7 +337,9 @@ describe("callerFromRequest", () => {
     if (caller?.kind !== "session") throw new Error("no session caller");
     expect(caller.refreshed).toBe(true);
     // Without this cookie the browser drops the session at its old Max-Age.
-    expect(renewedSessionCookie(auth.config, req, caller)).toContain(`tempo_session=${token}`);
+    expect(renewedSessionCookie(auth.config, req, caller)).toContain(
+      `__Host-tempo_session=${token}`,
+    );
   });
 
   it("keeps auth.session session-only and serves auth.caller and api.tokens", async () => {

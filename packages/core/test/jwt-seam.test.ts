@@ -1,6 +1,7 @@
 import { exportJWK, exportPKCS8, generateKeyPair, jwtVerify, SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createJoseJwtSeam } from "../src/seams/jwt.js";
+import { PROVIDER_TIMEOUT_MS } from "../src/social/provider.js";
 
 const JWKS_URL = "https://issuer.example/.well-known/jwks.json";
 const NOW = new Date("2026-01-01T00:00:00.000Z");
@@ -102,5 +103,38 @@ describe("jose jwt seam", () => {
     });
     expect(protectedHeader).toMatchObject({ alg: "ES256", kid: "ABC123" });
     expect(payload.sub).toBe("com.example.app");
+  });
+
+  it("gives the JWKS read core's provider deadline, not a jose default (plan 12b)", async () => {
+    // jose turns timeoutDuration into AbortSignal.timeout(ms) and passes that
+    // signal to the fetch. A jose change that drops the option fails here.
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const made = new Map<AbortSignal, number>();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const signal = real(ms);
+      made.set(signal, ms);
+      return signal;
+    });
+    const iss = await issuer();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const fetchFn: typeof fetch = (input, init) => {
+      signals.push(init?.signal);
+      return iss.fetchFn(input, init);
+    };
+    const token = await iss.sign({ iss: "https://issuer.example", aud: "client-1", sub: "u1" });
+    try {
+      await createJoseJwtSeam(fetchFn).verifyIdToken({
+        token,
+        jwksUrl: JWKS_URL,
+        issuer: "https://issuer.example",
+        audience: "client-1",
+        now: NOW,
+      });
+    } finally {
+      timeout.mockRestore();
+    }
+    expect(signals).toHaveLength(1);
+    const signal = signals[0];
+    expect(signal ? made.get(signal) : undefined).toBe(PROVIDER_TIMEOUT_MS);
   });
 });

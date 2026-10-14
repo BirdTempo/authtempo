@@ -576,7 +576,7 @@ describe("social routes", () => {
     expect(limited.status).toBe(404);
   });
 
-  const BIND = "tempo_session_oauth";
+  const BIND = "__Secure-tempo_session_oauth";
 
   it("GET start redirects to the provider and sets the binding cookie", async () => {
     const auth = socialAuth();
@@ -622,7 +622,7 @@ describe("social routes", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(`${BASE_URL}/home`);
     const cookies = res.headers.getSetCookie();
-    expect(cookies.some((c) => /^tempo_session=ts_/.test(c))).toBe(true);
+    expect(cookies.some((c) => /^__Host-tempo_session=ts_/.test(c))).toBe(true);
     expect(cookies).toContain(
       `${BIND}=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None`,
     );

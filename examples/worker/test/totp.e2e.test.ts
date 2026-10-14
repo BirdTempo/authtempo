@@ -34,7 +34,7 @@ async function verifiedUser(email: string): Promise<string> {
   await SELF.fetch(`${BASE}/auth/password/sign-up`, json({ email, password: PW }));
   const token = (await lastLink()).searchParams.get("token") ?? "";
   const verified = await SELF.fetch(`${BASE}/auth/password/verify`, form({ token }));
-  return named(verified, "tempo_session");
+  return named(verified, "__Host-tempo_session");
 }
 
 const STEP_MS = 30_000;
@@ -129,7 +129,7 @@ it("turns the factor on, gates the password sign-in, and opens the session with 
     json({ challenge: twoFactor.challenge, code }),
   );
   expect(verify.status).toBe(200);
-  const session = named(verify, "tempo_session");
+  const session = named(verify, "__Host-tempo_session");
   expect((await SELF.fetch(`${BASE}/me`, { headers: { cookie: session } })).status).toBe(200);
 
   // The replay guard is a D1 conditional update (Review Focus 1).
@@ -161,7 +161,7 @@ it("serves the challenge page and its form on D1, and caps the challenge at five
     form({ challenge: first.twoFactor.challenge, backupCode: f.backupCodes[1] ?? "" }),
   );
   expect(done.status).toBe(302);
-  expect(named(done, "tempo_session")).toMatch(/^tempo_session=ts_/);
+  expect(named(done, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
 
   const capped = (await (await challengeFor(email)).json()) as { twoFactor: { challenge: string } };
   const right = await f.next();
@@ -205,7 +205,7 @@ it("skips the gate with the trust cookie on D1; an expired trusted device asks f
   );
   const trust = trustLine.split(";")[0] ?? "";
   const skipped = await challengeFor(email, trust);
-  expect(named(skipped, "tempo_session")).toMatch(/^tempo_session=ts_/);
+  expect(named(skipped, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
   expect(await skipped.json()).not.toHaveProperty("twoFactor");
 
   // Only this user's rows: another test of this file also makes a trusted device.
@@ -257,6 +257,6 @@ it("turns the factor off with a code on D1: the sign-in opens a session again, a
 
   const signIn = await challengeFor(email);
   expect(signIn.status).toBe(200);
-  expect(named(signIn, "tempo_session")).toMatch(/^tempo_session=ts_/);
+  expect(named(signIn, "__Host-tempo_session")).toMatch(/^__Host-tempo_session=ts_/);
   expect(await signIn.json()).not.toHaveProperty("twoFactor");
 });

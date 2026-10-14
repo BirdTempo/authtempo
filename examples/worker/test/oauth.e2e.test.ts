@@ -50,7 +50,7 @@ async function verifiedUser(email: string): Promise<string> {
     `${BASE}/auth/password/verify`,
     form({ token }, { origin: BASE }),
   );
-  return named(verified, "tempo_session");
+  return named(verified, "__Host-tempo_session");
 }
 
 /** The payload of an EdDSA JWT whose signature verifies against /auth/jwks, plus its typ. */

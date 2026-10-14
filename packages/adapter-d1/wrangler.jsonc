@@ -15,6 +15,14 @@
       "database_id": "authtempo-test",
       // Relative to this config file.
       "migrations_dir": "migrations"
+    },
+    {
+      // Plan 12b: a database that the migration test brings to version 8,
+      // fills, and then moves to version 9. No migrations_dir: the test
+      // applies the files itself.
+      "binding": "STAGED",
+      "database_name": "authtempo-test-staged",
+      "database_id": "authtempo-test-staged"
     }
   ]
 }

@@ -172,7 +172,7 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect(userSignal?.aborted).toBe(true);
   });
 
-  it("passes the method, the headers, and the body of a userinfo fetch through and adds only the signal", async () => {
+  it("passes the method, the headers, and the body of a userinfo fetch through and adds only the signal and redirect manual (plan 12b)", async () => {
     const inits: (RequestInit | undefined)[] = [];
     const fetchFn: typeof fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -199,7 +199,12 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect((await complete(auth, await started(auth))).ok).toBe(true);
     expect(inits).toHaveLength(1);
     const { signal, ...rest } = inits[0] ?? {};
-    expect(rest).toEqual({ method: "POST", headers: { "x-a": "1" }, body: "b" });
+    expect(rest).toEqual({
+      method: "POST",
+      headers: { "x-a": "1" },
+      body: "b",
+      redirect: "manual",
+    });
     expect(signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -224,7 +229,7 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(`${BASE_URL}/?auth_error=oauth_failed`);
     expect(res.headers.getSetCookie()).toEqual([
-      "tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
+      "__Secure-tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
     ]);
     expect(timeout).toHaveBeenCalledWith(PROVIDER_TIMEOUT_MS);
     expect(error).toHaveBeenCalledWith(
@@ -447,7 +452,7 @@ describe("an oauth2 provider (plan 9c)", () => {
       }),
     );
     expect(done.headers.get("location")).toBe(`${BASE_URL}/home`);
-    expect(done.headers.getSetCookie().some((c) => /^tempo_session=ts_/.test(c))).toBe(true);
+    expect(done.headers.getSetCookie().some((c) => /^__Host-tempo_session=ts_/.test(c))).toBe(true);
     expect((await handle(get("/auth/social/other/start"))).status).toBe(404);
   });
 });

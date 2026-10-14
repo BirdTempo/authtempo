@@ -24,7 +24,13 @@ import type { BetterAuthOptions, CompatDatabase, InvitationEmailData } from "../
 const BASE = "https://api.example.com";
 const PASSWORD = "correct horse battery";
 
-function server(o: { minPasswordLength?: number; plugins?: BetterAuthOptions["plugins"] } = {}) {
+function server(
+  o: {
+    minPasswordLength?: number;
+    plugins?: BetterAuthOptions["plugins"];
+    requireEmailVerification?: boolean;
+  } = {},
+) {
   const invitations: InvitationEmailData[] = [];
   const mails: { kind: "verify" | "reset"; email: string; token: string }[] = [];
   const database: CompatDatabase = {
@@ -41,6 +47,9 @@ function server(o: { minPasswordLength?: number; plugins?: BetterAuthOptions["pl
     emailAndPassword: {
       enabled: true,
       ...(o.minPasswordLength !== undefined ? { minPasswordLength: o.minPasswordLength } : {}),
+      ...(o.requireEmailVerification !== undefined
+        ? { requireEmailVerification: o.requireEmailVerification }
+        : {}),
       sendResetPassword: async (d) =>
         void mails.push({ kind: "reset", email: d.user.email, token: d.token }),
     },
@@ -88,6 +97,24 @@ function server(o: { minPasswordLength?: number; plugins?: BetterAuthOptions["pl
 }
 
 describe("createAuthClient", () => {
+  it("answers UNEXPECTED_RESPONSE and no user when a core server sends the uniform sign-up answer (plan 12b)", async () => {
+    // A core server with its default answer. The shim's own server sets uniformSignUp false.
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: {
+        customFetchImpl: async () =>
+          new Response(JSON.stringify({ sent: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      },
+    });
+    const up = await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    expect(up.data).toBeNull();
+    expect(up.error).toMatchObject({ code: "UNEXPECTED_RESPONSE", status: 200 });
+  });
+
   it("signs up, signs in, and reads the session in Better Auth's shapes (Review Focus 4)", async () => {
     const s = server();
     const c = createAuthClient({
@@ -454,6 +481,21 @@ function memoryStorage() {
 }
 
 describe("expoClient", () => {
+  it("answers { token: null, user } and keeps no token at a sign-up with requireEmailVerification (plan 12b)", async () => {
+    const s = server({ requireEmailVerification: true });
+    const setItem = vi.fn();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [expoClient({ scheme: "reception", storage: { getItem: () => null, setItem } })],
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    const up = await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    expect(up.error).toBeNull();
+    expect(up.data).toMatchObject({ token: null, user: { email: "pat@example.com" } });
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it("stores the token, answers it from getCookie, and sends it as the bearer header", async () => {
     const s = server();
     const storage = memoryStorage();
@@ -472,7 +514,7 @@ describe("expoClient", () => {
       name: "Pat",
     });
     expect(storage.map.get("reception_tempo_session")).toBe(up.data?.token);
-    expect(c.getCookie()).toBe(`tempo_session=${up.data?.token}`);
+    expect(c.getCookie()).toBe(`__Host-tempo_session=${up.data?.token}`);
     expect((await c.getSession()).data?.user.email).toBe("pat@example.com");
     expect(s.seen.at(-1)?.headers.get("authorization")).toBe(`Bearer ${up.data?.token}`);
     // The cookie header line works on its own too, as consumer-i's query.ts sends it.

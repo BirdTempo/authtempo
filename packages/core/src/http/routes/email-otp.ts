@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import {
   type EmailOtpSession,
@@ -43,7 +44,13 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
-        return respond(await requestEmailOtp(config, { email: body.value.email, ip: ctx.ip }));
+        return respond(
+          await requestEmailOtp(config, {
+            email: body.value.email,
+            ip: ctx.ip,
+            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+          }),
+        );
       },
     },
     {
@@ -74,7 +81,13 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
-        return respond(await requestResetOtp(config, { email: body.value.email, ip: ctx.ip }));
+        return respond(
+          await requestResetOtp(config, {
+            email: body.value.email,
+            ip: ctx.ip,
+            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+          }),
+        );
       },
     },
     {

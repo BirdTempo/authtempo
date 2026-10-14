@@ -88,6 +88,27 @@ export function sealPrivateKey(secret: string, kid: string, pkcs8: Uint8Array): 
   return seal(secret, SEAL_INFO, pkcs8, kid);
 }
 
+/** The PKCS#8 bytes, or null: another secret, another kid, or a changed byte. The engine reseals them (plan 12b). */
+export function openPrivateKeyBytes(
+  secret: string,
+  kid: string,
+  sealed: string,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  return openSealed(secret, SEAL_INFO, sealed, kid);
+}
+
+/** A signing key of `alg` from PKCS#8 bytes, or null when the bytes are another alg. */
+export async function importPrivateKey(
+  pkcs8: Uint8Array<ArrayBuffer>,
+  alg: JwsAlg,
+): Promise<CryptoKey | null> {
+  try {
+    return await crypto.subtle.importKey("pkcs8", pkcs8, keyAlgorithm(alg), false, ["sign"]);
+  } catch {
+    return null;
+  }
+}
+
 /** The private key for one signature, or null: another secret, another kid, another alg, or a changed byte. */
 export async function openPrivateKey(
   secret: string,
@@ -95,13 +116,8 @@ export async function openPrivateKey(
   sealed: string,
   alg: JwsAlg,
 ): Promise<CryptoKey | null> {
-  const pkcs8 = await openSealed(secret, SEAL_INFO, sealed, kid);
-  if (!pkcs8) return null;
-  try {
-    return await crypto.subtle.importKey("pkcs8", pkcs8, keyAlgorithm(alg), false, ["sign"]);
-  } catch {
-    return null;
-  }
+  const pkcs8 = await openPrivateKeyBytes(secret, kid, sealed);
+  return pkcs8 ? importPrivateKey(pkcs8, alg) : null;
 }
 
 /** A compact JWS with the header `{ alg, kid, typ }`. The payload goes in as given. */

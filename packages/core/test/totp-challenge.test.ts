@@ -153,6 +153,7 @@ describe("the methods of a challenge (plan 12c)", () => {
     backupCodesVersion: 2,
     createdAt: at,
     updatedAt: at,
+    secretVersion: 1,
   };
   const withPasskey = makeAuth({
     password: {},

@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import type { TwoFactorPending } from "../engine/second-factor.js";
-import { publicSession } from "../engine/sessions.js";
+import { publicSession, sessionMaxAgeSeconds } from "../engine/sessions.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { readCookie, sessionCookie } from "./cookies.js";
 import { json } from "./json.js";
@@ -10,7 +10,7 @@ export function sessionCookieFor(config: ResolvedConfig, token: string): string 
   return sessionCookie(
     config.cookieName,
     token,
-    config.session.ttlDays * 86_400,
+    sessionMaxAgeSeconds(config),
     config.cookie.sameSite,
   );
 }

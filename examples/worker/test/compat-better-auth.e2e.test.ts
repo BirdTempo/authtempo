@@ -41,7 +41,7 @@ async function confirmByLink(link: string): Promise<string> {
     body: new URLSearchParams({ token: new URL(link).searchParams.get("token") ?? "" }).toString(),
   });
   expect(res.status).toBe(302);
-  return /tempo_session=[^;]+/.exec(res.headers.get("set-cookie") ?? "")?.[0] ?? "";
+  return /__Host-tempo_session=[^;]+/.exec(res.headers.get("set-cookie") ?? "")?.[0] ?? "";
 }
 async function sha256Hex(text: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -73,7 +73,7 @@ it("runs consumere's surface: sign-up, sign-in, the server session, social start
   expect(signedIn.data).toMatchObject({ redirect: false, user: { email, name: "Pat" } });
   const token = signedIn.data?.token ?? "";
   expect(token).toMatch(/^ts_/);
-  expect(await me({ cookie: `tempo_session=${token}` })).toMatchObject({
+  expect(await me({ cookie: `__Host-tempo_session=${token}` })).toMatchObject({
     status: 200,
     body: { email, name: "Pat" },
   });
@@ -99,12 +99,12 @@ it("runs consumere's surface: sign-up, sign-in, the server session, social start
 
   const signedInClient = createAuthClient({
     baseURL: BASE,
-    fetchOptions: { customFetchImpl, headers: { cookie: `tempo_session=${token}` } },
+    fetchOptions: { customFetchImpl, headers: { cookie: `__Host-tempo_session=${token}` } },
   });
   const out = await signedInClient.signOut();
   expect(out.error).toBeNull();
   expect(out.data).toEqual({ success: true });
-  expect(await me({ cookie: `tempo_session=${token}` })).toEqual(UNAUTHENTICATED);
+  expect(await me({ cookie: `__Host-tempo_session=${token}` })).toEqual(UNAUTHENTICATED);
 });
 
 it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer header, Expo getCookie", async () => {
@@ -132,7 +132,7 @@ it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer h
   expect(up.error).toBeNull();
   const mobileToken = up.data?.token ?? "";
   expect(seen).toEqual([mobileToken]);
-  expect(mobile.getCookie()).toBe(`tempo_session=${mobileToken}`);
+  expect(mobile.getCookie()).toBe(`__Host-tempo_session=${mobileToken}`);
   expect((await me({ cookie: mobile.getCookie() })).body.email).toBe(ownerEmail);
 
   // The bearer header, both ways: the token from set-auth-token grants the session; a wrong or absent one does not.
@@ -160,7 +160,7 @@ it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer h
 
   // Confirm the address by the mailed link, as a person does, so organization writes are allowed.
   const cookie = await confirmByLink(await lastLink(ownerEmail));
-  expect(cookie).toMatch(/^tempo_session=ts_/);
+  expect(cookie).toMatch(/^__Host-tempo_session=ts_/);
 
   const dashboard = createAuthClient({
     baseURL: BASE,
@@ -256,7 +256,7 @@ it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer h
   expect(again.error).toBeNull();
   const liveToken = again.data?.token ?? "";
   expect(liveToken).not.toBe(mobileToken);
-  expect(mobile.getCookie()).toBe(`tempo_session=${liveToken}`);
+  expect(mobile.getCookie()).toBe(`__Host-tempo_session=${liveToken}`);
   expect(await me({ authorization: `Bearer ${liveToken}` })).toMatchObject({
     status: 200,
     body: { email: ownerEmail },

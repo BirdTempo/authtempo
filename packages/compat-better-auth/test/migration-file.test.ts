@@ -6,16 +6,19 @@ import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
 import shipped0004 from "../migrations/d1/0004_compat_schema_v7.sql?raw";
 import shipped0005 from "../migrations/d1/0005_compat_schema_v8.sql?raw";
+import shipped0006 from "../migrations/d1/0006_compat_schema_v9.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
 import shipped0004Before17 from "../migrations/d1-before-1.7/0004_compat_schema_v7.sql?raw";
 import shipped0005Before17 from "../migrations/d1-before-1.7/0005_compat_schema_v8.sql?raw";
+import shipped0006Before17 from "../migrations/d1-before-1.7/0006_compat_schema_v9.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
   COMPAT_MIGRATION_0004_SQL,
   COMPAT_MIGRATION_0005_SQL,
+  compatMigration0006Sql,
   compatMigrationSql,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
@@ -29,6 +32,14 @@ function sqlite(schema: string): DatabaseSync {
   db.exec(schema);
   return db;
 }
+
+/**
+ * The columns of a model before schema version 9. Migration 0006 (plan 12b)
+ * adds secret_version last to ta_totp, ta_second_factor, and ta_jwk, so a
+ * test of an earlier migration holds the table to the columns it had then.
+ */
+const columnsBefore9 = (model: Parameters<typeof columnsOf>[0]) =>
+  columnsOf(model).filter((c) => c !== "secret_version");
 
 /** The ta tables in the database, by name. */
 const taTables = (db: DatabaseSync) =>
@@ -214,7 +225,7 @@ describe("migration 0003 (plan 9f)", () => {
       const cols = (
         db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
       ).map((c) => c.name);
-      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+      expect({ model, cols }).toEqual({ model, cols: columnsBefore9(model) });
     }
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "3" },
@@ -249,7 +260,7 @@ describe("migration 0004 (plan 9g)", () => {
       const cols = (
         db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
       ).map((c) => c.name);
-      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+      expect({ model, cols }).toEqual({ model, cols: columnsBefore9(model) });
     }
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "4" },
@@ -285,7 +296,7 @@ describe("migration 0005 (plan 12c)", () => {
     const cols = (
       db.prepare(`PRAGMA table_info(${TABLES.secondFactor})`).all() as { name: string }[]
     ).map((c) => c.name);
-    expect(cols).toEqual(columnsOf("secondFactor"));
+    expect(cols).toEqual(columnsBefore9("secondFactor"));
     expect(db.prepare("SELECT * FROM ta_second_factor").all()).toEqual([
       {
         id: "f1",
@@ -301,6 +312,36 @@ describe("migration 0005 (plan 12c)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "5" },
       { key: "schema_version", value: "8" },
+    ]);
+  });
+});
+
+describe("migration 0006 (plan 12b)", () => {
+  it("ships both D1 files as the default naming's SQLite text", () => {
+    const text = compatMigration0006Sql("sqlite", resolveNames());
+    expect(normalize(shipped0006)).toBe(normalize(text));
+    expect(normalize(shipped0006Before17)).toBe(normalize(text));
+  });
+
+  it("adds secret_version to core's three tables and taSecretVersion to verification, default 1, and moves the versions to 9 and 6", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const file of [shipped, shipped0002, shipped0003, shipped0004, shipped0005]) db.exec(file);
+    db.exec(
+      `INSERT INTO "verification" ("id","identifier","value","expiresAt","createdAt","updatedAt") VALUES ('v','i','h','2026-10-14T00:00:00.000Z','2026-10-14T00:00:00.000Z','2026-10-14T00:00:00.000Z');`,
+    );
+    db.exec(shipped0006);
+    for (const model of ["totp", "secondFactor", "jwk"] as const) {
+      const cols = (
+        db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
+      ).map((c) => c.name);
+      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+    }
+    expect(db.prepare(`SELECT "taSecretVersion" AS v FROM "verification"`).all()).toEqual([
+      { v: 1 },
+    ]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "6" },
+      { key: "schema_version", value: "9" },
     ]);
   });
 });

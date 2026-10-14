@@ -5,7 +5,7 @@ import { createAuth, createMemoryAdapter } from "@authtempo/core";
 
 const auth = createAuth({
   baseURL: "https://api.example.com",
-  secret: env.AUTH_SECRET,                 // at least 32 characters
+  secret: env.AUTH_SECRET,                 // at least 32 characters, 100 bits or more
   trustedOrigins: ["https://app.example.com", "consumera://"],
   storage: createMemoryAdapter(),          // use a D1 or Postgres adapter in production
   mail: { send: async (m) => { /* your transport */ } },
@@ -15,6 +15,10 @@ const auth = createAuth({
 if (url.pathname.startsWith("/auth/")) return auth.handle(request);
 const s = await auth.session(request);     // { user, session } or null
 ```
+
+Give `secret`, or `secrets` as a list of `{ version, value }` with the current version first. `secret` alone is version 1. A value has at least 32 characters.
+
+The estimate of a secret is its length times log2 of its distinct characters. `createAuth` refuses a current secret under 100 bits and warns from 100 to 119 bits. The estimate does not catch a pattern. Make a secret with 32 random bytes: `openssl rand -base64 32`.
 
 ## Routes under `basePath` (default `/auth`)
 
@@ -35,19 +39,19 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
-| POST | `/password/sign-up` | `{ email, password, name? }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `password_policy`, `password_breached`; 409 `email_taken`, `email_taken_unverified`; 429 `rate_limited`. The user is unverified until the mail link is confirmed |
+| POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
 | POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link of the address stops working |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
-| POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy` or `password_breached`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`. A reset that answers the challenge still sets the password and ends every session |
-| POST | `/password/change` | session, `{ currentPassword?, newPassword }` | `{ ok: true }`; 400 `invalid_body`, `password_policy`, `password_breached`; 401 without a session; 401 `invalid_credentials` for a missing or wrong current password; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited` |
+| POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy`, `password_breached`, or `breach_check_unavailable`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`, 503 `breach_check_unavailable`. A reset that answers the challenge still sets the password and ends every session |
+| POST | `/password/change` | session, `{ currentPassword?, newPassword }` | `{ ok: true }`; 400 `invalid_body`, `password_policy`, `password_breached`; 401 without a session; 401 `invalid_credentials` for a missing or wrong current password; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited`; 503 `breach_check_unavailable` |
 | POST | `/otp/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a sign-in code |
 | POST | `/otp/verify` | `{ email, code, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c); 400 `invalid_body`, `invalid_code` (a wrong, expired, spent, or unknown code), `too_many_attempts` (the code took `maxAttempts` wrong guesses: request a new one); 429 `rate_limited` |
 | POST | `/otp/reset/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a reset code. Only with a `password` config |
-| POST | `/otp/reset` | `{ email, code, password, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie and the password set (plan 12c); 400 `invalid_body`, `invalid_code`, `too_many_attempts`, `password_policy` and `password_breached` (both spend the code); 429 `rate_limited`. Only with a `password` config |
+| POST | `/otp/reset` | `{ email, code, password, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie and the password set (plan 12c); 400 `invalid_body`, `invalid_code`, `too_many_attempts`, `password_policy` and `password_breached` (both spend the code); 429 `rate_limited`; 503 `breach_check_unavailable` (it spends the code too). Only with a `password` config |
 | GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the confirm page when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
 | GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
 | POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
@@ -147,8 +151,15 @@ default `SameSite=Lax` the cookie goes on every same-site request, so an
 app on a sibling subdomain of the API works as is. An app on another
 site needs `cookie: { sameSite: "None" }`; then any site can make the
 browser send the cookie, and the Origin rule on POST is what refuses
-them. The cookie names stay `tempo_session` and `tempo_session_oauth` in
-version 1; a `__Host-` prefix is a version 2 item.
+them. The session cookie is `__Host-tempo_session` and the binding cookie
+is `__Secure-tempo_session_oauth` (plan 12b).
+
+Every POST also passes the Fetch Metadata rule. A form post (a form,
+multipart, `text/plain`, or no content type) needs `Sec-Fetch-Site` to be
+`same-origin` or `none`. A JSON post from another site (`cross-site` or
+`same-site`) needs a trusted `Origin`. A request with no `Sec-Fetch-Site`
+passes. A refusal answers 403 `origin_not_trusted`. Apple's callback skips
+both rules: Apple posts it from its own site.
 
 ## Handoff for native and desktop apps
 
@@ -334,9 +345,12 @@ optional.
 | --- | --- | --- |
 | `hash` | `createPbkdf2PasswordHash()` | The hash seam. It has `hash`, `verify`, and `dummy`. |
 | `minLength` | 8 | The lower bound, 8 to 128. Counted in code points. |
-| `breachCheck` | none | `(plain) => Promise<boolean>`. True refuses the password with `password_breached`. |
+| `breachCheck` | none | `(plain) => Promise<boolean \| "unavailable">`. True refuses with `password_breached`. `"unavailable"` refuses with 503 `breach_check_unavailable`: the check fails closed. `@authtempo/breach-check` answers it. |
 | `resetTtlMinutes` | 15 | The life of a reset link, 1 to 1440. |
 | `resetPage` | `defaultResetPage` | The HTML of the reset page. |
+| `requireVerified` | `false` | True refuses the password sign-in of an unverified address. |
+| `uniformSignUp` | `true` | Every sign-up answers `{ sent: true }` with no session. A known address gets a mail. False keeps a session at sign-up and `email_taken`. |
+| `existingAccountMail` | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address. |
 
 The default hash is PBKDF2-HMAC-SHA256 on Web Crypto. A hash is stored as
 `pbkdf2-sha256$<iterations>$<salt>$<hash>`. The salt is 16 random bytes and
@@ -372,6 +386,53 @@ user's pending handoff codes. It keeps the current session. A change also
 deletes the address's pending reset links (added 2026-10-10 by the plan 8
 final fix wave).
 
+`requireVerified` (plan 12b). The default is `false`, because core signs in
+an unverified password user since plan 8 (spec 8.7). A default of `true`
+would lock out each unverified user of a live app at the upgrade. With the
+key on, a sign-in checks the password first, then rehashes, then checks the
+address. A wrong password answers `invalid_credentials` as before. A right
+password of an unverified address answers `email_unverified` (403) and
+opens no session and no challenge, so only a person who knows the password
+learns that the address is unverified. A new verify link goes out first. It
+counts on `password-resend:email:<email>`, the key of the resend route, so
+at most 3 links go per 15 minutes. Over the limit, no mail goes, and the
+answer stays `email_unverified`. Under `signUp: "invited"` the sign-in does
+the same check, whatever `requireVerified` says: a stranger who signs up at
+an invited address cannot sign in before the address is proved. The other
+pending links of the address go first, so one link at a time is live.
+With `uniformSignUp: false`, a sign-up with the key on writes the user and
+the password, mails the link, and opens no session: it answers 200
+`{ user, verifyRequired: true }` with no cookie, and the session hooks do
+not run. The verify link signs the person in.
+
+`uniformSignUp` (plan 12b, ASVS 5.0.0 6.3.8). Every sign-up that passes the
+body check, the policy, and the breach check answers 200 `{ sent: true }`
+with no cookie. A new address gets the unverified user, the password, and
+the verify link, and the link opens the session. A known address gets no
+row and one mail that points to the sign-in, and a claim race or a refusal
+by `signUp: "invited"` gets no row and no mail. Under `"invited"` the
+invitation check runs first, so a known address with no pending invitation
+gets no mail. The hash runs before the
+transaction on every path, but the transaction of a new address writes
+more than the read of a known one, so core does not claim 6.3.8 in full.
+Under `"invited"` only a new address with an invitation gets the rows and
+the verify mail, so the time of the answer can show that an invitation
+exists. That tells less than whether an account exists.
+
+`breachCheck` (plan 12b, ASVS 5.0.0 6.2.12). The check fails closed, and
+core holds no list of breached passwords. An answer of `true` refuses the
+password with 400 `password_breached`. An answer of `"unavailable"`
+refuses it with 503 `breach_check_unavailable`: the person tries again
+later. A throw of the function answers 500, because it is a fault of the
+app's function, not an outage. The sign-up, the reset by link, the reset
+by code, and the change run the check. The sign-up and both resets run it
+before any read of a user, so a known and an unknown address get the same
+answer. A refused reset link stays usable. A refused reset code is spent,
+so after an outage the person asks for a new code. In the sign-up, the
+check runs after `password-sign-up:ip` and the captcha, and before
+`password-sign-up:email`. `@authtempo/breach-check` answers the port with the HIBP
+Pwned Passwords range API.
+
 A reset of a user with the second factor on opens no session (plan 12c).
 It sets the password and ends every session, as before. Then it writes a
 challenge, as the last write, and answers it: JSON 200
@@ -386,6 +447,7 @@ The limits, in the same limiter as the other routes:
 | Key | Limit |
 | --- | --- |
 | `password-sign-up:ip:<ip>` | 10 per hour |
+| `password-sign-up:email:<email>` | 5 per hour |
 | `password:ip:<ip>` | 20 per 15 minutes |
 | `password:email:<email>` | 10 per 15 minutes |
 | `password-reset:ip:<ip>` | 20 per 15 minutes |
@@ -394,6 +456,9 @@ The limits, in the same limiter as the other routes:
 | `password-resend:ip:<ip>` | 20 per 15 minutes |
 | `password-resend:email:<email>` | 3 per 15 minutes |
 | `password-change:user:<userId>` | 10 per 15 minutes |
+
+`<ip>` is an IPv4 address, the IPv4 form of a mapped IPv6 address, or the
+`/64` prefix of another IPv6 address (`ipKey`). One `/64` shares each count.
 
 The `password:email` limit is a trade-off: 10 wrong tries from anyone stop
 password sign-in for that address for 15 minutes. The magic link still
@@ -404,6 +469,25 @@ fix wave.
 The reset POST checks its limit, then reads the link row, then the policy,
 then the breach check, then hashes. A transaction consumes the link first.
 A spent or expired link costs no breach call and no hash.
+
+## Captcha
+
+`captcha: { port, flows?, onUnavailable? }` puts a captcha on the flows that
+send mail or write rows. Core names no supplier, and
+`@authtempo/captcha-turnstile` answers the port.
+
+- The token comes in the header `x-captcha-response`, and the preflight answer lists it.
+- The default flows are `password-sign-up`, `magic-link-request`, `email-otp-request`, and `password-reset-request` (the reset link and the reset code).
+- `password-sign-in` is off by default; name it in `flows` to check every sign-in.
+- Each flow runs its per-IP limit, then the captcha, then its per-email limits and its work. The per-IP limit bounds the captcha calls.
+- A request with no token spends no per-email limit, so a bot cannot block the mail to an address. In the sign-up, it costs no policy check and no breach call.
+- The captcha runs before the flow reads a user, so its answer is the same for every address.
+- No token answers 400 `captcha_required`; a refused token, or a token over 2048 characters, answers 403 `captcha_failed`.
+- When the port gives no answer or throws, `onUnavailable: "allow"` (the default) writes one log line and goes on, and `"refuse"` answers 503 `captcha_unavailable`.
+- An in-process `api` call with no `captchaToken` skips the check. An app that proxies a browser request through `api` must pass the browser's token as `captchaToken`; without it, the check does not run.
+- While core serves its own sign-in page (`handoff` or `oauth`, with no `handoff.signInPage`), `captcha.port.page` is required when a gated flow is on that page.
+- The page has the magic link form, and the password forms only with `password`. Without the widget, each gated flow on it answers `captcha_required`.
+- With `port.page`, core's sign-in page loads the widget's script under its nonce, adds the widget to the magic link and password forms, and adds `cspSources` to `script-src` and `frame-src`.
 
 ## Email codes
 
@@ -611,6 +695,7 @@ export default {
 - With `openid` the code exchange adds an ID token (`aud` = the client id, `nonce`, `sid`, `at_hash`, and `email` or `name` and `picture` by scope), and `/oauth/userinfo` answers the same claims. The ID token uses the `jwtMint.alg` (EdDSA or ES256). OIDC Discovery asks a provider to support RS256 too; core does not, so a relying party that accepts RS256 only cannot use it.
 - Limits: `oauth-register:ip` 10 per hour; `oauth-authorize:ip` 60 per 15 minutes; `oauth-token:ip` 60 per 15 minutes, shared with the revoke.
 - Not in version 1: a confidential client with a secret, a browser-based client on another origin (the token and register endpoints send no CORS headers to an origin that is not trusted), and a token exchange or a device flow.
+- A browser client on another origin gets 403 `origin_not_trusted` from the Fetch Metadata rule (plan 12b) on its form post to `POST /oauth/token` or `POST /oauth/revoke`, and on a `POST /oauth/userinfo` with no body. This holds also for a trusted origin.
 
 ## API tokens
 
@@ -654,10 +739,40 @@ return res;
   a token from the list.
 - In process: `auth.api.tokens.create`, `list`, `revoke`, and `current`.
 
+## The sign-up rule
+
+`signUp` sets who may become a user.
+
+| Key | Default | Rule |
+| --- | --- | --- |
+| `signUp` | `"open"` | `"open"`, `"invited"` (needs `organizations`), or `false`. A refused new user gets 403 `sign_up_closed`. |
+
+The rule runs at each create of a user: the password sign-up, the password
+reset, the magic link, the email code, and social. The importer and the
+operator's own storage writes are not under the rule. An existing user signs
+in as before. A magic link or code request still answers `{ sent: true }`. Its
+verify answers `sign_up_closed`, and only the owner of the mailbox sees that.
+A refused reset keeps its link usable.
+
+With `false`, the password sign-up answers `sign_up_closed` before it reads a
+user, so the answer is the same for every address. With `"invited"` and
+`uniformSignUp: false`, the answer shows whether the address has a pending
+invitation.
+
+With `"invited"`, a new user needs a proved address. A social sign-in that
+would create a user needs a verified address from the provider: else it
+answers `sign_up_closed`. The password sign-up of an invited address opens
+no session until the person follows the verify link. It answers `{ sent: true }`
+by default, and `{ user, verifyRequired: true }` with
+`password.uniformSignUp: false`.
+
 ## Organizations
 
 Set `organizations: {}` to turn the feature on. Without it, the organization
 routes and the `api` functions answer 404 `not_found`.
+
+With `signUp: "invited"`, only an address with a pending invitation becomes a
+user. The invitee signs in by any method, and the accept follows.
 
 **Ranks.** A role name maps to a rank. The default table is `viewer` 1,
 `member` 2, `admin` 3, `owner` 4. A member may hold more than one role,
@@ -951,8 +1066,72 @@ export default {
 Add a cron trigger to the Worker config, for example `"triggers": { "crons": ["17 * * * *"] }`.
 Without a trigger, expired rows stay in the database.
 
+## Secrets
+
+`secret` is version 1 of the app secret. `secrets` lists the versions, the
+current one first. The current version seals each new TOTP secret and
+signing key, and keys each new email code and backup code. Each row names
+its version in the column `secret_version`, and a read opens a value only
+under that version.
+
+| Call | Answer |
+| --- | --- |
+| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. It reads every row of four tables: one query per 1000 rows of each table. With 100,000 TOTP users, a call makes more than 200 queries, so run it from a script, not from a request. |
+| `auth.api.secrets.rewrap({ limit, after })` | Reseals up to `limit` (1 to 1000, default 100) TOTP secrets and keys under the current version. Answers `{ resealed, failed, skipped, more, next }`. `invalid_body` for a limit outside that range or a cursor that `rewrap` did not answer. |
+
+One pass of the rewrap reads each row under a configured old version once,
+in the order of the ids. Pass `next` as `after` to the next call, until
+`next` is `null`. A row that fails or is skipped stays behind the cursor,
+so it does not stop the rows after it. `more` stays `true` while a row
+under a configured old version remains, also a row that failed or was
+skipped. A row under a version that the config does not hold is never read.
+
+- `failed`: the row did not open under its version, or a concurrent write
+  changed it first. The log names the table, the row, and its version. A
+  later pass reads it again. A row that fails on every pass does not open
+  under its version: a TOTP user then runs a new setup, and a key retires
+  at its next signature and the sweep deletes it.
+- `skipped`: an unconfirmed TOTP setup that holds backup codes and is less
+  than 15 minutes old. Its codes are keyed under its version, so it stays
+  there until the enable. Wait 15 minutes and run a new pass: the pass then
+  reseals an expired setup and clears its codes.
+
+```ts
+let after: string | undefined;
+for (;;) {
+  const r = await auth.api.secrets.rewrap({ limit: 100, ...(after ? { after } : {}) });
+  if (!r.ok) throw new Error(r.code);
+  if (r.value.next === null) break;
+  after = r.value.next;
+}
+```
+
+A TOTP secret also moves to the current version at its next right code,
+and a key at its next signature. A keyed hash cannot move: core never sees
+its code again. A backup code stays under its version until it is used or
+the list is replaced. An email code lives `emailOtp.ttlMinutes`.
+
+Remove an old version from `secrets` only after `status` shows four zeros
+for it. A removed version also takes its unused backup codes: they match
+no more. When `backupCodes` is above 0, ask those users to make new codes
+first. A signing key under a version that the config does not hold does
+not open: it retires at the next signature, and a new key signs. A TOTP
+user under that version cannot pass the second factor. The rotation has two
+deploys. The operations guide "Secrets" gives each step and the
+consequence of a skipped step.
+
+Run the schema 9 migration on every instance before version 2 is current
+(https://authtempo.com/docs/operations/secrets/). An instance at version 8
+writes each value under version 1.
+
 ## Limits in version 1
 
+- A uniform sign-up of a new address writes rows, and one of a known
+  address does not. The time of the answer can differ by that work.
+- The PBKDF2 cost stays at 100000 iterations until a measurement on a
+  deployed Worker proves a higher count (`examples/pbkdf2-probe`).
+- The captcha token passes once. After a refused answer the person solves
+  the widget again.
 - The default limiter counts in memory. On Workers every isolate has its
   own count, so the real limit is the limit times the isolate count. Pass
   a shared `limiter` for a real limit. The D1 adapter ships `createD1Limiter`
@@ -972,7 +1151,9 @@ Without a trigger, expired rows stay in the database.
   in the same per-isolate limiter as the magic link. An `oidc` entry reads
   its discovery document after this limit.
 - Every call to a provider (the token exchange, the user info step, the
-  discovery read) stops after 10 s and answers `oauth_failed`.
+  discovery read, and the JWKS read) stops after 10 s, follows no
+  redirect, and answers `oauth_failed` on a 3xx. An app's `userinfo` gets a
+  fetch with the same rule, also when it asks to follow.
 - The confirm page has no script, so a double click on its button sends
   two posts. The first consumes the token and sets the cookie. If the
   browser drops the first answer, the second answers `invalid_token`, and
@@ -982,10 +1163,13 @@ Without a trigger, expired rows stay in the database.
 - One binding cookie per browser: a second social start, in another tab
   or for the other provider, replaces it, and the first flow then answers
   `invalid_token`. Start again.
-- The binding cookie and the session cookie are plain host cookies. A
-  host on a sibling subdomain of the API can set a cookie with the same
-  name for the parent domain. Keep the API on its own registrable domain,
-  or wait for the `__Host-` decision in plan 5.
+- The session cookie is `__Host-tempo_session` (plan 12b). For one
+  release core reads the old `tempo_session` and moves it. The binding
+  cookie is `__Secure-tempo_session_oauth` on the social path. The trust
+  cookie is a plain host cookie.
+- `session.absoluteDays` (1 to 365, off by default) ends a session that
+  many days after it opened, whatever its sliding refresh (ASVS 5.0.0
+  7.3.2). The person then signs in again.
 - A passkey challenge is valid for five minutes and for one use. Passkey
   sign-in options are limited to 30 per IP, and verifies to 20 per IP,
   per 15 minutes, in the same per-isolate limiter.
@@ -1026,6 +1210,7 @@ Without a trigger, expired rows stay in the database.
 - Core at version 7 needs the `0007_schema_v7` migration in both adapters. Version 7 adds `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, and `ta_oauth_token` (plan 9g).
 - Core at version 8 needs the `0008_schema_v8` migration in both adapters. Version 8 adds `ta_second_factor` and copies each enabled `ta_totp` row into it with the same id, so every stored backup code stays valid (plan 12c). It also deletes each `ta_totp` setup that no enable confirmed: a setup open across the deploy answers `totp_not_enabled` at the enable, and the person sets up again.
 - Warning: a Worker at version 7 still runs between `0008_schema_v8` and the deploy. Its second-factor writes do not reach `ta_second_factor`. Deploy core at version 8 at once after the migration. Then run the three checks of the adapter README ("Migrations") immediately after the deploy. They list an enabled `ta_totp` row with no factor row, a factor row that lists `totp` with no enabled `ta_totp` row, and a version 1 factor row whose backup codes differ from its `ta_totp` row.
+- Core at version 9 needs the `0009_schema_v9` migration in both adapters, and the compatibility package needs `0006_compat_schema_v9`. Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). The column is `NOT NULL DEFAULT 1`, so every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

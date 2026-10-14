@@ -30,6 +30,7 @@ function totpRow(id: string, userId: string, enabledAt: Date | null, backupCodes
     backupCodes,
     createdAt: at,
     updatedAt: at,
+    secretVersion: 1,
   };
 }
 
@@ -67,6 +68,8 @@ it("copies each enabled totp row with the same id and version 1, and skips an un
       backupCodesVersion: 1,
       createdAt: at,
       updatedAt: at,
+      // The copy of 0008 names no secret_version: the column default of 0009.
+      secretVersion: 1,
     },
   ]);
 });

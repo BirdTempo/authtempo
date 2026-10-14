@@ -127,7 +127,8 @@ describe("the email-otp options (plan 9e)", () => {
         allowedAttempts: 11,
         storeOTP: "plain",
         generateOTP: () => "123456",
-        disableSignUp: true,
+        // Plan 12b accepts a boolean: core's one sign-up rule (test/hardening.test.ts).
+        disableSignUp: "yes",
         overrideDefaultEmailVerification: true,
         sendVerificationOnSignUp: true,
         resendStrategy: "reuse",
@@ -138,7 +139,7 @@ describe("the email-otp options (plan 9e)", () => {
     ).toEqual([
       "plugins[email-otp].allowedAttempts: core takes 3 to 10",
       "plugins[email-otp].changeEmail: core has no change of address by code; see the plan index",
-      "plugins[email-otp].disableSignUp: core creates the user at the first code",
+      "plugins[email-otp].disableSignUp: expected a boolean",
       "plugins[email-otp].expiresIn: core takes 60 to 3600 seconds, rounded up to whole minutes",
       "plugins[email-otp].generateOTP: core makes the code itself, from crypto.getRandomValues",
       "plugins[email-otp].other: authtempo has no such option",
@@ -180,7 +181,7 @@ describe("Better Auth's email OTP paths (plan 9e)", () => {
     expect(body.token).toMatch(/^ts_/);
     expect(Object.keys(body.user as object).sort()).toEqual([...USER_KEYS].sort());
     expect(body.user).toMatchObject({ email: EMAIL, emailVerified: true, name: "" });
-    expect(signedIn.headers.get("set-cookie")).toContain(`tempo_session=${body.token}`);
+    expect(signedIn.headers.get("set-cookie")).toContain(`__Host-tempo_session=${body.token}`);
     expect(signedIn.headers.get("set-auth-token")).toBe(body.token);
   });
 
@@ -232,10 +233,12 @@ describe("Better Auth's email OTP paths (plan 9e)", () => {
     expect(reset.status).toBe(200);
     expect(await json(reset)).toEqual({ success: true });
     // The compat reset opens a session (a plan deviation): the cookie carries it.
-    const cookie = /tempo_session=(ts_[^;]+)/.exec(reset.headers.get("set-cookie") ?? "")?.[1];
+    const cookie = /__Host-tempo_session=(ts_[^;]+)/.exec(
+      reset.headers.get("set-cookie") ?? "",
+    )?.[1];
     expect(cookie).toMatch(/^ts_/);
     const me = await auth.api.getSession({
-      headers: new Headers({ cookie: `tempo_session=${cookie}` }),
+      headers: new Headers({ cookie: `__Host-tempo_session=${cookie}` }),
     });
     expect(me?.user.email).toBe(EMAIL);
     const signedIn = await auth.api.signInEmail({
