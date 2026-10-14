@@ -41,7 +41,7 @@ import d1Worker from "../../../../../../../examples/worker-d1/src/index.ts?raw";
 - Each call of the owned limiter runs one statement, so two calls at the same moment cannot both pass at the last slot.
 - The stored key is the key, the seconds, and the maximum, joined by U+001F. A key with U+001F throws.
 - A request with no client IP counts against one shared bucket of its flow, `<flow>:ip:unknown`.
-- `<ip>` is the client IP of an IPv4 address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count.
+- For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count.
 - On Workers, the default `clientIp` reads `cf-connecting-ip`, which Cloudflare sets and a caller cannot forge.
 - A per-code cap and a per-challenge cap live in their rows, so they hold under every limiter.
 

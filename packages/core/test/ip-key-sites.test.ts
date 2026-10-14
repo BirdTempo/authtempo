@@ -11,21 +11,28 @@ interface SourceFs {
 }
 const FS_MODULE = "node:fs";
 
+/** The per-IP key sites at plan 12b Task 16. A new site raises the count. */
+const MIN_SITES = 21;
+
 describe("the per-IP keys (plan 12b Task 16)", () => {
   it("calls ipKey in every per-IP limiter key of core", async () => {
     const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
     const src = new URL("../src/", import.meta.url);
+    const files = readdirSync(src, { recursive: true }).filter((file) => file.endsWith(".ts"));
+    // The scan must read the sites: a list with no file finds no miss.
+    expect(files).toContain("engine/magic-link.ts");
+    // The scan matches only a template key `:ip:${` on one line. A key joined
+    // with + or built in a variable escapes it. No such form exists today.
     // A key `<flow>:ip:${…}` that does not start with ipKey( would count each
     // IPv6 address of one /64 on its own.
-    const misses = readdirSync(src, { recursive: true })
-      .filter((file) => file.endsWith(".ts"))
-      .flatMap((file) =>
-        readFileSync(new URL(file, src), "utf8")
-          .split("\n")
-          .flatMap((line, i) => (/:ip:\$\{(?!ipKey\()/.test(line) ? [`src/${file}:${i + 1}`] : [])),
-      );
+    const lines = files.flatMap((file) =>
+      readFileSync(new URL(file, src), "utf8")
+        .split("\n")
+        .map((line, i) => ({ at: `src/${file}:${i + 1}`, line })),
+    );
+    const misses = lines.filter(({ line }) => /:ip:\$\{(?!ipKey\()/.test(line)).map(({ at }) => at);
     expect(misses).toEqual([]);
-    // The scan must read the sites: a wrong path finds no file and no miss.
-    expect(readFileSync(new URL("engine/magic-link.ts", src), "utf8")).toContain(":ip:${ipKey(");
+    const sites = lines.filter(({ line }) => line.includes(":ip:${ipKey(")).length;
+    expect(sites).toBeGreaterThanOrEqual(MIN_SITES);
   });
 });
