@@ -40,6 +40,7 @@ pnpm exec wrangler d1 migrations apply my-app --remote
 ## How it behaves
 
 - Each adapter reads `ta_meta.schema_version` once. An older or missing version makes every operation throw `StorageError` with `schema_mismatch`.
+- The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
 - A migration is append-only. A new version adds a migration and never changes an old one.
 - A migration of a newer version runs safely under the older code. So apply it first, then deploy.
 - `applyPostgresMigrations` is safe on every deploy, also from two replicas at once. Each migration takes an advisory lock and reads the applied names again.

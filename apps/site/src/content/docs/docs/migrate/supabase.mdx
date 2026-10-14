@@ -77,7 +77,7 @@ A policy of row level security that reads `auth.uid()` does not move. Check the 
 - An SSO user is skipped as `sso_user`, and a banned user as `banned`. The command still exits 0 for them.
 - A phone-only user has no address and is skipped as `no_email`.
 - The `github` provider imports as GitHub, and `linkedin_oidc` as LinkedIn. The older `linkedin` provider is listed as `identity:linkedin_legacy`.
-- A row with the tag `$fbscrypt$` needs the Firebase parameters and `firescrypt` in `--formats`.
+- A row with the tag `$fbscrypt$` needs `--firebase-signer-key`, `--firebase-salt-separator`, and `firescrypt` in `--formats`. Give the same two values as the seam's `firebase` option.
 - Supabase passkeys do not move.
 
 :::caution

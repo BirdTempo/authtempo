@@ -21,16 +21,16 @@ sidebar:
 ## Steps
 
 1. On D1, note that Time Travel is always on. It goes back 30 days on Workers Paid, and 7 days on Workers Free.
-2. Read the bookmark of a time before the fault.
+2. Read the bookmark of a time before the fault. The command prints it.
 
 ```sh
 pnpm exec wrangler d1 time-travel info my-app --timestamp="2026-10-14T09:00:00+00:00"
 ```
 
-3. Restore the database to that time.
+3. Restore the database to that bookmark.
 
 ```sh
-pnpm exec wrangler d1 time-travel restore my-app --timestamp=1791968400
+pnpm exec wrangler d1 time-travel restore my-app --bookmark="$BOOKMARK"
 ```
 
 4. For a copy outside Cloudflare, export the database to a SQL file.
@@ -54,7 +54,8 @@ psql "$DATABASE_URL" -c "DELETE FROM ta_session"
 ```
 
 7. With the compatibility package, delete the rows of the table `session` instead.
-8. Run `auth.api.sweepExpired()` once.
+8. Note that the table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
+9. Run `auth.api.sweepExpired()` once.
 
 ## How it behaves
 

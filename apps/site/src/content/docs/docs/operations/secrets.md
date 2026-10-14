@@ -19,7 +19,7 @@ sidebar:
 
 ## Before you start
 
-- Access to the secret store of the API, such as `wrangler secret put`.
+- Access to the secret store of the API. On Workers that is `wrangler secret put`. On Node and Bun it is the process environment.
 - A way to run code in the API's process, for the in-process api.
 
 ## What the secret protects
@@ -38,10 +38,13 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 
 1. List the users with the second factor on. Each one has a row in `ta_totp`.
 2. Tell each of them that they must set up the second factor again after the change.
-3. Store the new value with `pnpm exec wrangler secret put AUTH_SECRET`, or in the secret store of your server.
-4. Deploy, so every instance reads the new value.
-5. For each user of step 1, call `auth.api.totp.disable({ userId })` in the API's process.
-6. Read the log for the line about a signing key that does not open. One line is expected.
+3. For each user of step 1, call `auth.api.totp.disable({ userId })` in the API's process. Do this before the change, because no sealed key opens after it.
+4. On Workers, store the new value with `pnpm exec wrangler secret put AUTH_SECRET`. The Worker reads it as `env.AUTH_SECRET`.
+5. On Node and Bun, set `AUTH_SECRET` in the process environment of the server.
+6. Deploy, so every instance reads the new value.
+7. Read the log for the line about a signing key that does not open. One line is expected.
+
+The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
 
 ## How it behaves
 
@@ -50,12 +53,12 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 - A new `secret` changes no password hash. PBKDF2 needs no key.
 
 :::caution
-Warning: a new `secret` locks every user with the second factor out of it, and out of the backup codes. Do step 5 for each such user, or each one stays locked out.
+Warning: a new `secret` locks every user with the second factor out of it, and out of the backup codes. Do step 3 for each such user before the change, or each one stays locked out.
 :::
 
 ## If it fails
 
-- [`invalid_code`](/docs/reference/errors/#invalid_code) at the second factor after the change: step 5 did not run for that user.
+- [`invalid_code`](/docs/reference/errors/#invalid_code) at the second factor after the change: step 3 did not run for that user.
 - [`invalid_code`](/docs/reference/errors/#invalid_code) for an email code: the code is from before the change. Ask for a new one.
 - A JWT check fails on another server after 24 hours: that server keeps an old key set. It must read `/auth/jwks` again.
 

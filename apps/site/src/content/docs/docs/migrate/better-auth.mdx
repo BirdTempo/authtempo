@@ -75,10 +75,14 @@ The test below runs the sample against a database in memory. It also shows the e
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 
+The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
+
 ## How it behaves
 
 - Better Auth's defaults apply: a session lives 7 days and refreshes after 1 day.
 - The session cookie is `tempo_session`, not `better-auth.session_token`. Change each test and each legal page that names the old cookie.
+- The cookie name keeps the old product name tempo-auth for compatibility. [Cookies](/docs/reference/cookies/) states the rule.
+- The one key that is not Better Auth's is `authtempo`. `authtempo.appURL` is the origin where each sign-in lands, by default the origin of `baseURL`. An absolute `callbackURL` off that origin answers 403 with `INVALID_CALLBACK_URL`. `authtempo.passwordHash` replaces `betterAuthPasswordHash()`.
 - `session.token` holds the SHA-256 of the token. App SQL that reads it reads a hash.
 - A reset ends every session, where Better Auth kept the others.
 - Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
