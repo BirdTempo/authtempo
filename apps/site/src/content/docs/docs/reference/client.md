@@ -54,7 +54,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.session()` | `GET /session` | `PublicSession` or `null`. A 401 gives `null`, not a failure. |
 | `client.signOut()` | `POST /sign-out` | `{ ok: true }` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `{ sent: true }` |
-| `client.magicLink.verify({ token })` | `POST /magic-link/verify` | `PublicSession` |
+| `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `PasskeySummaryJSON` |
 | `client.passkey.signIn()` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession` |
 | `client.passkeys.list()` | `GET /passkeys` | `PasskeySummaryJSON[]` |
@@ -65,19 +65,24 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `{ sent: true }` |
 | `client.password.verifyEmail({ token })` | `POST /password/verify` | `{ verified: true }` |
 | `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `{ sent: true }` |
-| `client.password.reset({ token, password })` | `POST /password/reset` | `{ token }` and `PublicSession` |
+| `client.password.reset({ token, password, trustDevice? })` | `POST /password/reset` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.password.change({ currentPassword?, newPassword })` | `POST /password/change` | `{ ok: true }` |
 | `client.emailOtp.request({ email })` | `POST /otp/request` | `{ sent: true }` |
-| `client.emailOtp.verify({ email, code })` | `POST /otp/verify` | `{ token }` and `PublicSession` |
+| `client.emailOtp.verify({ email, code, trustDevice? })` | `POST /otp/verify` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.emailOtp.requestReset({ email })` | `POST /otp/reset/request` | `{ sent: true }` |
-| `client.emailOtp.reset({ email, code, password })` | `POST /otp/reset` | `{ token }` and `PublicSession` |
+| `client.emailOtp.reset({ email, code, password, trustDevice? })` | `POST /otp/reset` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.totp.setup({ password })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
 | `client.totp.enable({ code })` | `POST /totp/enable` | `TotpStatusJSON` |
-| `client.totp.verify({ challenge, code?, backupCode?, trustDevice? })` | `POST /totp/verify` | `TwoFactorSessionJSON` |
+| `client.totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | `POST /totp/verify` | `TwoFactorSessionJSON` |
 | `client.totp.disable({ code })` | `POST /totp/disable` | `{ ok: true }` |
 | `client.totp.regenerateBackupCodes({ code })` | `POST /totp/backup-codes` | `{ backupCodes }` |
 | `client.totp.status()` | `GET /totp` | `TotpStatusJSON` |
 | `client.totp.revokeTrustedDevices()` | `POST /totp/devices/revoke` | `{ ok: true }` |
+| `client.secondFactor.passkey.enable({ password })` | `POST /passkey/authenticate/options`, then `POST /second-factor/passkey/enable` | `SecondFactorEnableJSON` |
+| `client.secondFactor.passkey.verify({ challenge, trustDevice? })` | `POST /second-factor/passkey/options`, then `POST /totp/verify` | `TwoFactorSessionJSON` |
+| `client.secondFactor.email.enable({ password })` | `POST /second-factor/email/enable` | `SecondFactorEnableJSON` |
+| `client.secondFactor.email.send({ challenge })` | `POST /second-factor/email/send` | `{ sent: true }` |
+| `client.secondFactor.disable({ method, password })` | `POST /second-factor/disable` | `{ ok: true, methods }` |
 | `client.organizations.create({ slug, name, metadata? })` | `POST /organizations/create` | `{ organization: OrganizationJSON, member: MemberJSON }` |
 | `client.organizations.list()` | `GET /organizations` | `{ organization, role }[]` |
 | `client.organizations.update({ organizationId, name?, slug?, metadata? })` | `POST /organizations/update` | `OrganizationJSON` |
@@ -122,7 +127,7 @@ The types of the package:
 | --- | --- |
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `ErrorCode`, `Call`, `TransportOptions` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON` |
-| Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON` |
+| Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON` |
 
 ## Next
 

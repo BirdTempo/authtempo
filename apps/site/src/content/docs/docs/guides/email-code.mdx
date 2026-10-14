@@ -46,6 +46,7 @@ import test from "../../../../../samples/guides/email-code.test.ts?raw";
 - A request has three [limits](/docs/reference/limits/): `otp:email:<email>` 3 per 15 minutes, `otp:ip:<ip>` 20 per 15 minutes, and `otp:email-day:<email>` 20 per 24 hours.
 - A verify or a reset by code has two [limits](/docs/reference/limits/): `otp-verify:email:<email>` 10 per 15 minutes, and `otp-verify:ip:<ip>` 30 per 15 minutes.
 - A reset by code takes `{ email, code, password }` at `POST /auth/otp/reset`. A refused password spends the code.
+- A sign-in or a reset by code of a user with the second factor on answers a challenge, not a session. [Turn on the second factor](/docs/guides/second-factor/) tells the next step.
 
 ## If it fails
 

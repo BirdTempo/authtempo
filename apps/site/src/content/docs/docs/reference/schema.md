@@ -28,7 +28,7 @@ sources:
 | 5 | `0005_schema_v5` | `ta_api_token` |
 | 6 | `0006_schema_v6` | `ta_totp`, `ta_trusted_device` |
 | 7 | `0007_schema_v7` | `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, `ta_oauth_token` |
-| 8 | `0008_schema_v8` | `ta_second_factor` (copies each enabled `ta_totp` row with the same id) |
+| 8 | `0008_schema_v8` | `ta_second_factor` (copies each enabled `ta_totp` row with the same id, and deletes each `ta_totp` setup that no enable confirmed) |
 
 `SCHEMA_VERSION` of `@authtempo/core` is 8.
 
@@ -75,6 +75,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0002_compat_schema_v5` | No table. It moves the version to 5. The compatibility package holds no API token. |
 | `0003_compat_schema_v6` | `ta_totp` and `ta_trusted_device`. |
 | `0004_compat_schema_v7` | The four tables of version 7. |
+| `0005_compat_schema_v8` | `ta_second_factor`, with the same copy and the same delete. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

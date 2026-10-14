@@ -44,10 +44,13 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes |
 | `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify and reset |
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify and reset |
-| `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check |
+| `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
-| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the second factor setup |
+| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of the passkey and the email enable, and of the method disable: three callers, one budget |
 | `totp-verify:ip:<ip>` | 15 minutes | 30 | Second factor challenge |
+| `second-factor-passkey:ip:<ip>` | 15 minutes | 30 | The passkey options of a second factor challenge |
+| `second-factor-email:user:<userId>` | 15 minutes | 5 | Second factor email code send |
+| `totp:email-day:<email>` | 24 hours | 20 | Second factor email code send |
 | `invite:user:<userId>` | 15 minutes | 20 | Invite, per inviting user |
 | `invite:email:<email>` | 1 hour | 5 | Invite, per invited address |
 | `invitation-accept:ip:<ip>` | 15 minutes | 20 | Invitation accept |
@@ -56,6 +59,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |
+
+`otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
 
@@ -67,6 +72,7 @@ These counts live in their rows, so they hold under every limiter.
 | --- | --- | --- |
 | Wrong guesses of one email code | `emailOtp.maxAttempts`, 5 by default | `too_many_attempts` |
 | Wrong codes of one second factor challenge | 5 | `too_many_attempts` |
+| Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
 | Memberships of one user | `organizations.limits.perUser` | `organization_limit` |
 | Members of one organization | `organizations.limits.membersPerOrganization` | `member_limit` |

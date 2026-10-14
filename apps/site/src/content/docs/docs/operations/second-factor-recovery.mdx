@@ -1,0 +1,62 @@
+---
+title: Second factor recovery
+description: Turn off the second factor of a person who lost every method and every backup code, after a check of who they are.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.11
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+  - packages/core/README.md "Second factor"
+sidebar:
+  order: 7
+---
+
+import { Code } from "@astrojs/starlight/components";
+import recover from "../../../../../samples/operations/second-factor-recovery.ts?raw";
+import test from "../../../../../samples/operations/second-factor-recovery.test.ts?raw";
+
+**For:** an operator who answers a person that cannot pass the second factor.
+
+**What it does:** this guide checks who the person is, then turns their factor off in process. The person then turns a new method on.
+
+## Before you start
+
+- A way to run code in the API's process, for the [in-process API](/docs/reference/api/#the-in-process-api).
+- A written process of identity proofing, at the level that the person passed when they turned the factor on. [The threat model](/docs/concepts/threat-model/) tells why the level matters.
+
+## Steps
+
+1. Ask the person to try each method of the challenge first. A backup code passes when the authenticator is lost.
+2. Ask the person to reset the password if they lost it. A reset does not turn the factor off.
+3. Check who the person is with your identity proofing process. ASVS 5.0 6.4.4 asks for the level of the enrollment.
+4. Record the check: the user id, the time, the operator, and the evidence.
+5. Call the function below with the person's address. It turns every method of the user off.
+
+<Code code={recover} lang="ts" title="The recovery of one user" />
+
+6. Read the answer. `off` means the factor is off. `was_off` means it was off already. `no_user` means no account has the address.
+7. Tell the person to sign in and turn a method on again. The first method answers new backup codes.
+
+:::caution
+Warning: the disable lets the next sign-in pass with the first factor alone. Do it only after the check of step 3.
+:::
+
+The test below turns the factor off and signs in with the password alone.
+
+<Code code={test} lang="ts" title="The recovery as a test" />
+
+## How it behaves
+
+- The disable deletes the TOTP secret, the factor row, the backup codes, the trusted devices, and the live challenges, in one transaction.
+- The disable keeps the sessions of the user. A person who lost the factor has no session to end.
+- Core has no delayed self-recovery. A recovery always passes through an operator.
+- Plan 12f adds operator tools for this step.
+- Migration `0008_schema_v8` deletes each TOTP setup that no enable confirmed. A person who began a setup before the deploy gets `totp_not_enabled` at the enable after it. That person sets up again: the factor is not lost.
+
+## If it fails
+
+- [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): the user has no factor on. The function answers `was_off`. Tell the person to sign in.
+
+## Next
+
+- [Turn on the second factor](/docs/guides/second-factor/)
+- [Secrets](/docs/operations/secrets/)

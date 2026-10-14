@@ -31,7 +31,7 @@ sources:
 | Attacker | What they hold | What they want |
 | --- | --- | --- |
 | A stranger on the network | Nothing but the public routes | An account, a guess of a code, or a list of the addresses that have accounts. |
-| A person with the password | The password of one account | A session without the second factor. |
+| A person with the password or the mailbox | The password of one account, or its mailbox | A session without the second factor. |
 | A thief of a session | One session cookie or session token | A longer hold on the account. |
 | A claimant | An account that they made with an address that they do not own | The account of the real owner, when the owner proves the address later. |
 | A hostile page | A page in the person's browser | A request that the person did not mean, or a code sent to another origin. |
@@ -58,12 +58,17 @@ The odds below assume an owned limiter on D1 or Postgres. The memory limiter mul
 | --- | --- | --- | --- |
 | A 6-digit email code | 5 × 10⁻⁶ | 1 × 10⁻⁴ | about 3.6 % |
 | A TOTP code, with the password | 1.5 × 10⁻⁵ per challenge | 9 × 10⁻⁵ | about 3.2 % |
+| A 6-digit second factor email code, with the password | 5 × 10⁻⁶ per challenge | 3 × 10⁻⁵ | about 1.1 % |
 
 An email code of 8 digits divides each figure of its row by 100.
 
 ## What stays open
 
-- A person who holds the mailbox signs in without the second factor, by a magic link, an email code, or a reset. The second factor gates the password sign-in only.
+- An app that sets `totp.gate.magicLink`, `totp.gate.emailOtp`, or `totp.gate.social` to `false` lets the holder of the mailbox, or of the social account, past the factor.
+- The email method is the weakest method. A holder of the mailbox resets the password, signs in with it, and passes the email code. It stops a person with the password and no mailbox.
+- A reset of a user with the factor off that races the user's first method enable can keep the reset's session, with the factor on. The password sign-in has the same window. Spec 9 records it.
+- A person who lost every method and every backup code needs the operator. [Second factor recovery](/docs/operations/second-factor-recovery/) gives the steps. The operator's check of who the person is must reach the level of the enrollment. A weaker check is an easier path past the factor than the factor itself.
+- A person with the password and a session turns the passkey and the email method off with the password alone. TOTP turns off only with a code.
 - A session JWT and an OAuth access token live to their `exp`. A sign-out does not end them.
 - A legacy password hash verifies slower than PBKDF2. The response time shows an address that is not yet migrated.
 - Off Workers, a caller can set `cf-connecting-ip`. The app must pass `clientIp`, or every per-IP limit fails open.

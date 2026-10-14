@@ -92,7 +92,7 @@ without the `password` config.
 | Operation | Route | Answer type |
 | --- | --- | --- |
 | `client.password.signUp({ email, password, name? })` | `POST /password/sign-up` | `ClientResult<{ token } & PublicSession>` |
-| `client.password.signIn({ email, password })` | `POST /password/sign-in` | `ClientResult<{ token } & PublicSession>` |
+| `client.password.signIn({ email, password, trustDevice?, next? })` | `POST /password/sign-in` | `ClientResult<({ token } & PublicSession) \| TwoFactorChallengeJSON>` |
 | `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `ClientResult<{ sent: true }>` |
 | `client.password.verifyEmail({ token })` | `POST /password/verify` | `ClientResult<{ verified: true }>`; the cookie is set when the address was unverified |
 | `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `ClientResult<{ sent: true }>` |
@@ -106,6 +106,19 @@ from the `token` option. An Electron app can use `createTokenStore` from
 `@authtempo/handoff`.
 
 The password goes in the request body only. It never goes in a URL.
+
+## Email codes
+
+Every operation answers `not_found` when the server sets `emailOtp: false`.
+The two reset operations also answer `not_found` without the `password`
+config.
+
+| Operation | Route | Answer type |
+| --- | --- | --- |
+| `client.emailOtp.request({ email })` | `POST /otp/request` | `ClientResult<{ sent: true }>` |
+| `client.emailOtp.verify({ email, code, trustDevice? })` | `POST /otp/verify` | `ClientResult<({ token } & PublicSession) \| TwoFactorChallengeJSON>` |
+| `client.emailOtp.requestReset({ email })` | `POST /otp/reset/request` | `ClientResult<{ sent: true }>` |
+| `client.emailOtp.reset({ email, code, password, trustDevice? })` | `POST /otp/reset` | `ClientResult<({ token } & PublicSession) \| TwoFactorChallengeJSON>` |
 
 ## API tokens
 
@@ -200,17 +213,28 @@ already holds a passkey for this account. The browser rejects with
 `InvalidStateError` in that case, and the client cannot tell it from
 another failure.
 
-### The second factor beyond TOTP
+## The second factor
 
 A sign-in, a reset, a magic link, an email code, and social can answer `{ twoFactor: { challenge, expiresAt, methods } }` for a user with the second factor on. `methods` lists what passes, in this order: `passkey`, `totp`, `email`, `backup`.
 
+Every call but `totp.verify`, `secondFactor.passkey.verify`, and `secondFactor.email.send` needs a session. A token answers `unauthorized` there. Every call answers `not_found` when the server runs without `password` or with `totp: false`. The passkey calls also answer `not_found` without the `passkey` config.
+
 | Call | Does |
 | --- | --- |
+| `totp.setup({ password })` | Answers the secret, the key URI, and the backup codes, each once. The codes are empty when another method is on. |
+| `totp.enable({ code })` | Turns TOTP on with a current code. Answers `TotpStatusJSON`. |
+| `totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | Passes a challenge with one proof. Answers `TwoFactorSessionJSON`. |
+| `totp.disable({ code })` | Turns TOTP off with a current code or a backup code. |
+| `totp.regenerateBackupCodes({ code })` | Answers a new list of backup codes. The old codes stop working. |
+| `totp.status()` | Answers `TotpStatusJSON`, with `methods` and `backupCodesVersion`. |
+| `totp.revokeTrustedDevices()` | Deletes every trusted device of the user. |
 | `secondFactor.passkey.enable({ password })` | Asks the browser for a passkey, then turns the passkey method on. |
 | `secondFactor.passkey.verify({ challenge, trustDevice? })` | Passes a challenge with a passkey. |
 | `secondFactor.email.enable({ password })` | Turns the email method on. |
 | `secondFactor.email.send({ challenge })` | Mails a code; pass it as `totp.verify({ challenge, emailCode })`. |
 | `secondFactor.disable({ method, password })` | Turns the passkey or the email method off. |
+
+The calls of the second factor can answer these codes: `invalid_credentials`, `email_unverified` (403), `invalid_code`, `too_many_attempts`, `passkey_failed`, `invalid_body` (the challenge offers no such method), `invalid_token`, `totp_enabled`, `totp_not_enabled` (the method is off), `rate_limited`, `conflict`, `not_found`, and `unauthorized`. A dismissed passkey prompt answers `cancelled`.
 
 ## Show the signed-in email
 

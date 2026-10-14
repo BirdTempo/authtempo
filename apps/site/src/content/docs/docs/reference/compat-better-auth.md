@@ -54,7 +54,7 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | `emailOTP` | Core's email codes, for the sign-in and the reset. `sendVerificationOTP` is required. |
 | `bearer` | Adds `set-auth-token` to each answer that sets the session cookie. |
 | `expo` | Core's handoff through the system browser. `trustedOrigins` must hold the app scheme. |
-| `twoFactor` | Core's TOTP second factor on the password sign-in. Pass `accountLockout: { enabled: false }`. |
+| `twoFactor` | Core's TOTP second factor on the password sign-in. Pass `accountLockout: { enabled: false }`. Core's gate on the magic link, the email code, and social stays off. A reset by code of a user with the factor on opens no session. |
 | `jwt`, `mcp`, `cimd`, `oidc-provider`, `oauth-provider` | Refused at start. Move to core's `createAuth` with `jwtMint` and `oauth`. |
 
 Any other plugin is refused at start by its id.

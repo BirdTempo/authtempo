@@ -1,9 +1,11 @@
 ---
 title: Turn on the second factor
-description: Let a person turn on a TOTP second factor with backup codes, and finish a password sign-in with a code.
+description: Let a person turn on a second factor with TOTP, a passkey, or an email code, and finish every sign-in and reset with it.
 type: how-to
 sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.7
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.11
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.14
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
   - packages/core/README.md "Second factor"
 ---
@@ -12,14 +14,15 @@ import { Code } from "@astrojs/starlight/components";
 import config from "../../../../../samples/guides/second-factor.ts?raw";
 import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 
-**For:** an app developer whose users sign in with a password and want a code from an authenticator app too.
+**For:** an app developer whose users want a second step after the password, the magic link, or social.
 
-**What it does:** a password sign-in of a user with the factor on answers a challenge. The session opens only with a current code or a backup code.
+**What it does:** a sign-in or a reset of a user with the factor on answers a challenge. The session opens only with a method of the challenge.
 
 ## Before you start
 
-- [Sign in with a password](/docs/guides/password/) works in your app. The factor gates the password sign-in only.
-- Users with a verified address. The setup refuses an unverified user. [The claim rule](/docs/concepts/claim-rule/) tells what verifies an address.
+- [Sign in with a password](/docs/guides/password/) works in your app. The enable of each method proves the password.
+- Users with a verified address. The enable refuses an unverified user. [The claim rule](/docs/concepts/claim-rule/) tells what verifies an address.
+- For the passkey method, [Sign in with a passkey](/docs/guides/passkeys/) works in your app.
 
 ## Steps
 
@@ -29,47 +32,64 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 <Code code={config} lang="ts" title="The second factor config" />
 
 3. On a settings page, ask for the password.
-   - Send the password with `client.totp.setup({ password })`.
-4. Show the `uri` as a QR code.
-   - Show the backup codes once too. The setup answers them one time only.
-5. Call `client.totp.enable({ code })` with a current code from the authenticator app.
-   - The enable must come within 15 minutes of the setup.
-6. On the sign-in form, call `client.password.signIn`. An answer with `twoFactor` holds a `challenge`.
-7. Call `client.totp.verify({ challenge, code })` with the code that the person types.
-   - For a trusted device, add `trustDevice: true`.
-8. In a browser, send the person to `/auth/totp/challenge?challenge=<challenge>` on the API in place of step 7.
+4. For TOTP, send the password with `client.totp.setup({ password })`. Show the `uri` as a QR code.
+5. Call `client.totp.enable({ code })` with a current code from the authenticator app, within 15 minutes.
+6. For a passkey, call `client.secondFactor.passkey.enable({ password })`. The browser asks for a passkey of the user.
+7. For an email code, call `client.secondFactor.email.enable({ password })`.
+8. Show the backup codes once. The first method answers them, and no later call shows them again.
+9. On each sign-in form, read the answer. An answer with `twoFactor` holds a `challenge` and its `methods`.
+10. Pass the challenge with one method of `methods`:
+    - `totp`: call `client.totp.verify({ challenge, code })`.
+    - `passkey`: call `client.secondFactor.passkey.verify({ challenge })`.
+    - `email`: call `client.secondFactor.email.send({ challenge })`, then `client.totp.verify({ challenge, emailCode })`.
+    - `backup`: call `client.totp.verify({ challenge, backupCode })`.
+11. For a trusted device, add `trustDevice: true` to the verify.
+12. In a browser form flow, core sends the person to `/auth/totp/challenge` in place of steps 9 to 11.
 
-<Code code={test} lang="ts" title="Setup, gate, and verify as a test" />
+<Code code={test} lang="ts" title="Enable, gate, reset, and verify as a test" />
 
 ## How it behaves
 
-- The code is RFC 6238: SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once.
-- The enable ends every other session of the user, and deletes the user's trusted devices and challenges.
-- A challenge lives 5 minutes and takes 5 wrong codes.
-- A magic link, a social sign-in, a passkey, a handoff, and a reset open a session with no second factor.
+- Five methods answer a challenge with no cookie for a user with the factor on.
+- They are the password, the magic link, the email code, social, and the reset.
+- A reset still sets the new password and ends every session. Then the person passes the challenge.
+- A passkey sign-in has no gate. A passkey is a factor of its own.
+- `totp.gate.magicLink`, `totp.gate.emailOtp`, and `totp.gate.social` turn one gate off. Each is on by default.
+- The `email` method appears only after a password sign-in. After a magic link, the mailbox was the first factor.
+- The TOTP code is RFC 6238: SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once.
+- A backup code has 23 characters in groups. It holds 113.9 bits, above the 112 bits of ASVS 5.0 6.5.2.
+- The first method ends every other session of the user, and deletes the user's trusted devices and challenges.
+- A challenge lives 5 minutes and takes 5 wrong codes. An email code lives with its challenge.
 - A trusted device skips the factor for `totp.trustDays`. Its cookie is `tempo_totp_trust` on the path `/auth/`.
 - The code checks share two [limits](/docs/reference/limits/): `totp-code:user:<userId>` 10 per 15 minutes, and `totp-code:user-day:<userId>` 30 per 24 hours.
-- The setup's password check has its own [limit](/docs/reference/limits/): `totp-setup:user:<userId>` 5 per 15 minutes.
-- The verify has one more [limit](/docs/reference/limits/): `totp-verify:ip:<ip>` 30 per 15 minutes.
+- The email sends have the [limits](/docs/reference/limits/) `second-factor-email:user:<userId>` 5 per 15 minutes, `totp:email-day:<email>` 20 per 24 hours, and 3 sends per challenge.
+- The passkey and the email method turn off with the password alone. TOTP turns off only with a code.
 - No per-account lockout exists. [The threat model](/docs/concepts/threat-model/) gives the odds.
 
 :::caution
 Warning: a new `secret` opens no sealed factor secret and matches no backup code. Turn the factor off for each user before you change `secret`.
 :::
 
+:::caution
+Warning: a reset does not turn the factor off. A person who lost every method needs the operator. [Second factor recovery](/docs/operations/second-factor-recovery/) gives the steps.
+:::
+
 ## If it fails
 
-- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the password of the setup is wrong. No row is written.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the password of an enable is wrong. No row is written.
 - [`email_unverified`](/docs/reference/errors/#email_unverified): the user must prove the address first.
 - [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, or it passed once already.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the verify used a method that the challenge does not offer.
+- [`passkey_failed`](/docs/reference/errors/#passkey_failed): the assertion is not by a passkey of the user.
 - [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): the challenge took its fifth wrong code. Sign in again.
 - [`invalid_token`](/docs/reference/errors/#invalid_token): the challenge is unknown, spent, or older than 5 minutes.
-- [`totp_enabled`](/docs/reference/errors/#totp_enabled) and [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): the factor is already on, or it is off or its setup is too old.
-- [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the code checks is full.
-- [`conflict`](/docs/reference/errors/#conflict): two setups or two regenerations ran at the same time. Retry.
+- [`totp_enabled`](/docs/reference/errors/#totp_enabled) and [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): TOTP is already on, or the method is off.
+- [`second_factor_last_method`](/docs/reference/errors/#second_factor_last_method): the passkey is the last passkey of the user, and the passkey method is on.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the code checks or of the sends is full.
+- [`conflict`](/docs/reference/errors/#conflict): two writes to the factor ran at the same time. Retry.
 
 ## Next
 
+- [Second factor recovery](/docs/operations/second-factor-recovery/)
 - [The threat model](/docs/concepts/threat-model/)
-- [Secrets](/docs/operations/secrets/)
 - [Cookies](/docs/reference/cookies/)

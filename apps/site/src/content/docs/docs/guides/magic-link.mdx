@@ -46,6 +46,7 @@ import test from "../../../../../samples/guides/magic-link.test.ts?raw";
 - A `next` under `basePath` stays on `baseURL`. The handoff uses this rule.
 - The request has two [limits](/docs/reference/limits/): `magic-link:email:<email>` 5 per 15 minutes, and `magic-link:ip:<ip>` 20 per 15 minutes.
 - A link that proves the address of an unverified account claims it. [The claim rule](/docs/concepts/claim-rule/) tells what core deletes.
+- A user with the second factor on gets a challenge, not a session. [Turn on the second factor](/docs/guides/second-factor/) tells the next step.
 
 ## If it fails
 

@@ -4,7 +4,8 @@
 // check fails, and the last line counts the checks that passed.
 import { existsSync } from "node:fs";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
-import { ERRORS, OAUTH_ERRORS } from "@authtempo/core";
+import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
+import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { ROUTES } from "@authtempo/core/testing";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
@@ -15,6 +16,7 @@ import { checkFences } from "./check-fences.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkRoutes } from "./check-routes.ts";
+import { checkSchema } from "./check-schema.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
@@ -80,6 +82,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         helpRuns(),
         ALL_CHECK_CODES,
         (url) => docsPages().find((p) => pageUrl(p.path) === url)?.source ?? null,
+      ),
+  },
+  {
+    // One source for the version of core and the compat migrations (plan 12c).
+    name: "check-schema",
+    run: () =>
+      checkSchema(
+        distPageOrEmpty("/docs/reference/schema/"),
+        SCHEMA_VERSION,
+        COMPAT_MIGRATION_NAMES,
       ),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },

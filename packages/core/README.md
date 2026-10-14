@@ -22,9 +22,9 @@ const s = await auth.session(request);     // { user, session } or null
 | --- | --- | --- | --- |
 | POST | `/magic-link/request` | `{ email, next? }` | `{ sent: true }` always; 429 when rate limited; 400 on a bad body |
 | GET | `/magic-link/verify` | `?token=` | 200 HTML confirm page with a form that posts the token; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
-| POST | `/magic-link/verify` | form or JSON `token` | form body: 302 to `appURL` plus `next` with the session cookie, or 302 to `/?auth_error=<code>`; JSON body: 200 `{ user, session }` with the cookie, or the error as JSON |
+| POST | `/magic-link/verify` | form or JSON `token`, `trustDevice?` | form body: 302 to `appURL` plus `next` with the session cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or 302 to `/?auth_error=<code>`; JSON body: 200 `{ user, session }` with the cookie, or 200 `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON |
 | GET | `/social/google/start`, `/social/apple/start` | `?next=` | 302 to the provider with a binding cookie; 302 to `/?auth_error=rate_limited` when limited. A route exists only for a configured provider |
-| GET | `/social/google/callback` | `?code&state` | 302 to `next` with the session cookie; 302 to `/?auth_error=<code>` on failure |
+| GET | `/social/google/callback` | `?code&state` | 302 to `next` with the session cookie; for a user with the second factor on, 302 to the challenge page with no cookie (plan 12c); 302 to `/?auth_error=<code>` on failure |
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
 | GET | `/social/<name>/start`, `/social/<name>/callback` | `?next=`; `?code&state` | the same answers as the Google routes, for `github`, `linkedin`, and each `social.oidc` and `social.oauth2` entry |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401 |
@@ -42,12 +42,12 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link of the address stops working |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
-| POST | `/password/reset` | form or JSON `token`, `password` | form body: 302 to `next` with the cookie, or back to the form on `password_policy` or `password_breached`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited` |
+| POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy` or `password_breached`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`. A reset that answers the challenge still sets the password and ends every session |
 | POST | `/password/change` | session, `{ currentPassword?, newPassword }` | `{ ok: true }`; 400 `invalid_body`, `password_policy`, `password_breached`; 401 without a session; 401 `invalid_credentials` for a missing or wrong current password; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited` |
 | POST | `/otp/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a sign-in code |
-| POST | `/otp/verify` | `{ email, code }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `invalid_code` (a wrong, expired, spent, or unknown code), `too_many_attempts` (the code took `maxAttempts` wrong guesses: request a new one); 429 `rate_limited` |
+| POST | `/otp/verify` | `{ email, code, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c); 400 `invalid_body`, `invalid_code` (a wrong, expired, spent, or unknown code), `too_many_attempts` (the code took `maxAttempts` wrong guesses: request a new one); 429 `rate_limited` |
 | POST | `/otp/reset/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a reset code. Only with a `password` config |
-| POST | `/otp/reset` | `{ email, code, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `invalid_code`, `too_many_attempts`, `password_policy` and `password_breached` (both spend the code); 429 `rate_limited`. Only with a `password` config |
+| POST | `/otp/reset` | `{ email, code, password, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie and the password set (plan 12c); 400 `invalid_body`, `invalid_code`, `too_many_attempts`, `password_policy` and `password_breached` (both spend the code); 429 `rate_limited`. Only with a `password` config |
 | GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the confirm page when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
 | GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
 | POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
@@ -56,15 +56,20 @@ const s = await auth.session(request);     // { user, session } or null
 | GET | `/tokens` | session | `{ tokens: [{ id, name, hint, expiresAt, lastUsedAt, organizationId, createdAt }] }`, newest first, never a token or its hash; 401; 403 `email_unverified` |
 | POST | `/tokens/revoke` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `email_unverified`; 404 `not_found` for another user's token |
 | GET | `/tokens/current` | `Authorization: Bearer tk_…` only | `{ user, apiToken }`; 401 for a session cookie, a `ts_` bearer, or no credential |
-| POST | `/totp/setup` | session, `{ password }` | `{ secret, uri, backupCodes }`, each answered once; 400 `invalid_body`; 401, `invalid_credentials` (a wrong password; no row is written); 403 `email_unverified`; 429 `rate_limited` (`totp-setup:user`, 5 per 15 minutes); 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
-| POST | `/totp/enable` | session, `{ code }` | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; 400 `invalid_body`, `invalid_code`, `totp_not_enabled` (no setup, or one older than 15 minutes); 401; 403 `email_unverified`; 409 `totp_enabled`; 429 `rate_limited`. Every other session of the user ends with `two_factor` |
-| POST | `/totp/disable` | session, `{ code }` (a current code or a backup code) | `{ ok: true }`, and clears the trust cookie; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 429 `rate_limited` |
+| POST | `/totp/setup` | session, `{ password }` | `{ secret, uri, backupCodes }`, each answered once; `backupCodes` is empty when another method is on, because the factor keeps its list (plan 12c); 400 `invalid_body`; 401, `invalid_credentials` (a wrong password; no row is written); 403 `email_unverified`; 429 `rate_limited` (`totp-setup:user`, 5 per 15 minutes); 409 `totp_enabled`, `conflict` (a parallel setup of the same user). A new setup replaces one that was not confirmed. Only with `password` and `totp` not `false` |
+| POST | `/totp/enable` | session, `{ code }` | `{ enabled, enabledAt, backupCodesLeft, trustedDevices, methods, backupCodesVersion }`, as `GET /totp`; 400 `invalid_body`, `invalid_code`, `totp_not_enabled` (no setup, one older than 15 minutes, or a setup whose codes another method made stale: set up again); 401; 403 `email_unverified`; 409 `totp_enabled`, `conflict` (a parallel first enable of another method: retry); 429 `rate_limited`. As the first method, it ends every other session of the user with `two_factor` |
+| POST | `/totp/disable` | session, `{ code }` (a current code or a backup code) | `{ ok: true }`, and clears the trust cookie; it turns the TOTP method off, and with no method left the factor is off; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 409 `conflict`; 429 `rate_limited` |
 | POST | `/totp/backup-codes` | session, `{ code }` | `{ backupCodes }`, a new list; the old codes stop working; 400 `invalid_body`, `invalid_code`, `totp_not_enabled`; 401; 409 `conflict` (parallel writes won every try); 429 `rate_limited` |
-| GET | `/totp` | session | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; never the secret or the URI; 401 |
+| GET | `/totp` | session | `{ enabled, enabledAt, backupCodesLeft, trustedDevices, methods, backupCodesVersion }`: `enabled` is true when any method is on, `methods` lists them, and `backupCodesVersion` is 1 for the codes of plan 9f, 2 for the codes of 23 characters, and `null` with the factor off; never the secret or the URI; 401 |
 | POST | `/totp/devices/revoke` | session | `{ ok: true }`: every trusted device of the user goes, and the trust cookie is cleared; 401 |
-| POST | `/totp/verify` | `{ challenge, code }` or `{ challenge, backupCode }`, `trustDevice?` | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie, and the trust cookie when `trustDevice` is true; 400 `invalid_code`, `too_many_attempts` (the fifth wrong code), `invalid_token` (unknown, spent, or older than 5 minutes), `invalid_body`; 429 `rate_limited` |
-| GET | `/totp/challenge` | `?challenge=` | 200 HTML form (`totp.challengePage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed challenge. No side effect |
-| POST | `/totp/challenge` | form `challenge`, `code` or `backupCode`, `trustDevice=1` | 302 to `next` with the cookies; back to the form on `invalid_code`; 302 to `/?auth_error=<code>` otherwise |
+| POST | `/totp/verify` | `{ challenge }` and one of `code`, `backupCode`, `emailCode`, or `passkey` (an assertion over the options of `/second-factor/passkey/options`), `trustDevice?` | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie, and the trust cookie when `trustDevice` is true; 400 `invalid_code`, `too_many_attempts` (the fifth wrong code), `invalid_token` (unknown, spent, or older than 5 minutes), `invalid_body` (no proof, two proofs, or a method that the challenge does not offer), `passkey_failed`; 429 `rate_limited` |
+| GET | `/totp/challenge` | `?challenge=` | 200 HTML form of the challenge's methods, with a trusted-device button when the browser sends a live trust cookie of the user (`totp.challengePage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed or dead challenge. It reads rows and writes none |
+| POST | `/totp/challenge` | form `challenge`, and `code`, `backupCode`, or `emailCode` with `trustDevice=1`; or `action=send-email`; or `action=trusted` | 302 to `next` with the cookies; back to the form on `invalid_code` and after a send; 302 to `/?auth_error=<code>` otherwise. `action=trusted` passes with the trust cookie alone |
+| POST | `/second-factor/passkey/enable` | session, `{ password, response }` (an assertion over `/passkey/authenticate/options` by a passkey of the user) | `{ methods, backupCodes }`; the codes come once, with the first method; 400 `invalid_body`, `passkey_failed`; 401, `invalid_credentials`; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited` (`totp-setup:user`). Only with `passkey` |
+| POST | `/second-factor/passkey/options` | `{ challenge }` | WebAuthn request options with the user's passkeys in `allowCredentials`, bound to the challenge; 400 `invalid_body` (the challenge does not offer `passkey`), `invalid_token`; 429 `rate_limited` (`second-factor-passkey:ip`, 30 per 15 minutes). Only with `passkey` |
+| POST | `/second-factor/email/enable` | session, `{ password }` | `{ methods, backupCodes }`, as the passkey enable; 400 `invalid_body`; 401, `invalid_credentials`; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited` (`totp-setup:user`) |
+| POST | `/second-factor/email/send` | `{ challenge }` | `{ sent: true }`, and a 6-digit code to the user's address; a new send replaces the code; 400 `invalid_body` (the challenge does not offer `email`), `invalid_token`; 409 `conflict`; 429 `rate_limited` (3 sends per challenge, `second-factor-email:user` 5 per 15 minutes, `totp:email-day` 20 per 24 hours) |
+| POST | `/second-factor/disable` | session, `{ method, password }` with `method` `passkey` or `email` | `{ ok: true, methods }`, the methods left; with none left the factor is off and the trust cookie is cleared; 400 `invalid_body`, `totp_not_enabled` (the method is not on); 401, `invalid_credentials`; 409 `conflict`; 429 `rate_limited` (`totp-setup:user`). TOTP has its own disable, with a code |
 | GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
 | GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
 | POST | `/operator/keys/rotate` | `Authorization: Operator <secret>` | `{ kid }`: a new signing key; the old one verifies for 24 hours and signs nothing; 401 `unauthorized` for a missing or wrong secret; 429 `rate_limited` after 5 calls per IP per hour (`operator:ip:<ip>`), right or wrong. Only with `operator` |
@@ -81,7 +86,7 @@ Without a `passkey` config none of these routes exist, and the router answers 40
 
 Without a `password` config none of the password routes exist, and the router answers 404. The token routes exist in every deployment.
 
-Since plan 9f a user with the second factor on gets `{ twoFactor: { challenge, expiresAt } }` from `POST /password/sign-in` in place of the session, with no cookie. Send the challenge and a code to `POST /totp/verify`, or send the browser to `GET /totp/challenge?challenge=`. The sign-in also takes `trustDevice` (a native app's `td_` token; a browser sends the trust cookie) and `next` (where the challenge page lands). Without `password`, or with `totp: false`, none of the TOTP routes exist.
+Since plan 9f a user with the second factor on gets `{ twoFactor: { challenge, expiresAt, methods } }` from `POST /password/sign-in` in place of the session, with no cookie. Send the challenge and a code to `POST /totp/verify`, or send the browser to `GET /totp/challenge?challenge=`. The sign-in also takes `trustDevice` (a native app's `td_` token; a browser sends the trust cookie) and `next` (where the challenge page lands). Without `password`, or with `totp: false`, none of the TOTP routes exist. Since plan 12c the magic link, the email code sign-in, social, and the reset answer the same challenge, and the challenge lists its `methods`. A form flow goes to the challenge page.
 
 With `emailOtp: false` none of the code routes exist, and the router answers 404. Without a `password` config the two reset code routes do not exist.
 
@@ -367,6 +372,15 @@ user's pending handoff codes. It keeps the current session. A change also
 deletes the address's pending reset links (added 2026-10-10 by the plan 8
 final fix wave).
 
+A reset of a user with the second factor on opens no session (plan 12c).
+It sets the password and ends every session, as before. Then it writes a
+challenge, as the last write, and answers it: JSON 200
+`{ twoFactor: { challenge, expiresAt, methods } }`, or a 302 of the form
+to the challenge page. A trusted device skips the challenge. A reset never
+turns the factor off: a person who holds the mailbox and not the factor
+gets a new password and still meets the factor. The reset by code does
+the same.
+
 The limits, in the same limiter as the other routes:
 
 | Key | Limit |
@@ -465,23 +479,58 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 
 ## Second factor
 
-`totp` (plan 9f) is on when `password` is set. A user turns it on for their own account: `POST /totp/setup` with the password answers the secret, the `otpauth://` URI for a QR code, and the backup codes, each once; `POST /totp/enable` with a current code confirms it within 15 minutes. The setup takes the password because a session alone must not turn the factor on: a person with a stolen session could enroll an own authenticator, and the enable then ends the owner's sessions and asks every later password sign-in for that person's code. A wrong password answers `invalid_credentials` and writes no row. From then on a password sign-in answers a challenge, and the session opens only with a code from the app or a backup code. The magic link, the social sign-in, the passkey, the handoff, and the reset link do not ask for the factor (owner decision of 2026-10-13); a reset ends every session and the challenges.
+The second factor (plan 9f, plan 12c) is on when `password` is set. Its config key is `totp`, and `totp: false` turns it off. A user turns on one or more methods for their own account. The first step of each method proves the password, because a session alone must not turn the factor on: a person with a stolen session could enroll their own method, and the enable then ends the owner's other sessions. A wrong password answers `invalid_credentials` and writes no row.
 
-- The code: RFC 6238 with SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once: the write of the last step is the check.
-- A challenge lives 5 minutes and takes 5 wrong codes. The verify is limited to 30 per IP per 15 minutes. Enable, disable, the new backup codes, and the verify share two per-user limits on every code check: `totp-code:user` (10 per 15 minutes) and `totp-code:user-day` (30 per 24 hours). These two are the limits that bind an attacker who has the password.
-- The per-user limits have a cost: a person who has the password, or a stolen session, can use up the budget with wrong codes. Until the window ends, the owner's verify, enable, and disable answer `rate_limited`. Better Auth's account lockout has the same effect. A wrong password at the setup counts on its own key, `totp-setup:user` (5 per 15 minutes), and not on the sign-in's limits, so a stolen session cannot hold the owner's password sign-in at `rate_limited` from there (plan 9h). The trade of owner decision 3a: a stolen session can still use up the setup budget, and until the window ends the owner's own setup answers `rate_limited`.
-- A trusted device skips the factor for `totp.trustDays` (default 30). Its cookie `tempo_totp_trust` has the path `<basePath>/`. Enable and disable delete the user's trusted devices.
-- The secret is sealed with AES-256-GCM under a key from `secret`. A new app `secret` opens no sealed secret: every user with the factor on then fails the code, and the backup codes too, because they are keyed by `secret` as well. Before you change `secret`, have each such user turn the factor off, or turn it off for them with `api.totp.disable`.
-- There is no per-account lockout. The sign-in's 10 per address and the 5 codes per challenge allow 50 challenge guesses per address per 15 minutes; the shared per-user limits stop the verify at 10 code checks per user in that window and 30 in a day. One guess passes with odds of 3 in 10⁶ (the three codes of the window). The odds of a takeover by an attacker who has the password, at the full rate:
+| Method | Turn it on | Pass a challenge with |
+| --- | --- | --- |
+| `totp` | `POST /totp/setup` with the password answers the secret and the `otpauth://` URI for a QR code, once; then `POST /totp/enable` with a current code within 15 minutes | `code` |
+| `passkey` | `POST /second-factor/passkey/enable` with the password and a sign-in assertion by a passkey of the user. Needs `passkey` | `passkey`, over `POST /second-factor/passkey/options` |
+| `email` | `POST /second-factor/email/enable` with the password | `emailCode`, after `POST /second-factor/email/send` |
+| `backup` | The first method answers 10 backup codes, once | `backupCode` |
 
-  | Bound | Guesses | Odds of one success |
-  | --- | --- | --- |
-  | One challenge | 5 | 1.5 × 10⁻⁵ |
-  | One account per day | 30 | 9 × 10⁻⁵ |
-  | One account per year | 10,950 | about 3.2 % |
+- The first method creates the factor row, answers the backup codes, ends every other session, and deletes the trusted devices and the challenges. A later method adds itself to the row and answers no codes. A TOTP setup while another method is on answers an empty list.
+- `ta_second_factor` holds one row per user with the factor on: the methods, the backup code hashes, and `backupCodesVersion`. Migration `0008_schema_v8` copies each confirmed `ta_totp` row into it with `["totp"]` and version 1. A code of version 1, 8 to 12 characters, keeps working until the next regeneration.
+- A backup code has 23 characters, `totp.backupCodeLength` 23 to 32, shown in groups such as `abcde-fghjk-mnpqr-stuv-wxyz`. 23 characters of the 31-letter alphabet hold 113.9 bits, above the 112 bits of ASVS 5.0 6.5.2. The check ignores the dashes and the case.
+- The gate: a password sign-in, a magic link, an email code sign-in, social, and a reset of a user with the factor on answer a challenge, not a session. `totp.gate.magicLink`, `totp.gate.emailOtp`, and `totp.gate.social` turn one gate off. Each is `true` by default, because a method with no gate lets the holder of a mailbox past the factor. The password and the reset have no key. A passkey sign-in has no gate: a passkey is a factor of its own. The handoff has no key: it continues a browser session that passed the gate.
+- A challenge lists its `methods` in the order `passkey`, `totp`, `email`, `backup`. `email` is in the list only after a password sign-in: after a magic link, an email code, social, or a reset the mailbox was the first factor (owner decision 4). `passkey` is in the list only with the `passkey` config. `backup` is in the list while a code is left.
+- The TOTP code: RFC 6238 with SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once: the write of the last step is the check.
+- A challenge lives 5 minutes and takes 5 wrong codes. Every code check, of a TOTP code, a backup code, or an email code, counts on two per-user limits. A passkey assertion counts on none: it is not a guess. These two limits bind an attacker who has the password.
+- An email code has 6 digits. It lives with its challenge, at most 5 minutes, below the 10 minutes of ASVS 5.0 6.5.5. It is bound to its challenge (6.6.2). A new send replaces it. The mail is `totp.emailMail`, `defaultSecondFactorMail` by default, to the user's address.
+- The methods turn off in two ways. `POST /second-factor/disable` turns the passkey or the email method off with the password alone. `POST /totp/disable` turns TOTP off only with a code. So, while TOTP needs a code to turn off, a person with the password and a session can turn the passkey and the email methods off. The last method turns the factor off. `api.totp.disable({ userId })` turns every method off in process.
+- A passkey that is the last passkey of the user stays while the passkey method is on: its delete answers `second_factor_last_method`.
+- A trusted device skips the factor for `totp.trustDays` (default 30). Its cookie `tempo_totp_trust` has the path `<basePath>/`. A JSON caller sends the `td_` token as `trustDevice`. The challenge page shows a trusted-device button when the browser sends the cookie on the GET: an Apple callback is a cross-site POST, and a Lax cookie does not come with it. The first method and the disable of the last method delete the user's trusted devices.
+- The per-user limits have a cost: a person who has the password, or a stolen session, can use up the budget with wrong codes. Until the window ends, the owner's verify, enable, and disable answer `rate_limited`. Better Auth's account lockout has the same effect.
+- A wrong password at an enable counts on its own key, `totp-setup:user`, and not on the sign-in's limits, so a stolen session cannot hold the owner's password sign-in at `rate_limited` from there (plan 9h). The key has three callers that share its 5 per 15 minutes: the TOTP setup, the passkey and the email enable, and `POST /second-factor/disable`. The trade of owner decision 3a: a stolen session can still use up this budget, and until the window ends the owner's own enable and disable answer `rate_limited`.
+- The TOTP secret is sealed with AES-256-GCM under a key from `secret`. A backup code and an email code are HMAC-SHA256 under `secret`. A new app `secret` opens no sealed secret and matches no code. Before you change `secret`, have each user turn the factor off, or turn it off for them with `api.totp.disable`.
+- A lost factor: a person with no method and no backup code left cannot pass the challenge. A reset does not turn the factor off. The operator turns it off with `api.totp.disable({ userId })` after identity proofing at the level of the enrollment (ASVS 5.0 6.4.4). The site's runbook "Second factor recovery" gives the steps.
 
-  The limits are per isolate under the memory limiter: on Workers each isolate counts on its own, so the per-user budgets multiply by the isolate count. The owned D1 and Postgres limiters count once. The per-challenge cap lives in the row and stays global.
-- `api.totp` holds the same operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does; `ip` is not read since plan 9h. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
+The limits of the second factor, in the same limiter as the other routes:
+
+| Key | Window | Count | Covers |
+| --- | --- | --- | --- |
+| `totp-verify:ip:<ip>` | 15 minutes | 30 | The verify and the challenge page POST |
+| `totp-code:user:<userId>` | 15 minutes | 10 | Every code check: a TOTP code, a backup code, or an email code |
+| `totp-code:user-day:<userId>` | 24 hours | 30 | Every code check, as above |
+| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of the passkey and the email enable, and of `POST /second-factor/disable` |
+| `second-factor-passkey:ip:<ip>` | 15 minutes | 30 | The passkey options of a challenge |
+| `second-factor-email:user:<userId>` | 15 minutes | 5 | The email code sends |
+| `totp:email-day:<email>` | 24 hours | 20 | The email code sends of the second factor |
+
+Two counts live in the row and stay global: 5 wrong codes per challenge, and 3 email sends per challenge.
+
+`totp:email-day:<email>` and `otp:email-day:<email>` read one cap, `MAILED_CODES_PER_EMAIL_DAY` in `verification.ts`: one number, two keys (owner decision of 2026-10-14). The keys are apart because `POST /otp/request` needs no password. A person who knows the address must not use up the mails of the second factor.
+
+There is no per-account lockout. The sign-in's 10 per address and the 5 codes per challenge allow 50 challenge guesses per address per 15 minutes; the shared per-user limits stop the verify at 10 code checks per user in that window and 30 in a day. One guess of a TOTP code passes with odds of 3 in 10⁶ (the three codes of the window). The odds of a takeover by an attacker who has the password, at the full rate of a TOTP code:
+
+| Bound | Guesses | Odds of one success |
+| --- | --- | --- |
+| One challenge | 5 | 1.5 × 10⁻⁵ |
+| One account per day | 30 | 9 × 10⁻⁵ |
+| One account per year | 10,950 | about 3.2 % |
+
+The limits are per isolate under the memory limiter: on Workers each isolate counts on its own, so the per-user budgets multiply by the isolate count. The owned D1 and Postgres limiters count once.
+
+- `api.totp` holds the TOTP operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does; `ip` is not read since plan 9h. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
 - The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. A default that holds a colon (an IPv6 `baseURL` such as `http://[::1]:8787`, or an `appName` such as "Acme: Notes") stops `createAuth` with a message that names `totp.issuer`: the key URI uses the colon to split the issuer from the account. Set `totp.issuer`, or `totp: false`.
 
 ## JWT minting

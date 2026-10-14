@@ -29,10 +29,10 @@ sources:
 | email code | A code of 6 or 8 digits by mail that signs a person in or resets a password. | `OTP` |
 | passkey | A key pair on the person's device that signs a WebAuthn challenge. | `WebAuthn credential` |
 | password | A secret that the person types. Core stores a PBKDF2 hash of it. | |
-| second factor | A TOTP code from an authenticator app, asked after a right password. | `2FA`, `MFA`, `two-factor` |
+| second factor | A second proof after the first sign-in method: a TOTP code, a passkey, an email code, or a backup code. | `2FA`, `MFA`, `two-factor` |
 | backup code | A single-use code that replaces a TOTP code once. | |
 | trusted device | A browser or an app that skips the second factor until its expiry. | |
-| challenge | The `tf_` token of a password sign-in that waits for the second factor. | |
+| challenge | The `tf_` token of a sign-in or a reset that waits for the second factor. | |
 | provider | A service that signs a person in for the app, such as Google, Apple, or GitHub. | `IdP`, `identity provider` |
 | social sign-in | A sign-in through a provider. | |
 | identity | A row that joins a user to one provider and the provider's subject. | |
