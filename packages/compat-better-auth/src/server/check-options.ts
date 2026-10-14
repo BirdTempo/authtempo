@@ -289,8 +289,8 @@ const PLUGIN_RULES: Record<string, Rule> = {
     }),
     skipVerificationOnEnable: only(false, "core turns the factor on only after a right code"),
     allowPasswordless: only(false, "core asks for the password at every change of the factor"),
-    twoFactorTable: refused("core keeps the factor in its own ta_totp table"),
-    schema: refused("core keeps the factor in its own ta_totp table"),
+    twoFactorTable: refused("core keeps the factor in its own ta_second_factor and ta_totp tables"),
+    schema: refused("core keeps the factor in its own ta_second_factor and ta_totp tables"),
     twoFactorCookieMaxAge: refused("core's challenge lives 5 minutes; the cookie lives 600 s"),
     trustDeviceMaxAge: seconds(DAY, DAY, 365 * DAY, "core takes whole days from 1 to 365"),
     // Better Auth 1.7.2 turns the lockout on by default (verify-two-factor.mjs, read 2026-10-13).

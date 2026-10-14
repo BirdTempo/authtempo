@@ -158,13 +158,13 @@ describe("the two-factor options (plan 9f)", () => {
         "plugins[two-factor].backupCodeOptions.storeBackupCodes: core stores a keyed hash of each code; leave it out",
         "plugins[two-factor].issuer: core takes 1 to 80 characters with no colon",
         "plugins[two-factor].otpOptions: core's email second factor sends through totp.emailMail; the shim maps no Better Auth sender, so send-otp stays NOT_SUPPORTED; see the plan index",
-        "plugins[two-factor].schema: core keeps the factor in its own ta_totp table",
+        "plugins[two-factor].schema: core keeps the factor in its own ta_second_factor and ta_totp tables",
         "plugins[two-factor].skipVerificationOnEnable: core turns the factor on only after a right code",
         "plugins[two-factor].totpOptions.digits: core makes 6-digit codes",
         "plugins[two-factor].totpOptions.period: core fixes the step at 30 seconds",
         "plugins[two-factor].trustDeviceMaxAge: core takes whole days from 1 to 365",
         "plugins[two-factor].twoFactorCookieMaxAge: core's challenge lives 5 minutes; the cookie lives 600 s",
-        "plugins[two-factor].twoFactorTable: core keeps the factor in its own ta_totp table",
+        "plugins[two-factor].twoFactorTable: core keeps the factor in its own ta_second_factor and ta_totp tables",
       ].sort(),
     );
     // Whole days, but more than core's 365.
@@ -419,6 +419,7 @@ describe("the two-factor paths (plan 9f)", () => {
     for (const path of TWO_FACTOR_NOT_SUPPORTED) {
       const r = await post(path, {}, session);
       expect({ path, status: r.status }).toEqual({ path, status: 501 });
+      expect(await json(r)).toMatchObject({ code: "NOT_SUPPORTED" });
     }
     expect(
       (await post("/two-factor/enable", { password: PASSWORD, method: "otp" }, session)).status,
@@ -537,11 +538,11 @@ describe("the reset of a user with the factor on (plan 12c)", () => {
         cookie,
       );
     };
-    return { post, secret, reset };
+    return { auth, post, secret, reset, sent, storage: (opts.database as CompatDatabase).storage };
   }
 
   it("answers success with no cookie for a user with the factor on, and the next sign-in asks for the factor", async () => {
-    const { post, reset } = await resetApp();
+    const { auth, post, reset } = await resetApp();
     const r = await reset();
     expect(r.status).toBe(200);
     expect(await json(r)).toEqual({ success: true });
@@ -552,6 +553,28 @@ describe("the reset of a user with the factor on (plan 12c)", () => {
       password: "a brand new long password",
     });
     expect((await json(signIn)).twoFactor).toBeDefined();
+    expect(
+      await auth.api.signInEmail({ body: { email: EMAIL, password: "a brand new long password" } }),
+    ).toEqual({ twoFactorRedirect: true, twoFactorMethods: ["totp"] });
+  });
+
+  it("keeps no challenge row after the reset: the shim answers { success: true }, so no caller holds the challenge", async () => {
+    const { reset, storage } = await resetApp();
+    const challenges = () =>
+      storage.findMany("verification", [{ field: "purpose", op: "eq", value: "two-factor" }]);
+    expect(await challenges()).toEqual([]);
+    expect((await reset()).status).toBe(200);
+    expect(await challenges()).toEqual([]);
+  });
+
+  it("keeps the email code gate off: a code sign-in of a user with the factor on opens the session, as in Better Auth", async () => {
+    const { post, sent } = await resetApp();
+    await post("/email-otp/send-verification-otp", { email: EMAIL, type: "sign-in" });
+    const otp = sent.findLast((s) => s.type === "sign-in")?.otp ?? "";
+    const r = await post("/sign-in/email-otp", { email: EMAIL, otp });
+    expect(r.status).toBe(200);
+    expect(await json(r)).toMatchObject({ user: { email: EMAIL } });
+    expect(cookieOf(r, "tempo_session")).not.toBeNull();
   });
 
   it("opens the session at the reset on a trusted device: core reads the trust cookie the shim forwards (plan 12c)", async () => {

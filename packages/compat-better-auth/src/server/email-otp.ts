@@ -1,6 +1,7 @@
 import type { ClientCode } from "@authtempo/client";
 import { type Auth, normalizeEmail } from "@authtempo/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED, passwordPolicyCode } from "../errors.js";
+import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
 import { toUser } from "./shapes.js";
 
@@ -146,6 +147,17 @@ export async function emailOtpRoute(
   if (named !== "INVALID_PASSWORD") return failure(named, 400);
   return translate(
     await forward("/otp/reset", { email, code: body.otp, password: body.password }),
-    success,
+    async (b) => {
+      // Core answers a user with the factor on with a challenge (plan 12c).
+      // Better Auth's answer is `{ success: true }`, so no caller holds the
+      // challenge: it is deleted, as `api.signInEmail` does.
+      const challenge = (b.twoFactor as { challenge?: unknown } | undefined)?.challenge;
+      if (typeof challenge === "string")
+        await mapped.config.storage.delete("verification", [
+          { field: "valueHash", op: "eq", value: await sha256Hex(challenge) },
+          { field: "purpose", op: "eq", value: "two-factor" },
+        ]);
+      return success();
+    },
   );
 }
