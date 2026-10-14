@@ -63,6 +63,7 @@ function everyFeature() {
     organizations: {},
     password: {},
     oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false } },
+    operator: { secretHash: "0".repeat(64) },
   });
 }
 
@@ -85,7 +86,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(72);
+    expect(listed.length).toBe(73);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -164,6 +165,11 @@ describe("ROUTES (plan 11a)", () => {
     },
     { name: "emailOtp off", delta: { emailOtp: false }, features: ["emailOtp"], off: true },
     { name: "jwtMint off", delta: { jwtMint: false }, features: ["jwtMint"], off: true },
+    {
+      name: "operator",
+      delta: { operator: { secretHash: "0".repeat(64) } },
+      features: ["operator"],
+    },
   ];
 
   it.each(deltas)(

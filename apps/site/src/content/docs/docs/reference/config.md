@@ -48,6 +48,7 @@ The keys of `createAuth(config)`. `baseURL`, `secret`, `trustedOrigins`, `storag
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
+| `operator` | object or `false` | off | Turns on `POST /operator/keys/rotate`. Refused without `jwtMint`. |
 | `hooks` | object | no hook | The groups `organization` and `session`. Any other group is refused. |
 
 ## Cookie
@@ -212,6 +213,14 @@ Another key of `oauth` is refused.
 | `oauth.codeTtlMinutes` | number | 5 | An integer from 1 to 10. |
 | `oauth.registration.dynamic` | boolean | true | Serves `POST /oauth/register` of RFC 7591. |
 | `oauth.registration.cimd` | boolean | true | Accepts a client id that is the https URL of its metadata document. |
+
+## Operator
+
+Another key of `operator` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `operator.secretHash` | string | required | The SHA-256 of the operator secret as 64 lowercase hex characters. Core stores no secret. |
 
 ## Hooks
 

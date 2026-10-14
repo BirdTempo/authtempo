@@ -8,6 +8,7 @@ export type {
   MailMessage,
   MailPort,
   OAuthConfig,
+  OperatorConfig,
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,

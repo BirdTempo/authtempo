@@ -193,6 +193,12 @@ export interface AuthConfig {
    */
   oauth?: OAuthConfig | false;
   /**
+   * The operator route (plan 11c): `POST <basePath>/operator/keys/rotate`
+   * with `Authorization: Operator <secret>` makes a new signing key, for
+   * `authtempo keys rotate`. Off when absent or `false`. Needs `jwtMint`.
+   */
+  operator?: OperatorConfig | false;
+  /**
    * The app's code at named points of the organization and session flows
    * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
    * refuses with `throw hookRefusal(message)`; an after hook runs after the
@@ -313,6 +319,15 @@ export interface ResolvedJwtMint {
     | null;
   /** Days, or null: no timer (plan 11c). */
   rotateEvery: number | null;
+}
+
+export interface OperatorConfig {
+  /**
+   * The SHA-256 of the operator secret, as 64 lowercase hex characters
+   * (plan 11c). Core stores this hash and never the secret, as it stores
+   * every token. Make the secret from 32 random bytes or more.
+   */
+  secretHash: string;
 }
 
 export interface OAuthConfig {
@@ -447,6 +462,7 @@ export interface ResolvedConfig {
   totp: ResolvedTotp | null;
   jwtMint: ResolvedJwtMint | null;
   oauth: ResolvedOAuth | null;
+  operator: { secretHash: string } | null;
   hooks: ResolvedHooks;
 }
 
@@ -723,6 +739,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
     jwtMint,
     oauth: resolveOAuth(input.oauth, jwtMint),
+    operator: resolveOperator(input.operator, jwtMint),
     hooks: resolveHooks(input.hooks, organizations !== null),
   };
 }
@@ -964,6 +981,30 @@ function resolveJwtMint(
     claims: o.claims ?? null,
     rotateEvery,
   };
+}
+
+const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = { secretHash: true };
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/** `operator` (plan 11c). Off when absent or `false`. */
+function resolveOperator(
+  input: OperatorConfig | false | undefined,
+  jwtMint: ResolvedJwtMint | null,
+): { secretHash: string } | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("operator must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(OPERATOR_KEYS, key))
+      throw new ConfigError(`operator.${key} is not an option; core has secretHash`);
+  if (typeof input.secretHash !== "string" || !SHA256_HEX.test(input.secretHash))
+    throw new ConfigError(
+      "operator.secretHash must be the SHA-256 of the secret as 64 lowercase hex characters",
+    );
+  // The route's one action is a rotation of the signing key.
+  if (!jwtMint)
+    throw new ConfigError("operator needs jwtMint: its one action rotates the signing key");
+  return { secretHash: input.secretHash };
 }
 
 const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {

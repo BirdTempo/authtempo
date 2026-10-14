@@ -52,6 +52,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `invite:email:<email>` | 1 hour | 5 | Invite, per invited address |
 | `invitation-accept:ip:<ip>` | 15 minutes | 20 | Invitation accept |
 | `token-create:user:<userId>` | 1 hour | 20 | API token create |
+| `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |

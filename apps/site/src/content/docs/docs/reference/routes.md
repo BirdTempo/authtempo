@@ -607,6 +607,19 @@ These routes exist unless the config sets `jwtMint: false`.
 | Answer | `{ token }`, a session JWT |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
+## Operator
+
+This route exists when the config sets `operator`.
+
+<h3 id="post-operator-keys-rotate"><code>POST /operator/keys/rotate</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | `Authorization: Operator <secret>`, the secret whose SHA-256 is `operator.secretHash` |
+| Input | None |
+| Answer | `{ kid }`, the id of the new signing key. The old key verifies for 24 hours and signs nothing |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
 ## OAuth provider
 
 These routes exist when the config sets `oauth`. They answer the codes of the OAuth table, except where a code of the core table is named.

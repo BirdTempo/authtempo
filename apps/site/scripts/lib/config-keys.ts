@@ -12,6 +12,7 @@ import type {
   OAuthConfig,
   OidcEndpoints,
   OidcEntry,
+  OperatorConfig,
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
@@ -61,6 +62,7 @@ export const CONFIG_KEYS = {
     totp: true,
     jwtMint: true,
     oauth: true,
+    operator: true,
     hooks: true,
   } satisfies Keys<AuthConfig>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
@@ -179,6 +181,7 @@ export const CONFIG_KEYS = {
     dynamic: true,
     cimd: true,
   } satisfies Keys<NonNullable<OAuthConfig["registration"]>>,
+  operator: { secretHash: true } satisfies Keys<OperatorConfig>,
   hooks: { organization: true, session: true } satisfies Keys<HooksConfig>,
 } as const;
 

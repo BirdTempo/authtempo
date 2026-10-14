@@ -24,6 +24,9 @@ export default defineConfig(async () => {
             GOOGLE_CLIENT_SECRET: "example-secret",
             // The Expo Go redirect for the dev-redirect test. A RegExp source with no flags.
             DEV_REDIRECT_PATTERN: "^exp://192\\.168\\.1\\.20:8081/--/auth$",
+            // The SHA-256 hex of "authtempo-example-operator-secret-0123456789" (plan 11c).
+            OPERATOR_SECRET_HASH:
+              "9553f46eb9e964b487a02e36147c562555bf1a684cfa614904bcc0f5ab5f1c57",
           },
         },
       }),

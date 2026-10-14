@@ -5,6 +5,7 @@ import { handoffRoutes } from "./handoff.js";
 import { jwtRoutes } from "./jwt.js";
 import { magicLinkRoutes } from "./magic-link.js";
 import { oauthRoutes } from "./oauth.js";
+import { operatorRoutes } from "./operator.js";
 import { organizationRoutes } from "./organizations.js";
 import { passkeyRoutes } from "./passkeys.js";
 import { passwordRoutes } from "./password.js";
@@ -30,6 +31,7 @@ export function coreRoutes(config: ResolvedConfig): Route[] {
     ...organizationRoutes(config),
     ...tokenRoutes(config),
     ...jwtRoutes(config),
+    ...operatorRoutes(config),
     ...oauthRoutes(config),
   ];
 }

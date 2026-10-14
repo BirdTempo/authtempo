@@ -67,6 +67,7 @@ const s = await auth.session(request);     // { user, session } or null
 | POST | `/totp/challenge` | form `challenge`, `code` or `backupCode`, `trustDevice=1` | 302 to `next` with the cookies; back to the form on `invalid_code`; 302 to `/?auth_error=<code>` otherwise |
 | GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
 | GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
+| POST | `/operator/keys/rotate` | `Authorization: Operator <secret>` | `{ kid }`: a new signing key; the old one verifies for 24 hours and signs nothing; 401 `unauthorized` for a missing or wrong secret; 429 `rate_limited` after 5 calls per IP per hour (`operator:ip:<ip>`), right or wrong. Only with `operator` |
 | POST | `/oauth/register` | JSON client metadata (RFC 7591) | 201 `{ client_id, client_id_issued_at, client_name?, redirect_uris, token_endpoint_auth_method: "none", grant_types, response_types }`; 400 `invalid_redirect_uri`, `invalid_client_metadata`; 429. Only with `oauth` and `registration.dynamic` |
 | GET | `/oauth/authorize` | the OAuth 2.1 parameters, PKCE S256, `resource`, `scope`, `state`, `nonce`, `prompt` | 302 to `/oauth/sign-in` with no session, with `next` back to `?request_id=oq_…`, a request that core holds for 10 minutes; `request_id` alone shows the held request, and an unknown, spent, or expired one, or one that the consent page showed to another user, also with no session, answers 400 `invalid_request` JSON and spends nothing for that caller; 200 the consent page; 302 to the client with `code`, `state`, and `iss` when a consent covers the scopes; 302 with `error` for a bad request; 400 or 401 JSON with no redirect for a bad client or redirect URI; 429 |
 | POST | `/oauth/authorize` | the consent form: `request_id` and `decision=allow` or `deny`; the user the page showed the request to; session; `Origin` equal to `baseURL` | 302 to the client with `code` or `error=access_denied`; 400 `invalid_request` for a spent, expired, or another user's request; 401; 403 |
@@ -494,6 +495,15 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
   Two signatures at once make one new key: the retire matches the old row
   by id and slot, and the unique key on `slot` keeps one new row. The
   retired key verifies for 24 hours, as after `api.jwt.rotate()`.
+- The operator route (plan 11c): `operator: { secretHash }` turns on
+  `POST /operator/keys/rotate`, and it is off by default. `secretHash` is
+  the SHA-256 of the operator secret as 64 lowercase hex characters; core
+  stores no secret. Core hashes the presented secret and compares the
+  digests in constant time. Make the secret from 32 random bytes or more
+  (`openssl rand -base64 32`), and hash it with
+  `printf '%s' "$SECRET" | shasum -a 256`. The secret is not an API token:
+  no user owns it. `authtempo keys rotate` calls the route. Core refuses
+  `operator` with `jwtMint: false`.
 - Two live versions: during a gradual deployment, two versions of the app with different secrets, or with different `jwtMint.alg` values, retire each other's key at each mint. The JWKS then grows by one key per mint for 24 hours (core lists the signing key and at most 100 retired keys, the last retired first), and a mint can throw after three tries (`authtempo: no signing key after three tries`). Finish the deployment: when one version serves every request, one key signs again.
 - The token: header `{ alg, kid, typ: "JWT" }`; claims `iss` (`baseURL + basePath`), `sub` (the user id), `aud` (`jwtMint.audience`, default `baseURL`), `iat`, `exp` (`jwtMint.ttlMinutes`, 1 to 60, default 15), `sid` (the session id), `email`, `email_verified`, `name`, and `org` (the active organization id or null). `jwtMint.claims(user, session)` adds names and sets none of these, nor `nbf` or `jti`.
 - A resource server verifies the signature against `<basePath>/jwks`, `iss`, `aud`, `exp`, and the header `typ`: `JWT` for a session JWT, `at+jwt` for an OAuth access token (with jose, `jwtVerify(token, jwks, { issuer, audience, typ: "JWT" })`). One key signs both kinds with one issuer, so a server that skips `typ` can take one kind for the other. It keeps the key set in a cache. The token is a bearer for its life: a sign-out does not end it. Keep `ttlMinutes` short, and where a sign-out must end access at once, check the `sid` claim with `api.jwt.sessionLive({ sid })`: true while the session exists and is not expired.
@@ -955,6 +965,8 @@ Without a trigger, expired rows stay in the database.
   about ML-DSA. It is the library's post-quantum probe, not a authtempo
   setting, and workerd prints nothing.
 - Invitation accept is limited to 20 per IP per 15 minutes, in the same per-isolate limiter.
+- The operator route is limited to 5 calls per IP per hour
+  (`operator:ip:<ip>`), right or wrong secret, in the same limiter.
 - Email codes: a request is limited to 3 per address and 20 per IP, and a
   verify or a reset to 10 per address and 30 per IP, per 15 minutes, in the
   same limiter. The sign-in code and the reset code share each budget. Two

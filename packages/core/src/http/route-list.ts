@@ -19,6 +19,7 @@ export type RouteFeature =
   | "organizations"
   | "tokens"
   | "jwtMint"
+  | "operator"
   | "oauth"
   | "oauthRegistration";
 
@@ -29,7 +30,8 @@ export interface RouteEntry {
    * The config that turns the route on. `session`, `magicLink`, and `tokens`
    * are in every deployment; `emailOtp` and `jwtMint` are on by default;
    * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
-   * `oauthRegistration` needs `oauth` with `registration.dynamic`.
+   * `oauthRegistration` needs `oauth` with `registration.dynamic`; `operator`
+   * needs `operator.secretHash` (plan 11c).
    */
   readonly feature: RouteFeature;
 }
@@ -95,6 +97,7 @@ export const ROUTES: readonly RouteEntry[] = Object.freeze([
   { method: "GET", path: "/tokens/current", feature: "tokens" },
   { method: "GET", path: "/jwks", feature: "jwtMint" },
   { method: "GET", path: "/token", feature: "jwtMint" },
+  { method: "POST", path: "/operator/keys/rotate", feature: "operator" },
   { method: "POST", path: "/oauth/register", feature: "oauthRegistration" },
   { method: "GET", path: "/oauth/authorize", feature: "oauth" },
   { method: "POST", path: "/oauth/authorize", feature: "oauth" },

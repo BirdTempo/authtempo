@@ -82,6 +82,9 @@ function getAuth(env: Env): Auth {
       registration: { cimd: false },
       scopes: { "mcp:tools": "Use the example tools" },
     },
+    // The operator route (plan 11c) for `authtempo keys rotate`: on only when the var
+    // OPERATOR_SECRET_HASH is set. The Worker holds the hash, never the secret.
+    ...(env.OPERATOR_SECRET_HASH ? { operator: { secretHash: env.OPERATOR_SECRET_HASH } } : {}),
     // TEST_MODE only (plan 9d): the hooks the end-to-end test proves on D1. They write
     // app_tenant, a table of the test setup, so a deploy without the table sets none.
     ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
