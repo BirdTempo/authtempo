@@ -980,6 +980,55 @@ export default {
 Add a cron trigger to the Worker config, for example `"triggers": { "crons": ["17 * * * *"] }`.
 Without a trigger, expired rows stay in the database.
 
+## Secrets
+
+`secret` is version 1 of the app secret. `secrets` lists the versions, the
+current one first. The current version seals each new TOTP secret and
+signing key, and keys each new email code and backup code. Each row names
+its version in the column `secret_version`, and a read opens a value only
+under that version.
+
+| Call | Answer |
+| --- | --- |
+| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. |
+| `auth.api.secrets.rewrap({ limit, after })` | Reseals up to `limit` (1 to 1000, default 100) TOTP secrets and keys under the current version. Answers `{ resealed, failed, skipped, more, next }`. `invalid_body` for a limit outside that range or a cursor that `rewrap` did not answer. |
+
+One pass of the rewrap reads each row under a configured old version once,
+in the order of the ids. Pass `next` as `after` to the next call, until
+`next` is `null`. A row that fails or is skipped stays behind the cursor,
+so it does not stop the rows after it. `more` stays `true` while a row
+under a configured old version remains, also a row that failed or was
+skipped. A row under a version that the config does not hold is never read.
+
+- `failed`: the row did not open under its version, or its write did not
+  apply. The log names each row. A later pass reads it again.
+- `skipped`: an unconfirmed TOTP setup that holds backup codes and is less
+  than 15 minutes old. Its codes are keyed under its version, so it stays
+  there until the enable. Wait 15 minutes and run a new pass: the pass then
+  reseals an expired setup and clears its codes.
+
+```ts
+let after: string | undefined;
+for (;;) {
+  const r = await auth.api.secrets.rewrap({ limit: 100, ...(after ? { after } : {}) });
+  if (!r.ok) throw new Error(r.code);
+  if (r.value.next === null) break;
+  after = r.value.next;
+}
+```
+
+A TOTP secret also moves to the current version at its next right code,
+and a key at its next signature. A keyed hash cannot move: core never sees
+its code again. A backup code stays under its version until it is used or
+the list is replaced. An email code lives `emailOtp.ttlMinutes`.
+
+Remove an old version from `secrets` only after `status` shows four zeros
+for it. A signing key under a version that the config does not hold does
+not open: it retires at the next signature, and a new key signs. A TOTP
+user under that version cannot pass the second factor. The rotation has two
+deploys. The operations guide "Secrets" gives each step and the
+consequence of a skipped step.
+
 ## Limits in version 1
 
 - The default limiter counts in memory. On Workers every isolate has its
