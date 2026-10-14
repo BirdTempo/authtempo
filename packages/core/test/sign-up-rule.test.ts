@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ConfigError } from "../src/config.js";
+import { type AuthConfig, ConfigError } from "../src/config.js";
 import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import {
@@ -19,15 +19,16 @@ type Rule = "open" | "invited" | false;
 const NEW = "new@example.com";
 const DAY = 86_400_000;
 
-function authFor(signUp: Rule, extra: Record<string, unknown> = {}) {
-  return makeAuth({
+function authFor(signUp: Rule, extra: Partial<AuthConfig> = {}) {
+  const input: Partial<AuthConfig> = {
     signUp,
     organizations: {},
     // The detailed answer (`sign_up_closed`, `email_taken`), which these tests
     // read. The uniform answer under each rule has its own tests (plan 12b).
     password: { hash: FAST, uniformSignUp: false },
     ...extra,
-  } as never);
+  };
+  return makeAuth(input);
 }
 
 async function invite(
@@ -99,6 +100,7 @@ async function viaSocial(signUp: Rule, email: string, opts = { verified: true, i
 describe("the sign-up rule (plan 12b)", () => {
   it("is open by default, refuses another value, and refuses invited without organizations", () => {
     expect(makeAuth().config.signUp).toBe("open");
+    // A value outside the type on purpose: the config must refuse it at run time.
     expect(() => makeAuth({ signUp: "closed" as never })).toThrow(
       new ConfigError('signUp must be "open", "invited", or false'),
     );
