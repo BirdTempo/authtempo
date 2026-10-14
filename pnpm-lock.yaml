@@ -413,9 +413,24 @@ importers:
 
   packages/cli:
     dependencies:
+      '@authtempo/adapter-postgres':
+        specifier: workspace:*
+        version: link:../adapter-postgres
+      '@authtempo/compat-better-auth':
+        specifier: workspace:*
+        version: link:../compat-better-auth
       '@authtempo/core':
         specifier: workspace:*
         version: link:../core
+      '@authtempo/import':
+        specifier: workspace:*
+        version: link:../import
+      '@authtempo/legacy-hashes':
+        specifier: workspace:*
+        version: link:../legacy-hashes
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
     devDependencies:
       '@types/node':
         specifier: 24.19.1
@@ -550,9 +565,6 @@ importers:
       '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../legacy-hashes
-      postgres:
-        specifier: 3.4.9
-        version: 3.4.9
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
@@ -563,6 +575,9 @@ importers:
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
       typescript:
         specifier: 7.0.2
         version: 7.0.2

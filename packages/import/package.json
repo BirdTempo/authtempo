@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "authtempo-import": "./dist/cli.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -29,13 +26,13 @@
     "@authtempo/adapter-postgres": "workspace:*",
     "@authtempo/compat-better-auth": "workspace:*",
     "@authtempo/core": "workspace:*",
-    "@authtempo/legacy-hashes": "workspace:*",
-    "postgres": "3.4.9"
+    "@authtempo/legacy-hashes": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",
     "@cloudflare/workers-types": "5.20261007.1",
     "@types/node": "24.19.1",
+    "postgres": "3.4.9",
     "typescript": "7.0.2",
     "vite": "8.3.3",
     "vitest": "5.0.3",

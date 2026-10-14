@@ -3,7 +3,7 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    // The CLI reads files and argv through node:fs and node:util (@types/node 24.19.1, pinned).
+    // The CLI moved to @authtempo/cli (plan 11c), and src names no node: module now. The Node types stay, so a reader that needs one needs no config change (@types/node 24.19.1, pinned).
     "types": ["node"]
   },
   "include": ["src"]

@@ -63,14 +63,14 @@ Run every command from `packages/import/worker`.
      refuses with `schema_mismatch` until they are applied.
 
 3. Write the input as a dry run. Use the same flags as a Postgres run, with
-   `--d1-bundle` in place of `--postgres`. A pack of the package holds no
+   `--target d1-bundle --out <file>` in place of `--target postgres`. A pack holds no
    `input` folder (it can hold the hashes), and the CLI does not make one, so
    make it first in an installed copy:
 
    ```bash
    mkdir -p input
-   authtempo-import supabase --users users.csv --identities identities.csv \
-     --formats bcrypt,argon2id --d1-bundle input/import.local.json --dry-run
+   authtempo import supabase --users users.csv --identities identities.csv \
+     --formats bcrypt,argon2id --target d1-bundle --out input/import.local.json --dry-run
    ```
 
 4. Start the Worker. The build fails until `input/import.local.json` exists.

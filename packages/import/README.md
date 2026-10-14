@@ -7,8 +7,10 @@ from Auth.js. A Clerk, Supabase, Auth0, Firebase, or Cognito passkey needs a
 new enrolment.
 
 ```bash
-authtempo-import <provider> [files] --formats <the seam's list> --postgres "$DATABASE_URL" --dry-run
+authtempo import <provider> [files] --formats <the seam's list> --target postgres --url-env DATABASE_URL --dry-run
 ```
+
+The command is `authtempo import` in `@authtempo/cli` (plan 11c). The old binary `authtempo-import` stays for one release as an alias with its old flags, and prints one deprecation line. The connection string comes from the variable that `--url-env` names (default `DATABASE_URL`) or from `--url-file`, never from a flag value.
 
 Run `--dry-run` first. It prints the report a real run prints. The importer
 writes only rows that a core flow writes: an address is verified only where
@@ -105,7 +107,7 @@ Two CSV files from the database; the Admin API returns no hash:
 ```bash
 psql "$SUPABASE_DB_URL" -c "\copy (select id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, is_anonymous, deleted_at, banned_until, is_sso_user from auth.users) to 'users.csv' with csv header"
 psql "$SUPABASE_DB_URL" -c "\copy (select provider, provider_id, user_id from auth.identities) to 'identities.csv' with csv header"
-authtempo-import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --postgres "$DATABASE_URL"
+authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --target postgres --url-env DATABASE_URL
 ```
 
 - Every column of the two selects must be in the header. A missing column
@@ -120,7 +122,7 @@ authtempo-import supabase --users users.csv --identities identities.csv --format
 - The `github` provider imports as GitHub. The `linkedin_oidc` provider
   imports as LinkedIn. The older `linkedin` provider is listed as
   `identity:linkedin_legacy`.
-- Rows with Supabase's `$fbscrypt$` tag need `--firebase-signer-key` and
+- Rows with Supabase's `$fbscrypt$` tag need `--firebase-signer-key-env` (or `-file`) and
   `--firebase-salt-separator`, the same values as the seam's `firebase`
   option, and `firescrypt` in `--formats`. A row of another Firebase project
   is refused and listed.
@@ -144,7 +146,7 @@ while :; do
   o=$((o + 500))
 done
 jq -s 'add // []' pages.ndjson > users.json
-authtempo-import clerk --csv export.csv --users users.json [--organizations organizations.json] --formats bcrypt --postgres "$DATABASE_URL"
+authtempo import clerk --csv export.csv --users users.json [--organizations organizations.json] --formats bcrypt --target postgres --url-env DATABASE_URL
 ```
 
 - `organizations.json` is an array of `GET /v1/organizations` objects, each
@@ -175,7 +177,7 @@ it, then pass it as `--hashes`. Without `--hashes`, the CLI prints one line
 and imports no password.
 
 ```bash
-authtempo-import auth0 --users users.ndjson [--hashes hashes.ndjson] [--organizations organizations.json] --role-map lead=admin --formats bcrypt --postgres "$DATABASE_URL"
+authtempo import auth0 --users users.ndjson [--hashes hashes.ndjson] [--organizations organizations.json] --role-map lead=admin --formats bcrypt --target postgres --url-env DATABASE_URL
 ```
 
 `organizations.json` is one JSON array of `GET /api/v2/organizations`
@@ -208,7 +210,7 @@ other top-level value stops the run.
 (Authentication, Users, "Password hash parameters") `rounds` and `mem_cost`:
 
 ```bash
-authtempo-import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --postgres "$DATABASE_URL"
+authtempo import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --target postgres --url-env DATABASE_URL
 ```
 
 - The signer key and the salt separator go to the seam's `firebase` option,
@@ -241,7 +243,7 @@ as below, and delete it after the run.
 
 ```bash
 (umask 077; psql -At "$DATABASE_URL_OLD" -c "select json_build_object('users', (select coalesce(json_agg(json_build_object('id', u.id, 'email', u.email, 'emailVerified', u.\"emailVerified\" at time zone 'UTC', 'name', u.name, 'image', u.image, 'passwordHash', u.\"passwordHash\")), '[]') from \"User\" u), 'accounts', (select coalesce(json_agg(json_build_object('userId', a.\"userId\", 'type', a.type, 'provider', a.provider, 'providerAccountId', a.\"providerAccountId\")), '[]') from \"Account\" a), 'authenticators', (select coalesce(json_agg(json_build_object('credentialID', x.\"credentialID\", 'userId', x.\"userId\", 'credentialPublicKey', x.\"credentialPublicKey\", 'counter', x.counter, 'credentialDeviceType', x.\"credentialDeviceType\", 'credentialBackedUp', x.\"credentialBackedUp\", 'transports', x.transports)), '[]') from \"Authenticator\" x))" > tables.json)
-authtempo-import authjs --tables tables.json --formats bcrypt [--password-column passwordHash] [--same-passkey-rp-id] --postgres "$DATABASE_URL"
+authtempo import authjs --authjs-tables tables.json --formats bcrypt [--password-column passwordHash] [--same-passkey-rp-id] --target postgres --url-env DATABASE_URL
 rm tables.json
 ```
 
@@ -267,7 +269,7 @@ rm tables.json
 
 ```bash
 aws cognito-idp list-users --user-pool-id "$POOL" --output json > users.json
-authtempo-import cognito --users users.json --legacy-verify --postgres "$DATABASE_URL"
+authtempo import cognito --users users.json --legacy-verify --target postgres --url-env DATABASE_URL
 ```
 
 Set `password.legacyVerify` in the app (see `@authtempo/legacy-hashes`).
@@ -292,10 +294,9 @@ Cognito exports no hash, so this command needs no `--formats`.
 
 ## Targets
 
-- `--postgres <url>`: core's tables (`@authtempo/adapter-postgres`).
-- `--postgres <url> --better-auth`: an app that keeps the Better Auth 1.7
-  tables (`@authtempo/compat-better-auth`).
-- D1: `--d1-bundle <file>`, then the Worker script. `worker/README.md`
+- `--target postgres`: core's tables (`@authtempo/adapter-postgres`).
+- `--target postgres --tables compat`: an app that keeps the Better Auth 1.7 tables (`@authtempo/compat-better-auth`).
+- D1: `--target d1-bundle --out <file>`, then the Worker script. `worker/README.md`
   names the bundle path and every step. The Worker prints the report and
   the CLI's exit status. It writes core's tables (`TARGET=core`, the
   default), or an app's Better Auth 1.7 tables on D1 with `--var
@@ -308,7 +309,7 @@ Cognito exports no hash, so this command needs no `--formats`.
   check, and the run stops with a D1 error at the first statement on that
   table: the failing record writes no row (its undo removes them), and the
   records before it stay. Do not run `TARGET=compat` on such an app. The
-  `--better-auth` target on Postgres also uses the default names.
+  `--tables compat` target on Postgres also uses the default names.
 
 CAUTION: the D1 bundle holds every password hash and, for Supabase, the
 Firebase signer key. The CLI writes it with mode 0600. Do not commit it, and
@@ -316,5 +317,5 @@ remove it after the Worker run as `worker/README.md` says.
 
 Other options: `--reserved-slugs` (the app's `organizations.reservedSlugs`;
 core's defaults stay reserved) and `--platform-slug` (the app's platform
-organization slug; no import takes it). `authtempo-import` with no
-arguments prints the full usage.
+organization slug; no import takes it). `authtempo import --help` prints
+the full help.

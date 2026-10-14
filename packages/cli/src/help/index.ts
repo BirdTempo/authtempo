@@ -1,4 +1,5 @@
 import { ROOT_HELP } from "./authtempo.js";
+import { IMPORT_HELP } from "./import.js";
 import { KEYS_HELP } from "./keys.js";
 import type { HelpText } from "./types.js";
 
@@ -7,4 +8,4 @@ import type { HelpText } from "./types.js";
  * in main.ts. The docs site reads this list (plan 11c Task 9); the common
  * test holds it to the table.
  */
-export const HELP: readonly HelpText[] = [ROOT_HELP, KEYS_HELP];
+export const HELP: readonly HelpText[] = [ROOT_HELP, IMPORT_HELP, KEYS_HELP];

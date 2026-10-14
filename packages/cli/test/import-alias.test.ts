@@ -2,15 +2,15 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMemoryAdapter, type StorageAdapter, StorageError } from "@authtempo/core";
+import { CONFLICT_REASONS, type ImportReport, importId } from "@authtempo/import";
 import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
-import { type CliIo, exitCode, runCli, USAGE, writePrivate } from "../src/cli.js";
-import { importId } from "../src/ids.js";
-import { CONFLICT_REASONS, type ImportReport } from "../src/types.js";
-import { SUPABASE_FIXTURE_CREATED } from "./fixtures/supabase-counts.js";
-import identities from "./fixtures/supabase-identities.csv?raw";
-import users from "./fixtures/supabase-users.csv?raw";
-import { FIRESCRYPT } from "./readers/all.js";
+// The fixtures stay with the readers in packages/import: plan 11c moved the CLI, not the readers.
+import { SUPABASE_FIXTURE_CREATED } from "../../import/test/fixtures/supabase-counts.js";
+import identities from "../../import/test/fixtures/supabase-identities.csv?raw";
+import users from "../../import/test/fixtures/supabase-users.csv?raw";
+import { FIRESCRYPT } from "../../import/test/readers/all.js";
+import { type CliIo, exitCode, runCli, USAGE, writePrivate } from "../src/commands/import-alias.js";
 
 /** Every format: the tests below that do not test --formats pass all five. */
 const ALL = LEGACY_FORMATS.join(",");

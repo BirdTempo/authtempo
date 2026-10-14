@@ -18,7 +18,7 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@authtempo/handoff` | Native and desktop sign-in through the system browser, with openers for Expo and Electron. |
 | `@authtempo/compat-better-auth` | Runs a Better Auth 1.7 app on authtempo through a package alias, on the app's own Better Auth tables. Fails at start on an option core cannot keep. |
 | `@authtempo/legacy-hashes` | Verifies bcrypt, Argon2id, PBKDF2, scrypt, and Firebase scrypt hashes at sign-in and rehashes to PBKDF2. Pure JavaScript. bcryptjs is BSD-3-Clause (see `NOTICE`). |
-| `@authtempo/import` | `authtempo-import`: moves users from Supabase Auth, Clerk, Auth0, Firebase, Auth.js, and Cognito through the storage port. A second run writes nothing. |
+| `@authtempo/import` | The readers and `importUsers`: moves users from Supabase Auth, Clerk, Auth0, Firebase, Auth.js, and Cognito through the storage port. A second run writes nothing. The command is `authtempo import` in `@authtempo/cli`. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
 The example pins `@cloudflare/vitest-plugin` 1.4.0 and runs vitest 5.0.3, the same as core.

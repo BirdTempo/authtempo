@@ -38,7 +38,6 @@ const FORBIDDEN = ["worker/.wrangler/", "worker/input/", "src/", "test/"];
 const NEEDED = [
   "package.json",
   "dist/index.js",
-  "dist/cli.js",
   "worker/README.md",
   "worker/wrangler.jsonc",
   "worker/src/index.ts",

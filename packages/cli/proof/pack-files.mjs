@@ -30,6 +30,7 @@ const NEEDED = [
   "dist/index.js",
   "dist/main.js",
   "dist/bin/authtempo.js",
+  "dist/bin/authtempo-import.js",
 ];
 
 const failures = [];

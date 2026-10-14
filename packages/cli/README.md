@@ -37,6 +37,36 @@ release, install it with `pnpm add -D @authtempo/cli`, or run it with
   flag gets "Did you mean", and the command does not run.
 - The CLI writes no color and no terminal control.
 
+## import
+
+```bash
+authtempo import supabase --users users.csv --identities identities.csv \
+  --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run
+```
+
+The readers, the report, and the exit codes are those of
+`@authtempo/import` (its README names every flag of each provider). The
+flag map from the old binary:
+
+| `authtempo-import` | `authtempo import` |
+| --- | --- |
+| `--postgres <url>` | `--target postgres` with `--url-env <NAME>` (default `DATABASE_URL`) or `--url-file <path>` |
+| `--better-auth` | `--tables compat` (default `core`) |
+| `--d1-bundle <file>` | `--target d1-bundle --out <file>` |
+| `--tables <file>` (Auth.js) | `--authjs-tables <file>` |
+| `--firebase-signer-key <value>` | `--firebase-signer-key-env <NAME>` or `--firebase-signer-key-file <path>` |
+| every other flag | the same name and meaning |
+
+`--json` prints `{ report, stopped, bundle }`: the report is the JSON of
+`--report <file>`.
+
+## The alias authtempo-import
+
+`authtempo-import` stays for one release with its old flags and usage text.
+It prints one deprecation line on stderr, and with `--postgres` a second
+line, because a connection string on the command line goes into the shell
+history and the process list.
+
 ## keys rotate
 
 ```bash

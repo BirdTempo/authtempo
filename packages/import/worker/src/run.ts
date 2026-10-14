@@ -11,7 +11,7 @@ import {
   readSource,
 } from "@authtempo/import";
 
-/** What `authtempo-import ... --d1-bundle <file>` writes. */
+/** What `authtempo import ... --target d1-bundle --out <file>` writes (and the alias's `--d1-bundle <file>`). */
 export interface D1Bundle {
   bundle: ImportBundle;
   options: Omit<ImportOptions, "now">;

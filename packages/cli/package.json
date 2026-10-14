@@ -5,7 +5,8 @@
   "type": "module",
   "description": "The authtempo command line: init, migrate, import, check, and keys rotate.",
   "bin": {
-    "authtempo": "./dist/bin/authtempo.js"
+    "authtempo": "./dist/bin/authtempo.js",
+    "authtempo-import": "./dist/bin/authtempo-import.js"
   },
   "exports": {
     ".": {
@@ -25,7 +26,12 @@
     "test": "vitest run && node proof/pack-files.mjs"
   },
   "dependencies": {
-    "@authtempo/core": "workspace:*"
+    "@authtempo/adapter-postgres": "workspace:*",
+    "@authtempo/compat-better-auth": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@authtempo/import": "workspace:*",
+    "@authtempo/legacy-hashes": "workspace:*",
+    "postgres": "3.4.9"
   },
   "devDependencies": {
     "@types/node": "24.19.1",
