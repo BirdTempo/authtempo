@@ -95,6 +95,51 @@ export function validRedirectUri(value: unknown): value is string {
   return SCHEME_RE.test(u.protocol) && !BLOCKED_SCHEMES.has(u.protocol);
 }
 
+/**
+ * The web origins of a client's redirect URIs (plan 11d): the origin of each
+ * `https` URI, and of each `http` URI on a loopback host. A private-use
+ * scheme has no web origin (its URL origin is "null") and adds none, so a
+ * native client gets no CORS at the token endpoint.
+ */
+export function redirectOrigins(redirectUris: readonly string[]): Set<string> {
+  const origins = new Set<string>();
+  for (const uri of redirectUris) {
+    let u: URL;
+    try {
+      u = new URL(uri);
+    } catch {
+      continue;
+    }
+    if (u.protocol === "https:" || (u.protocol === "http:" && LOOPBACK.has(u.hostname)))
+      origins.add(u.origin);
+  }
+  return origins;
+}
+
+/**
+ * The origin check of the token endpoint (plan 11d): 60 per IP per 15
+ * minutes, at the POST and at the preflight of a foreign origin, before the
+ * client read. It has its own key, so a server request keeps the budget of
+ * `oauth-token:ip`.
+ */
+export const ORIGIN_CHECK_PER_IP = { seconds: 900, max: 60 };
+
+/**
+ * A registered `cl_` client by its id, with no write and no fetch: the read
+ * of a CORS preflight (plan 11d). A client metadata document URL answers
+ * null, so a preflight never makes core fetch a document.
+ */
+export async function registeredClient(
+  config: ResolvedConfig,
+  clientId: string,
+): Promise<OAuthClientRow | null> {
+  if (!config.oauth || !CLIENT_ID_RE.test(clientId)) return null;
+  return config.storage.findOne("oauthClient", [
+    { field: "id", op: "eq", value: clientId },
+    { field: "kind", op: "eq", value: "registered" },
+  ]);
+}
+
 /** 1 to 10 valid redirect URIs, each once, or null. */
 function redirectList(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > REDIRECT_MAX) return null;

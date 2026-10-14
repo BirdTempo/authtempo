@@ -1,11 +1,18 @@
 import { z } from "zod";
+import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import {
   type AuthorizeStep,
   authorizeStep,
   decideAuthorize,
 } from "../../engine/oauth-authorize.js";
-import { registerClient } from "../../engine/oauth-clients.js";
+import {
+  findClient,
+  ORIGIN_CHECK_PER_IP,
+  redirectOrigins,
+  registerClient,
+  registeredClient,
+} from "../../engine/oauth-clients.js";
 import { listGrants, revokeGrant } from "../../engine/oauth-grants.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
 import {
@@ -18,10 +25,11 @@ import {
 } from "../../engine/oauth-token.js";
 import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { OAUTH_ERRORS } from "../../errors.js";
+import { ipKey } from "../../limiter/ip-key.js";
 import { consentPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
-import type { Route, RouteContext } from "../router.js";
+import { originTrusted, type Route, type RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
 import { authorizationServerMetadata, PUBLIC_METADATA_HEADERS } from "../well-known.js";
@@ -63,7 +71,10 @@ async function formParams(request: Request): Promise<URLSearchParams | null> {
 /**
  * The provider routes (plan 9g, spec 8.13). None exists while `oauth` is
  * off. The router's Origin rule applies: a native client sends no Origin
- * and passes; a browser on an origin that is not trusted gets 403.
+ * and passes; a browser on an origin that is not trusted gets 403. The one
+ * exception is `POST /oauth/token` (plan 11d): it answers a web origin of
+ * the client that its form names, with CORS and no credentials, and a
+ * preflight of `?client_id=` of a registered client from such an origin.
  */
 export function oauthRoutes(config: ResolvedConfig): Route[] {
   const oauth = config.oauth;
@@ -156,6 +167,42 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     res.headers.set("pragma", "no-cache");
     return res;
   };
+  /** CORS for a client's own web origin (plan 11d): the exact origin, no credentials, and Vary for every cache. */
+  const clientCors = (res: Response, origin: string): Response => {
+    res.headers.set("access-control-allow-origin", origin);
+    res.headers.append("vary", "Origin");
+    return res;
+  };
+  const originChecked = async (ip: string | null) =>
+    config.limiter.allow(`oauth-token-origin:ip:${ipKey(ip)}`, ORIGIN_CHECK_PER_IP);
+  /** The grant of a form; the answer of the endpoint before any CORS header. */
+  const grantAnswer = async (form: URLSearchParams | null, ip: string | null) => {
+    if (!form) return tokenAnswer(oauthFail("invalid_request"));
+    const clientId = form.get("client_id") ?? "";
+    const grant = form.get("grant_type");
+    if (grant === "authorization_code")
+      return tokenAnswer(
+        await exchangeCode(config, {
+          code: form.get("code") ?? "",
+          codeVerifier: form.get("code_verifier") ?? "",
+          clientId,
+          redirectUri: form.get("redirect_uri") ?? "",
+          resource: form.get("resource"),
+          ip,
+        }),
+      );
+    if (grant === "refresh_token")
+      return tokenAnswer(
+        await refreshGrant(config, {
+          refreshToken: form.get("refresh_token") ?? "",
+          clientId,
+          scope: form.get("scope"),
+          resource: form.get("resource"),
+          ip,
+        }),
+      );
+    return tokenAnswer(oauthFail("unsupported_grant_type"));
+  };
   const userinfo = async (ctx: RouteContext): Promise<Response> => {
     const bearer = readBearer(ctx.request);
     const access = bearer ? await resolveAccessToken(config, bearer) : null;
@@ -174,33 +221,42 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/oauth/token",
+      // A foreign origin reaches the handler, which admits only the named client's own origins (plan 11d).
+      clientOrigin: true,
+      async preflight({ url, origin, request, ip }) {
+        // A preflight has no body, so the client rides in the query. Only a registered
+        // client, read by its id: a preflight never fetches a metadata document.
+        if (request.headers.get("access-control-request-method") !== "POST") return null;
+        if (!(await originChecked(ip)))
+          return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
+        const client = await registeredClient(config, url.searchParams.get("client_id") ?? "");
+        if (!client || !redirectOrigins(client.redirectUris).has(origin)) return null;
+        return clientCors(
+          new Response(null, {
+            status: 204,
+            headers: {
+              "access-control-allow-methods": "POST",
+              // CAPTCHA_HEADER: the same captcha header as the router's preflight (plan 12b).
+              "access-control-allow-headers": `content-type, ${CAPTCHA_HEADER}`,
+              "access-control-max-age": "600",
+            },
+          }),
+          origin,
+        );
+      },
       async handler(ctx) {
         const form = await formParams(ctx.request);
-        if (!form) return tokenAnswer(oauthFail("invalid_request"));
-        const clientId = form.get("client_id") ?? "";
-        const grant = form.get("grant_type");
-        if (grant === "authorization_code")
-          return tokenAnswer(
-            await exchangeCode(config, {
-              code: form.get("code") ?? "",
-              codeVerifier: form.get("code_verifier") ?? "",
-              clientId,
-              redirectUri: form.get("redirect_uri") ?? "",
-              resource: form.get("resource"),
-              ip: ctx.ip,
-            }),
-          );
-        if (grant === "refresh_token")
-          return tokenAnswer(
-            await refreshGrant(config, {
-              refreshToken: form.get("refresh_token") ?? "",
-              clientId,
-              scope: form.get("scope"),
-              resource: form.get("resource"),
-              ip: ctx.ip,
-            }),
-          );
-        return tokenAnswer(oauthFail("unsupported_grant_type"));
+        const origin = ctx.request.headers.get("origin");
+        // No Origin or a trusted Origin: the router applied the Origin rule and the Fetch Metadata rule.
+        // The router's config decides trust, so the handler and the router agree.
+        if (origin === null || originTrusted(ctx.config, origin)) return grantAnswer(form, ctx.ip);
+        // A foreign origin: the check runs before the grant, so a refused origin spends no code and no token.
+        if (!(await originChecked(ctx.ip)))
+          return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
+        const client = form ? await findClient(config, form.get("client_id") ?? "") : null;
+        if (!client || !redirectOrigins(client.redirectUris).has(origin))
+          return json({ error: "origin_not_trusted" }, 403);
+        return clientCors(await grantAnswer(form, ctx.ip), origin);
       },
     },
     {

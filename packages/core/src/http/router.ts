@@ -12,6 +12,15 @@ export interface RouteContext {
   now: Date;
 }
 
+/** What a route's preflight hook reads (plan 11d). */
+export interface PreflightContext {
+  request: Request;
+  url: URL;
+  /** The Origin of the preflight. It is not `baseURL` and not in `trustedOrigins`. */
+  origin: string;
+  ip: string | null;
+}
+
 export interface Route {
   method: "GET" | "POST";
   path: string;
@@ -22,10 +31,26 @@ export interface Route {
    * the binding cookie and the state row.
    */
   allowCrossSiteForm?: boolean;
+  /**
+   * The handler checks a foreign Origin itself (plan 11d). The router passes
+   * a POST whose Origin is present and not trusted past the Origin rule and
+   * the Fetch Metadata rule, and the handler admits only an origin of the
+   * client that the request names, with CORS and no credentials. A POST with
+   * no Origin or a trusted Origin keeps both rules. Only `POST /oauth/token`
+   * sets it: it reads no cookie, so a cross-site post carries no ambient
+   * authority, and PKCE binds each code to its verifier.
+   */
+  clientOrigin?: boolean;
+  /**
+   * The answer to a preflight from a foreign origin (plan 11d), or null for
+   * the 403 of the router. Only `POST /oauth/token` sets it.
+   */
+  preflight?(ctx: PreflightContext): Promise<Response | null>;
   handler(ctx: RouteContext): Promise<Response>;
 }
 
-function originTrusted(config: ResolvedConfig, origin: string): boolean {
+/** The origin is `baseURL` or in `trustedOrigins`: it gets credentialed CORS. */
+export function originTrusted(config: ResolvedConfig, origin: string): boolean {
   if (origin === config.baseURL) return true;
   return config.trustedOrigins.has(origin);
 }
@@ -114,20 +139,26 @@ async function moveLegacyCookie(
  * Origin rule is unchanged: a POST whose Origin header is present and not
  * trusted gets 403 before any handler runs. A POST with no Origin is a
  * non-browser client and passes. A POST that `fetchMetadataRefuses` names
- * gets the same 403 (plan 12b).
+ * gets the same 403 (plan 12b). A route with `clientOrigin` checks a
+ * foreign Origin itself, and a route with `preflight` answers a foreign
+ * preflight itself (plan 11d).
  */
 export function createRouter(
   config: ResolvedConfig,
   routes: Route[],
 ): (request: Request) => Promise<Response> {
   const table = new Map(routes.map((r) => [`${r.method} ${config.basePath}${r.path}`, r]));
+  // The routes that answer a foreign origin's preflight themselves (plan 11d).
+  const preflights = new Map(
+    routes.filter((r) => r.preflight).map((r) => [`${config.basePath}${r.path}`, r]),
+  );
   return async (request) => {
     const origin = request.headers.get("origin");
     const trusted = origin !== null && originTrusted(config, origin);
     if (request.method === "OPTIONS") {
       // A browser on another origin asks before a credentialed request. Only
       // a trusted origin gets an answer it can use.
-      if (!trusted) return json({ error: "origin_not_trusted" }, 403);
+      if (!trusted) return (origin !== null && (await foreign(request, origin))) || refused();
       return cors(
         new Response(null, {
           status: 204,
@@ -145,6 +176,28 @@ export function createRouter(
     return trusted ? cors(res, origin) : res;
   };
 
+  function refused(): Response {
+    return json({ error: "origin_not_trusted" }, 403);
+  }
+
+  /** A route's own answer to a foreign preflight, or null. A throw is logged and answers 500, as in dispatch. */
+  async function foreign(request: Request, origin: string): Promise<Response | null> {
+    const url = new URL(request.url);
+    const route = preflights.get(url.pathname);
+    if (!route?.preflight) return null;
+    try {
+      return await route.preflight({ request, url, origin, ip: config.clientIp(request) });
+    } catch (e) {
+      console.error(
+        "authtempo: unhandled error",
+        "OPTIONS",
+        route.path,
+        e instanceof Error ? e.name : typeof e,
+      );
+      return json({ error: "internal" }, 500);
+    }
+  }
+
   async function dispatch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const route = table.get(`${request.method} ${url.pathname}`);
@@ -152,6 +205,9 @@ export function createRouter(
     if (request.method === "POST" && !route.allowCrossSiteForm) {
       const origin = request.headers.get("origin");
       const trusted = origin !== null && originTrusted(config, origin);
+      // A foreign Origin on a `clientOrigin` route goes to the handler, which
+      // refuses it unless it is a web origin of the named client (plan 11d).
+      if (route.clientOrigin && origin !== null && !trusted) return run(route, request, url);
       if (origin !== null && !trusted) {
         return json({ error: "origin_not_trusted" }, 403);
       }
@@ -159,6 +215,10 @@ export function createRouter(
         return json({ error: "origin_not_trusted" }, 403);
       }
     }
+    return run(route, request, url);
+  }
+
+  async function run(route: Route, request: Request, url: URL): Promise<Response> {
     try {
       return await route.handler({
         request,

@@ -61,6 +61,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |
+| `oauth-token-origin:ip:<ip>` | 15 minutes | 60 | The origin check of a foreign origin at the token endpoint and its preflight |
 
 For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.
 

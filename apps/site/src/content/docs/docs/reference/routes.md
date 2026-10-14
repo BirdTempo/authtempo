@@ -724,10 +724,10 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 
 | Field | Value |
 | --- | --- |
-| Needs | Nothing |
+| Needs | Nothing. A browser on a foreign origin needs that origin in a redirect URI of the client that the form names; its answer then carries `access-control-allow-origin` and no credentials. A preflight from that origin names the client in `?client_id=` |
 | Input | A form: `grant_type=authorization_code` with `code`, `code_verifier`, `client_id`, `redirect_uri`, `resource?`; or `grant_type=refresh_token` with `refresh_token`, `client_id`, `scope?`, `resource?` |
 | Answer | `{ access_token, token_type: "Bearer", expires_in, scope, refresh_token?, id_token? }` |
-| Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`unsupported_grant_type`](/docs/reference/errors/#oauth-unsupported_grant_type), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
+| Errors | [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted), [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`unsupported_grant_type`](/docs/reference/errors/#oauth-unsupported_grant_type), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
 
 <h3 id="post-oauth-revoke"><code>POST /oauth/revoke</code></h3>
 
