@@ -46,15 +46,19 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 
 1. Make a new secret of 32 random bytes with `openssl rand -base64 32`.
 2. Store it as a second secret, for example `AUTH_SECRET_V2`. Keep `AUTH_SECRET` as it is.
-3. Replace `secret` with `secrets`, and read the old value as version 1. Put version 1 first, then version 2. Deploy to every instance.
+3. Replace `secret` with `secrets`, and read the old value as version 1. Put version 1 first, then version 2. Deploy to every instance at 100 percent.
 
    On Workers the key reads `secrets: [{ version: 1, value: env.AUTH_SECRET }, { version: 2, value: env.AUTH_SECRET_V2 }]`. On Node and Bun, read `process.env` in the same way.
 
    Remove the key `secret`. While it stays, core adds it back as version 1, and step 10 cannot remove that version.
 
+   Do not keep `secret` beside a `secrets` list that holds only version 2. Core adds `secret` after it as version 1, so version 2 is current in one deploy, and this step does not happen.
+
+   A gradual deployment keeps an old version of the API live. That version cannot open a value of version 2, so wait until the new version serves all traffic.
+
    Every instance now knows version 2, and version 1 stays current. Nothing is written under version 2 yet. If you skip this step, an instance on the old config cannot open a value of version 2. Its users then fail the second factor, and its signing key retires at each signature.
 
-4. Put version 2 first in `secrets`, then version 1. Deploy to every instance. Each new value is now written under version 2.
+4. Put version 2 first in `secrets`, then version 1. Deploy to every instance at 100 percent. Each new value is now written under version 2.
 5. In the API's process, run `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true.
 6. Pass the `next` of each answer as `after` to the next call. Stop when `next` is `null`. That is one pass.
 7. Run a new pass from step 5, with no `after`, while the last answer has `more: true`. Wait 15 minutes first when `skipped` or `failed` was above 0.
@@ -65,7 +69,9 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 9. Run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9.
 10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, and `backupCodes` are 0. Make sure that the config has no key `secret`. Deploy.
 
-   On Node and Bun, restart each process: it reads the environment only at start. Then delete `AUTH_SECRET` from the secret store.
+   On Node and Bun, restart each process: it reads the environment only at start.
+
+   Then delete `AUTH_SECRET` from the secret store, on every runtime. On Workers that is `pnpm --filter my-app exec wrangler secret delete AUTH_SECRET`.
 
    When `backupCodes` stays above 0, read the first warning below before you remove the version.
 
@@ -92,6 +98,10 @@ Warning: a removed version takes its unused backup codes with it. Read `status` 
 
 :::caution
 Warning: a TOTP user whose row stays under a removed version cannot pass the second factor. Remove a version only when its `totpSecrets` is 0. A row that fails on every pass needs a new setup by its user.
+:::
+
+:::caution
+Warning: a rollback to a build of core before schema version 9 is safe only before step 4. That build cannot open a row sealed under version 2. Its TOTP users then fail the second factor, and its signing keys retire.
 :::
 
 ## If it fails

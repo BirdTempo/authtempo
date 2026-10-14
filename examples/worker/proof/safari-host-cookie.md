@@ -48,6 +48,14 @@ steps 4, 5, and 8:
 pnpm exec wrangler dev --local-protocol https --var BASE_URL:https://localhost:8787 --var TEST_MODE:1 --var AUTH_SECRET:$(openssl rand -hex 32)
 ```
 
+Add `-k` to the two curl calls of steps 4 and 5. curl refuses the
+self-signed certificate without it:
+
+```sh
+curl -sk -X POST https://localhost:8787/auth/magic-link/request -H 'content-type: application/json' -d '{"email":"safari@example.com"}'
+curl -sk https://localhost:8787/__test/last-link
+```
+
 The base URL must be the https origin. With an http base URL, the mail link
 is http, and the https origin is not trusted. The confirm post then answers
 403. wrangler serves a self-signed certificate. Make Safari trust it before

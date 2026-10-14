@@ -39,7 +39,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
-| POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`; 403 `sign_up_closed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`. The user is unverified until the mail link is confirmed |
+| POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
@@ -410,9 +410,14 @@ body check, the policy, and the breach check answers 200 `{ sent: true }`
 with no cookie. A new address gets the unverified user, the password, and
 the verify link, and the link opens the session. A known address gets no
 row and one mail that points to the sign-in, and a claim race or a refusal
-by `signUp: "invited"` gets no row and no mail. The hash runs before the
+by `signUp: "invited"` gets no row and no mail. Under `"invited"` the
+invitation check runs first, so a known address with no pending invitation
+gets no mail. The hash runs before the
 transaction on every path, but the transaction of a new address writes
 more than the read of a known one, so core does not claim 6.3.8 in full.
+Under `"invited"` only a new address with an invitation gets the rows and
+the verify mail, so the time of the answer can show that an invitation
+exists. That tells less than whether an account exists.
 
 `breachCheck` (plan 12b, ASVS 5.0.0 6.2.12). The check fails closed, and
 core holds no list of breached passwords. An answer of `true` refuses the
@@ -750,9 +755,9 @@ verify answers `sign_up_closed`, and only the owner of the mailbox sees that.
 A refused reset keeps its link usable.
 
 With `false`, the password sign-up answers `sign_up_closed` before it reads a
-user, so the answer is the same for every address. With `"invited"`, the
-answer shows whether the address has a pending invitation, until the uniform
-sign-up answer folds it in.
+user, so the answer is the same for every address. With `"invited"` and
+`uniformSignUp: false`, the answer shows whether the address has a pending
+invitation.
 
 With `"invited"`, a new user needs a proved address. A social sign-in that
 would create a user needs a verified address from the provider: else it
@@ -1114,6 +1119,10 @@ not open: it retires at the next signature, and a new key signs. A TOTP
 user under that version cannot pass the second factor. The rotation has two
 deploys. The operations guide "Secrets" gives each step and the
 consequence of a skipped step.
+
+Run the schema 9 migration on every instance before version 2 is current
+(https://authtempo.com/docs/operations/secrets/). An instance at version 8
+writes each value under version 1.
 
 ## Limits in version 1
 
