@@ -11,7 +11,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 8 needs the migrations up to `0008_schema_v8`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 9 needs the migrations up to `0009_schema_v9`.
 
 ## Before you start
 
@@ -29,8 +29,11 @@ sources:
 | 6 | `0006_schema_v6` | `ta_totp`, `ta_trusted_device` |
 | 7 | `0007_schema_v7` | `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, `ta_oauth_token` |
 | 8 | `0008_schema_v8` | `ta_second_factor` (copies each enabled `ta_totp` row with the same id, and deletes each `ta_totp` setup that no enable confirmed) |
+| 9 | `0009_schema_v9` | No table. It adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk`: the version of the app secret that seals or keys the value. Default 1. |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 8.
+`SCHEMA_VERSION` of `@authtempo/core` is 9.
+
+Core at version 9 needs the `0009_schema_v9` migration in both adapters, and the compatibility package needs `0006_compat_schema_v9`. Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 
@@ -107,6 +110,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0003_compat_schema_v6` | `ta_totp` and `ta_trusted_device`. |
 | `0004_compat_schema_v7` | The four tables of version 7. |
 | `0005_compat_schema_v8` | `ta_second_factor`, with the same copy and the same delete. |
+| `0006_compat_schema_v9` | `secret_version` on `ta_totp`, `ta_second_factor`, and `ta_jwk`, and `taSecretVersion` on `verification`, which holds the same field. Default 1. The text names the verification table, so tables with other names take the text of `compatMigration0006Sql`. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

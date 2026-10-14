@@ -108,6 +108,7 @@ export async function startHandoff(
     data: { ...data },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   return ok({ handoffId });
 }
@@ -205,6 +206,7 @@ export async function continueHandoff(
         data: { ...codeData },
         createdAt: now,
         updatedAt: now,
+        secretVersion: config.keyring.current,
       });
       // The session was checked before this transaction. A claim in between deleted it and verified the user; the conditional update sees the deletion and undoes the code, which would otherwise skip the redeem guard.
       // The user id is in the where too: an api caller passes the two

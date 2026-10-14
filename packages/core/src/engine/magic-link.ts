@@ -58,6 +58,7 @@ export async function requestMagicLink(
     data: { next },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const link = config.magicLink.linkBuilder(token, next);
   await config.mail.send({

@@ -164,6 +164,7 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       valueHash: as("taValueHash"),
       consumedAt: as("taConsumedAt"),
       data: as("taData"),
+      secretVersion: as("taSecretVersion"),
     },
     // Better Auth's `value` is NOT NULL. It holds the hash, never a token.
     insertExtras: (row) => ({ value: row.valueHash }),

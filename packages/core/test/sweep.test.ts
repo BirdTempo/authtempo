@@ -39,6 +39,7 @@ describe("sweepExpired", () => {
         data: { next: "/home", n: 1 },
         createdAt: now,
         updatedAt: now,
+        secretVersion: 1,
       });
     const inv = (id: string, expiresAt: Date, acceptedAt: Date | null) =>
       storage.create("invitation", {
@@ -98,6 +99,7 @@ describe("sweepExpired", () => {
         retiredAt,
         createdAt: now,
         updatedAt: now,
+        secretVersion: 1,
       });
     const client = (id: string, lastSeenAt: Date) =>
       storage.create("oauthClient", {

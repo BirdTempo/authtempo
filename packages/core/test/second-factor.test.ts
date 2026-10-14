@@ -126,6 +126,7 @@ describe("the factor row (plan 12c)", () => {
       data: { attempts: 0 },
       createdAt: at,
       updatedAt: at,
+      secretVersion: 1,
     });
     expect(await disableTotp(auth.config, { userId: user.id })).toEqual({
       ok: true,

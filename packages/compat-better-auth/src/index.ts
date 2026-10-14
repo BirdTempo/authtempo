@@ -24,6 +24,7 @@ export {
 export {
   applyBetterAuthCompatMigrations,
   COMPAT_MIGRATION_NAMES,
+  compatMigration0006Sql,
   compatMigrationSql,
 } from "./storage/migration.js";
 export { type NamingOptions, resolveNames } from "./storage/names.js";

@@ -61,6 +61,7 @@ async function issueChallenge(
     data: { kind, ...extra },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   return { bytes: fromBase64Url(text), text };
 }

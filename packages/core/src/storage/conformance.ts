@@ -46,6 +46,21 @@ function verification(id: string, at: Date, consumedAt: Date | null): Verificati
     data: { next: "/home", n: 1 },
     createdAt: at,
     updatedAt: at,
+    secretVersion: 1,
+  };
+}
+
+/** A second-factor row of plan 12c, for the version tests (plan 12b). */
+function secondFactor(id: string, at: Date): Omit<SecondFactorRow, "secretVersion"> {
+  return {
+    id,
+    userId: "u1",
+    enabledAt: at,
+    methods: ["totp"],
+    backupCodes: ["h1"],
+    backupCodesVersion: 2,
+    createdAt: at,
+    updatedAt: at,
   };
 }
 
@@ -764,6 +779,7 @@ export function runAdapterConformance(
         backupCodes: ["h1", "h2"],
         createdAt: at,
         updatedAt: at,
+        secretVersion: 1,
       };
       await db.create("totp", factor);
       await expect(db.create("totp", { ...factor, id: "f2" })).rejects.toMatchObject({
@@ -831,6 +847,7 @@ export function runAdapterConformance(
         retiredAt: null,
         createdAt: at,
         updatedAt: at,
+        secretVersion: 1,
       };
       await db.create("jwk", key);
       // One signing key: a second row in the slot conflicts; a retired row (slot null) does not.
@@ -936,6 +953,7 @@ export function runAdapterConformance(
         backupCodesVersion: 1,
         createdAt: at,
         updatedAt: at,
+        secretVersion: 1,
       };
       await db.create("secondFactor", factor);
       await expect(db.create("secondFactor", { ...factor, id: "s2" })).rejects.toMatchObject({
@@ -960,6 +978,58 @@ export function runAdapterConformance(
         await db.findOne("secondFactor", [{ field: "userId", op: "eq", value: "u1" }]),
       ).toEqual({ ...factor, ...change });
       expect(await db.delete("secondFactor", [{ field: "userId", op: "eq", value: "u1" }])).toBe(1);
+    });
+
+    it("round-trips secretVersion on the four keyed models and filters by it (plan 12b)", async () => {
+      const at = new Date("2026-10-14T00:00:00.000Z");
+      await db.create("user", user("u1", "a@example.com", at));
+      await db.create("verification", { ...verification("v1", at, null), secretVersion: 1 });
+      await db.create("verification", { ...verification("v2", at, null), secretVersion: 2 });
+      await db.create("totp", {
+        id: "f1",
+        userId: "u1",
+        secret: "sealed",
+        enabledAt: at,
+        lastStep: 0,
+        backupCodes: [],
+        createdAt: at,
+        updatedAt: at,
+        secretVersion: 2,
+      });
+      await db.create("jwk", {
+        id: "k1",
+        publicJwk: { kty: "OKP", crv: "Ed25519", x: "x1", kid: "k1", alg: "EdDSA", use: "sig" },
+        privateKey: "sealed",
+        slot: "signing",
+        retiredAt: null,
+        createdAt: at,
+        updatedAt: at,
+        secretVersion: 3,
+      });
+      await db.create("secondFactor", { ...secondFactor("s1", at), secretVersion: 2 });
+      expect(
+        (
+          await db.findMany("verification", [{ field: "secretVersion", op: "in", value: [2, 3] }])
+        ).map((r) => r.id),
+      ).toEqual(["v2"]);
+      // The reseal guard: the second update of one old version matches no row.
+      const reseal = [
+        { field: "id" as const, op: "eq" as const, value: "f1" },
+        { field: "secretVersion" as const, op: "eq" as const, value: 2 },
+      ];
+      expect(await db.update("totp", reseal, { secret: "resealed", secretVersion: 3 })).toBe(1);
+      expect(await db.update("totp", reseal, { secret: "again", secretVersion: 3 })).toBe(0);
+      expect(
+        (await db.findOne("totp", [{ field: "id", op: "eq", value: "f1" }]))?.secretVersion,
+      ).toBe(3);
+      expect(
+        (await db.findOne("jwk", [{ field: "id", op: "eq", value: "k1" }]))?.secretVersion,
+      ).toBe(3);
+      expect(
+        (await db.findMany("secondFactor", [{ field: "secretVersion", op: "ne", value: 3 }])).map(
+          (r) => r.id,
+        ),
+      ).toEqual(["s1"]);
     });
   });
 }

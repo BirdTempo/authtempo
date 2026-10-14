@@ -211,7 +211,11 @@ export async function addMethod(
     userId: string;
     keepSessionId: string;
     method: SecondFactorMethod;
-    first: { id: string; backupCodes: string[] };
+    /**
+     * The id and the backup codes of a new factor row, and the secret
+     * version that keyed the codes (plan 12b).
+     */
+    first: { id: string; backupCodes: string[]; secretVersion: number };
   },
   now: Date,
   ended: SessionRow[] | undefined,
@@ -230,6 +234,7 @@ export async function addMethod(
       backupCodesVersion: BACKUP_CODES_VERSION,
       createdAt: now,
       updatedAt: now,
+      secretVersion: input.first.secretVersion,
     });
     await endSessions(
       tx,
@@ -430,6 +435,7 @@ export async function writeChallenge(
     },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   return {
     id,

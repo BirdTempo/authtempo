@@ -14,6 +14,7 @@ const row = (id: string, valueHash: string, data: Record<string, unknown> | null
   data,
   createdAt: t0,
   updatedAt: t0,
+  secretVersion: 1,
 });
 
 // Review Focus 2 on this adapter: quote, backslash, and unicode survive a round trip.

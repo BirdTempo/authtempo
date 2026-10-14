@@ -133,6 +133,7 @@ export async function startSocial(
     data: { ...data },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const query = buildQuery({
     client_id: provider.clientId,

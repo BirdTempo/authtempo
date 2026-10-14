@@ -261,6 +261,32 @@ UPDATE ta_meta SET value = '5' WHERE key = 'compat_better_auth';
 `,
 };
 
+export const MIGRATION_0006_NAME = "0006_compat_schema_v9";
+
+/**
+ * Migration 0006 (plan 12b): core's schema version 9. Core 9 adds the
+ * secret version of each sealed value and keyed hash. Core's own tables in
+ * this database (`ta_totp`, `ta_second_factor`, `ta_jwk`) get
+ * `secret_version`, and Better Auth's `verification` gets
+ * `taSecretVersion`, which holds core's field. Every column defaults to 1,
+ * the one secret of every value of today. The verification column takes the
+ * app's naming, so the text depends on `names`: the D1 files in this package
+ * are the text of the default naming, as for 0001. Append-only.
+ */
+export function compatMigration0006Sql(dialect: "postgres" | "sqlite", n: Names): string {
+  const int = dialect === "postgres" ? "integer" : "INTEGER";
+  const col = (table: string) =>
+    `ALTER TABLE ${table} ADD COLUMN secret_version ${int} NOT NULL DEFAULT 1;`;
+  return `${[
+    col("ta_totp"),
+    col("ta_second_factor"),
+    col("ta_jwk"),
+    `ALTER TABLE ${n.table("verification")} ADD COLUMN ${n.column("verification", "taSecretVersion")} ${int} NOT NULL DEFAULT 1;`,
+    "UPDATE ta_meta SET value = '9' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '6' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
 
@@ -511,6 +537,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0003_NAME,
   MIGRATION_0004_NAME,
   MIGRATION_0005_NAME,
+  MIGRATION_0006_NAME,
 ];
 
 /**
@@ -525,6 +552,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   () => COMPAT_MIGRATION_0003_SQL.postgres,
   () => COMPAT_MIGRATION_0004_SQL.postgres,
   () => COMPAT_MIGRATION_0005_SQL.postgres,
+  (names) => compatMigration0006Sql("postgres", names),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

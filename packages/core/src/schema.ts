@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export interface BaseRow {
   id: string;
@@ -69,6 +69,14 @@ export interface VerificationRow extends BaseRow {
   expiresAt: Date;
   consumedAt: Date | null;
   data: Record<string, unknown> | null;
+  /**
+   * The version of the app secret that keys this row's code (plan 12b, spec
+   * 22): an `email-otp` or `password-reset-otp` row, and a `two-factor` row
+   * whose `data` holds `emailCodeHash`. Every other purpose holds an unkeyed
+   * SHA-256, and its version means nothing. Migration 0009 writes 1 into
+   * every row of today.
+   */
+  secretVersion: number;
 }
 
 export interface PasskeyRow extends BaseRow {
@@ -143,6 +151,12 @@ export interface TotpRow extends BaseRow {
   lastStep: number;
   /** HMAC-SHA256 hex under the app secret of `<id>:<code>`, one per unused backup code. */
   backupCodes: string[];
+  /**
+   * The version of the app secret that seals or keys this row's value (plan
+   * 12b, spec 22). Migration 0009 writes 1 into every row of today. A read
+   * opens the value only under this version.
+   */
+  secretVersion: number;
 }
 
 /** A device that skips the second factor until `expiresAt` (plan 9f). */
@@ -177,6 +191,12 @@ export interface SecondFactorRow extends BaseRow {
    * version 1 stays valid until it is spent or replaced.
    */
   backupCodesVersion: number;
+  /**
+   * The version of the app secret that seals or keys this row's value (plan
+   * 12b, spec 22). Migration 0009 writes 1 into every row of today. A read
+   * opens the value only under this version.
+   */
+  secretVersion: number;
 }
 
 /** A signing key of this instance (plan 9g). The id is the `kid`. */
@@ -193,6 +213,12 @@ export interface JwkRow extends BaseRow {
   slot: string | null;
   /** Null while the key signs. A retired key verifies for 24 hours and signs nothing. */
   retiredAt: Date | null;
+  /**
+   * The version of the app secret that seals or keys this row's value (plan
+   * 12b, spec 22). Migration 0009 writes 1 into every row of today. A read
+   * opens the value only under this version.
+   */
+  secretVersion: number;
 }
 
 /** An OAuth client (plan 9g). */
@@ -321,6 +347,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       expiresAt: { type: "date" },
       consumedAt: { type: "date", nullable: true },
       data: { type: "json", nullable: true },
+      secretVersion: { type: "integer" },
     },
     unique: [["valueHash"]],
     indexes: [["purpose", "identifier"]],
@@ -408,6 +435,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       enabledAt: { type: "date", nullable: true },
       lastStep: { type: "integer" },
       backupCodes: { type: "json" },
+      secretVersion: { type: "integer" },
     },
     unique: [["userId"]],
     indexes: [],
@@ -432,6 +460,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       privateKey: { type: "string" },
       slot: { type: "string", nullable: true },
       retiredAt: { type: "date", nullable: true },
+      secretVersion: { type: "integer" },
     },
     // One signing key. A retired key has slot null, and a null never conflicts.
     unique: [["slot"]],
@@ -492,6 +521,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       methods: { type: "json" },
       backupCodes: { type: "json" },
       backupCodesVersion: { type: "integer" },
+      secretVersion: { type: "integer" },
     },
     unique: [["userId"]],
     indexes: [],

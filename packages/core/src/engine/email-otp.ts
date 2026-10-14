@@ -137,6 +137,7 @@ async function requestCode(
     data: { attempts: 0 },
     createdAt,
     updatedAt: createdAt,
+    secretVersion: config.keyring.current,
   });
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });

@@ -161,6 +161,7 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         backupCodes: [],
         createdAt: t0,
         updatedAt: t0,
+        secretVersion: 1,
       }),
     trustedDevice: (db) =>
       db.create("trustedDevice", {
@@ -205,6 +206,7 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         backupCodesVersion: 2,
         createdAt: t0,
         updatedAt: t0,
+        secretVersion: 1,
       }),
   };
 

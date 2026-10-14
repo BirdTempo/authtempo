@@ -63,6 +63,8 @@ SELECT s.user_id FROM ta_second_factor s JOIN ta_totp t ON t.id = s.id
 WHERE s.backup_codes_version = 1 AND t.backup_codes <> s.backup_codes;
 ```
 
+Version 9 (plan 12b, 2026-10-15) adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk`: the version of the app secret that seals or keys the value of the row, `NOT NULL DEFAULT 1`. Every row of today reads as version 1. Apply `0009_schema_v9` before you deploy a core at version 9; the adapter refuses a database at version 8. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

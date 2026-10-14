@@ -6,8 +6,9 @@ import {
   COMPAT_MIGRATION_0003_SQL,
   COMPAT_MIGRATION_0004_SQL,
   COMPAT_MIGRATION_0005_SQL,
+  compatMigration0006Sql,
 } from "../../src/storage/migration.js";
-import type { NamingOptions } from "../../src/storage/names.js";
+import { type NamingOptions, resolveNames } from "../../src/storage/names.js";
 import { BETTER_AUTH_SQLITE } from "../fixtures.js";
 import { d1MappingSuite } from "./mapping-suite.js";
 import { execD1 } from "./schema.js";
@@ -18,7 +19,8 @@ import { before17, renamed } from "./sql.js";
 // table names. Built from Better Auth's own SQLite SQL with its seven foreign
 // keys, renamed (plan 9b: every suite here creates each parent row first).
 // The migration is the before-1.7 text for these names, from
-// migrationSql("before-1.7"), then 0002 to 0005, which are the same for every naming.
+// migrationSql("before-1.7"), then 0002 to 0005, which are the same for every naming,
+// then 0006, which names the verification table and its column (plan 12b).
 const naming = {
   casing: "snake",
   tables: {
@@ -42,6 +44,7 @@ await execD1(COMPAT_MIGRATION_0002_SQL);
 await execD1(COMPAT_MIGRATION_0003_SQL.sqlite);
 await execD1(COMPAT_MIGRATION_0004_SQL.sqlite);
 await execD1(COMPAT_MIGRATION_0005_SQL.sqlite);
+await execD1(compatMigration0006Sql("sqlite", resolveNames(naming)));
 
 it("builds the tables with snake_case columns and plural names", async () => {
   const cols = await env.DB.prepare(

@@ -251,6 +251,7 @@ export async function issueCode(
     data: { ...data },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   return code;
 }
@@ -319,6 +320,7 @@ async function holdRequest(
     data: { ...data },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   return id;
 }

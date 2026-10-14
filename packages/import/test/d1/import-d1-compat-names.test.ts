@@ -1,5 +1,9 @@
 import { applyD1Migrations, env } from "cloudflare:test";
-import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
+import {
+  betterAuthSchemaStorage,
+  compatMigration0006Sql,
+  resolveNames,
+} from "@authtempo/compat-better-auth";
 import { expect, it } from "vitest";
 import betterAuthSqlite from "../../../compat-better-auth/test/fixtures/better-auth-1.7.2.sqlite.sql?raw";
 import { runImport } from "../../worker/src/run.js";
@@ -47,6 +51,12 @@ await env.DB.batch(
 await applyD1Migrations(
   env.DB,
   env.COMPAT_MIGRATIONS.filter((m) => /^000[2-5]/.test(m.name)),
+);
+// 0006 names the verification table and its column, so its text takes the naming (plan 12b).
+await env.DB.batch(
+  statements(compatMigration0006Sql("sqlite", resolveNames({ casing: "snake" }))).map((s) =>
+    env.DB.prepare(s),
+  ),
 );
 
 const count = async (table: string) =>

@@ -617,6 +617,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       data: { next: "/x", attempts: 0 },
       createdAt: now,
       updatedAt: now,
+      secretVersion: 1,
     });
     expect(await countAttempt(auth.storage, row, 5, now)).toBe("invalid_code");
     expect(
@@ -638,6 +639,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
         data: { attempts: 4 },
         createdAt: now,
         updatedAt: now,
+        secretVersion: 1,
       });
     await challenge("other");
     const capped = await challenge("capped");

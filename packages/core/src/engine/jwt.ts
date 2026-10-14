@@ -156,6 +156,7 @@ export async function signingKey(
         retiredAt: null,
         createdAt: now,
         updatedAt: now,
+        secretVersion: config.keyring.current,
       });
     } catch (e) {
       // Another isolate wrote the signing key first: read it on the next turn.

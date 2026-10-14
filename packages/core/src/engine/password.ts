@@ -313,6 +313,7 @@ async function sendVerifyMail(
     data: { passwordId },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const link = `${config.baseURL}${config.basePath}/password/verify?token=${encodeURIComponent(token)}`;
   await config.mail.send({
@@ -689,6 +690,7 @@ export async function requestPasswordReset(
     data: { next: safeNext(input.next) },
     createdAt: now,
     updatedAt: now,
+    secretVersion: config.keyring.current,
   });
   const link = `${config.baseURL}${config.basePath}/password/reset?token=${encodeURIComponent(token)}`;
   await config.mail.send({

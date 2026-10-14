@@ -273,6 +273,7 @@ export async function setupTotp(
         backupCodes: hashes,
         createdAt: now,
         updatedAt: now,
+        secretVersion: config.keyring.current,
       });
     } catch (err) {
       // A parallel setup of the same user won the unique key. No transaction is open here.
@@ -352,7 +353,8 @@ export async function enableTotp(
           userId: user.id,
           keepSessionId: session.id,
           method: "totp",
-          first: { id: row.id, backupCodes: row.backupCodes },
+          // The setup keyed these codes under the version of its row.
+          first: { id: row.id, backupCodes: row.backupCodes, secretVersion: row.secretVersion },
         },
         now,
         ended,

@@ -112,7 +112,7 @@ export async function enableMethod(
           userId: session.user.id,
           keepSessionId: session.session.id,
           method,
-          first: { id, backupCodes: hashes },
+          first: { id, backupCodes: hashes, secretVersion: config.keyring.current },
         },
         now,
         ended,
