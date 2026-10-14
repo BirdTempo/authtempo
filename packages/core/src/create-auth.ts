@@ -85,6 +85,12 @@ import {
 } from "./engine/password.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
 import {
+  rewrapSecrets,
+  type SecretsRewrap,
+  type SecretsStatus,
+  secretsStatus,
+} from "./engine/secrets.js";
+import {
   destroySession,
   type PublicSession,
   type ResolvedSession,
@@ -222,6 +228,21 @@ export interface TokensApi {
   current(input: { token: string }): Promise<Result<ResolvedApiToken>>;
 }
 
+/**
+ * The app secrets (plan 12b, spec 22). Present in every deployment, in
+ * process only: no route answers them. The rotation runbook runs passes of
+ * `rewrap` and reads `status` before it removes a version.
+ */
+export interface SecretsApi {
+  status(): Promise<SecretsStatus>;
+  /**
+   * `limit`: 1 to 1000 rows, default 100. `after`: the `next` of the call
+   * before, to go on with the pass. `invalid_body` for a limit outside that
+   * range or a cursor that `rewrap` did not answer.
+   */
+  rewrap(input?: { limit?: number; after?: string }): Promise<Result<SecretsRewrap>>;
+}
+
 /** Present on `api` unless the config sets `emailOtp: false` (plan 9e). */
 export interface EmailOtpApi {
   /** A sign-in code. Always `{ sent: true }`, except `rate_limited`. */
@@ -342,6 +363,7 @@ export interface AuthApi {
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
+  secrets: SecretsApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
   totp?: TotpApi;
@@ -428,6 +450,10 @@ export function createAuth(input: AuthConfig): Auth {
         list: (i) => listApiTokens(config, i),
         revoke: (i) => revokeApiToken(config, i),
         current: (i) => currentApiToken(config, i),
+      },
+      secrets: {
+        status: () => secretsStatus(config),
+        rewrap: (i) => rewrapSecrets(config, i),
       },
       ...(config.password
         ? {

@@ -25,6 +25,7 @@ export {
   type JwtApi,
   type OAuthApi,
   type PasswordApi,
+  type SecretsApi,
   type TokensApi,
   type TotpApi,
 } from "./create-auth.js";
@@ -88,6 +89,7 @@ export { LEGACY_VERIFY_HASH, PENDING_HASH_PREFIX } from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { SignInChallenge } from "./engine/second-factor.js";
 export type { MethodEnabled } from "./engine/second-factor-methods.js";
+export type { SecretsRewrap, SecretsStatus, SecretVersionCount } from "./engine/secrets.js";
 export { type PublicSession, type ResolvedSession, readSessionToken } from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";

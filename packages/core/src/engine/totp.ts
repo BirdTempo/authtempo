@@ -130,6 +130,18 @@ function enabledRow(storage: StorageAdapter, userId: string): Promise<TotpRow | 
   ]);
 }
 
+/**
+ * An unconfirmed setup that holds backup codes and has not expired (plan
+ * 12b). It keys its codes under the row's version too. A reseal would move
+ * the secret and leave the codes, and the enable then copies the codes with
+ * the wrong version. So no reseal touches it until the enable, a new setup,
+ * or the end of its 15 minutes. `api.secrets.rewrap` counts it as skipped.
+ */
+export function isLiveSetupWithCodes(row: TotpRow, now: Date): boolean {
+  const setupCodes = row.enabledAt === null && row.backupCodes.length > 0;
+  return setupCodes && row.createdAt.getTime() + SETUP_TTL_MS > now.getTime();
+}
+
 /** The secret under the version its row names (plan 12b), or null: another version, another user, or a changed byte. */
 function openSecret(config: ResolvedConfig, row: TotpRow): Promise<Uint8Array | null> {
   const secret = secretFor(config.keyring, row.secretVersion, row.id);
@@ -152,13 +164,8 @@ async function resealSecret(
 ): Promise<boolean> {
   const { keyring } = config;
   if (row.secretVersion === keyring.current) return false;
-  // An unconfirmed setup keys its backup codes under the row's version too.
-  // A reseal would move the secret and leave the codes, and the enable then
-  // copies the codes with the wrong version. So a live setup stays under its
-  // version until the enable or a new setup (at most 15 minutes).
+  if (isLiveSetupWithCodes(row, config.clock.now())) return false;
   const setupCodes = row.enabledAt === null && row.backupCodes.length > 0;
-  const live = row.createdAt.getTime() + SETUP_TTL_MS > config.clock.now().getTime();
-  if (setupCodes && live) return false;
   // An expired setup stays until its user runs a new setup. Without a
   // reseal, the rewrap never ends. Only the enable reads its codes, and the
   // enable refuses an expired setup, so the reseal clears them. A new setup

@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createAuth } from "../create-auth.js";
+import type { SecretsRewrap } from "../engine/secrets.js";
+import { base32Decode, totpCode } from "../primitives/totp.js";
+import type { Result } from "../result.js";
 import type {
   ApiTokenRow,
   IdentityRow,
@@ -13,6 +17,7 @@ import type {
   UserRow,
   VerificationRow,
 } from "../schema.js";
+import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
 import { type StorageAdapter, StorageError } from "./port.js";
 
 export interface ConformanceTarget {
@@ -1036,4 +1041,177 @@ export function runAdapterConformance(
       ).toBe(2);
     });
   });
+}
+
+/**
+ * The rotation proof of plan 12b on one storage: a TOTP user, a backup
+ * code, an email code, a session, and a session JWT, all made under
+ * version 1, pass through the two-phase rotation of spec 22. After the
+ * rewrap, version 1 goes, and the TOTP user and the JWT still pass. Call it
+ * from an adapter's test file with a factory that opens a fresh database.
+ */
+export function runSecretRotationConformance(
+  name: string,
+  factory: () => Promise<ConformanceTarget>,
+): void {
+  describe(`secret rotation: ${name}`, () => {
+    it("a rotation locks out no TOTP user and ends no live token (plan 12b)", async () => {
+      const target = await factory();
+      try {
+        await rotationRun(target.adapter);
+      } finally {
+        await target.close();
+      }
+    });
+  });
+}
+
+async function rotationRun(storage: StorageAdapter): Promise<void> {
+  const S1 = "0123456789abcdef0123456789abcdef";
+  const S2 = "q8JxVd3m0Yv2sZ7rKpT4wN1hLc9eFgAuBiOjQyRtSxM";
+  const PW = "correct horse battery";
+  const FAST = createPbkdf2PasswordHash({ iterations: 1000 });
+  let current = new Date("2026-10-14T00:00:00.000Z");
+  const clock = { now: () => current };
+  const step = () => {
+    current = new Date(current.getTime() + 30_000);
+  };
+  const mail: string[] = [];
+  const make = (secrets: Array<{ version: number; value: string }>) =>
+    createAuth({
+      baseURL: "https://api.example.com",
+      trustedOrigins: [],
+      storage,
+      mail: {
+        send: async (m) => {
+          mail.push(m.text);
+        },
+      },
+      clock,
+      secrets,
+      password: { hash: FAST },
+    });
+  const codeOf = (text: string | undefined) => /\b(\d{6})\b/.exec(text ?? "")?.[1] ?? "";
+  const at = clock.now();
+  const userId = "01JA0000000000000000000U02";
+  await storage.create("user", {
+    id: userId,
+    email: "ada@example.com",
+    emailVerified: true,
+    name: null,
+    image: null,
+    createdAt: at,
+    updatedAt: at,
+  });
+  await storage.create("password", {
+    id: "01JA0000000000000000000P02",
+    userId,
+    hash: await FAST.hash(PW),
+    createdAt: at,
+    updatedAt: at,
+  });
+  // Version 1 alone: the factor on, a session, a session JWT, and a live email code of another address.
+  const v1 = make([{ version: 1, value: S1 }]);
+  must(await v1.api.emailOtp?.request({ email: "ada@example.com", ip: null }));
+  const signedIn = must(
+    await v1.api.emailOtp?.verify({
+      email: "ada@example.com",
+      code: codeOf(mail.at(-1)),
+      ip: null,
+      userAgent: null,
+    }),
+  );
+  if (!("token" in signedIn)) throw new Error("rotation: no session token");
+  const setup = must(await v1.api.totp?.setup({ userId, password: PW }));
+  const seed = base32Decode(setup.secret);
+  const session = await v1.api.getSession(signedIn.token);
+  if (!session) throw new Error("rotation: no session");
+  must(await v1.api.totp?.enable({ session, code: await totpCode(seed, clock.now()) }));
+  const jwt = must(await v1.api.jwt?.mint({ userId, sessionId: session.session.id }));
+  must(await v1.api.emailOtp?.request({ email: "bo@example.com", ip: null }));
+  const boCode = codeOf(mail.at(-1));
+  const passFactor = async (auth: ReturnType<typeof make>, backupCode?: string) => {
+    const r = await auth.api.password?.signIn({
+      email: "ada@example.com",
+      password: PW,
+      ip: null,
+      userAgent: null,
+    });
+    if (!r?.ok || !("twoFactor" in r.value)) return false;
+    const v = await auth.api.totp?.verify({
+      challenge: r.value.twoFactor.challenge,
+      ...(backupCode !== undefined ? { backupCode } : { code: await totpCode(seed, clock.now()) }),
+      ip: null,
+    });
+    return v?.ok === true;
+  };
+  // Phase 1 knows version 2 and writes nothing under it; phase 2 makes it current.
+  for (const secrets of [
+    [
+      { version: 1, value: S1 },
+      { version: 2, value: S2 },
+    ],
+    [
+      { version: 2, value: S2 },
+      { version: 1, value: S1 },
+    ],
+  ]) {
+    const auth = make(secrets);
+    step();
+    expect({ phase: secrets[0]?.version, totp: await passFactor(auth) }).toEqual({
+      phase: secrets[0]?.version,
+      totp: true,
+    });
+    expect(await auth.api.jwt?.verify(jwt.token)).not.toBeNull();
+    expect(await auth.api.getSession(signedIn.token)).not.toBeNull();
+  }
+  const phase2 = make([
+    { version: 2, value: S2 },
+    { version: 1, value: S1 },
+  ]);
+  must(
+    await phase2.api.emailOtp?.verify({
+      email: "bo@example.com",
+      code: boCode,
+      ip: null,
+      userAgent: null,
+    }),
+  );
+  expect(await passFactor(phase2, setup.backupCodes[0])).toBe(true);
+  // One pass of the rewrap: follow `next` to the end of the rows.
+  let after: string | null = null;
+  for (let round = 0; round < 10; round++) {
+    const r: SecretsRewrap = must(
+      await phase2.api.secrets.rewrap({ limit: 1, ...(after !== null ? { after } : {}) }),
+    );
+    expect({ failed: r.failed, skipped: r.skipped }).toEqual({ failed: 0, skipped: 0 });
+    after = r.next;
+    if (after === null) {
+      expect(r.more).toBe(false);
+      break;
+    }
+  }
+  expect(after).toBeNull();
+  const one = (await phase2.api.secrets.status()).versions.find((v) => v.version === 1);
+  // The backup codes under version 1 stay until they are used or replaced: status shows them.
+  expect(one).toEqual({
+    version: 1,
+    configured: true,
+    current: false,
+    totpSecrets: 0,
+    backupCodes: setup.backupCodes.length - 1,
+    signingKeys: 0,
+    emailCodes: 0,
+  });
+  // Version 1 goes. The TOTP user and the JWT of version 1 still pass.
+  const only2 = make([{ version: 2, value: S2 }]);
+  step();
+  expect(await passFactor(only2)).toBe(true);
+  expect(await only2.api.jwt?.verify(jwt.token)).not.toBeNull();
+}
+
+/** The value of an ok result, or a throw that names the code. */
+function must<T>(r: Result<T> | undefined): T {
+  if (!r?.ok) throw new Error(`rotation: ${r ? r.code : "no api"}`);
+  return r.value;
 }
