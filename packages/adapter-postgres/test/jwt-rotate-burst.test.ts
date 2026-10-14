@@ -48,6 +48,7 @@ it("rotates once when eight signatures pass the interval together (plan 11c)", a
   const code = /\b(\d{6})\b/.exec(sent[0]?.text ?? "")?.[1] ?? "";
   const signedIn = await otp.verify({ email, code, ip: null, userAgent: null });
   if (!signedIn.ok) throw new Error(signedIn.code);
+  if (!("token" in signedIn.value)) throw new Error("the sign-in answered a challenge");
   const input = { userId: signedIn.value.user.id, sessionId: signedIn.value.session.id };
   const first = await jwt.mint(input);
   if (!first.ok) throw new Error(first.code);

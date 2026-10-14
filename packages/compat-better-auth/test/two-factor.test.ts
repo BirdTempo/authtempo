@@ -102,6 +102,7 @@ describe("the two-factor options (plan 9f)", () => {
       backupCodes: 10,
       trustDays: 30,
       trustCookieName: "better-auth.trust_device",
+      gate: { magicLink: false, emailOtp: false, social: false },
     });
     expect(
       totp({
@@ -116,6 +117,7 @@ describe("the two-factor options (plan 9f)", () => {
       backupCodeLength: 24,
       trustDays: 7,
       trustCookieName: "better-auth.trust_device",
+      gate: { magicLink: false, emailOtp: false, social: false },
     });
     expect(totp(null)).toBe(false);
   });

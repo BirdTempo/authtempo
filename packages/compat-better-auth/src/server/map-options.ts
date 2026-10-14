@@ -265,6 +265,13 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             : {}),
           trustDays: (tf.options.trustDeviceMaxAge ?? BETTER_AUTH_DEFAULTS.trustDeviceMaxAge) / DAY,
           trustCookieName: TRUST_DEVICE_COOKIE,
+          // Better Auth 1.7.2's two-factor plugin gates /sign-in/email,
+          // /sign-in/username, and /sign-in/phone-number only
+          // (dist/plugins/two-factor/index.mjs line 245, read 2026-10-14). Its
+          // magic link, email code, and social sign-in open a session with no
+          // second factor, so the shim keeps core's gate off on those three
+          // (owner decision 2 of 2026-10-14). The reset gate has no key.
+          gate: { magicLink: false, emailOtp: false, social: false },
         }
       : false,
     ...(google || apple || github || linkedin

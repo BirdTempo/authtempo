@@ -6,8 +6,8 @@ import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
-import type { TwoFactorPending } from "./second-factor.js";
-import { endedList, sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
+import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
+import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
@@ -57,6 +57,8 @@ export interface EmailOtpVerify {
   code: string;
   ip: string | null;
   userAgent: string | null;
+  /** The clear `td_` token of a trusted device (plan 12c): it skips the gate. */
+  trustDevice?: string | undefined;
 }
 
 /** A sign-in or a reset by code: the session token, the user, and the session row. */
@@ -254,7 +256,7 @@ async function consumeCode(
 export async function verifyEmailOtp(
   config: ResolvedConfig,
   input: EmailOtpVerify,
-): Promise<Result<EmailOtpSession>> {
+): Promise<Result<EmailOtpSession | TwoFactorPending>> {
   if (!config.emailOtp) return fail("not_found");
   const gate = await verifyGate(config, input);
   if (!gate.ok) return gate;
@@ -264,12 +266,22 @@ export async function verifyEmailOtp(
   const consumed = await consumeCode(config.storage, checked.value, now);
   if (!consumed.ok) return consumed;
   const ended = endedList(config);
-  // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
-  const steps = sessionSteps(config, {
-    ip: input.ip,
-    userAgent: input.userAgent,
-    via: "email_otp",
-  });
+  // The hook runs before the resolution's first write, for the D1 undo (see
+  // `insertSignUp` in password.ts). A user with the second factor on gets a
+  // challenge in place of the session (plan 12c). The code proves the
+  // mailbox, so the challenge offers no email method (owner decision 4).
+  const steps = gatedSteps(
+    config,
+    {
+      ip: input.ip,
+      userAgent: input.userAgent,
+      via: "email_otp",
+      next: "/",
+      trustDevice: input.trustDevice,
+      gate: config.totp?.gate.emailOtp ?? false,
+    },
+    now,
+  );
   const resolved = await hookGuard(async () =>
     ok(
       await findOrCreateUserByEmail(
@@ -285,6 +297,8 @@ export async function verifyEmailOtp(
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
   await sessionsEnded(config, ended, "claim");
+  if (after.kind === "challenge") return ok(after.pending);
+  await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "email_otp");
   return ok({ token: after.token, user, session: after.session });
 }

@@ -63,6 +63,7 @@ describe("createAuth", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    if (!("token" in r.value)) throw new Error("the sign-in answered a challenge");
     expect((await auth.api.getSession(r.value.token))?.user.email).toBe("ada@example.com");
     await auth.api.signOut(r.value.token);
     expect(await auth.api.getSession(r.value.token)).toBeNull();

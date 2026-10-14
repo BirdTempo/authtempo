@@ -12,7 +12,12 @@ import type { Route } from "../router.js";
 import { signedInResponse, trustTokenOf, twoFactorJson } from "../session-answer.js";
 
 const requestBody = z.object({ email: z.string().max(320) });
-const verifyBody = z.object({ email: z.string().max(320), code: z.string().max(16) });
+const verifyBody = z.object({
+  email: z.string().max(320),
+  code: z.string().max(16),
+  // Plan 12c: a native app's trust token; a browser sends the cookie.
+  trustDevice: z.string().max(64).optional(),
+});
 const resetBody = z.object({
   email: z.string().max(320),
   code: z.string().max(16),
@@ -52,8 +57,11 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
           code: body.value.code,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
         });
-        return r.ok ? signedIn(r.value) : respond(r);
+        if (!r.ok) return respond(r);
+        // A user with the second factor on: the challenge, and no cookie (plan 12c).
+        return "twoFactor" in r.value ? twoFactorJson(r.value) : signedIn(r.value);
       },
     },
   ];

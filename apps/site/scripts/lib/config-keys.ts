@@ -17,6 +17,7 @@ import type {
   OrganizationsConfig,
   PasswordConfig,
   TotpConfig,
+  TotpGateConfig,
 } from "@authtempo/core";
 
 /** One `true` for each key of T, the optional keys too. */
@@ -159,7 +160,13 @@ export const CONFIG_KEYS = {
     trustDays: true,
     trustCookieName: true,
     challengePage: true,
+    gate: true,
   } satisfies Keys<TotpConfig>,
+  "totp.gate": {
+    magicLink: true,
+    emailOtp: true,
+    social: true,
+  } satisfies Keys<TotpGateConfig>,
   jwtMint: {
     alg: true,
     audience: true,

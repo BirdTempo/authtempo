@@ -613,6 +613,7 @@ describe("passwordSignIn", () => {
     expect(r).toMatchObject({ ok: false, code: "invalid_credentials" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     expect(await auth.storage.findMany("password", [])).toEqual([]);
     const sessions = await auth.storage.findMany("session", []);
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);

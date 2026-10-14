@@ -80,6 +80,7 @@ describe("passkeys through the client", () => {
       userAgent: null,
     });
     if (!v.ok) throw new Error(v.code);
+    if (!("token" in v.value)) throw new Error("the sign-in answered a challenge");
     const bearer = v.value.token;
     const native = createClient({
       baseURL: BASE_URL,

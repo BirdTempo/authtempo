@@ -9,13 +9,18 @@ import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
+import { challengePageUrl, trustTokenOf, twoFactorJson } from "../session-answer.js";
 
 const requestBody = z.object({
   email: z.string().max(320),
   next: z.string().max(2048).optional(),
 });
 
-const verifyBody = z.object({ token: z.string().max(64) });
+const verifyBody = z.object({
+  token: z.string().max(64),
+  // Plan 12c: a native app's trust token; a browser sends the cookie.
+  trustDevice: z.string().max(64).optional(),
+});
 
 export function magicLinkRoutes(config: ResolvedConfig): Route[] {
   const verifyPath = `${config.basePath}/magic-link/verify`;
@@ -69,8 +74,15 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
         });
         if (!result.ok) return jsonCaller ? respond(result) : failed(result.code);
+        // A user with the second factor on (plan 12c): no cookie. A form goes
+        // to the challenge page, whose row holds the link's `next`.
+        if ("twoFactor" in result.value)
+          return jsonCaller
+            ? twoFactorJson(result.value)
+            : redirect(challengePageUrl(config, result.value.twoFactor.challenge));
         const maxAge = config.session.ttlDays * 86_400;
         const cookie = sessionCookie(
           config.cookieName,

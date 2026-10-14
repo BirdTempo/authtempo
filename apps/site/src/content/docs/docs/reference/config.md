@@ -180,10 +180,14 @@ Another key of `totp` is refused.
 | --- | --- | --- | --- |
 | `totp.issuer` | string | `appName`, else the host of `baseURL` with no port | 1 to 80 characters, no control character, no colon. A default with a colon is refused. |
 | `totp.backupCodes` | number | 10 | An integer from 5 to 20. |
-| `totp.backupCodeLength` | number | 8 | An integer from 8 to 12. |
+| `totp.backupCodeLength` | number | 23 | An integer from 23 to 32. A code of 23 characters holds 113.9 bits, above the 112 bits of ASVS 5.0 6.5.2. |
 | `totp.trustDays` | number | 30 | An integer from 1 to 365. |
 | `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName`. |
 | `totp.challengePage` | function of `TotpChallengePageInput` | `defaultTotpPage` | Answers the markup of the challenge form. |
+| `totp.gate` | object | all three on | The second factor's gate on the sign-in methods other than the password. Another key is refused. The handoff has no key: it continues a browser session that passed the gate. |
+| `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |
+| `totp.gate.emailOtp` | boolean | `true` | `false` lets the email code sign-in open a session with no second factor. |
+| `totp.gate.social` | boolean | `true` | `false` lets every social provider open a session with no second factor. |
 
 ## JWT minting
 

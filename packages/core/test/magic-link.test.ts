@@ -109,6 +109,7 @@ describe("magic link engine", () => {
     const first = await verifyMagicLink(config, { token, ip: "1.1.1.1", userAgent: "ua" });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
+    if (!("token" in first.value)) throw new Error("the sign-in answered a challenge");
     expect(first.value.next).toBe("/home");
     expect(first.value.user.email).toBe("ada@example.com");
     expect((await resolveSession(config, first.value.token))?.user.id).toBe(first.value.user.id);

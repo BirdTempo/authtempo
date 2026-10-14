@@ -4,9 +4,9 @@ import { constantTimeEqual, hmacSha256Hex, randomToken, sha256Hex } from "../pri
 import { newId } from "../primitives/ids.js";
 import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primitives/totp.js";
 import { fail, ok, type Result } from "../result.js";
-import type { SecondFactorMethod, SecondFactorRow, SessionRow } from "../schema.js";
+import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
-import { endSessions } from "./sessions.js";
+import { endSessions, type PreparedSession, prepareSession, writeSession } from "./sessions.js";
 
 /**
  * The second factor apart from its methods (plan 12c, spec 8.11 and 8.14).
@@ -463,4 +463,91 @@ export async function touchTrust(
     lastSeenAt: now,
     updatedAt: now,
   });
+}
+
+/** What a gated sign-in's resolution writes: a session, or a challenge in its place (plan 12c). */
+export type Opened =
+  | { kind: "session"; token: string; session: SessionRow }
+  | { kind: "challenge"; id: string; pending: TwoFactorPending };
+
+/** A gated sign-in's answer for a user with the factor on: the challenge, the landing path, and the user. */
+export interface SignInChallenge extends TwoFactorPending {
+  next: string;
+  user: UserRow;
+}
+
+/**
+ * The two steps of a gated sign-in (plan 12c): `sessionSteps` of plan 9d
+ * with the gate. `before` runs in the resolution's transaction with the user
+ * as the resolution leaves it, before its first write. It reads the gate;
+ * with no challenge it runs the session hook. `write` writes the session or
+ * the challenge, inside the same transaction, so the challenge commits with
+ * the claim and the identity link. A claimant and a minted user have no
+ * factor row, so they always get a session. A retry calls `before` again, and
+ * the newer reads win. `gate: false` (the method's key is off) skips the reads.
+ */
+export function gatedSteps(
+  config: ResolvedConfig,
+  open: {
+    ip: string | null;
+    userAgent: string | null;
+    via: Exclude<GatedVia, "password">;
+    next: string;
+    trustDevice: string | undefined;
+    gate: boolean;
+  },
+  now: Date,
+): {
+  before(tx: StorageAdapter, user: UserRow): Promise<void>;
+  write(tx: StorageAdapter): Promise<Opened>;
+  trustId(): string | null;
+} {
+  let prepared: PreparedSession | null = null;
+  let gated: { row: SecondFactorRow; userId: string } | null = null;
+  let trustId: string | null = null;
+  return {
+    async before(tx, user) {
+      prepared = null;
+      gated = null;
+      trustId = null;
+      const read: GateRead = open.gate
+        ? await gateRead(config, tx, user.id, open.trustDevice, now)
+        : { gated: false, trustId: null };
+      if (read.gated) {
+        gated = { row: read.row, userId: user.id };
+        return;
+      }
+      trustId = read.trustId;
+      prepared = await prepareSession(
+        config,
+        { user, ip: open.ip, userAgent: open.userAgent, via: open.via },
+        tx,
+      );
+    },
+    async write(tx) {
+      const g = gated;
+      if (g) {
+        const { id, pending } = await writeChallenge(
+          config,
+          tx,
+          g.row,
+          {
+            userId: g.userId,
+            via: open.via,
+            from: "sign-in",
+            ip: open.ip,
+            userAgent: open.userAgent,
+            next: open.next,
+          },
+          now,
+        );
+        return { kind: "challenge", id, pending };
+      }
+      const p = prepared;
+      if (!p) throw new Error("authtempo: the session hook step did not run");
+      const s = await writeSession(config, p, tx);
+      return { kind: "session", token: s.token, session: s.session };
+    },
+    trustId: () => trustId,
+  };
 }

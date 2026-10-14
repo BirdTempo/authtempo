@@ -83,6 +83,7 @@ import {
   verifyPassword,
   verifyPasswordEmail,
 } from "./engine/password.js";
+import type { SignInChallenge } from "./engine/second-factor.js";
 import {
   destroySession,
   type PublicSession,
@@ -224,7 +225,7 @@ export interface TokensApi {
 export interface EmailOtpApi {
   /** A sign-in code. Always `{ sent: true }`, except `rate_limited`. */
   request(input: EmailOtpRequest): Promise<Result<{ sent: true }>>;
-  verify(input: EmailOtpVerify): Promise<Result<EmailOtpSession>>;
+  verify(input: EmailOtpVerify): Promise<Result<EmailOtpSession | TwoFactorPending>>;
   /** A reset code. `not_found` without a `password` config. */
   requestReset(input: EmailOtpRequest): Promise<Result<{ sent: true }>>;
   /** The reset by code. `not_found` without a `password` config. */
@@ -237,11 +238,11 @@ export interface AuthApi {
   requestMagicLink(input: MagicLinkRequest): Promise<Result<{ sent: true }>>;
   verifyMagicLink(
     input: MagicLinkVerify,
-  ): Promise<Result<{ token: string; next: string; user: UserRow }>>;
+  ): Promise<Result<{ token: string; next: string; user: UserRow } | SignInChallenge>>;
   startSocial(input: SocialStart): Promise<Result<SocialStarted>>;
   completeSocial(
     input: SocialComplete,
-  ): Promise<Result<{ token: string; next: string; user: UserRow }>>;
+  ): Promise<Result<{ token: string; next: string; user: UserRow } | SignInChallenge>>;
   passkeyRegistrationOptions(input: {
     user: UserRow;
   }): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;

@@ -446,6 +446,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant.ok).toBe(true);
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok || !claimant.ok) throw new Error("a flow failed");
+    if (!("token" in claimant.value)) throw new Error("the sign-in answered a challenge");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     expect(proved.value.user.id).toBe(userId);
 
     // Exactly the owner's session survives. Nothing older, and nothing the claimant wrote.
@@ -534,6 +536,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const sessions = await auth.storage.findMany("session", [
       { field: "userId", op: "eq", value: userId },
     ]);
@@ -572,6 +575,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const userId = proved.value.user.id;
     expect(
       await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
@@ -617,6 +621,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const userId = proved.value.user.id;
     expect(
       await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
@@ -681,6 +686,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(r).toMatchObject({ ok: false, code: "invalid_token" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const sessions = await auth.storage.findMany("session", [
       { field: "userId", op: "eq", value: user.id },
     ]);
@@ -768,6 +774,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const sessions = await auth.storage.findMany("session", [
       { field: "userId", op: "eq", value: userId },
     ]);
@@ -791,6 +798,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(r).toMatchObject({ ok: false, code: "invalid_token" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const sessions = await auth.storage.findMany("session", [
       { field: "userId", op: "eq", value: user.id },
     ]);
@@ -942,6 +950,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const userId = proved.value.user.id;
     expect(
       await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]),
@@ -998,6 +1007,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "invalid_credentials" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const userId = proved.value.user.id;
     expect(userId).toBe(up.value.user.id);
     expect(
@@ -1155,6 +1165,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(r).toMatchObject({ ok: false, code: "invalid_token" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     expect(await auth.storage.findMany("password", [])).toEqual([]);
     const sessions = await auth.storage.findMany("session", []);
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
@@ -1264,6 +1275,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     const link = await magicLinkToken(auth);
     const ml = await verifyMagicLink(auth.config, { token: link, ip: null, userAgent: null });
     if (!ml.ok) throw new Error(ml.code);
+    if (!("token" in ml.value)) throw new Error("the sign-in answered a challenge");
     const session = await resolveSession(auth.config, ml.value.token);
     if (!session) throw new Error("no session");
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
@@ -1457,6 +1469,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const sessions = await auth.storage.findMany("session", []);
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
     expect(
@@ -1511,6 +1524,7 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const users = await auth.storage.findMany("user", []);
     expect(users.map((u) => [u.id, u.emailVerified])).toEqual([[proved.value.user.id, true]]);
     const sessions = await auth.storage.findMany("session", []);
@@ -1575,6 +1589,7 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const sessions = await auth.storage.findMany("session", []);
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
     expect(await auth.storage.findMany("password", [])).toEqual([]);
@@ -1627,6 +1642,7 @@ describe("an update undo restores only the columns the update set (plan 9 final 
     expect(err).toBe(transient);
     const proved = owner as Awaited<ReturnType<typeof verifyMagicLink>> | null;
     if (!proved?.ok) throw new Error("the owner's verify failed");
+    if (!("token" in proved.value)) throw new Error("the sign-in answered a challenge");
     const users = await auth.storage.findMany("user", []);
     expect(users.map((u) => [u.id, u.emailVerified])).toEqual([[proved.value.user.id, true]]);
     const sessions = await auth.storage.findMany("session", []);

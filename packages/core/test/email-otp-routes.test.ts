@@ -175,7 +175,7 @@ describe("email code routes (plan 9e)", () => {
       ip: null,
       userAgent: null,
     });
-    expect(v?.ok && v.value.user.email).toBe(EMAIL);
+    expect(v?.ok && "user" in v.value && v.value.user.email).toBe(EMAIL);
     expect(await auth.api.emailOtp?.requestReset({ email: EMAIL, ip: null })).toEqual({
       ok: true,
       value: { sent: true },

@@ -25,7 +25,8 @@ import {
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
-import { endedList, sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
+import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
+import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import {
   type BeforeResolveWrite,
   ClaimRacedError,
@@ -67,6 +68,8 @@ export interface SocialComplete {
   bindToken: string | null;
   ip: string | null;
   userAgent: string | null;
+  /** The clear `td_` token of a trusted device (plan 12c). Apple's form post carries no `Lax` cookie; the challenge page offers the device then. */
+  trustDevice?: string | undefined;
 }
 
 interface StateData {
@@ -154,7 +157,7 @@ export async function startSocial(
 export async function completeSocial(
   config: ResolvedConfig,
   input: SocialComplete,
-): Promise<Result<{ token: string; next: string; user: UserRow }>> {
+): Promise<Result<{ token: string; next: string; user: UserRow } | SignInChallenge>> {
   const entry = findProvider(config, input.provider);
   if (!entry) return fail("not_found");
   const state = input.state ?? "";
@@ -200,11 +203,27 @@ export async function completeSocial(
   const bounded = profile ? boundProfile(profile, provider.name) : null;
   if (!bounded) return fail("oauth_failed");
 
-  // The session commits with the claim in one transaction, so a claimant's
-  // in-flight callback cannot keep a session the claim deleted.
+  // The session or the challenge commits with the claim in one transaction,
+  // so a claimant's in-flight callback cannot keep a session the claim deleted.
   const ended = endedList(config);
-  // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
-  const steps = sessionSteps(config, { ip: input.ip, userAgent: input.userAgent, via: "social" });
+  const next = safeNext(data.next);
+  // The hook runs before the resolution's first write, for the D1 undo (see
+  // `insertSignUp` in password.ts). A user with the second factor on gets a
+  // challenge in place of the session (plan 12c). A new identity of a
+  // verified user commits with the challenge: the link alone opens nothing,
+  // and a later sign-in through it meets the gate again (spec 9).
+  const steps = gatedSteps(
+    config,
+    {
+      ip: input.ip,
+      userAgent: input.userAgent,
+      via: "social",
+      next,
+      trustDevice: input.trustDevice,
+      gate: config.totp?.gate.social ?? false,
+    },
+    now,
+  );
   const resolved = await hookGuard(() =>
     resolveSocialUser(
       config.storage,
@@ -219,8 +238,10 @@ export async function completeSocial(
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
   await sessionsEnded(config, ended, "claim");
+  if (after.kind === "challenge") return ok({ ...after.pending, next, user });
+  await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "social");
-  return ok({ token: after.token, next: safeNext(data.next), user });
+  return ok({ token: after.token, next, user });
 }
 
 /**
@@ -414,7 +435,7 @@ export function resolveSocialUser(
   profile: SocialProfile,
   now: Date,
 ): Promise<Result<UserRow>>;
-export function resolveSocialUser<T extends AfterSession>(
+export function resolveSocialUser<T extends AfterWrite>(
   storage: StorageAdapter,
   provider: string,
   profile: SocialProfile,
@@ -423,7 +444,7 @@ export function resolveSocialUser<T extends AfterSession>(
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
 ): Promise<Result<{ user: UserRow; after: T }>>;
-export async function resolveSocialUser<T extends AfterSession>(
+export async function resolveSocialUser<T extends AfterWrite>(
   storage: StorageAdapter,
   provider: string,
   profile: SocialProfile,
@@ -466,7 +487,11 @@ export async function resolveSocialUser<T extends AfterSession>(
             // it, and a later claim deletes the identity and the session.
             // Checked 2026-10-10.
             if (!(await userStillUnverified(tx, user.id, now))) {
-              await tx.delete("session", [{ field: "id", op: "eq", value: value.session.id }]);
+              // The row that `after` wrote. A created user has no factor, so
+              // it is a session; the challenge branch keeps the rule whole.
+              if (value.kind === "session")
+                await tx.delete("session", [{ field: "id", op: "eq", value: value.session.id }]);
+              else await tx.delete("verification", [{ field: "id", op: "eq", value: value.id }]);
               await tx.delete("identity", [{ field: "id", op: "eq", value: trustedIdentityId }]);
               return fail<never>("email_taken_unverified");
             }
@@ -497,10 +522,8 @@ interface Linked {
   created: boolean;
 }
 
-/** The part of the `after` result that the new-user guard deletes. */
-interface AfterSession {
-  session: { id: string };
-}
+/** The part of the `after` result that the new-user guard deletes: the session or the challenge that `after` wrote (plan 12c). */
+type AfterWrite = { kind: "session"; session: { id: string } } | { kind: "challenge"; id: string };
 
 /** Runs inside the caller's transaction. */
 async function linkInTransaction(

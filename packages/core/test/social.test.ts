@@ -126,6 +126,7 @@ describe("completeSocial", () => {
     const r = await complete(auth, s);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    if (!("token" in r.value)) throw new Error("the sign-in answered a challenge");
     expect(r.value.next).toBe("/home");
     expect(r.value.user).toMatchObject({
       email: "ada@example.com",

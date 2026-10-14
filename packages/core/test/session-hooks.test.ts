@@ -315,6 +315,7 @@ describe("session create hooks (plan 9d)", () => {
       userAgent: null,
     });
     if (!s.ok) throw new Error(s.code);
+    if (!("token" in s.value)) throw new Error("the sign-in answered a challenge");
     await check(social, "social", s.value.token);
 
     // Passkey.

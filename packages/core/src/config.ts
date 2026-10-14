@@ -252,6 +252,25 @@ export interface ResolvedEmailOtp {
   resetMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
+/**
+ * The second factor's gate on the sign-in methods other than the password
+ * (plan 12c, owner decision 2 of 2026-10-14). Each key is on by default: a
+ * person who turns the factor on expects it on every pathway (ASVS 5.0
+ * 6.3.4). `false` lets that method open a session with no second factor.
+ * The password sign-in and the reset are always gated. The passkey needs no
+ * key: every ceremony requires user verification, so it is two factors by
+ * itself. The handoff has no key: it continues a browser session that passed
+ * the gate.
+ */
+export interface TotpGateConfig {
+  /** The magic link. Default true. */
+  magicLink?: boolean;
+  /** The email code sign-in. Default true. */
+  emailOtp?: boolean;
+  /** Every social provider. Default true. */
+  social?: boolean;
+}
+
 export interface TotpConfig {
   /**
    * The issuer that an authenticator app shows: 1 to 80 characters, no
@@ -276,6 +295,8 @@ export interface TotpConfig {
   trustCookieName?: string;
   /** The HTML of the challenge page. Default `defaultTotpPage`. */
   challengePage?: (input: TotpChallengePageInput) => string;
+  /** The gate on the magic link, the email code, and social. Each is on by default (plan 12c). */
+  gate?: TotpGateConfig;
 }
 
 export interface ResolvedTotp {
@@ -285,6 +306,7 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
+  gate: { magicLink: boolean; emailOtp: boolean; social: boolean };
 }
 
 export interface JwtMintConfig {
@@ -847,7 +869,33 @@ const TOTP_KEYS: Readonly<Record<keyof TotpConfig, true>> = {
   trustDays: true,
   trustCookieName: true,
   challengePage: true,
+  gate: true,
 };
+
+const TOTP_GATE_KEYS: Readonly<Record<keyof TotpGateConfig, true>> = {
+  magicLink: true,
+  emailOtp: true,
+  social: true,
+};
+
+/** `totp.gate` (plan 12c): each method on unless the app sets it false. */
+function resolveGate(input: unknown): ResolvedTotp["gate"] {
+  const gate = { magicLink: true, emailOtp: true, social: true };
+  if (input === undefined) return gate;
+  if (!isPlainObject(input)) throw new ConfigError("totp.gate must be an object");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(TOTP_GATE_KEYS, key))
+      throw new ConfigError(
+        `totp.gate.${key} is not an option; core has magicLink, emailOtp, and social. The handoff has no key: it continues a browser session that passed the gate`,
+      );
+  for (const key of ["magicLink", "emailOtp", "social"] as const) {
+    const value = (input as TotpGateConfig)[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") throw new ConfigError(`totp.gate.${key} must be true or false`);
+    gate[key] = value;
+  }
+  return gate;
+}
 const COOKIE_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 /** `totp` (plan 9f). Absent: on with the defaults when `password` is set. `false`: off. */
@@ -871,7 +919,7 @@ function resolveTotp(
   for (const [key, value] of Object.entries(o))
     if (value !== undefined && !Object.hasOwn(TOTP_KEYS, key))
       throw new ConfigError(
-        `totp.${key} is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, and challengePage`,
+        `totp.${key} is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, challengePage, and gate`,
       );
   const { issuer } = o;
   if (
@@ -926,6 +974,7 @@ function resolveTotp(
     trustDays,
     trustCookieName,
     challengePage: o.challengePage ?? defaultTotpPage,
+    gate: resolveGate(o.gate),
   };
 }
 

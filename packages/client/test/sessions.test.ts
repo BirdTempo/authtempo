@@ -60,5 +60,6 @@ async function bearerFor(server: ReturnType<typeof makeServer>, email: string): 
   const token = tokenFromMail(server.mail.at(-1)?.text ?? "");
   const v = await server.auth.api.verifyMagicLink({ token, ip: null, userAgent: null });
   if (!v.ok) throw new Error(v.code);
+  if (!("token" in v.value)) throw new Error("the sign-in answered a challenge");
   return v.value.token;
 }

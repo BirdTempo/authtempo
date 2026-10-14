@@ -5,6 +5,7 @@ import { readBody } from "../body.js";
 import { clearOauthCookie, oauthCookie, readCookie, sessionCookie } from "../cookies.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
+import { challengePageUrl, trustTokenOf } from "../session-answer.js";
 
 const BIND_MAX_AGE_SECONDS = 600;
 
@@ -69,8 +70,19 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           bindToken: readCookie(ctx.request, bindName),
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          // A GET callback is a top-level navigation, so a Lax trust cookie
+          // comes with it. Apple's cross-site form post carries none; the
+          // challenge page then offers the trusted device (plan 12c).
+          trustDevice: trustTokenOf(config, ctx.request, undefined),
         });
         if (!r.ok) return failed(r.code);
+        if ("twoFactor" in r.value) {
+          // A user with the second factor on (plan 12c): no session cookie.
+          // The state is spent, so the binding cookie goes.
+          const res = redirect(challengePageUrl(config, r.value.twoFactor.challenge));
+          res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
+          return res;
+        }
         const res = redirect(resolveNext(config, r.value.next));
         res.headers.append(
           "set-cookie",

@@ -101,17 +101,17 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Area | Types |
 | --- | --- |
 | The auth object | `Auth`, `AuthApi`, `Caller`, `Result`, `Awaitable`, `PublicSession`, `ResolvedSession`, `ResolvedApiToken`, `SweepResult`, `Clock` |
-| Config | `AuthConfig`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `TotpConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `HooksConfig` |
+| Config | `AuthConfig`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `TotpConfig`, `TotpGateConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `HooksConfig` |
 | Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
-| Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow` |
+| Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `SecondFactorRow`, `SecondFactorMethod`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow` |
 | Errors | `ErrorCode`, `OAuthErrorCode` |
 | Pages and mails | `ConfirmPageInput`, `SignInPageInput`, `HandoffConfirmPageInput`, `ResetPageInput`, `PasswordVerifyPageInput`, `TotpChallengePageInput`, `ConsentPageInput`, `EmailOtpMailInput` |
 | Magic link and social | `MagicLinkRequest`, `MagicLinkVerify`, `SocialStart`, `SocialStarted`, `SocialComplete`, `SocialProfile`, `SocialProviderName` |
 | Passkeys | `PasskeySummary`, `RegisteredPasskey`, `AuthenticatedPasskey`, `PublicKeyCredentialCreationOptionsJSON`, `PublicKeyCredentialRequestOptionsJSON`, `RegistrationResponseJSON`, `AuthenticationResponseJSON` |
 | Handoff | `HandoffStart` |
-| Passwords | `PasswordApi`, `PasswordSignUp`, `PasswordSignIn`, `PasswordSignInResult`, `PasswordSession`, `PasswordVerify`, `PasswordVerified`, `PasswordResend`, `PasswordResetRequest`, `PasswordReset`, `PasswordChange`, `PasswordReauth` |
+| Passwords | `PasswordApi`, `PasswordSignUp`, `PasswordSignIn`, `PasswordSignInResult`, `PasswordSession`, `PasswordVerify`, `PasswordVerified`, `PasswordResend`, `PasswordResetRequest`, `PasswordReset`, `ResetResult`, `ResetChallenge`, `PasswordChange`, `PasswordReauth` |
 | Email codes | `EmailOtpApi`, `EmailOtpRequest`, `EmailOtpVerify`, `EmailOtpReset`, `EmailOtpSession`, `ResolvedEmailOtp` |
-| Second factor | `TotpApi`, `TotpSetup`, `TotpSetupInput`, `TotpStatus`, `TwoFactorPending`, `TwoFactorSession`, `TwoFactorVerify` |
+| Second factor | `TotpApi`, `TotpSetup`, `TotpSetupInput`, `TotpStatus`, `TwoFactorPending`, `TwoFactorSession`, `TwoFactorVerify`, `ChallengeMethod`, `SignInChallenge` |
 | API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthAccess`, `OAuthGrantSummary` |
 | Organizations | `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |

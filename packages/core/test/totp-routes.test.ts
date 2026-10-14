@@ -441,3 +441,44 @@ describe("the reset gate on the routes (plan 12c)", () => {
     expect(cookieNamed(res, "tempo_session")).toMatch(/^tempo_session=ts_/);
   });
 });
+
+describe("the gated sign-ins on the routes (plan 12c)", () => {
+  async function magicToken(h: Handle): Promise<string> {
+    await h.auth.handle(post("/auth/magic-link/request", { email: EMAIL, next: "/inbox" }));
+    const token = h.mails.findLast((m) => m.to === EMAIL && m.subject.startsWith("Sign in"))?.token;
+    if (!token) throw new Error("no magic link");
+    return token;
+  }
+
+  it("answers the magic link form with 302 to the challenge page and no cookie, and JSON with the challenge", async () => {
+    const h = pwHandle({ hash: FAST });
+    await enrolled(h, await verifiedUser(h));
+    const res = await h.auth.handle(
+      form("/auth/magic-link/verify", `token=${await magicToken(h)}`),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toMatch(
+      new RegExp(`^${BASE_URL}/auth/totp/challenge\\?challenge=tf_`),
+    );
+    expect(res.headers.get("set-cookie")).toBeNull();
+    const json = await h.auth.handle(
+      post("/auth/magic-link/verify", { token: await magicToken(h) }),
+    );
+    expect(json.status).toBe(200);
+    expect(json.headers.get("set-cookie")).toBeNull();
+    expect(((await json.json()) as { twoFactor: { methods: string[] } }).twoFactor.methods).toEqual(
+      ["totp", "backup"],
+    );
+  });
+
+  it("answers the email code verify with the challenge and no cookie", async () => {
+    const h = pwHandle({ hash: FAST });
+    await enrolled(h, await verifiedUser(h));
+    await h.auth.handle(post("/auth/otp/request", { email: EMAIL }));
+    const code = /\b(\d{6})\b/.exec(h.mails.at(-1)?.text ?? "")?.[1] ?? "";
+    const res = await h.auth.handle(post("/auth/otp/verify", { email: EMAIL, code }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(((await res.json()) as { twoFactor?: unknown }).twoFactor).toBeDefined();
+  });
+});

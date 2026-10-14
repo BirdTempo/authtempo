@@ -176,6 +176,7 @@ describe("email code verify (plan 9e)", () => {
     const code = await request(auth);
     const v = await verify(auth, code);
     if (!v.ok) throw new Error(v.code);
+    if (!("token" in v.value)) throw new Error("the sign-in answered a challenge");
     expect(v.value.user).toMatchObject({ email: EMAIL, emailVerified: true });
     expect((await resolveSession(auth.config, v.value.token))?.session.id).toBe(v.value.session.id);
     expect(await verify(auth, code)).toEqual({ ok: false, code: "invalid_code", status: 400 });
@@ -367,6 +368,7 @@ describe("email code verify (plan 9e)", () => {
     if (!up.ok) throw new Error(up.code);
     const v = await verify(auth, await request(auth));
     if (!v.ok) throw new Error(v.code);
+    if (!("token" in v.value)) throw new Error("the sign-in answered a challenge");
     expect(v.value.user).toMatchObject({ id: up.value.user.id, emailVerified: true });
     expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
       v.value.session.id,

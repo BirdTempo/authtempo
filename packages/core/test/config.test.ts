@@ -623,7 +623,7 @@ describe("totp (plan 9f)", () => {
       [{ challengePage: "html" }, "totp.challengePage must be a function"],
       [
         { digits: 8 },
-        "totp.digits is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, and challengePage",
+        "totp.digits is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, challengePage, and gate",
       ],
       [true, "totp must be an object or false"],
     ];
@@ -631,6 +631,26 @@ describe("totp (plan 9f)", () => {
       expect(() => resolveConfig({ ...pw, totp: totp as never })).toThrowError(message);
     expect(() => resolveConfig({ ...base, totp: {} })).toThrowError(
       "totp needs a password config: the enable of each method proves the password",
+    );
+  });
+
+  it("turns the gate on for the magic link, the email code, and social by default, takes false per method, and refuses another key (plan 12c)", () => {
+    expect(resolveConfig(pw).totp?.gate).toEqual({ magicLink: true, emailOtp: true, social: true });
+    expect(resolveConfig({ ...pw, totp: { gate: { social: false } } }).totp?.gate).toEqual({
+      magicLink: true,
+      emailOtp: true,
+      social: false,
+    });
+    expect(() =>
+      resolveConfig({ ...pw, totp: { gate: { handoff: false } as never } }),
+    ).toThrowError(
+      "totp.gate.handoff is not an option; core has magicLink, emailOtp, and social. The handoff has no key: it continues a browser session that passed the gate",
+    );
+    expect(() => resolveConfig({ ...pw, totp: { gate: { social: "no" } as never } })).toThrowError(
+      "totp.gate.social must be true or false",
+    );
+    expect(() => resolveConfig({ ...pw, totp: { gate: true as never } })).toThrowError(
+      "totp.gate must be an object",
     );
   });
 });
