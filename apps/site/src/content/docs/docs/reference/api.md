@@ -65,7 +65,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `systemClock` | The clock of the system. |
 | `schema` | The models and the fields of the storage port. |
 | `defaultConfirmPage`, `defaultSignInPage`, `defaultHandoffConfirmPage`, `defaultResetPage`, `defaultPasswordVerifyPage`, `defaultTotpPage`, `defaultConsentPage` | The default pages. [Replace the default pages](/docs/guides/pages/) tells how to replace one. |
-| `defaultEmailOtpMail`, `defaultResetOtpMail` | The default mails of the email codes. |
+| `defaultEmailOtpMail`, `defaultResetOtpMail`, `defaultSecondFactorMail` | The default mails of the email codes. `defaultSecondFactorMail` is the mail of a second-factor email code. |
 | `limiterKey` | Joins a key, the seconds, and the maximum into the stored key of the owned limiters. |
 | `normalizeEmail`, `normalizeSlug` | The address rule and the slug rule of core. |
 | `validOrganizationName`, `validUserName` | The name rules of core. |

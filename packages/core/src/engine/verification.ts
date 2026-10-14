@@ -123,3 +123,11 @@ export async function countAttempt(
   console.error(`authtempo: ${kind} count gave up`, row.id);
   return "invalid_code";
 }
+
+/**
+ * Per 24 hours per address, for every mailed code: the email code sign-in
+ * and the reset code (plan 9e final fix wave), and the second-factor email
+ * code (plan 12c). One key, `otp:email-day:<email>`, is one budget: one
+ * address gets at most 20 code mails a day, whatever the purpose.
+ */
+export const MAILED_CODES_PER_EMAIL_DAY = { seconds: 86_400, max: 20 };

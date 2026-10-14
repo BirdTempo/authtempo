@@ -37,6 +37,7 @@ export type {
 export {
   defaultEmailOtpMail,
   defaultResetOtpMail,
+  defaultSecondFactorMail,
   type EmailOtpMailInput,
 } from "./engine/email-otp-mail.js";
 export type { HandoffStart } from "./engine/handoff.js";

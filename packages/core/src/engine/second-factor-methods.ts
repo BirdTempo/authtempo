@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
-import { sha256Hex } from "../primitives/crypto.js";
+import { constantTimeEqual, hmacSha256Hex, randomDigits, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
@@ -17,12 +17,14 @@ import {
   challengeOrigin,
   FactorRaceError,
   factorRow,
+  later,
   newBackupCodes,
   removeMethod,
   SETUP_PER_USER,
   TWO_FACTOR_TOKEN_RE,
 } from "./second-factor.js";
 import { endedList, type ResolvedSession, sessionsEnded } from "./sessions.js";
+import { MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
  * The second-factor methods beside TOTP (plan 12c, spec 8.14): a passkey and
@@ -34,6 +36,23 @@ import { endedList, type ResolvedSession, sessionsEnded } from "./sessions.js";
 // Per 15 minutes per IP, for the passkey options of a challenge. The same
 // budget as the passkey sign-in options (`passkey-options:ip`, plan 4).
 const PASSKEY_OPTIONS_PER_IP = { seconds: 900, max: 30 };
+// Per 15 minutes per user, for the second-factor code mails over all
+// challenges: a person with the password must not fill the mailbox.
+const EMAIL_SENDS_PER_USER = { seconds: 900, max: 5 };
+// The mails of one challenge. A new send replaces the code, so one code is
+// live per challenge; 3 covers a slow mail and a typo.
+const SENDS_PER_CHALLENGE = 3;
+// The digits of the code: one guess passes with 10^-6. With the per-user
+// code keys (30 a day) one account admits about 3 x 10^-5 per day and about
+// 1.1 % per year to a person with the password and not the mailbox.
+const EMAIL_CODE_DIGITS = 6;
+/** The compare's stored value when no code was sent: the same HMAC and compare run. */
+const NO_HASH = "0".repeat(64);
+
+/** The stored value of a second-factor email code: HMAC-SHA256 under the app secret of `<challenge row id>:<code>`. */
+function emailCodeHash(secret: string, challengeId: string, code: string): Promise<string> {
+  return hmacSha256Hex(secret, `${challengeId}:${code}`);
+}
 
 /** A method's enable: the methods that are on, and the backup codes, answered once for the first method (else empty). */
 export interface MethodEnabled {
@@ -218,4 +237,101 @@ export function acceptPasskey(
     challengeId: challenge.id,
     response,
   });
+}
+
+/**
+ * Turns the email method on (plan 12c). Needs a verified address and the
+ * password; the address is the user's own, so the enable sends no code. An
+ * email code proves the mailbox, which a reset also proves: for a user whose
+ * only method is the email code, a person who holds the mailbox resets the
+ * password and passes the code. The docs say so beside the enable.
+ */
+export async function enableEmailMethod(
+  config: ResolvedConfig,
+  input: { session: ResolvedSession; password: string },
+): Promise<Result<MethodEnabled>> {
+  if (!config.totp) return fail("not_found");
+  const { user } = input.session;
+  if (!user.emailVerified) return fail("email_unverified");
+  const proved = await provePassword(config, user.id, input.password);
+  if (!proved.ok) return proved;
+  return enableMethod(config, input.session, "email");
+}
+
+/**
+ * Mails a 6-digit code bound to one challenge (plan 12c, ASVS 5.0 6.6.2).
+ * The challenge must offer `email`: a password sign-in only (owner decision
+ * 4). The order of the checks: the challenge, the method, the per-challenge
+ * cap of 3, then the per-user key and the shared daily key of the address,
+ * so a refused send costs no budget. The code's keyed hash replaces the last
+ * one in the challenge's `data` by a compare-and-set on `updatedAt`; the
+ * mail goes after the write, never inside a transaction.
+ */
+export async function sendSecondFactorEmail(
+  config: ResolvedConfig,
+  input: { challenge: string },
+): Promise<Result<{ sent: true }>> {
+  const totp = config.totp;
+  if (!totp) return fail("not_found");
+  const now = config.clock.now();
+  const live = await liveChallenge(config, input.challenge, now);
+  if (!live.ok) return live;
+  const { row, factor } = live.value;
+  if (!challengeMethods(config, factor, challengeOrigin(row.data)).includes("email"))
+    return fail("invalid_body");
+  const data: Record<string, unknown> = { ...(row.data ?? {}) };
+  const sends = typeof data.emailSends === "number" ? data.emailSends : 0;
+  if (sends >= SENDS_PER_CHALLENGE) return fail("rate_limited");
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: row.identifier },
+  ]);
+  if (!user) return fail("invalid_token");
+  if (!(await config.limiter.allow(`second-factor-email:user:${user.id}`, EMAIL_SENDS_PER_USER)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`otp:email-day:${user.email}`, MAILED_CODES_PER_EMAIL_DAY)))
+    return fail("rate_limited");
+  const code = randomDigits(EMAIL_CODE_DIGITS);
+  // One compare-and-set on the challenge row: a parallel send or a counted
+  // guess that wrote first makes this match zero rows. `countAttempt` keeps
+  // the other keys of `data`, so a guess never drops the code.
+  const n = await config.storage.update(
+    "verification",
+    [
+      { field: "id", op: "eq", value: row.id },
+      { field: "consumedAt", op: "eq", value: null },
+      { field: "updatedAt", op: "eq", value: row.updatedAt },
+    ],
+    {
+      data: {
+        ...data,
+        emailCodeHash: await emailCodeHash(config.secret, row.id, code),
+        emailSends: sends + 1,
+        emailSentAt: now.toISOString(),
+      },
+      updatedAt: later(now, row.updatedAt),
+    },
+  );
+  if (n === 0) return fail("conflict");
+  // The code lives with its challenge: at most 5 minutes (ASVS 5.0 6.5.5 allows 10).
+  const ttlMinutes = Math.max(1, Math.ceil((row.expiresAt.getTime() - now.getTime()) / 60_000));
+  const message = totp.emailMail({ email: user.email, code, ttlMinutes, appName: config.appName });
+  // To the user's address, whatever the builder wrote, as the email code sign-in does.
+  await config.mail.send({ ...message, to: user.email });
+  return ok({ sent: true });
+}
+
+/**
+ * True for the code of this challenge's last send (plan 12c). One HMAC and
+ * one compare on every path. The code passes once: the verify spends the
+ * challenge as the last statement of its session transaction.
+ */
+export async function acceptEmailCode(
+  config: ResolvedConfig,
+  challenge: VerificationRow,
+  code: string,
+): Promise<boolean> {
+  const stored = (challenge.data as { emailCodeHash?: unknown } | null)?.emailCodeHash;
+  const candidate = await emailCodeHash(config.secret, challenge.id, code.replace(/\s/g, ""));
+  const right = constantTimeEqual(candidate, typeof stored === "string" ? stored : NO_HASH);
+  return typeof stored === "string" && right;
 }

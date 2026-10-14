@@ -161,6 +161,7 @@ export const CONFIG_KEYS = {
     trustCookieName: true,
     challengePage: true,
     gate: true,
+    emailMail: true,
   } satisfies Keys<TotpConfig>,
   "totp.gate": {
     magicLink: true,

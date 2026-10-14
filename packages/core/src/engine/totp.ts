@@ -35,7 +35,7 @@ import {
   type TwoFactorPending,
   writeChallenge,
 } from "./second-factor.js";
-import { acceptPasskey } from "./second-factor-methods.js";
+import { acceptEmailCode, acceptPasskey } from "./second-factor-methods.js";
 import {
   endedList,
   openSession,
@@ -505,9 +505,11 @@ const VERIFY_PER_IP = { seconds: 900, max: 30 };
 
 export interface TwoFactorVerify {
   challenge: string;
-  /** A 6-digit code of the app. Exactly one of `code`, `backupCode`, and `passkey`. */
+  /** A 6-digit code of the app. Exactly one of `code`, `backupCode`, `emailCode`, and `passkey`. */
   code?: string | undefined;
   backupCode?: string | undefined;
+  /** The code of `POST /second-factor/email/send` for this challenge (plan 12c). After a password sign-in only. */
+  emailCode?: string | undefined;
   /** A WebAuthn assertion over the options of `POST /second-factor/passkey/options` for this challenge (plan 12c). */
   passkey?: unknown;
   /** True: write a trusted device and answer its token. */
@@ -519,6 +521,7 @@ export interface TwoFactorVerify {
 type Proof =
   | { method: "totp"; value: string }
   | { method: "backup"; value: string }
+  | { method: "email"; value: string }
   | { method: "passkey"; value: unknown };
 
 /** The one proof of a verify, or null for none or for more than one. */
@@ -526,6 +529,7 @@ function proofOf(input: TwoFactorVerify): Proof | null {
   const proofs: Proof[] = [];
   if (input.code !== undefined) proofs.push({ method: "totp", value: input.code });
   if (input.backupCode !== undefined) proofs.push({ method: "backup", value: input.backupCode });
+  if (input.emailCode !== undefined) proofs.push({ method: "email", value: input.emailCode });
   if (input.passkey !== undefined) proofs.push({ method: "passkey", value: input.passkey });
   return proofs.length === 1 ? (proofs[0] ?? null) : null;
 }
@@ -684,6 +688,8 @@ export async function verifyTwoFactor(
     const left = await spendBackupCode(config, factor, proof.value, now);
     if (left === null) return miss();
     backupCodesLeft = left;
+  } else if (proof.method === "email") {
+    if (!(await acceptEmailCode(config, challenge, proof.value))) return miss();
   } else if (!(await acceptPasskey(config, challenge, proof.value))) return miss();
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: challenge.identifier },

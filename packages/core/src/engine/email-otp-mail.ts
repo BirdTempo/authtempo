@@ -30,3 +30,12 @@ export function defaultResetOtpMail(input: EmailOtpMailInput): MailMessage {
     text: `Your password reset code for ${input.appName} is ${input.code}. It is valid for ${minutesText(input.ttlMinutes)}.`,
   };
 }
+
+/** The default mail of a second-factor email code (plan 12c). `totp.emailMail` replaces it. */
+export function defaultSecondFactorMail(input: EmailOtpMailInput): MailMessage {
+  return {
+    to: input.email,
+    subject: `Your sign-in code for ${input.appName}`,
+    text: `Your second-factor code for ${input.appName} is ${input.code}. It is valid for ${minutesText(input.ttlMinutes)}. If you did not sign in just now, change your password.`,
+  };
+}

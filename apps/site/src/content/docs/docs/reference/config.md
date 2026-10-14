@@ -188,6 +188,7 @@ Another key of `totp` is refused.
 | `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |
 | `totp.gate.emailOtp` | boolean | `true` | `false` lets the email code sign-in open a session with no second factor. |
 | `totp.gate.social` | boolean | `true` | `false` lets every social provider open a session with no second factor. |
+| `totp.emailMail` | function of `EmailOtpMailInput` | `defaultSecondFactorMail` | Answers the mail of a second-factor email code. Core sends it to the user's address. |
 
 ## JWT minting
 

@@ -32,6 +32,7 @@ const verifyBody = z.object({
   challenge: z.string().max(64),
   code: z.string().max(16).optional(),
   backupCode: z.string().max(64).optional(),
+  emailCode: z.string().max(16).optional(),
   // Plan 12c: a WebAuthn assertion; the engine reads only the fields that the seam checks.
   passkey: z.unknown().optional(),
   trustDevice: z.boolean().optional(),

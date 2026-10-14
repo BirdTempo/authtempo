@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
-import { defaultEmailOtpMail, defaultResetOtpMail } from "../src/engine/email-otp-mail.js";
+import {
+  defaultEmailOtpMail,
+  defaultResetOtpMail,
+  defaultSecondFactorMail,
+} from "../src/engine/email-otp-mail.js";
 import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultConsentPage } from "../src/http/consent-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
@@ -623,7 +627,7 @@ describe("totp (plan 9f)", () => {
       [{ challengePage: "html" }, "totp.challengePage must be a function"],
       [
         { digits: 8 },
-        "totp.digits is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, challengePage, and gate",
+        "totp.digits is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, challengePage, gate, and emailMail",
       ],
       [true, "totp must be an object or false"],
     ];
@@ -651,6 +655,13 @@ describe("totp (plan 9f)", () => {
     );
     expect(() => resolveConfig({ ...pw, totp: { gate: true as never } })).toThrowError(
       "totp.gate must be an object",
+    );
+  });
+
+  it("takes emailMail as a function and refuses another value (plan 12c)", () => {
+    expect(resolveConfig(pw).totp?.emailMail).toBe(defaultSecondFactorMail);
+    expect(() => resolveConfig({ ...pw, totp: { emailMail: "x" as never } })).toThrowError(
+      "totp.emailMail must be a function",
     );
   });
 });

@@ -2,8 +2,10 @@ import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import {
   disableMethod,
+  enableEmailMethod,
   enablePasskeyMethod,
   passkeyChallengeOptions,
+  sendSecondFactorEmail,
 } from "../../engine/second-factor-methods.js";
 import {
   type ResolvedSession,
@@ -16,6 +18,7 @@ import type { Route, RouteContext } from "../router.js";
 
 /** The sign-in's length bound applies in `checkUserPassword`; this cap only bounds the body. */
 const passwordField = z.string().max(1024);
+const passwordBody = z.object({ password: passwordField });
 const passkeyEnableBody = z.object({ password: passwordField, response: z.unknown() });
 const disableBody = z.object({ method: z.enum(["passkey", "email"]), password: passwordField });
 const challengeBody = z.object({ challenge: z.string().max(64) });
@@ -93,6 +96,30 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
             clearTrustCookie(totp.trustCookieName, trustPath, config.cookie.sameSite),
           );
         return send(res, s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/second-factor/email/enable",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const body = await readJson(ctx.request, passwordBody);
+        if (!body.ok) return send(respond(body), s.renewed);
+        const r = await enableEmailMethod(config, {
+          session: s.resolved,
+          password: body.value.password,
+        });
+        return send(respond(r), s.renewed);
+      },
+    },
+    {
+      method: "POST",
+      path: "/second-factor/email/send",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, challengeBody);
+        if (!body.ok) return respond(body);
+        return respond(await sendSecondFactorEmail(config, { challenge: body.value.challenge }));
       },
     },
   ];

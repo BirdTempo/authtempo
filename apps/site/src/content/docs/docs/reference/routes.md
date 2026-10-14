@@ -313,7 +313,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ challenge, code }` or `{ challenge, backupCode }`, and `trustDevice?` |
+| Input | JSON `{ challenge }` with one of `code`, `backupCode`, `emailCode`, or `passkey`, and `trustDevice?` |
 | Answer | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
@@ -361,6 +361,24 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Input | JSON `{ method, password }`, where `method` is `passkey` or `email` |
 | Answer | `{ ok: true, methods }`, the methods left. With none left, the factor is off and the trust cookie is cleared. |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-second-factor-email-enable"><code>POST /second-factor/email/enable</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session and a verified address |
+| Input | JSON `{ password }` |
+| Answer | `{ methods, backupCodes }`. The codes come once, with the first method; else the list is empty. The first method ends every other session. |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-second-factor-email-send"><code>POST /second-factor/email/send</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A live challenge of a password sign-in that offers `email` |
+| Input | JSON `{ challenge }` |
+| Answer | `{ sent: true }`. A 6-digit code goes to the user's address. It lives with the challenge, and a new send replaces it. |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## Email codes
 

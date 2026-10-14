@@ -1,6 +1,7 @@
 import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
+  defaultSecondFactorMail,
   type EmailOtpMailInput,
 } from "./engine/email-otp-mail.js";
 import {
@@ -297,6 +298,11 @@ export interface TotpConfig {
   challengePage?: (input: TotpChallengePageInput) => string;
   /** The gate on the magic link, the email code, and social. Each is on by default (plan 12c). */
   gate?: TotpGateConfig;
+  /**
+   * The mail of a second-factor email code (plan 12c). Core sends it to the
+   * user's address, whatever `to` it answers. Default `defaultSecondFactorMail`.
+   */
+  emailMail?: (input: EmailOtpMailInput) => MailMessage;
 }
 
 export interface ResolvedTotp {
@@ -307,6 +313,7 @@ export interface ResolvedTotp {
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
   gate: { magicLink: boolean; emailOtp: boolean; social: boolean };
+  emailMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
 export interface JwtMintConfig {
@@ -870,6 +877,7 @@ const TOTP_KEYS: Readonly<Record<keyof TotpConfig, true>> = {
   trustCookieName: true,
   challengePage: true,
   gate: true,
+  emailMail: true,
 };
 
 const TOTP_GATE_KEYS: Readonly<Record<keyof TotpGateConfig, true>> = {
@@ -919,7 +927,7 @@ function resolveTotp(
   for (const [key, value] of Object.entries(o))
     if (value !== undefined && !Object.hasOwn(TOTP_KEYS, key))
       throw new ConfigError(
-        `totp.${key} is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, challengePage, and gate`,
+        `totp.${key} is not an option; core has issuer, backupCodes, backupCodeLength, trustDays, trustCookieName, challengePage, gate, and emailMail`,
       );
   const { issuer } = o;
   if (
@@ -965,6 +973,8 @@ function resolveTotp(
     );
   if (o.challengePage !== undefined && typeof o.challengePage !== "function")
     throw new ConfigError("totp.challengePage must be a function");
+  if (o.emailMail !== undefined && typeof o.emailMail !== "function")
+    throw new ConfigError("totp.emailMail must be a function");
   return {
     // The default has no port (review M-2): the Key URI Format reads a colon,
     // also as %3A, as the split between the issuer and the account.
@@ -975,6 +985,7 @@ function resolveTotp(
     trustCookieName,
     challengePage: o.challengePage ?? defaultTotpPage,
     gate: resolveGate(o.gate),
+    emailMail: o.emailMail ?? defaultSecondFactorMail,
   };
 }
 

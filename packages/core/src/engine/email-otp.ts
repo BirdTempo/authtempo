@@ -9,7 +9,7 @@ import { resetWithProof } from "./password.js";
 import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
-import { attemptsOf, countAttempt } from "./verification.js";
+import { attemptsOf, countAttempt, MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
  * Email codes (plan 9e, spec 8.10). A code is a proof of the address, as a
@@ -32,7 +32,8 @@ const REQUEST_PER_EMAIL = { seconds: 900, max: 3 };
 // 1,040 per day and about 30 % per year for a patient attacker. 20 codes a
 // day at `maxAttempts` 5 gives at most 100 guesses a day: about 1 in 10,000
 // per day and about 3.6 % per year, and the victim gets 20 mails a day.
-const REQUEST_PER_EMAIL_DAY = { seconds: 86_400, max: 20 };
+// The value is MAILED_CODES_PER_EMAIL_DAY (verification.ts), shared with the second-factor code.
+
 // Per 15 minutes, shared by the sign-in verify and the reset.
 const VERIFY_PER_IP = { seconds: 900, max: 30 };
 const VERIFY_PER_EMAIL = { seconds: 900, max: 10 };
@@ -95,7 +96,7 @@ async function requestCode(
     return fail("rate_limited");
   if (!(await config.limiter.allow(`otp:email:${email}`, REQUEST_PER_EMAIL)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`otp:email-day:${email}`, REQUEST_PER_EMAIL_DAY)))
+  if (!(await config.limiter.allow(`otp:email-day:${email}`, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
   const now = config.clock.now();
   await config.storage.update(

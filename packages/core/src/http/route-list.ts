@@ -74,6 +74,8 @@ export const ROUTES: readonly RouteEntry[] = Object.freeze([
   { method: "POST", path: "/second-factor/passkey/enable", feature: "totp" },
   { method: "POST", path: "/second-factor/passkey/options", feature: "totp" },
   { method: "POST", path: "/second-factor/disable", feature: "totp" },
+  { method: "POST", path: "/second-factor/email/enable", feature: "totp" },
+  { method: "POST", path: "/second-factor/email/send", feature: "totp" },
   { method: "POST", path: "/otp/request", feature: "emailOtp" },
   { method: "POST", path: "/otp/verify", feature: "emailOtp" },
   { method: "POST", path: "/otp/reset/request", feature: "emailOtpReset" },
