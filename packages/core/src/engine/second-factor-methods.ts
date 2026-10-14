@@ -249,7 +249,7 @@ export function acceptPasskey(
  * password; the address is the user's own, so the enable sends no code. An
  * email code proves the mailbox, which a reset also proves: for a user whose
  * only method is the email code, a person who holds the mailbox resets the
- * password and passes the code. The docs say so beside the enable.
+ * password and passes the code. The threat model page (concepts) says so.
  */
 export async function enableEmailMethod(
   config: ResolvedConfig,
@@ -268,9 +268,9 @@ export async function enableEmailMethod(
  * The challenge must offer `email`: a password sign-in only (owner decision
  * 4). The order of the checks: the challenge, the method, the per-challenge
  * cap of 3, then the per-user key and the shared daily key of the address,
- * so a refused send costs no budget. The code's keyed hash replaces the last
- * one in the challenge's `data` by a compare-and-set on `updatedAt`; the
- * mail goes after the write, never inside a transaction.
+ * so a refusal before the limiters costs no budget. The code's keyed hash
+ * replaces the last one in the challenge's `data` by a compare-and-set on
+ * `updatedAt`; the mail goes after the write, never inside a transaction.
  */
 export async function sendSecondFactorEmail(
   config: ResolvedConfig,

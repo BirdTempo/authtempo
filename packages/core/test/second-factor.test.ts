@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { requestEmailOtp } from "../src/engine/email-otp.js";
+import { defaultSecondFactorMail } from "../src/engine/email-otp-mail.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import {
   passkeyAuthenticationOptions,
@@ -25,8 +27,10 @@ import {
   totpStatus,
   verifyTwoFactor,
 } from "../src/engine/totp.js";
+import { MAILED_CODES_PER_EMAIL_DAY } from "../src/engine/verification.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode, normalizeBackupCode } from "../src/primitives/totp.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { tokenFromMail } from "./helpers.js";
 import {
@@ -736,5 +740,155 @@ describe("an email code as a second-factor method (plan 12c)", () => {
     await withEmail(auth);
     await sendSecondFactorEmail(auth.config, { challenge: await passwordChallenge(auth) });
     expect(auth.mail.at(-1)).toMatchObject({ to: EMAIL, subject: "Code" });
+  });
+});
+
+describe("the bounds and the guards of the email method (plan 12c, Task 7 review)", () => {
+  /** A 6-digit code that is not `code`. */
+  const other = (code: string) => (code === "000000" ? "111111" : "000000");
+
+  it("counts a wrong email code on the challenge: the fifth spends it", async () => {
+    const auth = totpAuth();
+    await withEmail(auth);
+    const a = await passwordChallenge(auth);
+    await sendSecondFactorEmail(auth.config, { challenge: a });
+    const code = mailedCode(auth);
+    for (let i = 0; i < 4; i++)
+      expect(
+        await verifyTwoFactor(auth.config, { challenge: a, emailCode: other(code), ip: null }),
+      ).toMatchObject({ ok: false, code: "invalid_code" });
+    expect(
+      await verifyTwoFactor(auth.config, { challenge: a, emailCode: other(code), ip: null }),
+    ).toMatchObject({ ok: false, code: "too_many_attempts" });
+    expect(
+      await verifyTwoFactor(auth.config, { challenge: a, emailCode: code, ip: null }),
+    ).toMatchObject({ ok: false, code: "too_many_attempts" });
+  });
+
+  it("counts an email code on the per-user code keys", async () => {
+    const auth = totpAuth();
+    await withEmail(auth);
+    // A new 15-minute window: the TOTP enable of `enrolled` counted one code check.
+    auth.clock.advance(901_000);
+    // No send: a challenge with no stored code answers each guess as a miss.
+    for (const challenge of [await passwordChallenge(auth), await passwordChallenge(auth)])
+      for (let i = 0; i < 5; i++)
+        expect(
+          (await verifyTwoFactor(auth.config, { challenge, emailCode: "123456", ip: null })).ok,
+        ).toBe(false);
+    expect(
+      await verifyTwoFactor(auth.config, {
+        challenge: await passwordChallenge(auth),
+        emailCode: "123456",
+        ip: null,
+      }),
+    ).toMatchObject({ ok: false, code: "rate_limited" });
+  });
+
+  it("refuses the email enable with a wrong password: invalid_credentials, and the factor stays as it was", async () => {
+    const auth = totpAuth();
+    const { user, session } = await enrolled(auth);
+    const before = await factorRow(auth.storage, user.id);
+    expect(
+      await enableEmailMethod(auth.config, { session, password: "not the password" }),
+    ).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect(await factorRow(auth.storage, user.id)).toEqual(before);
+  });
+
+  it("refuses the email enable for an address that is not verified: email_unverified", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    await auth.storage.update("user", [{ field: "id", op: "eq", value: s.user.id }], {
+      emailVerified: false,
+    });
+    const session = await resolveSession(auth.config, s.token);
+    if (!session) throw new Error("no session");
+    expect(await enableEmailMethod(auth.config, { session, password: PASSWORD })).toMatchObject({
+      ok: false,
+      code: "email_unverified",
+    });
+    expect(await auth.storage.findMany("secondFactor", [])).toEqual([]);
+  });
+
+  it("counts the send on the daily key of the address, one budget with the email code sign-in", async () => {
+    const auth = totpAuth();
+    await withEmail(auth);
+    const a = await passwordChallenge(auth);
+    for (let i = 0; i < MAILED_CODES_PER_EMAIL_DAY.max - 1; i++)
+      await auth.config.limiter.allow(`otp:email-day:${EMAIL}`, MAILED_CODES_PER_EMAIL_DAY);
+    expect(await sendSecondFactorEmail(auth.config, { challenge: a })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(await requestEmailOtp(auth.config, { email: EMAIL, ip: null })).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
+  });
+
+  it("answers conflict and sends no mail when the challenge row changed under the send", async () => {
+    const auth = totpAuth();
+    await withEmail(auth);
+    const a = await passwordChallenge(auth);
+    const inner = auth.config.storage;
+    // A parallel send or a counted guess writes the row between the read and the write.
+    const racing: StorageAdapter = {
+      create: (m, d) => inner.create(m, d),
+      findOne: (m, w) => inner.findOne(m, w),
+      findMany: (m, w, o) => inner.findMany(m, w, o),
+      update: async (m, w, d) => {
+        if (m === "verification") {
+          const id = String(w.find((c) => c.field === "id")?.value);
+          await inner.update("verification", [{ field: "id", op: "eq", value: id }], {
+            updatedAt: new Date(auth.clock.now().getTime() + 5_000),
+          });
+        }
+        return inner.update(m, w, d);
+      },
+      delete: (m, w) => inner.delete(m, w),
+      transaction: (fn) => inner.transaction(fn),
+    };
+    const mails = auth.mail.length;
+    expect(
+      await sendSecondFactorEmail({ ...auth.config, storage: racing }, { challenge: a }),
+    ).toMatchObject({ ok: false, code: "conflict" });
+    expect(auth.mail).toHaveLength(mails);
+  });
+
+  it("states the challenge's time left in the mail: 5 minutes at once, 3 after 150 seconds", async () => {
+    const ttls: number[] = [];
+    const auth = totpAuth({
+      totp: {
+        emailMail: (input) => {
+          ttls.push(input.ttlMinutes);
+          return defaultSecondFactorMail(input);
+        },
+      },
+    });
+    await withEmail(auth);
+    const a = await passwordChallenge(auth);
+    await sendSecondFactorEmail(auth.config, { challenge: a });
+    auth.clock.advance(150_000);
+    await sendSecondFactorEmail(auth.config, { challenge: a });
+    expect(ttls).toEqual([5, 3]);
+  });
+
+  it("refuses the TOTP enable with totp_not_enabled when the email method turned on after the setup, and the factor keeps its list", async () => {
+    const auth = totpAuth();
+    const session = await verifiedSession(auth);
+    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    if (!setup.ok) throw new Error(setup.code);
+    expect(setup.value.backupCodes).toHaveLength(10);
+    const on = await enableEmailMethod(auth.config, { session, password: PASSWORD });
+    if (!on.ok) throw new Error(on.code);
+    expect(on.value.backupCodes).toHaveLength(10);
+    const factor = await factorRow(auth.storage, session.user.id);
+    expect(
+      await enableTotp(auth.config, {
+        session,
+        code: await codeNow(auth, base32Decode(setup.value.secret)),
+      }),
+    ).toMatchObject({ ok: false, code: "totp_not_enabled" });
+    expect(await factorRow(auth.storage, session.user.id)).toEqual(factor);
   });
 });
