@@ -1,4 +1,12 @@
 import {
+  CAPTCHA_FLOWS,
+  type CaptchaConfig,
+  type CaptchaFlow,
+  type CaptchaPort,
+  DEFAULT_CAPTCHA_FLOWS,
+  type ResolvedCaptcha,
+} from "./captcha.js";
+import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
   defaultSecondFactorMail,
@@ -254,6 +262,12 @@ export interface AuthConfig {
    * `organizations`.
    */
   hooks?: HooksConfig;
+  /**
+   * A captcha on the flows that send mail or write rows (plan 12b). The token
+   * comes in the header `x-captcha-response`, after the flow's limits. Off
+   * when absent. `@authtempo/captcha-turnstile` answers the port.
+   */
+  captcha?: CaptchaConfig;
 }
 
 export interface PasswordConfig {
@@ -570,6 +584,7 @@ export interface ResolvedConfig {
   oauth: ResolvedOAuth | null;
   operator: { secretHash: string } | null;
   hooks: ResolvedHooks;
+  captcha: ResolvedCaptcha | null;
 }
 
 /**
@@ -865,6 +880,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     oauth: resolveOAuth(input.oauth, jwtMint),
     operator: resolveOperator(input.operator, jwtMint),
     hooks: resolveHooks(input.hooks, organizations !== null),
+    captcha: resolveCaptcha(input.captcha),
   };
 }
 
@@ -1447,6 +1463,79 @@ function resolveHooks(input: HooksConfig | undefined, organizationsOn: boolean):
     SESSION_HOOK_POINTS,
   ) as unknown as SessionHooks;
   return { organization, session };
+}
+
+const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {
+  port: true,
+  flows: true,
+  onUnavailable: true,
+};
+const FIELD_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** `captcha` (plan 12b). Absent: off. */
+function resolveCaptcha(input: CaptchaConfig | undefined): ResolvedCaptcha | null {
+  if (input === undefined) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("captcha must be an object");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(CAPTCHA_KEYS, key))
+      throw new ConfigError(
+        `captcha.${key} is not an option; core has port, flows, and onUnavailable`,
+      );
+  const port = input.port as unknown;
+  if (
+    typeof port !== "object" ||
+    port === null ||
+    typeof (port as CaptchaPort).verify !== "function"
+  )
+    throw new ConfigError("captcha.port must have a verify function");
+  const page = (port as CaptchaPort).page;
+  if (page !== undefined) {
+    if (!isPlainObject(page as unknown))
+      throw new ConfigError("captcha.port.page must be an object");
+    if (!isHttpsUrl(page.scriptSrc))
+      throw new ConfigError("captcha.port.page.scriptSrc must be an https URL");
+    if (typeof page.widgetHtml !== "string" || page.widgetHtml.length > 4096)
+      throw new ConfigError(
+        "captcha.port.page.widgetHtml must be a string of at most 4096 characters",
+      );
+    if (typeof page.responseField !== "string" || !FIELD_RE.test(page.responseField))
+      throw new ConfigError(
+        "captcha.port.page.responseField must be 1 to 64 letters, digits, _, or -",
+      );
+    if (
+      !Array.isArray(page.cspSources) ||
+      !page.cspSources.every((s) => isHttpsUrl(s) && new URL(s).origin === s)
+    )
+      throw new ConfigError("captcha.port.page.cspSources must hold https origins with no path");
+  }
+  const flows: unknown = input.flows ?? [...DEFAULT_CAPTCHA_FLOWS];
+  if (
+    !Array.isArray(flows) ||
+    flows.length < 1 ||
+    new Set(flows).size !== flows.length ||
+    !flows.every((f) => (CAPTCHA_FLOWS as readonly unknown[]).includes(f))
+  )
+    throw new ConfigError(
+      `captcha.flows must be a list of 1 or more distinct flows: ${CAPTCHA_FLOWS.join(", ")}`,
+    );
+  const onUnavailable = input.onUnavailable ?? "allow";
+  if (onUnavailable !== "allow" && onUnavailable !== "refuse")
+    throw new ConfigError('captcha.onUnavailable must be "allow" or "refuse"');
+  return {
+    port: port as CaptchaPort,
+    flows: new Set(flows as CaptchaFlow[]),
+    onUnavailable,
+    // A copy of the checked values: a later change to the port object does not reach the page.
+    page:
+      page === undefined
+        ? null
+        : Object.freeze({
+            scriptSrc: page.scriptSrc,
+            widgetHtml: page.widgetHtml,
+            responseField: page.responseField,
+            cspSources: Object.freeze([...page.cspSources]),
+          }),
+  };
 }
 
 /**

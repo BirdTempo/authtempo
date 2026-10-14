@@ -1,3 +1,4 @@
+import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
@@ -19,6 +20,8 @@ export interface MagicLinkRequest {
   email: string;
   next?: string | undefined;
   ip: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 export interface MagicLinkVerify {
@@ -45,6 +48,9 @@ export async function requestMagicLink(
     return fail("rate_limited");
   if (!(await config.limiter.allow(`magic-link:email:${email}`, PER_EMAIL)))
     return fail("rate_limited");
+  // After the limits and before the row (plan 12b).
+  const captcha = await checkCaptcha(config, "magic-link-request", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   const now = config.clock.now();
   const token = randomToken(MAGIC_LINK_PREFIX);
   const next = safeNext(input.next);

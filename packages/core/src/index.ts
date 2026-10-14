@@ -1,5 +1,16 @@
 export const VERSION = "0.0.0";
 
+export {
+  CAPTCHA_FLOWS,
+  CAPTCHA_HEADER,
+  CAPTCHA_TOKEN_MAX,
+  type CaptchaConfig,
+  type CaptchaFlow,
+  type CaptchaPage,
+  type CaptchaPort,
+  checkCaptcha,
+  DEFAULT_CAPTCHA_FLOWS,
+} from "./captcha.js";
 export type {
   AuthConfig,
   EmailOtpConfig,

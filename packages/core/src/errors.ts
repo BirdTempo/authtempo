@@ -47,6 +47,10 @@ export const ERRORS = {
   second_factor_last_method: 409,
   // plan 12b: the sign-up rule refused a new user
   sign_up_closed: 403,
+  // plan 12b: the captcha port
+  captcha_required: 400,
+  captcha_failed: 403,
+  captcha_unavailable: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

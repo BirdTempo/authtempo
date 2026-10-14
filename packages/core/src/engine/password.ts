@@ -1,3 +1,4 @@
+import { checkCaptcha } from "../captcha.js";
 import type { MailMessage, ResolvedConfig } from "../config.js";
 import type { ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
@@ -128,6 +129,8 @@ export interface PasswordSignUp {
   name?: string | undefined;
   ip: string | null;
   userAgent: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 export interface PasswordSignIn {
@@ -139,6 +142,8 @@ export interface PasswordSignIn {
   trustDevice?: string | undefined;
   /** Where the challenge page lands after the second factor (plan 9f). `safeNext` applies. */
   next?: string | undefined;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 /** A session, or a second-factor challenge for a user with the factor on (plan 9f). */
@@ -204,6 +209,9 @@ export async function passwordSignUp(
   // no mail, and before the hash: only a sign-up that can mail counts.
   if (!(await config.limiter.allow(`password-sign-up:email:${email}`, SIGN_UP_PER_EMAIL)))
     return fail("rate_limited");
+  // After the limits, so a limit bounds the supplier calls; before the hash and any read of a user (plan 12b).
+  const captcha = await checkCaptcha(config, "password-sign-up", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
   const now = config.clock.now();
@@ -587,6 +595,9 @@ export async function passwordSignIn(
   const email = normalizeEmail(input.email);
   if (email !== null && !(await config.limiter.allow(`password:email:${email}`, SIGN_IN_PER_EMAIL)))
     return fail("rate_limited");
+  // After the limits and before any read of a user: the answer is the same for every address (plan 12b).
+  const captcha = await checkCaptcha(config, "password-sign-in", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   // The length is the caller's own input, so this refusal tells nothing about an account. It bounds the CPU.
   if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
   // The floor of every failure from here on (spec 17.4). Date.now, not the
@@ -868,6 +879,8 @@ export interface PasswordResetRequest {
   email: string;
   next?: string | undefined;
   ip: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 /**
@@ -888,6 +901,14 @@ export async function requestPasswordReset(
     return fail("rate_limited");
   if (!(await config.limiter.allow(`password-reset:email:${email}`, RESET_PER_EMAIL)))
     return fail("rate_limited");
+  // After the limits and before the row (plan 12b).
+  const captcha = await checkCaptcha(
+    config,
+    "password-reset-request",
+    input.captchaToken,
+    input.ip,
+  );
+  if (captcha) return captcha;
   const now = config.clock.now();
   const token = randomToken(PASSWORD_RESET_PREFIX);
   await config.storage.create("verification", {

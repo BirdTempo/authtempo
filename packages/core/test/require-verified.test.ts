@@ -148,7 +148,7 @@ describe("password.requireVerified (plan 12b, Better Auth docs audit gap 1)", ()
     const start = html.indexOf(`postJson("/password/sign-in"`);
     const handler = html.slice(start, html.indexOf(".catch(", start));
     expect(handler).toContain(
-      `say(body && body.error === "email_unverified" ? "Confirm your email address first. We sent you a new link." : "The request was not accepted.");`,
+      `if (code === "email_unverified") say("Confirm your email address first. We sent you a new link.");`,
     );
   });
 });

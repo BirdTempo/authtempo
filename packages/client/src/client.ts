@@ -83,6 +83,8 @@ export interface Client {
     request(input: {
       email: string;
       next?: string | undefined;
+      /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
+      captchaToken?: string | undefined;
     }): Promise<ClientResult<{ sent: true }>>;
     /**
      * The JSON verify: the session answer with the cookie, or `{ twoFactor }`
@@ -117,7 +119,13 @@ export interface Client {
    * With the server's `password.uniformSignUp: false` and `password.requireVerified` on, or `signUp: "invited"`, `signUp` answers `{ user, verifyRequired: true }` and no token.
    */
   password: {
-    signUp(input: { email: string; password: string; name?: string | undefined }): Promise<
+    signUp(input: {
+      email: string;
+      password: string;
+      name?: string | undefined;
+      /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
+      captchaToken?: string | undefined;
+    }): Promise<
       ClientResult<
         // The third shape is the default (plan 12b). The second: uniformSignUp off and
         // requireVerified on. Neither opens a session.
@@ -136,6 +144,8 @@ export interface Client {
       password: string;
       trustDevice?: string | undefined;
       next?: string | undefined;
+      /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
+      captchaToken?: string | undefined;
     }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
     /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
     resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
@@ -144,6 +154,8 @@ export interface Client {
     requestReset(input: {
       email: string;
       next?: string | undefined;
+      /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
+      captchaToken?: string | undefined;
     }): Promise<ClientResult<{ sent: true }>>;
     /** A session, or `{ twoFactor }` for a user with the second factor on (plan 12c): the password is set and every session ended. */
     reset(input: {
@@ -163,13 +175,21 @@ export interface Client {
    * token: a browser app keeps the cookie, and a native app stores the token.
    */
   emailOtp: {
-    request(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
+    /** `captchaToken`: the captcha widget's token (plan 12b), sent in the header `x-captcha-response`. */
+    request(input: {
+      email: string;
+      captchaToken?: string | undefined;
+    }): Promise<ClientResult<{ sent: true }>>;
     verify(input: {
       email: string;
       code: string;
       trustDevice?: string | undefined;
     }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
-    requestReset(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
+    /** `captchaToken`: as in `request`. */
+    requestReset(input: {
+      email: string;
+      captchaToken?: string | undefined;
+    }): Promise<ClientResult<{ sent: true }>>;
     reset(input: {
       email: string;
       code: string;
@@ -326,6 +346,17 @@ export interface Client {
   errors: typeof ERRORS;
 }
 
+/**
+ * The header of the captcha token: core's `CAPTCHA_HEADER` (plan 12b). The
+ * client does not import core's root, so the name is here, and
+ * test/password.test.ts compares it with core's.
+ */
+const CAPTCHA_HEADER = "x-captcha-response";
+
+function captchaHeader(token: string | undefined): Record<string, string> | undefined {
+  return token !== undefined ? { [CAPTCHA_HEADER]: token } : undefined;
+}
+
 export function createClient(options: ClientOptions): Client {
   const call = createTransport(options);
   const webauthn = options.webauthn ?? browserWebAuthn();
@@ -346,7 +377,8 @@ export function createClient(options: ClientOptions): Client {
     // The empty object makes the content type JSON and the body harmless to read; the router's POST Origin rule still applies.
     signOut: () => call<{ ok: true }>("POST", "/sign-out", {}),
     magicLink: {
-      request: (input) => call<{ sent: true }>("POST", "/magic-link/request", input),
+      request: ({ captchaToken, ...rest }) =>
+        call<{ sent: true }>("POST", "/magic-link/request", rest, captchaHeader(captchaToken)),
       verify: ({ token, trustDevice }) =>
         call<PublicSession | TwoFactorChallengeJSON>("POST", "/magic-link/verify", {
           token,
@@ -394,16 +426,18 @@ export function createClient(options: ClientOptions): Client {
       delete: (input) => call<{ ok: true }>("POST", "/passkeys/delete", input),
     },
     password: {
-      signUp: ({ name, ...rest }) =>
+      signUp: ({ name, captchaToken, ...rest }) =>
         call<
           | ({ token: string } & PublicSession)
           | { user: PublicSession["user"]; verifyRequired: true }
           | { sent: true }
-        >("POST", "/password/sign-up", {
-          ...rest,
-          ...(name !== undefined ? { name } : {}),
-        }),
-      signIn: ({ trustDevice, next, ...rest }) =>
+        >(
+          "POST",
+          "/password/sign-up",
+          { ...rest, ...(name !== undefined ? { name } : {}) },
+          captchaHeader(captchaToken),
+        ),
+      signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
         call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
           "POST",
           "/password/sign-in",
@@ -412,14 +446,17 @@ export function createClient(options: ClientOptions): Client {
             ...(trustDevice !== undefined ? { trustDevice } : {}),
             ...(next !== undefined ? { next } : {}),
           },
+          captchaHeader(captchaToken),
         ),
       resendVerification: (input) => call<{ sent: true }>("POST", "/password/verify/resend", input),
       verifyEmail: (input) => call<{ verified: true }>("POST", "/password/verify", input),
-      requestReset: ({ next, ...rest }) =>
-        call<{ sent: true }>("POST", "/password/reset/request", {
-          ...rest,
-          ...(next !== undefined ? { next } : {}),
-        }),
+      requestReset: ({ next, captchaToken, ...rest }) =>
+        call<{ sent: true }>(
+          "POST",
+          "/password/reset/request",
+          { ...rest, ...(next !== undefined ? { next } : {}) },
+          captchaHeader(captchaToken),
+        ),
       reset: ({ trustDevice, ...rest }) =>
         call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
           "POST",
@@ -433,14 +470,16 @@ export function createClient(options: ClientOptions): Client {
         }),
     },
     emailOtp: {
-      request: ({ email }) => call<{ sent: true }>("POST", "/otp/request", { email }),
+      request: ({ email, captchaToken }) =>
+        call<{ sent: true }>("POST", "/otp/request", { email }, captchaHeader(captchaToken)),
       verify: ({ email, code, trustDevice }) =>
         call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("POST", "/otp/verify", {
           email,
           code,
           ...(trustDevice !== undefined ? { trustDevice } : {}),
         }),
-      requestReset: ({ email }) => call<{ sent: true }>("POST", "/otp/reset/request", { email }),
+      requestReset: ({ email, captchaToken }) =>
+        call<{ sent: true }>("POST", "/otp/reset/request", { email }, captchaHeader(captchaToken)),
       reset: ({ email, code, password, trustDevice }) =>
         call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("POST", "/otp/reset", {
           email,

@@ -461,7 +461,9 @@ describe("sign-in page", () => {
     expect(on).toContain(`autocomplete="current-password"`);
     expect(on).toContain(`<button id="forgot" type="button">Forgot password</button>`);
     expect(on).toContain(`postJson("/password/sign-in"`);
-    expect(on).toContain(`postJson("/password/reset/request", { email: email, next: cont })`);
+    expect(on).toContain(
+      `postJson("/password/reset/request", { email: email, next: cont }, pwForm)`,
+    );
     const off = defaultSignInPage({ ...pw, methods: { ...pw.methods, password: false } });
     expect(off).not.toContain(`id="password"`);
     expect(off).not.toContain(`id="forgot"`);
@@ -508,6 +510,8 @@ describe("sign-in page", () => {
     // Every code the handler names is a real core code, so a renamed code fails here.
     const codes = [...handler.matchAll(/code === "([a-z_]+)"/g)].map((m) => m[1]);
     expect(codes.sort()).toEqual([
+      "captcha_failed",
+      "captcha_required",
       "email_taken",
       "email_taken_unverified",
       "password_breached",
@@ -561,7 +565,7 @@ describe("sign-in page", () => {
     const start = html.indexOf(`postJson("/password/sign-in"`);
     const handler = html.slice(start, html.indexOf(".catch(", start));
     expect(handler).toContain(
-      `postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont })`,
+      `postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont }, pwForm)`,
     );
     expect(handler).toContain(
       `if (body && body.twoFactor) location.href = base + "/totp/challenge?challenge=" + encodeURIComponent(body.twoFactor.challenge);`,

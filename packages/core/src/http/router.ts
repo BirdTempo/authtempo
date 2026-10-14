@@ -130,7 +130,8 @@ export function createRouter(
           status: 204,
           headers: {
             "access-control-allow-methods": "GET, POST",
-            "access-control-allow-headers": "content-type, authorization",
+            // x-captcha-response: the captcha token of plan 12b, from a trusted app origin.
+            "access-control-allow-headers": "content-type, authorization, x-captcha-response",
             "access-control-max-age": "600",
           },
         }),

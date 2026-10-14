@@ -69,6 +69,15 @@ export const BETTER_AUTH_CODES = {
   // social "signup disabled" (dist/oauth2/link-account.mjs:202), and the
   // email code INVALID_OTP (dist/plugins/email-otp/routes.mjs:413).
   sign_up_closed: "SIGN_UP_CLOSED",
+  // Plan 12b, the captcha port. The names are Better Auth 1.7.2's captcha
+  // plugin codes (dist/plugins/captcha/error-codes.mjs, read 2026-10-15):
+  // MISSING_RESPONSE, VERIFICATION_FAILED, and UNKNOWN_ERROR, its external
+  // code for a service that gives no answer. The plugin answers 400 for the
+  // refusals (index.mjs:35) and 500 for the rest (index.mjs:71); the shim
+  // keeps core's statuses (400, 403, 503).
+  captcha_required: "MISSING_RESPONSE",
+  captcha_failed: "VERIFICATION_FAILED",
+  captcha_unavailable: "UNKNOWN_ERROR",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

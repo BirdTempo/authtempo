@@ -159,7 +159,9 @@ describe("router", () => {
     expect(pre.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
     expect(pre.headers.get("access-control-allow-credentials")).toBe("true");
     expect(pre.headers.get("access-control-allow-methods")).toBe("GET, POST");
-    expect(pre.headers.get("access-control-allow-headers")).toBe("content-type, authorization");
+    expect(pre.headers.get("access-control-allow-headers")).toBe(
+      "content-type, authorization, x-captcha-response",
+    );
     expect(pre.headers.get("access-control-max-age")).toBe("600");
     expect(pre.headers.get("vary")).toBe("Origin");
     const res = await handle(

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
 import { publicSession, resolveSession, sessionMaxAgeSeconds } from "../../engine/sessions.js";
@@ -37,6 +38,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
             email: body.value.email,
             next: body.value.next,
             ip: ctx.ip,
+            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
           }),
         );
       },

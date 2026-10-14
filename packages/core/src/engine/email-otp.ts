@@ -1,3 +1,4 @@
+import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
@@ -52,6 +53,8 @@ const NEWEST_FIRST: Sort<"verification">[] = [
 export interface EmailOtpRequest {
   email: string;
   ip: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
 }
 
 export interface EmailOtpVerify {
@@ -99,6 +102,14 @@ async function requestCode(
     return fail("rate_limited");
   if (!(await config.limiter.allow(`otp:email-day:${email}`, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
+  // After the limits and before the rows (plan 12b). The reset code is a reset request.
+  const captcha = await checkCaptcha(
+    config,
+    purpose === "email-otp" ? "email-otp-request" : "password-reset-request",
+    input.captchaToken,
+    input.ip,
+  );
+  if (captcha) return captcha;
   const now = config.clock.now();
   await config.storage.update(
     "verification",

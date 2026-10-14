@@ -14,10 +14,12 @@ export interface TransportOptions {
   credentials?: RequestCredentials | undefined;
 }
 
+/** `extra`: more request headers, for example the captcha token of plan 12b. */
 export type Call = <T>(
   method: "GET" | "POST",
   path: string,
   body?: unknown,
+  extra?: Record<string, string>,
 ) => Promise<ClientResult<T>>;
 
 function isKnownCode(code: unknown): code is keyof typeof ERRORS {
@@ -39,9 +41,11 @@ export function createTransport(options: TransportOptions): Call {
     method: "GET" | "POST",
     path: string,
     body?: unknown,
+    extra?: Record<string, string>,
   ): Promise<ClientResult<T>> => {
     const headers: Record<string, string> = { accept: "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
+    if (extra) Object.assign(headers, extra);
     const token = options.token ? await options.token() : null;
     if (token) headers.authorization = `Bearer ${token}`;
     let res: Response;

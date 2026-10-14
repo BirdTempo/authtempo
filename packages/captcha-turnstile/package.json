@@ -1,0 +1,30 @@
+{
+  "name": "@authtempo/captcha-turnstile",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run && node ../../examples/worker/proof/bundle-no-node.mjs proof && tsc -p tsconfig.json && node proof/pack-files.mjs"
+  },
+  "peerDependencies": {
+    "@authtempo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@authtempo/core": "workspace:*",
+    "@cloudflare/workers-types": "5.20261007.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}

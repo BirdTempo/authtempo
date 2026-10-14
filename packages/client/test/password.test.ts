@@ -1,4 +1,4 @@
-import { createPbkdf2PasswordHash } from "@authtempo/core";
+import { CAPTCHA_HEADER, createPbkdf2PasswordHash } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { createClient } from "../src/client.js";
 import { BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.js";
@@ -148,5 +148,40 @@ describe("password", () => {
       code: "invalid_token",
       status: 400,
     });
+  });
+
+  it("sends captchaToken in the x-captcha-response header and never in the body (plan 12b)", async () => {
+    const seen: Array<{ url: string; header: string | null; body: Record<string, unknown> }> = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      seen.push({
+        url: String(input),
+        // Core's name: the client's copy must match it.
+        header: new Headers(init?.headers).get(CAPTCHA_HEADER),
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      });
+      return Response.json({ sent: true });
+    };
+    const client = createClient({ baseURL: BASE_URL, fetch });
+    const captchaToken = "tok";
+    await client.password.signUp({ email: EMAIL, password: PW, captchaToken });
+    await client.password.signIn({ email: EMAIL, password: PW, captchaToken });
+    await client.password.requestReset({ email: EMAIL, captchaToken });
+    await client.magicLink.request({ email: EMAIL, captchaToken });
+    await client.emailOtp.request({ email: EMAIL, captchaToken });
+    await client.emailOtp.requestReset({ email: EMAIL, captchaToken });
+    expect(seen.map((s) => new URL(s.url).pathname)).toEqual([
+      "/auth/password/sign-up",
+      "/auth/password/sign-in",
+      "/auth/password/reset/request",
+      "/auth/magic-link/request",
+      "/auth/otp/request",
+      "/auth/otp/reset/request",
+    ]);
+    for (const s of seen) {
+      expect(s.header).toBe("tok");
+      expect(s.body).not.toHaveProperty("captchaToken");
+    }
+    await client.password.signUp({ email: EMAIL, password: PW });
+    expect(seen.at(-1)?.header).toBeNull();
   });
 });

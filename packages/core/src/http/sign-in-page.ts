@@ -29,6 +29,13 @@ export interface SignInPageInput {
   nonce: string;
   /** The app name from the config. Escaped in the title and the heading. */
   appName: string;
+  /**
+   * The captcha widget (plan 12b), or null. The page loads `scriptSrc` under
+   * the nonce, puts `widgetHtml` in the magic link and password forms as
+   * given, and sends the value of the field `responseField` in the header
+   * `x-captcha-response`. Core passes it when `captcha.port.page` is set.
+   */
+  captcha?: { scriptSrc: string; widgetHtml: string; responseField: string } | null | undefined;
 }
 
 /**
@@ -42,6 +49,9 @@ export function defaultSignInPage(input: SignInPageInput): string {
   const base = escapeHtml(input.basePath);
   const cont = escapeHtml(input.continuePath);
   const appName = escapeHtml(input.appName);
+  const captcha = input.captcha ?? null;
+  // The adapter's markup, as given: the adapter owns it, and config checks only its length.
+  const widget = captcha ? `\n${captcha.widgetHtml}` : "";
   const nextParam = encodeURIComponent(input.continuePath);
   const social = (name: string, label: string) =>
     `<a class="button" href="${base}/social/${escapeHtml(encodeURIComponent(name))}/start?next=${escapeHtml(nextParam)}">${escapeHtml(label)}</a>`;
@@ -52,7 +62,7 @@ export function defaultSignInPage(input: SignInPageInput): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="strict-origin">
 <meta name="robots" content="noindex">
-<title>Sign in to ${appName}</title>
+<title>Sign in to ${appName}</title>${captcha ? `\n<script src="${escapeHtml(captcha.scriptSrc)}" nonce="${escapeHtml(input.nonce)}" async defer></script>` : ""}
 <style>
 body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #f6f6f6; color: #111; }
 main { background: #fff; padding: 2rem; border-radius: 0.5rem; box-shadow: 0 1px 4px rgba(0,0,0,0.12); width: 22rem; max-width: 90vw; }
@@ -64,12 +74,12 @@ p.status { min-height: 1.5rem; color: #555; }
 </style>
 </head>
 <body>
-<main data-base="${base}" data-continue="${cont}">
+<main data-base="${base}" data-continue="${cont}"${captcha ? ` data-captcha-field="${escapeHtml(captcha.responseField)}"` : ""}>
 <h1>Sign in to ${appName}</h1>
 ${
   input.methods.magicLink
     ? `<form id="magic-link" method="post" autocomplete="on">
-<input type="email" name="email" placeholder="you@example.com" required autofocus>
+<input type="email" name="email" placeholder="you@example.com" required autofocus>${widget}
 <button type="submit">Email me a sign-in link</button>
 </form>`
     : ""
@@ -78,7 +88,7 @@ ${
   input.methods.password
     ? `<form id="password" method="post" action="${base}/password/sign-in" autocomplete="on">
 <input type="email" name="email" placeholder="you@example.com" autocomplete="username" required>
-<input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+<input type="password" name="password" placeholder="Password" autocomplete="current-password" required>${widget}
 <button type="submit">Sign in with password</button>
 <button id="sign-up" type="button">Create account</button>
 <button id="forgot" type="button">Forgot password</button>
@@ -98,17 +108,31 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
   var cont = main.getAttribute("data-continue");
   var status = document.getElementById("status");
   function say(text) { status.textContent = text; }
-  function postJson(path, body) {
-    return fetch(base + path, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  var captchaField = main.getAttribute("data-captcha-field");
+  function postJson(path, body, form) {
+    var headers = { "content-type": "application/json" };
+    // The widget's token goes in the header (plan 12b). It passes once: after a refused answer, reload the page.
+    if (captchaField && form) {
+      var f = form.querySelector('[name="' + captchaField + '"]');
+      if (f && f.value) headers["x-captcha-response"] = f.value;
+    }
+    return fetch(base + path, { method: "POST", credentials: "include", headers: headers, body: JSON.stringify(body) });
+  }
+  // The text of a refused request: the captcha codes of plan 12b ask for the check, any other code is generic.
+  function refusal(res) {
+    return res.json().then(function (body) {
+      var code = body && body.error;
+      return code === "captcha_required" || code === "captcha_failed" ? "Complete the check, then reload the page if it does not pass." : "The request was not accepted.";
+    }, function () { return "The request was not accepted."; });
   }
   var ml = document.getElementById("magic-link");
   if (ml) ml.addEventListener("submit", function (e) {
     e.preventDefault();
     var email = e.target.elements.email.value;
-    postJson("/magic-link/request", { email: email, next: cont }).then(function (res) {
+    postJson("/magic-link/request", { email: email, next: cont }, ml).then(function (res) {
       if (res.ok) say("Check your email for a sign-in link.");
       else if (res.status === 429) say("Too many requests. Try again later.");
-      else say("The request was not accepted.");
+      else return refusal(res).then(say);
     }).catch(function () { say("Could not reach the server. Try again."); });
   });
   var pwForm = document.getElementById("password");
@@ -116,7 +140,7 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
     pwForm.addEventListener("submit", function (e) {
       e.preventDefault();
       say("");
-      postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont }).then(function (res) {
+      postJson("/password/sign-in", { email: pwForm.elements.email.value, password: pwForm.elements.password.value, next: cont }, pwForm).then(function (res) {
         // A user with a second factor gets a challenge and no cookie yet (plan 9f): the challenge page lands on cont.
         if (res.ok) return res.json().then(function (body) {
           if (body && body.twoFactor) location.href = base + "/totp/challenge?challenge=" + encodeURIComponent(body.twoFactor.challenge);
@@ -125,8 +149,12 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
         else if (res.status === 401) say("The email or the password is not correct.");
         else if (res.status === 429) say("Too many attempts. Try again later.");
         // password.requireVerified (plan 12b): the right password of an unverified address.
-        else if (res.status === 403) return res.json().then(function (body) {
-          say(body && body.error === "email_unverified" ? "Confirm your email address first. We sent you a new link." : "The request was not accepted.");
+        // captcha_required and captcha_failed (plan 12b): the check refused the request.
+        else if (res.status === 403 || res.status === 400) return res.json().then(function (body) {
+          var code = body && body.error;
+          if (code === "email_unverified") say("Confirm your email address first. We sent you a new link.");
+          else if (code === "captcha_required" || code === "captcha_failed") say("Complete the check, then reload the page if it does not pass.");
+          else say("The request was not accepted.");
         }, function () { say("The request was not accepted."); });
         else say("The request was not accepted.");
       }).catch(function () { say("Could not reach the server. Try again."); });
@@ -134,10 +162,10 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
     document.getElementById("forgot").addEventListener("click", function () {
       var email = pwForm.elements.email.value;
       if (!email) { say("Type your email first."); return; }
-      postJson("/password/reset/request", { email: email, next: cont }).then(function (res) {
+      postJson("/password/reset/request", { email: email, next: cont }, pwForm).then(function (res) {
         if (res.ok) say("Check your email for a link to reset your password.");
         else if (res.status === 429) say("Too many requests. Try again later.");
-        else say("The request was not accepted.");
+        else return refusal(res).then(say);
       }).catch(function () { say("Could not reach the server. Try again."); });
     });
     // Plan 10: sign-up on the page. The sign-up answer sets the session cookie, so success
@@ -158,7 +186,7 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
       signUp.disabled = true;
       signInButton.disabled = true;
       say("");
-      postJson("/password/sign-up", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
+      postJson("/password/sign-up", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }, pwForm).then(function (res) {
         // password.requireVerified (plan 12b): the sign-up opens no session, and the mailed link signs in.
         if (res.ok) return res.json().then(function (body) {
           if (body && body.sent) fail("Check your email to continue.");
@@ -171,6 +199,7 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
           if (code === "email_taken" || code === "email_taken_unverified") fail("An account with this address exists. Sign in instead.");
           else if (code === "password_policy") fail("The password is too short, too long, has a control character, or equals your email address.");
           else if (code === "password_breached") fail("This password is in a known data breach. Choose another one.");
+          else if (code === "captcha_required" || code === "captcha_failed") fail("Complete the check, then reload the page if it does not pass.");
           else fail("The request was not accepted.");
         }, function () { fail("The request was not accepted."); });
       }).catch(function () { fail("Could not reach the server. Try again."); });

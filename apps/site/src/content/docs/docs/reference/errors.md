@@ -348,6 +348,33 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete). |
 
+<h3 id="captcha_required"><code>captcha_required</code> 400</h3>
+
+- **Meaning:** The flow has a captcha, and the request has no `x-captcha-response` header.
+- **Do:** Show the widget, and send its token in the header.
+
+| Routes |
+| --- |
+| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/reset/request`](/docs/reference/routes/#post-password-reset-request), [`POST /magic-link/request`](/docs/reference/routes/#post-magic-link-request), [`POST /otp/request`](/docs/reference/routes/#post-otp-request), [`POST /otp/reset/request`](/docs/reference/routes/#post-otp-reset-request), each when `captcha.flows` names its flow. |
+
+<h3 id="captcha_failed"><code>captcha_failed</code> 403</h3>
+
+- **Meaning:** The captcha refused the token, or the token is longer than 2048 characters. A token passes once.
+- **Do:** Show the widget again, and send its new token.
+
+| Routes |
+| --- |
+| The routes of [`captcha_required`](#captcha_required). |
+
+<h3 id="captcha_unavailable"><code>captcha_unavailable</code> 503</h3>
+
+- **Meaning:** The captcha gave no answer, and `captcha.onUnavailable` is `"refuse"`.
+- **Do:** Try again later.
+
+| Routes |
+| --- |
+| The routes of [`captcha_required`](#captcha_required). |
+
 ## OAuth codes
 
 `OAUTH_ERRORS` of `@authtempo/core` holds these codes. The provider routes answer them, because an OAuth client reads these strings. `invalid_token` and `rate_limited` are in both tables, so an OAuth anchor has the prefix `oauth-`.

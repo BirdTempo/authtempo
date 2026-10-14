@@ -448,6 +448,22 @@ The reset POST checks its limit, then reads the link row, then the policy,
 then the breach check, then hashes. A transaction consumes the link first.
 A spent or expired link costs no breach call and no hash.
 
+## Captcha
+
+`captcha: { port, flows?, onUnavailable? }` puts a captcha on the flows that
+send mail or write rows. Core names no supplier, and
+`@authtempo/captcha-turnstile` answers the port.
+
+- The token comes in the header `x-captcha-response`, and the preflight answer lists it.
+- The default flows are `password-sign-up`, `magic-link-request`, `email-otp-request`, and `password-reset-request` (the reset link and the reset code).
+- `password-sign-in` is off by default; name it in `flows` to check every sign-in.
+- Each flow runs its limits, then the captcha, then its work, so a limit bounds the captcha calls.
+- The captcha runs before the flow reads a user, so its answer is the same for every address.
+- No token answers 400 `captcha_required`; a refused token, or a token over 2048 characters, answers 403 `captcha_failed`.
+- When the port gives no answer or throws, `onUnavailable: "allow"` (the default) writes one log line and goes on, and `"refuse"` answers 503 `captcha_unavailable`.
+- An in-process `api` call with no `captchaToken` skips the check; an app that proxies a browser passes the browser's token.
+- With `port.page`, core's sign-in page loads the widget's script under its nonce, adds the widget to the magic link and password forms, and adds `cspSources` to `script-src` and `frame-src`.
+
 ## Email codes
 
 Since plan 9e core signs a person in by a code from the mail, and resets a

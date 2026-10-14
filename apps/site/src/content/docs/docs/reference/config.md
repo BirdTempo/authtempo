@@ -242,6 +242,17 @@ Another key of `operator` is refused.
 | `hooks.organization` | `OrganizationHooks` | none | Needs `organizations`. A name that is no hook point is refused. |
 | `hooks.session` | `SessionHooks` | none | `beforeCreate`, `afterCreate`, and `afterEnd`. |
 
+## Captcha
+
+The token comes in the header `x-captcha-response`. Core checks it after the limits of the flow and before the flow reads a user or writes a row. An in-process `api` call with no `captchaToken` skips the check.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `captcha` | object | off | Turns the check on for the flows in `captcha.flows`. |
+| `captcha.port` | `CaptchaPort` | required | An object with `verify`. `@authtempo/captcha-turnstile` gives one. Its optional `page` puts the widget on core's sign-in page: `scriptSrc` is an https URL, `responseField` is 1 to 64 letters, digits, `_`, or `-`, and `cspSources` holds https origins with no path. |
+| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in` is the fifth flow, and it is off by default. `password-reset-request` covers the reset link and the reset code. |
+| `captcha.onUnavailable` | `"allow"` \| `"refuse"` | `"allow"` | What happens when the captcha gives no answer. `"allow"` writes one log line and goes on: the limits still bound the flow. `"refuse"` answers 503 `captcha_unavailable`. |
+
 ## Next
 
 - [Routes](/docs/reference/routes/)

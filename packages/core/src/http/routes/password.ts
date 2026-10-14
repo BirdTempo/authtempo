@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import {
   changePassword,
@@ -94,6 +95,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           name: body.value.name,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
         });
         if (!r.ok) return respond(r);
         // The uniform answer (plan 12b): the same bytes for every address, no cookie.
@@ -117,6 +119,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           userAgent: ctx.request.headers.get("user-agent"),
           trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
           next: body.value.next,
+          captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
@@ -179,6 +182,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
             email: body.value.email,
             next: body.value.next,
             ip: ctx.ip,
+            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
           }),
         );
       },
