@@ -25,7 +25,7 @@ sidebar:
 
 1. Set `baseURL` to the origin of the API, with `https:`.
 2. Put each origin of the app in `trustedOrigins`, and each app scheme of a native app.
-3. Store `secret` as a secret of 32 characters or more, never in the code.
+3. Store `secret` as a secret of 32 characters or more, never in the code. It needs an estimate of 100 bits or more: make one with `openssl rand -base64 32`.
 4. Use the owned limiter of your adapter: `createD1Limiter` or `createPostgresLimiter`.
 5. Replace the mail port with a call to your mail provider.
 6. Apply every migration before the first request. [Upgrades](/docs/operations/upgrades/) tells how.

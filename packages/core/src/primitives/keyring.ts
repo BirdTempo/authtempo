@@ -26,8 +26,8 @@ export const SECRET_VERSION_MAX = 999_999;
 /**
  * Under this estimate `createAuth` refuses the current secret (spec 9, plan 12b).
  * A refusal at 120 bits stops about one correct `openssl rand -hex 16` secret in
- * three (P = 0.32), and at 100 bits about one in 370,000 (P = 2.7e-6).
- * The design computed both figures on 2026-10-14 from the occupancy distribution.
+ * three (P = 0.32), and at 100 bits about one in 370,000 (P = 2.7e-6), as the
+ * design computed on 2026-10-14 from the occupancy distribution.
  */
 export const ENTROPY_REFUSE_BITS = 100;
 /** Under this estimate `createAuth` writes one warning line. Better Auth 1.7.2 warns under 120 with the same formula. */

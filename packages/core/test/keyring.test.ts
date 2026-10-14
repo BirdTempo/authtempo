@@ -74,13 +74,14 @@ describe("the keyring (plan 12b)", () => {
   });
 
   it("gives a keyed hash the current value and known false for an unknown version, so one HMAC still runs", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const k = createKeyring([
       { version: 2, value: "two" },
       { version: 1, value: "one" },
     ]);
     expect(hashSecretFor(k, 1, "r")).toEqual({ secret: "one", known: true });
     expect(hashSecretFor(k, 7, "r")).toEqual({ secret: "two", known: false });
+    expect(log).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -24,10 +24,10 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | --- | --- | --- | --- |
 | `basePath` | string | `"/auth"` | Starts with `/` and does not end with `/`. |
 | `baseURL` | string | required | The origin of the server that mounts `handle`: no path, no trailing slash. |
-| `secret` | string | `secrets` | Version 1 of the app secret. At least 32 characters and an estimate of 100 bits or more. It keys the stored codes and seals the factor secrets and the signing keys. |
+| `secret` | string | `secrets` | Version 1 of the app secret. At least 32 characters. When it is the current version, it needs an estimate of 100 bits or more. It keys the stored codes and seals the factor secrets and the signing keys. |
 | `secrets` | list of `{ version, value }` | `[{ version: 1, value: secret }]` | The app secrets, the current version first. The current version seals and keys every new value. See [Secrets](/docs/operations/secrets/). |
 | `secrets[].version` | number | required | An integer from 1 to 999999. A row from before version 9 of the schema reads as version 1. |
-| `secrets[].value` | string | required | At least 32 characters. The first entry needs an estimate of 100 bits or more; an older entry under 120 bits writes one warning line. |
+| `secrets[].value` | string | required | At least 32 characters. The first entry needs an estimate of 100 bits or more. An entry under 120 bits writes one warning line. |
 | `appName` | string | the host of `baseURL` | 1 to 80 characters with no control character. It names the app in the pages and the mail subjects. |
 | `trustedOrigins` | string list | required | Exact origins and app schemes. A `*` is refused. |
 | `appURL` | string | `baseURL` | An exact origin that is `baseURL` or a member of `trustedOrigins`. Sign-ins land here. |

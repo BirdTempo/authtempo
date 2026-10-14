@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ConfigError, type LegacyVerifyConfig, resolveConfig } from "../src/config.js";
+import { type LegacyVerifyConfig, resolveConfig } from "../src/config.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import {
   LEGACY_VERIFY_HASH,
@@ -399,7 +399,7 @@ describe("password.legacyVerify (spec 17.4)", () => {
           mail: base.mail,
           password: { legacyVerify: { verify: async () => false, timeoutMs } },
         }),
-      ).toThrow(ConfigError);
+      ).toThrow(/password\.legacyVerify\.timeoutMs/);
     }
   });
 });

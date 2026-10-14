@@ -191,14 +191,14 @@ export function extraFiles(stack: Stack): TemplateFile[] {
     info.secrets === ".dev.vars.example"
       ? [
           "# The secrets of wrangler dev. Copy this file to .dev.vars, which git ignores.",
-          "# AUTH_SECRET: at least 32 characters. Make one with: openssl rand -base64 32",
+          "# AUTH_SECRET: at least 32 characters and 100 bits or more. Make one with: openssl rand -base64 32",
           "# On Cloudflare, store it with: pnpm exec wrangler secret put AUTH_SECRET",
           "AUTH_SECRET=",
           "",
         ]
       : [
           "# The settings of the server. Copy this file to .env, which git ignores.",
-          "# AUTH_SECRET: at least 32 characters. Make one with: openssl rand -base64 32",
+          "# AUTH_SECRET: at least 32 characters and 100 bits or more. Make one with: openssl rand -base64 32",
           "AUTH_SECRET=",
           "# DATABASE_URL: the connection string of your Postgres database.",
           "DATABASE_URL=",
