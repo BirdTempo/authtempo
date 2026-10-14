@@ -31,6 +31,11 @@ const KID_MAX = 64;
 const SID_MAX = 64;
 /** One day in milliseconds: `jwtMint.rotateEvery` counts days (plan 11c). */
 const DAY_MS = 86_400_000;
+/**
+ * The options of `signingKey` on the signing path (plan 11c). One frozen
+ * object, so a signature allocates nothing for it when the timer is off.
+ */
+const ROTATE_DUE: { readonly rotateDue: true } = Object.freeze({ rotateDue: true });
 
 /** The claims a session JWT carries from core. `jwtMint.claims` adds names, never these. */
 export const RESERVED_CLAIMS: ReadonlySet<string> = new Set([
@@ -171,7 +176,7 @@ export async function signToken(
 ): Promise<string> {
   const { alg } = mintConfig(config);
   for (let attempt = 0; attempt < 2; attempt++) {
-    const row = await signingKey(config, alg, { rotateDue: true });
+    const row = await signingKey(config, alg, ROTATE_DUE);
     const key = await openPrivateKey(config.secret, row.id, row.privateKey, alg);
     if (key) return signJws({ alg, kid: row.id, typ, key, payload });
     console.error("authtempo: a signing key does not open under this secret; it retires", row.id);

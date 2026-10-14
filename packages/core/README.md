@@ -489,12 +489,7 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
 `jwtMint` (plan 9g) is on by default; `jwtMint: false` removes `/jwks`, `/token`, and `api.jwt`. A session JWT is a signed statement about a session user for a server that cannot call `auth.session`.
 
 - The key: `jwtMint.alg` is `EdDSA` (Ed25519, the default) or `ES256` (ECDSA P-256). Core writes the first key at the first use, seals the private half with AES-256-GCM under a key from `secret`, and opens it for one signature at a time. `api.jwt.rotate()` makes a new key; the old one verifies for 24 hours and signs nothing, and the sweep deletes it after that. A new app `secret` opens no old key: the key retires at the next signature with one log line, and a new key signs.
-- The timer (plan 11c): `jwtMint.rotateEvery` is a whole number of days
-  from 1 to 365, and off by default. The first signature with a key that
-  old retires the key and signs with a new one. A JWKS read never rotates.
-  Two signatures at once make one new key: the retire matches the old row
-  by id and slot, and the unique key on `slot` keeps one new row. The
-  retired key verifies for 24 hours, as after `api.jwt.rotate()`.
+- The timer (plan 11c): `jwtMint.rotateEvery` is a whole number of days from 1 to 365, and off by default. The first signature with a key that old retires the key and signs with a new one. A JWKS read never rotates. Two signatures at once make one new key: the retire matches the old row by id and slot, and the unique key on `slot` keeps one new row. The retired key verifies for 24 hours, as after `api.jwt.rotate()`.
 - The operator route (plan 11c): `operator: { secretHash }` turns on
   `POST /operator/keys/rotate`, and it is off by default. `secretHash` is
   the SHA-256 of the operator secret as 64 lowercase hex characters; core

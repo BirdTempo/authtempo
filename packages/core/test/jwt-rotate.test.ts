@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { publicKeySet, signToken, verifyLocal } from "../src/engine/jwt.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -34,6 +35,22 @@ describe("jwtMint.rotateEvery (plan 11c)", () => {
     auth.clock.advance(DAY);
     expect(await kids(auth)).toEqual([next]);
     expect(await verifyLocal(auth.config, old)).toBeNull();
+    // The sweep deletes a key retired more than 24 hours ago, so one more ms.
+    auth.clock.advance(1);
+    await sweepExpired(auth.config);
+    const rows = await auth.storage.findMany("jwk", []);
+    expect(rows.map((r) => r.id)).toEqual([next]);
+  });
+
+  it("does not rotate again when the clock steps back after a rotation", async () => {
+    const auth = makeAuth({ jwtMint: { rotateEvery: 1 } });
+    const first = kidOf(await sign(auth));
+    auth.clock.advance(DAY);
+    const next = kidOf(await sign(auth));
+    expect(next).not.toBe(first);
+    auth.clock.advance(-DAY);
+    expect(kidOf(await sign(auth))).toBe(next);
+    expect(await auth.storage.findMany("jwk", [])).toHaveLength(2);
   });
 
   it("never rotates on a JWKS read: the timer runs on the signing path only", async () => {
