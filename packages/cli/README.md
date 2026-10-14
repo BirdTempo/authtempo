@@ -1,0 +1,58 @@
+# @authtempo/cli
+
+The `authtempo` command line: set up, migrate, import into, check, and
+maintain an authtempo deployment. Spec section 19 holds its rules.
+
+```bash
+authtempo --help
+authtempo help <command>
+```
+
+## Install
+
+The packages are not on a registry yet: publication is the owner's call.
+In this repo, no package depends on the CLI, so pnpm links no
+`authtempo` binary: build it with `pnpm --filter @authtempo/cli build`,
+then run `node packages/cli/dist/bin/authtempo.js`. After the first
+release, install it with `pnpm add -D @authtempo/cli`, or run it with
+`pnpm dlx @authtempo/cli`.
+
+## The rules
+
+- Exit codes: 0 done; 1 a person must look (a failed check, an import
+  record that needs a person); 2 a usage error, a malformed input, or a
+  stop. A stop prints one `stopped:` line on stderr.
+- stdout holds the result. Usage errors, warnings, the `stopped:` line,
+  and each line that names a host, a database, or a file that the command
+  reads or writes go to stderr. `--json` prints one JSON document on stdout;
+  `src/json.ts` exports each shape.
+- No flag takes a secret as its value. A connection string comes from
+  `--url-env <NAME>` (default `DATABASE_URL`) or `--url-file <path>`; the
+  operator secret from `--token-env <NAME>` (default
+  `AUTHTEMPO_OPERATOR_SECRET`) or `--token-file <path>`. A file of `-` is
+  stdin. No output line holds a secret that the command read.
+- `--help`, `-h`, and `help <command>` print the complete help, with the
+  link to the command's page under
+  `https://authtempo.com/docs/reference/cli/`. A flag one edit from a known
+  flag gets "Did you mean", and the command does not run.
+- The CLI writes no color and no terminal control.
+
+## keys rotate
+
+```bash
+authtempo keys rotate https://api.example.com --yes
+```
+
+It calls `POST <basePath>/operator/keys/rotate` of core with
+`Authorization: Operator <secret>`, and prints `kid: <kid>`. The deployment
+needs `operator: { secretHash }` in its config, the SHA-256 hex of the
+secret. The old key verifies for 24 hours and signs nothing. With no
+terminal the command needs `--yes`; it reads the key set before and after,
+and warns when a cache still serves the old set.
+
+## Tests
+
+The child-process tests run `dist/bin/authtempo.js`. `test/support/bin.ts`
+fails a run when the build is older than `src/`, and `packages/cli/turbo.json`
+builds the package before its test. `node proof/pack-files.mjs` proves that a
+pack holds `dist/`, `package.json`, and this README only.

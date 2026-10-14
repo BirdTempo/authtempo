@@ -1,0 +1,63 @@
+import type { Io } from "./io.js";
+
+/**
+ * The text of a secret, and the parts that a driver can print alone: the
+ * password of a URL, its decoded form, and the user and password pair. A part
+ * under 4 characters is dropped: a scrub of one letter mangles every line.
+ */
+export function secretParts(value: string): string[] {
+  const parts = [value];
+  try {
+    const u = new URL(value);
+    if (u.password)
+      parts.push(u.password, decodeURIComponent(u.password), `${u.username}:${u.password}`);
+  } catch {
+    // Not a URL: the value alone.
+  }
+  return [...new Set(parts)].filter((p) => p.length >= 4);
+}
+
+/** Replaces each secret in a line with ***, the longest first. */
+export function scrub(text: string, secrets: ReadonlySet<string>): string {
+  let out = text;
+  for (const s of [...secrets].sort((a, b) => b.length - a.length)) out = out.split(s).join("***");
+  return out;
+}
+
+/** The io of a command: every line passes the scrub, and a command adds each secret it reads. */
+export interface Ctx extends Io {
+  addSecret(value: string): void;
+}
+
+/** The no-secret rule at the last line of defence (spec 19): no output line holds a secret that a command read. */
+export function guarded(io: Io): Ctx {
+  const secrets = new Set<string>();
+  return {
+    ...io,
+    out: (line) => io.out(scrub(line, secrets)),
+    err: (line) => io.err(scrub(line, secrets)),
+    addSecret(value) {
+      for (const p of secretParts(value)) secrets.add(p);
+    },
+  };
+}
+
+/** A human line of the result: stdout, or stderr when the command prints JSON. */
+export function sayer(ctx: Ctx, json: boolean): (line: string) => void {
+  return json ? (line) => ctx.err(line) : (line) => ctx.out(line);
+}
+
+/** The one JSON document of `--json`, on one line of stdout. */
+export function printJson(ctx: Ctx, doc: unknown): void {
+  ctx.out(JSON.stringify(doc));
+}
+
+/** A connection string as a person may see it: the host, the port, and the database, never the user or the password. */
+export function describeUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname}${u.port ? `:${u.port}` : ""}${u.pathname}`.replace(/\/$/, "");
+  } catch {
+    return "the database";
+  }
+}

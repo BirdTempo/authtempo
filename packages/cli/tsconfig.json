@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // The CLI reads files, argv, and child processes through node: modules (@types/node 24.19.1, pinned).
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The sources and the Node tests (plan 11c). The Workers-pool tests have their own config.
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["src", "test"],
+  "exclude": ["test/pool"]
+}

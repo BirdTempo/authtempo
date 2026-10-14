@@ -1,0 +1,35 @@
+{
+  "name": "@authtempo/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The authtempo command line: init, migrate, import, check, and keys rotate.",
+  "bin": {
+    "authtempo": "./dist/bin/authtempo.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run && node proof/pack-files.mjs"
+  },
+  "dependencies": {
+    "@authtempo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
