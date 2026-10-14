@@ -1,6 +1,7 @@
 export { ERRORS, type ErrorCode } from "@authtempo/core/errors";
 export {
   type ApiTokenSummaryJSON,
+  type ChallengeMethodJSON,
   type Client,
   type ClientOptions,
   createClient,
@@ -9,6 +10,7 @@ export {
   type OAuthGrantJSON,
   type OrganizationJSON,
   type PasskeySummaryJSON,
+  type SecondFactorEnableJSON,
   type TotpStatusJSON,
   type TwoFactorChallengeJSON,
   type TwoFactorSessionJSON,

@@ -28,12 +28,14 @@ describe("password", () => {
     const token = tokenFromMail(server.mail.at(-1)?.text ?? "");
     const reset = await client.password.reset({ token, password: "new password 1" });
     if (!reset.ok) throw new Error(reset.code);
+    if ("twoFactor" in reset.value) throw new Error("no session: a second-factor challenge");
     expect(reset.value.user.emailVerified).toBe(true);
+    const sessionToken = reset.value.token;
     const bearer = createClient({
       baseURL: BASE_URL,
       fetch,
       credentials: "omit",
-      token: () => reset.value.token,
+      token: () => sessionToken,
     });
     expect(
       await bearer.password.change({

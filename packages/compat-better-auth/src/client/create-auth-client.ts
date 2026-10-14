@@ -526,6 +526,12 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         const r = await run(
           (c) => c.emailOtp.verify({ email, code: otp }),
           (v) => {
+            // The shim sets totp.gate.emailOtp false (plan 12c), as Better Auth
+            // gates no email code sign-in, so core answers a session here.
+            if ("twoFactor" in v)
+              throw new Error(
+                "authtempo compat: the email code answered a second-factor challenge",
+              );
             keepToken(v.token);
             return { token: v.token, user: toClientUser(v.user) };
           },

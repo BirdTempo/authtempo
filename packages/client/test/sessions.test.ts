@@ -11,6 +11,7 @@ async function signedIn(server: ReturnType<typeof makeServer>) {
   const token = tokenFromMail(server.mail[0]?.text ?? "");
   const v = await client.magicLink.verify({ token });
   if (!v.ok) throw new Error(v.code);
+  if ("twoFactor" in v.value) throw new Error("no session: a second-factor challenge");
   return { client, jar, session: v.value };
 }
 

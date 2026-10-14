@@ -15,6 +15,7 @@ async function grantedBrowser() {
     token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
   });
   if (!verified.ok) throw new Error(verified.code);
+  if ("twoFactor" in verified.value) throw new Error("no session: a second-factor challenge");
   const userId = verified.value.user.id;
   const now = server.clock.now();
   const clientId = `cl_${"a".repeat(43)}`;

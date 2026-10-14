@@ -13,7 +13,7 @@ describe("magic link", () => {
     });
     const token = tokenFromMail(server.mail[0]?.text ?? "");
     const v = await client.magicLink.verify({ token });
-    expect(v.ok && v.value.user.email).toBe("ada@example.com");
+    expect(v.ok && !("twoFactor" in v.value) && v.value.user.email).toBe("ada@example.com");
     expect(jar.size).toBe(1);
     // A second verify of the same token is a replay.
     expect(await client.magicLink.verify({ token })).toMatchObject({

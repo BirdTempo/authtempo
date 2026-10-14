@@ -56,7 +56,7 @@ on `baseURL` is removed.
 | `client.session()` | `GET /session` | `ClientResult<PublicSession \| null>`. A 401 gives `null`, not a failure. |
 | `client.signOut()` | `POST /sign-out` | `ClientResult<{ ok: true }>` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `ClientResult<{ sent: true }>` |
-| `client.magicLink.verify({ token })` | `POST /magic-link/verify` | `ClientResult<PublicSession>` |
+| `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `ClientResult<PublicSession \| TwoFactorChallengeJSON>` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `ClientResult<PasskeySummaryJSON>` |
 | `client.passkey.signIn()` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>` |
 | `client.passkeys.list()` | `GET /passkeys` | `ClientResult<PasskeySummaryJSON[]>` |
@@ -96,7 +96,7 @@ without the `password` config.
 | `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `ClientResult<{ sent: true }>` |
 | `client.password.verifyEmail({ token })` | `POST /password/verify` | `ClientResult<{ verified: true }>`; the cookie is set when the address was unverified |
 | `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `ClientResult<{ sent: true }>` |
-| `client.password.reset({ token, password })` | `POST /password/reset` | `ClientResult<{ token } & PublicSession>` |
+| `client.password.reset({ token, password, trustDevice? })` | `POST /password/reset` | `ClientResult<({ token } & PublicSession) \| TwoFactorChallengeJSON>` |
 | `client.password.change({ currentPassword?, newPassword })` | `POST /password/change` | `ClientResult<{ ok: true }>` |
 
 The client has no token store. `signUp`, `signIn`, and `reset` answer the
@@ -199,6 +199,18 @@ event. Do not show an error.
 already holds a passkey for this account. The browser rejects with
 `InvalidStateError` in that case, and the client cannot tell it from
 another failure.
+
+### The second factor beyond TOTP
+
+A sign-in, a reset, a magic link, an email code, and social can answer `{ twoFactor: { challenge, expiresAt, methods } }` for a user with the second factor on. `methods` lists what passes, in this order: `passkey`, `totp`, `email`, `backup`.
+
+| Call | Does |
+| --- | --- |
+| `secondFactor.passkey.enable({ password })` | Asks the browser for a passkey, then turns the passkey method on. |
+| `secondFactor.passkey.verify({ challenge, trustDevice? })` | Passes a challenge with a passkey. |
+| `secondFactor.email.enable({ password })` | Turns the email method on. |
+| `secondFactor.email.send({ challenge })` | Mails a code; pass it as `totp.verify({ challenge, emailCode })`. |
+| `secondFactor.disable({ method, password })` | Turns the passkey or the email method off. |
 
 ## Show the signed-in email
 

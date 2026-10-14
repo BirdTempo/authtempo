@@ -34,9 +34,23 @@ export type ApiTokenSummaryJSON = Omit<
 /** One OAuth grant of the signed-in person (plan 9g final fix wave). */
 export type OAuthGrantJSON = Omit<OAuthGrantSummary, "createdAt"> & { createdAt: string };
 
-/** The password sign-in's answer for a user with the second factor on (plan 9f): no session yet. */
+/** A method that a challenge offers, in the order of preference (plan 12c). */
+export type ChallengeMethodJSON = "passkey" | "totp" | "email" | "backup";
+
+/**
+ * The answer of a flow whose user has the second factor on (plan 9f): no
+ * session yet. The password sign-in, the reset, the magic link, the email
+ * code, and social answer it (plan 12c). Call `totp.verify` with one method
+ * of `methods`, or `secondFactor.passkey.verify` for `passkey`.
+ */
 export interface TwoFactorChallengeJSON {
-  twoFactor: { challenge: string; expiresAt: string };
+  twoFactor: { challenge: string; expiresAt: string; methods: ChallengeMethodJSON[] };
+}
+
+/** A method's enable: the methods that are on, and the backup codes, answered once with the first method (else empty). */
+export interface SecondFactorEnableJSON {
+  methods: ("totp" | "passkey" | "email")[];
+  backupCodes: string[];
 }
 export interface TotpStatusJSON {
   /** True when the second factor is on, by any method. */
@@ -70,8 +84,15 @@ export interface Client {
       email: string;
       next?: string | undefined;
     }): Promise<ClientResult<{ sent: true }>>;
-    /** The JSON verify: the session answer with the cookie. A form post is the page's job, not the client's. */
-    verify(input: { token: string }): Promise<ClientResult<PublicSession>>;
+    /**
+     * The JSON verify: the session answer with the cookie, or `{ twoFactor }`
+     * for a user with the second factor on (plan 12c). A form post is the
+     * page's job, not the client's.
+     */
+    verify(input: {
+      token: string;
+      trustDevice?: string | undefined;
+    }): Promise<ClientResult<PublicSession | TwoFactorChallengeJSON>>;
   };
   handoff: {
     redeem(input: {
@@ -118,10 +139,12 @@ export interface Client {
       email: string;
       next?: string | undefined;
     }): Promise<ClientResult<{ sent: true }>>;
+    /** A session, or `{ twoFactor }` for a user with the second factor on (plan 12c): the password is set and every session ended. */
     reset(input: {
       token: string;
       password: string;
-    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+      trustDevice?: string | undefined;
+    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
     change(input: {
       currentPassword?: string | undefined;
       newPassword: string;
@@ -138,13 +161,15 @@ export interface Client {
     verify(input: {
       email: string;
       code: string;
-    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+      trustDevice?: string | undefined;
+    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
     requestReset(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
     reset(input: {
       email: string;
       code: string;
       password: string;
-    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+      trustDevice?: string | undefined;
+    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
   };
   /** Every operation answers `not_found` when the server runs without the `organizations` config. */
   organizations: {
@@ -253,6 +278,7 @@ export interface Client {
       challenge: string;
       code?: string | undefined;
       backupCode?: string | undefined;
+      emailCode?: string | undefined;
       trustDevice?: boolean | undefined;
     }): Promise<ClientResult<TwoFactorSessionJSON>>;
     /** `code` is a current code or a backup code. */
@@ -262,6 +288,34 @@ export interface Client {
     }): Promise<ClientResult<{ backupCodes: string[] }>>;
     status(): Promise<ClientResult<TotpStatusJSON>>;
     revokeTrustedDevices(): Promise<ClientResult<{ ok: true }>>;
+  };
+  /**
+   * The second-factor methods beside TOTP (plan 12c). The enable and the
+   * disable need a session and the password; `passkey.verify` and
+   * `email.send` take the challenge of a sign-in. Every call answers
+   * `not_found` when the server runs without `password` or with
+   * `totp: false`, and the passkey calls also without the `passkey` config.
+   */
+  secondFactor: {
+    passkey: {
+      /** Asks the browser for a passkey of the user, then turns the method on. */
+      enable(input: { password: string }): Promise<ClientResult<SecondFactorEnableJSON>>;
+      /** Asks the browser for a passkey over the challenge's options, then verifies the challenge. */
+      verify(input: {
+        challenge: string;
+        trustDevice?: boolean | undefined;
+      }): Promise<ClientResult<TwoFactorSessionJSON>>;
+    };
+    email: {
+      enable(input: { password: string }): Promise<ClientResult<SecondFactorEnableJSON>>;
+      /** Mails a code for this challenge. Then call `totp.verify` with `emailCode`. */
+      send(input: { challenge: string }): Promise<ClientResult<{ sent: true }>>;
+    };
+    /** Turns the passkey or the email method off. With no method left, the factor is off. */
+    disable(input: {
+      method: "passkey" | "email";
+      password: string;
+    }): Promise<ClientResult<{ ok: true; methods: ("totp" | "passkey" | "email")[] }>>;
   };
   errors: typeof ERRORS;
 }
@@ -287,7 +341,11 @@ export function createClient(options: ClientOptions): Client {
     signOut: () => call<{ ok: true }>("POST", "/sign-out", {}),
     magicLink: {
       request: (input) => call<{ sent: true }>("POST", "/magic-link/request", input),
-      verify: (input) => call<PublicSession>("POST", "/magic-link/verify", input),
+      verify: ({ token, trustDevice }) =>
+        call<PublicSession | TwoFactorChallengeJSON>("POST", "/magic-link/verify", {
+          token,
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
     },
     handoff: {
       redeem: (input) => call<{ token: string } & PublicSession>("POST", "/handoff/redeem", input),
@@ -352,7 +410,12 @@ export function createClient(options: ClientOptions): Client {
           ...rest,
           ...(next !== undefined ? { next } : {}),
         }),
-      reset: (input) => call<{ token: string } & PublicSession>("POST", "/password/reset", input),
+      reset: ({ trustDevice, ...rest }) =>
+        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
+          "POST",
+          "/password/reset",
+          { ...rest, ...(trustDevice !== undefined ? { trustDevice } : {}) },
+        ),
       change: ({ currentPassword, newPassword }) =>
         call<{ ok: true }>("POST", "/password/change", {
           ...(currentPassword !== undefined ? { currentPassword } : {}),
@@ -361,11 +424,20 @@ export function createClient(options: ClientOptions): Client {
     },
     emailOtp: {
       request: ({ email }) => call<{ sent: true }>("POST", "/otp/request", { email }),
-      verify: ({ email, code }) =>
-        call<{ token: string } & PublicSession>("POST", "/otp/verify", { email, code }),
+      verify: ({ email, code, trustDevice }) =>
+        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("POST", "/otp/verify", {
+          email,
+          code,
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
       requestReset: ({ email }) => call<{ sent: true }>("POST", "/otp/reset/request", { email }),
-      reset: ({ email, code, password }) =>
-        call<{ token: string } & PublicSession>("POST", "/otp/reset", { email, code, password }),
+      reset: ({ email, code, password, trustDevice }) =>
+        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("POST", "/otp/reset", {
+          email,
+          code,
+          password,
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
     },
     organizations: {
       create: ({ metadata, ...rest }) =>
@@ -474,11 +546,12 @@ export function createClient(options: ClientOptions): Client {
           password: input.password,
         }),
       enable: (input) => call<TotpStatusJSON>("POST", "/totp/enable", input),
-      verify: ({ code, backupCode, trustDevice, ...rest }) =>
+      verify: ({ code, backupCode, emailCode, trustDevice, ...rest }) =>
         call<TwoFactorSessionJSON>("POST", "/totp/verify", {
           ...rest,
           ...(code !== undefined ? { code } : {}),
           ...(backupCode !== undefined ? { backupCode } : {}),
+          ...(emailCode !== undefined ? { emailCode } : {}),
           ...(trustDevice !== undefined ? { trustDevice } : {}),
         }),
       disable: (input) => call<{ ok: true }>("POST", "/totp/disable", input),
@@ -486,6 +559,52 @@ export function createClient(options: ClientOptions): Client {
         call<{ backupCodes: string[] }>("POST", "/totp/backup-codes", input),
       status: () => call<TotpStatusJSON>("GET", "/totp"),
       revokeTrustedDevices: () => call<{ ok: true }>("POST", "/totp/devices/revoke", {}),
+    },
+    secondFactor: {
+      passkey: {
+        async enable({ password }) {
+          // The enable's proof is a sign-in assertion by a passkey of this user (plan 12c).
+          const options = await call<PublicKeyCredentialRequestOptionsJSON>(
+            "POST",
+            "/passkey/authenticate/options",
+            {},
+          );
+          if (!options.ok) return options;
+          const response = await ceremony(() => webauthn.get(options.value));
+          if (!response.ok) return response;
+          return call<SecondFactorEnableJSON>("POST", "/second-factor/passkey/enable", {
+            password,
+            response: response.value,
+          });
+        },
+        async verify({ challenge, trustDevice }) {
+          const options = await call<PublicKeyCredentialRequestOptionsJSON>(
+            "POST",
+            "/second-factor/passkey/options",
+            { challenge },
+          );
+          if (!options.ok) return options;
+          const response = await ceremony(() => webauthn.get(options.value));
+          if (!response.ok) return response;
+          return call<TwoFactorSessionJSON>("POST", "/totp/verify", {
+            challenge,
+            passkey: response.value,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+          });
+        },
+      },
+      email: {
+        enable: ({ password }) =>
+          call<SecondFactorEnableJSON>("POST", "/second-factor/email/enable", { password }),
+        send: ({ challenge }) =>
+          call<{ sent: true }>("POST", "/second-factor/email/send", { challenge }),
+      },
+      disable: ({ method, password }) =>
+        call<{ ok: true; methods: ("totp" | "passkey" | "email")[] }>(
+          "POST",
+          "/second-factor/disable",
+          { method, password },
+        ),
     },
     errors: ERRORS,
   };

@@ -31,14 +31,16 @@ describe("emailOtp (plan 9e)", () => {
     ).toEqual({ ok: false, code: "invalid_code", status: 400 });
     const v = await client.emailOtp.verify({ email: EMAIL, code });
     if (!v.ok) throw new Error(v.code);
+    if ("twoFactor" in v.value) throw new Error("no session: a second-factor challenge");
     expect(v.value.token).toMatch(/^ts_/);
     expect(v.value.user).toMatchObject({ email: EMAIL, emailVerified: true });
     expect(jar.size).toBe(1);
+    const sessionToken = v.value.token;
     const bearer = createClient({
       baseURL: BASE_URL,
       fetch,
       credentials: "omit",
-      token: () => v.value.token,
+      token: () => sessionToken,
     });
     const s = await bearer.session();
     expect(s.ok && s.value?.user.email).toBe(EMAIL);
@@ -58,6 +60,7 @@ describe("emailOtp (plan 9e)", () => {
       password: "a new long password",
     });
     if (!r.ok) throw new Error(r.code);
+    if ("twoFactor" in r.value) throw new Error("no session: a second-factor challenge");
     expect(r.value.token).toMatch(/^ts_/);
     expect(
       (await client.password.signIn({ email: EMAIL, password: "a new long password" })).ok,
