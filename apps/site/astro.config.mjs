@@ -15,8 +15,17 @@ const sidebar = [
   // Starlight 0.39 and later: a group has `items`, and `autogenerate` is an item.
   { label: "Getting started", items: [{ autogenerate: { directory: "docs/start" } }] },
   { label: "How-to guides", items: [{ autogenerate: { directory: "docs/guides" } }] },
+  { label: "Migration", items: [{ autogenerate: { directory: "docs/migrate" } }] },
+  { label: "Operations", items: [{ autogenerate: { directory: "docs/operations" } }] },
   { label: "Reference", items: [{ autogenerate: { directory: "docs/reference" } }] },
   { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }] },
+  {
+    label: "Versions",
+    items: [
+      { label: "Versioning policy", slug: "docs/versioning" },
+      { label: "Changelog", slug: "docs/changelog" },
+    ],
+  },
 ];
 
 export default defineConfig({

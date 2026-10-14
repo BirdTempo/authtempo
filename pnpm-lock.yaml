@@ -199,6 +199,9 @@ importers:
       '@authtempo/handoff':
         specifier: workspace:*
         version: link:../../packages/handoff
+      '@authtempo/import':
+        specifier: workspace:*
+        version: link:../../packages/import
       '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../../packages/legacy-hashes

@@ -1,0 +1,85 @@
+---
+title: From Firebase Auth
+description: Move the users, the identities, and the Firebase scrypt hashes of Firebase Auth into authtempo, and change the app's auth calls.
+type: how-to
+sources:
+  - packages/import/README.md "Firebase"
+  - packages/legacy-hashes/README.md "@authtempo/legacy-hashes"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17.2
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+sidebar:
+  order: 6
+---
+
+import { Code } from "@astrojs/starlight/components";
+import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
+
+**For:** an operator and a developer who move an app from Firebase Auth to authtempo.
+
+**What it does:** you export the users of Firebase, import them into core's tables, and change the app's Firebase calls to `@authtempo/client`.
+
+## Before you start
+
+- An API with authtempo and `password` set. Do a [getting started tutorial](/docs/start/) first.
+- The Firebase CLI, signed in to the project.
+- The password hash parameters of the project, from the console: Authentication, Users, "Password hash parameters".
+- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace.
+
+## Steps
+
+1. Export the users with `firebase auth:export users.json --format=json`.
+2. Read `rounds`, `mem_cost`, the signer key, and the salt separator in the console.
+3. Store the signer key and the salt separator as secrets of the API, not in the code.
+4. Chain the legacy seam before core's PBKDF2. Pass `["firescrypt"]` as `formats`, and the signer key and the salt separator as `firebase`.
+
+<Code code={seam} lang="ts" title="The API after the import" />
+
+5. Run the import as a dry run, with `rounds` and `mem_cost` of the project.
+
+```sh
+pnpm exec authtempo-import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --postgres "$DATABASE_URL" --dry-run
+```
+
+6. Run the same command without `--dry-run`.
+7. Sign in once with a known user and the old password.
+8. Change each auth call of the app with the table below.
+9. Do the steps of [The cutover](/docs/migrate/cutover/).
+
+## The calls
+
+| Firebase | authtempo |
+| --- | --- |
+| `signInWithEmailAndPassword(auth, email, password)` | `client.password.signIn({ email, password })` |
+| `createUserWithEmailAndPassword(auth, email, password)` | `client.password.signUp({ email, password })` |
+| `sendSignInLinkToEmail(auth, email, settings)` | `client.magicLink.request({ email })` |
+| `signInWithPopup(auth, new GoogleAuthProvider())` | Send the browser to `/auth/social/google/start?next=/` on the API. There is no popup. |
+| `sendPasswordResetEmail(auth, email)` | `client.password.requestReset({ email })` |
+| `signOut(auth)` | `client.signOut()` |
+| `onAuthStateChanged(auth, callback)` | No event. Call `client.session()` after each sign-in and each sign-out. |
+| `user.getIdToken()` | `client.jwt.token()` |
+| `verifyIdToken(token)` of the Admin SDK | `auth.session(request)`, or a check of the session JWT against `/auth/jwks` |
+
+## How it behaves
+
+- `rounds` and `mem_cost` are each 1 to 99. The product of 2 to the power of `mem_cost` and `rounds` is at most 2 to the power of 18.
+- Other values stop the run before any read.
+- The export carries no hash parameters. A wrong value refuses every first sign-in with no line in the report.
+- A `github.com` provider imports as GitHub. A custom `oidc.<name>` provider is dropped and listed.
+- A user with a `disabled` value other than `false` is skipped.
+- Firebase passkeys do not move.
+
+:::caution
+Warning: a wrong signer key, salt separator, `rounds`, or `mem_cost` makes every imported password fail. Sign in once with a known user before the cutover.
+:::
+
+## If it fails
+
+- The command stops at start: `rounds` or `mem_cost` is out of bounds.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials) for every imported user: a hash parameter of the project is wrong.
+- The API stops at construction: `firescrypt` is in `formats` without the `firebase` option.
+
+## Next
+
+- [The cutover](/docs/migrate/cutover/)
+- [Import CLI](/docs/reference/import-cli/)
+- [Secrets](/docs/operations/secrets/)

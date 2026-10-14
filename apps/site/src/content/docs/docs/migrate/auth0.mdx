@@ -1,0 +1,85 @@
+---
+title: From Auth0
+description: Move the users, the identities, the bcrypt hashes, and the organizations of Auth0 into authtempo, and change the app's auth calls.
+type: how-to
+sources:
+  - packages/import/README.md "Auth0"
+  - packages/import/README.md "The exit status and the report"
+  - packages/legacy-hashes/README.md "@authtempo/legacy-hashes"
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+sidebar:
+  order: 5
+---
+
+import { Code } from "@astrojs/starlight/components";
+import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
+
+**For:** an operator and a developer who move an app from Auth0 to authtempo.
+
+**What it does:** you import the user export of Auth0 and its hash file into core's tables, and change the app's Auth0 calls to `@authtempo/client`.
+
+## Before you start
+
+- An API with authtempo and `password` set. Do a [getting started tutorial](/docs/start/) first.
+- The user export job of Auth0, `POST /api/v2/jobs/users-exports` with the format `json`.
+- The password hashes, if you need them. Auth0 sends them only through a support case, as a PGP file.
+- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace.
+
+## Steps
+
+1. Run the user export job, and decompress the file if it is compressed, for example with `gunzip users.ndjson.gz`.
+2. Decrypt the hash file of the support case as `hashes.ndjson`.
+3. For organizations, write `organizations.json`: one array of `GET /api/v2/organizations` objects, each with a `members` array.
+4. Chain the legacy seam before core's PBKDF2 in the API. Pass `["bcrypt"]` as `formats`.
+
+<Code code={seam} lang="ts" title="The API after the import" />
+
+5. Map your role names to core's roles with `--role-map`. Auth0 roles have no default map.
+6. Run the import as a dry run, and read the report.
+
+```sh
+pnpm exec authtempo-import auth0 --users users.ndjson --hashes hashes.ndjson --organizations organizations.json --role-map lead=admin --formats bcrypt --postgres "$DATABASE_URL" --dry-run
+```
+
+7. Run the same command without `--dry-run`.
+8. Sign in once with a known user and the old password.
+9. Change each auth call of the app with the table below.
+10. Do the steps of [The cutover](/docs/migrate/cutover/).
+
+## The calls
+
+Auth0 sends the person to its own page. authtempo has no page for a web app: the app shows its own sign-in form.
+
+| Auth0 | authtempo |
+| --- | --- |
+| `loginWithRedirect()` | The app's own form, with `client.magicLink.request` or `client.password.signIn`. |
+| `loginWithRedirect({ authorizationParams: { connection: "google-oauth2" } })` | Send the browser to `/auth/social/google/start?next=/` on the API. |
+| `logout()` | `client.signOut()` |
+| `getUser()`, `isAuthenticated()` | `client.session()` |
+| `getTokenSilently()` | `client.jwt.token()` |
+| The check of an Auth0 access token on the server | `auth.session(request)`, or a check of the session JWT against `/auth/jwks` |
+
+## How it behaves
+
+- A hash line is used only when exactly one user matches `auth0|<_id>` and the addresses are equal.
+- Only a `$2a$` or `$2b$` hash imports. Any other hash is refused by its format.
+- An unmapped role becomes `member`. An organization with no owner gets its first admin as owner; with no admin it is skipped.
+- A `github` identity imports as GitHub. Every `linkedin` identity is listed as `identity:linkedin_legacy`.
+- A user with a `blocked` value other than `false` is skipped as `banned`.
+- Without `--hashes`, the command prints one line and imports no password. A reset or a magic link then signs each user in.
+
+:::caution
+Warning: the decrypted hash file holds every password hash. Do not commit it, and delete it after the run.
+:::
+
+## If it fails
+
+- The command exits 1: read the report for `unmatched_row`, `hash_email_mismatch`, `no_owner`, or a refused hash.
+- The command stops at start: `organizations.json` is the page object of the API, not the array. Save the array itself.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the password is wrong, or the user imported with no password.
+
+## Next
+
+- [The cutover](/docs/migrate/cutover/)
+- [Import CLI](/docs/reference/import-cli/)
+- [Mint a JWT for your other services](/docs/guides/jwt/)
