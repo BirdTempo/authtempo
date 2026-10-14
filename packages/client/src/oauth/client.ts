@@ -62,6 +62,13 @@ interface TokenAnswer {
   id_token: string | undefined;
 }
 
+/**
+ * The largest `expires_in` in seconds. A Date ends at 8.64e15 ms, and a
+ * safe integer such as 1e13 seconds is past it, which gives an Invalid Date.
+ * 1e12 seconds (about 31,700 years) from any clock of this era stays in range.
+ */
+const EXPIRES_IN_MAX = 1e12;
+
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const optionalString = (v: unknown): v is string | undefined =>
@@ -69,8 +76,8 @@ const optionalString = (v: unknown): v is string | undefined =>
 
 /**
  * The token answer, checked at run time (RFC 6749 section 5.1): a non-empty
- * `access_token`, a `token_type` of Bearer in any case, a positive finite
- * `expires_in`, and string `scope`, `refresh_token`, and `id_token` when
+ * `access_token`, a `token_type` of Bearer in any case, a positive safe
+ * integer `expires_in` up to `EXPIRES_IN_MAX` (so the expiry is a valid date), and string `scope`, `refresh_token`, and `id_token` when
  * present. Null for any other shape, which the caller answers as `unexpected`.
  */
 function tokenAnswer(v: unknown): TokenAnswer | null {
@@ -78,7 +85,12 @@ function tokenAnswer(v: unknown): TokenAnswer | null {
   const { access_token, token_type, expires_in, scope, refresh_token, id_token } = v;
   if (typeof access_token !== "string" || access_token === "") return null;
   if (typeof token_type !== "string" || token_type.toLowerCase() !== "bearer") return null;
-  if (typeof expires_in !== "number" || !Number.isFinite(expires_in) || expires_in <= 0)
+  if (
+    typeof expires_in !== "number" ||
+    !Number.isSafeInteger(expires_in) ||
+    expires_in <= 0 ||
+    expires_in > EXPIRES_IN_MAX
+  )
     return null;
   if (!optionalString(scope) || !optionalString(refresh_token) || !optionalString(id_token))
     return null;

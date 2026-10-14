@@ -216,6 +216,9 @@ describe("the OAuth client's answers and rules (plan 11d Task 8 review)", () => 
       { ...GOOD, token_type: "mac" },
       { ...GOOD, expires_in: "x" },
       { ...GOOD, expires_in: -1 },
+      { ...GOOD, expires_in: 1e308 },
+      { ...GOOD, expires_in: 1.5 },
+      { ...GOOD, expires_in: 1e13 },
       { ...GOOD, access_token: 5 },
       { ...GOOD, access_token: "" },
       { ...GOOD, scope: 5 },
@@ -321,6 +324,24 @@ describe("the OAuth client's answers and rules (plan 11d Task 8 review)", () => 
     if (!u.ok) throw new Error(u.code);
     const state = new URL(u.value).searchParams.get("state") ?? "";
     const back = `${REDIRECT}?code=oc_x&state=${state}&iss=${encodeURIComponent(ISSUER)}`;
+    expect(await b.oauth.handleRedirect(back)).toEqual({
+      ok: false,
+      code: "redirect_mismatch",
+      status: 0,
+    });
+    expect(b.sent).toHaveLength(0);
+  });
+
+  it("refuses the redirect of a sign-in that a client of another issuer started on the same store", async () => {
+    const shared = memoryPendingStore();
+    const other = "https://other.example.com/auth";
+    const a = stub(() => Response.json(GOOD), { pending: shared });
+    const b = stub(() => Response.json(GOOD), { pending: shared, issuer: other });
+    const u = await a.oauth.authorizeURL();
+    if (!u.ok) throw new Error(u.code);
+    const state = new URL(u.value).searchParams.get("state") ?? "";
+    // The same client id; only the issuer differs, and the redirect names b's issuer.
+    const back = `${REDIRECT}?code=oc_x&state=${state}&iss=${encodeURIComponent(other)}`;
     expect(await b.oauth.handleRedirect(back)).toEqual({
       ok: false,
       code: "redirect_mismatch",

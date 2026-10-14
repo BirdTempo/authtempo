@@ -98,6 +98,7 @@ describe("the OAuth client in a browser on its own origin (plan 11d, Task 3)", (
   it("removes the abandoned sign-ins older than 10 minutes from sessionStorage at each start", async () => {
     const storage = memoryStorage();
     storage.setItem("other-app:key", "kept");
+    storage.setItem("authtempo-oauth:broken", "not json");
     const store = browserPendingStore(storage);
     const base = { issuer: ISSUER, clientId: "cl_a", verifier: "v" };
     await store.put({ ...base, state: "old", createdAt: 0 });
