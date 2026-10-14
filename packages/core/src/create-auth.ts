@@ -68,10 +68,10 @@ import {
   type PasswordResend,
   type PasswordReset,
   type PasswordResetRequest,
-  type PasswordSession,
   type PasswordSignIn,
   type PasswordSignInResult,
   type PasswordSignUp,
+  type PasswordSignUpResult,
   type PasswordVerified,
   type PasswordVerify,
   passwordSignIn,
@@ -143,7 +143,8 @@ import type {
 
 /** Present on `api` only when the config has a `password` section. */
 export interface PasswordApi {
-  signUp(input: PasswordSignUp): Promise<Result<PasswordSession>>;
+  /** A session, or `{ user, verifyRequired: true }` while `password.requireVerified` is on (plan 12b). */
+  signUp(input: PasswordSignUp): Promise<Result<PasswordSignUpResult>>;
   /** A session, or `{ twoFactor }` for a user with the second factor on (plan 9f). */
   signIn(input: PasswordSignIn): Promise<Result<PasswordSignInResult>>;
   /** The password of a known user again, with the sign-in's limits (plan 9f). */

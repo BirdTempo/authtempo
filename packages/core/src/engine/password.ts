@@ -83,6 +83,18 @@ export interface PasswordSession {
   session: SessionRow;
 }
 
+/**
+ * The sign-up answer while `password.requireVerified` is on (plan 12b): the
+ * new user and no session. The verify link signs the person in.
+ */
+export interface PasswordSignUpPending {
+  user: UserRow;
+  verifyRequired: true;
+}
+
+/** A session, or the user with no session while `password.requireVerified` is on. */
+export type PasswordSignUpResult = PasswordSession | PasswordSignUpPending;
+
 export interface PasswordSignUp {
   email: string;
   password: string;
@@ -132,18 +144,19 @@ async function screen(
 }
 
 interface Created {
-  signedIn: PasswordSession;
+  answer: PasswordSignUpResult;
   passwordId: string;
 }
 
 /**
  * Creates an unverified user with a password and a session, then mails a
- * link that confirms the address.
+ * link that confirms the address. While `password.requireVerified` is on,
+ * it opens no session and answers the user with `verifyRequired: true`.
  */
 export async function passwordSignUp(
   config: ResolvedConfig,
   input: PasswordSignUp,
-): Promise<Result<PasswordSession>> {
+): Promise<Result<PasswordSignUpResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
   if (!(await config.limiter.allow(`password-sign-up:ip:${input.ip ?? "unknown"}`, SIGN_UP_PER_IP)))
@@ -184,15 +197,11 @@ export async function passwordSignUp(
     }
   }
   if (!created.ok) return created;
+  const answer = created.value.answer;
   // Right after the commit, before the mail: the session exists whatever the mail does.
-  await sessionOpened(
-    config,
-    created.value.signedIn.session,
-    created.value.signedIn.user,
-    "password",
-  );
+  if ("session" in answer) await sessionOpened(config, answer.session, answer.user, "password");
   await sendVerifyMail(config, email, created.value.passwordId, now);
-  return ok(created.value.signedIn);
+  return ok(answer);
 }
 
 /**
@@ -200,7 +209,9 @@ export async function passwordSignUp(
  * (the owner's magic link) can find this user before the commit, so a
  * conditional update of the user row where `emailVerified` is false runs
  * after the session insert. The last statement activates the password row,
- * which the sign-up wrote pending (`PENDING_HASH_PREFIX`).
+ * which the sign-up wrote pending (`PENDING_HASH_PREFIX`). While
+ * `password.requireVerified` is on, no session hook runs and no session
+ * row is written (plan 12b); the guard and the activation stay.
  */
 function insertSignUp(
   config: ResolvedConfig,
@@ -241,11 +252,14 @@ function insertSignUp(
     // row has a guard. After an owner's reset inside this transaction, the
     // pending password row holds the owner's hash, so an undo of it would
     // delete the owner's password. A refusal here undoes nothing.
-    const prepared = await prepareSession(
-      config,
-      { user: minted, ip: input.ip, userAgent: input.userAgent, via: "password" },
-      tx,
-    );
+    const opens = !config.password?.requireVerified;
+    const prepared = opens
+      ? await prepareSession(
+          config,
+          { user: minted, ip: input.ip, userAgent: input.userAgent, via: "password" },
+          tx,
+        )
+      : null;
     const user = await tx.create("user", minted);
     // Pending until the guard below passed: see `PENDING_HASH_PREFIX`.
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
@@ -256,7 +270,10 @@ function insertSignUp(
       createdAt: now,
       updatedAt: now,
     });
-    const s = await writeSession(config, prepared, tx);
+    const s = prepared ? await writeSession(config, prepared, tx) : null;
+    const dropSession = async () => {
+      if (s) await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+    };
     // claimEmail flips the flag in its first statement, so any claim since
     // the user create makes this match zero rows. The user row is the
     // owner's now. A throw would undo the password create, and the D1 undo
@@ -267,7 +284,7 @@ function insertSignUp(
     // owner's reset keeps this row id and writes the owner's hash into it,
     // and that row must stay.
     if (!(await userStillUnverified(tx, user.id, now))) {
-      await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+      await dropSession();
       await tx.delete("password", [
         { field: "id", op: "eq", value: password.id },
         { field: "hash", op: "eq", value: pending },
@@ -288,10 +305,13 @@ function insertSignUp(
       { hash: row.hash, updatedAt: now },
     );
     if (active === 0) {
-      await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+      await dropSession();
       return fail("email_taken_unverified");
     }
-    return ok({ signedIn: { token: s.token, user, session: s.session }, passwordId: password.id });
+    const answer: PasswordSignUpResult = s
+      ? { token: s.token, user, session: s.session }
+      : { user, verifyRequired: true };
+    return ok({ answer, passwordId: password.id });
   });
 }
 
@@ -353,21 +373,53 @@ export async function resendPasswordVerification(
   if (email === null) return ok({ sent: true });
   if (!(await config.limiter.allow(`password-resend:ip:${input.ip ?? "unknown"}`, RESEND_PER_IP)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`password-resend:email:${email}`, RESEND_PER_EMAIL)))
-    return fail("rate_limited");
+  // The email limit counts before the reads, so an unknown address spends
+  // the same budget as a known one.
+  if (!(await allowResendMail(config, email))) return fail("rate_limited");
   const user = await config.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (!user || user.emailVerified) return ok({ sent: true });
   const row = await config.storage.findOne("password", [
     { field: "userId", op: "eq", value: user.id },
   ]);
   if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) return ok({ sent: true });
+  await replaceVerifyMail(config, email, row.id);
+  return ok({ sent: true });
+}
+
+/** The per-email limit of a new verify link: the resend route's key (plan 8b). */
+function allowResendMail(config: ResolvedConfig, email: string): Promise<boolean> {
+  return config.limiter.allow(`password-resend:email:${email}`, RESEND_PER_EMAIL);
+}
+
+/** Deletes the pending `password-verify` rows of the address, then mails one new link. */
+async function replaceVerifyMail(
+  config: ResolvedConfig,
+  email: string,
+  passwordId: string,
+): Promise<void> {
   await config.storage.delete("verification", [
     { field: "purpose", op: "eq", value: "password-verify" },
     { field: "identifier", op: "eq", value: email },
     { field: "consumedAt", op: "eq", value: null },
   ]);
-  await sendVerifyMail(config, email, row.id, config.clock.now());
-  return ok({ sent: true });
+  await sendVerifyMail(config, email, passwordId, config.clock.now());
+}
+
+/**
+ * A new verify link for a known unverified user with an active password
+ * row (plan 12b): the per-email limit of the resend route, then the other
+ * pending links go, then one mail. No IP key: the caller counted its own.
+ * False when the limit is full and no mail went. A mail throw reaches the
+ * caller, as at the resend.
+ */
+export async function mailVerifyAgain(
+  config: ResolvedConfig,
+  email: string,
+  passwordId: string,
+): Promise<boolean> {
+  if (!(await allowResendMail(config, email))) return false;
+  await replaceVerifyMail(config, email, passwordId);
+  return true;
 }
 
 /**
@@ -454,6 +506,14 @@ export async function passwordSignIn(
         return refuse();
       proved = current.hash;
     }
+  }
+  // Plan 12b Task 15 (Better Auth docs audit gap 1). After the password
+  // check, so only a person who knows the password learns that the address
+  // is unverified. A new link goes out, at most 3 per 15 minutes. Before the
+  // second-factor gate: no challenge opens either.
+  if (pw.requireVerified && !user.emailVerified) {
+    await mailVerifyAgain(config, user.email, row.id);
+    return fail("email_unverified");
   }
   // The second factor (plan 9f, owner decision 1b): a user with the factor on
   // gets a challenge in place of the session. The gate keeps the guard below

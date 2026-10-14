@@ -269,6 +269,15 @@ export interface PasswordConfig {
    * stop its call when `signal` aborts.
    */
   legacyVerify?: LegacyVerifyConfig;
+  /**
+   * True refuses a password sign-in of a user whose address is not
+   * verified: the right password answers `email_unverified` (403) and
+   * mails a new verify link, at most 3 per 15 minutes. A sign-up then
+   * opens no session. Default `false`, because core signs in an
+   * unverified password user since plan 8 (spec 8.7). A default of `true`
+   * would lock out each unverified user of a live app at the upgrade.
+   */
+  requireVerified?: boolean;
 }
 
 export interface EmailOtpConfig {
@@ -533,6 +542,7 @@ export interface ResolvedConfig {
     resetTtlMinutes: number;
     resetPage: (input: ResetPageInput) => string;
     legacyVerify: Required<LegacyVerifyConfig> | null;
+    requireVerified: boolean;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
   totp: ResolvedTotp | null;
@@ -769,6 +779,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         throw new ConfigError("password.legacyVerify.verify must be a function");
       legacyVerify = { verify: p.legacyVerify.verify, timeoutMs };
     }
+    // Default false: see `PasswordConfig.requireVerified`.
+    const requireVerified = p.requireVerified ?? false;
+    if (typeof requireVerified !== "boolean")
+      throw new ConfigError("password.requireVerified must be a boolean");
     password = {
       hash: p.hash ?? createPbkdf2PasswordHash(),
       minLength,
@@ -776,6 +790,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       resetTtlMinutes,
       resetPage: p.resetPage ?? defaultResetPage,
       legacyVerify,
+      requireVerified,
     };
   }
   // One source for the session cookie name: the trust cookie check of `totp` reads it too.

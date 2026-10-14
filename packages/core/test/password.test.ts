@@ -24,6 +24,7 @@ import {
   recordNextTransaction,
   sessionOnly,
   signUpAndVerify,
+  upSession,
 } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -47,7 +48,7 @@ describe("passwordSignUp", () => {
     const auth = pwAuth();
     const r = await signUp(auth, { email: " Ada@Example.com ", name: "Ada" });
     if (!r.ok) throw new Error(r.code);
-    expect(r.value.token).toMatch(/^ts_[A-Za-z0-9_-]{43}$/);
+    expect(upSession(r.value).token).toMatch(/^ts_[A-Za-z0-9_-]{43}$/);
     expect(r.value.user).toMatchObject({ email: EMAIL, emailVerified: false, name: "Ada" });
     const rows = await auth.storage.findMany("password", []);
     expect(rows).toHaveLength(1);
@@ -739,7 +740,7 @@ describe("verifyPasswordEmail", () => {
     expect(
       await auth.storage.findOne("identity", [{ field: "provider", op: "eq", value: "email" }]),
     ).toMatchObject({ subject: EMAIL });
-    expect(await resolveSession(auth.config, up.value.token)).toBeNull();
+    expect(await resolveSession(auth.config, upSession(up.value).token)).toBeNull();
     expect(await resolveSession(auth.config, r.value.signedIn.token)).not.toBeNull();
     expect((await signIn(auth)).ok).toBe(true);
   });
@@ -877,7 +878,7 @@ describe("requestPasswordReset and resetPassword", () => {
         })
       ).ok,
     ).toBe(true);
-    expect(await resolveSession(auth.config, claimant.value.token)).toBeNull();
+    expect(await resolveSession(auth.config, upSession(claimant.value).token)).toBeNull();
     expect(await signIn(auth, { password: "claimant password" })).toMatchObject({
       code: "invalid_credentials",
     });
@@ -1113,7 +1114,7 @@ describe("changePassword", () => {
     const auth = pwAuth();
     const up = await signUp(auth);
     if (!up.ok) throw new Error(up.code);
-    const unverified = await resolveSession(auth.config, up.value.token);
+    const unverified = await resolveSession(auth.config, upSession(up.value).token);
     if (!unverified) throw new Error("no session");
     expect(
       await changePassword(auth.config, {

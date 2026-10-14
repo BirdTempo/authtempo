@@ -115,7 +115,6 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     ],
     consumerb: [
       "advanced.defaultCookieAttributes.secure",
-      "emailAndPassword.requireEmailVerification",
       "emailAndPassword.sendResetPassword",
       "emailVerification.expiresIn",
       "plugins[admin]",
@@ -172,7 +171,7 @@ describe("checkOptions: the allow list fails closed", () => {
         enabled: true,
         minPasswordLength: 12,
         maxPasswordLength: 128,
-        requireEmailVerification: false,
+        requireEmailVerification: true,
         autoSignIn: true,
         disableSignUp: false,
         revokeSessionsOnPasswordReset: true,
@@ -182,6 +181,7 @@ describe("checkOptions: the allow list fails closed", () => {
       emailVerification: {
         sendVerificationEmail: send,
         sendOnSignUp: true,
+        sendOnSignIn: true,
         autoSignInAfterVerification: true,
         expiresIn: 3600,
       },

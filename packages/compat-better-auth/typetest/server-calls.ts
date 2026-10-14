@@ -9,7 +9,9 @@ export async function consumereCalls(request: Request) {
   const up = await cf.api.signUpEmail({
     body: { email: "a@example.com", password: "correct horse battery", name: "A" },
   });
-  const token: string = up.token;
+  // consumere names requireEmailVerification (a boolean), so the token can be
+  // null, as Better Auth 1.7.2 types it (dist/api/routes/sign-up.d.mts line 152).
+  const token: string | null = up.token;
   const signedIn = await cf.api.signInEmail({
     body: { email: "a@example.com", password: "correct horse battery" },
   });
@@ -63,4 +65,26 @@ export async function noTwoFactorCalls() {
   });
   // @ts-expect-error without the plugin the answer has no twoFactorRedirect
   return r.twoFactorRedirect;
+}
+
+// Plan 12b Task 15: with requireEmailVerification the sign-up token can be null; without it, it cannot.
+export async function noRequireVerifiedCalls() {
+  const up = await mr.api.signUpEmail({
+    body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+  });
+  const token: string = up.token;
+  return token;
+}
+const rv = betterAuth({
+  ...consumeri,
+  emailAndPassword: { enabled: true, requireEmailVerification: true },
+});
+export async function requireVerifiedCalls() {
+  const up = await rv.api.signUpEmail({
+    body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+  });
+  const maybe: string | null = up.token;
+  // @ts-expect-error with requireEmailVerification the sign-up opens no session, so the token is null
+  const token: string = up.token;
+  return [maybe, token];
 }

@@ -34,6 +34,7 @@ import { base32Decode, normalizeBackupCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { tokenFromMail } from "./helpers.js";
+import { upSession } from "./password-helpers.js";
 import {
   type Auth,
   codeNow,
@@ -455,7 +456,7 @@ describe("a passkey as a second-factor method (plan 12c)", () => {
       userAgent: null,
     });
     if (!up.ok) throw new Error(up.code);
-    const bea = await resolveSession(auth.config, up.value.token);
+    const bea = await resolveSession(auth.config, upSession(up.value).token);
     if (!bea) throw new Error("no session");
     expect(bea.user.emailVerified).toBe(false);
     expect(

@@ -87,6 +87,7 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 - The one key that is not Better Auth's is `authtempo`. `authtempo.appURL` is the origin where each sign-in lands, by default the origin of `baseURL`. An absolute `callbackURL` off that origin answers 403 with `INVALID_CALLBACK_URL`. `authtempo.passwordHash` replaces `betterAuthPasswordHash()`.
 - `session.token` holds the SHA-256 of the token. App SQL that reads it reads a hash.
 - A reset ends every session, where Better Auth kept the others.
+- `requireEmailVerification: true` maps to `password.requireVerified`. An unverified sign-in answers `EMAIL_NOT_VERIFIED` and gets a new verify link, also when `sendOnSignIn` is absent.
 - Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The callback URL at each provider is `<baseURL><basePath>/social/<provider>/callback`, not `/api/auth/callback/<provider>`.
 - The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.

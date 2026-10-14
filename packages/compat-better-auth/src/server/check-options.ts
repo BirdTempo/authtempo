@@ -425,10 +425,8 @@ const TOP: Record<string, Rule> = {
       PASSWORD_MAX_LENGTH,
       `core fixes the maximum at ${PASSWORD_MAX_LENGTH}`,
     ),
-    requireEmailVerification: only(
-      false,
-      "core answers a session at sign-up before the address is verified",
-    ),
+    // Plan 12b Task 15: maps to core's password.requireVerified.
+    requireEmailVerification: boolean,
     autoSignIn: only(true, "core signs the person in at sign-up"),
     disableSignUp: only(false, "core serves sign-up whenever passwords are on"),
     revokeSessionsOnPasswordReset: only(true, "core ends every session on a reset"),
@@ -438,6 +436,13 @@ const TOP: Record<string, Rule> = {
   emailVerification: object({
     sendVerificationEmail: fn,
     sendOnSignUp: only(true, "core mails the verify link at every sign-up"),
+    // Better Auth mails a new link at an unverified sign-in only with this
+    // key true (dist/api/routes/sign-in.mjs line 342, read 2026-10-14).
+    // Core always mails one, so absent and true are accepted.
+    sendOnSignIn: only(
+      true,
+      "core sends a new verify link at each unverified sign-in, at most 3 per 15 minutes",
+    ),
     autoSignInAfterVerification: only(true, "core signs the person in at the verify link"),
     expiresIn: MINUTES,
   }),

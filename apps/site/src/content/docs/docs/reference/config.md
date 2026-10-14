@@ -163,6 +163,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `password.legacyVerify` | `LegacyVerifyConfig` | none | The old system's check, for users with `LEGACY_VERIFY_HASH`. |
 | `password.legacyVerify.verify` | async function of the address, the password, and a signal | required in `legacyVerify` | Only `true` is a match. |
 | `password.legacyVerify.timeoutMs` | number | 5000 | An integer from 100 to 30000. Every failed sign-in waits this long. |
+| `password.requireVerified` | boolean | `false` | True refuses the right password of an unverified address with `email_unverified` and mails a new link. A sign-up then opens no session. The default keeps the sign-in of an unverified user that core allows since plan 8. |
 
 ## Email codes
 

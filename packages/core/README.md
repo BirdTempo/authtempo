@@ -348,6 +348,7 @@ optional.
 | `breachCheck` | none | `(plain) => Promise<boolean>`. True refuses the password with `password_breached`. |
 | `resetTtlMinutes` | 15 | The life of a reset link, 1 to 1440. |
 | `resetPage` | `defaultResetPage` | The HTML of the reset page. |
+| `requireVerified` | `false` | True refuses the password sign-in of an unverified address. |
 
 The default hash is PBKDF2-HMAC-SHA256 on Web Crypto. A hash is stored as
 `pbkdf2-sha256$<iterations>$<salt>$<hash>`. The salt is 16 random bytes and
@@ -382,6 +383,22 @@ the new password first, deletes every other session, and deletes the
 user's pending handoff codes. It keeps the current session. A change also
 deletes the address's pending reset links (added 2026-10-10 by the plan 8
 final fix wave).
+
+`requireVerified` (plan 12b). The default is `false`, because core signs in
+an unverified password user since plan 8 (spec 8.7). A default of `true`
+would lock out each unverified user of a live app at the upgrade. With the
+key on, a sign-in checks the password first, then rehashes, then checks the
+address. A wrong password answers `invalid_credentials` as before. A right
+password of an unverified address answers `email_unverified` (403) and
+opens no session and no challenge, so only a person who knows the password
+learns that the address is unverified. A new verify link goes out first. It
+counts on `password-resend:email:<email>`, the key of the resend route, so
+at most 3 links go per 15 minutes. Over the limit, no mail goes, and the
+answer stays `email_unverified`. The other pending links of the address go
+first, so one link at a time is live. A sign-up with the key on writes the
+user and the password, mails the link, and opens no session: it answers
+200 `{ user, verifyRequired: true }` with no cookie, and the session hooks
+do not run. The verify link signs the person in.
 
 A reset of a user with the second factor on opens no session (plan 12c).
 It sets the password and ends every session, as before. Then it writes a

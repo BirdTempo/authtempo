@@ -4,6 +4,7 @@ import { createAuth } from "../src/create-auth.js";
 import {
   type PasswordSession,
   type PasswordSignInResult,
+  type PasswordSignUpResult,
   passwordSignUp,
   verifyPasswordEmail,
 } from "../src/engine/password.js";
@@ -102,6 +103,16 @@ export async function sessionOnly(
   if (v.ok && !("token" in v.value))
     throw new Error("the sign-in answered a second-factor challenge");
   return v as Result<PasswordSession>;
+}
+
+/**
+ * The session of a sign-up answer. Since plan 12b a sign-up with
+ * `password.requireVerified` on answers no session. A test that expects a
+ * session reads it through this call: a pending answer throws.
+ */
+export function upSession(v: PasswordSignUpResult): PasswordSession {
+  if (!("session" in v)) throw new Error("the sign-up answered no session");
+  return v;
 }
 
 /**

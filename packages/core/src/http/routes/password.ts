@@ -13,7 +13,7 @@ import {
   verifyPasswordEmail,
 } from "../../engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
-import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import { publicUser, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
@@ -95,7 +95,11 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
         });
-        return r.ok ? signedIn(r.value) : respond(r);
+        if (!r.ok) return respond(r);
+        // password.requireVerified (plan 12b): the user, no session, and no cookie.
+        if ("verifyRequired" in r.value)
+          return json({ user: publicUser(r.value.user), verifyRequired: true });
+        return signedIn(r.value);
       },
     },
     {

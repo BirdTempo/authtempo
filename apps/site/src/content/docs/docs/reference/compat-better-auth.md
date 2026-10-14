@@ -69,6 +69,7 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 | An absolute `callbackURL` on any trusted origin | Only the origin of `authtempo.appURL` keeps its path. Any other answers 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour | It lives as long as the magic link. |
+| `requireEmailVerification: true` mails a new link at an unverified sign-in only with `sendOnSignIn: true` | It maps to `password.requireVerified`. The sign-in answers `EMAIL_NOT_VERIFIED` and always mails a new link, at most 3 per 15 minutes. `sendOnSignIn: false` is refused at start. |
 | `trustedOrigins` takes a function and wildcards | Each entry is an exact origin or an app scheme. |
 | The session cookie `better-auth.session_token` | The session cookie `tempo_session`. |
 

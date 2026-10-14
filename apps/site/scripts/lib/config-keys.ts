@@ -149,6 +149,7 @@ export const CONFIG_KEYS = {
     resetTtlMinutes: true,
     resetPage: true,
     legacyVerify: true,
+    requireVerified: true,
   } satisfies Keys<PasswordConfig>,
   "password.legacyVerify": { verify: true, timeoutMs: true } satisfies Keys<LegacyVerifyConfig>,
   emailOtp: {

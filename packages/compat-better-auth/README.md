@@ -69,6 +69,15 @@ At most two legacy derives run at once per isolate, also when the app chains
 `@authtempo/legacy-hashes` before this seam: both use core's `deriveGate`.
 The others wait, and no sign-in is refused.
 
+`requireEmailVerification: true` maps to core's `password.requireVerified`
+(plan 12b). A sign-up opens no session and answers `{ token: null, user }`.
+A taken address answers the same shape with a new synthetic user, as Better
+Auth does. A right password of an unverified address answers
+`EMAIL_NOT_VERIFIED` (403). Core mails a new verify link at each unverified
+sign-in, at most 3 per 15 minutes, also when `sendOnSignIn` is absent. An app
+that leaves `sendOnSignIn` out now gets that mail, where Better Auth sends
+none.
+
 ## Storage: in place on the Better Auth tables
 
 `drizzleAdapter(db, { provider: "pg", schema })` and
@@ -243,6 +252,10 @@ accepts the invitation, and the row id (from `api.createInvitation`) cancels it.
 verify link through core's resend route (plan 8b). The earlier link of the
 address stops working. A `callbackURL` answers `NOT_SUPPORTED` (501): core lands
 the link on the app origin.
+
+`emailVerification.sendOnSignIn: false` is refused at start: core sends a new
+verify link at each unverified sign-in, at most 3 per 15 minutes. Absent and
+`true` are accepted.
 
 Errors: `APIError` on the server and `error` on the client carry Better Auth's
 code (`body.code`, `error.code`) and core's HTTP status. The table is
@@ -605,8 +618,8 @@ The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organizati
 consumerd (follow-ups first): admin and impersonation, anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, the rate limit storage. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` (`ta_purpose` with snake-case names) instead; the row holds a keyed hash, never the code.
 The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
 
-consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, and `jwt` and JWKS (refused since plan 9g; see "JWT and the OAuth provider"), admin, `requireEmailVerification`, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
-The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.requireEmailVerification`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
+consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, and `jwt` and JWKS (refused since plan 9g; see "JWT and the OAuth provider"), admin, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
 
 ## JWT and the OAuth provider
 

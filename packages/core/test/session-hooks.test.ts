@@ -25,7 +25,7 @@ import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST, sessionOnly, signUpAndVerify } from "./password-helpers.js";
+import { FAST, sessionOnly, signUpAndVerify, upSession } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
 
 const PASSWORD = "correct horse battery";
@@ -579,7 +579,7 @@ describe("session end hooks (plan 9d)", () => {
     calls.length = 0;
     expect((await magicSignIn(auth, "ada@example.com")).ok).toBe(true);
     expect(calls.filter(([name]) => name === "afterEnd")).toEqual([
-      ["afterEnd", { session: up.value.session, reason: "claim" }],
+      ["afterEnd", { session: upSession(up.value).session, reason: "claim" }],
     ]);
   });
 
@@ -596,7 +596,7 @@ describe("session end hooks (plan 9d)", () => {
     });
     expect(verified.ok && verified.value.signedIn !== null).toBe(true);
     expect(calls.filter(([name]) => name === "afterEnd")).toEqual([
-      ["afterEnd", { session: up.value.session, reason: "claim" }],
+      ["afterEnd", { session: upSession(up.value).session, reason: "claim" }],
     ]);
   });
 
@@ -626,7 +626,7 @@ describe("session end hooks (plan 9d)", () => {
     calls.length = 0;
     expect((await reset(auth, "bob@example.com")).ok).toBe(true);
     expect(calls.filter(([name]) => name === "afterEnd")).toEqual([
-      ["afterEnd", { session: bob.value.session, reason: "claim" }],
+      ["afterEnd", { session: upSession(bob.value).session, reason: "claim" }],
     ]);
   });
 
@@ -737,7 +737,7 @@ describe("session end hooks (plan 9d)", () => {
     if (!bob.ok) throw new Error(bob.code);
     await createSession(auth.config, { userId: bob.value.user.id, ip: null, userAgent: null });
     calls.length = 0;
-    restore = signOutAfterRead(bob.value.token);
+    restore = signOutAfterRead(upSession(bob.value).token);
     expect((await magicSignIn(auth, "bob@example.com")).ok).toBe(true);
     restore();
     expect(perRow()).toEqual({ count: 2, distinct: 2 });

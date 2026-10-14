@@ -18,7 +18,7 @@ import type { ModelName, UserRow } from "../src/schema.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { undoCreateWhere } from "../src/storage/sql.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST, sessionOnly } from "./password-helpers.js";
+import { FAST, sessionOnly, upSession } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, socialAuth } from "./social-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -1064,7 +1064,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     const passwords = await inner.findMany("password", []);
     expect(passwords.map((p) => p.userId)).toEqual([won.value.user.id]);
     const sessions = await inner.findMany("session", []);
-    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(won.value.token)]);
+    expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(upSession(won.value).token)]);
     expect(auth.mail).toHaveLength(1);
   });
 

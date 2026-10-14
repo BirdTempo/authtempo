@@ -77,6 +77,8 @@ export type {
   PasswordSignIn,
   PasswordSignInResult,
   PasswordSignUp,
+  PasswordSignUpPending,
+  PasswordSignUpResult,
   PasswordVerified,
   PasswordVerify,
   ResetChallenge,

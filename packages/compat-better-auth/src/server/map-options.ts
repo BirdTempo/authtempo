@@ -307,6 +307,10 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             resetTtlMinutes:
               (ep.resetPasswordTokenExpiresIn ?? BETTER_AUTH_DEFAULTS.resetPasswordTokenExpiresIn) /
               60,
+            // Plan 12b Task 15: Better Auth's requireEmailVerification is core's
+            // requireVerified. A sign-up answers no session, and an unverified
+            // sign-in answers EMAIL_NOT_VERIFIED.
+            ...(ep.requireEmailVerification === true ? { requireVerified: true } : {}),
           },
         }
       : {}),

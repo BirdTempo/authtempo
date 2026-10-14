@@ -377,6 +377,7 @@ export interface BetterAuthOptions {
   emailVerification?: {
     sendVerificationEmail?: SendEmail;
     sendOnSignUp?: boolean;
+    sendOnSignIn?: boolean;
     autoSignInAfterVerification?: boolean;
     expiresIn?: number;
   };
@@ -460,16 +461,33 @@ export type HasTwoFactor<O extends BetterAuthOptions> = O extends {
       : true
   : false;
 
-export interface CompatServerApi<TF extends boolean = false> {
+/**
+ * True when the option type names `emailAndPassword.requireEmailVerification`
+ * with a value that can be true (plan 12b Task 15). Then `signUpEmail` can
+ * answer `token: null`. A wide `BetterAuthOptions` is false, as for
+ * `HasTwoFactor`, so code that types its options wide keeps the old type.
+ */
+export type RequiresVerification<O extends BetterAuthOptions> = O extends {
+  emailAndPassword: { requireEmailVerification: infer R };
+}
+  ? [R] extends [false | undefined]
+    ? false
+    : true
+  : false;
+
+export interface CompatServerApi<TF extends boolean = false, RV extends boolean = false> {
   /** `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f). */
   getSession(input: {
     headers: Headers;
   }): Promise<{ session: Session; user: User & { twoFactorEnabled?: boolean } } | null>;
-  /** `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
+  /**
+   * `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither.
+   * `token` is null with `emailAndPassword.requireEmailVerification` (plan 12b): no session opens.
+   */
   signUpEmail(input: {
     body: { email: string; password: string; name: string; image?: string; callbackURL?: string };
     headers?: Headers;
-  }): Promise<{ token: string; user: User }>;
+  }): Promise<{ token: RV extends true ? string | null : string; user: User }>;
   /** `callbackURL` and `rememberMe: false` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
   signInEmail(input: {
     body: { email: string; password: string; callbackURL?: string; rememberMe?: boolean };
@@ -505,7 +523,7 @@ export interface CompatServerApi<TF extends boolean = false> {
 
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {
   handler(request: Request): Promise<Response>;
-  api: CompatServerApi<HasTwoFactor<O>>;
+  api: CompatServerApi<HasTwoFactor<O>, RequiresVerification<O>>;
   /** Type-only, as in Better Auth: `Auth["$Infer"]["Session"]["user"]`. The runtime value is an empty object. */
   $Infer: { Session: { session: Session; user: User } };
   options: O;
