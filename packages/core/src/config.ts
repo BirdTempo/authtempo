@@ -170,7 +170,10 @@ export interface AuthConfig {
      * and a name given twice.
      */
     oauth2?: OAuth2Entry[];
-    /** The fetch for every provider call. Default: the global fetch. Tests inject one. */
+    /**
+     * The fetch for every provider call. Default: the global fetch. Tests
+     * inject one. Core wraps it: no redirect is followed.
+     */
     fetch?: typeof fetch;
   };
   /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
