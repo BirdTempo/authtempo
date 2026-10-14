@@ -30,6 +30,11 @@ export interface SessionStore<D, E> {
 }
 
 export function createSessionStore<D, E>(input: {
+  /**
+   * One read of the session. Answer `error: null` for a success: the store
+   * tests `error !== null`, so an `undefined` error shows as a failure with
+   * `data` null.
+   */
   read(): Promise<{ data: D | null; error: E | null }>;
   /** The error state of a read that threw: a storage read or an app callback. */
   onThrow(e: unknown): E;
@@ -55,7 +60,16 @@ export function createSessionStore<D, E>(input: {
     state = next;
     notifying++;
     try {
-      for (const l of listeners) l();
+      for (const l of listeners) {
+        try {
+          l();
+        } catch (e) {
+          // One listener's throw must not stop the later ones; report it apart, as an event handler's would be.
+          queueMicrotask(() => {
+            throw e;
+          });
+        }
+      }
     } finally {
       notifying--;
     }
@@ -78,7 +92,8 @@ export function createSessionStore<D, E>(input: {
       try {
         do {
           dirty = false;
-          if (!state.isPending) set({ ...state, isRefetching: true });
+          // After a dropped read the state already shows the refetch: no second notify.
+          if (!state.isPending && !state.isRefetching) set({ ...state, isRefetching: true });
           const r = await read();
           if (dirty) continue;
           set({

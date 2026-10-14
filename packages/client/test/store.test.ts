@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionStore } from "../src/store.js";
 
 type Answer = { data: string | null; error: string | null };
@@ -102,6 +102,51 @@ describe("createSessionStore (plan 11d, moved from the compatibility package)", 
     expect(c.reads()).toBe(2);
     c.answer({ data: "ada", error: null });
     await vi.waitFor(() => expect(store.get().isRefetching).toBe(false));
+    expect(states).toEqual([false, true, false]);
+    stop();
+  });
+});
+
+describe("createSessionStore fix round (plan 11d Task 5 review)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("notifies the later listeners when one throws, and reports the error apart (L1)", async () => {
+    const reported: (() => void)[] = [];
+    vi.stubGlobal("queueMicrotask", (f: () => void) => reported.push(f));
+    const c = controlled();
+    const store = createSessionStore<string, string>({ read: c.read, onThrow: () => "threw" });
+    let later = 0;
+    const stop1 = store.subscribe(() => {
+      throw new Error("listener failed");
+    });
+    const stop2 = store.subscribe(() => {
+      later++;
+    });
+    c.answer({ data: "ada", error: null });
+    await vi.waitFor(() => expect(store.get().isPending).toBe(false));
+    expect(later).toBe(1);
+    expect(reported).toHaveLength(1);
+    expect(() => reported[0]?.()).toThrow("listener failed");
+    stop1();
+    stop2();
+  });
+
+  it("notifies isRefetching once when a newer change drops a read (L4)", async () => {
+    const c = controlled();
+    const store = createSessionStore<string, string>({ read: c.read, onThrow: () => "threw" });
+    const states: boolean[] = [];
+    const stop = store.subscribe(() => states.push(store.get().isRefetching));
+    c.answer({ data: "ada", error: null });
+    await vi.waitFor(() => expect(store.get().isPending).toBe(false));
+    void store.refetch();
+    void store.refetch();
+    c.answer({ data: "stale", error: null });
+    await vi.waitFor(() => expect(c.waiting()).toBe(1));
+    c.answer({ data: null, error: null });
+    await vi.waitFor(() => expect(store.get().isRefetching).toBe(false));
+    expect(store.get().data).toBeNull();
     expect(states).toEqual([false, true, false]);
     stop();
   });

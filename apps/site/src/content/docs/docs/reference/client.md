@@ -33,7 +33,7 @@ sources:
 | `navigate` | `location.assign` | Sends the browser to the social start URL. A router or a test injects one. |
 | `broadcast` | `true` where `BroadcastChannel` exists | Tell the other tabs of the origin after a change, on the channel `authtempo-session`, and read again when one tells. |
 | `refetchOnVisible` | `true` where `document` exists | Read the session again when the page becomes visible. |
-| `onSessionEnd` | none | Runs when `session()` answers `null` for a client with a `token` option. Clear the stored token there. |
+| `onSessionEnd` | none | Runs when `session()` answers `null` to a read that sent a token. Clear the stored token there, so the next read sends none. |
 
 `createTransport(options)` answers a `Call` for a route of your own app's code. Its path is a `RoutePath` of `@authtempo/core/routes`, so a path that core does not serve fails the compile. A query goes in the fourth argument, never in the path. More request headers go in the fifth argument.
 
@@ -62,7 +62,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 - `store.refetch()` reads the session again.
 - The store reads again after each sign-in and after the sign-out.
 - It reads again after the second factor verify and enable, a password reset or change, and the address verify.
-- It reads again after a change of the active organization and after the handoff redeem.
+- It reads again after the active organization changes, after an organization delete or a member remove, and after the handoff redeem.
 - It reads again when another tab of the origin changes the session, and when the page becomes visible. It does not poll.
 
 `createSessionStore` makes the same store over a read of your own.

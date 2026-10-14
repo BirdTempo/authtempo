@@ -97,8 +97,9 @@ export interface ClientOptions extends TransportOptions {
   /** Read the session again when the page becomes visible. Default true where `document` exists. */
   refetchOnVisible?: boolean | undefined;
   /**
-   * Runs when `session()` answers null for a client with a `token` option: the
-   * token is dead, and the app clears it from its store (plan 11d).
+   * Runs when `session()` answers null to a read that sent a token: the token
+   * is dead, and the app clears it from its store (plan 11d). After the clear,
+   * a read sends no token and runs no handler.
    */
   onSessionEnd?: (() => void | Promise<void>) | undefined;
   /** Sends the browser to a URL: the social start. Default `location.assign`. Tests and a router inject one. */
@@ -149,7 +150,8 @@ export interface Client {
    * The session store (plan 11d): one read at the first subscriber, and one
    * after each call that changes the session (every sign-in, the sign-out,
    * the second factor verify and enable, a password reset or change, the
-   * address verify, the active organization, and the handoff redeem), after
+   * address verify, the active organization, an organization delete or a
+   * member remove, and the handoff redeem), after
    * another tab's change, and when the page becomes visible. No poll.
    */
   store: SessionStore<PublicSession, ClientFailure>;
@@ -452,12 +454,16 @@ export function createClient(options: ClientOptions): Client {
     return call<T>(c.method, c.path, body, query, headers);
   };
   async function session(): Promise<ClientResult<PublicSession | null>> {
+    // The token this read sends. `options.token` is a function and is always set, so the end
+    // handler keys on its answer: after the app clears the token, a 401 runs no handler, and a
+    // sign-out or a refetch inside the handler ends (plan 11d Task 5 review, J2).
+    const sent = options.token ? await options.token() : null;
     const r = await send<PublicSession>("session");
     if (!r.ok && r.code === "unauthorized") {
       // A bearer client's token is dead: the app clears it (the client README rule, plan 11d).
       // A store that fails to clear must not turn an answer into a throw.
       const end = options.onSessionEnd;
-      if (options.token && end)
+      if (sent !== null && end)
         await Promise.resolve()
           .then(end)
           .catch(() => {});
@@ -465,30 +471,54 @@ export function createClient(options: ClientOptions): Client {
     }
     return r;
   }
-  const store = createSessionStore<PublicSession, ClientFailure>({
+  const inner = createSessionStore<PublicSession, ClientFailure>({
     read: async () => {
       const r = await session();
       return r.ok ? { data: r.value, error: null } : { data: null, error: r };
     },
     onThrow: () => ({ ok: false, code: "unexpected", status: 0 }),
   });
-  const channel =
-    (options.broadcast ?? true) && typeof BroadcastChannel !== "undefined"
-      ? new BroadcastChannel(SESSION_CHANNEL)
-      : null;
-  // Node keeps the process alive while a channel is open; a browser has no unref.
-  (channel as { unref?: () => void } | null)?.unref?.();
-  channel?.addEventListener("message", () => store.refetchIfStarted());
-  if ((options.refetchOnVisible ?? true) && typeof document !== "undefined")
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") store.refetchIfStarted();
-    });
+  const broadcast = (options.broadcast ?? true) && typeof BroadcastChannel !== "undefined";
+  // The listening channel and the document listener open at the first subscriber, not here.
+  // A client with no subscriber (the compatibility package makes one per call) holds no
+  // channel and no listener, so nothing leaks (plan 11d Task 5 review, J1).
+  let channel: BroadcastChannel | null = null;
+  let listening = false;
+  const listen = () => {
+    if (listening) return;
+    listening = true;
+    if (broadcast) {
+      channel = new BroadcastChannel(SESSION_CHANNEL);
+      // Node keeps the process alive while a channel is open; a browser has no unref.
+      (channel as { unref?: () => void }).unref?.();
+      channel.addEventListener("message", () => inner.refetchIfStarted());
+    }
+    if ((options.refetchOnVisible ?? true) && typeof document !== "undefined")
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") inner.refetchIfStarted();
+      });
+  };
+  const store: SessionStore<PublicSession, ClientFailure> = {
+    ...inner,
+    subscribe(listener) {
+      listen();
+      return inner.subscribe(listener);
+    },
+  };
+  /** Tells the other tabs. With no listening channel, a short one posts and closes; the message still goes out. */
+  const tell = () => {
+    if (channel) return channel.postMessage("changed");
+    if (!broadcast) return;
+    const once = new BroadcastChannel(SESSION_CHANNEL);
+    once.postMessage("changed");
+    once.close();
+  };
   /** After a call that changes the session succeeds: read again, and tell the other tabs. */
   const changes = async <T>(p: Promise<ClientResult<T>>): Promise<ClientResult<T>> => {
     const r = await p;
     if (r.ok) {
       store.refetchIfStarted();
-      channel?.postMessage("changed");
+      tell();
     }
     return r;
   };
@@ -734,7 +764,8 @@ export function createClient(options: ClientOptions): Client {
         });
         return r.ok ? ok(r.value.organization) : r;
       },
-      delete: (input) => send<{ ok: true }>("organizations.delete", input),
+      // Core clears the active organization when it is deleted, so the session data changes.
+      delete: (input) => changes(send<{ ok: true }>("organizations.delete", input)),
       members: {
         async list(input) {
           const r = await send<{ members: MemberJSON[] }>("organizations.members.list", undefined, {
@@ -750,7 +781,8 @@ export function createClient(options: ClientOptions): Client {
           const r = await send<{ member: MemberJSON }>("organizations.members.role", input);
           return r.ok ? ok(r.value.member) : r;
         },
-        remove: (input) => send<{ ok: true }>("organizations.members.remove", input),
+        // A member who leaves the active organization loses it from the session.
+        remove: (input) => changes(send<{ ok: true }>("organizations.members.remove", input)),
       },
       invitations: {
         async invite(input) {
@@ -815,7 +847,7 @@ export function createClient(options: ClientOptions): Client {
           if (!options.ok) return options;
           const response = await ceremony(() => webauthn.get(options.value));
           if (!response.ok) return response;
-          // An enable ends the other sessions of the user, as `totp.enable` does.
+          // The ended sessions are in other browsers; this origin's tabs share the cookie. The wrap keeps parity with `totp.enable`.
           return changes(
             send<SecondFactorEnableJSON>("secondFactor.passkey.enable.verify", {
               password,

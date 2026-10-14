@@ -71,8 +71,8 @@ more request headers go in the fifth.
 - The store reads again after each sign-in and after the sign-out.
 - It reads again after the second factor verify and enable, a password
   reset or change, and the address verify.
-- It reads again after a change of the active organization and after the
-  handoff redeem.
+- It reads again after the active organization changes, after an
+  organization delete or a member remove, and after the handoff redeem.
 - It reads again when another tab of the origin changes the session, and
   when the page becomes visible. It does not poll.
 
