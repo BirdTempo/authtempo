@@ -32,7 +32,7 @@ const REQUEST_PER_EMAIL = { seconds: 900, max: 3 };
 // 1,040 per day and about 30 % per year for a patient attacker. 20 codes a
 // day at `maxAttempts` 5 gives at most 100 guesses a day: about 1 in 10,000
 // per day and about 3.6 % per year, and the victim gets 20 mails a day.
-// The value is MAILED_CODES_PER_EMAIL_DAY (verification.ts), shared with the second-factor code.
+// The value is MAILED_CODES_PER_EMAIL_DAY (verification.ts); the second-factor code has its own key.
 
 // Per 15 minutes, shared by the sign-in verify and the reset.
 const VERIFY_PER_IP = { seconds: 900, max: 30 };

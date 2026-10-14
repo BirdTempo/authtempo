@@ -267,7 +267,7 @@ export async function enableEmailMethod(
  * Mails a 6-digit code bound to one challenge (plan 12c, ASVS 5.0 6.6.2).
  * The challenge must offer `email`: a password sign-in only (owner decision
  * 4). The order of the checks: the challenge, the method, the per-challenge
- * cap of 3, then the per-user key and the shared daily key of the address,
+ * cap of 3, then the per-user key and the daily key of the address,
  * so a refusal before the limiters costs no budget. The code's keyed hash
  * replaces the last one in the challenge's `data` by a compare-and-set on
  * `updatedAt`; the mail goes after the write, never inside a transaction.
@@ -293,7 +293,7 @@ export async function sendSecondFactorEmail(
   if (!user) return fail("invalid_token");
   if (!(await config.limiter.allow(`second-factor-email:user:${user.id}`, EMAIL_SENDS_PER_USER)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`otp:email-day:${user.email}`, MAILED_CODES_PER_EMAIL_DAY)))
+  if (!(await config.limiter.allow(`totp:email-day:${user.email}`, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
   const code = randomDigits(EMAIL_CODE_DIGITS);
   // One compare-and-set on the challenge row: a parallel send or a counted

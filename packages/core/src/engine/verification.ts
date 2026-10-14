@@ -125,9 +125,11 @@ export async function countAttempt(
 }
 
 /**
- * Per 24 hours per address, for every mailed code: the email code sign-in
- * and the reset code (plan 9e final fix wave), and the second-factor email
- * code (plan 12c). One key, `otp:email-day:<email>`, is one budget: one
- * address gets at most 20 code mails a day, whatever the purpose.
+ * Per 24 hours per address, the cap of each mailed-code key. Two keys read
+ * it. `otp:email-day:<email>` counts the email code sign-in and the reset
+ * code (plan 9e final fix wave). `totp:email-day:<email>` counts the
+ * second-factor email code (plan 12c, owner decision 2026-10-14). The keys
+ * are apart because `POST /otp/request` needs no password: a person who
+ * knows the address must not use up the second factor's mails.
  */
 export const MAILED_CODES_PER_EMAIL_DAY = { seconds: 86_400, max: 20 };

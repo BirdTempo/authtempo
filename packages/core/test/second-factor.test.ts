@@ -810,17 +810,25 @@ describe("the bounds and the guards of the email method (plan 12c, Task 7 review
     expect(await auth.storage.findMany("secondFactor", [])).toEqual([]);
   });
 
-  it("counts the send on the daily key of the address, one budget with the email code sign-in", async () => {
+  it("counts the send on its own daily key of the address, apart from the email code sign-in (owner decision 2026-10-14)", async () => {
     const auth = totpAuth();
     await withEmail(auth);
     const a = await passwordChallenge(auth);
-    for (let i = 0; i < MAILED_CODES_PER_EMAIL_DAY.max - 1; i++)
+    // A person who knows the address spends the sign-in's daily key.
+    for (let i = 0; i < MAILED_CODES_PER_EMAIL_DAY.max; i++)
       await auth.config.limiter.allow(`otp:email-day:${EMAIL}`, MAILED_CODES_PER_EMAIL_DAY);
+    expect(await requestEmailOtp(auth.config, { email: EMAIL, ip: null })).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
     expect(await sendSecondFactorEmail(auth.config, { challenge: a })).toEqual({
       ok: true,
       value: { sent: true },
     });
-    expect(await requestEmailOtp(auth.config, { email: EMAIL, ip: null })).toMatchObject({
+    // The send's own key now holds 1; 19 more spend it.
+    for (let i = 0; i < MAILED_CODES_PER_EMAIL_DAY.max - 1; i++)
+      await auth.config.limiter.allow(`totp:email-day:${EMAIL}`, MAILED_CODES_PER_EMAIL_DAY);
+    expect(await sendSecondFactorEmail(auth.config, { challenge: a })).toMatchObject({
       ok: false,
       code: "rate_limited",
     });
