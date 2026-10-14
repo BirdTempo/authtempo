@@ -57,8 +57,12 @@ async function viaEmailCode(auth: ReturnType<typeof makeAuth>, email: string) {
   return verifyEmailOtp(auth.config, { email, code, ip: null, userAgent: null });
 }
 
-async function viaSocial(signUp: Rule, email: string) {
-  const claims: Record<string, unknown> = { sub: `g-${email}`, email, email_verified: true };
+async function viaSocial(signUp: Rule, email: string, opts = { verified: true, invited: false }) {
+  const claims: Record<string, unknown> = {
+    sub: `g-${email}`,
+    email,
+    email_verified: opts.verified,
+  };
   const jwt = fakeJwt({
     "idtok-default": { claims, audience: GOOGLE.clientId, issuer: "https://accounts.google.com" },
   });
@@ -66,6 +70,7 @@ async function viaSocial(signUp: Rule, email: string) {
     social: { google: GOOGLE, fetch: tokenEndpoint("idtok-default").fetchFn },
     jwt,
   });
+  if (opts.invited) await invite(auth, email, DAY);
   const started = await startSocial(auth.config, { provider: "google", ip: null });
   if (!started.ok) throw new Error(started.code);
   const location = new URL(started.value.location);
@@ -149,6 +154,15 @@ describe("the sign-up rule (plan 12b)", () => {
     await invite(auth, NEW, DAY);
     expect((await up(NEW)).ok).toBe(true);
     expect(await users(auth)).toEqual(["ada@example.com", NEW]);
+  });
+
+  it("refuses a social create under invited when the provider address is unverified", async () => {
+    const unproved = await viaSocial("invited", NEW, { verified: false, invited: true });
+    expect(unproved.r).toMatchObject({ ok: false, code: "sign_up_closed" });
+    expect(await users(unproved.auth)).toEqual([]);
+    const proved = await viaSocial("invited", NEW, { verified: true, invited: true });
+    expect(proved.r.ok).toBe(true);
+    expect(await users(proved.auth)).toEqual([NEW]);
   });
 
   it("keeps the reset link usable when the reset would create a user", async () => {

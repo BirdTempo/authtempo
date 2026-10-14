@@ -326,13 +326,23 @@ export async function mayCreateUser(
   stopWith("sign_up_closed");
 }
 
-/** A `BeforeResolveWrite` that applies the sign-up rule to a created user, then runs `before`. */
+/**
+ * A `BeforeResolveWrite` that applies the sign-up rule to a created user,
+ * then runs `before`. Under `"invited"` the created user needs a proved
+ * address: else a stranger who knows an invited address, and has a social
+ * account with that address unverified, gets a signed-in user (owner
+ * ruling, 2026-10-15). The magic link and the email code create a verified
+ * user, so only social meets this check.
+ */
 export function signUpGuard(
   config: ResolvedConfig,
   before?: BeforeResolveWrite,
 ): BeforeResolveWrite {
   return async (tx, user, created) => {
-    if (created) await mayCreateUser(config, tx, user.email);
+    if (created) {
+      if (config.signUp === "invited" && !user.emailVerified) stopWith("sign_up_closed");
+      await mayCreateUser(config, tx, user.email);
+    }
     if (before) await before(tx, user, created);
   };
 }
