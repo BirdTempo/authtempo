@@ -12,7 +12,6 @@ export const ROOT_HELP: HelpText = {
   ],
   examples: [
     // Only commands of the table: the common test holds each example's command to it.
-    // Task 8 of plan 11c adds the example of check.
     {
       line: "authtempo init my-app --stack workers-d1",
       says: "Write a new app on Cloudflare Workers and D1 into the folder my-app.",
@@ -20,6 +19,10 @@ export const ROOT_HELP: HelpText = {
     {
       line: "authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --dry-run",
       says: "Print the report of a Supabase import, and write nothing.",
+    },
+    {
+      line: "authtempo check https://api.example.com",
+      says: "Check that the deployment answers as core promises. Exit 1 names each failure.",
     },
     {
       line: "authtempo keys rotate https://api.example.com --yes",

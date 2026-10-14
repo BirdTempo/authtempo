@@ -21,6 +21,7 @@
     "@authtempo/legacy-hashes": "workspace:*"
   },
   "devDependencies": {
+    "@authtempo/cli": "workspace:*",
     "@cloudflare/vitest-plugin": "1.4.0",
     "@cloudflare/workers-types": "5.20261007.1",
     "typescript": "7.0.2",

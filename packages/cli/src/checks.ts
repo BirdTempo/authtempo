@@ -1,0 +1,353 @@
+import { type Fetcher, fetchWithin, isLocalHost } from "./net.js";
+
+// The checks of `authtempo check` (spec 19). This file and its imports use
+// no Node.js module, so a Worker test runs them in workerd. Every request
+// is public: no credential goes out, and no row is written, except the
+// first signing key that core writes at the first JWKS read.
+
+export const CHECK_IDS = [
+  "https",
+  "mount",
+  "origin_rule",
+  "cookie",
+  "jwks",
+  "well_known",
+  "schema_version",
+] as const;
+export type CheckId = (typeof CHECK_IDS)[number];
+export type CheckStatus = "pass" | "fail" | "skip";
+
+export interface CheckResult {
+  id: CheckId;
+  status: CheckStatus;
+  /** The failure code, or the skip reason; null for a pass. */
+  code: string | null;
+  detail: string;
+}
+
+export interface CheckReport {
+  base: string;
+  checks: CheckResult[];
+  /** Lines that start with a warning code, such as `cookie_samesite_none: …`. A warning is no failure. */
+  warnings: string[];
+  summary: { run: number; pass: number; fail: number; skip: number };
+}
+
+/** The codes of each check: a failure, a warning, or a skip reason. The check page has one anchor for each. */
+export const CHECK_CODES = {
+  https: { fail: ["base_not_https"], warn: [], skip: [] },
+  mount: { fail: ["mount_missing", "mount_wrong_answer"], warn: [], skip: [] },
+  origin_rule: { fail: ["origin_not_enforced"], warn: [], skip: ["no_mount"] },
+  cookie: {
+    fail: ["cookie_missing", "cookie_not_httponly", "cookie_not_secure", "cookie_path_not_root"],
+    warn: ["cookie_samesite_none"],
+    skip: ["no_mount"],
+  },
+  jwks: {
+    fail: [
+      "jwks_bad_answer",
+      "jwks_empty",
+      "jwks_private_part",
+      "jwks_bad_key",
+      "jwks_no_cache_control",
+    ],
+    warn: [],
+    skip: ["no_mount", "jwt_mint_off"],
+  },
+  well_known: {
+    fail: [
+      "well_known_bad_answer",
+      "well_known_mismatch",
+      "well_known_issuer",
+      "well_known_jwks_uri",
+      "well_known_not_at_root",
+    ],
+    warn: [],
+    skip: ["oauth_off"],
+  },
+  schema_version: {
+    fail: ["schema_missing", "schema_behind", "schema_ahead"],
+    warn: [],
+    skip: ["no_database"],
+  },
+} as const satisfies Record<
+  CheckId,
+  { fail: readonly string[]; warn: readonly string[]; skip: readonly string[] }
+>;
+
+/** Every code once: the failure codes, the warning codes, and the skip reasons. */
+export const ALL_CHECK_CODES: readonly string[] = [
+  ...new Set(Object.values(CHECK_CODES).flatMap((c) => [...c.fail, ...c.warn, ...c.skip])),
+];
+
+export interface CheckInput {
+  /** The origin of the deployment, such as https://api.example.com. */
+  base: string;
+  basePath: string;
+  fetch: Fetcher;
+  timeoutMs: number;
+  /** The schema version that the caller's core needs. */
+  schemaVersion: number;
+  /** Reads the schema version of the database. Absent: the schema check skips. */
+  readSchema?: () => Promise<number | null>;
+  /** Each skip counts as a failure. */
+  strict?: boolean;
+}
+
+/** The body of an answer as text, read in full, so no stream stays open. */
+const textOf = (res: Response) => res.text().catch(() => "");
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+async function jsonOf(res: Response): Promise<Record<string, unknown> | null> {
+  try {
+    const v: unknown = JSON.parse(await textOf(res));
+    return isRecord(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A public signing key as core serves it: a kid, EdDSA or ES256, and use sig. */
+const goodKey = (k: Record<string, unknown>) =>
+  typeof k.kid === "string" && (k.alg === "EdDSA" || k.alg === "ES256") && k.use === "sig";
+
+/**
+ * Runs the seven checks in the order of CHECK_IDS. A host that gives no HTTP
+ * answer throws a HostError (exit 2); every answer is a result. The function
+ * fails itself when it reports another list than CHECK_IDS, so a check that
+ * does not run cannot pass in silence.
+ */
+export async function runChecks(input: CheckInput): Promise<CheckReport> {
+  const { base, basePath } = input;
+  const auth = `${base}${basePath}`;
+  const results: CheckResult[] = [];
+  const warnings: string[] = [];
+  const add = (id: CheckId, status: CheckStatus, code: string | null, detail: string) => {
+    results.push({ id, status, code, detail });
+  };
+  const get = (url: string) =>
+    fetchWithin(input.fetch, url, { headers: { accept: "application/json" } }, input.timeoutMs);
+  const post = (url: string, headers: Record<string, string>) =>
+    fetchWithin(
+      input.fetch,
+      url,
+      { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" },
+      input.timeoutMs,
+    );
+
+  const host = new URL(base);
+  if (host.protocol === "https:") add("https", "pass", null, `${base} uses https`);
+  else if (isLocalHost(host.hostname))
+    add("https", "pass", null, `${base} is on this machine; a deploy needs https`);
+  else
+    add(
+      "https",
+      "fail",
+      "base_not_https",
+      `${base} uses http; the session cookie is Secure, so a browser drops it`,
+    );
+
+  const session = await get(`${auth}/session`);
+  const sessionType = session.headers.get("content-type") ?? "";
+  const sessionBody = await jsonOf(session);
+  const mount =
+    session.status === 404 || !sessionType.includes("application/json") || sessionBody === null
+      ? "mount_missing"
+      : session.status === 401 && sessionBody.error === "unauthorized"
+        ? null
+        : "mount_wrong_answer";
+  if (mount === null) add("mount", "pass", null, `GET ${auth}/session answers 401 JSON`);
+  else if (mount === "mount_missing")
+    add(
+      "mount",
+      "fail",
+      mount,
+      `GET ${auth}/session answers ${session.status} with no core JSON: the routes are not at ${basePath}`,
+    );
+  else
+    add(
+      "mount",
+      "fail",
+      mount,
+      `GET ${auth}/session answers ${session.status}; core answers 401 with no credential`,
+    );
+
+  if (mount !== null) {
+    for (const id of ["origin_rule", "cookie", "jwks"] as const)
+      add(id, "skip", "no_mount", `the routes are not at ${auth}`);
+  } else {
+    const foreign = await post(`${auth}/sign-out`, { origin: "https://check.invalid" });
+    await textOf(foreign);
+    if (foreign.status === 403)
+      add("origin_rule", "pass", null, "a POST from an untrusted origin answers 403");
+    else
+      add(
+        "origin_rule",
+        "fail",
+        "origin_not_enforced",
+        `a POST with Origin https://check.invalid answers ${foreign.status}; core answers 403`,
+      );
+
+    // A sign-out with no cookie and no Origin touches no row and answers the clear cookie (routes/sessions.ts).
+    const out = await post(`${auth}/sign-out`, {});
+    await textOf(out);
+    const cookie = out.status === 200 ? out.headers.getSetCookie()[0] : undefined;
+    if (cookie === undefined)
+      add(
+        "cookie",
+        "fail",
+        "cookie_missing",
+        `POST ${auth}/sign-out answers ${out.status} with no Set-Cookie`,
+      );
+    else {
+      const name = cookie.split("=")[0] ?? "";
+      const attrs = cookie.split(";").map((a) => a.trim().toLowerCase());
+      if (!attrs.includes("httponly"))
+        add("cookie", "fail", "cookie_not_httponly", `the cookie ${name} has no HttpOnly`);
+      else if (!attrs.includes("secure"))
+        add("cookie", "fail", "cookie_not_secure", `the cookie ${name} has no Secure`);
+      else if (!attrs.includes("path=/"))
+        add("cookie", "fail", "cookie_path_not_root", `the cookie ${name} has no Path=/`);
+      else {
+        if (attrs.includes("samesite=none"))
+          warnings.push(
+            `cookie_samesite_none: the cookie ${name} is SameSite=None; keep it only for an app on another site`,
+          );
+        add("cookie", "pass", null, `the cookie ${name} is HttpOnly, Secure, and Path=/`);
+      }
+    }
+
+    const jwks = await get(`${auth}/jwks`);
+    if (jwks.status === 404) {
+      await textOf(jwks);
+      add("jwks", "skip", "jwt_mint_off", `GET ${auth}/jwks answers 404: jwtMint is false`);
+    } else {
+      const cache = jwks.headers.get("cache-control");
+      const body = await jsonOf(jwks);
+      const keys = body && Array.isArray(body.keys) ? (body.keys as unknown[]) : null;
+      const records = keys?.filter(isRecord) ?? [];
+      if (jwks.status !== 200 || keys === null)
+        add(
+          "jwks",
+          "fail",
+          "jwks_bad_answer",
+          `GET ${auth}/jwks answers ${jwks.status} with no key set`,
+        );
+      else if (keys.length === 0) add("jwks", "fail", "jwks_empty", "the key set holds no key");
+      else if (records.some((k) => "d" in k))
+        add("jwks", "fail", "jwks_private_part", "a key of the key set holds a private part (d)");
+      else if (records.length !== keys.length || !records.every(goodKey))
+        add(
+          "jwks",
+          "fail",
+          "jwks_bad_key",
+          "a key has no kid, no alg of EdDSA or ES256, or no use of sig",
+        );
+      else if (!cache)
+        add("jwks", "fail", "jwks_no_cache_control", "the key set has no cache-control");
+      else
+        add(
+          "jwks",
+          "pass",
+          null,
+          `the key set holds ${keys.length} public key(s); cache-control: ${cache}`,
+        );
+    }
+  }
+
+  const oidc = await get(`${host.origin}/.well-known/openid-configuration`);
+  const as = await get(`${host.origin}/.well-known/oauth-authorization-server`);
+  const a = await jsonOf(oidc);
+  const b = await jsonOf(as);
+  if (oidc.status === 404 && as.status === 404) {
+    const under = await get(`${auth}/.well-known/openid-configuration`);
+    await textOf(under);
+    if (under.status === 200)
+      add(
+        "well_known",
+        "fail",
+        "well_known_not_at_root",
+        `the documents answer under ${basePath} only; mount auth.wellKnown at the origin root`,
+      );
+    else add("well_known", "skip", "oauth_off", "both documents answer 404: oauth is off");
+  } else if (oidc.status !== 200 || as.status !== 200 || !a || !b)
+    add(
+      "well_known",
+      "fail",
+      "well_known_bad_answer",
+      `the documents answer ${oidc.status} and ${as.status}; both answer 200 JSON with oauth on`,
+    );
+  else if (a.issuer !== b.issuer || a.jwks_uri !== b.jwks_uri)
+    add(
+      "well_known",
+      "fail",
+      "well_known_mismatch",
+      "the two documents name another issuer or another jwks_uri",
+    );
+  else if (a.issuer !== auth)
+    add(
+      "well_known",
+      "fail",
+      "well_known_issuer",
+      `the issuer is ${String(a.issuer)}; the base is ${auth}`,
+    );
+  else if (a.jwks_uri !== `${auth}/jwks`)
+    add(
+      "well_known",
+      "fail",
+      "well_known_jwks_uri",
+      `jwks_uri is ${String(a.jwks_uri)}; the key set is at ${auth}/jwks`,
+    );
+  else add("well_known", "pass", null, `both documents name the issuer ${auth}`);
+
+  if (!input.readSchema)
+    add(
+      "schema_version",
+      "skip",
+      "no_database",
+      "give --target and the inputs of the database to read the schema version",
+    );
+  else {
+    const v = await input.readSchema();
+    if (v === null)
+      add(
+        "schema_version",
+        "fail",
+        "schema_missing",
+        "the database has no ta_meta: run authtempo migrate",
+      );
+    else if (v < input.schemaVersion)
+      add(
+        "schema_version",
+        "fail",
+        "schema_behind",
+        `the database is at version ${v}; core needs ${input.schemaVersion}: run authtempo migrate`,
+      );
+    else if (v > input.schemaVersion)
+      add(
+        "schema_version",
+        "fail",
+        "schema_ahead",
+        `the database is at version ${v}; this CLI knows ${input.schemaVersion}: use a newer CLI`,
+      );
+    else add("schema_version", "pass", null, `the database is at version ${v}`);
+  }
+
+  if (results.length !== CHECK_IDS.length || results.some((r, i) => r.id !== CHECK_IDS[i]))
+    throw new Error(
+      `runChecks reported ${results.map((r) => r.id).join(", ")}; the table is ${CHECK_IDS.join(", ")}`,
+    );
+  const checks =
+    input.strict === true
+      ? results.map((r) => (r.status === "skip" ? { ...r, status: "fail" as const } : r))
+      : results;
+  const count = (s: CheckStatus) => checks.filter((r) => r.status === s).length;
+  return {
+    base,
+    checks,
+    warnings,
+    summary: { run: checks.length, pass: count("pass"), fail: count("fail"), skip: count("skip") },
+  };
+}

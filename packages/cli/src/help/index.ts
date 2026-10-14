@@ -1,4 +1,5 @@
 import { ROOT_HELP } from "./authtempo.js";
+import { CHECK_HELP } from "./check.js";
 import { IMPORT_HELP } from "./import.js";
 import { INIT_HELP } from "./init.js";
 import { KEYS_HELP } from "./keys.js";
@@ -15,5 +16,6 @@ export const HELP: readonly HelpText[] = [
   INIT_HELP,
   MIGRATE_HELP,
   IMPORT_HELP,
+  CHECK_HELP,
   KEYS_HELP,
 ];

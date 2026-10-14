@@ -11,9 +11,11 @@ authtempo help <command>
 ## Install
 
 The packages are not on a registry yet: publication is the owner's call.
-In this repo, no package depends on the CLI, so pnpm links no
-`authtempo` binary: build it with `pnpm --filter @authtempo/cli build`,
-then run `node packages/cli/dist/bin/authtempo.js`. After the first
+In this repo, `examples/worker` has the CLI as a dev dependency, so pnpm
+links the `authtempo` binary there: build it with
+`pnpm --filter @authtempo/cli build`, then run
+`pnpm --filter authtempo-example-worker exec authtempo --help`, or
+`node packages/cli/dist/bin/authtempo.js`. After the first
 release, install it with `pnpm add -D @authtempo/cli`, or run it with
 `pnpm dlx @authtempo/cli`.
 
@@ -118,6 +120,25 @@ flag map from the old binary:
 It prints one deprecation line on stderr, and with `--postgres` a second
 line, because a connection string on the command line goes into the shell
 history and the process list.
+
+## check
+
+```bash
+authtempo check https://api.example.com
+```
+
+Seven checks, each `pass`, `fail` with a code, or `skip` with a reason:
+`https`, `mount` (`GET <basePath>/session` answers 401 JSON),
+`origin_rule` (a POST from `https://check.invalid` answers 403), `cookie`
+(the clear cookie of a sign-out is HttpOnly, Secure, and `Path=/`), `jwks`
+(public keys only, EdDSA or ES256, `use: "sig"`, a cache header),
+`well_known` (both documents at the origin root name the issuer and the
+key set), and `schema_version` (with `--target` and the inputs of the
+database). A skip never counts as a pass; `--strict` counts it as a
+failure. The command reads public documents only; the first JWKS read of
+a new database writes its first signing key, which is core's own rule.
+`runChecks` is exported and imports no Node.js module, so a Worker test can
+run it. `src/checks.ts` lists every code in `CHECK_CODES`.
 
 ## keys rotate
 

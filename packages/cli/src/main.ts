@@ -1,5 +1,6 @@
 import { nearest } from "./args.js";
 import type { Command } from "./command.js";
+import { checkCommand } from "./commands/check.js";
 import { importCommand } from "./commands/import.js";
 import { initCommand } from "./commands/init.js";
 import { keysCommand } from "./commands/keys.js";
@@ -17,6 +18,7 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   init: initCommand,
   migrate: migrateCommand,
   import: importCommand,
+  check: checkCommand,
   keys: keysCommand,
 };
 

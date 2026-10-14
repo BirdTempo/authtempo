@@ -67,3 +67,12 @@ export const INIT_JSON_KEYS = {
   files: true,
   next: true,
 } as const satisfies Record<keyof InitJson, true>;
+
+/** `authtempo check --json`: the report of `runChecks`, with each check, the warnings, and the summary. */
+export type { CheckReport as CheckJson } from "./checks.js";
+export const CHECK_JSON_KEYS = {
+  base: true,
+  checks: true,
+  warnings: true,
+  summary: true,
+} as const satisfies Record<keyof import("./checks.js").CheckReport, true>;
