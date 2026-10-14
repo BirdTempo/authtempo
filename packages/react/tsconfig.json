@@ -1,5 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // No DOM lib: the binding runs in React DOM and in React Native, so a
+    // `window` or `document` line in src must fail the compile (plan 11d Task
+    // 10 review, M2). The tests keep the DOM lib through tsconfig.test.json.
+    "lib": ["ES2023"]
+  },
   "include": ["src"]
 }

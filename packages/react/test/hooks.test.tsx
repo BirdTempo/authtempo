@@ -1,5 +1,5 @@
 import { createClient } from "@authtempo/client";
-import type { ReactNode } from "react";
+import { type ReactNode, StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -122,5 +122,69 @@ describe("@authtempo/react (plan 11d)", () => {
     await vi.waitFor(() => expect(view.el.textContent).toBe("oauth_deniedunexpectednone"));
     history.replaceState(null, "", "/");
     view.unmount();
+  });
+
+  it("reads the redirect error once: a new location and a new render keep the first code", async () => {
+    const client = createClient({ baseURL: API, fetch: browserFetch(makeServer().auth) });
+    const spy = vi.spyOn(client, "readRedirectError");
+    history.replaceState(null, "", "/?auth_error=oauth_denied");
+    let bump = () => {};
+    function Err() {
+      const [n, setN] = useState(0);
+      bump = () => setN((x) => x + 1);
+      const code = useAuthError();
+      return (
+        <p>
+          {code ?? "none"}:{n}
+        </p>
+      );
+    }
+    const view = mount(
+      <AuthProvider client={client}>
+        <Err />
+      </AuthProvider>,
+    );
+    await vi.waitFor(() => expect(view.el.textContent).toBe("oauth_denied:0"));
+    history.replaceState(null, "", "/?auth_error=rate_limited");
+    bump();
+    await vi.waitFor(() => expect(view.el.textContent).toBe("oauth_denied:1"));
+    expect(spy).toHaveBeenCalledTimes(1);
+    history.replaceState(null, "", "/");
+    view.unmount();
+  });
+
+  it("reads the session once and opens one channel under StrictMode", async () => {
+    const server = makeServer();
+    const inner = browserFetch(server.auth);
+    let reads = 0;
+    const fetch = (async (i: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(new Request(i, init).url).pathname === "/auth/session") reads++;
+      return inner(i, init);
+    }) as typeof globalThis.fetch;
+    const Real = globalThis.BroadcastChannel;
+    let opens = 0;
+    // The client opens its channel with the global at the first subscribe; this subclass counts it.
+    globalThis.BroadcastChannel = class extends Real {
+      constructor(name: string) {
+        super(name);
+        opens++;
+      }
+    };
+    try {
+      const client = createClient({ baseURL: API, fetch });
+      const view = mount(
+        <StrictMode>
+          <AuthProvider client={client}>
+            <Probe />
+            <Probe />
+          </AuthProvider>
+        </StrictMode>,
+      );
+      await vi.waitFor(() => expect(view.el.textContent).toBe("signed outsigned out"));
+      expect({ reads, opens }).toEqual({ reads: 1, opens: 1 });
+      view.unmount();
+    } finally {
+      globalThis.BroadcastChannel = Real;
+    }
   });
 });

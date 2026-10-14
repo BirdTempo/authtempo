@@ -108,4 +108,43 @@ describe("the React example (plan 11d)", () => {
     history.replaceState(null, "", "/");
     view.unmount();
   });
+
+  it("shows the OAuth text for a redirect code of the OAuth table only", async () => {
+    const s = server();
+    history.replaceState(null, "", "/?auth_error=invalid_request");
+    const view = render(s.auth);
+    try {
+      await vi.waitFor(() =>
+        expect(view.el.querySelector('[role="alert"]')?.textContent).toBe(
+          errorText("invalid_request", "oauth"),
+        ),
+      );
+    } finally {
+      // A failure must not leave the code in the URL for the next test.
+      history.replaceState(null, "", "/");
+      view.unmount();
+    }
+  });
+
+  it("clears the text of a failure at the next submit", async () => {
+    const s = server();
+    const view = render(s.auth);
+    await vi.waitFor(() => expect(view.el.querySelector('input[name="email"]')).not.toBeNull());
+    type(view.el.querySelector('input[name="email"]'), "ada@example.com");
+    press(view.el, "Send a code");
+    await vi.waitFor(() => expect(view.el.querySelector('input[name="code"]')).not.toBeNull());
+    type(view.el.querySelector('input[name="code"]'), "000000");
+    press(view.el, "Sign in");
+    await vi.waitFor(() => expect(view.el.querySelector('[role="alert"]')).not.toBeNull());
+    const code = /\b(\d{6})\b/.exec(s.mail.at(-1)?.text ?? "")?.[1] ?? "";
+    type(view.el.querySelector('input[name="code"]'), code);
+    press(view.el, "Sign in");
+    await vi.waitFor(() =>
+      expect(view.el.querySelector('[data-testid="who"]')?.textContent).toBe("ada@example.com"),
+    );
+    press(view.el, "Sign out");
+    await vi.waitFor(() => expect(view.el.querySelector('input[name="email"]')).not.toBeNull());
+    expect(view.el.querySelector('[role="alert"]')).toBeNull();
+    view.unmount();
+  });
 });

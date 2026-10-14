@@ -37,6 +37,7 @@ export function App() {
           type="button"
           onClick={async () => {
             await client.signOut();
+            setFailure(null);
             // The next person starts at the email step.
             setStep("email");
             setCode("");
@@ -54,6 +55,7 @@ export function App() {
         <form
           onSubmit={async (e) => {
             e.preventDefault();
+            setFailure(null);
             const r = await client.emailOtp.request({ email });
             if (r.ok) setStep("code");
             else setFailure(errorText(r.code));
@@ -75,6 +77,7 @@ export function App() {
         <form
           onSubmit={async (e) => {
             e.preventDefault();
+            setFailure(null);
             const r = await client.emailOtp.verify({ email, code });
             if (!r.ok) setFailure(errorText(r.code));
           }}
