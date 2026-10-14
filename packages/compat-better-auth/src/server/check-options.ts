@@ -327,6 +327,12 @@ const FOREIGN_PLUGINS: Record<string, string> = {
   "api-key": "not mapped; see the plan index",
   anonymous: "authtempo has no anonymous sign-in",
   username: "authtempo has no username sign-in",
+  // Better Auth 1.7.2 ids (dist/plugins/captcha and dist/plugins/haveibeenpwned, read 2026-10-15).
+  // Core has both checks (plan 12b); the shim does not pass them, so name the core option.
+  captcha:
+    "not mapped; use core's captcha option (@authtempo/core) with @authtempo/captcha-turnstile",
+  "have-i-been-pwned":
+    "not mapped; use core's password.breachCheck option (@authtempo/core) with @authtempo/breach-check",
 };
 
 const plugins: Rule = (v, p, out) => {

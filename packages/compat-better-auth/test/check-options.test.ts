@@ -256,6 +256,17 @@ describe("checkOptions: the allow list fails closed", () => {
     ]);
   });
 
+  it("refuses Better Auth's captcha and have-i-been-pwned plugins and names core's options (plan 12b)", () => {
+    // Better Auth's own plugin objects: a refusal case, so the cast is the input.
+    const foreign = [{ id: "captcha" }, { id: "have-i-been-pwned" }] as never;
+    expect(checkOptions({ ...base, plugins: foreign }).refusals).toEqual([
+      "plugins[captcha]: not mapped; use core's captcha option (@authtempo/core) with @authtempo/captcha-turnstile",
+      "plugins[have-i-been-pwned]: not mapped; use core's password.breachCheck option (@authtempo/core) with @authtempo/breach-check",
+    ]);
+    for (const name of ["`captcha`", "`have-i-been-pwned`", "@authtempo/breach-check"])
+      expect(readme).toContain(name);
+  });
+
   it("refuses a trustedOrigins function and each entry that is not an exact origin or an app scheme (M-2)", () => {
     expect(checkOptions({ ...base, trustedOrigins: () => [] }).refusals).toEqual([
       "trustedOrigins: a function is refused; pass a list of exact origins",
