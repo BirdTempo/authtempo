@@ -11,7 +11,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 7 needs the migrations up to `0007_schema_v7`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 8 needs the migrations up to `0008_schema_v8`.
 
 ## Before you start
 
@@ -28,8 +28,9 @@ sources:
 | 5 | `0005_schema_v5` | `ta_api_token` |
 | 6 | `0006_schema_v6` | `ta_totp`, `ta_trusted_device` |
 | 7 | `0007_schema_v7` | `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, `ta_oauth_token` |
+| 8 | `0008_schema_v8` | `ta_second_factor` (copies each enabled `ta_totp` row with the same id) |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 7.
+`SCHEMA_VERSION` of `@authtempo/core` is 8.
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 
