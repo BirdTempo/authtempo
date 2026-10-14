@@ -264,7 +264,12 @@ const PLUGIN_RULES: Record<string, Rule> = {
       allowPasswordless: only(false, "core asks for the password at every change of the factor"),
       disable: only(false, "core serves the TOTP code whenever the plugin is on"),
     }),
-    otpOptions: refused("core has no email or SMS second factor; see the plan index"),
+    // Core has an email second factor since plan 12c, but it mails through
+    // `totp.emailMail`, and Better Auth's `otpOptions.sendOTP` would be a
+    // second sender. The shim maps none, so the email method is core's own.
+    otpOptions: refused(
+      "core's email second factor sends through totp.emailMail; the shim maps no Better Auth sender, so send-otp stays NOT_SUPPORTED; see the plan index",
+    ),
     backupCodeOptions: object({
       amount: (v, p, out) => {
         if (typeof v !== "number" || !Number.isInteger(v) || v < 5 || v > 20)

@@ -8,7 +8,7 @@ import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import readme from "../README.md?raw";
 import { betterAuthPasswordHash } from "../src/hash.js";
-import { bearer, COMPAT_PLUGIN, twoFactor } from "../src/plugins.js";
+import { bearer, COMPAT_PLUGIN, emailOTP, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
@@ -157,7 +157,7 @@ describe("the two-factor options (plan 9f)", () => {
         "plugins[two-factor].backupCodeOptions.length: core takes an integer from 23 to 32: a backup code holds 112 bits or more (ASVS 5.0 6.5.2)",
         "plugins[two-factor].backupCodeOptions.storeBackupCodes: core stores a keyed hash of each code; leave it out",
         "plugins[two-factor].issuer: core takes 1 to 80 characters with no colon",
-        "plugins[two-factor].otpOptions: core has no email or SMS second factor; see the plan index",
+        "plugins[two-factor].otpOptions: core's email second factor sends through totp.emailMail; the shim maps no Better Auth sender, so send-otp stays NOT_SUPPORTED; see the plan index",
         "plugins[two-factor].schema: core keeps the factor in its own ta_totp table",
         "plugins[two-factor].skipVerificationOnEnable: core turns the factor on only after a right code",
         "plugins[two-factor].totpOptions.digits: core makes 6-digit codes",
@@ -475,5 +475,108 @@ describe("the two-factor paths (plan 9f)", () => {
     expect(readme).toContain("| `twoFactor` |");
     expect(readme).toContain("INVALID_TWO_FACTOR_COOKIE");
     expect(readme).toContain("accountLockout: { enabled: false }");
+  });
+});
+
+describe("the reset of a user with the factor on (plan 12c)", () => {
+  /** A verified user with the factor on, on an app with the email OTP plugin; `sent` holds the mailed codes. */
+  async function resetApp() {
+    const sent: { email: string; otp: string; type: string }[] = [];
+    const links: string[] = [];
+    const opts = options({}, links);
+    const auth = betterAuth({
+      ...opts,
+      plugins: [
+        ...(opts.plugins ?? []),
+        emailOTP({
+          sendVerificationOTP: async (d) => {
+            sent.push(d);
+          },
+        }),
+      ],
+    });
+    const post = (path: string, body: unknown, cookie = "") =>
+      auth.handler(
+        new Request(`${BASE}/api/auth${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: BASE,
+            ...(cookie ? { cookie } : {}),
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    await post("/password/sign-up", { email: EMAIL, password: PASSWORD });
+    await post("/password/verify", { token: links.at(-1) });
+    const session = pair(
+      cookieOf(
+        await post("/password/sign-in", { email: EMAIL, password: PASSWORD }),
+        "tempo_session",
+      ),
+    );
+    const enable = await post("/two-factor/enable", { password: PASSWORD }, session);
+    const uri = ((await enable.json()) as { totpURI: string }).totpURI;
+    const secret = base32Decode(new URL(uri).searchParams.get("secret") ?? "");
+    const on = await post(
+      "/two-factor/verify-totp",
+      { code: await totpCode(secret, new Date()) },
+      session,
+    );
+    expect(on.status).toBe(200);
+    const reset = async (cookie = "") => {
+      await post(
+        "/email-otp/send-verification-otp",
+        { email: EMAIL, type: "forget-password" },
+        cookie,
+      );
+      const otp = sent.findLast((s) => s.type === "forget-password")?.otp ?? "";
+      return post(
+        "/email-otp/reset-password",
+        { email: EMAIL, otp, password: "a brand new long password" },
+        cookie,
+      );
+    };
+    return { post, secret, reset };
+  }
+
+  it("answers success with no cookie for a user with the factor on, and the next sign-in asks for the factor", async () => {
+    const { post, reset } = await resetApp();
+    const r = await reset();
+    expect(r.status).toBe(200);
+    expect(await json(r)).toEqual({ success: true });
+    expect(cookieOf(r, "tempo_session")).toBeNull();
+    expect(cookieOf(r, "better-auth.two_factor")).toBeNull();
+    const signIn = await post("/password/sign-in", {
+      email: EMAIL,
+      password: "a brand new long password",
+    });
+    expect((await json(signIn)).twoFactor).toBeDefined();
+  });
+
+  it("opens the session at the reset on a trusted device: core reads the trust cookie the shim forwards (plan 12c)", async () => {
+    const { post, secret, reset } = await resetApp();
+    const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
+    const challenge = pair(cookieOf(signIn, "better-auth.two_factor"));
+    vi.useFakeTimers({ now: Date.now() + 30_000, toFake: ["Date"] });
+    try {
+      const v = await post(
+        "/two-factor/verify-totp",
+        { code: await totpCode(secret, new Date()), trustDevice: true },
+        challenge,
+      );
+      const trust = pair(cookieOf(v, "better-auth.trust_device"));
+      expect(trust).toMatch(/^better-auth\.trust_device=td_/);
+      const r = await reset(trust);
+      expect(r.status).toBe(200);
+      expect(await json(r)).toEqual({ success: true });
+      expect(cookieOf(r, "tempo_session")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps send-otp and verify-otp at NOT_SUPPORTED: the shim maps no Better Auth sender for the email factor", () => {
+    expect(TWO_FACTOR_NOT_SUPPORTED).toEqual(["/two-factor/send-otp", "/two-factor/verify-otp"]);
   });
 });

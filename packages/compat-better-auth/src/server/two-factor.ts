@@ -17,6 +17,13 @@ export const TWO_FACTOR_COOKIE = "better-auth.two_factor";
 export const TRUST_DEVICE_COOKIE = "better-auth.trust_device";
 /** Better Auth's twoFactorCookieMaxAge default. Core's challenge itself lives 5 minutes. */
 const TWO_FACTOR_COOKIE_MAX_AGE = 600;
+/**
+ * Better Auth's email code second factor. Core has one since plan 12c, but
+ * the shim refuses `otpOptions` (no Better Auth sender) and answers the
+ * `method: "otp"` enable NOT_SUPPORTED, so no user of the shim can turn the
+ * email method on through Better Auth's paths. A mapping would serve a state
+ * the shim cannot reach.
+ */
 export const TWO_FACTOR_NOT_SUPPORTED: readonly string[] = [
   "/two-factor/send-otp",
   "/two-factor/verify-otp",
