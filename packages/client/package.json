@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run && node ../../scripts/check-no-node.mjs src"
   },
   "dependencies": {
     "@authtempo/core": "workspace:*"

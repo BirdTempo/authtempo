@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    // TypeScript 7 loads no @types package unless "types" names it. The
+    // verifier runs on Workers, in Bun, and in Node, and no file here reads a
+    // Node.js module. With no Node types, a Node.js global is a type error.
+    "types": []
+  },
+  // proof/index.ts is here only so that this typecheck covers it. The bundle
+  // proof (examples/worker/proof/bundle-no-node.mjs) bundles it; vitest does not run it.
+  "include": ["src", "test", "proof/index.ts"]
+}

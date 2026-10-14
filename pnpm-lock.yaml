@@ -682,6 +682,28 @@ importers:
         specifier: 4.148.0
         version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
 
+  packages/verify:
+    dependencies:
+      '@authtempo/client':
+        specifier: workspace:*
+        version: link:../client
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20261007.1
+        version: 5.20261007.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
+
 packages:
 
   '@astrojs/compiler-binding-android-arm64@0.5.1':
