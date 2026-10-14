@@ -200,6 +200,9 @@ export async function passwordSignUp(
   if (!pw) return fail("not_found");
   if (!(await config.limiter.allow(`password-sign-up:ip:${input.ip ?? "unknown"}`, SIGN_UP_PER_IP)))
     return fail("rate_limited");
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  const captcha = await checkCaptcha(config, "password-sign-up", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   // Before the policy and before any read: the policy and the lookups trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return fail("invalid_body");
@@ -213,9 +216,6 @@ export async function passwordSignUp(
   // no mail, and before the hash: only a sign-up that can mail counts.
   if (!(await config.limiter.allow(`password-sign-up:email:${email}`, SIGN_UP_PER_EMAIL)))
     return fail("rate_limited");
-  // After the limits, so a limit bounds the supplier calls; before the hash and any read of a user (plan 12b).
-  const captcha = await checkCaptcha(config, "password-sign-up", input.captchaToken, input.ip);
-  if (captcha) return captcha;
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
   const now = config.clock.now();
@@ -595,13 +595,13 @@ export async function passwordSignIn(
   if (!pw) return fail("not_found");
   if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
     return fail("rate_limited");
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  const captcha = await checkCaptcha(config, "password-sign-in", input.captchaToken, input.ip);
+  if (captcha) return captcha;
   // Before any lookup: the lookup and the email limit key trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email !== null && !(await config.limiter.allow(`password:email:${email}`, SIGN_IN_PER_EMAIL)))
     return fail("rate_limited");
-  // After the limits and before any read of a user: the answer is the same for every address (plan 12b).
-  const captcha = await checkCaptcha(config, "password-sign-in", input.captchaToken, input.ip);
-  if (captcha) return captcha;
   // The length is the caller's own input, so this refusal tells nothing about an account. It bounds the CPU.
   if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
   // The floor of every failure from here on (spec 17.4). Date.now, not the
@@ -903,9 +903,7 @@ export async function requestPasswordReset(
   if (email === null) return ok({ sent: true });
   if (!(await config.limiter.allow(`password-reset:ip:${input.ip ?? "unknown"}`, RESET_PER_IP)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`password-reset:email:${email}`, RESET_PER_EMAIL)))
-    return fail("rate_limited");
-  // After the limits and before the row (plan 12b).
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(
     config,
     "password-reset-request",
@@ -913,6 +911,8 @@ export async function requestPasswordReset(
     input.ip,
   );
   if (captcha) return captcha;
+  if (!(await config.limiter.allow(`password-reset:email:${email}`, RESET_PER_EMAIL)))
+    return fail("rate_limited");
   const now = config.clock.now();
   const token = randomToken(PASSWORD_RESET_PREFIX);
   await config.storage.create("verification", {

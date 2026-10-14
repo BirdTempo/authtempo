@@ -80,9 +80,17 @@ function refuse(code: "captcha_required" | "captcha_failed" | "captcha_unavailab
 }
 
 /**
- * The check of one gated flow, after its limits (plan 12b). Null: the flow
- * goes on. `token` undefined is an in-process call, which skips the check;
- * null or "" is a request with no header.
+ * The check of one gated flow (plan 12b). Null: the flow goes on.
+ *
+ * The order in every flow: the per-IP limit, then this check, then every
+ * per-email limit, the policy and the breach check, and the first read. The
+ * per-IP limit bounds the calls to the supplier. A request with no token
+ * must not spend a victim address's per-email limit, which would block the
+ * mail to that address, and must not cost a breach-range call. Before the
+ * first read, the refusal is the same for every address.
+ *
+ * `token` undefined is an in-process call, which skips the check; null or
+ * "" is a request with no header.
  */
 export async function checkCaptcha(
   config: ResolvedConfig,

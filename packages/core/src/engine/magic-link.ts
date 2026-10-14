@@ -46,11 +46,11 @@ export async function requestMagicLink(
   if (email === null) return ok({ sent: true });
   if (!(await config.limiter.allow(`magic-link:ip:${input.ip ?? "unknown"}`, PER_IP)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`magic-link:email:${email}`, PER_EMAIL)))
-    return fail("rate_limited");
-  // After the limits and before the row (plan 12b).
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(config, "magic-link-request", input.captchaToken, input.ip);
   if (captcha) return captcha;
+  if (!(await config.limiter.allow(`magic-link:email:${email}`, PER_EMAIL)))
+    return fail("rate_limited");
   const now = config.clock.now();
   const token = randomToken(MAGIC_LINK_PREFIX);
   const next = safeNext(input.next);

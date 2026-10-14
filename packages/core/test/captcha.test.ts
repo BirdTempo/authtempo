@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CaptchaFlow, CaptchaPort } from "../src/captcha.js";
+import { CAPTCHA_FLOWS, type CaptchaFlow, type CaptchaPort } from "../src/captcha.js";
 import { type AuthConfig, ConfigError } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -141,14 +141,29 @@ describe("the captcha port (plan 12b)", () => {
     }
   });
 
-  it("runs the limit first: a request over the limit makes no call", async () => {
+  it("runs the per-IP limit first: a request over it makes no call", async () => {
     const f = fakePort("pass");
     const auth = setup({ port: f.port });
-    // magic-link:email is 5 per 15 minutes.
-    for (let i = 0; i < 6; i++)
-      await auth.handle(post("/magic-link/request", { email: "a@example.com" }, "tok"));
-    expect(f.calls).toHaveLength(5);
+    // magic-link:ip is 20 per 15 minutes. A new address each time, so no per-email limit counts.
+    for (let i = 0; i < 21; i++)
+      await auth.handle(post("/magic-link/request", { email: `a${i}@example.com` }, "tok"));
+    expect(f.calls).toHaveLength(20);
   });
+
+  it.each(Object.values(ROUTE_OF).flat())(
+    "spends no per-email limit of $path on a request with no token, so a bot cannot block the mail to an address",
+    async ({ path, body }) => {
+      const auth = setup({ port: fakePort("pass").port, flows: [...CAPTCHA_FLOWS] });
+      // Each per-email limit of these flows is 10 or less. Eleven refused requests from eleven IP addresses.
+      for (let i = 0; i < 11; i++) {
+        const res = await auth.handle(post(path, body, undefined, `203.0.113.${i + 10}`));
+        expect(res.status).toBe(400);
+      }
+      const res = await auth.handle(post(path, body, "tok"));
+      expect(res.status).not.toBe(429);
+      expect(res.status).not.toBe(400);
+    },
+  );
 
   it("skips the check for an in-process call with no token, and checks a token that the app passes", async () => {
     const f = fakePort("fail");
@@ -331,5 +346,79 @@ describe("the captcha port (plan 12b)", () => {
     expect(html).not.toContain("evil.example");
     expect(html).not.toContain("alert(1)");
     expect(policy).not.toContain("evil.example");
+  });
+
+  it("refuses a request with no token the same for a known and an unknown address, with no work", async () => {
+    const counts = { storage: 0, hash: 0, verify: 0, breach: 0, mail: 0 };
+    const memory = createMemoryAdapter();
+    const storage = new Proxy(memory, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          counts.storage++;
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    const hash = {
+      hash: (p: string) => {
+        counts.hash++;
+        return FAST.hash(p);
+      },
+      verify: (p: string, stored: string) => {
+        counts.verify++;
+        return FAST.verify(p, stored);
+      },
+      dummy: () => FAST.dummy(),
+    };
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: TEST_SECRET,
+      trustedOrigins: ["https://app.example.com"],
+      storage,
+      mail: {
+        send: async () => {
+          counts.mail++;
+        },
+      },
+      password: {
+        hash,
+        uniformSignUp: false,
+        breachCheck: async () => {
+          counts.breach++;
+          return false;
+        },
+      },
+      captcha: { port: fakePort("pass").port, flows: [...CAPTCHA_FLOWS] },
+    });
+    const known = "known@example.com";
+    const seeded = await auth.api.password?.signUp({
+      email: known,
+      password: "correct horse battery",
+      ip: null,
+      userAgent: null,
+    });
+    expect(seeded?.ok).toBe(true);
+    const answer = async (path: string, email: string) => {
+      const body =
+        path === "/password/sign-up" || path === "/password/sign-in"
+          ? { email, password: "correct horse battery" }
+          : { email };
+      const res = await auth.handle(post(path, body));
+      return { status: res.status, headers: [...res.headers], body: await res.text() };
+    };
+    const paths = Object.values(ROUTE_OF).flatMap((routes) => routes.map((r) => r.path));
+    expect(paths).toHaveLength(6);
+    for (const k of Object.keys(counts) as Array<keyof typeof counts>) counts[k] = 0;
+    for (const path of paths) {
+      const a = await answer(path, known);
+      const b = await answer(path, "unknown@example.com");
+      expect({ path, ...a }).toEqual({ path, ...b });
+      expect(a.status).toBe(400);
+      expect(JSON.parse(a.body)).toEqual({ error: "captcha_required" });
+    }
+    // The memory limiter holds the limit counts; storage, the hash, the breach port, and the mail never ran.
+    expect(counts).toEqual({ storage: 0, hash: 0, verify: 0, breach: 0, mail: 0 });
   });
 });

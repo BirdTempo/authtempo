@@ -98,11 +98,8 @@ async function requestCode(
   if (email === null) return ok({ sent: true });
   if (!(await config.limiter.allow(`otp:ip:${input.ip ?? "unknown"}`, REQUEST_PER_IP)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`otp:email:${email}`, REQUEST_PER_EMAIL)))
-    return fail("rate_limited");
-  if (!(await config.limiter.allow(`otp:email-day:${email}`, MAILED_CODES_PER_EMAIL_DAY)))
-    return fail("rate_limited");
-  // After the limits and before the rows (plan 12b). The reset code is a reset request.
+  // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
+  // The reset code is a reset request.
   const captcha = await checkCaptcha(
     config,
     purpose === "email-otp" ? "email-otp-request" : "password-reset-request",
@@ -110,6 +107,10 @@ async function requestCode(
     input.ip,
   );
   if (captcha) return captcha;
+  if (!(await config.limiter.allow(`otp:email:${email}`, REQUEST_PER_EMAIL)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`otp:email-day:${email}`, MAILED_CODES_PER_EMAIL_DAY)))
+    return fail("rate_limited");
   const now = config.clock.now();
   await config.storage.update(
     "verification",

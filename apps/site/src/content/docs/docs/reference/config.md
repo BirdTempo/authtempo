@@ -244,7 +244,7 @@ Another key of `operator` is refused.
 
 ## Captcha
 
-The token comes in the header `x-captcha-response`. Core checks it after the limits of the flow and before the flow reads a user or writes a row. An in-process `api` call with no `captchaToken` skips the check. An app that proxies a browser request through `api` must pass the browser's token as `captchaToken`; without it, the check does not run.
+The token comes in the header `x-captcha-response`. Core checks it after the per-IP limit of the flow. The check runs before every per-email limit, the password policy, the breach check, and the first read of a user. So a request with no token spends no per-email limit of an address, and costs no breach call. An in-process `api` call with no `captchaToken` skips the check. An app that proxies a browser request through `api` must pass the browser's token as `captchaToken`; without it, the check does not run.
 Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.signInPage` replaces it. Then `captcha.port.page` is required. Without the widget, the page sends no token, and every gated flow on it answers `captcha_required`.
 
 | Key | Type | Default | Rule |

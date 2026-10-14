@@ -424,8 +424,8 @@ by code, and the change run the check. The sign-up and both resets run it
 before any read of a user, so a known and an unknown address get the same
 answer. A refused reset link stays usable. A refused reset code is spent,
 so after an outage the person asks for a new code. In the sign-up, the
-check runs after `password-sign-up:ip` and before `password-sign-up:email`
-and the captcha. `@authtempo/breach-check` answers the port with the HIBP
+check runs after `password-sign-up:ip` and the captcha, and before
+`password-sign-up:email`. `@authtempo/breach-check` answers the port with the HIBP
 Pwned Passwords range API.
 
 A reset of a user with the second factor on opens no session (plan 12c).
@@ -471,7 +471,8 @@ send mail or write rows. Core names no supplier, and
 - The token comes in the header `x-captcha-response`, and the preflight answer lists it.
 - The default flows are `password-sign-up`, `magic-link-request`, `email-otp-request`, and `password-reset-request` (the reset link and the reset code).
 - `password-sign-in` is off by default; name it in `flows` to check every sign-in.
-- Each flow runs its limits, then the captcha, then its work, so a limit bounds the captcha calls.
+- Each flow runs its per-IP limit, then the captcha, then its per-email limits and its work. The per-IP limit bounds the captcha calls.
+- A request with no token spends no per-email limit, so a bot cannot block the mail to an address. In the sign-up, it costs no policy check and no breach call.
 - The captcha runs before the flow reads a user, so its answer is the same for every address.
 - No token answers 400 `captcha_required`; a refused token, or a token over 2048 characters, answers 403 `captcha_failed`.
 - When the port gives no answer or throws, `onUnavailable: "allow"` (the default) writes one log line and goes on, and `"refuse"` answers 503 `captcha_unavailable`.
