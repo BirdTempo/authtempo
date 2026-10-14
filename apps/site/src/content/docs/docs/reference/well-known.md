@@ -14,7 +14,7 @@ sources:
 
 ## Before you start
 
-- Set `oauth` in the config. While `oauth` is off, every path answers 404.
+- Set `oauth` in the config. While `oauth` is off, every path answers 404. [OAuth provider](/docs/reference/config/#oauth-provider) lists its keys.
 
 ## The documents
 

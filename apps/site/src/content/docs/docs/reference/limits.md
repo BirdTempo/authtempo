@@ -38,20 +38,20 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `password-reset:ip:<ip>` | 15 minutes | 20 | Reset request |
 | `password-reset:email:<email>` | 15 minutes | 5 | Reset request |
 | `password-reset-post:ip:<ip>` | 15 minutes | 20 | Reset form post |
-| `password-change:user:<id>` | 15 minutes | 10 | Password change |
+| `password-change:user:<userId>` | 15 minutes | 10 | Password change |
 | `otp:ip:<ip>` | 15 minutes | 20 | Email code request, both purposes |
 | `otp:email:<email>` | 15 minutes | 3 | Email code request, both purposes |
 | `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes |
 | `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify and reset |
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify and reset |
-| `totp-code:user:<id>` | 15 minutes | 10 | Every second factor code check |
-| `totp-code:user-day:<id>` | 24 hours | 30 | Every second factor code check |
-| `totp-setup:user:<id>` | 15 minutes | 5 | The password check of the second factor setup |
+| `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check |
+| `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
+| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the second factor setup |
 | `totp-verify:ip:<ip>` | 15 minutes | 30 | Second factor challenge |
-| `invite:user:<id>` | 15 minutes | 20 | Invite, per inviting user |
+| `invite:user:<userId>` | 15 minutes | 20 | Invite, per inviting user |
 | `invite:email:<email>` | 1 hour | 5 | Invite, per invited address |
 | `invitation-accept:ip:<ip>` | 15 minutes | 20 | Invitation accept |
-| `token-create:user:<id>` | 1 hour | 20 | API token create |
+| `token-create:user:<userId>` | 1 hour | 20 | API token create |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |

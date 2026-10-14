@@ -13,7 +13,7 @@ sources:
 
 ## Before you start
 
-- Nothing. This page is the start of the reference.
+- Nothing. This page is the start of the reference. The [docs home](/docs/) lists every section.
 
 ## Terms
 

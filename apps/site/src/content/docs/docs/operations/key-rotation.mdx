@@ -21,7 +21,7 @@ import test from "../../../../../samples/operations/key-rotation.test.ts?raw";
 ## Before you start
 
 - A deployed API. Read [Deploy](/docs/operations/deploy/) first.
-- For the signing key, `jwtMint` on. It is on by default.
+- For the signing key, `jwtMint` on. It is on by default. [JWT minting](/docs/reference/config/#jwt-minting) lists its keys.
 
 ## Steps
 
@@ -44,7 +44,7 @@ The test below rotates the key and checks the key set.
 ## How it behaves
 
 - A rotation retires the signing key and writes a new one. The retired key verifies for 24 hours and signs nothing.
-- `GET /auth/jwks` lists the signing key first, then each key retired less than 24 hours ago.
+- `GET /auth/jwks` lists the signing key first, then at most 100 keys retired less than 24 hours ago.
 - A server that verifies session JWTs reads the key set again for a new `kid`. With a cache of the key set, the cache must be shorter than 24 hours.
 - The sweep deletes a key 24 hours after it retired.
 - Core signs the Apple client secret again at each token exchange, with a life of five minutes. No stored Apple secret expires.

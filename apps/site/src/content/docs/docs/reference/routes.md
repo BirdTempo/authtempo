@@ -595,7 +595,7 @@ These routes exist unless the config sets `jwtMint: false`.
 | --- | --- |
 | Needs | Nothing |
 | Input | None |
-| Answer | `{ keys }`: the signing key and each key retired less than 24 hours ago; `cache-control: public, max-age=300` |
+| Answer | `{ keys }`: the signing key and at most 100 keys retired less than 24 hours ago; `cache-control: public, max-age=300` |
 | Errors | None |
 
 <h3 id="get-token"><code>GET /token</code></h3>

@@ -17,7 +17,7 @@ sidebar:
 
 ## Before you start
 
-- Access to the logs of the API. On Workers, `pnpm exec wrangler tail` streams them.
+- Access to the logs of the API. On Workers, `pnpm --filter my-app exec wrangler tail` streams them. [The lines](/docs/operations/observability/#the-lines) section lists what core writes.
 
 ## Steps
 

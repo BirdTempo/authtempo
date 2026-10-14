@@ -16,7 +16,7 @@ sources:
 
 ## Before you start
 
-- The app runs Better Auth 1.7.
+- The app runs Better Auth 1.7. [From Better Auth](/docs/migrate/better-auth/) tells how to move it.
 
 ## The rule
 

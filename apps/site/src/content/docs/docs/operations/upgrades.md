@@ -27,7 +27,7 @@ sidebar:
 3. On D1, apply the migrations of the adapter to the real database.
 
 ```sh
-pnpm exec wrangler d1 migrations apply my-app --remote
+pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
 ```
 
 4. On Postgres, call `applyPostgresMigrations(sql)` once per deploy, before the first request.

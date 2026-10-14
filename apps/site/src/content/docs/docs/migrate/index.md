@@ -17,8 +17,8 @@ sidebar:
 
 ## Before you start
 
-- Know the auth system that the app uses now, and its version.
-- Know whether the app must keep its code, or may change its auth calls.
+- Know the auth system that the app uses now, and its version. The [import CLI](/docs/reference/import-cli/) lists the sources.
+- Know whether the app must keep its code, or may change its auth calls. [Better Auth compatibility](/docs/reference/compat-better-auth/) keeps the code of a Better Auth app.
 - Read [The cutover](/docs/migrate/cutover/) once before you choose. Every path ends there.
 
 ## Steps

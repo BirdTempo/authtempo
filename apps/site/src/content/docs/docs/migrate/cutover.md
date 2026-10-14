@@ -19,7 +19,7 @@ sidebar:
 
 - Do the guide of your source system: [Choose a migration path](/docs/migrate/).
 - Deploy the API with authtempo, with every migration applied. [Upgrades](/docs/operations/upgrades/) tells how.
-- Plan a time of low traffic. Every person signs in again once after the cutover.
+- Plan a time of low traffic. Every person signs in again once after the cutover. [How it behaves](/docs/migrate/cutover/#how-it-behaves) tells why.
 
 ## Steps
 

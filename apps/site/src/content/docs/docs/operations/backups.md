@@ -15,8 +15,8 @@ sidebar:
 
 ## Before you start
 
-- The name of the D1 database, or the URL of the Postgres database.
-- The `secret` of the API at the time of the backup. Keep it beside the backup, in a secret store.
+- The name of the D1 database, or the URL of the Postgres database. [D1](/docs/reference/schema/#d1) shows where the name goes.
+- The `secret` of the API at the time of the backup. Keep it beside the backup, in a secret store. [Secrets](/docs/operations/secrets/#what-the-secret-protects) tells what it opens.
 
 ## Steps
 
@@ -24,19 +24,19 @@ sidebar:
 2. Read the bookmark of a time before the fault. The command prints it.
 
 ```sh
-pnpm exec wrangler d1 time-travel info my-app --timestamp="2026-10-14T09:00:00+00:00"
+pnpm --filter my-app exec wrangler d1 time-travel info my-app --timestamp="2026-10-14T09:00:00+00:00"
 ```
 
 3. Restore the database to that bookmark.
 
 ```sh
-pnpm exec wrangler d1 time-travel restore my-app --bookmark="$BOOKMARK"
+pnpm --filter my-app exec wrangler d1 time-travel restore my-app --bookmark="$BOOKMARK"
 ```
 
 4. For a copy outside Cloudflare, export the database to a SQL file.
 
 ```sh
-pnpm exec wrangler d1 export my-app --remote --output=./my-app.sql
+pnpm --filter my-app exec wrangler d1 export my-app --remote --output=./my-app.sql
 ```
 
 5. On Postgres, dump the database in the custom format, and restore it with `pg_restore`.
@@ -49,13 +49,14 @@ pg_restore -d "$RESTORE_URL" my-app.dump
 6. After a restore, delete every session row, because a restore brings back sessions that ended.
 
 ```sh
-pnpm exec wrangler d1 execute my-app --remote --command "DELETE FROM ta_session"
+pnpm --filter my-app exec wrangler d1 execute my-app --remote --command "DELETE FROM ta_session"
 psql "$DATABASE_URL" -c "DELETE FROM ta_session"
 ```
 
 7. With the compatibility package, delete the rows of the table `session` instead.
-8. Note that the table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
-9. Run `auth.api.sweepExpired()` once.
+8. Run `auth.api.sweepExpired()` once.
+
+The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
 
 ## How it behaves
 

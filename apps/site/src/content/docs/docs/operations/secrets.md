@@ -19,8 +19,8 @@ sidebar:
 
 ## Before you start
 
-- Access to the secret store of the API. On Workers that is `wrangler secret put`. On Node and Bun it is the process environment.
-- A way to run code in the API's process, for the in-process api.
+- Access to the secret store of the API. On Workers that is `pnpm --filter my-app exec wrangler secret put`. On Node and Bun it is the process environment. [Deploy](/docs/operations/deploy/) sets the first value.
+- A way to run code in the API's process, for the [in-process API](/docs/reference/api/#the-in-process-api).
 
 ## What the secret protects
 
@@ -39,7 +39,7 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 1. List the users with the second factor on. Each one has a row in `ta_totp`.
 2. Tell each of them that they must set up the second factor again after the change.
 3. For each user of step 1, call `auth.api.totp.disable({ userId })` in the API's process. Do this before the change, because no sealed key opens after it.
-4. On Workers, store the new value with `pnpm exec wrangler secret put AUTH_SECRET`. The Worker reads it as `env.AUTH_SECRET`.
+4. On Workers, store the new value with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`. The Worker reads it as `env.AUTH_SECRET`.
 5. On Node and Bun, set `AUTH_SECRET` in the process environment of the server.
 6. Deploy, so every instance reads the new value.
 7. Read the log for the line about a signing key that does not open. One line is expected.

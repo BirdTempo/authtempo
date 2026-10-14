@@ -15,7 +15,7 @@ sources:
 
 ## Before you start
 
-- Know your adapter: D1, Postgres, or the Better Auth tables of the compatibility package.
+- Know your adapter: D1, Postgres, or the Better Auth tables of the compatibility package. [Choose your stack](/docs/start/) compares them.
 
 ## The versions
 
@@ -54,7 +54,7 @@ Point `migrations_dir` at the migrations of the adapter, and apply them with wra
 ```
 
 ```sh
-wrangler d1 migrations apply my-app --remote
+pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
 ```
 
 ## Postgres

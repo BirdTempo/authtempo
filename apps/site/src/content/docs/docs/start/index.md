@@ -16,8 +16,8 @@ sidebar:
 
 ## Before you start
 
-- Know where your API runs: Cloudflare Workers, Node, or Bun.
-- Know which database your app has, or will have.
+- Know where your API runs: Cloudflare Workers, Node, or Bun. [Runtimes and compatibility flags](/docs/reference/runtimes/) lists what each needs.
+- Know which database your app has, or will have. [Schema and migrations](/docs/reference/schema/) covers D1 and Postgres.
 
 ## Steps
 

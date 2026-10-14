@@ -21,9 +21,9 @@ import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
 ## Before you start
 
 - An API with authtempo and `password` set. Do a [getting started tutorial](/docs/start/) first.
-- The user export job of Auth0, `POST /api/v2/jobs/users-exports` with the format `json`.
-- The password hashes, if you need them. Auth0 sends them only through a support case, as a PGP file.
-- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace.
+- The user export job of Auth0, `POST /api/v2/jobs/users-exports` with the format `json`. [The command](/docs/reference/import-cli/#the-command) reads its file.
+- The password hashes, if you need them. Auth0 sends them only through a support case, as a PGP file. [The command](/docs/reference/import-cli/#the-command) reads them with `--hashes`.
+- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
 
 ## Steps
 

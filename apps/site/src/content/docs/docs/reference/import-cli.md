@@ -15,7 +15,7 @@ sources:
 ## Before you start
 
 - Read [Choose a migration path](/docs/migrate/) for the guide of each source.
-- No session and no second factor secret moves from any source. Passkeys move only from Auth.js.
+- No session and no second factor secret moves from any source. Passkeys move only from Auth.js. [The cutover](/docs/migrate/cutover/) tells how people sign in again.
 
 ## The command
 

@@ -19,7 +19,7 @@ sidebar:
 ## Before you start
 
 - An API that passes its tests. Do a [getting started tutorial](/docs/start/) first.
-- On Workers, a Cloudflare account. With `password`, a Workers Paid plan.
+- A Cloudflare account, on Workers. With `password`, a Workers Paid plan.
 
 ## Steps
 
@@ -42,7 +42,7 @@ sidebar:
 | `compatibility_flags` on D1 | `no_nodejs_compat`, `no_nodejs_compat_v2` | Node.js compatibility is on by default from 2026-08-04. |
 | `compatibility_flags` on Postgres | `nodejs_compat` | postgres.js cannot open a socket. |
 | `triggers.crons` | `["17 * * * *"]` | Expired rows stay in the database forever. |
-| `AUTH_SECRET` | `pnpm exec wrangler secret put AUTH_SECRET` | The secret lies in the config, readable by each person with the repo. |
+| `AUTH_SECRET` | `pnpm --filter my-app exec wrangler secret put AUTH_SECRET` | The secret lies in the config, readable by each person with the repo. |
 | The plan | Workers Paid with `password` | One PBKDF2 hash needs more CPU than Workers Free gives one request. |
 
 ## How it behaves

@@ -23,8 +23,8 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 
 ## Before you start
 
-- An app on Better Auth 1.7, on Postgres through postgres.js or on D1.
-- The tables `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, and `passkey`. Create a missing table with Better Auth's own SQL for it.
+- An app on Better Auth 1.7, on Postgres through postgres.js or on D1. [Better Auth compatibility](/docs/reference/compat-better-auth/) lists what it keeps.
+- The tables `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, and `passkey`. Create a missing table with Better Auth's own SQL for it. [The Better Auth tables](/docs/reference/schema/#the-better-auth-tables) section lists them.
 - The packages of authtempo in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.
 
 ## Steps
@@ -57,7 +57,7 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 6. On Postgres, call `betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate()` once per deploy, before the first request.
 7. On D1, copy the four compat files into the app's `migrations_dir`, in order, each with the app's next number.
 8. Take the files from `migrations/d1/` for Better Auth 1.7 tables, or from `migrations/d1-before-1.7/` for older tables.
-9. Apply them with `pnpm exec wrangler d1 migrations apply <database> --remote`.
+9. Apply them with `pnpm --filter my-app exec wrangler d1 migrations apply <database> --remote`.
 10. Register the new callback URL at each social provider before the cutover.
 
 The test below runs the sample against a database in memory. It also shows the error at start.
