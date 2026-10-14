@@ -183,6 +183,21 @@ describe("authtempo import (spec 19, the flag map)", () => {
     }
   });
 
+  it("reads no old flag after --: an argument there is a positional", async () => {
+    const { code, io } = await run([
+      ...SUPABASE,
+      "--target",
+      "d1-bundle",
+      "--out",
+      "b.json",
+      "--",
+      "--postgres=x",
+    ]);
+    expect(code).toBe(2);
+    expect(io.stderr[0]).toMatch(/^name one provider: /);
+    expect(io.reads).toEqual([]);
+  });
+
   it("keeps the old checks with the new names: authjs needs --authjs-tables", async () => {
     const { code, io } = await run([
       "import",

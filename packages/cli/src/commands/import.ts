@@ -74,6 +74,8 @@ export const importCommand: Command = {
   options: OPTIONS,
   async run(argv, ctx) {
     for (const arg of argv) {
+      // After --, parseArgs reads each argument as a positional, not as a flag.
+      if (arg === "--") break;
       const flag = arg.split("=")[0] ?? arg;
       const hint = Object.hasOwn(RENAMED, flag) ? RENAMED[flag] : undefined;
       if (hint !== undefined) throw new UsageError(`authtempo import takes no ${flag}: ${hint}`);

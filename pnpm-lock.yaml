@@ -553,9 +553,6 @@ importers:
       '@authtempo/adapter-d1':
         specifier: workspace:*
         version: link:../adapter-d1
-      '@authtempo/adapter-postgres':
-        specifier: workspace:*
-        version: link:../adapter-postgres
       '@authtempo/compat-better-auth':
         specifier: workspace:*
         version: link:../compat-better-auth
@@ -566,6 +563,9 @@ importers:
         specifier: workspace:*
         version: link:../legacy-hashes
     devDependencies:
+      '@authtempo/adapter-postgres':
+        specifier: workspace:*
+        version: link:../adapter-postgres
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
         version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)))
