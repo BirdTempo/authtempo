@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkFrontmatter } from "../scripts/check-frontmatter.ts";
+import { checkFrontmatter, pageUrl } from "../scripts/check-frontmatter.ts";
 
 const repo: Record<string, string> = {
   "docs/spec.md": "## 8. Flows\n\n### 8.2 Magic link\n",
@@ -104,6 +104,28 @@ describe("checkFrontmatter", () => {
     ]);
     expect(prereq("- Dockerfile of the app.\n").failures).toHaveLength(1);
     expect(prereq("- A database,\n  as [Schema](/docs/schema/) tells.\n").failures).toEqual([]);
+  });
+
+  it("refuses a Before you start link to the page itself, with or without an anchor", () => {
+    const prereq = (items: string) =>
+      checkFrontmatter([page(GOOD, TEMPLATE.replace("- A [thing](/docs/).\n", items))], read)
+        .failures;
+    expect(prereq("- A [thing](/docs/x/).\n")).toEqual([
+      "docs/x.md: the Before you start item links /docs/x/, the page itself",
+    ]);
+    expect(prereq("- A [thing](/docs/x/#steps).\n")).toEqual([
+      "docs/x.md: the Before you start item links /docs/x/#steps, the page itself",
+    ]);
+    expect(prereq("- A [thing](#steps).\n")).toEqual([
+      "docs/x.md: the Before you start item links #steps, the page itself",
+    ]);
+    expect(prereq("- A [thing](/docs/xy/#steps).\n")).toEqual([]);
+  });
+
+  it("maps a page path to its URL", () => {
+    expect(pageUrl("docs/migrate/cutover.md")).toBe("/docs/migrate/cutover/");
+    expect(pageUrl("docs/migrate/index.md")).toBe("/docs/migrate/");
+    expect(pageUrl("docs/index.mdx")).toBe("/docs/");
   });
 
   it("fails when it reads no page", () => {

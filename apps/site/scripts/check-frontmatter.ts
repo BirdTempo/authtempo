@@ -57,6 +57,24 @@ function listItems(part: readonly string[]): string[] {
 }
 
 /** True when the item starts with a prefix as a whole word ("Docker" is not "Dockerfile"). */
+/** The URL of a page: `docs/migrate/index.md` is `/docs/migrate/`, `docs/a/b.mdx` is `/docs/a/b/`. */
+export function pageUrl(path: string): string {
+  const bare = path.replace(/\.mdx?$/, "").replace(/(^|\/)index$/, "");
+  return `/${bare}${bare === "" || bare.endsWith("/") ? "" : "/"}`;
+}
+
+/** The link targets of a text: markdown links and raw HTML anchors. */
+function hrefsIn(text: string): string[] {
+  return [...text.matchAll(/\]\(([^)\s]+)\)|<a\s[^>]*href="([^"]*)"/g)].map(
+    (m) => m[1] ?? m[2] ?? "",
+  );
+}
+
+/** True when the href names the page it is on, with or without an anchor. */
+function isSelfLink(href: string, url: string): boolean {
+  return href.startsWith("#") || href.split("#")[0] === url;
+}
+
 function isExempt(item: string): boolean {
   return NO_LINK_PREFIXES.some(
     (p) => item.startsWith(p) && (p.endsWith(" ") || !/^[A-Za-z0-9]/.test(item.slice(p.length))),
@@ -142,7 +160,12 @@ export function checkFrontmatter(
     const before = partLines(lines, "## Before you start");
     for (const item of before ? listItems(before) : []) {
       r.counts.prerequisites = (r.counts.prerequisites ?? 0) + 1;
-      if (linksIn(item) > 0) continue;
+      // A prerequisite comes before the page, so a link to the page itself
+      // points the reader at nothing new.
+      const self = hrefsIn(item).filter((h) => isSelfLink(h, pageUrl(p.path)));
+      for (const h of self)
+        r.failures.push(`${p.path}: the Before you start item links ${h}, the page itself`);
+      if (self.length > 0 || linksIn(item) > 0) continue;
       if (isExempt(item)) {
         r.counts.exempt = (r.counts.exempt ?? 0) + 1;
         r.exempt?.push(`${p.path}: ${item}`);
