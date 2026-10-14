@@ -9,6 +9,8 @@ import {
   verifyPasswordEmail,
 } from "../src/engine/password.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
+import type { Clock } from "../src/primitives/clock.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, post, tokenFromMail } from "./helpers.js";
 import { FAST, pwHandle } from "./password-helpers.js";
 import { fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
@@ -29,7 +31,7 @@ function authFor(signUp: Rule, extra: Record<string, unknown> = {}) {
 }
 
 async function invite(
-  auth: ReturnType<typeof makeAuth>,
+  auth: { clock: Clock; storage: StorageAdapter },
   email: string,
   expiresIn: number,
   accepted = false,
@@ -188,7 +190,7 @@ describe("the sign-up rule (plan 12b)", () => {
 
   it("opens no session at the detailed sign-up of an invited address, and the verify link signs in", async () => {
     const h = pwHandle({ hash: FAST }, { signUp: "invited", organizations: {} });
-    await invite(h as never, NEW, DAY);
+    await invite(h, NEW, DAY);
     const res = await h.auth.handle(
       post("/auth/password/sign-up", { email: NEW, password: "correct horse battery" }),
     );
@@ -211,7 +213,7 @@ describe("the sign-up rule (plan 12b)", () => {
   it("refuses the password sign-in of an unproved invited address until the verify link (Task 9 review M1)", async () => {
     for (const uniformSignUp of [true, false]) {
       const h = pwHandle({ hash: FAST, uniformSignUp }, { signUp: "invited", organizations: {} });
-      await invite(h as never, NEW, DAY);
+      await invite(h, NEW, DAY);
       const creds = { email: NEW, password: "correct horse battery" };
       expect((await h.auth.handle(post("/auth/password/sign-up", creds))).status).toBe(200);
       // A stranger who knows the invited address signs up with a password of their own.
