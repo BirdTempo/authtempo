@@ -2,7 +2,7 @@ import type { ResolvedConfig, ResolvedTotp } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { constantTimeEqual, hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
-import { currentSecret } from "../primitives/keyring.js";
+import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primitives/totp.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
@@ -91,12 +91,16 @@ export async function spendBackupCode(
   // adapter whose `eq` on a date never matches.
   for (let round = 0; round <= row.backupCodes.length; round++) {
     if (!current) return null;
-    const candidate = await backupCodeHash(currentSecret(config.keyring), current.id, typed);
+    // The row's version keys the compare (plan 12b). A spend writes the
+    // codes only: the codes left keep the version that keyed them.
+    const key = hashSecretFor(config.keyring, current.secretVersion, current.id);
+    const candidate = await backupCodeHash(key.secret, current.id, typed);
     let found = -1;
     current.backupCodes.forEach((hash, i) => {
       if (constantTimeEqual(candidate, hash)) found = i;
     });
-    if (found === -1) return null;
+    // Every stored hash ran the compare; an unknown version matches nothing.
+    if (found === -1 || !key.known) return null;
     const left = current.backupCodes.filter((_, i) => i !== found);
     const n = await config.storage.update(
       "secondFactor",
@@ -141,6 +145,8 @@ export async function replaceBackupCodes(
         backupCodes: hashes,
         backupCodesVersion: BACKUP_CODES_VERSION,
         updatedAt: later(now, current.updatedAt),
+        // `newBackupCodes` keyed the new list under the current version (plan 12b).
+        secretVersion: config.keyring.current,
       },
     );
     if (n === 1) return ok({ backupCodes: codes });

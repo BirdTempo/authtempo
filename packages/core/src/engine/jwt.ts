@@ -1,18 +1,20 @@
 import type { ResolvedConfig, ResolvedJwtMint } from "../config.js";
+import { appErrorName } from "../primitives/app-error.js";
 import { newId } from "../primitives/ids.js";
 import {
   type DecodedJws,
   decodeJws,
   generateSigningKey,
+  importPrivateKey,
   type JwsAlg,
-  openPrivateKey,
+  openPrivateKeyBytes,
   type PublicJwk,
   RETIRED_KEY_MS,
   sealPrivateKey,
   signJws,
   verifyJws,
 } from "../primitives/jwk.js";
-import { currentSecret } from "../primitives/keyring.js";
+import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
@@ -167,6 +169,46 @@ export async function signingKey(
 }
 
 /**
+ * Seals a key again under the current version (plan 12b), at its first
+ * signature after a switch or from `api.secrets.rewrap`. One conditional
+ * update on the old sealed value: zero rows means another isolate resealed
+ * it first. True when this call wrote the row. It never throws, so the
+ * signature never waits on a failed write.
+ */
+async function resealKey(
+  config: ResolvedConfig,
+  row: JwkRow,
+  pkcs8: Uint8Array<ArrayBuffer>,
+): Promise<boolean> {
+  const { keyring } = config;
+  if (row.secretVersion === keyring.current) return false;
+  try {
+    const n = await config.storage.update(
+      "jwk",
+      [
+        { field: "id", op: "eq", value: row.id },
+        { field: "privateKey", op: "eq", value: row.privateKey },
+      ],
+      {
+        privateKey: await sealPrivateKey(currentSecret(keyring), row.id, pkcs8),
+        secretVersion: keyring.current,
+      },
+    );
+    return n === 1;
+  } catch (e) {
+    console.error("authtempo: a signing key reseal failed", row.id, appErrorName(e));
+    return false;
+  }
+}
+
+/** `api.secrets.rewrap` for one key row, signing or retired (plan 12b): true when it moved to the current version. */
+export async function rewrapKeyRow(config: ResolvedConfig, row: JwkRow): Promise<boolean> {
+  const secret = secretFor(config.keyring, row.secretVersion, row.id);
+  const pkcs8 = secret === null ? null : await openPrivateKeyBytes(secret, row.id, row.privateKey);
+  return pkcs8 ? resealKey(config, row, pkcs8) : false;
+}
+
+/**
  * A compact JWS of `payload` with the signing key. The private key is
  * opened for this signature only. A key that does not open was sealed under
  * another app secret: it retires with one log line, and a new key signs.
@@ -179,8 +221,15 @@ export async function signToken(
   const { alg } = mintConfig(config);
   for (let attempt = 0; attempt < 2; attempt++) {
     const row = await signingKey(config, alg, ROTATE_DUE);
-    const key = await openPrivateKey(currentSecret(config.keyring), row.id, row.privateKey, alg);
-    if (key) return signJws({ alg, kid: row.id, typ, key, payload });
+    // The version the row names, never a second try (plan 12b).
+    const secret = secretFor(config.keyring, row.secretVersion, row.id);
+    const pkcs8 =
+      secret === null ? null : await openPrivateKeyBytes(secret, row.id, row.privateKey);
+    const key = pkcs8 ? await importPrivateKey(pkcs8, alg) : null;
+    if (key && pkcs8) {
+      await resealKey(config, row, pkcs8);
+      return signJws({ alg, kid: row.id, typ, key, payload });
+    }
     console.error("authtempo: a signing key does not open under this secret; it retires", row.id);
     await retireKey(config, row);
   }

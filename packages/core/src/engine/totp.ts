@@ -1,9 +1,10 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { openSealed, seal } from "../primitives/aead.js";
+import { appErrorName } from "../primitives/app-error.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
-import { currentSecret } from "../primitives/keyring.js";
+import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { base32Encode, otpauthUri, verifyTotp } from "../primitives/totp.js";
 import { fail, ok, type Result } from "../result.js";
 import type {
@@ -129,8 +130,54 @@ function enabledRow(storage: StorageAdapter, userId: string): Promise<TotpRow | 
   ]);
 }
 
+/** The secret under the version its row names (plan 12b), or null: another version, another user, or a changed byte. */
 function openSecret(config: ResolvedConfig, row: TotpRow): Promise<Uint8Array | null> {
-  return openSealed(currentSecret(config.keyring), SEAL_INFO, row.secret, row.userId);
+  const secret = secretFor(config.keyring, row.secretVersion, row.id);
+  return secret === null
+    ? Promise.resolve(null)
+    : openSealed(secret, SEAL_INFO, row.secret, row.userId);
+}
+
+/**
+ * Seals an opened secret again under the current version (plan 12b), after a
+ * right code or from `api.secrets.rewrap`. One conditional update on the old
+ * sealed value: zero rows means another request resealed it, or a new setup
+ * replaced it. True when this call wrote the row. It never throws, so a lost
+ * or failed reseal never fails a right code.
+ */
+async function resealSecret(
+  config: ResolvedConfig,
+  row: TotpRow,
+  plain: Uint8Array,
+): Promise<boolean> {
+  const { keyring } = config;
+  if (row.secretVersion === keyring.current) return false;
+  // An unconfirmed setup keys its backup codes under the row's version too.
+  // A reseal would move the secret and leave the codes, and the enable then
+  // copies the codes with the wrong version. The setup lives 15 minutes, so
+  // it stays under its version until the enable or a new setup.
+  if (row.enabledAt === null && row.backupCodes.length > 0) return false;
+  try {
+    const sealed = await seal(currentSecret(keyring), SEAL_INFO, plain, row.userId);
+    const n = await config.storage.update(
+      "totp",
+      [
+        { field: "id", op: "eq", value: row.id },
+        { field: "secret", op: "eq", value: row.secret },
+      ],
+      { secret: sealed, secretVersion: keyring.current },
+    );
+    return n === 1;
+  } catch (e) {
+    console.error("authtempo: a TOTP secret reseal failed", row.id, appErrorName(e));
+    return false;
+  }
+}
+
+/** `api.secrets.rewrap` for one TOTP row (plan 12b): true when it moved to the current version. */
+export async function rewrapTotpRow(config: ResolvedConfig, row: TotpRow): Promise<boolean> {
+  const plain = await openSecret(config, row);
+  return plain ? resealSecret(config, row, plain) : false;
 }
 
 /**
@@ -160,7 +207,8 @@ async function acceptCode(
   code: string,
   now: Date,
 ): Promise<boolean> {
-  const step = await matchStep(await openSecret(config, row), code, now);
+  const plain = await openSecret(config, row);
+  const step = await matchStep(plain, code, now);
   if (step === null) return false;
   const n = await config.storage.update(
     "totp",
@@ -171,7 +219,10 @@ async function acceptCode(
     ],
     { lastStep: step },
   );
-  return n === 1;
+  if (n !== 1) return false;
+  // The reseal leaves `updatedAt`: the compare-and-set of plan 9f on it must not see a reseal as a change.
+  if (plain) await resealSecret(config, row, plain);
+  return true;
 }
 
 /** A code of the app (6 digits) or a backup code (any other text), for the operations that take either. */
@@ -259,6 +310,8 @@ export async function setupTotp(
         backupCodes: hashes,
         createdAt: now,
         updatedAt: later(now, existing.updatedAt),
+        // The version that sealed the new secret and keyed the new codes (plan 12b).
+        secretVersion: config.keyring.current,
       },
     );
     if (n === 0) return fail("totp_enabled");

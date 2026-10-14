@@ -1,7 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
-import { currentSecret } from "../primitives/keyring.js";
+import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
@@ -217,8 +217,13 @@ async function checkCode(
   if (!otp) return fail("not_found");
   const row = email === null ? null : await newestCode(config.storage, purpose, email);
   // One HMAC and one compare on every path, against a fixed value when no row exists.
-  const candidate = await codeHash(currentSecret(config.keyring), row?.id ?? NO_ROW_ID, code);
-  const right = constantTimeEqual(candidate, row?.valueHash ?? NO_ROW_HASH);
+  // The row's version keys the HMAC (plan 12b). With no row, the current
+  // version runs it against NO_ROW_HASH. One HMAC and one compare on every path.
+  const key = row
+    ? hashSecretFor(config.keyring, row.secretVersion, row.id)
+    : { secret: currentSecret(config.keyring), known: true };
+  const candidate = await codeHash(key.secret, row?.id ?? NO_ROW_ID, code);
+  const right = constantTimeEqual(candidate, row?.valueHash ?? NO_ROW_HASH) && key.known;
   if (!row) return fail("invalid_code");
   if (row.consumedAt !== null)
     return fail(attemptsOf(row) >= otp.maxAttempts ? "too_many_attempts" : "invalid_code");
