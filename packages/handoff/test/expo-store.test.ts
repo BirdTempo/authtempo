@@ -30,11 +30,40 @@ describe("expoTokenStore (plan 11d)", () => {
     expect(await tokens.get()).toBeNull();
   });
 
-  it("answers null and deletes the entry when the read throws", async () => {
+  it("answers null and keeps the entry when the read throws, as a locked keychain does (O1)", async () => {
     const { store, map } = fakeSecureStore(true);
     map.set("app.token", "ts_old");
     expect(await expoTokenStore(store, { key: "app.token" }).get()).toBeNull();
-    expect(map.has("app.token")).toBe(false);
+    expect(map.get("app.token")).toBe("ts_old");
+  });
+
+  it("answers null and deletes an entry that is present but empty (O1)", async () => {
+    const { store, map } = fakeSecureStore();
+    map.set("authtempo.session", "");
+    expect(await expoTokenStore(store).get()).toBeNull();
+    expect(map.has("authtempo.session")).toBe(false);
+  });
+
+  it("passes the SecureStore options to each call (L2)", async () => {
+    const seen: unknown[] = [];
+    const store: SecureStoreLike = {
+      getItemAsync: async (_k, o) => {
+        seen.push(o);
+        return "ts_x";
+      },
+      setItemAsync: async (_k, _v, o) => {
+        seen.push(o);
+      },
+      deleteItemAsync: async (_k, o) => {
+        seen.push(o);
+      },
+    };
+    const options = { keychainService: "consumera", keychainAccessible: 0 };
+    const tokens = expoTokenStore(store, { secureStoreOptions: options });
+    await tokens.get();
+    await tokens.set("ts_y");
+    await tokens.clear();
+    expect(seen).toEqual([options, options, options]);
   });
 
   it("refuses a key that expo-secure-store refuses, at construction", () => {

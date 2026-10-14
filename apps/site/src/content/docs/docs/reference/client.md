@@ -132,6 +132,8 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 
 The password, email code, and second factor operations answer `not_found` when the server turns the feature off.
 
+For passkey autofill, start the autofill when the page loads, before a passkey button can run. A new passkey ceremony ends a waiting one, also a register.
+
 ## Error texts and links
 
 `errorText(code)` answers one sentence for a code, for an app to show to a person. `errorDocsURL(code)` answers the docs page of the code: its anchor on [Error codes](/docs/reference/errors/), or the [Results](#results) section for `network`, `unexpected`, and `cancelled`. `redirect_mismatch` links to the [failure codes of the handoff](/docs/reference/handoff/#failure-codes). Pass `"oauth"` as the second argument for a code of the OAuth client, because `invalid_token` and `rate_limited` are in both tables. `ERROR_TEXT` holds every text, by table.

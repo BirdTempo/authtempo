@@ -129,7 +129,9 @@ describe("the call table of the client (plan 11d)", () => {
 
   it("has one raw call in client.ts, the one inside send", () => {
     expect(clientSource.match(/\bcall</g)).toHaveLength(1);
-    expect(clientSource).toContain("return call<T>(c.method, c.path, body, query, headers);");
+    expect(clientSource).toContain(
+      "return call<T>(c.method, c.path, body, query, headers, token);",
+    );
   });
 
   it("sends a query apart from the path", async () => {

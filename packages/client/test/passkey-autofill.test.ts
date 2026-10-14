@@ -167,3 +167,34 @@ describe("passkey autofill fix round (plan 11d Task 6 review)", () => {
     expect(await autofill).toEqual({ ok: false, code: "cancelled", status: 0 });
   });
 });
+
+describe("passkey register and a waiting autofill (plan 11d Task 6 re-review, N3)", () => {
+  it("ends a waiting autofill when a passkey register starts", async () => {
+    const { server, soft } = await withPasskey();
+    stubAutofill(true);
+    // A second authenticator: the first one already holds a passkey of this user.
+    const phone = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
+    const seam: BrowserWebAuthn = {
+      create: (options) => phone.register(options.challenge),
+      async get(options, ceremony) {
+        if (ceremony?.mediation === "conditional")
+          await new Promise<void>((_, reject) =>
+            ceremony.signal?.addEventListener("abort", () => reject(new WebAuthnCancelled())),
+          );
+        return soft.authenticate(options.challenge);
+      },
+    };
+    const browser = createClient({
+      baseURL: BASE_URL,
+      fetch: inProcessFetch(server.auth).fetch,
+      webauthn: seam,
+    });
+    await browser.magicLink.request({ email: "ada@example.com" });
+    await browser.magicLink.verify({ token: tokenFromMail(server.mail.at(-1)?.text ?? "") });
+    const autofill = browser.passkey.signIn({ autofill: true });
+    await new Promise((r) => setTimeout(r, 10));
+    const reg = await browser.passkey.register({ name: "phone" });
+    expect(reg.ok ? "ok" : `${reg.code} ${reg.status}`).toBe("ok");
+    expect(await autofill).toEqual({ ok: false, code: "cancelled", status: 0 });
+  });
+});

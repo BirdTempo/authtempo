@@ -69,9 +69,22 @@ export function expoCrypto<A>(Crypto: ExpoCryptoLike<A>): HandoffCrypto {
  * (build/SecureStore.d.ts); `typetest/expo-shapes.ts` pins it.
  */
 export interface SecureStoreLike {
-  getItemAsync(key: string): Promise<string | null>;
-  setItemAsync(key: string, value: string): Promise<void>;
-  deleteItemAsync(key: string): Promise<void>;
+  getItemAsync(key: string, options?: SecureStoreOptionsLike): Promise<string | null>;
+  setItemAsync(key: string, value: string, options?: SecureStoreOptionsLike): Promise<void>;
+  deleteItemAsync(key: string, options?: SecureStoreOptionsLike): Promise<void>;
+}
+
+/**
+ * The options of expo-secure-store 57.0.4 (`SecureStoreOptions`). For example
+ * `keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK` lets a background task
+ * read the token while the phone is locked.
+ */
+export interface SecureStoreOptionsLike {
+  keychainService?: string;
+  requireAuthentication?: boolean;
+  authenticationPrompt?: string;
+  keychainAccessible?: number;
+  accessGroup?: string;
 }
 
 /** expo-secure-store: "Keys may contain alphanumeric characters, `.`, `-`, and `_`." */
@@ -79,26 +92,38 @@ const SECURE_STORE_KEY = /^[A-Za-z0-9._-]+$/;
 
 /**
  * The bearer token in the iOS Keychain or the Android Keystore, through
- * expo-secure-store (plan 11d). A read that throws (a keystore entry that the
- * system dropped) answers null and deletes the entry: the person signs in again.
+ * expo-secure-store (plan 11d). A read that throws answers null for that read
+ * and keeps the entry: a locked keychain or a cancelled biometric prompt fails
+ * a read for a short time only. An entry that is present but empty is not a
+ * token: the read deletes it and answers null.
  */
 export function expoTokenStore(
   SecureStore: SecureStoreLike,
-  options: { key?: string | undefined } = {},
+  options: {
+    key?: string | undefined;
+    /** Passed to each call, for example `keychainAccessible` or `keychainService`. */
+    secureStoreOptions?: SecureStoreOptionsLike | undefined;
+  } = {},
 ): TokenStore {
   const key = options.key ?? "authtempo.session";
   if (!SECURE_STORE_KEY.test(key))
     throw new Error("authtempo handoff: the key may hold letters, digits, '.', '-', and '_' only");
+  const o = options.secureStoreOptions;
   return {
     async get() {
+      let value: string | null;
       try {
-        return await SecureStore.getItemAsync(key);
+        value = await SecureStore.getItemAsync(key, o);
       } catch {
-        await SecureStore.deleteItemAsync(key).catch(() => {});
         return null;
       }
+      if (value === "") {
+        await SecureStore.deleteItemAsync(key, o).catch(() => {});
+        return null;
+      }
+      return value;
     },
-    set: (token) => SecureStore.setItemAsync(key, token),
-    clear: () => SecureStore.deleteItemAsync(key),
+    set: (token) => SecureStore.setItemAsync(key, token, o),
+    clear: () => SecureStore.deleteItemAsync(key, o),
   };
 }

@@ -99,9 +99,11 @@ export interface ClientOptions extends TransportOptions {
   /**
    * Runs when `session()` answers null to a read that sent a token: the token
    * is dead, and the app clears it from its store (plan 11d). After the clear,
-   * a read sends no token and runs no handler.
+   * a read sends no token and runs no handler. `sent` is the token that the
+   * read sent: clear the store only when it still holds that token, because a
+   * newer sign-in may have written another one since.
    */
-  onSessionEnd?: (() => void | Promise<void>) | undefined;
+  onSessionEnd?: ((sent: string) => void | Promise<void>) | undefined;
   /** Sends the browser to a URL: the social start. Default `location.assign`. Tests and a router inject one. */
   navigate?: ((url: string) => void) | undefined;
 }
@@ -462,16 +464,19 @@ export function createClient(options: ClientOptions): Client {
     body?: unknown,
     query?: Query,
     headers?: Readonly<Record<string, string>>,
+    token?: string | null,
   ) => {
     const c = callOf(operation);
-    return call<T>(c.method, c.path, body, query, headers);
+    return call<T>(c.method, c.path, body, query, headers, token);
   };
   async function session(): Promise<ClientResult<PublicSession | null>> {
     // The token this read sends. `options.token` is a function and is always set, so the end
     // handler keys on its answer: after the app clears the token, a 401 runs no handler, and a
     // sign-out or a refetch inside the handler ends (plan 11d Task 5 review, J2).
+    // One read of the token for the header and for the handler: two reads could answer two
+    // different tokens (plan 11d Task 12 review, J1).
     const sent = options.token ? await options.token() : null;
-    const r = await send<PublicSession>("session");
+    const r = await send<PublicSession>("session", undefined, undefined, undefined, sent);
     if (!r.ok && r.code === "unauthorized") {
       // A bearer client's token is dead: the app clears it (the client README rule, plan 11d).
       // A store that fails to clear must not turn an answer into a throw.
@@ -479,7 +484,7 @@ export function createClient(options: ClientOptions): Client {
       // An empty token sends no header (the transport), so it counts as cleared (plan 11d Task 5 re-review, N1).
       if (sent && end)
         await Promise.resolve()
-          .then(end)
+          .then(() => end(sent))
           .catch(() => {});
       return ok(null);
     }
@@ -723,6 +728,9 @@ export function createClient(options: ClientOptions): Client {
     },
     passkey: {
       async register(input = {}) {
+        // A browser refuses a create while a get waits, so end a waiting autofill first (plan 11d Task 6 re-review, N3).
+        pending?.abort();
+        pending = null;
         const options = await send<PublicKeyCredentialCreationOptionsJSON>(
           "passkey.register.options",
           {},

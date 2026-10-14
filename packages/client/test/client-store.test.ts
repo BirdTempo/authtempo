@@ -312,3 +312,32 @@ describe("client.store fix round (plan 11d Task 5 review)", () => {
     }
   });
 });
+
+describe("client.session token read (plan 11d Task 12 review)", () => {
+  it("reads the token once per session read, and gives that token to onSessionEnd (J1)", async () => {
+    const server = makeServer();
+    const token = await bearerToken(server);
+    let reads = 0;
+    const ended: string[] = [];
+    const client = createClient({
+      baseURL: BASE_URL,
+      credentials: "omit",
+      fetch: inProcessFetch(server.auth).fetch,
+      token: () => {
+        reads++;
+        return token;
+      },
+      onSessionEnd: (sent) => {
+        ended.push(sent);
+      },
+    });
+    const live = await client.session();
+    expect(live.ok && live.value?.user.email).toBe("ada@example.com");
+    expect(reads).toBe(1);
+    await client.signOut();
+    reads = 0;
+    expect(await client.session()).toEqual({ ok: true, value: null });
+    expect(reads).toBe(1);
+    expect(ended).toEqual([token]);
+  });
+});

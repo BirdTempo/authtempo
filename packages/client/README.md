@@ -275,6 +275,10 @@ Call `supportsPasskeys()` before you show a passkey button. It returns
 A dismissed prompt gives the code `cancelled`. Treat it as a normal
 event. Do not show an error.
 
+For passkey autofill, start the autofill when the page loads, before a
+passkey button can run. A new passkey ceremony ends a waiting one, also
+a register.
+
 `unexpected` with status 0 on `register` can mean that the device
 already holds a passkey for this account. The browser rejects with
 `InvalidStateError` in that case, and the client cannot tell it from
