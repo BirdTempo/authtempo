@@ -7,6 +7,7 @@ import type {
   OAuthConsentRow,
   OAuthTokenRow,
   PasskeyRow,
+  SecondFactorRow,
   TotpRow,
   TrustedDeviceRow,
   UserRow,
@@ -921,6 +922,44 @@ export function runAdapterConformance(
         await db.findOne("oauthToken", [{ field: "tokenHash", op: "eq", value: "h1" }]),
       ).toEqual({ ...token, usedAt: at });
       expect(await db.delete("oauthToken", [{ field: "familyId", op: "eq", value: "f1" }])).toBe(2);
+    });
+
+    it("round-trips the version 8 secondFactor model and keeps its unique key (plan 12c)", async () => {
+      const at = new Date("2026-10-14T00:00:00.000Z");
+      await db.create("user", user("u1", "a@example.com", at));
+      const factor: SecondFactorRow = {
+        id: "s1",
+        userId: "u1",
+        enabledAt: at,
+        methods: ["totp"],
+        backupCodes: ["h1", "h2"],
+        backupCodesVersion: 1,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("secondFactor", factor);
+      await expect(db.create("secondFactor", { ...factor, id: "s2" })).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["userId"],
+      });
+      // The method and backup code writes are a compare-and-set on updatedAt: one winner.
+      const later = new Date(at.getTime() + 1);
+      const guard = [
+        { field: "id" as const, op: "eq" as const, value: "s1" },
+        { field: "updatedAt" as const, op: "eq" as const, value: at },
+      ];
+      const change = {
+        methods: ["totp", "passkey"] as SecondFactorRow["methods"],
+        backupCodes: ["h2"],
+        backupCodesVersion: 2,
+        updatedAt: later,
+      };
+      expect(await db.update("secondFactor", guard, change)).toBe(1);
+      expect(await db.update("secondFactor", guard, change)).toBe(0);
+      expect(
+        await db.findOne("secondFactor", [{ field: "userId", op: "eq", value: "u1" }]),
+      ).toEqual({ ...factor, ...change });
+      expect(await db.delete("secondFactor", [{ field: "userId", op: "eq", value: "u1" }])).toBe(1);
     });
   });
 }

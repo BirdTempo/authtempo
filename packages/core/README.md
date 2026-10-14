@@ -975,6 +975,7 @@ Without a trigger, expired rows stay in the database.
 - Core at version 5 needs the `0005_schema_v5` migration in both adapters. Version 5 adds the API token table, `ta_api_token`.
 - Core at version 6 needs the `0006_schema_v6` migration in both adapters. Version 6 adds `ta_totp` and `ta_trusted_device` (plan 9f).
 - Core at version 7 needs the `0007_schema_v7` migration in both adapters. Version 7 adds `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, and `ta_oauth_token` (plan 9g).
+- Core at version 8 needs the `0008_schema_v8` migration in both adapters. Version 8 adds `ta_second_factor` and copies each enabled `ta_totp` row into it with the same id, so every stored backup code stays valid (plan 12c).
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

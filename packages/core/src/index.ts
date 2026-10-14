@@ -143,6 +143,8 @@ export {
   type PasskeyRow,
   type PasswordRow,
   SCHEMA_VERSION,
+  type SecondFactorMethod,
+  type SecondFactorRow,
   type SessionRow,
   schema,
   type TotpRow,

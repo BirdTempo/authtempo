@@ -37,6 +37,7 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
         "ta_oauth_client",
         "ta_oauth_consent",
         "ta_oauth_token",
+        "ta_second_factor",
       ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     );
   };
@@ -103,6 +104,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
         "oauthClient",
         "oauthConsent",
         "oauthToken",
+        "secondFactor",
       ] as const) {
         const info = await env.DB.prepare(`PRAGMA table_info(${TABLES[model]})`).all<{
           name: string;
@@ -125,6 +127,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
         "oauthClient",
         "oauthConsent",
         "oauthToken",
+        "secondFactor",
       ] as const) {
         const list = await env.DB.prepare(`PRAGMA index_list(${TABLES[model]})`).all<{
           name: string;

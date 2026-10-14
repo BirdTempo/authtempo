@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export interface BaseRow {
   id: string;
@@ -154,6 +154,31 @@ export interface TrustedDeviceRow extends BaseRow {
   lastSeenAt: Date;
 }
 
+/** A second-factor method (plan 12c). The TOTP method keeps its secret in `totp`. */
+export type SecondFactorMethod = "totp" | "passkey" | "email";
+
+/**
+ * The second factor of one user, apart from its methods (plan 12c). The row
+ * exists only while at least one method is on: "the factor is on" is "the
+ * row exists", and every gate reads this row.
+ */
+export interface SecondFactorRow extends BaseRow {
+  userId: string;
+  /** When the first method of this row went on. */
+  enabledAt: Date;
+  /** The methods that are on, in the order of their enable. Never empty. */
+  methods: SecondFactorMethod[];
+  /** HMAC-SHA256 hex under the app secret of `<id>:<code>`, one per unused backup code. */
+  backupCodes: string[];
+  /**
+   * 1: a list of plan 9f (8 to 12 characters, about 40 to 60 bits), copied
+   * by migration 0008. 2: codes of 23 to 32 characters, 112 bits or more
+   * (ASVS 5.0 6.5.2). Core cannot rehash a code it never sees, so a list of
+   * version 1 stays valid until it is spent or replaced.
+   */
+  backupCodesVersion: number;
+}
+
 /** A signing key of this instance (plan 9g). The id is the `kid`. */
 export interface JwkRow extends BaseRow {
   /** The public JWK: kty, crv, x, (y), kid, alg, use. The algorithm is read from here. */
@@ -221,6 +246,7 @@ export interface Models {
   oauthClient: OAuthClientRow;
   oauthConsent: OAuthConsentRow;
   oauthToken: OAuthTokenRow;
+  secondFactor: SecondFactorRow;
 }
 
 export type ModelName = keyof Models;
@@ -455,5 +481,19 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     unique: [["tokenHash"]],
     // clientId: the sweep looks up the refresh tokens of one client.
     indexes: [["userId"], ["familyId"], ["clientId"]],
+  },
+  // plan 12c: one second factor per user, apart from its methods. The TOTP
+  // secret stays in `totp`; the method list and the backup codes are here.
+  secondFactor: {
+    fields: {
+      ...base,
+      userId: { type: "string" },
+      enabledAt: { type: "date" },
+      methods: { type: "json" },
+      backupCodes: { type: "json" },
+      backupCodesVersion: { type: "integer" },
+    },
+    unique: [["userId"]],
+    indexes: [],
   },
 };

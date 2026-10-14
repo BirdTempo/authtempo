@@ -206,6 +206,57 @@ UPDATE ta_meta SET value = '4' WHERE key = 'compat_better_auth';
 `,
 };
 
+export const MIGRATION_0005_NAME = "0005_compat_schema_v8";
+
+/**
+ * Migration 0005 (plan 12c): core's schema version 8. Core 8 adds the
+ * `secondFactor` model: the factor apart from its methods. This package
+ * keeps the factor in core's own tables (plan 9f), so this migration creates
+ * core's `ta_second_factor` beside them, with core 0008's names, columns, and
+ * index, and copies each enabled `ta_totp` row into it with the same id: a
+ * backup code hash is keyed by the row id, so every stored code stays valid.
+ * The text is the same for every naming and for both D1 variants: it names
+ * `ta_` tables only. Append-only.
+ */
+export const COMPAT_MIGRATION_0005_SQL: Readonly<Record<"postgres" | "sqlite", string>> = {
+  postgres: `CREATE TABLE ta_second_factor (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  user_id text NOT NULL,
+  enabled_at timestamptz NOT NULL,
+  methods jsonb NOT NULL,
+  backup_codes jsonb NOT NULL,
+  backup_codes_version integer NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_second_factor__user_id ON ta_second_factor (user_id);
+INSERT INTO ta_second_factor (id, created_at, updated_at, user_id, enabled_at, methods, backup_codes, backup_codes_version)
+SELECT id, created_at, updated_at, user_id, enabled_at, '["totp"]'::jsonb, backup_codes, 1
+FROM ta_totp
+WHERE enabled_at IS NOT NULL;
+UPDATE ta_meta SET value = '8' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '5' WHERE key = 'compat_better_auth';
+`,
+  sqlite: `CREATE TABLE ta_second_factor (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  enabled_at INTEGER NOT NULL,
+  methods TEXT NOT NULL,
+  backup_codes TEXT NOT NULL,
+  backup_codes_version INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_second_factor__user_id ON ta_second_factor (user_id);
+INSERT INTO ta_second_factor (id, created_at, updated_at, user_id, enabled_at, methods, backup_codes, backup_codes_version)
+SELECT id, created_at, updated_at, user_id, enabled_at, '["totp"]', backup_codes, 1
+FROM ta_totp
+WHERE enabled_at IS NOT NULL;
+UPDATE ta_meta SET value = '8' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '5' WHERE key = 'compat_better_auth';
+`,
+};
+
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
 
@@ -455,6 +506,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0002_NAME,
   MIGRATION_0003_NAME,
   MIGRATION_0004_NAME,
+  MIGRATION_0005_NAME,
 ];
 
 /**
@@ -468,6 +520,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   () => COMPAT_MIGRATION_0002_SQL,
   () => COMPAT_MIGRATION_0003_SQL.postgres,
   () => COMPAT_MIGRATION_0004_SQL.postgres,
+  () => COMPAT_MIGRATION_0005_SQL.postgres,
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

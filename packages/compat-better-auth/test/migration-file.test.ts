@@ -5,14 +5,17 @@ import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
 import shipped0004 from "../migrations/d1/0004_compat_schema_v7.sql?raw";
+import shipped0005 from "../migrations/d1/0005_compat_schema_v8.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
 import shipped0004Before17 from "../migrations/d1-before-1.7/0004_compat_schema_v7.sql?raw";
+import shipped0005Before17 from "../migrations/d1-before-1.7/0005_compat_schema_v8.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
   COMPAT_MIGRATION_0004_SQL,
+  COMPAT_MIGRATION_0005_SQL,
   compatMigrationSql,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
@@ -251,6 +254,47 @@ describe("migration 0004 (plan 9g)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "4" },
       { key: "schema_version", value: "7" },
+    ]);
+  });
+});
+
+describe("migration 0005 (plan 12c)", () => {
+  it("ships both D1 files as the one constant's SQLite text", () => {
+    expect(normalize(shipped0005)).toBe(normalize(COMPAT_MIGRATION_0005_SQL.sqlite));
+    expect(normalize(shipped0005Before17)).toBe(normalize(COMPAT_MIGRATION_0005_SQL.sqlite));
+  });
+
+  it("creates core's table with core's columns, copies the enabled totp rows, and moves the versions to 8 and 5", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    db.exec(shipped);
+    db.exec(shipped0002);
+    db.exec(shipped0003);
+    db.exec(shipped0004);
+    db.exec(
+      `INSERT INTO ta_totp (id, created_at, updated_at, user_id, secret, enabled_at, last_step, backup_codes)
+       VALUES ('f1', 1, 2, 'u1', 'sealed', 3, 5, '["h1"]'), ('f2', 1, 2, 'u2', 'sealed', NULL, 0, '["h2"]')`,
+    );
+    db.exec(shipped0005);
+    expect(taTables(db)).toContain("ta_second_factor");
+    const cols = (
+      db.prepare(`PRAGMA table_info(${TABLES.secondFactor})`).all() as { name: string }[]
+    ).map((c) => c.name);
+    expect(cols).toEqual(columnsOf("secondFactor"));
+    expect(db.prepare("SELECT * FROM ta_second_factor").all()).toEqual([
+      {
+        id: "f1",
+        created_at: 1,
+        updated_at: 2,
+        user_id: "u1",
+        enabled_at: 3,
+        methods: '["totp"]',
+        backup_codes: '["h1"]',
+        backup_codes_version: 1,
+      },
+    ]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "5" },
+      { key: "schema_version", value: "8" },
     ]);
   });
 });

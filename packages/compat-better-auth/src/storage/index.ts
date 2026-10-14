@@ -22,7 +22,7 @@ export type PostgresSchemaStorage = CompatDatabase & {
   readonly names: Names;
   /** The text of migration 0001 for these names. */
   migrationSql(): string;
-  /** Runs migrations 0001 to 0004 when the database does not hold them. Safe on every deploy. */
+  /** Runs migrations 0001 to 0005 when the database does not hold them. Safe on every deploy. */
   migrate(): Promise<string[]>;
 };
 

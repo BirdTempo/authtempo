@@ -195,6 +195,17 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         createdAt: t0,
         updatedAt: t0,
       }),
+    secondFactor: (db) =>
+      db.create("secondFactor", {
+        id: "c1",
+        userId: "u1",
+        enabledAt: t0,
+        methods: ["totp"],
+        backupCodes: [],
+        backupCodesVersion: 2,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
   };
 
   it("covers every child model of the schema", () => {

@@ -26,11 +26,11 @@ describe("the common rules (spec 19)", () => {
   it("prints the version of the CLI and the schema version of its core", () => {
     const r = runBin(["--version"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe("authtempo 0.0.0 (schema version 7)\n");
+    expect(r.stdout).toBe("authtempo 0.0.0 (schema version 8)\n");
     const j = runBin(["--version", "--json"]);
     const doc = JSON.parse(j.stdout) as Record<string, unknown>;
     expect(Object.keys(doc).sort()).toEqual(Object.keys(VERSION_JSON_KEYS).sort());
-    expect(doc).toEqual({ cli: "0.0.0", schemaVersion: 7 });
+    expect(doc).toEqual({ cli: "0.0.0", schemaVersion: 8 });
   });
 
   it("prints the short help on stderr and exits 2 with no command", () => {

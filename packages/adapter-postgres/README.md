@@ -58,6 +58,8 @@ Version 6 (plan 9f, 2026-10-13) adds `ta_totp`, one row per user with a second f
 
 Version 7 (plan 9g, 2026-10-13) adds `ta_jwk` (the signing keys, unique on `slot`), `ta_oauth_client`, `ta_oauth_consent` (unique on the client and the user), and `ta_oauth_token` (the refresh token hashes, unique on the hash, with indexes on the user, the family, and the client). Apply `0007_schema_v7` before you deploy a core at version 7; the adapter refuses a database at version 6.
 
+Version 8 (plan 12c, 2026-10-14) adds `ta_second_factor`, one row per user with the second factor on (unique on the user), with the method list and the backup codes. It copies each enabled `ta_totp` row into it with the same id, so every stored backup code stays valid; `ta_totp.backup_codes` is unread from version 8 on. Apply `0008_schema_v8` before you deploy a core at version 8; the adapter refuses a database at version 7.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

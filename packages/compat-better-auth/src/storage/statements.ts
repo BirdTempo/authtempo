@@ -150,6 +150,9 @@ export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   "oauthClient",
   "oauthConsent",
   "oauthToken",
+  // Plan 12c: migration 0005 creates it and copies the enabled ta_totp rows.
+  // The Better Auth twoFactor table stays unread, as for totp.
+  "secondFactor",
 ]);
 
 function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {

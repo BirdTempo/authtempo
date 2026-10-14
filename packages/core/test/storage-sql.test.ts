@@ -99,6 +99,13 @@ describe("names", () => {
     expect(schema.oauthToken.indexes).toEqual([["userId"], ["familyId"], ["clientId"]]);
     expect(fieldsFromUniqueIndex("jwk", "ux_ta_jwk__slot")).toEqual(["slot"]);
   });
+  it("names the version 8 table in snake case (plan 12c)", () => {
+    expect(TABLES.secondFactor).toBe("ta_second_factor");
+    expect(uniqueIndexName("secondFactor", ["userId"])).toBe("ux_ta_second_factor__user_id");
+    expect(fieldsFromUniqueIndex("secondFactor", "ux_ta_second_factor__user_id")).toEqual([
+      "userId",
+    ]);
+  });
   it("rejects unknown models and fields", () => {
     expect(() => assertModel("nope")).toThrow(/unknown_model/);
     expect(() => assertModel("toString")).toThrow(/unknown_model/);
@@ -506,7 +513,8 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = ?)" +
-    " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = ?)";
+    " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)";
 
   it("lists every model with a userId field as a child, from the schema", () => {
     expect(USER_CHILD_MODELS).toEqual([
@@ -520,6 +528,7 @@ describe("the D1 undo of a user create (plan 8b)", () => {
       "trustedDevice",
       "oauthConsent",
       "oauthToken",
+      "secondFactor",
     ]);
   });
 
@@ -527,18 +536,18 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     const st = coreStatements(SQLITE);
     expect(st.undoCreate("user", user(true))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ?${children}`,
-      params: ["u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1"],
+      params: ["u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1"],
     });
     expect(st.undoCreate("user", user(false))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ? AND email_verified = ?${children}`,
-      params: ["u1", 0, "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1"],
+      params: ["u1", 0, "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1", "u1"],
     });
   });
 
   it("numbers the Postgres placeholders after the where", () => {
     const s = coreStatements(POSTGRES).undoCreate("user", user(true));
-    expect(s.sql.endsWith("FROM ta_oauth_token WHERE user_id = $11)")).toBe(true);
-    expect(s.params).toHaveLength(11);
+    expect(s.sql.endsWith("FROM ta_second_factor WHERE user_id = $12)")).toBe(true);
+    expect(s.params).toHaveLength(12);
   });
 
   it("keeps the undo of any other model a delete by id", () => {
