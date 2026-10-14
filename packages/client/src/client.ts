@@ -114,7 +114,7 @@ export interface Client {
    * Every operation answers `not_found` when the server runs without the `password` config.
    * `signUp`, `signIn`, and `reset` answer the bearer token. A browser app keeps the cookie, and a native app stores the token.
    * By default the server answers `{ sent: true }` and opens the session at the verify link (plan 12b).
-   * With the server's `password.uniformSignUp: false` and `password.requireVerified` on, `signUp` answers `{ user, verifyRequired: true }` and no token.
+   * With the server's `password.uniformSignUp: false` and `password.requireVerified` on, or `signUp: "invited"`, `signUp` answers `{ user, verifyRequired: true }` and no token.
    */
   password: {
     signUp(input: { email: string; password: string; name?: string | undefined }): Promise<

@@ -90,8 +90,9 @@ export interface PasswordSession {
 }
 
 /**
- * The sign-up answer while `password.requireVerified` is on (plan 12b): the
- * new user and no session. The verify link signs the person in.
+ * The sign-up answer while `password.requireVerified` is on, or `signUp` is
+ * `"invited"` (plan 12b): the new user and no session. The verify link
+ * signs the person in.
  */
 export interface PasswordSignUpPending {
   user: UserRow;
@@ -101,7 +102,7 @@ export interface PasswordSignUpPending {
 /**
  * `{ sent: true }` for every address while `password.uniformSignUp` is on
  * (the default, plan 12b). With it off: a session, or the user with no
- * session while `password.requireVerified` is on.
+ * session while `password.requireVerified` is on or `signUp` is `"invited"`.
  */
 export type PasswordSignUpResult = PasswordSession | PasswordSignUpPending | { sent: true };
 
@@ -179,8 +180,8 @@ interface Created {
  * confirms the address. While `password.uniformSignUp` is on (the default),
  * it opens no session and answers `{ sent: true }` for every address (plan
  * 12b, see `uniformSignUp`). With it off, it opens a session; while
- * `password.requireVerified` is on, it opens none and answers the user with
- * `verifyRequired: true`.
+ * `password.requireVerified` is on, or `signUp` is `"invited"`, it opens none
+ * and answers the user with `verifyRequired: true`.
  */
 export async function passwordSignUp(
   config: ResolvedConfig,
@@ -246,8 +247,9 @@ export async function passwordSignUp(
  * conditional update of the user row where `emailVerified` is false runs
  * after the session insert. The last statement activates the password row,
  * which the sign-up wrote pending (`PENDING_HASH_PREFIX`). While
- * `password.requireVerified` is on, no session hook runs and no session
- * row is written (plan 12b); the guard and the activation stay.
+ * `password.requireVerified` is on, or `signUp` is `"invited"`, no session
+ * hook runs and no session row is written (plan 12b); the guard and the
+ * activation stay.
  */
 function insertSignUp(
   config: ResolvedConfig,
@@ -291,7 +293,10 @@ function insertSignUp(
     // row has a guard. After an owner's reset inside this transaction, the
     // pending password row holds the owner's hash, so an undo of it would
     // delete the owner's password. A refusal here undoes nothing.
-    const opens = !config.password?.requireVerified;
+    // Under "invited" the address must be proved too (owner ruling,
+    // 2026-10-15): else a stranger who knows an invited address gets a
+    // session. The verify link opens it, as under `requireVerified`.
+    const opens = !config.password?.requireVerified && config.signUp !== "invited";
     const prepared = opens
       ? await prepareSession(
           config,

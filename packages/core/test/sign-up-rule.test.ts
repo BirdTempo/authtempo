@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import { ConfigError } from "../src/config.js";
 import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
-import { passwordSignUp, requestPasswordReset, resetPassword } from "../src/engine/password.js";
+import {
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
-import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
+import { makeAuth, post, tokenFromMail } from "./helpers.js";
+import { FAST, pwHandle } from "./password-helpers.js";
 import { fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
 
 type Rule = "open" | "invited" | false;
@@ -179,6 +184,28 @@ describe("the sign-up rule (plan 12b)", () => {
     expect(await up(NEW)).toEqual({ ok: true, value: { sent: true } });
     expect(await users(auth)).toEqual(["ada@example.com", NEW]);
     expect(auth.mail.map((m) => m.to)).toEqual([NEW]);
+  });
+
+  it("opens no session at the detailed sign-up of an invited address, and the verify link signs in", async () => {
+    const h = pwHandle({ hash: FAST }, { signUp: "invited", organizations: {} });
+    await invite(h as never, NEW, DAY);
+    const res = await h.auth.handle(
+      post("/auth/password/sign-up", { email: NEW, password: "correct horse battery" }),
+    );
+    const body = (await res.json()) as { verifyRequired?: unknown; token?: unknown };
+    expect({
+      status: res.status,
+      verifyRequired: body.verifyRequired,
+      token: body.token,
+      cookie: res.headers.get("set-cookie"),
+    }).toEqual({ status: 200, verifyRequired: true, token: undefined, cookie: null });
+    expect(await h.storage.findMany("session", [])).toHaveLength(0);
+    const v = await verifyPasswordEmail(h.config, {
+      token: h.mails.at(-1)?.token ?? "",
+      ip: null,
+      userAgent: null,
+    });
+    expect(v.ok && v.value.signedIn !== null).toBe(true);
   });
 
   it("refuses a social create under invited when the provider address is unverified", async () => {

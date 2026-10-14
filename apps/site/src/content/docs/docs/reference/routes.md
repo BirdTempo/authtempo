@@ -175,7 +175,7 @@ These routes exist when the config sets `password`.
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ email, password, name? }` |
-| Answer | 200 `{ sent: true }` with no cookie, for every address. The verify link opens the session. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on: `{ user, verifyRequired: true }` with no cookie |
+| Answer | 200 `{ sent: true }` with no cookie, for every address. The verify link opens the session. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on, or with `signUp: "invited"`: `{ user, verifyRequired: true }` with no cookie |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed) |
 
 <h3 id="post-password-sign-in"><code>POST /password/sign-in</code></h3>

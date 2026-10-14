@@ -719,7 +719,9 @@ sign-up answer folds it in.
 With `"invited"`, a new user needs a proved address. A social sign-in that
 would create a user needs a verified address from the provider: else it
 answers `sign_up_closed`. The password sign-up of an invited address opens
-no session until the person follows the verify link.
+no session until the person follows the verify link. It answers `{ sent: true }`
+by default, and `{ user, verifyRequired: true }` with
+`password.uniformSignUp: false`.
 
 ## Organizations
 
