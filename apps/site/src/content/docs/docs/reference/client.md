@@ -132,6 +132,10 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 
 The password, email code, and second factor operations answer `not_found` when the server turns the feature off.
 
+## Error texts and links
+
+`errorText(code)` answers one sentence for a code, for an app to show to a person. `errorDocsURL(code)` answers the docs page of the code: its anchor on [Error codes](/docs/reference/errors/), or the [Results](#results) section for `network`, `unexpected`, and `cancelled`. `redirect_mismatch` links to the [failure codes of the handoff](/docs/reference/handoff/#failure-codes). Pass `"oauth"` as the second argument for a code of the OAuth client, because `invalid_token` and `rate_limited` are in both tables. `ERROR_TEXT` holds every text, by table.
+
 ## Exports
 
 | Export | What it is |
@@ -150,12 +154,17 @@ The password, email code, and second factor operations answer `not_found` when t
 | `CLIENT_CALLS` | The table of every route that the client calls, with each operation, method, and path. The client takes each path from it. |
 | `createSessionStore` | Makes a session store over a read function. |
 | `SESSION_CHANNEL` | The name of the `BroadcastChannel`, `authtempo-session`. |
+| `errorText` | One sentence for a code. |
+| `errorDocsURL` | The docs link of a code. |
+| `errorAnchor` | The anchor of a code on the errors page. |
+| `ERROR_TEXT` | Every error text, by table. |
+| `DOCS_ORIGIN` | The origin of the docs, `https://authtempo.com`. |
 
 The types of the package:
 
 | Area | Types |
 | --- | --- |
-| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore` |
+| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
 | Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 

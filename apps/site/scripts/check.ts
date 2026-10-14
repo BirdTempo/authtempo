@@ -10,6 +10,7 @@ import { ROUTES } from "@authtempo/core/routes";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
+import { checkErrorLinks, errorLinks } from "./check-error-links.ts";
 import { checkErrors } from "./check-errors.ts";
 import { checkExports, readExports } from "./check-exports.ts";
 import { checkFences } from "./check-fences.ts";
@@ -43,6 +44,10 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   {
     name: "check-errors",
     run: () => checkErrors(distPageOrEmpty("/docs/reference/errors/"), ERRORS, OAUTH_ERRORS),
+  },
+  {
+    name: "check-error-links",
+    run: () => checkErrorLinks(errorLinks(), distPageOrEmpty),
   },
   {
     name: "check-routes",

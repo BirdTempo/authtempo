@@ -1,4 +1,4 @@
-import type { ErrorCode } from "@authtempo/core/errors";
+import type { ErrorCode, OAuthErrorCode } from "@authtempo/core/errors";
 
 /**
  * The core error table, plus the three codes only a client can see:
@@ -33,3 +33,26 @@ export function failWith<T = never>(
 ): ClientResult<T> {
   return { ok: false, code, status, message };
 }
+
+/**
+ * The OAuth provider table (`OAUTH_ERRORS`), plus the codes that only an SDK
+ * sees, and `redirect_mismatch`: the redirect's `state` or `iss` matches no
+ * sign-in that this client started (plan 11d). Apart from `ClientCode`,
+ * because `invalid_token` and `rate_limited` are in both tables with other
+ * statuses.
+ */
+export type OAuthClientCode =
+  | OAuthErrorCode
+  | "network"
+  | "unexpected"
+  | "cancelled"
+  | "redirect_mismatch";
+
+export interface OAuthFailure {
+  ok: false;
+  code: OAuthClientCode;
+  /** The HTTP status, or 0 when no answer arrived or the code came through a redirect. */
+  status: number;
+}
+
+export type OAuthResult<T> = { ok: true; value: T } | OAuthFailure;

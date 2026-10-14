@@ -18,8 +18,24 @@ export {
   type TwoFactorChallengeJSON,
   type TwoFactorSessionJSON,
 } from "./client.js";
+export {
+  DOCS_ORIGIN,
+  ERROR_TEXT,
+  type ErrorTable,
+  errorAnchor,
+  errorDocsURL,
+  errorText,
+  type SdkCode,
+} from "./error-text.js";
 export { readRedirectError } from "./redirect-error.js";
-export type { ClientCode, ClientFailure, ClientResult } from "./result.js";
+export type {
+  ClientCode,
+  ClientFailure,
+  ClientResult,
+  OAuthClientCode,
+  OAuthFailure,
+  OAuthResult,
+} from "./result.js";
 export {
   createSessionStore,
   SESSION_CHANNEL,

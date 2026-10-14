@@ -116,6 +116,24 @@ client can see:
 | `unexpected` | The answer is not JSON, or its error code is not in the core table. |
 | `cancelled` | The person dismissed the passkey prompt, or no authenticator matched. |
 
+## Error texts
+
+`errorText(code)` answers one sentence for a code, for an app to show to
+a person. `errorDocsURL(code)` answers the docs page of the code: its
+anchor on the error codes page, or the results section of the client
+page for `network`, `unexpected`, and `cancelled`. `redirect_mismatch`
+links to the failure codes of the handoff page. Pass `"oauth"` as the
+second argument for a code of the OAuth client, because `invalid_token`
+and `rate_limited` are in both tables. `ERROR_TEXT` holds every text, by
+table.
+
+```ts
+import { errorDocsURL, errorText } from "@authtempo/client";
+
+const r = await client.signOut();
+if (!r.ok) show(errorText(r.code), errorDocsURL(r.code));
+```
+
 ## Passwords
 
 Every password operation answers `not_found` when the server runs
