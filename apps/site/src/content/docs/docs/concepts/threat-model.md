@@ -43,7 +43,7 @@ sources:
 - **Keyed and sealed secrets.** An email code and a backup code are HMAC-SHA256 under the app `secret`. The second factor secret and the private signing keys are sealed with AES-256-GCM under a key from `secret`. A copy of the tables without `secret` opens none of them.
 - **Constant time.** Every compare of a secret is constant time. An unknown address runs the same hash work as a wrong password.
 - **No account probe.** A magic link request, an email code request, and a reset request answer the same for every address.
-- **Limits.** Every flow that starts a mail or accepts a guess has a limit per IP, and most have a limit per address. The magic-link verify and the token resolve have no limit. [Limits](/docs/reference/limits/) lists each key.
+- **Limits.** Every flow that starts a mail or accepts a guess has a limit per IP, and most have a limit per address. The verify routes of a link, the social callbacks, and the token resolve have no limit, because each checks a token of 32 random bytes. [Limits](/docs/reference/limits/) lists each key.
 - **Bounded guesses.** An email code admits 5 guesses, and an address gets at most 20 codes a day. A second-factor challenge admits 5 guesses, and an account at most 30 a day.
 - **Single use.** A magic link, a code, a challenge, and an OAuth code are spent in one conditional update. Two uses race for one row, and one wins.
 - **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how.
@@ -52,7 +52,7 @@ sources:
 
 ## The odds
 
-The odds below assume an owned limiter on D1 or Postgres. The memory limiter multiplies the per-IP and per-address budgets by the number of isolates. The caps per code and per challenge live in the row, and stay global.
+The odds below assume an owned limiter on D1 or Postgres. The memory limiter multiplies the per-IP, per-address, and per-user budgets by the number of isolates. The caps per code and per challenge live in the row, and stay global.
 
 | Guess | One code or one challenge | One account in a day | One account in a year |
 | --- | --- | --- | --- |
