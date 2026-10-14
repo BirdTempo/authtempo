@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
-import { LIVE_PER_SESSION } from "../src/engine/jwt.js";
+import { LIVE_PER_SESSION, signToken } from "../src/engine/jwt.js";
 import { createSession, destroySession } from "../src/engine/sessions.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
-import { DEFAULT_COOKIE_NAME, LEGACY_COOKIE_NAME } from "../src/primitives/credentials.js";
+import {
+  ACCESS_TOKEN_TYPE,
+  DEFAULT_COOKIE_NAME,
+  LEGACY_COOKIE_NAME,
+} from "../src/primitives/credentials.js";
+import { decodeJws } from "../src/primitives/jwk.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth } from "./helpers.js";
 
 /** One storage, clock, and limiter for the engine view and the routes. */
@@ -72,10 +77,14 @@ describe("POST /token/live (plan 11d)", () => {
     expect(await (await h.auth.handle(live(s.jwt))).json()).toEqual({ live: false });
   });
 
-  it("answers 401 for no bearer, a session token, a cookie alone, a changed JWT, and an expired JWT", async () => {
+  it("answers 401 for no bearer, a session token, a cookie alone, a changed JWT, an access token, and an expired JWT", async () => {
     const h = liveHandle();
     const s = await withJwt(h);
     const changed = `${s.jwt.slice(0, -2)}${s.jwt.endsWith("AA") ? "BB" : "AA"}`;
+    // An access token: the same claims under the same key, with the header typ at+jwt.
+    const claims = decodeJws(s.jwt)?.payload;
+    if (!claims) throw new Error("the session JWT does not decode");
+    const access = await signToken(h.config, ACCESS_TOKEN_TYPE, claims);
     for (const req of [
       live(null),
       live(s.sessionToken),
@@ -83,6 +92,7 @@ describe("POST /token/live (plan 11d)", () => {
       live(null, { cookie: `${LEGACY_COOKIE_NAME}=${s.sessionToken}` }),
       live("not-a-token"),
       live(changed),
+      live(access),
     ]) {
       const res = await h.auth.handle(req);
       expect(res.status).toBe(401);
