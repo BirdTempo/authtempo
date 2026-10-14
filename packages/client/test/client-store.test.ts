@@ -181,25 +181,27 @@ describe("client.store fix round (plan 11d Task 5 review)", () => {
     stop2();
   });
 
-  it("runs onSessionEnd once per end, as the app clears the token (J2)", async () => {
-    const server = makeServer();
-    let token: string | null = await bearerToken(server);
-    const issued = token;
-    let ended = 0;
-    const client = createClient({
-      baseURL: BASE_URL,
-      credentials: "omit",
-      fetch: inProcessFetch(server.auth).fetch,
-      token: () => token,
-      onSessionEnd: () => {
-        ended++;
-        token = null;
-      },
-    });
-    await client.signOut();
-    token = issued;
-    for (let i = 0; i < 3; i++) expect(await client.session()).toEqual({ ok: true, value: null });
-    expect(ended).toBe(1);
+  it("runs onSessionEnd once per end, as the app clears the token to null or to an empty string (J2, N1)", async () => {
+    for (const cleared of [null, ""]) {
+      const server = makeServer();
+      let token: string | null = await bearerToken(server);
+      const issued = token;
+      let ended = 0;
+      const client = createClient({
+        baseURL: BASE_URL,
+        credentials: "omit",
+        fetch: inProcessFetch(server.auth).fetch,
+        token: () => token,
+        onSessionEnd: () => {
+          ended++;
+          token = cleared;
+        },
+      });
+      await client.signOut();
+      token = issued;
+      for (let i = 0; i < 3; i++) expect(await client.session()).toEqual({ ok: true, value: null });
+      expect(ended).toBe(1);
+    }
   });
 
   it("ends the reads when onSessionEnd signs out or refetches the store (J2)", async () => {

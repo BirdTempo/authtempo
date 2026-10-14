@@ -1,4 +1,4 @@
-import { createPbkdf2PasswordHash } from "@authtempo/core";
+import { CAPTCHA_HEADER, createPbkdf2PasswordHash } from "@authtempo/core";
 import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client.js";
@@ -85,5 +85,50 @@ describe("client.signIn.password (plan 11d)", () => {
       code: "invalid_credentials",
       status: 401,
     });
+  });
+});
+
+describe("client.signIn.password fix round (plan 11d Task 6 review)", () => {
+  it("sends captchaToken in the captcha header (M1)", async () => {
+    const headers: (string | null)[] = [];
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      headers.push(new Headers(init?.headers).get(CAPTCHA_HEADER));
+      return Response.json({ error: "invalid_credentials" }, { status: 401 });
+    };
+    const client = createClient({ baseURL: BASE_URL, fetch });
+    await client.signIn.password({ email: EMAIL, password: PW, captchaToken: "tok" });
+    expect(headers).toEqual(["tok"]);
+  });
+
+  it("shows the methods of the challenge (M2)", async () => {
+    const server = makeServer({ password: { hash: FAST } });
+    const owner = await verifiedUser(server);
+    const setup = await owner.totp.setup({ password: PW });
+    if (!setup.ok) throw new Error(setup.code);
+    const enabled = await owner.totp.enable({
+      code: await totpCode(base32Decode(setup.value.secret), server.clock.now()),
+    });
+    if (!enabled.ok) throw new Error(enabled.code);
+    const browser = createClient({ baseURL: BASE_URL, fetch: inProcessFetch(server.auth).fetch });
+    const r = await browser.signIn.password({ email: EMAIL, password: PW });
+    if (!r.ok || r.value.kind !== "second-factor") throw new Error("no second factor step");
+    expect(r.value.methods).toEqual(["totp", "backup"]);
+  });
+
+  it("verifies the email method with an email code (M2)", async () => {
+    const server = makeServer({ password: { hash: FAST } });
+    const owner = await verifiedUser(server);
+    const on = await owner.secondFactor.email.enable({ password: PW });
+    if (!on.ok) throw new Error(on.code);
+    const browser = createClient({ baseURL: BASE_URL, fetch: inProcessFetch(server.auth).fetch });
+    const r = await browser.signIn.password({ email: EMAIL, password: PW });
+    if (!r.ok || r.value.kind !== "second-factor") throw new Error("no second factor step");
+    expect(r.value.methods).toContain("email");
+    const sent = await browser.secondFactor.email.send({ challenge: r.value.challenge });
+    if (!sent.ok) throw new Error(sent.code);
+    const emailCode = /\b(\d{6})\b/.exec(server.mail.at(-1)?.text ?? "")?.[1] ?? "";
+    const done = await r.value.verify({ emailCode });
+    if (!done.ok) throw new Error(done.code);
+    expect(done.value.user.email).toBe(EMAIL);
   });
 });

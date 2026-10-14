@@ -56,3 +56,21 @@ describe("social sign-in and the redirect error (plan 11d)", () => {
     expect(readRedirectError("https://app.example.com/home")).toBeNull();
   });
 });
+
+describe("social sign-in fix round (plan 11d Task 6 review)", () => {
+  it("reads a code of core's OAuth table, which core's OAuth route sends (M3)", () => {
+    expect(readRedirectError("https://app.example.com/?auth_error=invalid_request")).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("answers unexpected when the default navigate finds no location (L2)", () => {
+    expect(typeof (globalThis as { location?: unknown }).location).toBe("undefined");
+    const client = createClient({ baseURL: BASE_URL });
+    expect(client.social.signIn({ provider: "google" })).toEqual({
+      ok: false,
+      code: "unexpected",
+      status: 0,
+    });
+  });
+});

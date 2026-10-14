@@ -124,3 +124,46 @@ describe("passkey autofill (plan 11d)", () => {
     expect(seen[0]?.mediation).toBeUndefined();
   });
 });
+
+describe("passkey autofill fix round (plan 11d Task 6 review)", () => {
+  it("answers cancelled with no ceremony when abort() comes before the options answer (J1)", async () => {
+    const { server, soft } = await withPasskey();
+    stubAutofill(true);
+    const { seam, seen } = seamOf(soft);
+    const browser = createClient({
+      baseURL: BASE_URL,
+      fetch: inProcessFetch(server.auth).fetch,
+      webauthn: seam,
+    });
+    const waiting = browser.passkey.signIn({ autofill: true });
+    browser.passkey.abort();
+    expect(await waiting).toEqual({ ok: false, code: "cancelled", status: 0 });
+    expect(seen).toHaveLength(0);
+  });
+
+  it("ends a waiting autofill when a modal sign-in starts, and the modal one signs in (J2)", async () => {
+    const { server, soft } = await withPasskey();
+    stubAutofill(true);
+    // The conditional get waits for its signal; a modal get answers at once.
+    const seam: BrowserWebAuthn = {
+      create: (options) => soft.register(options.challenge),
+      async get(options, ceremony) {
+        if (ceremony?.mediation === "conditional")
+          await new Promise<void>((_, reject) =>
+            ceremony.signal?.addEventListener("abort", () => reject(new WebAuthnCancelled())),
+          );
+        return soft.authenticate(options.challenge);
+      },
+    };
+    const browser = createClient({
+      baseURL: BASE_URL,
+      fetch: inProcessFetch(server.auth).fetch,
+      webauthn: seam,
+    });
+    const autofill = browser.passkey.signIn({ autofill: true });
+    await new Promise((r) => setTimeout(r, 10));
+    const modal = await browser.passkey.signIn();
+    expect(modal.ok && modal.value.user.email).toBe("ada@example.com");
+    expect(await autofill).toEqual({ ok: false, code: "cancelled", status: 0 });
+  });
+});

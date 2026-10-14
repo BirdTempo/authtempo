@@ -30,7 +30,7 @@ sources:
 | `token` | none | A function that answers the bearer token, or null. |
 | `fetch` | `globalThis.fetch` | The fetch of every call. |
 | `webauthn` | `browserWebAuthn()` | The passkey seam, of the type `BrowserWebAuthn`. |
-| `navigate` | `location.assign` | Sends the browser to the social start URL. A router or a test injects one. |
+| `navigate` | `location.assign` | Sends the browser to the social start URL. A router or a test injects one. With the default and no `location`, as in a server render, `social.signIn` answers `unexpected`. |
 | `broadcast` | `true` where `BroadcastChannel` exists | Tell the other tabs of the origin after a change, on the channel `authtempo-session`, and read again when one tells. |
 | `refetchOnVisible` | `true` where `document` exists | Read the session again when the page becomes visible. |
 | `onSessionEnd` | none | Runs when `session()` answers `null` to a read that sent a token. Clear the stored token there, so the next read sends none. |
@@ -73,15 +73,15 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | --- | --- | --- |
 | `client.session()` | `GET /session` | `PublicSession` or `null`. A 401 gives `null`, not a failure. |
 | `client.signOut()` | `POST /sign-out` | `{ ok: true }` |
-| `client.readRedirectError(url)` | none | The `ErrorCode` of `?auth_error=<code>`, `unexpected` for a code that core's table lacks, or `null` |
+| `client.readRedirectError(url)` | none | The code of `?auth_error=<code>`: an `ErrorCode` or an `OAuthErrorCode`, because core's OAuth sign-in route sends a code of `OAUTH_ERRORS`. `unexpected` for a code that neither table has, or `null` |
 | `client.social.startURL({ provider, next? })` | `GET /social/:provider/start` (built, not fetched) | `string`; `invalid_body` with status 0 for a name that core refuses |
-| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `{ url }` |
-| `client.signIn.password({ email, password, trustDevice?, next? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `PasswordSignIn`: `{ kind: "session", session }`, or `{ kind: "second-factor", challenge, expiresAt, verify }` |
+| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `{ url }`; `unexpected` with status 0 when the default `navigate` finds no `location` |
+| `client.signIn.password({ email, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `PasswordSignIn`: `{ kind: "session", session }`, or `{ kind: "second-factor", challenge, expiresAt, methods, verify }`. `verify` takes `{ code }`, `{ backupCode }`, or `{ emailCode }`. For the passkey method, call `secondFactor.passkey.verify` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `{ sent: true }` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `PasskeySummaryJSON` |
 | `client.passkey.signIn({ autofill? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing |
-| `client.passkey.abort()` | none | Ends a waiting autofill sign-in, which answers `cancelled` |
+| `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `PasskeySummaryJSON[]` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `{ ok: true }` |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `{ token }` and `PublicSession` |

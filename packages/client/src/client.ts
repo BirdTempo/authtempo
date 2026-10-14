@@ -9,7 +9,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   PublicSession,
 } from "@authtempo/core";
-import { ERRORS, type ErrorCode } from "@authtempo/core/errors";
+import { ERRORS, type ErrorCode, type OAuthErrorCode } from "@authtempo/core/errors";
 import { PROVIDER_NAME_RE } from "@authtempo/core/routes";
 import { type ClientOperation, callOf } from "./calls.js";
 import { readRedirectError } from "./redirect-error.js";
@@ -116,9 +116,16 @@ export type PasswordSignIn =
       kind: "second-factor";
       challenge: string;
       expiresAt: string;
-      /** Ends the step with a current code or a backup code. `trustDevice` asks core to trust this device. */
+      /** The methods that this challenge takes, in the order of preference (plan 12c). */
+      methods: ChallengeMethodJSON[];
+      /**
+       * Ends the step with a current code, a backup code, or an email code. Get an
+       * email code with `secondFactor.email.send({ challenge })`. For the passkey
+       * method, call `secondFactor.passkey.verify({ challenge })` instead.
+       * `trustDevice` asks core to trust this device.
+       */
       verify(
-        factor: { code: string } | { backupCode: string },
+        factor: { code: string } | { backupCode: string } | { emailCode: string },
         options?: { trustDevice?: boolean | undefined },
       ): Promise<ClientResult<TwoFactorSessionJSON>>;
     };
@@ -127,13 +134,17 @@ export interface Client {
   /** The caller's session, or null when the API answers 401. A null is a normal state, not a failure. */
   session(): Promise<ClientResult<PublicSession | null>>;
   signOut(): Promise<ClientResult<{ ok: true }>>;
-  /** The error code of a URL that a browser flow failure landed on (`?auth_error=<code>`), `unexpected` for an unknown code, or null. */
-  readRedirectError(url: string | URL): ErrorCode | "unexpected" | null;
+  /**
+   * The error code of a URL that a browser flow failure landed on
+   * (`?auth_error=<code>`): a code of core's `ERRORS` or `OAUTH_ERRORS`,
+   * `unexpected` for an unknown code, or null.
+   */
+  readRedirectError(url: string | URL): ErrorCode | OAuthErrorCode | "unexpected" | null;
   /** Social sign-in in a browser (plan 11d). A native app rides a social sign-in through the handoff's `next`. */
   social: {
     /** The URL of `GET <basePath>/social/:provider/start`. `invalid_body` with status 0 for a name that core refuses. */
     startURL(input: { provider: string; next?: string | undefined }): ClientResult<string>;
-    /** Sends the browser to the start URL through `navigate`. */
+    /** Sends the browser to the start URL through `navigate`. With the default `navigate` and no `location`, it answers `unexpected` with status 0. */
     signIn(input: { provider: string; next?: string | undefined }): ClientResult<{ url: string }>;
   };
   /** Sign-ins in one call (plan 11d). */
@@ -144,6 +155,8 @@ export interface Client {
       password: string;
       trustDevice?: string | undefined;
       next?: string | undefined;
+      /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
+      captchaToken?: string | undefined;
     }): Promise<ClientResult<PasswordSignIn>>;
   };
   /**
@@ -189,7 +202,7 @@ export interface Client {
      * `cancelled` with no request (plan 11d).
      */
     signIn(input?: { autofill?: boolean | undefined }): Promise<ClientResult<PublicSession>>;
-    /** Ends a waiting autofill sign-in. It answers `cancelled`. */
+    /** Ends a waiting passkey ceremony, the autofill or another. It answers `cancelled`. */
     abort(): void;
   };
   passkeys: {
@@ -463,7 +476,8 @@ export function createClient(options: ClientOptions): Client {
       // A bearer client's token is dead: the app clears it (the client README rule, plan 11d).
       // A store that fails to clear must not turn an answer into a throw.
       const end = options.onSessionEnd;
-      if (sent !== null && end)
+      // An empty token sends no header (the transport), so it counts as cleared (plan 11d Task 5 re-review, N1).
+      if (sent && end)
         await Promise.resolve()
           .then(end)
           .catch(() => {});
@@ -531,11 +545,17 @@ export function createClient(options: ClientOptions): Client {
       return fail(e instanceof WebAuthnCancelled ? "cancelled" : "unexpected", 0);
     }
   }
-  const navigate =
-    options.navigate ??
-    ((url: string) => {
-      (globalThis as { location?: { assign(u: string): void } }).location?.assign(url);
-    });
+  /** Answers false when the default finds no `location`, as in a server render: the call then fails. */
+  const navigate = (url: string): boolean => {
+    if (options.navigate) {
+      options.navigate(url);
+      return true;
+    }
+    const location = (globalThis as { location?: { assign?(u: string): void } }).location;
+    if (typeof location?.assign !== "function") return false;
+    location.assign(url);
+    return true;
+  };
   function startURL(input: { provider: string; next?: string | undefined }): ClientResult<string> {
     if (!PROVIDER_NAME_RE.test(input.provider)) return fail("invalid_body", 0);
     const { path } = callOf("social.start");
@@ -547,7 +567,34 @@ export function createClient(options: ClientOptions): Client {
       ),
     );
   }
-  let autofill: AbortController | null = null;
+  // One controller for every passkey get (plan 11d Task 6 review, J1 and J2). A browser refuses
+  // a second pending get, so a new get ends the waiting one first. The controller exists before
+  // the first await, so an abort() during the options request is not lost.
+  let pending: AbortController | null = null;
+  /** One get ceremony: ends the waiting get, loads the options, and runs the get with the shared signal. */
+  async function assertion(
+    load: () => Promise<ClientResult<PublicKeyCredentialRequestOptionsJSON>>,
+    autofill = false,
+  ): Promise<ClientResult<Awaited<ReturnType<BrowserWebAuthn["get"]>>>> {
+    pending?.abort();
+    const controller = new AbortController();
+    pending = controller;
+    try {
+      // No modal prompt on a page load: without conditional mediation the autofill answers cancelled.
+      if (autofill && !(await supportsAutofill())) return fail("cancelled", 0);
+      if (controller.signal.aborted) return fail("cancelled", 0);
+      const options = await load();
+      if (controller.signal.aborted) return fail("cancelled", 0);
+      if (!options.ok) return options;
+      const ceremonyOptions: CeremonyOptions = autofill
+        ? { mediation: "conditional", signal: controller.signal }
+        : { signal: controller.signal };
+      return await ceremony(() => webauthn.get(options.value, ceremonyOptions));
+    } finally {
+      // A spent controller is not kept (L4).
+      if (pending === controller) pending = null;
+    }
+  }
   const password: Client["password"] = {
     signUp: ({ name, captchaToken, ...rest }) =>
       changes(
@@ -630,7 +677,7 @@ export function createClient(options: ClientOptions): Client {
       signIn(input) {
         const url = startURL(input);
         if (!url.ok) return url;
-        navigate(url.value);
+        if (!navigate(url.value)) return fail("unexpected", 0);
         return ok({ url: url.value });
       },
     },
@@ -639,15 +686,20 @@ export function createClient(options: ClientOptions): Client {
         const r = await password.signIn(input);
         if (!r.ok) return r;
         if (!("twoFactor" in r.value)) return ok({ kind: "session", session: r.value });
-        const { challenge, expiresAt } = r.value.twoFactor;
+        const { challenge, expiresAt, methods } = r.value.twoFactor;
         return ok({
           kind: "second-factor",
           challenge,
           expiresAt,
+          methods,
           verify: (factor, o = {}) =>
             totp.verify({
               challenge,
-              ...("code" in factor ? { code: factor.code } : { backupCode: factor.backupCode }),
+              ...("code" in factor
+                ? { code: factor.code }
+                : "backupCode" in factor
+                  ? { backupCode: factor.backupCode }
+                  : { emailCode: factor.emailCode }),
               ...(o.trustDevice !== undefined ? { trustDevice: o.trustDevice } : {}),
             }),
         });
@@ -685,26 +737,16 @@ export function createClient(options: ClientOptions): Client {
         return r.ok ? ok(r.value.passkey) : r;
       },
       async signIn(input = {}) {
-        // No modal prompt on a page load: without conditional mediation the autofill answers cancelled.
-        if (input.autofill && !(await supportsAutofill())) return fail("cancelled", 0);
-        const options = await send<PublicKeyCredentialRequestOptionsJSON>(
-          "passkey.signIn.options",
-          {},
+        const response = await assertion(
+          () => send<PublicKeyCredentialRequestOptionsJSON>("passkey.signIn.options", {}),
+          input.autofill === true,
         );
-        if (!options.ok) return options;
-        let ceremonyOptions: CeremonyOptions = {};
-        if (input.autofill) {
-          autofill?.abort();
-          autofill = new AbortController();
-          ceremonyOptions = { mediation: "conditional", signal: autofill.signal };
-        }
-        const response = await ceremony(() => webauthn.get(options.value, ceremonyOptions));
         if (!response.ok) return response;
         return changes(send<PublicSession>("passkey.signIn.verify", { response: response.value }));
       },
       abort() {
-        autofill?.abort();
-        autofill = null;
+        pending?.abort();
+        pending = null;
       },
     },
     passkeys: {
@@ -840,12 +882,9 @@ export function createClient(options: ClientOptions): Client {
       passkey: {
         async enable({ password }) {
           // The enable's proof is a sign-in assertion by a passkey of this user (plan 12c).
-          const options = await send<PublicKeyCredentialRequestOptionsJSON>(
-            "secondFactor.passkey.enable.options",
-            {},
+          const response = await assertion(() =>
+            send<PublicKeyCredentialRequestOptionsJSON>("secondFactor.passkey.enable.options", {}),
           );
-          if (!options.ok) return options;
-          const response = await ceremony(() => webauthn.get(options.value));
           if (!response.ok) return response;
           // The ended sessions are in other browsers; this origin's tabs share the cookie. The wrap keeps parity with `totp.enable`.
           return changes(
@@ -856,12 +895,11 @@ export function createClient(options: ClientOptions): Client {
           );
         },
         async verify({ challenge, trustDevice }) {
-          const options = await send<PublicKeyCredentialRequestOptionsJSON>(
-            "secondFactor.passkey.verify.options",
-            { challenge },
+          const response = await assertion(() =>
+            send<PublicKeyCredentialRequestOptionsJSON>("secondFactor.passkey.verify.options", {
+              challenge,
+            }),
           );
-          if (!options.ok) return options;
-          const response = await ceremony(() => webauthn.get(options.value));
           if (!response.ok) return response;
           // The passkey verify of a challenge opens a session, as `totp.verify` does.
           return changes(

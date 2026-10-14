@@ -8,7 +8,11 @@ import type {
 /** How one ceremony runs (plan 11d). `mediation: "conditional"` waits for the autofill of a field. */
 export interface CeremonyOptions {
   mediation?: "conditional" | undefined;
-  /** Aborts a waiting ceremony; the seam then throws `WebAuthnCancelled`. */
+  /**
+   * Aborts a waiting ceremony; the seam then throws `WebAuthnCancelled`. Call
+   * `abort()` with no reason: a custom reason passes through as an error, and
+   * the client answers `unexpected`. The client's own `abort()` sends none.
+   */
   signal?: AbortSignal | undefined;
 }
 
