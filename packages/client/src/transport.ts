@@ -47,8 +47,6 @@ export type RawCall = <T>(
   body?: unknown,
   query?: Query,
   headers?: Readonly<Record<string, string>>,
-  /** The bearer token of this call, already read. Absent: the call reads `options.token`. */
-  token?: string | null,
 ) => Promise<ClientResult<T>>;
 
 function isKnownCode(code: unknown): code is keyof typeof ERRORS {
@@ -89,13 +87,11 @@ export function createRawTransport(options: TransportOptions): RawCall {
     body?: unknown,
     query?: Query,
     headers?: Readonly<Record<string, string>>,
-    given?: string | null,
   ): Promise<ClientResult<T>> => {
     const sent: Record<string, string> = { accept: "application/json" };
     if (body !== undefined) sent["content-type"] = "application/json";
     if (headers) Object.assign(sent, headers);
-    // A caller that already read the token passes it, so one call reads the store once.
-    const token = given !== undefined ? given : options.token ? await options.token() : null;
+    const token = options.token ? await options.token() : null;
     if (token) sent.authorization = `Bearer ${token}`;
     let res: Response;
     try {
