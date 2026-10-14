@@ -40,7 +40,8 @@ export const STACK_INFO: Readonly<Record<Stack, StackInfo>> = {
     secrets: ".dev.vars.example",
     next: [
       "cp .dev.vars.example .dev.vars",
-      "export DATABASE_URL=<the connection string of your database>",
+      // A placeholder in quotes: a pasted <…> is a shell redirect.
+      "export DATABASE_URL='postgres://…'",
       "authtempo migrate --target postgres",
       "pnpm dev",
     ],
@@ -65,6 +66,16 @@ export const STACK_INFO: Readonly<Record<Stack, StackInfo>> = {
 /** The folders that an example holds after an install or a run: never part of a template. */
 const SKIP = new Set(["node_modules", ".wrangler", "dist", ".turbo"]);
 
+/**
+ * The dot files that an example may hold. The walker reads the file system,
+ * not git, so a git-ignored .dev.vars or .env with a real secret, or a
+ * .DS_Store, could reach dist/templates.json and the pack. Any other dot
+ * file or folder stops the build. An allowlist, not `git ls-files`: the
+ * build and the drift test then need no git checkout, and a stray file
+ * fails loudly instead of being dropped with no message.
+ */
+const DOT_ALLOWED = new Set([".gitignore", ".dev.vars.example", ".env.example"]);
+
 /** The files of an example app, relative and sorted. */
 export function exampleFiles(dir: string): string[] {
   const out: string[] = [];
@@ -72,6 +83,10 @@ export function exampleFiles(dir: string): string[] {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       if (SKIP.has(e.name)) continue;
       const p = join(d, e.name);
+      if (e.name.startsWith(".") && !DOT_ALLOWED.has(e.name))
+        throw new Error(
+          `${p}: no template may hold this dot file; remove it, or add it to DOT_ALLOWED in src/templates.ts`,
+        );
       if (e.isDirectory()) walk(p);
       else out.push(relative(dir, p));
     }
@@ -79,6 +94,21 @@ export function exampleFiles(dir: string): string[] {
   walk(dir);
   return out.sort();
 }
+
+/**
+ * True while the CLI is unpublished: its own package.json is private or at
+ * version 0.0.0. The note below then goes into the next steps and the
+ * scaffold README; it removes itself at publication.
+ */
+export const UNPUBLISHED: boolean = (() => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    private?: boolean;
+    version: string;
+  };
+  return pkg.private === true || pkg.version === "0.0.0";
+})();
+export const UNPUBLISHED_NOTE =
+  "The packages are not on a registry yet: pnpm install works only inside the authtempo workspace until they are published.";
 
 const BASE_EXTENDS = '"extends": "../../tsconfig.base.json"';
 /** The test script of the D1 example: its bundle proof is a file of the repo, not of the app. */
@@ -139,6 +169,7 @@ export function extraFiles(stack: Stack): TemplateFile[] {
     "",
     ...steps.map((s, i) => `${i + 1}. Run \`${s}\`.`),
     "",
+    ...(UNPUBLISHED ? [UNPUBLISHED_NOTE, ""] : []),
     `\`${info.secrets}\` lists each secret with no value. Do not commit a copy with values: \`.gitignore\` lists it.`,
     "",
     "## Links",

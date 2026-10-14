@@ -7,12 +7,24 @@ import { Stop, UsageError } from "../errors.js";
 import { INIT_HELP } from "../help/init.js";
 import type { InitJson } from "../json.js";
 import { printJson, sayer } from "../output.js";
-import { STACK_INFO, STACKS, type Stack, type TemplateFile } from "../templates.js";
+import {
+  STACK_INFO,
+  STACKS,
+  type Stack,
+  type TemplateFile,
+  UNPUBLISHED,
+  UNPUBLISHED_NOTE,
+} from "../templates.js";
 
 const OPTIONS = { ...COMMON_OPTIONS, stack: { type: "string" } } as const;
 
 /** dist/templates.json: the build renders it from the 11a examples (scripts/copy-templates.mjs). */
 const TEMPLATES = fileURLToPath(new URL("../templates.json", import.meta.url));
+
+/** A path as a shell reads it: in single quotes when it holds a space or a character of the shell. */
+export function shellPath(path: string): string {
+  return /^[A-Za-z0-9_./,:@%+=-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
+}
 
 /**
  * `authtempo init [dir] --stack <stack>` (spec 19, owner decision 3): it
@@ -54,7 +66,7 @@ export const initCommand: Command = {
       say(`wrote ${f.path}`);
     }
     const next = [
-      ...(given === "." ? [] : [`cd ${given}`]),
+      ...(given === "." ? [] : [`cd ${shellPath(given)}`]),
       "pnpm install",
       ...STACK_INFO[stack].next,
     ];
@@ -62,6 +74,8 @@ export const initCommand: Command = {
     say("Next:");
     for (const step of next) say(`  ${step}`);
     say(`Docs: https://authtempo.com/docs/start/${STACK_INFO[stack].page}/`);
+    // On stderr, so stdout and the --json document stay the same at publication.
+    if (UNPUBLISHED) ctx.err(UNPUBLISHED_NOTE);
     if (json)
       printJson(ctx, { stack, dir, files: files.map((f) => f.path), next } satisfies InitJson);
     return 0;

@@ -24,7 +24,7 @@ export const INIT_HELP: HelpText = {
     { code: 0, says: "The command wrote every file, and printed the next steps." },
     {
       code: 2,
-      says: "A usage error, or a file of the app in the folder already. The command then writes nothing.",
+      says: "A usage error, or the folder holds a file of the app. The command then writes nothing.",
     },
   ],
 };

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { INIT_JSON_KEYS } from "../src/json.js";
 import {
   exampleFiles,
@@ -11,6 +11,8 @@ import {
   STACKS,
   type Stack,
   type TemplateFile,
+  UNPUBLISHED,
+  UNPUBLISHED_NOTE,
 } from "../src/templates.js";
 import { assertFreshBuild, linesOf, PKG, REPO, runBin } from "./support/bin.js";
 
@@ -18,8 +20,31 @@ const VERSION = (JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as 
   .version;
 const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 let templates: Record<Stack, TemplateFile[]>;
-const fresh = (name: string) =>
-  join(PKG, ".scaffold", `${name}-${crypto.randomUUID().slice(0, 8)}`);
+const PKG_JSON = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as {
+  private?: boolean;
+  version: string;
+};
+
+/** The folders under .scaffold that this file made, and those of a failed test, kept for diagnosis. */
+const made: string[] = [];
+const kept = new Set<string>();
+const fresh = (name: string) => {
+  const dir = join(PKG, ".scaffold", `${name}-${crypto.randomUUID().slice(0, 8)}`);
+  made.push(dir);
+  return dir;
+};
+
+beforeEach(({ onTestFailed }) => {
+  const start = made.length;
+  onTestFailed(() => {
+    for (const dir of made.slice(start)) kept.add(dir);
+  });
+});
+
+afterAll(() => {
+  for (const dir of made) if (!kept.has(dir)) rmSync(dir, { recursive: true, force: true });
+  if (kept.size > 0) console.error(`kept for diagnosis: ${[...kept].join(", ")}`);
+});
 
 beforeAll(() => {
   assertFreshBuild();
@@ -116,6 +141,35 @@ describe("the init templates (spec 19, the one-source rule)", () => {
   });
 });
 
+describe("the dot files of an example", () => {
+  it("stops the render at a dot file off the allowlist, such as a .dev.vars or a .DS_Store", () => {
+    const dir = fresh("dot-files");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    for (const f of [
+      "package.json",
+      "src/index.ts",
+      ".gitignore",
+      ".dev.vars.example",
+      ".env.example",
+    ])
+      writeFileSync(join(dir, f), "x\n");
+    expect(exampleFiles(dir)).toEqual([
+      ".dev.vars.example",
+      ".env.example",
+      ".gitignore",
+      "package.json",
+      "src/index.ts",
+    ]);
+    writeFileSync(join(dir, ".dev.vars"), "AUTH_SECRET=x\n");
+    expect(() => exampleFiles(dir)).toThrow(`${join(dir, ".dev.vars")}: no template may hold`);
+    rmSync(join(dir, ".dev.vars"));
+    writeFileSync(join(dir, "src", ".DS_Store"), "x");
+    expect(() => exampleFiles(dir)).toThrow(
+      `${join(dir, "src", ".DS_Store")}: no template may hold`,
+    );
+  });
+});
+
 describe("authtempo init (spec 19)", () => {
   it("writes the files of each stack, and prints each file and the next steps", () => {
     for (const stack of STACKS) {
@@ -134,7 +188,30 @@ describe("authtempo init (spec 19)", () => {
       expect(linesOf(r.stdout).at(-1)).toBe(
         `Docs: https://authtempo.com/docs/start/${STACK_INFO[stack].page}/`,
       );
+      expect(r.stdout).not.toContain(UNPUBLISHED_NOTE);
+      expect(linesOf(r.stderr).at(-1)).toBe(
+        UNPUBLISHED ? UNPUBLISHED_NOTE : `writing ${files.length} files to ${dir}`,
+      );
+      const readme = readFileSync(join(dir, "README.md"), "utf8");
+      expect(readme.includes(UNPUBLISHED_NOTE)).toBe(UNPUBLISHED);
     }
+  });
+
+  it("names the install note only while the CLI is unpublished", () => {
+    expect(UNPUBLISHED).toBe(PKG_JSON.private === true || PKG_JSON.version === "0.0.0");
+  });
+
+  it("quotes a folder with a space or a character of the shell in the cd step", () => {
+    const dir = fresh("init a b");
+    const r = runBin(["init", dir, "--stack", "node"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`\nNext:\n  cd '${dir}'\n  pnpm install\n`);
+    const odd = fresh("init-it's");
+    const j = runBin(["init", odd, "--stack", "node", "--json"]);
+    expect(j.status, j.stderr).toBe(0);
+    expect((JSON.parse(j.stdout) as { next: string[] }).next[0]).toBe(
+      `cd '${odd.replace("'", "'\\''")}'`,
+    );
   });
 
   it("prints one JSON document with --json", () => {

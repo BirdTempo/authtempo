@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, symlinkSync } from "node:fs";
+import { readFileSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { STACK_INFO, STACKS, type Stack } from "../src/templates.js";
 import { assertFreshBuild, PKG, REPO, runBin } from "./support/bin.js";
 
@@ -20,6 +20,12 @@ const PASSES: Readonly<Record<Stack, readonly string[]>> = {
 
 beforeAll(() => {
   assertFreshBuild();
+});
+
+/** The scaffolds that passed: removed after the file. A failed scaffold stays, for diagnosis. */
+const passed: string[] = [];
+afterAll(() => {
+  for (const dir of passed) rmSync(dir, { recursive: true, force: true });
 });
 
 /** A package script of the scaffold, through sh, with the scaffold's node_modules/.bin first on PATH, as pnpm runs it. */
@@ -52,5 +58,6 @@ for (const stack of STACKS)
       const out = `${test.stdout}${test.stderr}`;
       expect(test.status, out).toBe(0);
       for (const line of PASSES[stack]) expect(out).toContain(line);
+      passed.push(dir);
     });
   });
