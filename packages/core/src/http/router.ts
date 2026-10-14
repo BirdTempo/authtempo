@@ -27,6 +27,30 @@ function originTrusted(config: ResolvedConfig, origin: string): boolean {
   return config.trustedOrigins.has(origin);
 }
 
+/**
+ * A body that a page of another site can post with no CORS preflight: a
+ * form, multipart, text/plain, or no type (the Fetch standard's safelisted
+ * `content-type` values). JSON needs a preflight, which only a trusted
+ * origin passes.
+ */
+function isJsonBody(request: Request): boolean {
+  const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
+  return type === "application/json";
+}
+
+/**
+ * The Fetch Metadata rule (plan 12b), beside the Origin rule. A form post is
+ * refused unless the browser says it came from this origin. A JSON post is
+ * refused from another site unless its Origin is trusted. A request with no
+ * `Sec-Fetch-Site` passes: an older browser, or a client that is not a browser.
+ */
+export function fetchMetadataRefuses(request: Request, originTrusted: boolean): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site === null) return false;
+  if (!isJsonBody(request)) return site !== "same-origin" && site !== "none";
+  return (site === "cross-site" || site === "same-site") && !originTrusted;
+}
+
 /** Credentialed CORS for one trusted origin. `Vary: Origin` keeps a cache from serving it to another. */
 function cors(res: Response, origin: string): Response {
   res.headers.set("access-control-allow-origin", origin);
@@ -47,7 +71,8 @@ function cors(res: Response, origin: string): Response {
  * Every response to a trusted origin carries the CORS headers. The POST
  * Origin rule is unchanged: a POST whose Origin header is present and not
  * trusted gets 403 before any handler runs. A POST with no Origin is a
- * non-browser client and passes.
+ * non-browser client and passes. A POST that `fetchMetadataRefuses` names
+ * gets the same 403 (plan 12b).
  */
 export function createRouter(
   config: ResolvedConfig,
@@ -84,6 +109,9 @@ export function createRouter(
     if (request.method === "POST" && !route.allowCrossSiteForm) {
       const origin = request.headers.get("origin");
       if (origin !== null && !originTrusted(config, origin)) {
+        return json({ error: "origin_not_trusted" }, 403);
+      }
+      if (fetchMetadataRefuses(request, origin !== null && originTrusted(config, origin))) {
         return json({ error: "origin_not_trusted" }, 403);
       }
     }

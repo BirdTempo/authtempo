@@ -39,6 +39,7 @@ import test from "../../../../../samples/guides/split-origins.test.ts?raw";
 - A trusted origin gets a 204 answer to its preflight. Any other origin gets 403.
 - A POST with an `Origin` header that is not trusted answers 403 before any handler runs.
 - A POST with no `Origin` header is a client that is not a browser, and passes.
+- A form post, multipart, `text/plain`, or a post with no content type needs `Sec-Fetch-Site` to be `same-origin` or `none`. A JSON post with `Sec-Fetch-Site` set to `cross-site` or `same-site` needs a trusted `Origin`. Each refusal answers 403 [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted), and a request with no `Sec-Fetch-Site` passes.
 - With `SameSite=None`, any site can make the browser send the cookie. The Origin rule is what refuses such a request.
 - A `next` under `basePath` stays on `baseURL`. Every other `next` lands on `appURL`.
 - The cookie names are `tempo_session` and `tempo_session_oauth`. A host on a sibling subdomain can set a cookie of the same name, so keep the API on its own registrable domain.
