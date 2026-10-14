@@ -14,7 +14,7 @@ sources:
 
 ## Before you start
 
-- Read the "Commands" table of the root `README.md` for `pnpm test` and the other commands.
+- Read [Architecture](/docs/concepts/architecture/) for the parts that these rules test. The "Commands" table of the root `README.md` lists `pnpm test` and the other commands.
 
 ## A green result is a claim
 

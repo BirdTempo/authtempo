@@ -43,7 +43,7 @@ The port is generic. Core names a model and its fields. The adapter maps them to
 
 ## Why so narrow
 
-A narrow port is easy to keep on every database. D1 has no interactive transaction, and SQLite and Postgres differ in their types. Each method maps to one SQL statement, so an adapter has little room to differ from another.
+A narrow port is easy to keep on every database. D1 has no interactive transaction, and SQLite and Postgres differ in their types. Each method has a small, fixed meaning, so an adapter has little room to differ from another.
 
 The guards of core live in the `where` clauses and the unique keys, not in the isolation of a transaction. So the same guard works on D1 and on Postgres. [The race rules](/docs/concepts/races/) tell how.
 

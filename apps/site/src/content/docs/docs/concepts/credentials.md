@@ -22,7 +22,7 @@ sources:
 
 | Credential | Who holds it | Where it travels | Life | Ends at a sign-out |
 | --- | --- | --- | --- | --- |
-| Session token, `ts_` | A browser or a native app | The session cookie, or the bearer header | 30 days, and a sliding refresh | Yes |
+| Session token, `ts_` | A browser or a native app | The session cookie, or the bearer header | 30 days by default, and a sliding refresh | Yes |
 | API token, `tk_` | A script or a CLI | The bearer header only | 90 days by default, or no expiry | No |
 | Session JWT | Another server of the app | Any header that the app chooses | 15 minutes by default | No |
 | Access token, `at+jwt` | An OAuth client, such as an MCP client | The bearer header | `oauth.accessTtlMinutes` | No |

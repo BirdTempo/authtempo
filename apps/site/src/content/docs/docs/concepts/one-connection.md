@@ -32,7 +32,7 @@ A before hook runs inside the flow's transaction, before the first write. Core w
 4. The query waits for a free connection.
 5. No connection comes free, because the transaction waits for the hook.
 
-The request hangs until the pool times out. No error names the cause.
+The request hangs until the client ends. postgres.js has no default queue timeout. No error names the cause.
 
 ## The ways out
 
@@ -44,7 +44,7 @@ A before hook must also not open a transaction on core's storage. It runs inside
 
 ## Why core does not stop it
 
-Core cannot see which client a hook queries. A timeout on hooks would also cut a slow hook that is right. The rule stays with the app, and the adapter README states it beside the setting.
+Core sets no timeout on a hook, as it sets none on the mail port. The rule stays with the app, and the adapter README states it beside the setting.
 
 ## Next
 

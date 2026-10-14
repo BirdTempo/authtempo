@@ -40,12 +40,13 @@ An account that a person made with an address that nobody proved is a claim, not
 
 When a proof arrives for an unverified user, core runs the claim in the same transaction as the sign-in:
 
-1. It deletes the other identities of the user. The proving identity and the `email` identity stay.
-2. It deletes the password row, except the row that a verify link confirms.
-3. It deletes the passkeys, the pending handoff codes, and every session.
-4. It marks the address verified, and opens a session for the person who proved it.
+1. It marks the address verified first. A sign-in of the claimant that runs at the same moment then sees the flag.
+2. It deletes the other identities of the user. The proving identity and the `email` identity stay.
+3. It deletes the password row, except the row that a verify link confirms.
+4. It deletes every session.
+5. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
 
-The claimant then holds nothing. The owner holds the account.
+The proof then opens a session for the person who proved the address. The claimant holds nothing. The owner holds the account.
 
 ## The edges
 
@@ -58,7 +59,7 @@ The claimant then holds nothing. The owner holds the account.
 
 ## Why in one transaction
 
-A claim and a sign-in of the claimant can run at the same moment. Each sign-in of an unverified user ends its transaction with a guard: a conditional update on the row that it trusted. When the claim deleted that row, the guard matches zero rows. The sign-in then deletes its own new session and answers a failure. [The race rules](/docs/concepts/races/) tell more.
+A claim and a sign-in of the claimant can run at the same moment. Each sign-in of an unverified user ends its transaction with a guard: a conditional update on the row that it trusted. When the claim deleted or changed that row, the guard matches zero rows. The sign-in then deletes its own new session and answers a failure. [The race rules](/docs/concepts/races/) tell more.
 
 ## Next
 

@@ -4,6 +4,9 @@ description: The attackers that authtempo expects, the assets it guards, and the
 type: explanation
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.7
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17.2
   - README.md "Rules that the code enforces"
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
 ---
@@ -40,7 +43,7 @@ sources:
 - **Keyed and sealed secrets.** An email code and a backup code are HMAC-SHA256 under the app `secret`. The second factor secret and the private signing keys are sealed with AES-256-GCM under a key from `secret`. A copy of the tables without `secret` opens none of them.
 - **Constant time.** Every compare of a secret is constant time. An unknown address runs the same hash work as a wrong password.
 - **No account probe.** A magic link request, an email code request, and a reset request answer the same for every address.
-- **Limits.** Every flow that a stranger can call has a limit per IP, and most have a limit per address. [Limits](/docs/reference/limits/) lists each key.
+- **Limits.** Every flow that starts a mail or accepts a guess has a limit per IP, and most have a limit per address. The magic-link verify and the token resolve have no limit. [Limits](/docs/reference/limits/) lists each key.
 - **Bounded guesses.** An email code admits 5 guesses, and an address gets at most 20 codes a day. A second-factor challenge admits 5 guesses, and an account at most 30 a day.
 - **Single use.** A magic link, a code, a challenge, and an OAuth code are spent in one conditional update. Two uses race for one row, and one wins.
 - **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how.
@@ -49,9 +52,9 @@ sources:
 
 ## The odds
 
-The odds below assume an owned limiter on D1 or Postgres. The memory limiter multiplies each budget by the number of isolates.
+The odds below assume an owned limiter on D1 or Postgres. The memory limiter multiplies the per-IP and per-address budgets by the number of isolates. The caps per code and per challenge live in the row, and stay global.
 
-| Guess | One try | One account in a day | One account in a year |
+| Guess | One code or one challenge | One account in a day | One account in a year |
 | --- | --- | --- | --- |
 | A 6-digit email code | 5 × 10⁻⁶ | 1 × 10⁻⁴ | about 3.6 % |
 | A TOTP code, with the password | 1.5 × 10⁻⁵ per challenge | 9 × 10⁻⁵ | about 3.2 % |
@@ -64,6 +67,9 @@ An email code of 8 digits divides each figure of its row by 100.
 - A session JWT and an OAuth access token live to their `exp`. A sign-out does not end them.
 - A legacy password hash verifies slower than PBKDF2. The response time shows an address that is not yet migrated.
 - Off Workers, a caller can set `cf-connecting-ip`. The app must pass `clientIp`, or every per-IP limit fails open.
+- A sign-up answers `email_taken` or `email_taken_unverified`, so it shows that an address has an account.
+- The timing of the verify-mail resend shows an unverified account.
+- An API token survives a password reset and a sign-out.
 - There is no lockout per account. The limits bound the guesses instead.
 
 ## Next

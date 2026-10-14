@@ -50,7 +50,7 @@ The app reads the signed-in user from its own routes with `auth.session(request)
 Core talks to the outside through ports that the app fills:
 
 - The storage port holds the rows.
-- The mail port sends each mail: a magic link, an email code, a reset link, an invitation.
+- The mail port sends each mail, such as a magic link, an email code, a reset link, an invitation.
 - The limiter port counts the attempts per key and window.
 - The clock gives the time, so a test can move it.
 
