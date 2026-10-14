@@ -880,7 +880,13 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     oauth: resolveOAuth(input.oauth, jwtMint),
     operator: resolveOperator(input.operator, jwtMint),
     hooks: resolveHooks(input.hooks, organizations !== null),
-    captcha: resolveCaptcha(input.captcha),
+    captcha: resolveCaptcha(
+      input.captcha,
+      // Core's own sign-in page serves the handoff and the OAuth login step,
+      // unless the app gives handoff.signInPage.
+      (handoff !== null || (input.oauth !== undefined && input.oauth !== false)) &&
+        input.handoff?.signInPage === undefined,
+    ),
   };
 }
 
@@ -1473,7 +1479,10 @@ const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {
 const FIELD_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** `captcha` (plan 12b). Absent: off. */
-function resolveCaptcha(input: CaptchaConfig | undefined): ResolvedCaptcha | null {
+function resolveCaptcha(
+  input: CaptchaConfig | undefined,
+  defaultPageServed: boolean,
+): ResolvedCaptcha | null {
   if (input === undefined) return null;
   if (!isPlainObject(input as unknown)) throw new ConfigError("captcha must be an object");
   for (const [key, value] of Object.entries(input))
@@ -1517,6 +1526,12 @@ function resolveCaptcha(input: CaptchaConfig | undefined): ResolvedCaptcha | nul
   )
     throw new ConfigError(
       `captcha.flows must be a list of 1 or more distinct flows: ${CAPTCHA_FLOWS.join(", ")}`,
+    );
+  // Core's page sends a token only from the widget that `page` describes.
+  // With no page, every gated flow on that page answers captcha_required.
+  if (page === undefined && defaultPageServed)
+    throw new ConfigError(
+      "captcha.port.page is required while core serves its sign-in page (handoff or oauth): without the widget, the page sends no token, and every gated flow on it answers captcha_required. Give the port a page, or set handoff.signInPage",
     );
   const onUnavailable = input.onUnavailable ?? "allow";
   if (onUnavailable !== "allow" && onUnavailable !== "refuse")

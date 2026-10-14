@@ -233,6 +233,21 @@ describe("the captcha port (plan 12b)", () => {
         },
         "captcha.port.page.cspSources must hold https origins with no path",
       ],
+      [{ port: { ...port, page: "x" } }, "captcha.port.page must be an object"],
+      [
+        {
+          port: {
+            ...port,
+            page: {
+              scriptSrc: "https://x.example/a.js",
+              widgetHtml: "x".repeat(4097),
+              responseField: "f",
+              cspSources: ["https://x.example"],
+            },
+          },
+        },
+        "captcha.port.page.widgetHtml must be a string of at most 4096 characters",
+      ],
     ];
     for (const [captcha, message] of cases)
       expect(() => setup(captcha as never)).toThrow(new ConfigError(message));
@@ -268,5 +283,53 @@ describe("the captcha port (plan 12b)", () => {
     expect(html).toContain('data-captcha-field="captcha-response"');
     expect(policy).toContain(`script-src 'nonce-${nonce}' https://captcha.example;`);
     expect(policy).toContain("frame-src https://captcha.example;");
+  });
+
+  it("needs a page while core serves its own sign-in page, so the page can send a token", () => {
+    const port = fakePort("pass").port;
+    const message =
+      "captcha.port.page is required while core serves its sign-in page (handoff or oauth): without the widget, the page sends no token, and every gated flow on it answers captcha_required. Give the port a page, or set handoff.signInPage";
+    expect(() => setup({ port }, { handoff: { schemes: ["example://"] } })).toThrow(
+      new ConfigError(message),
+    );
+    const oauth = {
+      resources: ["https://api.example.com/mcp"],
+      fetch: (async () => new Response()) as typeof fetch,
+    };
+    expect(() => setup({ port }, { oauth })).toThrow(new ConfigError(message));
+    // The app's own page shows its own widget: no page is needed.
+    expect(() =>
+      setup({ port }, { handoff: { schemes: ["example://"], signInPage: () => "<p>own</p>" } }),
+    ).not.toThrow();
+    // No page of core is served: no page is needed.
+    expect(() => setup({ port })).not.toThrow();
+  });
+
+  it("keeps the checked page: a later change to port.page does not reach the sign-in page", async () => {
+    const page = {
+      scriptSrc: "https://captcha.example/api.js",
+      widgetHtml: '<div class="w"></div>',
+      responseField: "captcha-response",
+      cspSources: ["https://captcha.example"],
+    };
+    const port: CaptchaPort = { ...fakePort("pass").port, page };
+    const auth = setup({ port }, { handoff: { schemes: ["example://"] } });
+    page.scriptSrc = "http://evil.example/x.js";
+    page.widgetHtml = "<script>alert(1)</script>";
+    page.cspSources.push("http://evil.example");
+    port.page = { ...page, responseField: "other" };
+    const res = await auth.handle(
+      new Request(
+        `${BASE}/auth/handoff/start?redirect=${encodeURIComponent("example://auth")}&challenge=${"a".repeat(43)}`,
+      ),
+    );
+    const html = await res.text();
+    const policy = res.headers.get("content-security-policy") ?? "";
+    expect(html).toContain('<script src="https://captcha.example/api.js"');
+    expect(html).toContain('<div class="w"></div>');
+    expect(html).toContain('data-captcha-field="captcha-response"');
+    expect(html).not.toContain("evil.example");
+    expect(html).not.toContain("alert(1)");
+    expect(policy).not.toContain("evil.example");
   });
 });

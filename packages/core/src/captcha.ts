@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "./config.js";
+import { ERRORS } from "./errors.js";
 import { appErrorName } from "./primitives/app-error.js";
-import { fail, type Result } from "./result.js";
+import type { Result } from "./result.js";
 
 /**
  * The captcha port (plan 12b). Core names no supplier: an adapter package
@@ -74,6 +75,10 @@ export interface ResolvedCaptcha {
 
 type Failure = Extract<Result<never>, { ok: false }>;
 
+function refuse(code: "captcha_required" | "captcha_failed" | "captcha_unavailable"): Failure {
+  return { ok: false, code, status: ERRORS[code] };
+}
+
 /**
  * The check of one gated flow, after its limits (plan 12b). Null: the flow
  * goes on. `token` undefined is an in-process call, which skips the check;
@@ -87,8 +92,8 @@ export async function checkCaptcha(
 ): Promise<Failure | null> {
   const captcha = config.captcha;
   if (!captcha?.flows.has(flow) || token === undefined) return null;
-  if (token === null || token === "") return fail("captcha_required") as Failure;
-  if (token.length > CAPTCHA_TOKEN_MAX) return fail("captcha_failed") as Failure;
+  if (token === null || token === "") return refuse("captcha_required");
+  if (token.length > CAPTCHA_TOKEN_MAX) return refuse("captcha_failed");
   let answer: "pass" | "fail" | "unavailable";
   try {
     answer = await captcha.port.verify({ token, ip, flow });
@@ -97,8 +102,8 @@ export async function checkCaptcha(
     answer = "unavailable";
   }
   if (answer === "pass") return null;
-  if (answer === "fail") return fail("captcha_failed") as Failure;
-  if (captcha.onUnavailable === "refuse") return fail("captcha_unavailable") as Failure;
+  if (answer === "fail") return refuse("captcha_failed");
+  if (captcha.onUnavailable === "refuse") return refuse("captcha_unavailable");
   console.error("authtempo: the captcha did not answer", flow);
   return null;
 }
