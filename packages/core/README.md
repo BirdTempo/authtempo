@@ -154,6 +154,13 @@ browser send the cookie, and the Origin rule on POST is what refuses
 them. The cookie names stay `tempo_session` and `tempo_session_oauth` in
 version 1; a `__Host-` prefix is a version 2 item.
 
+Every POST also passes the Fetch Metadata rule. A form post (a form,
+multipart, `text/plain`, or no content type) needs `Sec-Fetch-Site` to be
+`same-origin` or `none`. A JSON post from another site (`cross-site` or
+`same-site`) needs a trusted `Origin`. A request with no `Sec-Fetch-Site`
+passes. A refusal answers 403 `origin_not_trusted`. Apple's callback skips
+both rules: Apple posts it from its own site.
+
 ## Handoff for native and desktop apps
 
 Set `handoff: { schemes: ["consumera://"] }`. The app makes a PKCE
