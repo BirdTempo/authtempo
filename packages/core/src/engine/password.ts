@@ -764,24 +764,28 @@ export async function resetPassword(
   return runReset(
     config,
     input,
+    peek,
     (tx) => consumeVerification(tx, { purpose: "password-reset", valueHash, now }),
     hash,
     now,
   );
 }
 
-/** What a reset proves the mailbox with: the spend of its row, the first statement of the reset's transaction (plan 9e). */
+/** What a reset proves the mailbox with: the spend of its row in the reset's transaction (plan 9e). */
 export type ResetConsume = (tx: StorageAdapter) => Promise<Result<VerificationRow>>;
 
 /**
  * The reset's transaction, its retry, and its after hooks, for the reset
- * link and the reset code (plan 9e). `consume` spends the proof as the
- * transaction's first statement. `input` carries the session's ip and user
- * agent, and the trust token of the device (plan 12c).
+ * link and the reset code (plan 9e). `proof` is the row that `consume`
+ * spends, as the caller read it. `consume` spends it after the deletes of
+ * the address's older pending rows (the lock order in `applyReset`).
+ * `input` carries the session's ip and user agent, and the trust token of
+ * the device (plan 12c).
  */
 export async function runReset(
   config: ResolvedConfig,
   input: { ip: string | null; userAgent: string | null; trustDevice?: string | undefined },
+  proof: VerificationRow,
   consume: ResetConsume,
   hash: string,
   now: Date,
@@ -792,7 +796,9 @@ export async function runReset(
   let reset: Result<ResetResult> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
-      reset = await hookGuard(() => applyReset(config, input, consume, hash, now, ended, trust));
+      reset = await hookGuard(() =>
+        applyReset(config, input, proof, consume, hash, now, ended, trust),
+      );
     } catch (err) {
       // Two resets for one address raced: the loser's user, email
       // identity, or password create failed on a unique key. Caught here,
@@ -859,7 +865,7 @@ export async function resetWithProof(
   }
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
-  return runReset(config, input, consume, hash, now);
+  return runReset(config, input, proof, consume, hash, now);
 }
 
 /** The session rows a reset deleted, by cause. Only one list fills in one reset. Undefined lists when no `afterEnd` hook listens (plan 9h). */
@@ -871,6 +877,7 @@ interface ResetEnded {
 function applyReset(
   config: ResolvedConfig,
   input: { ip: string | null; userAgent: string | null; trustDevice?: string | undefined },
+  proof: VerificationRow,
   consume: ResetConsume,
   hash: string,
   now: Date,
@@ -882,8 +889,36 @@ function applyReset(
     if (ended.claim) ended.claim.length = 0;
     if (ended.reset) ended.reset.length = 0;
     trust.id = null;
-    // The first statement. Two POSTs of one proof race here, and only one
-    // wins. A refusal comes before any write, so nothing is left to undo.
+    // The lock order (plan 12c, Task 12): every reset takes the pending reset
+    // rows of its address in id order, then the password row. So the older
+    // rows go first, one delete per row in sorted order, then the consume of
+    // this reset's own row. The delete of the newer rows comes later, below.
+    // Reason: with the consume first, two resets of one address with two
+    // proofs each held its own row. One waited on the other's password row,
+    // and the other waited on that row in its delete: a Postgres deadlock
+    // (adapter-postgres reset-gate-race.test.ts). Now a reset that holds its
+    // own row holds every older pending row too, so no cycle can form. On D1
+    // the undo of a delete re-inserts the row as it was, so it stays exact.
+    const older = (
+      await tx.findMany("verification", [
+        { field: "purpose", op: "in", value: RESET_PURPOSES },
+        { field: "identifier", op: "eq", value: proof.identifier },
+        { field: "consumedAt", op: "eq", value: null },
+      ])
+    )
+      .map((v) => v.id)
+      .filter((id) => id < proof.id)
+      .sort();
+    for (const id of older)
+      await tx.delete("verification", [
+        { field: "id", op: "eq", value: id },
+        { field: "consumedAt", op: "eq", value: null },
+      ]);
+    // Two POSTs of one proof race here, and only one wins. The caller read
+    // the row live with this `now`, so a refusal here means that a parallel
+    // reset or password change spent or deleted it. That winner deletes every
+    // pending reset row of the address too, so the deletes above remove no
+    // row that the winner leaves.
     const consumed = await consume(tx);
     if (!consumed.ok) return consumed;
     const email = consumed.value.identifier;
@@ -918,7 +953,8 @@ function applyReset(
     // other write (plan 9d, fix round 2). The link row belongs to this
     // request alone, so the D1 undo of the consume is exact; an undo of the
     // writes below would not be (see `insertSignUp`). A refusal undoes the
-    // consume with the transaction, so the link stays usable.
+    // consume with the transaction, so the link stays usable. The deletes of
+    // the older rows above also come before the hook: their undo is exact too.
     // The user the hook sees is the user this reset leaves: found, claimed, or minted.
     // A gated reset opens no session here, so no hook runs: the verify of
     // its challenge runs it through `openSession`.
