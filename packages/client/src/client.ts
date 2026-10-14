@@ -39,10 +39,15 @@ export interface TwoFactorChallengeJSON {
   twoFactor: { challenge: string; expiresAt: string };
 }
 export interface TotpStatusJSON {
+  /** True when the second factor is on, by any method. */
   enabled: boolean;
   enabledAt: string | null;
   backupCodesLeft: number;
   trustedDevices: number;
+  /** The methods that are on: `totp`, `passkey`, `email`. */
+  methods: ("totp" | "passkey" | "email")[];
+  /** 1 for an old list of short codes; ask the person to make new codes. Null when the factor is off. */
+  backupCodesVersion: number | null;
 }
 export type TwoFactorSessionJSON = { token: string } & PublicSession & {
     next: string;

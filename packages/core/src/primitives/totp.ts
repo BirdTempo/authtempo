@@ -160,3 +160,22 @@ export function randomBackupCode(length: number): string {
 export function normalizeBackupCode(input: string): string {
   return input.toLowerCase().replace(/[\s-]/g, "");
 }
+
+/**
+ * A backup code in groups for a person to copy (plan 12c): groups of 5 and 4
+ * characters joined by dashes, the longer groups first, so 23 characters read
+ * 5-5-5-4-4. `normalizeBackupCode` drops the dashes again before the compare.
+ */
+export function groupBackupCode(code: string): string {
+  const groups = Math.ceil(code.length / 5);
+  const base = Math.floor(code.length / groups);
+  const extra = code.length % groups;
+  const out: string[] = [];
+  let at = 0;
+  for (let i = 0; i < groups; i++) {
+    const size = base + (i < extra ? 1 : 0);
+    out.push(code.slice(at, at + size));
+    at += size;
+  }
+  return out.join("-");
+}

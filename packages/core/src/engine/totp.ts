@@ -1,29 +1,41 @@
-import type { ResolvedConfig, ResolvedTotp } from "../config.js";
+import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { openSealed, seal } from "../primitives/aead.js";
-import { constantTimeEqual, hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
+import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
-import {
-  base32Encode,
-  normalizeBackupCode,
-  otpauthUri,
-  randomBackupCode,
-  verifyTotp,
-} from "../primitives/totp.js";
+import { base32Encode, otpauthUri, verifyTotp } from "../primitives/totp.js";
 import { fail, ok, type Result } from "../result.js";
-import type { SessionRow, TotpRow, UserRow } from "../schema.js";
+import type {
+  SecondFactorMethod,
+  SecondFactorRow,
+  SessionRow,
+  TotpRow,
+  UserRow,
+} from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { checkUserPassword } from "./password.js";
 import {
+  addMethod,
+  disableSecondFactor,
+  FactorRaceError,
+  factorRow,
+  later,
+  newBackupCodes,
+  removeMethod,
+  replaceBackupCodes,
+  spendBackupCode,
+} from "./second-factor.js";
+import {
   endedList,
-  endSessions,
   openSession,
   type ResolvedSession,
   sessionOpened,
   sessionsEnded,
 } from "./sessions.js";
 import { attemptsOf, countAttempt } from "./verification.js";
+
+export { deleteTwoFactorChallenges } from "./second-factor.js";
 
 /**
  * The TOTP second factor (plan 9f, spec 8.11). One `totp` row per user
@@ -68,29 +80,30 @@ async function codeCheckAllowed(config: ResolvedConfig, userId: string): Promise
     (await config.limiter.allow(`totp-code:user-day:${userId}`, CODE_PER_USER_DAY))
   );
 }
-/** The rounds of the backup code replacement's compare-and-set. Each lost round means that another write landed first. */
-const REPLACE_ROUNDS = 5;
 
 export interface TotpSetup {
   /** The base32 secret, for a person who types it in. Answered once. */
   secret: string;
   /** The `otpauth://` key URI, for a QR code. Answered once. */
   uri: string;
-  /** The backup codes, usable after `enable`. Answered once. */
+  /**
+   * The backup codes, usable after `enable`. Answered once. Empty when
+   * another method is on: the factor keeps its list (plan 12c).
+   */
   backupCodes: string[];
 }
 
 export interface TotpStatus {
+  /** True when the second factor is on, by any method (plan 12c). */
   enabled: boolean;
   enabledAt: Date | null;
   backupCodesLeft: number;
   /** The live trusted devices. */
   trustedDevices: number;
-}
-
-/** A write time strictly after `than`, so a compare-and-set on `updatedAt` sees every write. */
-function later(now: Date, than: Date): Date {
-  return new Date(Math.max(now.getTime(), than.getTime() + 1));
+  /** The methods that are on (plan 12c). Empty when the factor is off. */
+  methods: SecondFactorMethod[];
+  /** 1 for a list of plan 9f, 2 for codes of 112 bits; null when the factor is off (plan 12c). An app asks a user at version 1 to make new codes. */
+  backupCodesVersion: number | null;
 }
 
 /** The row of a factor that is on, or null. */
@@ -103,22 +116,6 @@ function enabledRow(storage: StorageAdapter, userId: string): Promise<TotpRow | 
 
 function openSecret(config: ResolvedConfig, row: TotpRow): Promise<Uint8Array | null> {
   return openSealed(config.secret, SEAL_INFO, row.secret, row.userId);
-}
-
-function backupCodeHash(secret: string, rowId: string, code: string): Promise<string> {
-  return hmacSha256Hex(secret, `${rowId}:${code}`);
-}
-
-async function newBackupCodes(
-  config: ResolvedConfig,
-  totp: ResolvedTotp,
-  rowId: string,
-): Promise<{ codes: string[]; hashes: string[] }> {
-  const codes = Array.from({ length: totp.backupCodes }, () =>
-    randomBackupCode(totp.backupCodeLength),
-  );
-  const hashes = await Promise.all(codes.map((c) => backupCodeHash(config.secret, rowId, c)));
-  return { codes, hashes };
 }
 
 /**
@@ -162,66 +159,19 @@ async function acceptCode(
   return n === 1;
 }
 
-/**
- * Spends a backup code: the codes left, or null for a code that is not
- * there. Every stored hash runs the compare. The removal is a
- * compare-and-set on `updatedAt`, so two parallel uses of one code spend it
- * once: the loser reads the row again and no longer finds the code.
- */
-async function acceptBackupCode(
-  config: ResolvedConfig,
-  row: TotpRow,
-  code: string,
-  now: Date,
-): Promise<number | null> {
-  const typed = normalizeBackupCode(code);
-  let current: TotpRow | null = row;
-  // A hard bound, as `countAttempt` has. Each lost round means that a
-  // parallel use spent a code, so an honest adapter ends before the list is
-  // empty. An adapter whose `eq` on a date never matches loses every round;
-  // without the bound one backup code then holds a request forever.
-  for (let round = 0; round <= row.backupCodes.length; round++) {
-    if (!current || current.enabledAt === null) return null;
-    const candidate = await backupCodeHash(config.secret, current.id, typed);
-    let found = -1;
-    current.backupCodes.forEach((hash, i) => {
-      if (constantTimeEqual(candidate, hash)) found = i;
-    });
-    if (found === -1) return null;
-    const left = current.backupCodes.filter((_, i) => i !== found);
-    const n = await config.storage.update(
-      "totp",
-      [
-        { field: "id", op: "eq", value: current.id },
-        { field: "updatedAt", op: "eq", value: current.updatedAt },
-      ],
-      { backupCodes: left, updatedAt: later(now, current.updatedAt) },
-    );
-    if (n === 1) return left.length;
-    current = await config.storage.findOne("totp", [{ field: "id", op: "eq", value: current.id }]);
-  }
-  console.error("authtempo: backup code spend gave up", row.id);
-  return null;
-}
-
 /** A code of the app (6 digits) or a backup code (any other text), for the operations that take either. */
 async function proveFactor(
   config: ResolvedConfig,
-  row: TotpRow,
+  factor: SecondFactorRow,
   code: string,
   now: Date,
 ): Promise<boolean> {
   const typed = code.replace(/\s/g, "");
-  if (/^\d{6}$/.test(typed)) return acceptCode(config, row, typed, now);
-  return (await acceptBackupCode(config, row, code, now)) !== null;
-}
-
-/** A challenge is a session in waiting, as a handoff code is: a flow that ends the user's sessions or changes the factor deletes the user's challenges. */
-export async function deleteTwoFactorChallenges(tx: StorageAdapter, userId: string): Promise<void> {
-  await tx.delete("verification", [
-    { field: "purpose", op: "eq", value: "two-factor" },
-    { field: "identifier", op: "eq", value: userId },
-  ]);
+  if (/^\d{6}$/.test(typed)) {
+    const row = await enabledRow(config.storage, factor.userId);
+    return row !== null && (await acceptCode(config, row, typed, now));
+  }
+  return (await spendBackupCode(config, factor, code, now)) !== null;
 }
 
 /** The setup's input: the user and the user's password (plan 9f final fix wave, review I-1). */
@@ -273,7 +223,12 @@ export async function setupTotp(
   const secret = new Uint8Array(SECRET_BYTES);
   crypto.getRandomValues(secret);
   const id = existing?.id ?? newId(now);
-  const { codes, hashes } = await newBackupCodes(config, totp, id);
+  // The codes come with the first method only. With another method on, the
+  // factor keeps its list, and the setup answers an empty one (plan 12c).
+  const factor = await factorRow(config.storage, user.id);
+  const { codes, hashes } = factor
+    ? { codes: [], hashes: [] }
+    : await newBackupCodes(config, totp, id);
   const sealed = await seal(config.secret, SEAL_INFO, secret, user.id);
   if (existing) {
     // In place, and only while unconfirmed: zero rows means an enable confirmed it since the read.
@@ -318,10 +273,12 @@ export async function setupTotp(
 }
 
 /**
- * Confirms the setup with a code of the window (plan 9f). Then every other
- * session of the user ends with `two_factor`, so a session a thief holds
- * does not survive the enable, and the user's trusted devices and challenges
- * go. The caller's own session stays.
+ * Confirms the setup with a code of the window (plan 9f) and turns the TOTP
+ * method on (plan 12c). As the first method, the factor row takes the totp
+ * row's id and the setup's codes, so their hashes stay valid, and every
+ * other session of the user ends with `two_factor`; the trusted devices and
+ * the challenges go. As a later method, nothing ends. The caller's own
+ * session stays.
  */
 export async function enableTotp(
   config: ResolvedConfig,
@@ -340,66 +297,76 @@ export async function enableTotp(
   const step = await matchStep(await openSecret(config, row), input.code, now);
   if (step === null) return fail("invalid_code");
   const ended = endedList(config);
-  const done = await config.storage.transaction(async (tx): Promise<Result<TotpStatus>> => {
-    // The confirm and the replay guard in one statement, as `acceptCode`.
-    const n = await tx.update(
-      "totp",
-      [
-        { field: "id", op: "eq", value: row.id },
-        { field: "enabledAt", op: "eq", value: null },
-        { field: "lastStep", op: "lt", value: step },
-        // The row as this call read it: a parallel setup that replaced it
-        // after the read wrote another secret and reset `lastStep`, and the
-        // code was checked against the old secret. Without this line the
-        // enable turns on a secret that no code confirmed.
-        { field: "updatedAt", op: "eq", value: row.updatedAt },
-      ],
-      { enabledAt: now, lastStep: step, updatedAt: later(now, row.updatedAt) },
-    );
-    if (n === 0) return fail("invalid_code");
-    await endSessions(
-      tx,
-      [
-        { field: "userId", op: "eq", value: user.id },
-        { field: "id", op: "ne", value: session.id },
-      ],
-      ended ?? null,
-    );
-    await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: user.id }]);
-    await deleteTwoFactorChallenges(tx, user.id);
-    return ok({
-      enabled: true,
-      enabledAt: now,
-      backupCodesLeft: row.backupCodes.length,
-      trustedDevices: 0,
+  let done: Result<{ first: boolean }>;
+  try {
+    done = await config.storage.transaction(async (tx): Promise<Result<{ first: boolean }>> => {
+      // The confirm and the replay guard in one statement, as `acceptCode`.
+      const n = await tx.update(
+        "totp",
+        [
+          { field: "id", op: "eq", value: row.id },
+          { field: "enabledAt", op: "eq", value: null },
+          { field: "lastStep", op: "lt", value: step },
+          // The row as this call read it: a parallel setup that replaced it
+          // after the read wrote another secret and reset `lastStep`, and the
+          // code was checked against the old secret. Without this line the
+          // enable turns on a secret that no code confirmed.
+          { field: "updatedAt", op: "eq", value: row.updatedAt },
+        ],
+        // The setup's codes move to the factor row; this column is unread from version 8 on.
+        { enabledAt: now, lastStep: step, backupCodes: [], updatedAt: later(now, row.updatedAt) },
+      );
+      if (n === 0) return fail("invalid_code");
+      const added = await addMethod(
+        tx,
+        {
+          userId: user.id,
+          keepSessionId: session.id,
+          method: "totp",
+          first: { id: row.id, backupCodes: row.backupCodes },
+        },
+        now,
+        ended,
+      );
+      return ok({ first: added.first });
     });
-  });
-  if (done.ok) await sessionsEnded(config, ended, "two_factor");
-  return done;
+  } catch (err) {
+    // A parallel first enable of another method won the unique `userId`, or
+    // the row changed under every round. Caught here, outside: inside,
+    // Postgres has already aborted the transaction. The person retries.
+    if (
+      err instanceof FactorRaceError ||
+      (err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        err.model === "secondFactor")
+    )
+      return fail("conflict");
+    throw err;
+  }
+  if (!done.ok) return done;
+  if (done.value.first) await sessionsEnded(config, ended, "two_factor");
+  return totpStatus(config, { userId: user.id });
 }
 
-/** Deletes the factor, the trusted devices, and the challenges of the user in one transaction. The count of factor rows it deleted. */
-function removeTotp(config: ResolvedConfig, userId: string): Promise<number> {
-  return config.storage.transaction(async (tx) => {
-    const n = await tx.delete("totp", [{ field: "userId", op: "eq", value: userId }]);
-    await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: userId }]);
-    await deleteTwoFactorChallenges(tx, userId);
-    return n;
-  });
-}
-
-/** The in-process disable, with no code (plan 9f): for an app that checked the person another way, such as the compat shim after the password. */
+/**
+ * The in-process disable, with no code (plan 9f): it turns every method off
+ * (plan 12c). For the operator after identity proofing at the level of the
+ * enrollment (ASVS 5.0 6.4.4), and for an app that checked the person another
+ * way, such as the compat shim after the password.
+ */
 export async function disableTotp(
   config: ResolvedConfig,
   input: { userId: string },
 ): Promise<Result<{ ok: true }>> {
   if (!config.totp) return fail("not_found");
-  if (!(await enabledRow(config.storage, input.userId))) return fail("totp_not_enabled");
-  await removeTotp(config, input.userId);
+  if ((await disableSecondFactor(config, input.userId)) === 0) return fail("totp_not_enabled");
   return ok({ ok: true });
 }
 
-/** The route's disable: a current code or a backup code. */
+/**
+ * The route's disable of the TOTP method: a current code or a backup code.
+ * The last method turns the factor off (plan 12c).
+ */
 export async function disableTotpWithCode(
   config: ResolvedConfig,
   input: { user: UserRow; code: string },
@@ -407,40 +374,20 @@ export async function disableTotpWithCode(
   if (!config.totp) return fail("not_found");
   if (!(await codeCheckAllowed(config, input.user.id))) return fail("rate_limited");
   const now = config.clock.now();
+  const factor = await factorRow(config.storage, input.user.id);
   const row = await enabledRow(config.storage, input.user.id);
-  if (!row) return fail("totp_not_enabled");
-  if (!(await proveFactor(config, row, input.code, now))) return fail("invalid_code");
-  await removeTotp(config, input.user.id);
-  return ok({ ok: true });
-}
-
-/** A new list of backup codes, by a compare-and-set on `updatedAt`: a backup code spent at the same time does not come back. */
-async function replaceBackupCodes(
-  config: ResolvedConfig,
-  totp: ResolvedTotp,
-  row: TotpRow,
-  now: Date,
-): Promise<Result<{ backupCodes: string[] }>> {
-  let current: TotpRow | null = row;
-  // A hard bound, as `countAttempt` has: a lost round means that a parallel
-  // spend or replacement wrote first. Past the bound the answer is
-  // `conflict`, because the factor is still on.
-  for (let round = 0; round < REPLACE_ROUNDS; round++) {
-    if (!current || current.enabledAt === null) return fail("totp_not_enabled");
-    const { codes, hashes } = await newBackupCodes(config, totp, current.id);
-    const n = await config.storage.update(
-      "totp",
-      [
-        { field: "id", op: "eq", value: current.id },
-        { field: "updatedAt", op: "eq", value: current.updatedAt },
-      ],
-      { backupCodes: hashes, updatedAt: later(now, current.updatedAt) },
-    );
-    if (n === 1) return ok({ backupCodes: codes });
-    current = await config.storage.findOne("totp", [{ field: "id", op: "eq", value: current.id }]);
+  if (!factor || !row) return fail("totp_not_enabled");
+  if (!(await proveFactor(config, factor, input.code, now))) return fail("invalid_code");
+  try {
+    await config.storage.transaction(async (tx) => {
+      await tx.delete("totp", [{ field: "id", op: "eq", value: row.id }]);
+      await removeMethod(tx, input.user.id, "totp", now);
+    });
+  } catch (err) {
+    if (err instanceof FactorRaceError) return fail("conflict");
+    throw err;
   }
-  console.error("authtempo: backup code replacement gave up", row.id);
-  return fail("conflict");
+  return ok({ ok: true });
 }
 
 /** The in-process regeneration, with no code (plan 9f). */
@@ -450,9 +397,9 @@ export async function regenerateBackupCodes(
 ): Promise<Result<{ backupCodes: string[] }>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  const row = await enabledRow(config.storage, input.userId);
-  if (!row) return fail("totp_not_enabled");
-  return replaceBackupCodes(config, totp, row, config.clock.now());
+  const factor = await factorRow(config.storage, input.userId);
+  if (!factor) return fail("totp_not_enabled");
+  return replaceBackupCodes(config, totp, factor, config.clock.now());
 }
 
 /** The route's regeneration: a current code or a backup code. */
@@ -464,10 +411,13 @@ export async function regenerateBackupCodesWithCode(
   if (!totp) return fail("not_found");
   if (!(await codeCheckAllowed(config, input.user.id))) return fail("rate_limited");
   const now = config.clock.now();
-  const row = await enabledRow(config.storage, input.user.id);
-  if (!row) return fail("totp_not_enabled");
-  if (!(await proveFactor(config, row, input.code, now))) return fail("invalid_code");
-  return replaceBackupCodes(config, totp, row, now);
+  const factor = await factorRow(config.storage, input.user.id);
+  if (!factor) return fail("totp_not_enabled");
+  if (!(await proveFactor(config, factor, input.code, now))) return fail("invalid_code");
+  // Read again: a backup code that proved the call was spent from this row.
+  const current = await factorRow(config.storage, input.user.id);
+  if (!current) return fail("totp_not_enabled");
+  return replaceBackupCodes(config, totp, current, now);
 }
 
 /** The factor's state. It never answers the secret, the URI, or a code. */
@@ -477,16 +427,18 @@ export async function totpStatus(
 ): Promise<Result<TotpStatus>> {
   if (!config.totp) return fail("not_found");
   const now = config.clock.now();
-  const row = await enabledRow(config.storage, input.userId);
+  const factor = await factorRow(config.storage, input.userId);
   const devices = await config.storage.findMany("trustedDevice", [
     { field: "userId", op: "eq", value: input.userId },
     { field: "expiresAt", op: "gt", value: now },
   ]);
   return ok({
-    enabled: row !== null,
-    enabledAt: row?.enabledAt ?? null,
-    backupCodesLeft: row?.backupCodes.length ?? 0,
+    enabled: factor !== null,
+    enabledAt: factor?.enabledAt ?? null,
+    backupCodesLeft: factor?.backupCodes.length ?? 0,
     trustedDevices: devices.length,
+    methods: factor?.methods ?? [],
+    backupCodesVersion: factor?.backupCodesVersion ?? null,
   });
 }
 
@@ -612,7 +564,7 @@ export async function twoFactorGate(
 ): Promise<Result<TwoFactorPending> | null> {
   if (!config.totp) return null;
   const { user } = input;
-  if (!(await enabledRow(config.storage, user.id))) return null;
+  if (!(await factorRow(config.storage, user.id))) return null;
   if (await trusted(config, user.id, input.trustDevice, now)) return null;
   const challenge = randomToken(TWO_FACTOR_PREFIX);
   const valueHash = await sha256Hex(challenge);
@@ -688,11 +640,12 @@ export async function verifyTwoFactor(
   // guesses. After the live check: an unknown, spent, or expired challenge
   // costs the user nothing.
   if (!(await codeCheckAllowed(config, challenge.identifier))) return fail("rate_limited");
-  const row = await enabledRow(config.storage, challenge.identifier);
-  if (!row) return fail("invalid_token");
-  let backupCodesLeft = row.backupCodes.length;
+  const factor = await factorRow(config.storage, challenge.identifier);
+  if (!factor) return fail("invalid_token");
+  let backupCodesLeft = factor.backupCodes.length;
   if (code !== undefined) {
-    if (!(await acceptCode(config, row, code, now)))
+    const row = await enabledRow(config.storage, challenge.identifier);
+    if (!row || !(await acceptCode(config, row, code, now)))
       return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
   } else {
     // The spend commits here, before the session transaction. So a backup
@@ -700,7 +653,7 @@ export async function verifyTwoFactor(
     // challenge that matches zero rows (a reset or a change ran), or a
     // `session.beforeCreate` hook that refuses (hookGuard). The person then
     // uses another backup code.
-    const left = await acceptBackupCode(config, row, backupCode ?? "", now);
+    const left = await spendBackupCode(config, factor, backupCode ?? "", now);
     if (left === null)
       return fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
     backupCodesLeft = left;

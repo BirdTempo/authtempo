@@ -5,6 +5,7 @@ import {
   BACKUP_CODE_ALPHABET,
   base32Decode,
   base32Encode,
+  groupBackupCode,
   hotp,
   normalizeBackupCode,
   otpauthUri,
@@ -170,6 +171,18 @@ describe("backup codes (plan 9f)", () => {
     for (const c of "01ilo") expect(BACKUP_CODE_ALPHABET).not.toContain(c);
     expect(randomBackupCode(8)).toMatch(/^[abcdefghjkmnpqrstuvwxyz23456789]{8}$/);
     expect(randomBackupCode(12)).toHaveLength(12);
+  });
+
+  it("groups a backup code 5-5-5-4-4 at 23 characters and 5-5-5-5-4-4-4 at 32, and the normal form drops the dashes (plan 12c)", () => {
+    const code23 = "abcdefghjkmnpqrstuvwxyz";
+    expect(groupBackupCode(code23)).toBe("abcde-fghjk-mnpqr-stuv-wxyz");
+    expect(normalizeBackupCode(groupBackupCode(code23))).toBe(code23);
+    const code32 = `${code23}234567892`;
+    expect(
+      groupBackupCode(code32)
+        .split("-")
+        .map((g) => g.length),
+    ).toEqual([5, 5, 5, 5, 4, 4, 4]);
   });
 
   it("draws again for a byte of 248 or more, so no character is more likely", () => {

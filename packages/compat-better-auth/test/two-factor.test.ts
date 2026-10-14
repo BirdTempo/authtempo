@@ -100,21 +100,20 @@ describe("the two-factor options (plan 9f)", () => {
     const totp = (tf: TwoFactorOptions | null) => mapOptions(options(tf)).config.totp;
     expect(totp({})).toEqual({
       backupCodes: 10,
-      backupCodeLength: 10,
       trustDays: 30,
       trustCookieName: "better-auth.trust_device",
     });
     expect(
       totp({
         issuer: "Acme",
-        backupCodeOptions: { amount: 12, length: 8 },
+        backupCodeOptions: { amount: 12, length: 24 },
         trustDeviceMaxAge: 7 * 86_400,
         totpOptions: { digits: 6, period: 30 },
       }),
     ).toEqual({
       issuer: "Acme",
       backupCodes: 12,
-      backupCodeLength: 8,
+      backupCodeLength: 24,
       trustDays: 7,
       trustCookieName: "better-auth.trust_device",
     });
@@ -153,7 +152,7 @@ describe("the two-factor options (plan 9f)", () => {
         "plugins[two-factor].allowPasswordless: core asks for the password at every change of the factor",
         "plugins[two-factor].backupCodeOptions.amount: core takes an integer from 5 to 20",
         "plugins[two-factor].backupCodeOptions.customBackupCodesGenerate: core makes its own backup codes",
-        "plugins[two-factor].backupCodeOptions.length: core takes an integer from 8 to 12",
+        "plugins[two-factor].backupCodeOptions.length: core takes an integer from 23 to 32: a backup code holds 112 bits or more (ASVS 5.0 6.5.2)",
         "plugins[two-factor].backupCodeOptions.storeBackupCodes: core stores a keyed hash of each code; leave it out",
         "plugins[two-factor].issuer: core takes 1 to 80 characters with no colon",
         "plugins[two-factor].otpOptions: core has no email or SMS second factor; see the plan index",
@@ -199,7 +198,7 @@ describe("the two-factor paths (plan 9f)", () => {
     expect(body.method).toBe("totp");
     expect(String(body.totpURI).startsWith("otpauth://totp/Acme:pat%40example.com?")).toBe(true);
     expect(backupCodes).toHaveLength(10);
-    expect(backupCodes[0]).toHaveLength(10);
+    expect(backupCodes[0]).toHaveLength(27);
     expect(await json(confirm)).toMatchObject({ user: { email: EMAIL, twoFactorEnabled: true } });
     const s = await json(await get("/session", session));
     expect(s.user).toMatchObject({ twoFactorEnabled: true });

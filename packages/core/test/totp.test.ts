@@ -16,7 +16,7 @@ import {
 import { countAttempt } from "../src/engine/verification.js";
 import { openSealed } from "../src/primitives/aead.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
-import { base32Decode, otpauthUri, totpCode } from "../src/primitives/totp.js";
+import { base32Decode, normalizeBackupCode, otpauthUri, totpCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
 import {
@@ -41,7 +41,8 @@ describe("the setup (plan 9f)", () => {
       otpauthUri({ secret: base32Decode(secret), issuer: "api.example.com", account: EMAIL }),
     );
     expect(backupCodes).toHaveLength(10);
-    for (const c of backupCodes) expect(c).toMatch(/^[abcdefghjkmnpqrstuvwxyz23456789]{8}$/);
+    for (const c of backupCodes)
+      expect(normalizeBackupCode(c)).toMatch(/^[abcdefghjkmnpqrstuvwxyz23456789]{23}$/);
     const [row] = await auth.storage.findMany("totp", []);
     expect(row).toMatchObject({ userId: session.user.id, enabledAt: null, lastStep: 0 });
     const stored = JSON.stringify(row);
@@ -49,7 +50,9 @@ describe("the setup (plan 9f)", () => {
     for (const c of backupCodes) expect(stored).not.toContain(c);
     expect(row?.backupCodes).toEqual(
       await Promise.all(
-        backupCodes.map((c) => hmacSha256Hex(auth.config.secret, `${row?.id}:${c}`)),
+        backupCodes.map((c) =>
+          hmacSha256Hex(auth.config.secret, `${row?.id}:${normalizeBackupCode(c)}`),
+        ),
       ),
     );
     expect(
@@ -100,13 +103,13 @@ describe("the setup (plan 9f)", () => {
   });
 
   it("takes the issuer, the count, and the length from the config, and an issuer from the call", async () => {
-    const auth = totpAuth({ totp: { issuer: "Acme", backupCodes: 5, backupCodeLength: 12 } });
+    const auth = totpAuth({ totp: { issuer: "Acme", backupCodes: 5, backupCodeLength: 30 } });
     const session = await verifiedSession(auth);
     const r = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
     if (!r.ok) throw new Error(r.code);
     expect(r.value.uri.startsWith("otpauth://totp/Acme:ada%40example.com?")).toBe(true);
     expect(r.value.backupCodes).toHaveLength(5);
-    expect(r.value.backupCodes[0]).toHaveLength(12);
+    expect(normalizeBackupCode(r.value.backupCodes[0] ?? "")).toHaveLength(30);
     const custom = await setupTotp(auth.config, {
       userId: session.user.id,
       password: PASSWORD,
@@ -198,7 +201,14 @@ describe("the enable (plan 9f)", () => {
       });
     expect(await enableTotp(auth.config, { session, code: previous })).toEqual({
       ok: true,
-      value: { enabled: true, enabledAt: now, backupCodesLeft: 10, trustedDevices: 0 },
+      value: {
+        enabled: true,
+        enabledAt: now,
+        backupCodesLeft: 10,
+        trustedDevices: 0,
+        methods: ["totp"],
+        backupCodesVersion: 2,
+      },
     });
     const [row] = await auth.storage.findMany("totp", []);
     expect(row?.lastStep).toBe(Math.floor(now.getTime() / 30_000) - 1);
@@ -356,7 +366,14 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
   it("answers the status: off, unconfirmed, on, and the live trusted devices only", async () => {
     const auth = totpAuth();
     const session = await verifiedSession(auth);
-    const off = { enabled: false, enabledAt: null, backupCodesLeft: 0, trustedDevices: 0 };
+    const off = {
+      enabled: false,
+      enabledAt: null,
+      backupCodesLeft: 0,
+      trustedDevices: 0,
+      methods: [],
+      backupCodesVersion: null,
+    };
     expect(await totpStatus(auth.config, { userId: session.user.id })).toEqual({
       ok: true,
       value: off,
@@ -384,7 +401,14 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
     await device("old", new Date(at.getTime() - 60_000));
     expect(await totpStatus(auth.config, { userId: session.user.id })).toEqual({
       ok: true,
-      value: { enabled: true, enabledAt: at, backupCodesLeft: 10, trustedDevices: 1 },
+      value: {
+        enabled: true,
+        enabledAt: at,
+        backupCodesLeft: 10,
+        trustedDevices: 1,
+        methods: ["totp"],
+        backupCodesVersion: 2,
+      },
     });
   });
 

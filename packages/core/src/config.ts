@@ -263,7 +263,12 @@ export interface TotpConfig {
   issuer?: string;
   /** The backup codes per setup and per regeneration, 5 to 20. Default 10. */
   backupCodes?: number;
-  /** The characters of a backup code, 8 to 12. Default 8. */
+  /**
+   * The characters of a backup code, 23 to 32. Default 23: 23 characters of a
+   * 31-symbol alphabet hold 113.9 bits, above the 112 bits at which ASVS 5.0
+   * 6.5.2 allows a standard hash. Core stores HMAC-SHA256 under `secret`, so a
+   * shorter code would need a slow salted hash on every wrong guess (plan 12c).
+   */
   backupCodeLength?: number;
   /** The life of a trusted device, 1 to 365 days. Default 30. */
   trustDays?: number;
@@ -858,7 +863,7 @@ function resolveTotp(
   if (!hasPassword) {
     if (input !== undefined)
       throw new ConfigError(
-        "totp needs a password config: the second factor gates the password sign-in only",
+        "totp needs a password config: the enable of each method proves the password",
       );
     return null;
   }
@@ -891,9 +896,13 @@ function resolveTotp(
   const backupCodes = o.backupCodes ?? 10;
   if (!Number.isSafeInteger(backupCodes) || backupCodes < 5 || backupCodes > 20)
     throw new ConfigError("totp.backupCodes must be an integer from 5 to 20");
-  const backupCodeLength = o.backupCodeLength ?? 8;
-  if (!Number.isSafeInteger(backupCodeLength) || backupCodeLength < 8 || backupCodeLength > 12)
-    throw new ConfigError("totp.backupCodeLength must be an integer from 8 to 12");
+  // 23 characters is the shortest code of 112 bits (ASVS 5.0 6.5.2, owner decision 3 of
+  // 2026-10-14). 32 bounds the row and the typing.
+  const backupCodeLength = o.backupCodeLength ?? 23;
+  if (!Number.isSafeInteger(backupCodeLength) || backupCodeLength < 23 || backupCodeLength > 32)
+    throw new ConfigError(
+      "totp.backupCodeLength must be an integer from 23 to 32: a backup code holds 112 bits or more (ASVS 5.0 6.5.2)",
+    );
   const trustDays = o.trustDays ?? 30;
   if (!Number.isSafeInteger(trustDays) || trustDays < 1 || trustDays > 365)
     throw new ConfigError("totp.trustDays must be an integer from 1 to 365");

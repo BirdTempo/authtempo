@@ -543,7 +543,7 @@ describe("totp (plan 9f)", () => {
     expect(on).toMatchObject({
       issuer: "api.example.com",
       backupCodes: 10,
-      backupCodeLength: 8,
+      backupCodeLength: 23,
       trustDays: 30,
       trustCookieName: "tempo_totp_trust",
     });
@@ -556,7 +556,7 @@ describe("totp (plan 9f)", () => {
         totp: {
           issuer: "Acme",
           backupCodes: 20,
-          backupCodeLength: 12,
+          backupCodeLength: 32,
           trustDays: 365,
           trustCookieName: "better-auth.trust_device",
         },
@@ -564,7 +564,7 @@ describe("totp (plan 9f)", () => {
     ).toMatchObject({
       issuer: "Acme",
       backupCodes: 20,
-      backupCodeLength: 12,
+      backupCodeLength: 32,
       trustDays: 365,
       trustCookieName: "better-auth.trust_device",
     });
@@ -599,7 +599,8 @@ describe("totp (plan 9f)", () => {
   it("refuses a value out of range, a key core does not have, a page that is not a function, and totp without password", () => {
     const ISSUER = "totp.issuer must be 1 to 80 characters with no control character and no colon";
     const CODES = "totp.backupCodes must be an integer from 5 to 20";
-    const LENGTH = "totp.backupCodeLength must be an integer from 8 to 12";
+    const LENGTH =
+      "totp.backupCodeLength must be an integer from 23 to 32: a backup code holds 112 bits or more (ASVS 5.0 6.5.2)";
     const DAYS = "totp.trustDays must be an integer from 1 to 365";
     const COOKIE =
       "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name";
@@ -611,8 +612,9 @@ describe("totp (plan 9f)", () => {
       [{ backupCodes: 4 }, CODES],
       [{ backupCodes: 21 }, CODES],
       [{ backupCodes: 10.5 }, CODES],
-      [{ backupCodeLength: 7 }, LENGTH],
-      [{ backupCodeLength: 13 }, LENGTH],
+      [{ backupCodeLength: 22 }, LENGTH],
+      [{ backupCodeLength: 33 }, LENGTH],
+      [{ backupCodeLength: 8 }, LENGTH],
       [{ trustDays: 0 }, DAYS],
       [{ trustDays: 366 }, DAYS],
       [{ trustCookieName: "has space" }, COOKIE],
@@ -628,7 +630,7 @@ describe("totp (plan 9f)", () => {
     for (const [totp, message] of bad)
       expect(() => resolveConfig({ ...pw, totp: totp as never })).toThrowError(message);
     expect(() => resolveConfig({ ...base, totp: {} })).toThrowError(
-      "totp needs a password config: the second factor gates the password sign-in only",
+      "totp needs a password config: the enable of each method proves the password",
     );
   });
 });

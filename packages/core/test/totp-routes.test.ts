@@ -106,6 +106,8 @@ describe("the TOTP routes (plan 9f)", () => {
       enabledAt: enrolledAt.toISOString(),
       backupCodesLeft: 10,
       trustedDevices: 0,
+      methods: ["totp"],
+      backupCodesVersion: 2,
     });
     const logged = JSON.stringify(log.map((s) => s.mock.calls));
     for (const secret of [f.secret, f.uri, ...f.backupCodes]) {

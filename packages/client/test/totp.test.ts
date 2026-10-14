@@ -38,6 +38,8 @@ describe("totp (plan 9f)", () => {
       enabledAt: "2026-01-01T00:00:00.000Z",
       backupCodesLeft: 10,
       trustedDevices: 0,
+      methods: ["totp"],
+      backupCodesVersion: 2,
     });
     expect(await browser.totp.status()).toEqual({ ok: true, value: enabled });
   });

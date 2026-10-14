@@ -277,7 +277,8 @@ export interface EmailOtpOptions {
  * totp/index.d.mts, backup-codes/index.d.mts, read 2026-10-13). Plan 9f maps
  * `issuer`, `backupCodeOptions.amount` and `length`, and `trustDeviceMaxAge`;
  * `totpOptions.digits` 6 and `period` 30 and `accountLockout: { enabled: false }`
- * are accepted; the check refuses every other key by name.
+ * are accepted; the check refuses every other key by name. Core takes a
+ * `length` of 23 to 32 (plan 12c).
  */
 export interface TwoFactorOptions {
   issuer?: string;

@@ -131,7 +131,6 @@ describe("betterAuth", () => {
       emailOtpExpiresIn: 300,
       emailOtpAllowedAttempts: 3,
       twoFactorBackupCodes: 10,
-      twoFactorBackupCodeLength: 10,
       trustDeviceMaxAge: 2592000,
       basePath: "/api/auth",
     });

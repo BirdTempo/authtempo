@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { createAuth } from "@authtempo/core";
 import { beforeEach, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 
@@ -55,4 +56,48 @@ it("copies each enabled totp row with the same id and version 1, and skips an un
       updatedAt: at,
     },
   ]);
+});
+
+/** HMAC-SHA256 hex of `text` under `key`: the backup code hash of spec 8.11 item 3. */
+async function hmacHex(key: string, text: string): Promise<string> {
+  const k = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(text)));
+  return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+it("lets a plan 9f backup code of 8 characters pass through the engine after the copy, and the replacement writes version 2 (plan 12c)", async () => {
+  const db = createD1Adapter(env.DB);
+  const secret = "0123456789abcdef0123456789abcdef";
+  const auth = createAuth({
+    baseURL: "https://api.example.com",
+    secret,
+    trustedOrigins: [],
+    storage: db,
+    mail: { send: async () => {} },
+    password: {},
+  });
+  const user = await db.create("user", {
+    id: "u1",
+    email: "ada@example.com",
+    emailVerified: true,
+    name: null,
+    image: null,
+    createdAt: at,
+    updatedAt: at,
+  });
+  const code = "abcd2345";
+  await db.create("totp", totpRow("f1", "u1", at, [await hmacHex(secret, `f1:${code}`)]));
+  await env.DB.prepare(copyStatement()).run();
+  const totp = auth.api.totp;
+  if (!totp) throw new Error("totp is off");
+  expect((await totp.regenerateBackupCodesWithCode({ user, code })).ok).toBe(true);
+  expect(await db.findOne("secondFactor", [{ field: "id", op: "eq", value: "f1" }])).toMatchObject({
+    backupCodesVersion: 2,
+  });
 });

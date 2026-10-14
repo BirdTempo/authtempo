@@ -36,8 +36,8 @@ export const BETTER_AUTH_DEFAULTS = {
   emailOtpAllowedAttempts: 3,
   // dist/plugins/two-factor/backup-codes/index.mjs (generateBackupCodesFn: amount 10,
   // length 10) and index.mjs (trustDeviceMaxAge 30 days), read 2026-10-13 (plan 9f).
+  // Better Auth's length of 10 is not mapped since plan 12c: core's codes hold 112 bits.
   twoFactorBackupCodes: 10,
-  twoFactorBackupCodeLength: 10,
   trustDeviceMaxAge: 2_592_000,
   basePath: "/api/auth",
 } as const;
@@ -258,8 +258,11 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           ...(tf.options.issuer !== undefined ? { issuer: tf.options.issuer } : {}),
           backupCodes:
             tf.options.backupCodeOptions?.amount ?? BETTER_AUTH_DEFAULTS.twoFactorBackupCodes,
-          backupCodeLength:
-            tf.options.backupCodeOptions?.length ?? BETTER_AUTH_DEFAULTS.twoFactorBackupCodeLength,
+          // Absent: core's 23 characters (113.9 bits, ASVS 5.0 6.5.2, plan 12c).
+          // check-options refuses 8 to 22, so a set value is 23 to 32.
+          ...(tf.options.backupCodeOptions?.length !== undefined
+            ? { backupCodeLength: tf.options.backupCodeOptions.length }
+            : {}),
           trustDays: (tf.options.trustDeviceMaxAge ?? BETTER_AUTH_DEFAULTS.trustDeviceMaxAge) / DAY,
           trustCookieName: TRUST_DEVICE_COOKIE,
         }

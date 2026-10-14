@@ -271,8 +271,12 @@ const PLUGIN_RULES: Record<string, Rule> = {
           refuse(out, p, "core takes an integer from 5 to 20");
       },
       length: (v, p, out) => {
-        if (typeof v !== "number" || !Number.isInteger(v) || v < 8 || v > 12)
-          refuse(out, p, "core takes an integer from 8 to 12");
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 23 || v > 32)
+          refuse(
+            out,
+            p,
+            "core takes an integer from 23 to 32: a backup code holds 112 bits or more (ASVS 5.0 6.5.2)",
+          );
       },
       customBackupCodesGenerate: refused("core makes its own backup codes"),
       storeBackupCodes: refused("core stores a keyed hash of each code; leave it out"),
