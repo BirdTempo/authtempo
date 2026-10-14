@@ -46,8 +46,8 @@ describe("an OAuth access token (plan 11d)", () => {
     const server = makeServer();
     const s = await signedIn(server);
     const at = await accessToken(server, s.cookie);
-    // The server lists MCP as a resource but accepts session JWTs only: the
-    // access token must not pass, though its aud is the resource of the URL.
+    // The server lists MCP as a resource but accepts session JWTs only.
+    // The access token must not pass, though its aud is the resource of the URL.
     const v = createVerifier({
       issuer: ISSUER,
       audience: "https://files.example.com",

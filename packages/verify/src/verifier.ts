@@ -99,18 +99,29 @@ function pathOf(operation: VerifyOperation): string {
   return c.path;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * True for an object with a string `id`: the run-time check of a 200 answer of the auth app.
+ * The client types the body at compile time only.
+ */
+function hasId(value: unknown): boolean {
+  return isObject(value) && typeof value.id === "string" && value.id !== "";
+}
+
 async function sha256Hex(text: string): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
   return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
- * The claim rule of a session JWT. A copy of `verifySessionJwt` in core's
- * `engine/jwt.ts` (the checks after the signature): `typ` is `JWT`, `iss` is
- * the issuer, `sub` and `sid` are strings, `exp` is a number after now with
- * no clock skew, and `aud` (a string or a list) holds an entry of the
- * audience. THE TWO COPIES MUST STAY EQUAL: `test/engine-parity.test.ts` asks
- * both about the same tokens and pins the same answer.
+ * The claim rule of a session JWT: a copy of `verifySessionJwt` in core's `engine/jwt.ts`.
+ * It holds the checks after the signature. `typ` is `JWT`, and `iss` is the issuer.
+ * `sub` and `sid` are strings, and `exp` is a number after now with no clock skew.
+ * `aud`, a string or a list, holds an entry of the audience.
+ * THE TWO COPIES MUST STAY EQUAL: `test/engine-parity.test.ts` asks both copies about the same tokens.
  */
 type Claims = Record<string, unknown>;
 
@@ -127,14 +138,14 @@ function sessionClaimsPass(
 }
 
 /**
- * The claim rule of an access token. A copy of `resolveAccessToken` in core's
- * `engine/oauth-token.ts` and of the resource check of `callerFromRequest` in
- * `engine/tokens.ts`: `typ` is `at+jwt`, `iss` is the issuer, `aud` is a
- * string and is the resource that the request URL falls under (by
- * `resourceOf`, so it is in `resources`), `exp` is a number after now with no
- * clock skew, and `sub`, `client_id`, `scope`, and `jti` are strings. Core
- * also checks that the user exists; an offline check cannot. THE COPIES MUST
- * STAY EQUAL: `test/engine-parity.test.ts` pins them.
+ * The claim rule of an access token: a copy of `resolveAccessToken` in core's `engine/oauth-token.ts`.
+ * It also copies the resource check of `callerFromRequest` in `engine/tokens.ts`.
+ * `typ` is `at+jwt`, and `iss` is the issuer.
+ * `aud` is a string, and it is the resource that the request URL falls under, by `resourceOf`.
+ * `exp` is a number after now with no clock skew.
+ * `sub`, `client_id`, `scope`, and `jti` are strings.
+ * Core also checks that the user exists; an offline check cannot.
+ * THE COPIES MUST STAY EQUAL: `test/engine-parity.test.ts` pins them.
  */
 function accessClaimsPass(
   p: Claims,
@@ -154,11 +165,11 @@ function accessClaimsPass(
 }
 
 /**
- * The resource-server SDK (plan 11d, spec 20). A session JWT and an access
- * token verify offline against the key set; a `tk_` token and a `ts_` token
- * verify by one call to the auth app. It reads the `Authorization` header
- * only: a resource server never reads the session cookie. A wrong config
- * throws here.
+ * The resource-server SDK (plan 11d, spec 20).
+ * A session JWT and an access token verify offline against the key set.
+ * A `tk_` token and a `ts_` token verify by one call to the auth app.
+ * It reads the `Authorization` header only: a resource server never reads the session cookie.
+ * A wrong config throws here.
  */
 export function createVerifier(options: VerifierOptions): Verifier {
   let issuerURL: URL;
@@ -170,9 +181,13 @@ export function createVerifier(options: VerifierOptions): Verifier {
   if (
     (issuerURL.protocol !== "https:" && issuerURL.protocol !== "http:") ||
     issuerURL.search ||
-    issuerURL.hash
+    issuerURL.hash ||
+    issuerURL.username ||
+    issuerURL.password
   )
-    throw new Error("authtempo verify: issuer must be an http or https URL with no query");
+    throw new Error(
+      "authtempo verify: issuer must be an http or https URL with no query, fragment, or user info",
+    );
   const issuer = options.issuer.replace(/\/$/, "");
   const accept = options.accept ?? ["session-jwt"];
   if (accept.length === 0 || accept.some((k) => !KINDS.includes(k)))
@@ -205,8 +220,8 @@ export function createVerifier(options: VerifierOptions): Verifier {
     throw new Error("authtempo verify: accept holds session-jwt, so audience is required");
   if (accept.includes("oauth") && resources.length === 0)
     throw new Error("authtempo verify: accept holds oauth, so resources is required");
-  // Spec 8.12 (review I-2): one key signs both kinds with one issuer, so a URL that is both
-  // would let a token of one kind pass as the other where a check skips typ.
+  // Spec 8.12 (review I-2): one key signs both kinds of token with one issuer.
+  // So a URL that is both could let one kind pass as the other where a check skips typ.
   for (const a of audience)
     if (resources.includes(a))
       throw new Error(`authtempo verify: ${a} is both an audience and a resource`);
@@ -237,6 +252,8 @@ export function createVerifier(options: VerifierOptions): Verifier {
       token: () => bearer,
     });
   const none: VerifyResult = { ok: true, value: null };
+  // A 200 answer whose shape is not core's: a proxy page or a wrong route, never a caller.
+  const unexpected200: VerifyResult = { ok: false, code: "unexpected", status: 200 };
   const apiCache = new Map<string, { until: number; caller: Caller }>();
 
   async function apiToken(bearer: string): Promise<VerifyResult> {
@@ -248,7 +265,13 @@ export function createVerifier(options: VerifierOptions): Verifier {
       apiToken: ApiTokenSummaryJSON;
     }>("GET", "/tokens/current");
     if (!r.ok) return r.code === "unauthorized" ? none : r;
-    const caller: Caller = { kind: "api-token", user: r.value.user, apiToken: r.value.apiToken };
+    const body: unknown = r.value;
+    if (!isObject(body) || !hasId(body.user) || !hasId(body.apiToken)) return unexpected200;
+    const caller: Caller = {
+      kind: "api-token",
+      user: body.user as PublicSession["user"],
+      apiToken: body.apiToken as ApiTokenSummaryJSON,
+    };
     if (apiTokenSeconds > 0) {
       apiCache.delete(hash);
       apiCache.set(hash, { until: now() + apiTokenSeconds * 1000, caller });
@@ -264,9 +287,15 @@ export function createVerifier(options: VerifierOptions): Verifier {
   async function sessionToken(token: string): Promise<VerifyResult> {
     const r = await transport(token)<PublicSession>("GET", "/session");
     if (!r.ok) return r.code === "unauthorized" ? none : r;
+    const body: unknown = r.value;
+    if (!isObject(body) || !hasId(body.user) || !hasId(body.session)) return unexpected200;
     return {
       ok: true,
-      value: { kind: "session-token", user: r.value.user, session: r.value.session },
+      value: {
+        kind: "session-token",
+        user: body.user as PublicSession["user"],
+        session: body.session as PublicSession["session"],
+      },
     };
   }
 
@@ -287,13 +316,15 @@ export function createVerifier(options: VerifierOptions): Verifier {
     const nowSeconds = Math.floor(now() / 1000);
     if (kind === "session-jwt") {
       if (!sessionClaimsPass(p, issuer, audience, nowSeconds)) return none;
-      // Core writes these claims in every session JWT (`mintSessionJwt`), and only core
-      // holds the key, so a token without them is not core's: null, never a throw.
+      // Core writes these claims in every session JWT (`mintSessionJwt`), and only core holds the key.
+      // So a token without them is not core's: null, never a throw.
       if (typeof p.email !== "string" || typeof p.email_verified !== "boolean") return none;
       if (options.checkSessionEnd) {
         const live = await transport(token)<{ live: boolean }>("POST", "/token/live");
         if (!live.ok) return live.code === "unauthorized" ? none : live;
-        if (live.value.live !== true) return none;
+        const answer: unknown = live.value;
+        if (!isObject(answer) || typeof answer.live !== "boolean") return unexpected200;
+        if (!answer.live) return none;
       }
       return {
         ok: true,
@@ -328,8 +359,8 @@ export function createVerifier(options: VerifierOptions): Verifier {
 
   return {
     async verifyRequest(request) {
-      // The bearer only (Task 1 review): a resource server never reads the
-      // session cookie, so a browser's cookie on a cross-site request is no credential here.
+      // The bearer only (Task 1 review): a resource server never reads the session cookie.
+      // So a browser's cookie on a cross-site request is no credential here.
       const bearer = readBearer(request);
       if (bearer === null) return none;
       if (bearer.startsWith(API_TOKEN_PREFIX))

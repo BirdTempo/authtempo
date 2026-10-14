@@ -1,8 +1,12 @@
 export { VERIFY_CALLS, type VerifyOperation } from "./calls.js";
 export { TIMEOUT_DEFAULT_MS, TIMEOUT_MAX_MS, TIMEOUT_MIN_MS } from "./fetch.js";
 export {
+  FAILED_READ_PAUSE_MS,
   KEY_SET_DEFAULT_SECONDS,
+  KEY_SET_MAX_BYTES,
+  KEY_SET_MAX_KEYS,
   KEY_SET_MAX_SECONDS,
+  KEY_SET_MIN_SECONDS,
   UNKNOWN_KID_EVERY_MS,
 } from "./jwks.js";
 export {

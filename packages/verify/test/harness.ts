@@ -30,10 +30,10 @@ export function makeClock(start = "2026-01-01T00:00:00.000Z") {
 }
 
 /**
- * A core instance on the memory adapter with JWT minting for FILES and the
- * provider for MCP, a clock that the test moves, and a fetch that counts each
- * path and can fail as an outage does. No test calls the network: the fetch
- * hands each request to `auth.handle`.
+ * A core instance on the memory adapter, with JWT minting for FILES and the provider for MCP.
+ * It has a clock that the test moves.
+ * Its fetch counts each path and can fail as an outage does.
+ * No test calls the network: the fetch hands each request to `auth.handle`.
  */
 export function makeServer(extra: Partial<AuthConfig> = {}) {
   const clock = makeClock();
@@ -176,4 +176,36 @@ export function expOf(token: string): number {
   const part = token.split(".")[1] ?? "";
   const json = atob(part.replace(/-/g, "+").replace(/_/g, "/"));
   return (JSON.parse(json) as { exp: number }).exp;
+}
+
+function b64url(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * A test key of its own: an Ed25519 pair, its key set, and a signer that takes any header.
+ * A test of the header rules needs a token that core never mints (no typ, or another typ).
+ * The key set is served by a stub fetch, so the token verifies only by this key.
+ */
+export async function ownKey(kid = "own-1") {
+  const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey;
+  const keySet = {
+    keys: [{ kty: "OKP", crv: "Ed25519", x: jwk.x, kid, alg: "EdDSA", use: "sig" }],
+  };
+  const enc = new TextEncoder();
+  return {
+    keySet,
+    fetch: (async () => Response.json(keySet)) as typeof globalThis.fetch,
+    async sign(header: Record<string, unknown>, payload: Record<string, unknown>) {
+      const input = `${b64url(enc.encode(JSON.stringify({ alg: "EdDSA", kid, ...header })))}.${b64url(enc.encode(JSON.stringify(payload)))}`;
+      const sig = await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, enc.encode(input));
+      return `${input}.${b64url(new Uint8Array(sig))}`;
+    },
+  };
 }

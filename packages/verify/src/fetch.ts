@@ -1,9 +1,9 @@
 /**
- * The fetch rules of the verifier (plan 11d). Each call to the auth app
- * follows no redirect, as every provider fetch of core does since plan 12b:
- * an answer must not steer the call to another address. Each call has a
- * deadline that the verifier owns, so a hung auth app costs a resource
- * server `timeoutMs`, not a hung request.
+ * The fetch rules of the verifier (plan 11d).
+ * Each call to the auth app follows no redirect, as every provider fetch of core does since plan 12b.
+ * An answer must not steer the call to another address.
+ * Each call has a deadline that the verifier owns.
+ * So a hung auth app costs a resource server `timeoutMs`, not a hung request.
  */
 
 /** The deadline of one call when the options name none. */
@@ -14,11 +14,10 @@ export const TIMEOUT_MIN_MS = 100;
 export const TIMEOUT_MAX_MS = 30_000;
 
 /**
- * The fetch that every call of the verifier goes through. A 3xx answer
- * comes back with its status and no body, so the reader answers
- * `unexpected` with that status. An `opaqueredirect` answer (the form a
- * browser-like runtime gives under `redirect: "manual"`) has no status to
- * pass on: it rejects, and the reader answers `network` with status 0.
+ * The fetch that every call of the verifier goes through.
+ * A 3xx answer comes back with its status and no body, so the reader answers `unexpected` with that status.
+ * A browser-like runtime gives an `opaqueredirect` answer under `redirect: "manual"`.
+ * That answer has no status to pass on, so it rejects, and the reader answers `network` with status 0.
  */
 export function ownedFetch(fetchFn: typeof fetch, timeoutMs: number): typeof fetch {
   return async (input, init) => {

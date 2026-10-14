@@ -1,8 +1,8 @@
 // The file list of a pack of @authtempo/verify (plan 11d).
-// Publication is on hold; this check proves the `files` entry with no
-// publish. pnpm 12.8.1 prints the list with `pnpm pack --dry-run --json`, and
-// the answer is one object with a `files` list of `{ path }` (the same read
-// as packages/import/worker/proof/pack-files.mjs, checked 2026-10-12).
+// Publication is on hold. This check proves the `files` entry with no publish.
+// pnpm 12.8.1 prints the list with `pnpm pack --dry-run --json`.
+// The answer is one object with a `files` list of `{ path }`.
+// This is the same read as packages/import/worker/proof/pack-files.mjs, checked 2026-10-12.
 // The package's test script runs `tsc` first, so `dist` is newer than the
 // source that this check reads it for.
 import { spawnSync } from "node:child_process";

@@ -135,6 +135,13 @@ describe("a session JWT (plan 11d)", () => {
       /timeoutMs/,
     );
     expect(() => createVerifier({ issuer: ISSUER, audience: [""] })).toThrow(/audience/);
+    // Task 9 review L2: an issuer with user info.
+    expect(() =>
+      createVerifier({ issuer: "https://u:p@api.example.com/auth", audience: FILES }),
+    ).toThrow(/user info/);
+    expect(() =>
+      createVerifier({ issuer: "https://u@api.example.com/auth", audience: FILES }),
+    ).toThrow(/user info/);
   });
 
   it("refuses a resource that core's resource rule refuses, at construction and not per request", () => {

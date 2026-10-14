@@ -2,9 +2,9 @@
  * The 401 and the 403 of a resource server: RFC 6750 section 3 with the
  * resource metadata link of RFC 9728 section 5.1. `resource_metadata` names
  * the protected-resource document that `auth.wellKnown` serves for the
- * resource (spec 8.13 item 5). The MCP authorization revision 2026-07-28
- * (read 2026-10-14): a 401 SHOULD carry `scope`, a 403 names every scope of
- * the operation in one challenge, and `offline_access` SHOULD NOT be in it.
+ * resource (spec 8.13 item 5).
+ * The MCP authorization revision 2026-07-28 was read on 2026-10-14. A 401 SHOULD carry `scope`.
+ * A 403 names every scope of the operation in one challenge. `offline_access` SHOULD NOT be in it.
  */
 
 export interface ChallengeInput {

@@ -5,8 +5,22 @@ import type { PublicJwk } from "@authtempo/core/credentials";
 export const KEY_SET_DEFAULT_SECONDS = 300;
 /** A max-age above this is cut to it, so a wrong header cannot pin an old key set for a day. */
 export const KEY_SET_MAX_SECONDS = 3600;
+/** A max-age below this is raised to it, so `max-age=0` cannot cause a read at each request. */
+export const KEY_SET_MIN_SECONDS = 60;
 /** An unknown `kid` reads the key set again at most once in this window. */
 export const UNKNOWN_KID_EVERY_MS = 30_000;
+/** After a failed read, the cache answers the same failure for this long with no read. */
+export const FAILED_READ_PAUSE_MS = 5000;
+/**
+ * The largest key set body that the cache reads. Core's largest set measured 18,998 bytes
+ * (ES256, 101 keys; see test/jwks-caps.test.ts), so the cap is about 3.4 times that.
+ */
+export const KEY_SET_MAX_BYTES = 65_536;
+/**
+ * The most keys that a set may hold. Core lists the signing key and at most 100 retired keys
+ * (`JWKS_RETIRED_MAX` of core's engine/jwt.ts). A lower cap refuses a set that core can send.
+ */
+export const KEY_SET_MAX_KEYS = 101;
 
 export interface KeyCache {
   /** The public key of `kid`, null when the set lacks it, or a failure when the set does not answer. */
@@ -16,19 +30,44 @@ export interface KeyCache {
 function maxAgeSeconds(cacheControl: string | null): number {
   const m = /(?:^|,)\s*max-age=(\d+)/i.exec(cacheControl ?? "");
   if (!m?.[1]) return KEY_SET_DEFAULT_SECONDS;
-  return Math.min(Number(m[1]), KEY_SET_MAX_SECONDS);
+  return Math.max(KEY_SET_MIN_SECONDS, Math.min(Number(m[1]), KEY_SET_MAX_SECONDS));
+}
+
+/** The body as text, or null when it is longer than the cap. */
+async function cappedText(res: Response): Promise<string | null> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > KEY_SET_MAX_BYTES) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    all.set(p, at);
+    at += p.byteLength;
+  }
+  return new TextDecoder().decode(all);
 }
 
 const B64URL = /^[A-Za-z0-9_-]+$/;
 
 /**
  * The key of one entry of the set, or null (plan 11d, Task 1 review).
- * `PublicJwk` is a compile-time type only, so each fetched entry is checked
- * here at run time: `kty`, `crv`, and `alg` must be one of the two pairs that
- * core signs with (OKP, Ed25519, EdDSA or EC, P-256, ES256), `use` must be
- * `sig` when present, and `key_ops` must hold `verify` when present. An entry
- * that fails is dropped, so a token that names it answers null: a bad key
- * fails closed. The answer is a new object of the known fields only.
+ * `PublicJwk` is a compile-time type only, so the cache checks each fetched entry here.
+ * `kty`, `crv`, and `alg` must be OKP, Ed25519, and EdDSA, or EC, P-256, and ES256.
+ * An entry may leave out `use`; when it has one, the value must be `sig`.
+ * An entry may leave out `key_ops`; when it has one, the list must hold `verify`.
+ * An entry that fails is dropped, so a token that names it answers null: a bad key fails closed.
+ * The answer is a new object of the known fields only.
  */
 export function publicKeyOf(entry: unknown): PublicJwk | null {
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
@@ -52,12 +91,13 @@ export function publicKeyOf(entry: unknown): PublicJwk | null {
 }
 
 /**
- * The verifier's own key cache (plan 11d): the set lives for the max-age of
- * its answer, an unknown `kid` reads it again at most once per 30 s, and a
- * burst of verifies at the start causes one read. A read that fails answers
- * the failure, never a stale set, so an outage is not a bad token. The
- * verifier holds no retirement clock: core lists a retired key for 24 hours
- * (spec 8.12) and drops it after, and the cache follows the set.
+ * The verifier's own key cache (plan 11d).
+ * The set lives for the max-age of its answer, from 60 s to 3600 s.
+ * An unknown `kid` reads the set again at most once per 30 s.
+ * A burst of verifies at the start causes one read.
+ * A read that fails answers the failure, never a stale set, so an outage is not a bad token.
+ * For 5 s after a failed read, the cache answers that failure with no read.
+ * The cache holds no retirement clock: core lists a retired key for 24 hours (spec 8.12).
  */
 export function createKeyCache(input: {
   url: string;
@@ -67,23 +107,26 @@ export function createKeyCache(input: {
   let keys: Map<string, PublicJwk> | null = null;
   let until = 0;
   let lastRead = Number.NEGATIVE_INFINITY;
+  let failure: { at: number; answer: ClientFailure } | null = null;
   let inFlight: Promise<ClientFailure | null> | null = null;
-  async function read(): Promise<ClientFailure | null> {
-    lastRead = input.now();
+  async function load(): Promise<ClientFailure | null> {
     let res: Response;
+    let text: string | null;
     try {
       res = await input.fetch(input.url, { headers: { accept: "application/json" } });
+      text = await cappedText(res);
     } catch {
       return { ok: false, code: "network", status: 0 };
     }
+    if (text === null) return { ok: false, code: "unexpected", status: res.status };
     let body: unknown;
     try {
-      body = await res.json();
+      body = JSON.parse(text);
     } catch {
       return { ok: false, code: "unexpected", status: res.status };
     }
     const list = (body as { keys?: unknown } | null)?.keys;
-    if (!res.ok || !Array.isArray(list))
+    if (!res.ok || !Array.isArray(list) || list.length > KEY_SET_MAX_KEYS)
       return { ok: false, code: "unexpected", status: res.status };
     const next = new Map<string, PublicJwk>();
     for (const entry of list) {
@@ -93,6 +136,12 @@ export function createKeyCache(input: {
     keys = next;
     until = input.now() + maxAgeSeconds(res.headers.get("cache-control")) * 1000;
     return null;
+  }
+  async function read(): Promise<ClientFailure | null> {
+    lastRead = input.now();
+    const failed = await load();
+    failure = failed ? { at: input.now(), answer: failed } : null;
+    return failed;
   }
   const refresh = (): Promise<ClientFailure | null> => {
     inFlight ??= read().finally(() => {
@@ -106,6 +155,7 @@ export function createKeyCache(input: {
       const stale = keys === null || now >= until;
       const unknown = !stale && !keys?.has(kid) && now - lastRead >= UNKNOWN_KID_EVERY_MS;
       if (stale || unknown) {
+        if (failure && now - failure.at < FAILED_READ_PAUSE_MS) return failure.answer;
         const failed = await refresh();
         if (failed) return failed;
       }

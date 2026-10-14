@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createVerifier, UNKNOWN_KID_EVERY_MS } from "../src/index.js";
+import { createVerifier, FAILED_READ_PAUSE_MS, UNKNOWN_KID_EVERY_MS } from "../src/index.js";
 import { FILES, ISSUER, makeServer, sessionJwt, signedIn, withBearer } from "./harness.js";
 
 async function setup() {
@@ -78,6 +78,8 @@ describe("the key cache (plan 11d)", () => {
       status: 0,
     });
     server.outage(null);
+    // The cache answers the failure for 5 s after it with no read (Task 9 review L1).
+    server.clock.advance(FAILED_READ_PAUSE_MS);
     expect((await v.verifyRequest(withBearer(FILES, token))).ok).toBe(true);
   });
 

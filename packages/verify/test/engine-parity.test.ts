@@ -19,10 +19,9 @@ import {
 /**
  * The verifier's claim rule is a copy of the engine's rule (`verifySessionJwt`
  * and `resolveAccessToken` in core's `engine/jwt.ts` and
- * `engine/oauth-token.ts`). The two copies must stay equal. This file asks both
- * copies about the same tokens, each minted by a real core instance, and pins
- * the same answer: a token that the engine accepts verifies, and a token that
- * it refuses answers null.
+ * `engine/oauth-token.ts`). The two copies must stay equal.
+ * This file asks both copies about the same tokens, and a real core instance mints each token.
+ * A token that the engine accepts must verify. A token that the engine refuses must answer null.
  */
 
 const OTHER = "https://other.example.com";

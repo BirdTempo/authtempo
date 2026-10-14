@@ -1,11 +1,10 @@
 import { expect, it } from "vitest";
 import { createVerifier } from "../src/index.js";
 
-// A real auth app. It runs only with AUTHTEMPO_LIVE_ISSUER set to the issuer
-// of a running auth app (`baseURL + basePath`), and the evidence of a build
-// does not count it. It proves the real fetch path: the key set answers
-// through `redirect: "manual"` and the owned deadline, so a token of an
-// unknown key answers null and not a failure.
+// A real auth app. The test runs only when AUTHTEMPO_LIVE_ISSUER holds the issuer of a running auth app.
+// The issuer is `baseURL + basePath`. The evidence of a build does not count this test.
+// It proves the real fetch path: the key set answers through `redirect: "manual"` and the owned deadline.
+// So a token of an unknown key answers null and not a failure.
 const issuer = (globalThis as { process?: { env: Record<string, string | undefined> } }).process
   ?.env.AUTHTEMPO_LIVE_ISSUER;
 

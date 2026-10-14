@@ -1,8 +1,7 @@
 import { createVerifier } from "../src/index.js";
 
-// The bundle proof of plan 11d: wrangler bundles this Worker with
-// no_nodejs_compat, and bundle-no-node.mjs fails on a node: import in the
-// verifier, the client, or the core entries that it pulls in.
+// The bundle proof of plan 11d: wrangler bundles this Worker with no_nodejs_compat.
+// bundle-no-node.mjs fails on a node: import in the verifier, the client, or the core entries.
 export default {
   async fetch(request: Request): Promise<Response> {
     const verifier = createVerifier({
