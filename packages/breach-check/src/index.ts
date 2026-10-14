@@ -6,8 +6,17 @@
  */
 
 export const RANGE_URL = "https://api.pwnedpasswords.com/range/";
-/** A padded answer has 800 to 1,000 lines of about 40 bytes. A larger body is not a true answer. */
-export const BODY_MAX_BYTES = 65_536;
+/**
+ * The cap of a range body. Measured with Add-Padding on 2026-10-15: eight
+ * ranges held 76 to 105 KB (about 2,000 lines each; 5BAA6 was 84,191 bytes in
+ * 2,054 lines). The HIBP page says padding adds 800 to 1,000 records; that is
+ * not the size of a range. 512 KB holds about five times the largest answer
+ * measured. A larger body is not a true answer.
+ */
+export const BODY_MAX_BYTES = 524_288;
+
+/** One true line of a range answer: a 35-character hex suffix and a count. */
+const LINE_RE = /^([0-9A-Fa-f]{35}):(\d{1,10})$/;
 
 export interface BreachCheckOptions {
   /** Default: the global fetch. */
@@ -16,7 +25,7 @@ export interface BreachCheckOptions {
   timeoutMs?: number;
   /** A count of this or more refuses the password. Default 1. */
   minCount?: number;
-  /** HIBP answers 403 to a request with no user agent. Default "authtempo-breach-check". */
+  /** The HIBP page requires a user agent on each request. Default "authtempo-breach-check". */
   userAgent?: string;
 }
 
@@ -107,13 +116,22 @@ export function createBreachCheck(
       console.error("authtempo breach-check: the body is over the cap");
       return "unavailable";
     }
+    // Count the true lines. A 200 with none (an empty body, a proxy page, a
+    // captive portal) is no answer: false there would fail open.
+    let lines = 0;
+    let found = false;
     for (const line of body.split("\n")) {
-      const [s, c] = line.trim().split(":");
-      const count = Number(c);
-      // A line with count 0 is padding (the HIBP page): skip it.
-      if (!s || !Number.isSafeInteger(count) || count === 0) continue;
-      if (s.toUpperCase() === suffix) return count >= minCount;
+      const m = LINE_RE.exec(line.trim());
+      if (!m?.[1] || !m[2]) continue;
+      lines++;
+      // A padded line has count 0 (the HIBP page). minCount is 1 or more, so a
+      // padded line never refuses, even when its random suffix equals ours.
+      if (m[1].toUpperCase() === suffix && Number(m[2]) >= minCount) found = true;
     }
-    return false;
+    if (lines === 0) {
+      console.error("authtempo breach-check: the body holds no range line");
+      return "unavailable";
+    }
+    return found;
   };
 }

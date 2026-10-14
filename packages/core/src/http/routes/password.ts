@@ -19,7 +19,7 @@ import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
-import { defaultPasswordVerifyPage } from "../password-pages.js";
+import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import {
@@ -68,8 +68,19 @@ const changeBody = z.object({
   newPassword: z.string().max(1024),
 });
 
+type PageError = NonNullable<ResetPageInput["error"]>;
+
 /** The refusals the reset page shows. The link is still valid after each. */
-const PAGE_ERRORS = new Set(["password_policy", "password_breached", "breach_check_unavailable"]);
+const PAGE_ERRORS: ReadonlySet<string> = new Set<PageError>([
+  "password_policy",
+  "password_breached",
+  "breach_check_unavailable",
+]);
+
+/** A guard, not a cast: a code outside `PAGE_ERRORS` stays a string. */
+function isPageError(code: string | null): code is PageError {
+  return code !== null && PAGE_ERRORS.has(code);
+}
 
 /** No route without a `password` config, so the router answers 404. */
 export function passwordRoutes(config: ResolvedConfig): Route[] {
@@ -195,10 +206,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed("invalid_token");
         const raw = ctx.url.searchParams.get("error");
-        const error =
-          raw !== null && PAGE_ERRORS.has(raw)
-            ? (raw as "password_policy" | "password_breached" | "breach_check_unavailable")
-            : null;
+        const error = isPageError(raw) ? raw : null;
         return page(
           pw.resetPage({
             action: resetPath,
@@ -228,7 +236,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         if (!r.ok) {
           if (jsonCaller) return respond(r);
           // The link is still valid after a refused password: send the person back to the form.
-          if (PAGE_ERRORS.has(r.code))
+          if (isPageError(r.code))
             return redirect(
               `${config.baseURL}${resetPath}?token=${encodeURIComponent(body.value.token)}&error=${r.code}`,
             );

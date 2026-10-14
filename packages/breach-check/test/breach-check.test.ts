@@ -23,6 +23,30 @@ function fake(answer: () => Response | Promise<Response>) {
 const range = (...lines: string[]) => new Response(lines.join("\r\n"), { status: 200 });
 const OTHER = "0018A45C4D1DEF81644B54AB7F969B88D65:1";
 
+/** `n` lines of fake suffixes, about 42 bytes each, as a padded range has. The `extra` line goes last. */
+function realistic(n: number, extra?: string): string {
+  const lines: string[] = [];
+  let x = 0x2545f491;
+  for (let i = 0; i < n; i++) {
+    let hex = "";
+    while (hex.length < 35) {
+      x = (Math.imul(x, 1103515245) + 12345) >>> 0;
+      hex += x.toString(16).toUpperCase().padStart(8, "0");
+    }
+    lines.push(`${hex.slice(0, 35)}:${i % 3 === 0 ? 0 : (x % 9000) + 1000}`);
+  }
+  if (extra) lines.push(extra);
+  return lines.join("\r\n");
+}
+
+/** The body with lines of one character added at the start, to exactly `size` bytes (ASCII). */
+function toSize(body: string, size: number): string {
+  const fill = size - body.length;
+  if (fill < 2) throw new Error("the body is too large for the size");
+  // Blank lines: no range line, so they change no answer.
+  return `${"\r\n".repeat(Math.floor(fill / 2))}${fill % 2 ? " " : ""}${body}`;
+}
+
 describe("createBreachCheck (plan 12b)", () => {
   it("sends the 5-character prefix only, with padding, a user agent, and no redirect", async () => {
     const f = fake(() => range(OTHER, `${SUFFIX}:3`));
@@ -65,12 +89,37 @@ describe("createBreachCheck (plan 12b)", () => {
     expect(await createBreachCheck({ fetch: many.fetchFn, minCount: 10 })("password")).toBe(true);
   });
 
-  it("reads a body of exactly the cap", async () => {
-    const line = `${SUFFIX}:2`;
-    const body = `${"0".repeat(BODY_MAX_BYTES - line.length - 2)}\r\n${line}`;
-    expect(body.length).toBe(BODY_MAX_BYTES);
+  it("reads a realistic padded range of about 2,100 lines and 88 KB", async () => {
+    // On 2026-10-15 a padded range held 76 to 105 KB (5BAA6: 84,191 bytes, 2,054 lines).
+    const body = realistic(2_100, `${SUFFIX}:3`);
+    expect(body.split("\r\n")).toHaveLength(2_101);
+    expect(body.length).toBeGreaterThan(86_000);
+    expect(body.length).toBeLessThan(90_000);
     const f = fake(() => new Response(body, { status: 200 }));
     expect(await createBreachCheck({ fetch: f.fetchFn })("password")).toBe(true);
+    const miss = fake(() => new Response(realistic(2_100), { status: 200 }));
+    expect(await createBreachCheck({ fetch: miss.fetchFn })("password")).toBe(false);
+  });
+
+  it("reads a body of exactly the cap, and refuses one byte more", async () => {
+    const exact = toSize(realistic(2_100, `${SUFFIX}:2`), BODY_MAX_BYTES);
+    expect(exact.length).toBe(BODY_MAX_BYTES);
+    const at = fake(() => new Response(exact, { status: 200 }));
+    expect(await createBreachCheck({ fetch: at.fetchFn })("password")).toBe(true);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const over = fake(() => new Response(`${exact}0`, { status: 200 }));
+    expect(await createBreachCheck({ fetch: over.fetchFn })("password")).toBe("unavailable");
+    log.mockRestore();
+  });
+
+  it("answers unavailable for a 200 with no range line: an empty body or an HTML page", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const body of ["", "<!doctype html><html><body>Sign in to the network</body></html>"]) {
+      const f = fake(() => new Response(body, { status: 200 }));
+      expect(await createBreachCheck({ fetch: f.fetchFn })("password")).toBe("unavailable");
+    }
+    expect(log).toHaveBeenCalledTimes(2);
+    log.mockRestore();
   });
 
   it("answers unavailable for a timeout, a network error, a 302, a 500, and a body over the cap", async () => {

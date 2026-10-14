@@ -31,7 +31,7 @@ and the package sends one.
 | `fetch` | the global `fetch` | a fetch function | The fetch of the range call. Tests give a stub. |
 | `timeoutMs` | 2000 | an integer from 500 to 10000 | One deadline for the call and the read of its body. |
 | `minCount` | 1 | a positive integer | A count of this or more refuses the password. |
-| `userAgent` | `authtempo-breach-check` | a string | The `User-Agent` header. HIBP answers 403 to a request with none. |
+| `userAgent` | `authtempo-breach-check` | a string | The `User-Agent` header. The HIBP page requires a user agent. |
 
 A bad `timeoutMs` or `minCount` throws when you call `createBreachCheck`.
 
@@ -39,7 +39,7 @@ A bad `timeoutMs` or `minCount` throws when you call `createBreachCheck`.
 
 - **`true`:** the range answer holds the suffix with a count of `minCount` or more. Core refuses the password with 400 `password_breached`.
 - **`false`:** the range answer does not hold the suffix, or holds it with a lower count.
-- **`"unavailable"`:** no answer before the deadline, a network error, a status other than 200, or a body over 64 KB. A 3xx status is in this list: the call follows no redirect.
+- **`"unavailable"`:** no answer before the deadline, a network error, a status other than 200, a body over 512 KB, or a 200 body with no `SUFFIX:COUNT` line. A 3xx status is in this list: the call follows no redirect.
 
 ## The check fails closed
 
@@ -60,9 +60,12 @@ hash, or the prefix.
 4. It compares each suffix with the rest of the hash, with no regard to case.
 
 Only the first 5 characters of the hash leave the process (k-anonymity).
-The call sends `Add-Padding: true`, so each answer holds 800 to 1,000 lines.
-A padded line has a count of 0, and the package skips it. A padded answer
-is about 40 KB, so the cap of 64 KB holds each true answer.
+The call sends `Add-Padding: true`. The HIBP page says that padding adds
+800 to 1,000 records. A padded line has a count of 0, so it never refuses a
+password. A whole range is larger: on 2026-10-15, eight padded ranges held
+76 to 105 KB, about 2,000 lines each. The cap of 512 KB holds about five
+times the largest of them. A 200 body with no `SUFFIX:COUNT` line, such as
+an empty body or the HTML page of a proxy, answers `"unavailable"`.
 
 The HIBP page states no rate limit for the range API. Core runs a limit
 before each check, so the limits of core bound the range calls.
