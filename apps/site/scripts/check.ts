@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
-import { ROUTES } from "@authtempo/core/testing";
+import { ROUTES } from "@authtempo/core/routes";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";

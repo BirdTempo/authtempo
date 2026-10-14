@@ -36,7 +36,8 @@ export interface RouteEntry {
   readonly feature: RouteFeature;
 }
 
-export const ROUTES: readonly RouteEntry[] = Object.freeze([
+// No annotation on the constant: the type stays the literal tuple, so an SDK's path is checked at compile time (plan 11d).
+export const ROUTES = Object.freeze([
   { method: "GET", path: "/session", feature: "session" },
   { method: "POST", path: "/sign-out", feature: "session" },
   { method: "POST", path: "/magic-link/request", feature: "magicLink" },
@@ -118,3 +119,18 @@ export const ROUTES: readonly RouteEntry[] = Object.freeze([
   { method: "GET", path: "/.well-known/oauth-authorization-server", feature: "oauth" },
   { method: "GET", path: "/.well-known/openid-configuration", feature: "oauth" },
 ] as const satisfies readonly RouteEntry[]);
+
+/** The method of a route. */
+export type RouteMethod = RouteEntry["method"];
+
+/** One entry of `ROUTES` with its literal method and path (plan 11d). */
+export type RouteLiteral = (typeof ROUTES)[number];
+
+/**
+ * A path that `ROUTES` holds for the method `M` (plan 11d). An SDK types its
+ * paths with it, so a path that core does not serve fails the SDK's compile.
+ */
+export type RoutePath<M extends RouteMethod = RouteMethod> = Extract<
+  RouteLiteral,
+  { method: M }
+>["path"];

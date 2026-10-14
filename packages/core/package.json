@@ -31,6 +31,14 @@
     "./testing": {
       "types": "./dist/testing/soft-authenticator.d.ts",
       "default": "./dist/testing/soft-authenticator.js"
+    },
+    "./routes": {
+      "types": "./dist/routes.d.ts",
+      "default": "./dist/routes.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials.d.ts",
+      "default": "./dist/credentials.js"
     }
   },
   "files": [

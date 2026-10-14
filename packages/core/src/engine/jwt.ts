@@ -1,5 +1,6 @@
 import type { ResolvedConfig, ResolvedJwtMint } from "../config.js";
 import { appErrorName } from "../primitives/app-error.js";
+import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import { newId } from "../primitives/ids.js";
 import {
   type DecodedJws,
@@ -356,7 +357,10 @@ export async function mintSessionJwt(
     name: user.name,
     org: session.activeOrganizationId,
   };
-  return ok({ token: await signToken(config, "JWT", claims), expiresAt: new Date(exp * 1000) });
+  return ok({
+    token: await signToken(config, SESSION_JWT_TYPE, claims),
+    expiresAt: new Date(exp * 1000),
+  });
 }
 
 /** The claims of a session JWT of this instance, or null: a bad signature, another typ, issuer, or audience, or a past `exp`. */
@@ -366,7 +370,7 @@ export async function verifySessionJwt(
 ): Promise<SessionJwtClaims | null> {
   const mint = mintConfig(config);
   const d = await verifyLocal(config, token);
-  if (d?.header.typ !== "JWT") return null;
+  if (d?.header.typ !== SESSION_JWT_TYPE) return null;
   const p = d.payload;
   const now = Math.floor(config.clock.now().getTime() / 1000);
   if (p.iss !== issuerOf(config) || typeof p.sub !== "string" || typeof p.sid !== "string")

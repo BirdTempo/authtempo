@@ -136,6 +136,15 @@ content security policy that permits inline style, no script, and a form
 post to this origin only. A page that needs script or a remote stylesheet
 needs its own route in the app, because the policy header is fixed.
 
+## Entries for SDKs
+
+Two entries hold the facts that an SDK reads, so each fact has one copy (plan 11d).
+
+- `@authtempo/core/routes`: `ROUTES`, every route that core can serve, with literal types. `RoutePath<"GET">` is the type of a GET path that core serves, so a typo in an SDK's path fails its compile. It also exports `PROVIDER_NAME_RE` and `AUTH_ERROR_PARAM` (`auth_error`).
+- `@authtempo/core/credentials`: the prefixes `ts_` and `tk_`, the JWT `typ` values `JWT` and `at+jwt`, `DEFAULT_COOKIE_NAME` (`__Host-tempo_session`), `LEGACY_COOKIE_NAME` (`tempo_session`, read for one release), `readBearer`, `readSessionToken`, the compact JWS check on Web Crypto (`decodeJws`, `verifyJws`), and `resourceOf`, the rule that finds the resource a URL falls under.
+
+`@authtempo/core/testing` still exports `ROUTES` for an app's own route tests.
+
 ## Apps on another origin
 
 Set `appURL` to the app's origin and list it in `trustedOrigins`. Every

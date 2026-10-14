@@ -235,7 +235,7 @@ function derInteger(bytes: Uint8Array): Bytes {
 }
 
 /** Every route that core can serve (plan 11a), for the docs checks and an app's own route tests. */
-export { ROUTES, type RouteEntry, type RouteFeature } from "../http/route-list.js";
+export { ROUTES, type RouteEntry, type RouteFeature } from "../routes.js";
 
 /**
  * The app secret of the tests (plan 12b): 32 hex characters with 16

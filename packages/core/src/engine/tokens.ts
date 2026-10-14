@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { API_TOKEN_PREFIX } from "../primitives/credentials.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { JWS_RE } from "../primitives/jwk.js";
@@ -14,7 +15,9 @@ import {
   sessionCookieToken,
 } from "./sessions.js";
 
-export const API_TOKEN_PREFIX = "tk_";
+// Moved to primitives/credentials.ts (plan 11d); still exported here.
+export { API_TOKEN_PREFIX };
+
 const API_TOKEN_RE = /^tk_[A-Za-z0-9_-]{43}$/;
 const HINT_LENGTH = 8;
 const DAY_MS = 86_400_000;

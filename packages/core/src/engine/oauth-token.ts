@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { ACCESS_TOKEN_TYPE, SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import {
   constantTimeEqual,
   randomBase64Url,
@@ -9,6 +10,7 @@ import {
 } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
+import { resourceOf } from "../primitives/resource.js";
 import type { OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
@@ -26,7 +28,8 @@ import { consumeVerification } from "./verification.js";
  * lives `oauth.accessTtlMinutes`.
  */
 
-export const ACCESS_TOKEN_TYPE = "at+jwt";
+// Moved to primitives/credentials.ts (plan 11d); still exported here.
+export { ACCESS_TOKEN_TYPE };
 export const REFRESH_PREFIX = "or_";
 const REFRESH_RE = /^or_[A-Za-z0-9_-]{43}$/;
 const CODE_RE = /^oc_[A-Za-z0-9_-]{43}$/;
@@ -222,7 +225,7 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
       claims.name = g.user.name;
       claims.picture = g.user.image;
     }
-    answer.id_token = await signToken(config, "JWT", claims);
+    answer.id_token = await signToken(config, SESSION_JWT_TYPE, claims);
   }
   return oauthOk(answer);
 }
@@ -472,23 +475,5 @@ export function requestResource(
 ): string | null {
   const oauth = config.oauth;
   if (!oauth) return null;
-  let url: URL;
-  try {
-    url = new URL(request.url);
-  } catch {
-    return null;
-  }
-  let best: string | null = null;
-  let bestLength = -1;
-  for (const resource of oauth.resources) {
-    const r = new URL(resource);
-    if (r.origin !== url.origin) continue;
-    const base = r.pathname.replace(/\/$/, "");
-    if (base !== "" && url.pathname !== base && !url.pathname.startsWith(`${base}/`)) continue;
-    if (base.length > bestLength) {
-      best = resource;
-      bestLength = base.length;
-    }
-  }
-  return best;
+  return resourceOf(oauth.resources, request.url);
 }

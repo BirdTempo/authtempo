@@ -15,6 +15,9 @@ export function resolveNext(config: ResolvedConfig, next: string): string {
   return `${base}${next}`;
 }
 
+/** The query parameter of the app URL that a browser flow failure lands on (plan 11d: the client reads it). */
+export const AUTH_ERROR_PARAM = "auth_error";
+
 export function authErrorUrl(config: ResolvedConfig, code: string): string {
-  return `${config.appURL}/?auth_error=${code}`;
+  return `${config.appURL}/?${AUTH_ERROR_PARAM}=${code}`;
 }
