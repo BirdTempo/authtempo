@@ -29,27 +29,63 @@ async function resetByLink(auth: Auth, over: { email?: string; trustDevice?: str
 const sessionsOf = (auth: Auth, userId: string) =>
   auth.storage.findMany("session", [{ field: "userId", op: "eq", value: userId }]);
 
-/** A test auth that records the `via` of each opened session. */
+/** A test auth that records the `via` of each opened session and the reason of each ended session. */
 function recording() {
   const vias: string[] = [];
+  const ended: string[] = [];
   const auth = totpAuth({
     hooks: {
       session: {
         afterCreate: (e) => {
           vias.push(e.via);
         },
+        afterEnd: (e) => {
+          ended.push(e.reason);
+        },
       },
     },
   });
-  return { auth, vias };
+  return { auth, vias, ended };
 }
+
+/** A trust token of `email` from a password sign-in and a verify with `trustDevice`. */
+async function trustOf(auth: Auth, secret: Uint8Array, email = EMAIL): Promise<string> {
+  const s = await passwordSignIn(auth.config, {
+    email,
+    password: PASSWORD,
+    ip: null,
+    userAgent: null,
+  });
+  if (!s.ok || !("twoFactor" in s.value)) throw new Error("no challenge");
+  const v = await verifyTwoFactor(auth.config, {
+    challenge: s.value.twoFactor.challenge,
+    code: await codeNow(auth, secret),
+    trustDevice: true,
+    ip: null,
+  });
+  if (!v.ok || !v.value.trustDevice) throw new Error("no trust token");
+  return v.value.trustDevice.token;
+}
+
+/** The reset links and codes of `email` that are not spent. */
+const openResetRows = async (auth: Auth, email = EMAIL) =>
+  (
+    await auth.storage.findMany("verification", [
+      { field: "identifier", op: "eq", value: email },
+      { field: "consumedAt", op: "eq", value: null },
+    ])
+  ).filter((v) => v.purpose === "password-reset" || v.purpose === "password-reset-otp");
 
 describe("the reset gate (plan 12c, ASVS 5.0 6.4.3)", () => {
   it("a gated reset sets the password, ends the sessions, opens no session, and answers the challenge", async () => {
-    const { auth, vias } = recording();
+    const { auth, vias, ended } = recording();
     const { user, secret } = await enrolled(auth);
-    expect((await sessionsOf(auth, user.id)).length).toBeGreaterThan(0);
+    const before = (await sessionsOf(auth, user.id)).length;
+    expect(before).toBeGreaterThan(0);
     vias.length = 0;
+    ended.length = 0;
+    // A second link for the address: the reset deletes it too.
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     const r = await resetByLink(auth);
     if (!r.ok || !("twoFactor" in r.value)) throw new Error("the reset answered no challenge");
     expect(r.value.next).toBe("/after");
@@ -57,6 +93,8 @@ describe("the reset gate (plan 12c, ASVS 5.0 6.4.3)", () => {
     expect(r.value.twoFactor.methods).toEqual(["totp", "backup"]);
     expect(await sessionsOf(auth, user.id)).toEqual([]);
     expect(vias).toEqual([]);
+    expect(ended).toEqual(Array.from({ length: before }, () => "password_reset"));
+    expect(await openResetRows(auth)).toEqual([]);
     expect(
       await passwordSignIn(auth.config, {
         email: EMAIL,
@@ -108,6 +146,55 @@ describe("the reset gate (plan 12c, ASVS 5.0 6.4.3)", () => {
     expect(await sessionsOf(auth, user.id)).toHaveLength(1);
     const [device] = await auth.storage.findMany("trustedDevice", []);
     expect(device?.lastSeenAt).toEqual(auth.clock.now());
+    // A trusted device skips the challenge, not the password change.
+    expect(
+      await passwordSignIn(auth.config, {
+        email: EMAIL,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      }),
+    ).toMatchObject({ code: "invalid_credentials" });
+  });
+
+  it("answers the challenge for the trust token of another user", async () => {
+    const auth = totpAuth();
+    const { user } = await enrolled(auth);
+    const other = await enrolled(auth, "eve@example.com");
+    const token = await trustOf(auth, other.secret, "eve@example.com");
+    const r = await resetByLink(auth, { trustDevice: token });
+    expect(r.ok && "twoFactor" in r.value).toBe(true);
+    expect(await sessionsOf(auth, user.id)).toEqual([]);
+  });
+
+  it("answers the challenge for an expired trust token", async () => {
+    const auth = totpAuth();
+    const { user, secret } = await enrolled(auth);
+    const token = await trustOf(auth, secret);
+    const days = auth.config.totp?.trustDays;
+    if (days === undefined) throw new Error("no totp config");
+    auth.clock.advance(days * 86_400_000 + 1);
+    const r = await resetByLink(auth, { trustDevice: token });
+    expect(r.ok && "twoFactor" in r.value).toBe(true);
+    expect(await sessionsOf(auth, user.id)).toEqual([]);
+  });
+
+  it("opens a session on a trusted device for a reset by code", async () => {
+    const auth = totpAuth();
+    const { user, secret } = await enrolled(auth);
+    const token = await trustOf(auth, secret);
+    expect((await requestResetOtp(auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+    const code = /\b(\d{6})\b/.exec(auth.mail.at(-1)?.text ?? "")?.[1] ?? "";
+    const r = await resetPasswordWithOtp(auth.config, {
+      email: EMAIL,
+      code,
+      password: NEW,
+      ip: null,
+      userAgent: null,
+      trustDevice: token,
+    });
+    expect(r.ok && "token" in r.value).toBe(true);
+    expect(await sessionsOf(auth, user.id)).toHaveLength(1);
   });
 
   it("opens a session for a minted user and for a claimant: neither has a factor", async () => {
