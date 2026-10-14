@@ -82,10 +82,15 @@ more request headers go in the fifth.
 | --- | --- | --- |
 | `client.session()` | `GET /session` | `ClientResult<PublicSession \| null>`. A 401 gives `null`, not a failure. |
 | `client.signOut()` | `POST /sign-out` | `ClientResult<{ ok: true }>` |
+| `client.readRedirectError(url)` | none | The `ErrorCode` of `?auth_error=<code>`, `unexpected` for a code that core's table lacks, or `null` |
+| `client.social.startURL({ provider, next? })` | `GET /social/:provider/start` (built, not fetched) | `ClientResult<string>`; `invalid_body` with status 0 for a name that core refuses |
+| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `ClientResult<{ url }>` |
+| `client.signIn.password({ email, password, trustDevice?, next? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `ClientResult<PasswordSignIn>` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `ClientResult<{ sent: true }>` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `ClientResult<PublicSession \| TwoFactorChallengeJSON>` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `ClientResult<PasskeySummaryJSON>` |
-| `client.passkey.signIn()` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>` |
+| `client.passkey.signIn({ autofill? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing |
+| `client.passkey.abort()` | none | Ends a waiting autofill sign-in, which answers `cancelled` |
 | `client.passkeys.list()` | `GET /passkeys` | `ClientResult<PasskeySummaryJSON[]>` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `ClientResult<{ ok: true }>` |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `ClientResult<{ token } & PublicSession>` |

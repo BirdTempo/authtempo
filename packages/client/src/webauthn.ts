@@ -5,16 +5,30 @@ import type {
   RegistrationResponseJSON,
 } from "@authtempo/core";
 
+/** How one ceremony runs (plan 11d). `mediation: "conditional"` waits for the autofill of a field. */
+export interface CeremonyOptions {
+  mediation?: "conditional" | undefined;
+  /** Aborts a waiting ceremony; the seam then throws `WebAuthnCancelled`. */
+  signal?: AbortSignal | undefined;
+}
+
 /** The WebAuthn ceremonies as the client sees them: JSON in, JSON out. Tests inject a soft one. */
 export interface BrowserWebAuthn {
   create(options: PublicKeyCredentialCreationOptionsJSON): Promise<RegistrationResponseJSON>;
-  get(options: PublicKeyCredentialRequestOptionsJSON): Promise<AuthenticationResponseJSON>;
+  get(
+    options: PublicKeyCredentialRequestOptionsJSON,
+    ceremony?: CeremonyOptions,
+  ): Promise<AuthenticationResponseJSON>;
 }
 
 /** The part of `navigator.credentials` the seam calls. */
 export interface CredentialsContainerLike {
   create(options: { publicKey?: PublicKeyCredentialCreationOptions }): Promise<unknown>;
-  get(options: { publicKey?: PublicKeyCredentialRequestOptions }): Promise<unknown>;
+  get(options: {
+    publicKey?: PublicKeyCredentialRequestOptions;
+    mediation?: "conditional";
+    signal?: AbortSignal;
+  }): Promise<unknown>;
 }
 
 /** The part of a `PublicKeyCredential` the conversion reads. */
@@ -46,6 +60,7 @@ export class WebAuthnCancelled extends Error {
 interface PublicKeyCredentialStatic {
   parseCreationOptionsFromJSON?: (json: unknown) => PublicKeyCredentialCreationOptions;
   parseRequestOptionsFromJSON?: (json: unknown) => PublicKeyCredentialRequestOptions;
+  isConditionalMediationAvailable?: () => Promise<boolean>;
 }
 
 function pkcStatic(): PublicKeyCredentialStatic | undefined {
@@ -54,6 +69,20 @@ function pkcStatic(): PublicKeyCredentialStatic | undefined {
 
 export function supportsPasskeys(): boolean {
   return pkcStatic() !== undefined;
+}
+
+/**
+ * True when the browser can offer passkeys in the autofill of a field with
+ * `autocomplete="username webauthn"` (conditional mediation, WebAuthn Level 3).
+ */
+export async function supportsAutofill(): Promise<boolean> {
+  const pkc = pkcStatic();
+  if (typeof pkc?.isConditionalMediationAvailable !== "function") return false;
+  try {
+    return await pkc.isConditionalMediationAvailable();
+  } catch {
+    return false;
+  }
 }
 
 export function base64UrlEncode(bytes: ArrayBuffer | ArrayBufferView): string {
@@ -140,10 +169,14 @@ export function credentialToJSON(
   return json as unknown as RegistrationResponseJSON | AuthenticationResponseJSON;
 }
 
+/**
+ * A dismissed prompt, no matching authenticator, or an aborted autofill. An
+ * abort rejects with the signal's reason: `abort()` with no argument makes it
+ * a DOMException named AbortError (WebAuthn Level 3, read 2026-10-15).
+ */
 function cancelled(e: unknown): boolean {
-  return (
-    typeof e === "object" && e !== null && (e as { name?: unknown }).name === "NotAllowedError"
-  );
+  const name = typeof e === "object" && e !== null ? (e as { name?: unknown }).name : undefined;
+  return name === "NotAllowedError" || name === "AbortError";
 }
 
 /**
@@ -178,11 +211,17 @@ export function browserWebAuthn(container?: CredentialsContainerLike): BrowserWe
         throw e;
       }
     },
-    async get(options) {
+    async get(options, ceremony) {
       const parse = pkcStatic()?.parseRequestOptionsFromJSON;
       const publicKey = parse ? parse(options) : toBinaryRequestOptions(options);
       try {
-        return toJSON(await creds().get({ publicKey }));
+        return toJSON(
+          await creds().get({
+            publicKey,
+            ...(ceremony?.mediation ? { mediation: ceremony.mediation } : {}),
+            ...(ceremony?.signal ? { signal: ceremony.signal } : {}),
+          }),
+        );
       } catch (e) {
         if (cancelled(e)) throw new WebAuthnCancelled();
         throw e;

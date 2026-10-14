@@ -47,18 +47,28 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(57);
+    expect(CLIENT_CALLS).toHaveLength(58);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
     const { seen, fetch } = recording();
     looked.length = 0;
-    const c = createClient({ baseURL: BASE, fetch, webauthn: seam });
+    // A navigation is a GET of the start route, written in the table's template form.
+    const c = createClient({
+      baseURL: BASE,
+      fetch,
+      webauthn: seam,
+      navigate: (url) =>
+        seen.push(
+          `GET ${new URL(url).pathname.replace(/^\/auth/, "").replace(/^\/social\/[^/]+\//, "/social/:provider/")}`,
+        ),
+    });
     const org = { organizationId: "o1" };
     await c.session();
     await c.signOut();
     await c.magicLink.request({ email: "a@b.c" });
     await c.magicLink.verify({ token: "t" });
+    c.social.signIn({ provider: "google" });
     await c.handoff.redeem({ code: "c", verifier: "v" });
     await c.passkey.register();
     await c.passkey.signIn();

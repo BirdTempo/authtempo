@@ -30,6 +30,7 @@ sources:
 | `token` | none | A function that answers the bearer token, or null. |
 | `fetch` | `globalThis.fetch` | The fetch of every call. |
 | `webauthn` | `browserWebAuthn()` | The passkey seam, of the type `BrowserWebAuthn`. |
+| `navigate` | `location.assign` | Sends the browser to the social start URL. A router or a test injects one. |
 | `broadcast` | `true` where `BroadcastChannel` exists | Tell the other tabs of the origin after a change, on the channel `authtempo-session`, and read again when one tells. |
 | `refetchOnVisible` | `true` where `document` exists | Read the session again when the page becomes visible. |
 | `onSessionEnd` | none | Runs when `session()` answers `null` for a client with a `token` option. Clear the stored token there. |
@@ -72,10 +73,15 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | --- | --- | --- |
 | `client.session()` | `GET /session` | `PublicSession` or `null`. A 401 gives `null`, not a failure. |
 | `client.signOut()` | `POST /sign-out` | `{ ok: true }` |
+| `client.readRedirectError(url)` | none | The `ErrorCode` of `?auth_error=<code>`, `unexpected` for a code that core's table lacks, or `null` |
+| `client.social.startURL({ provider, next? })` | `GET /social/:provider/start` (built, not fetched) | `string`; `invalid_body` with status 0 for a name that core refuses |
+| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `{ url }` |
+| `client.signIn.password({ email, password, trustDevice?, next? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `PasswordSignIn`: `{ kind: "session", session }`, or `{ kind: "second-factor", challenge, expiresAt, verify }` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `{ sent: true }` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `PasskeySummaryJSON` |
-| `client.passkey.signIn()` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession` |
+| `client.passkey.signIn({ autofill? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing |
+| `client.passkey.abort()` | none | Ends a waiting autofill sign-in, which answers `cancelled` |
 | `client.passkeys.list()` | `GET /passkeys` | `PasskeySummaryJSON[]` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `{ ok: true }` |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `{ token }` and `PublicSession` |
@@ -134,6 +140,8 @@ The password, email code, and second factor operations answer `not_found` when t
 | `createTransport` | The typed call for a route of your own app's code, with its `TransportOptions` and the `Call` type. The client uses the same request code, and takes its paths from `CLIENT_CALLS`. |
 | `browserWebAuthn` | The passkey seam of a browser, on `navigator.credentials`. |
 | `supportsPasskeys` | True when the browser can run the passkey ceremonies. |
+| `supportsAutofill` | True when the browser has conditional mediation for passkeys. |
+| `readRedirectError` | The redirect error reader of `client.readRedirectError`. |
 | `credentialToJSON` | Converts a credential of the browser to the JSON that core reads. |
 | `toBinaryCreationOptions`, `toBinaryRequestOptions` | Convert the options JSON of core for a browser with no `parseCreationOptionsFromJSON`. |
 | `base64UrlEncode`, `base64UrlDecode` | The base64url codec of the conversions. |
@@ -148,8 +156,8 @@ The types of the package:
 | Area | Types |
 | --- | --- |
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore` |
-| Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON` |
-| Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON` |
+| Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
+| Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 
 ## Next
 

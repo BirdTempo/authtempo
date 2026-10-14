@@ -9,8 +9,10 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   PublicSession,
 } from "@authtempo/core";
-import { ERRORS } from "@authtempo/core/errors";
+import { ERRORS, type ErrorCode } from "@authtempo/core/errors";
+import { PROVIDER_NAME_RE } from "@authtempo/core/routes";
 import { type ClientOperation, callOf } from "./calls.js";
+import { readRedirectError } from "./redirect-error.js";
 import { type ClientFailure, type ClientResult, fail, ok } from "./result.js";
 import {
   createSessionStore,
@@ -18,8 +20,14 @@ import {
   type SessionState,
   type SessionStore,
 } from "./store.js";
-import { createRawTransport, type Query, type TransportOptions } from "./transport.js";
-import { type BrowserWebAuthn, browserWebAuthn, WebAuthnCancelled } from "./webauthn.js";
+import { createRawTransport, type Query, routeURL, type TransportOptions } from "./transport.js";
+import {
+  type BrowserWebAuthn,
+  browserWebAuthn,
+  type CeremonyOptions,
+  supportsAutofill,
+  WebAuthnCancelled,
+} from "./webauthn.js";
 
 export type PasskeySummaryJSON = Omit<PasskeySummary, "createdAt"> & { createdAt: string };
 
@@ -93,15 +101,50 @@ export interface ClientOptions extends TransportOptions {
    * token is dead, and the app clears it from its store (plan 11d).
    */
   onSessionEnd?: (() => void | Promise<void>) | undefined;
+  /** Sends the browser to a URL: the social start. Default `location.assign`. Tests and a router inject one. */
+  navigate?: ((url: string) => void) | undefined;
 }
 
 /** The state of `client.store`. */
 export type ClientSessionState = SessionState<PublicSession, ClientFailure>;
 
+/** The answer of `client.signIn.password` (plan 11d): a session, or the second factor step. */
+export type PasswordSignIn =
+  | { kind: "session"; session: { token: string } & PublicSession }
+  | {
+      kind: "second-factor";
+      challenge: string;
+      expiresAt: string;
+      /** Ends the step with a current code or a backup code. `trustDevice` asks core to trust this device. */
+      verify(
+        factor: { code: string } | { backupCode: string },
+        options?: { trustDevice?: boolean | undefined },
+      ): Promise<ClientResult<TwoFactorSessionJSON>>;
+    };
+
 export interface Client {
   /** The caller's session, or null when the API answers 401. A null is a normal state, not a failure. */
   session(): Promise<ClientResult<PublicSession | null>>;
   signOut(): Promise<ClientResult<{ ok: true }>>;
+  /** The error code of a URL that a browser flow failure landed on (`?auth_error=<code>`), `unexpected` for an unknown code, or null. */
+  readRedirectError(url: string | URL): ErrorCode | "unexpected" | null;
+  /** Social sign-in in a browser (plan 11d). A native app rides a social sign-in through the handoff's `next`. */
+  social: {
+    /** The URL of `GET <basePath>/social/:provider/start`. `invalid_body` with status 0 for a name that core refuses. */
+    startURL(input: { provider: string; next?: string | undefined }): ClientResult<string>;
+    /** Sends the browser to the start URL through `navigate`. */
+    signIn(input: { provider: string; next?: string | undefined }): ClientResult<{ url: string }>;
+  };
+  /** Sign-ins in one call (plan 11d). */
+  signIn: {
+    /** `password.signIn`, with the second factor step as an object whose `verify` ends it. */
+    password(input: {
+      email: string;
+      password: string;
+      trustDevice?: string | undefined;
+      next?: string | undefined;
+    }): Promise<ClientResult<PasswordSignIn>>;
+  };
   /**
    * The session store (plan 11d): one read at the first subscriber, and one
    * after each call that changes the session (every sign-in, the sign-out,
@@ -136,8 +179,16 @@ export interface Client {
   passkey: {
     /** Needs a session. Registers a new passkey for the signed-in user. */
     register(input?: { name?: string | undefined }): Promise<ClientResult<PasskeySummaryJSON>>;
-    /** A discoverable-credential sign-in. Answers the session; the browser gets the cookie. */
-    signIn(): Promise<ClientResult<PublicSession>>;
+    /**
+     * A discoverable-credential sign-in. Answers the session; the browser gets
+     * the cookie. With `autofill: true` the browser waits for the person to pick
+     * a passkey from the autofill of a field with `autocomplete="username
+     * webauthn"`; where the browser has no conditional mediation it answers
+     * `cancelled` with no request (plan 11d).
+     */
+    signIn(input?: { autofill?: boolean | undefined }): Promise<ClientResult<PublicSession>>;
+    /** Ends a waiting autofill sign-in. It answers `cancelled`. */
+    abort(): void;
   };
   passkeys: {
     list(): Promise<ClientResult<PasskeySummaryJSON[]>>;
@@ -450,9 +501,128 @@ export function createClient(options: ClientOptions): Client {
       return fail(e instanceof WebAuthnCancelled ? "cancelled" : "unexpected", 0);
     }
   }
+  const navigate =
+    options.navigate ??
+    ((url: string) => {
+      (globalThis as { location?: { assign(u: string): void } }).location?.assign(url);
+    });
+  function startURL(input: { provider: string; next?: string | undefined }): ClientResult<string> {
+    if (!PROVIDER_NAME_RE.test(input.provider)) return fail("invalid_body", 0);
+    const { path } = callOf("social.start");
+    return ok(
+      routeURL(
+        options,
+        path.replace(":provider", input.provider),
+        input.next !== undefined ? { next: input.next } : undefined,
+      ),
+    );
+  }
+  let autofill: AbortController | null = null;
+  const password: Client["password"] = {
+    signUp: ({ name, captchaToken, ...rest }) =>
+      changes(
+        send<
+          | ({ token: string } & PublicSession)
+          | { user: PublicSession["user"]; verifyRequired: true }
+          | { sent: true }
+        >(
+          "password.signUp",
+          { ...rest, ...(name !== undefined ? { name } : {}) },
+          undefined,
+          captchaHeader(captchaToken),
+        ),
+      ),
+    signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
+      changes(
+        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
+          "password.signIn",
+          {
+            ...rest,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+            ...(next !== undefined ? { next } : {}),
+          },
+          undefined,
+          captchaHeader(captchaToken),
+        ),
+      ),
+    resendVerification: (input) => send<{ sent: true }>("password.resendVerification", input),
+    verifyEmail: (input) => changes(send<{ verified: true }>("password.verifyEmail", input)),
+    requestReset: ({ next, captchaToken, ...rest }) =>
+      send<{ sent: true }>(
+        "password.requestReset",
+        { ...rest, ...(next !== undefined ? { next } : {}) },
+        undefined,
+        captchaHeader(captchaToken),
+      ),
+    reset: ({ trustDevice, ...rest }) =>
+      changes(
+        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("password.reset", {
+          ...rest,
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
+      ),
+    change: ({ currentPassword, newPassword }) =>
+      changes(
+        send<{ ok: true }>("password.change", {
+          ...(currentPassword !== undefined ? { currentPassword } : {}),
+          newPassword,
+        }),
+      ),
+  };
+  const totp: Client["totp"] = {
+    setup: (input) =>
+      send<{ secret: string; uri: string; backupCodes: string[] }>("totp.setup", {
+        password: input.password,
+      }),
+    enable: (input) => changes(send<TotpStatusJSON>("totp.enable", input)),
+    verify: ({ code, backupCode, emailCode, trustDevice, ...rest }) =>
+      changes(
+        send<TwoFactorSessionJSON>("totp.verify", {
+          ...rest,
+          ...(code !== undefined ? { code } : {}),
+          ...(backupCode !== undefined ? { backupCode } : {}),
+          ...(emailCode !== undefined ? { emailCode } : {}),
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
+      ),
+    disable: (input) => send<{ ok: true }>("totp.disable", input),
+    regenerateBackupCodes: (input) =>
+      send<{ backupCodes: string[] }>("totp.regenerateBackupCodes", input),
+    status: () => send<TotpStatusJSON>("totp.status"),
+    revokeTrustedDevices: () => send<{ ok: true }>("totp.revokeTrustedDevices", {}),
+  };
   return {
     session,
     store,
+    readRedirectError,
+    social: {
+      startURL,
+      signIn(input) {
+        const url = startURL(input);
+        if (!url.ok) return url;
+        navigate(url.value);
+        return ok({ url: url.value });
+      },
+    },
+    signIn: {
+      async password(input) {
+        const r = await password.signIn(input);
+        if (!r.ok) return r;
+        if (!("twoFactor" in r.value)) return ok({ kind: "session", session: r.value });
+        const { challenge, expiresAt } = r.value.twoFactor;
+        return ok({
+          kind: "second-factor",
+          challenge,
+          expiresAt,
+          verify: (factor, o = {}) =>
+            totp.verify({
+              challenge,
+              ...("code" in factor ? { code: factor.code } : { backupCode: factor.backupCode }),
+              ...(o.trustDevice !== undefined ? { trustDevice: o.trustDevice } : {}),
+            }),
+        });
+      },
+    },
     // The empty object makes the content type JSON and the body harmless to read; the router's POST Origin rule still applies.
     signOut: () => changes(send<{ ok: true }>("signOut", {})),
     magicLink: {
@@ -484,15 +654,27 @@ export function createClient(options: ClientOptions): Client {
         });
         return r.ok ? ok(r.value.passkey) : r;
       },
-      async signIn() {
+      async signIn(input = {}) {
+        // No modal prompt on a page load: without conditional mediation the autofill answers cancelled.
+        if (input.autofill && !(await supportsAutofill())) return fail("cancelled", 0);
         const options = await send<PublicKeyCredentialRequestOptionsJSON>(
           "passkey.signIn.options",
           {},
         );
         if (!options.ok) return options;
-        const response = await ceremony(() => webauthn.get(options.value));
+        let ceremonyOptions: CeremonyOptions = {};
+        if (input.autofill) {
+          autofill?.abort();
+          autofill = new AbortController();
+          ceremonyOptions = { mediation: "conditional", signal: autofill.signal };
+        }
+        const response = await ceremony(() => webauthn.get(options.value, ceremonyOptions));
         if (!response.ok) return response;
         return changes(send<PublicSession>("passkey.signIn.verify", { response: response.value }));
+      },
+      abort() {
+        autofill?.abort();
+        autofill = null;
       },
     },
     passkeys: {
@@ -502,57 +684,7 @@ export function createClient(options: ClientOptions): Client {
       },
       delete: (input) => send<{ ok: true }>("passkeys.delete", input),
     },
-    password: {
-      signUp: ({ name, captchaToken, ...rest }) =>
-        changes(
-          send<
-            | ({ token: string } & PublicSession)
-            | { user: PublicSession["user"]; verifyRequired: true }
-            | { sent: true }
-          >(
-            "password.signUp",
-            { ...rest, ...(name !== undefined ? { name } : {}) },
-            undefined,
-            captchaHeader(captchaToken),
-          ),
-        ),
-      signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
-        changes(
-          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
-            "password.signIn",
-            {
-              ...rest,
-              ...(trustDevice !== undefined ? { trustDevice } : {}),
-              ...(next !== undefined ? { next } : {}),
-            },
-            undefined,
-            captchaHeader(captchaToken),
-          ),
-        ),
-      resendVerification: (input) => send<{ sent: true }>("password.resendVerification", input),
-      verifyEmail: (input) => changes(send<{ verified: true }>("password.verifyEmail", input)),
-      requestReset: ({ next, captchaToken, ...rest }) =>
-        send<{ sent: true }>(
-          "password.requestReset",
-          { ...rest, ...(next !== undefined ? { next } : {}) },
-          undefined,
-          captchaHeader(captchaToken),
-        ),
-      reset: ({ trustDevice, ...rest }) =>
-        changes(
-          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("password.reset", {
-            ...rest,
-            ...(trustDevice !== undefined ? { trustDevice } : {}),
-          }),
-        ),
-      change: ({ currentPassword, newPassword }) =>
-        changes(
-          send<{ ok: true }>("password.change", {
-            ...(currentPassword !== undefined ? { currentPassword } : {}),
-            newPassword,
-          }),
-        ),
-    },
+    password,
     emailOtp: {
       request: ({ email, captchaToken }) =>
         send<{ sent: true }>("emailOtp.request", { email }, undefined, captchaHeader(captchaToken)),
@@ -671,28 +803,7 @@ export function createClient(options: ClientOptions): Client {
       },
       revoke: (input) => send<{ ok: true }>("oauth.revoke", { clientId: input.clientId }),
     },
-    totp: {
-      setup: (input) =>
-        send<{ secret: string; uri: string; backupCodes: string[] }>("totp.setup", {
-          password: input.password,
-        }),
-      enable: (input) => changes(send<TotpStatusJSON>("totp.enable", input)),
-      verify: ({ code, backupCode, emailCode, trustDevice, ...rest }) =>
-        changes(
-          send<TwoFactorSessionJSON>("totp.verify", {
-            ...rest,
-            ...(code !== undefined ? { code } : {}),
-            ...(backupCode !== undefined ? { backupCode } : {}),
-            ...(emailCode !== undefined ? { emailCode } : {}),
-            ...(trustDevice !== undefined ? { trustDevice } : {}),
-          }),
-        ),
-      disable: (input) => send<{ ok: true }>("totp.disable", input),
-      regenerateBackupCodes: (input) =>
-        send<{ backupCodes: string[] }>("totp.regenerateBackupCodes", input),
-      status: () => send<TotpStatusJSON>("totp.status"),
-      revokeTrustedDevices: () => send<{ ok: true }>("totp.revokeTrustedDevices", {}),
-    },
+    totp,
     secondFactor: {
       passkey: {
         async enable({ password }) {

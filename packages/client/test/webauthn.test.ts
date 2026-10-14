@@ -183,4 +183,32 @@ describe("browserWebAuthn", () => {
     ).rejects.toBeInstanceOf(WebAuthnCancelled);
     await expect(w.get({ challenge: "YQ" })).rejects.toThrow("boom");
   });
+
+  it("passes conditional mediation and the signal to the container, and an abort is cancelled (plan 11d)", async () => {
+    const seen: { mediation?: string; signal?: AbortSignal }[] = [];
+    const w = browserWebAuthn({
+      async create() {
+        throw new Error("not used");
+      },
+      // A browser rejects a waiting conditional get with the signal's abort reason (WebAuthn Level 3).
+      get: (init) =>
+        new Promise((_, reject) => {
+          seen.push({ ...init });
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    });
+    const controller = new AbortController();
+    const waiting = w.get(
+      { challenge: "YQ" },
+      { mediation: "conditional", signal: controller.signal },
+    );
+    controller.abort();
+    await expect(waiting).rejects.toBeInstanceOf(WebAuthnCancelled);
+    expect(seen[0]?.mediation).toBe("conditional");
+    expect(seen[0]?.signal).toBe(controller.signal);
+    // A modal get sends neither member.
+    void w.get({ challenge: "YQ" }).catch(() => {});
+    expect(seen[1]).not.toHaveProperty("mediation");
+    expect(seen[1]).not.toHaveProperty("signal");
+  });
 });

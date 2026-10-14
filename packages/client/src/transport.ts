@@ -65,15 +65,20 @@ function searchOf(query: Query | undefined): string {
   return pairs.length > 0 ? `?${pairs.join("&")}` : "";
 }
 
+/** The URL of a route: `baseURL` with one trailing slash removed, `basePath`, the path, and the query. The one copy of the URL rule. */
+export function routeURL(options: TransportOptions, path: string, query?: Query): string {
+  // A trailing slash on baseURL would build `//auth/session`, which the router answers with 404.
+  const baseURL = options.baseURL.replace(/\/$/, "");
+  const basePath = options.basePath ?? "/auth";
+  return `${baseURL}${basePath}${path}${searchOf(query)}`;
+}
+
 /**
  * One function behind every operation. It never throws for an answer: a
  * rejected fetch is `network`, an unreadable body is `unexpected`, and a
  * known error code passes through with its status.
  */
 export function createRawTransport(options: TransportOptions): RawCall {
-  // A trailing slash on baseURL would build `//auth/session`, which the router answers with 404.
-  const baseURL = options.baseURL.replace(/\/$/, "");
-  const basePath = options.basePath ?? "/auth";
   const doFetch = options.fetch ?? globalThis.fetch;
   const credentials = options.credentials ?? "include";
   return async <T>(
@@ -90,7 +95,7 @@ export function createRawTransport(options: TransportOptions): RawCall {
     if (token) sent.authorization = `Bearer ${token}`;
     let res: Response;
     try {
-      res = await doFetch(`${baseURL}${basePath}${path}${searchOf(query)}`, {
+      res = await doFetch(routeURL(options, path, query), {
         method,
         headers: sent,
         credentials,

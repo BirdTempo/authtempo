@@ -21,6 +21,8 @@ export const CLIENT_CALLS = [
   { operation: "signOut", method: "POST", path: "/sign-out" },
   { operation: "magicLink.request", method: "POST", path: "/magic-link/request" },
   { operation: "magicLink.verify", method: "POST", path: "/magic-link/verify" },
+  // A browser navigation, not a fetch: client.social builds its URL from this row.
+  { operation: "social.start", method: "GET", path: "/social/:provider/start" },
   { operation: "handoff.redeem", method: "POST", path: "/handoff/redeem" },
   { operation: "passkey.register.options", method: "POST", path: "/passkey/register/options" },
   { operation: "passkey.register.verify", method: "POST", path: "/passkey/register/verify" },

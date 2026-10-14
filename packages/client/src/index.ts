@@ -12,11 +12,13 @@ export {
   type OAuthGrantJSON,
   type OrganizationJSON,
   type PasskeySummaryJSON,
+  type PasswordSignIn,
   type SecondFactorEnableJSON,
   type TotpStatusJSON,
   type TwoFactorChallengeJSON,
   type TwoFactorSessionJSON,
 } from "./client.js";
+export { readRedirectError } from "./redirect-error.js";
 export type { ClientCode, ClientFailure, ClientResult } from "./result.js";
 export {
   createSessionStore,
@@ -30,9 +32,11 @@ export {
   base64UrlDecode,
   base64UrlEncode,
   browserWebAuthn,
+  type CeremonyOptions,
   type CredentialsContainerLike,
   credentialToJSON,
   type PublicKeyCredentialLike,
+  supportsAutofill,
   supportsPasskeys,
   toBinaryCreationOptions,
   toBinaryRequestOptions,
