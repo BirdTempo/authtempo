@@ -49,7 +49,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `api.totp` | `setup`, `enable`, `verify`, `disable`, `disableWithCode`, `regenerateBackupCodes`, `regenerateBackupCodesWithCode`, `status`, `uri`, `revokeTrustedDevices`; present when the second factor is on. `disable` turns every method off |
 | `api.jwt` | `mint`, `verify`, `rotate`, `jwks`, `sessionLive`; present unless `jwtMint` is `false` |
 | `api.oauth` | `grants`, `revoke`; present when `oauth` is set |
-| `api.secrets` | `status`, `rewrap`; present in every deployment, in process only. `status()` answers, for each version of the app secret, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. `rewrap({ limit, after })` reseals up to `limit` (1 to 1000, default 100) TOTP secrets and signing keys under the current version, and answers `{ resealed, failed, skipped, more, next }`. Pass `next` as `after` until `next` is `null` |
+| `api.secrets` | `status`, `rewrap`; present in every deployment, in process only. `status()` answers, for each version of the app secret, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. `status` reads every row of the TOTP, second factor, signing key, and code tables: one query per 1000 rows of each table. `rewrap({ limit, after })` reseals up to `limit` (1 to 1000, default 100) TOTP secrets and signing keys under the current version, and answers `{ resealed, failed, skipped, more, next }`. Pass `next` as `after` until `next` is `null` |
 
 ## Functions
 

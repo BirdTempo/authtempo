@@ -56,8 +56,13 @@ export interface SecretsRewrap {
 
 /** `limit` of `rewrap`: the rows it reads in one call, over all tables. */
 export const REWRAP_LIMIT = { default: 100, max: 1000 } as const;
-/** The page of a status read. The storage port has no count, so status reads the keyed tables by pages of ids. */
-const PAGE = 100;
+/**
+ * The page of a status read. The storage port has no count, so status reads
+ * every row of the four tables by pages of ids: one query per 1000 rows of
+ * each table. The port sets no maximum limit (checked 2026-10-15), and a
+ * page of 1000 is the most rows that `rewrap` reads in one call.
+ */
+const PAGE = 1000;
 /** The purposes whose `valueHash` is a keyed hash (plan 9e). */
 const KEYED_PURPOSES = ["email-otp", "password-reset-otp"] as const;
 /** The sealed tables in the order of a pass. The cursor names the table and the last id read. */
@@ -168,33 +173,48 @@ export async function rewrapSecrets(
   const old = keyring.versions.filter((v) => v !== keyring.current);
   if (old.length === 0) return ok({ resealed: 0, failed: 0, skipped: 0, more: false, next: null });
   const counts = { resealed: 0, failed: 0, skipped: 0 };
-  const failedRow = (model: Sealed, id: string) => {
+  // A row that does not open counts as failed. So does a row whose
+  // conditional write matched nothing: a concurrent sign-in, signature, or
+  // new setup changed it first. A later pass reads it again.
+  const failedRow = (model: Sealed, row: { id: string; secretVersion: number }) => {
     counts.failed++;
-    console.error("authtempo: a sealed value did not move to the current secret", model, id);
+    console.error(
+      "authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first",
+      model,
+      row.id,
+      `version ${row.secretVersion}`,
+    );
   };
   const now = config.clock.now();
-  const startTable = (cursor?.[1] as Sealed | undefined) ?? SEALED[0];
+  const startTable = SEALED.find((t) => t === cursor?.[1]) ?? SEALED[0];
   let budget = limit;
   let next: string | null = null;
   for (const model of SEALED.slice(SEALED.indexOf(startTable))) {
-    const where: Where<Sealed>[] = [{ field: "secretVersion", op: "in", value: old }];
-    if (cursor && model === startTable)
-      where.push({ field: "id", op: "gt", value: cursor[2] ?? "" });
+    const after: Where<Sealed>[] =
+      cursor && model === startTable ? [{ field: "id", op: "gt", value: cursor[2] ?? "" }] : [];
     const opts = { sort: byId<Sealed>(), limit: budget };
     let read: Array<{ id: string }>;
     if (model === "totp") {
-      const rows = await storage.findMany("totp", where as Where<"totp">[], opts);
+      const rows = await storage.findMany(
+        "totp",
+        [{ field: "secretVersion", op: "in", value: old }, ...after],
+        opts,
+      );
       for (const row of rows) {
         if (isLiveSetupWithCodes(row, now)) counts.skipped++;
         else if (await rewrapTotpRow(config, row)) counts.resealed++;
-        else failedRow(model, row.id);
+        else failedRow(model, row);
       }
       read = rows;
     } else {
-      const rows = await storage.findMany("jwk", where as Where<"jwk">[], opts);
+      const rows = await storage.findMany(
+        "jwk",
+        [{ field: "secretVersion", op: "in", value: old }, ...after],
+        opts,
+      );
       for (const row of rows) {
         if (await rewrapKeyRow(config, row)) counts.resealed++;
-        else failedRow(model, row.id);
+        else failedRow(model, row);
       }
       read = rows;
     }

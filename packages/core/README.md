@@ -692,12 +692,20 @@ return res;
 | `signUp` | `"open"` | `"open"`, `"invited"` (needs `organizations`), or `false`. A refused new user gets 403 `sign_up_closed`. |
 
 The rule runs at each create of a user: the password sign-up, the password
-reset, the magic link, the email code, and social. With `false`, an existing
-user signs in as before. The password sign-up answers `sign_up_closed` before
-it reads a user, so the answer is the same for every address. A magic link
-or code request still answers `{ sent: true }`. Its verify answers
-`sign_up_closed`, and only the owner of the mailbox sees that. A refused
-reset keeps its link usable.
+reset, the magic link, the email code, and social. An existing user signs in
+as before. A magic link or code request still answers `{ sent: true }`. Its
+verify answers `sign_up_closed`, and only the owner of the mailbox sees that.
+A refused reset keeps its link usable.
+
+With `false`, the password sign-up answers `sign_up_closed` before it reads a
+user, so the answer is the same for every address. With `"invited"`, the
+answer shows whether the address has a pending invitation, until the uniform
+sign-up answer folds it in.
+
+With `"invited"`, a new user needs a proved address. A social sign-in that
+would create a user needs a verified address from the provider: else it
+answers `sign_up_closed`. The password sign-up of an invited address opens
+no session until the person follows the verify link.
 
 ## Organizations
 
@@ -1009,7 +1017,7 @@ under that version.
 
 | Call | Answer |
 | --- | --- |
-| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. |
+| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. It reads every row of four tables: one query per 1000 rows of each table. With 100,000 TOTP users, a call makes more than 200 queries, so run it from a script, not from a request. |
 | `auth.api.secrets.rewrap({ limit, after })` | Reseals up to `limit` (1 to 1000, default 100) TOTP secrets and keys under the current version. Answers `{ resealed, failed, skipped, more, next }`. `invalid_body` for a limit outside that range or a cursor that `rewrap` did not answer. |
 
 One pass of the rewrap reads each row under a configured old version once,
@@ -1019,8 +1027,11 @@ so it does not stop the rows after it. `more` stays `true` while a row
 under a configured old version remains, also a row that failed or was
 skipped. A row under a version that the config does not hold is never read.
 
-- `failed`: the row did not open under its version, or its write did not
-  apply. The log names each row. A later pass reads it again.
+- `failed`: the row did not open under its version, or a concurrent write
+  changed it first. The log names the table, the row, and its version. A
+  later pass reads it again. A row that fails on every pass does not open
+  under its version: a TOTP user then runs a new setup, and a key retires
+  at its next signature and the sweep deletes it.
 - `skipped`: an unconfirmed TOTP setup that holds backup codes and is less
   than 15 minutes old. Its codes are keyed under its version, so it stays
   there until the enable. Wait 15 minutes and run a new pass: the pass then
@@ -1042,7 +1053,9 @@ its code again. A backup code stays under its version until it is used or
 the list is replaced. An email code lives `emailOtp.ttlMinutes`.
 
 Remove an old version from `secrets` only after `status` shows four zeros
-for it. A signing key under a version that the config does not hold does
+for it. A removed version also takes its unused backup codes: they match
+no more. When `backupCodes` is above 0, ask those users to make new codes
+first. A signing key under a version that the config does not hold does
 not open: it retires at the next signature, and a new key signs. A TOTP
 user under that version cannot pass the second factor. The rotation has two
 deploys. The operations guide "Secrets" gives each step and the

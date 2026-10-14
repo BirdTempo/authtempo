@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/create-auth.js";
+import { decodeJws } from "../src/primitives/jwk.js";
 import { base32Decode, totpCode } from "../src/primitives/totp.js";
 import type { VerificationPurpose } from "../src/schema.js";
 import { createPbkdf2PasswordHash } from "../src/seams/password-hash.js";
@@ -182,7 +183,7 @@ describe("api.secrets (plan 12b)", () => {
     log.mockRestore();
   });
 
-  it("moves a row past one that fails, skips a live setup, and reseals the setup after 15 minutes", async () => {
+  it("moves a TOTP row and a key past a row that fails, skips a live setup, and reseals it after 15 minutes", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const storage = createMemoryAdapter();
     let current = AT;
@@ -248,6 +249,9 @@ describe("api.secrets (plan 12b)", () => {
         code: await totpCode(base32Decode(cySetup.value.secret), clock.now()),
       }),
     );
+    // A signing key under version 1.
+    const cyId = "01JA0000000000000000000U12";
+    const old = must(await v1.api.jwt?.mint({ userId: cyId, sessionId: session.session.id }));
     const v2 = authOn(storage, [{ version: 2, value: S2 }, ...ONE], clock, mail);
     // The first call reads the row that fails, and the cursor goes on past it.
     const first = must(await v2.api.secrets.rewrap({ limit: 1 }));
@@ -263,8 +267,9 @@ describe("api.secrets (plan 12b)", () => {
       next = r.next;
       more = r.more;
     }
+    // Cy's TOTP secret and the signing key move.
     expect({ ...sum, more, next }).toEqual({
-      resealed: 1,
+      resealed: 2,
       failed: 1,
       skipped: 1,
       more: true,
@@ -280,7 +285,11 @@ describe("api.secrets (plan 12b)", () => {
       next: null,
     });
     const one = (await v2.api.secrets.status()).versions.find((v) => v.version === 1);
-    expect(one?.totpSecrets).toBe(1);
+    expect({ totp: one?.totpSecrets, keys: one?.signingKeys }).toEqual({ totp: 1, keys: 0 });
+    // The resealed key opens under version 2 alone: it signs again with its kid.
+    const only2 = authOn(storage, [{ version: 2, value: S2 }], clock, mail);
+    const minted = must(await only2.api.jwt?.mint({ userId: cyId, sessionId: session.session.id }));
+    expect(decodeJws(minted.token)?.header.kid).toBe(decodeJws(old.token)?.header.kid);
     log.mockRestore();
   });
 });

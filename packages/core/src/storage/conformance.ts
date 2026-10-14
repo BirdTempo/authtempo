@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAuth } from "../create-auth.js";
 import type { SecretsRewrap } from "../engine/secrets.js";
+import { decodeJws } from "../primitives/jwk.js";
 import { base32Decode, totpCode } from "../primitives/totp.js";
 import type { Result } from "../result.js";
 import type {
@@ -1208,6 +1209,11 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
   step();
   expect(await passFactor(only2)).toBe(true);
   expect(await only2.api.jwt?.verify(jwt.token)).not.toBeNull();
+  // The verify reads the public key only. A new token proves that the
+  // resealed private key opens: a key that does not open retires at the
+  // sign, and a new key with another kid signs.
+  const again = must(await only2.api.jwt?.mint({ userId, sessionId: session.session.id }));
+  expect(decodeJws(again.token)?.header.kid).toBe(decodeJws(jwt.token)?.header.kid);
 }
 
 /** The value of an ok result, or a throw that names the code. */
