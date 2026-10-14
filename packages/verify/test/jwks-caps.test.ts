@@ -1,3 +1,4 @@
+import { JWKS_RETIRED_MAX } from "@authtempo/core/credentials";
 import { describe, expect, it } from "vitest";
 import {
   createVerifier,
@@ -22,13 +23,14 @@ import {
  * Measured on 2026-10-15 from this harness (memory adapter, Node 26.10.0, arm64), after 110 rotations:
  * - EdDSA: one key 151 bytes; the largest set 14,251 bytes with 101 keys.
  * - ES256: one key 198 bytes; the largest set 18,998 bytes with 101 keys.
- * Core lists the signing key and at most 100 retired keys, so 101 keys is core's own bound.
+ * The reviewer measured 18,989 bytes for 101 ES256 keys.
+ * Core lists the signing key and at most `JWKS_RETIRED_MAX` retired keys: the cap is that bound plus one.
  * The body cap of 64 KiB is about 3.4 times the largest measured set.
  */
 describe("the key set caps (Task 9 review M2)", () => {
-  it("verifies against core's largest set: ES256, 101 keys, under the body cap", async () => {
+  it("verifies against core's largest set: ES256, at the key cap, under the body cap", async () => {
     const server = makeServer({ jwtMint: { audience: [FILES], alg: "ES256" } });
-    for (let i = 0; i < 110; i++) await server.auth.api.jwt?.rotate();
+    for (let i = 0; i < KEY_SET_MAX_KEYS + 9; i++) await server.auth.api.jwt?.rotate();
     const body = await (await server.auth.handle(new Request(`${ISSUER}/jwks`))).text();
     expect((JSON.parse(body) as { keys: unknown[] }).keys).toHaveLength(KEY_SET_MAX_KEYS);
     expect(new TextEncoder().encode(body).length).toBeLessThan(KEY_SET_MAX_BYTES);
@@ -44,7 +46,11 @@ describe("the key set caps (Task 9 review M2)", () => {
     expect(r.ok && r.value?.kind).toBe("session-jwt");
   }, 60_000);
 
-  it("answers unexpected for a set of more than 101 keys", async () => {
+  it("holds the key cap to core's bound plus the signing key", () => {
+    expect(KEY_SET_MAX_KEYS).toBe(JWKS_RETIRED_MAX + 1);
+  });
+
+  it("answers unexpected for a set of one key more than the cap", async () => {
     const key = await ownKey();
     const own = key.keySet.keys[0];
     const filler = Array.from({ length: KEY_SET_MAX_KEYS }, (_, i) => ({ ...own, kid: `f${i}` }));

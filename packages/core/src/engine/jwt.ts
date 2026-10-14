@@ -7,6 +7,7 @@ import {
   decodeJws,
   generateSigningKey,
   importPrivateKey,
+  JWKS_RETIRED_MAX,
   type JwsAlg,
   openPrivateKeyBytes,
   type PublicJwk,
@@ -238,12 +239,8 @@ export async function signToken(
   throw new Error("authtempo: no signing key opens under this secret");
 }
 
-/**
- * The retired keys the JWKS lists at most. Two live versions of an app with
- * different secrets or algs retire a key at each mint, so the list can grow
- * by one key per mint for 24 hours; the bound keeps the newest (Task 3 review).
- */
-export const JWKS_RETIRED_MAX = 100;
+// Moved to primitives/jwk.ts (plan 11d); still exported here.
+export { JWKS_RETIRED_MAX };
 
 /**
  * The JWKS document: the signing key first, then at most 100 keys retired

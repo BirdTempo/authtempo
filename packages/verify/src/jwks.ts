@@ -1,5 +1,5 @@
 import type { ClientFailure } from "@authtempo/client";
-import type { PublicJwk } from "@authtempo/core/credentials";
+import { JWKS_RETIRED_MAX, type PublicJwk } from "@authtempo/core/credentials";
 
 /** The key set lives this long when its answer names no max-age. Core sends 300. */
 export const KEY_SET_DEFAULT_SECONDS = 300;
@@ -12,15 +12,19 @@ export const UNKNOWN_KID_EVERY_MS = 30_000;
 /** After a failed read, the cache answers the same failure for this long with no read. */
 export const FAILED_READ_PAUSE_MS = 5000;
 /**
- * The largest key set body that the cache reads. Core's largest set measured 18,998 bytes
- * (ES256, 101 keys; see test/jwks-caps.test.ts), so the cap is about 3.4 times that.
+ * The caps of a key set read (Task 9 review M2).
+ * Core's largest set is the signing key and `JWKS_RETIRED_MAX` retired keys: 101 keys today.
+ * Measured on 2026-10-15 (memory adapter, Node 26.10.0, after 110 rotations):
+ * - the implementer: EdDSA 101 keys 14,251 bytes; ES256 101 keys 18,998 bytes;
+ * - the reviewer: ES256 101 keys 18,989 bytes.
+ * The body cap of 64 KiB is about 3.4 times the largest of these.
  */
 export const KEY_SET_MAX_BYTES = 65_536;
 /**
- * The most keys that a set may hold. Core lists the signing key and at most 100 retired keys
- * (`JWKS_RETIRED_MAX` of core's engine/jwt.ts). A lower cap refuses a set that core can send.
+ * The most keys that a set may hold: core's own bound, from its one source.
+ * A lower cap refuses a set that core can send, and every token then fails.
  */
-export const KEY_SET_MAX_KEYS = 101;
+export const KEY_SET_MAX_KEYS = JWKS_RETIRED_MAX + 1;
 
 export interface KeyCache {
   /** The public key of `kid`, null when the set lacks it, or a failure when the set does not answer. */

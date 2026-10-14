@@ -33,14 +33,10 @@ if (r.value === null) return verifier.unauthorized();
 | `session-jwt` | A session JWT, `typ: "JWT"` | Offline: the signature against the key set, `iss`, `sub`, `sid`, `aud` (one of `audience`), and `exp` |
 | `oauth` | An access token, `typ: "at+jwt"` | Offline: as above, and `aud` must be the entry of `resources` that the request URL falls under |
 | `api-token` | A `tk_` bearer | One `GET <basePath>/tokens/current`; `cache.apiTokenSeconds` (0 to 60, default 0) keeps the answer |
-| `session-token` | A `ts_` bearer | One `GET <basePath>/session`. Off by default: it sends the person's session token to the auth app |
+| `session-token` | A `ts_` bearer | One `GET <basePath>/session`. Off by default: it sends the person's session token to the auth app. Each check can extend the person's session, as a visit does |
 
 `accept` lists the kinds to accept; the default is `["session-jwt"]`. A kind
 that `accept` does not list answers null with no network call.
-
-The `session-token` kind changes the session. `GET /session` slides the
-session's expiry, as a request of the person does. Each check by a resource
-server keeps the person's session alive.
 
 ## Options
 
@@ -88,8 +84,9 @@ reads the key set and sends each bearer over plain HTTP. Core accepts an
 - After a failed read of the key set, the verifier answers the same failure
   for 5 s with no read. An outage then costs one read per 5 s, not one read
   per request.
-- A key set body over 64 KiB, or a set of more than 101 keys, gives
-  `unexpected`. Core's largest set holds 101 keys, about 19 KB.
+- A key set body over 64 KiB gives `unexpected`. A set of more keys than
+  core can list gives `unexpected` too. Core lists the signing key and at
+  most `JWKS_RETIRED_MAX` retired keys: 101 keys today, about 19 KB.
 - Each key of the set is checked when it is read. `kty`, `crv`, and `alg`
   must be OKP, Ed25519, and EdDSA, or EC, P-256, and ES256. A key may leave
   out `use`; when it has one, the value must be `sig`. A key may leave out

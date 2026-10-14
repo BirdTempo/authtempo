@@ -14,6 +14,15 @@ export type JwsAlg = "EdDSA" | "ES256";
 /** A retired key verifies this long after its retirement and then goes (the sweep). */
 export const RETIRED_KEY_MS = 86_400_000;
 
+/**
+ * The retired keys the JWKS lists at most. Two live versions of an app with
+ * different secrets or algs retire a key at each mint, so the list can grow
+ * by one key per mint for 24 hours; the bound keeps the newest (Task 3 review).
+ * Here since plan 11d, so the credentials entry exports it with no engine module:
+ * the verifier caps a key set at this bound plus the signing key.
+ */
+export const JWKS_RETIRED_MAX = 100;
+
 /** Three base64url parts: the shape of a compact JWS, and of nothing core issues otherwise. */
 export const JWS_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
