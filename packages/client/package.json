@@ -11,6 +11,10 @@
     "./oauth": {
       "types": "./dist/oauth/index.d.ts",
       "default": "./dist/oauth/index.js"
+    },
+    "./conformance": {
+      "types": "./dist/conformance.d.ts",
+      "default": "./dist/conformance.js"
     }
   },
   "files": [

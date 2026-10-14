@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // Tests only: this package is never built or published (plan 11d).
+  "compilerOptions": { "noEmit": true, "jsx": "react-jsx" },
+  "include": ["test"]
+}

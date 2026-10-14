@@ -1,0 +1,24 @@
+{
+  "name": "@authtempo/sdk-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@authtempo/client": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@authtempo/handoff": "workspace:*",
+    "@authtempo/react": "workspace:*",
+    "@authtempo/verify": "workspace:*",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "happy-dom": "20.14.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
