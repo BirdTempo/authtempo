@@ -176,7 +176,7 @@ describe("the shim and plan 12b", () => {
         apple: { clientId: "a", teamId: "T", keyId: "K", privateKey: "P", disableSignUp: true },
       },
     };
-    expect(refusalsOf(closed as never)).not.toContain("disableSignUp");
+    expect(refusalsOf(closed as never)).toBe("no refusal");
     expect(mapOptions(closed).config.signUp).toBe(false);
     // A provider without the key is open, so the set is a mix.
     expect(
