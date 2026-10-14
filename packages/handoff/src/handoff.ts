@@ -1,5 +1,6 @@
 import { type ClientCode, createClient } from "@authtempo/client";
 import type { PublicSession } from "@authtempo/core";
+import { HANDOFF_CALLS } from "./calls.js";
 import { type HandoffCrypto, makePkce, webCrypto } from "./pkce.js";
 import { parseReturnedUrl } from "./redirect.js";
 
@@ -58,8 +59,9 @@ export function createHandoff(options: HandoffOptions): Handoff {
     credentials: "omit",
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
+  const startPath = HANDOFF_CALLS[0].path;
   const startUrl = (challenge: string) =>
-    `${baseURL}${basePath}/handoff/start?challenge=${encode(challenge)}&redirect=${encode(options.redirect)}`;
+    `${baseURL}${basePath}${startPath}?challenge=${encode(challenge)}&redirect=${encode(options.redirect)}`;
   async function run(): Promise<HandoffResult> {
     const { verifier, challenge } = await makePkce(c);
     const returned = await options.opener.open(startUrl(challenge), options.redirect);

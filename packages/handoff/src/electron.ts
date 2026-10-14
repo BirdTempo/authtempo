@@ -2,6 +2,9 @@
 // app second-instance, app.requestSingleInstanceLock, shell.openExternal, and safeStorage (isEncryptionAvailable, getSelectedStorageBackend).
 import type { HandoffOpener } from "./handoff.js";
 import { parseReturnedUrl } from "./redirect.js";
+import type { TokenStore } from "./token-store.js";
+
+export type { TokenStore } from "./token-store.js";
 
 export interface ElectronShellLike {
   openExternal(url: string): Promise<void>;
@@ -100,12 +103,6 @@ export class TokenStoreError extends Error {
     this.name = "TokenStoreError";
     this.code = code;
   }
-}
-
-export interface TokenStore {
-  get(): Promise<string | null>;
-  set(token: string): Promise<void>;
-  clear(): Promise<void>;
 }
 
 export interface TokenCipher {

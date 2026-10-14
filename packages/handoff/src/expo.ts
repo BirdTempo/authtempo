@@ -1,6 +1,9 @@
 // Shapes checked against the expo-web-browser, expo-crypto, and electron docs on 2026-10-09 (expo-web-browser 57.0.3, expo-crypto 57.0.3).
 import type { HandoffOpener } from "./handoff.js";
 import type { HandoffCrypto } from "./pkce.js";
+import type { TokenStore } from "./token-store.js";
+
+export type { TokenStore } from "./token-store.js";
 
 /** The part of `expo-web-browser` the opener calls. Pass the module itself. */
 export interface ExpoWebBrowserLike {
@@ -57,5 +60,45 @@ export function expoCrypto<A>(Crypto: ExpoCryptoLike<A>): HandoffCrypto {
       new Uint8Array(
         await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new Uint8Array(data)),
       ),
+  };
+}
+
+/**
+ * The part of `expo-secure-store` the token store calls. Pass the module
+ * itself. Read on 2026-10-14 from expo-secure-store 57.0.4
+ * (build/SecureStore.d.ts); `typetest/expo-shapes.ts` pins it.
+ */
+export interface SecureStoreLike {
+  getItemAsync(key: string): Promise<string | null>;
+  setItemAsync(key: string, value: string): Promise<void>;
+  deleteItemAsync(key: string): Promise<void>;
+}
+
+/** expo-secure-store: "Keys may contain alphanumeric characters, `.`, `-`, and `_`." */
+const SECURE_STORE_KEY = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * The bearer token in the iOS Keychain or the Android Keystore, through
+ * expo-secure-store (plan 11d). A read that throws (a keystore entry that the
+ * system dropped) answers null and deletes the entry: the person signs in again.
+ */
+export function expoTokenStore(
+  SecureStore: SecureStoreLike,
+  options: { key?: string | undefined } = {},
+): TokenStore {
+  const key = options.key ?? "authtempo.session";
+  if (!SECURE_STORE_KEY.test(key))
+    throw new Error("authtempo handoff: the key may hold letters, digits, '.', '-', and '_' only");
+  return {
+    async get() {
+      try {
+        return await SecureStore.getItemAsync(key);
+      } catch {
+        await SecureStore.deleteItemAsync(key).catch(() => {});
+        return null;
+      }
+    },
+    set: (token) => SecureStore.setItemAsync(key, token),
+    clear: () => SecureStore.deleteItemAsync(key),
   };
 }

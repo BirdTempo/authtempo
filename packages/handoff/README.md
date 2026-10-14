@@ -186,6 +186,34 @@ async function main() {
   Every Electron development binary shares one bundle id, so do not rely on
   this path. Declare the scheme in the bundle.
 
+## The native client
+
+`createNativeClient({ baseURL, handoff, store })` answers a client for a native or desktop app in one call. It sends the stored token as the bearer and no cookie.
+
+- `signInWithBrowser()` runs the handoff, writes the token to the store, and reads the session.
+- `session()` clears the token when it answers `null`: the token is dead.
+- `signOut()` clears the token when the server ended the session or did not know it.
+- A store that throws answers `unexpected`. Nothing throws for an answer.
+
+On Expo, the store is `expoTokenStore(SecureStore)` of `@authtempo/handoff/expo`, on the iOS Keychain or the Android Keystore through `expo-secure-store`. A key holds letters, digits, `.`, `-`, and `_` only; the default is `authtempo.session`. On Electron, the store is `createTokenStore` of `@authtempo/handoff/electron`.
+
+```ts
+import * as SecureStore from "expo-secure-store";
+import * as WebBrowser from "expo-web-browser";
+import * as Crypto from "expo-crypto";
+import { createHandoff, createNativeClient } from "@authtempo/handoff";
+import { expoCrypto, expoOpener, expoTokenStore } from "@authtempo/handoff/expo";
+
+const baseURL = "https://api.example.com";
+const handoff = createHandoff({
+  baseURL,
+  redirect: "consumera://auth",
+  opener: expoOpener(WebBrowser),
+  crypto: expoCrypto(Crypto),
+});
+export const client = createNativeClient({ baseURL, handoff, store: expoTokenStore(SecureStore) });
+```
+
 ## Development
 
 Core admits a development redirect only when the API sets
