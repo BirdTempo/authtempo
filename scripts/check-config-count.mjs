@@ -6,7 +6,8 @@ import { execFileSync } from "node:child_process";
 
 // Counted 2026-10-11: 11 with packages/import/vitest.d1.config.ts (plan 9b
 // Task 14). Plan 11a adds apps/site (12), then examples/worker-d1 (13, Task 6)
-// and examples/worker-postgres (14, Task 7). Raise this number when a package adds a vitest config.
+// and examples/worker-postgres (14, Task 7). Plan 11c adds
+// packages/cli/vitest.config.ts (15, Task 3). Raise this number when a package adds a vitest config.
 const MINIMUM = 15;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {

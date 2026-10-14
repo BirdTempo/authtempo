@@ -59,6 +59,23 @@ describe("the common rules (spec 19)", () => {
     expect(linesOf(f.stderr)[0]).toBe("unknown flag --yess. Did you mean --yes?");
   });
 
+  it("names a command of the table in every example of every help text", () => {
+    for (const h of HELP)
+      for (const e of h.examples) {
+        const [program, command] = e.line.split(" ");
+        expect(program, e.line).toBe("authtempo");
+        expect(Object.keys(COMMANDS), e.line).toContain(command);
+      }
+  });
+
+  it("gives a short form only to --help (-h) and --dry-run (-n)", () => {
+    const ALLOWED: Record<string, string> = { help: "h", "dry-run": "n" };
+    for (const [name, c] of Object.entries(COMMANDS))
+      for (const [flag, spec] of Object.entries(c.options))
+        if (spec.short !== undefined)
+          expect(`${name} --${flag} -${spec.short}`).toBe(`${name} --${flag} -${ALLOWED[flag]}`);
+  });
+
   it("writes no escape byte in any output", () => {
     for (const args of [
       ["--help"],

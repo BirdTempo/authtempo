@@ -11,13 +11,15 @@ export const ROOT_HELP: HelpText = {
     "authtempo --version",
   ],
   examples: [
+    // Only commands of the table: the common test holds each example's command to it.
+    // Tasks 7 and 8 of plan 11c add the examples of init and check.
     {
-      line: "authtempo init my-app --stack workers-d1",
-      says: "Write a new Worker app on D1 into the folder my-app.",
+      line: "authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --dry-run",
+      says: "Print the report of a Supabase import, and write nothing.",
     },
     {
-      line: "authtempo check https://api.example.com",
-      says: "Check that a deployment answers as core promises.",
+      line: "authtempo keys rotate https://api.example.com --yes",
+      says: "Rotate the signing key with the operator secret in AUTHTEMPO_OPERATOR_SECRET.",
     },
   ],
   flags: [

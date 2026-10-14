@@ -145,4 +145,43 @@ describe("authtempo keys rotate (spec 19)", () => {
       expect(io.stderr[0]).toBe(`${bad} must be an http or https origin with no path`);
     }
   });
+
+  it("refuses http to a host that is not this machine, before the secret is read", async () => {
+    const bad = "http://203.0.113.9";
+    const message = `${bad} must use https: http is for localhost, 127.0.0.1, or [::1] only`;
+    // No secret is set: a read of the secret would stop with another message.
+    const unset = await rotate([bad, "--yes"], { env: {} });
+    expect(unset.code).toBe(2);
+    expect(unset.io.stderr[0]).toBe(message);
+    const set = await rotate([bad, "--yes"]);
+    expect(set.code).toBe(2);
+    expect(set.io.requests).toEqual([]);
+    expect(set.io.stderr[0]).toBe(message);
+    const local = await rotate(["http://127.0.0.1:8787", "--yes"]);
+    expect(local.io.requests[0]?.url).toBe("http://127.0.0.1:8787/auth/jwks");
+  });
+
+  it("follows no redirect: a 307 to another origin stops with exit 2, and prints no kid", async () => {
+    const inits: RequestInit[] = [];
+    const real = deployment();
+    const { code, io } = await rotate([BASE, "--yes"], {
+      fetch: async (url, init) => {
+        inits.push(init);
+        if (url === `${BASE}/auth/operator/keys/rotate`)
+          return new Response(null, {
+            status: 307,
+            headers: { location: "https://evil.example.net/rotate" },
+          });
+        if (url.startsWith("https://evil.example.net")) return Response.json({ kid: "EVIL" });
+        return real(url, init);
+      },
+    });
+    expect(code).toBe(2);
+    expect(io.stdout).toEqual([]);
+    expect(io.requests.map((r) => r.url)).not.toContain("https://evil.example.net/rotate");
+    expect(io.stderr.at(-1)).toBe(
+      `stopped: POST ${BASE}/auth/operator/keys/rotate answered 307, a redirect: the CLI follows no redirect`,
+    );
+    expect(inits.map((i) => i.redirect)).toEqual(["manual", "manual"]);
+  });
 });

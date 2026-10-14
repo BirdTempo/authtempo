@@ -15,6 +15,12 @@ export class HostError extends Stop {
  * A request with a time limit. A network failure or a timeout throws a
  * HostError that names the method and the URL. The cause's message is not
  * printed: a driver or a proxy can echo a header in it.
+ *
+ * The request follows no redirect (review of plan 11c Task 3). fetch keeps
+ * the Authorization header on a redirect, and a 307 to another origin let
+ * that origin answer for the deployment. A 3xx answer is a stop that names
+ * the status. `redirect: "manual"` gives the 3xx answer in Node.js; a runtime
+ * that hides it gives an "opaqueredirect" answer, which stops the same way.
  */
 export async function fetchWithin(
   fetcher: Fetcher,
@@ -22,13 +28,19 @@ export async function fetchWithin(
   init: RequestInit,
   ms: number,
 ): Promise<Response> {
+  let res: Response;
   try {
-    return await fetcher(url, { ...init, signal: AbortSignal.timeout(ms) });
+    res = await fetcher(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(ms) });
   } catch (e) {
     const why =
       e instanceof Error && e.name === "TimeoutError" ? `no answer in ${ms / 1000} s` : "no answer";
     throw new HostError(`${init.method ?? "GET"} ${url}: ${why}`);
   }
+  if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400))
+    throw new HostError(
+      `${init.method ?? "GET"} ${url} answered ${res.status}, a redirect: the CLI follows no redirect`,
+    );
+  return res;
 }
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -38,7 +50,12 @@ export function isLocalHost(hostname: string): boolean {
   return LOCAL_HOSTS.has(hostname);
 }
 
-/** The base URL of a deployment: an http or https origin with no path, query, or credentials. */
+/**
+ * The base URL of a deployment: an https origin with no path, query, or
+ * credentials. http is for a host of this machine only (review of plan 11c
+ * Task 3): a command sends a secret to this origin, and plain http to another
+ * host shows the secret to every network on the way.
+ */
 export function baseOf(value: string | undefined): string {
   if (value === undefined)
     throw new UsageError("name the base URL of the deployment, such as https://api.example.com");
@@ -57,6 +74,10 @@ export function baseOf(value: string | undefined): string {
     u.password !== ""
   )
     throw new UsageError(`${value} must be an http or https origin with no path`);
+  if (u.protocol === "http:" && !isLocalHost(u.hostname))
+    throw new UsageError(
+      `${value} must use https: http is for localhost, 127.0.0.1, or [::1] only`,
+    );
   return u.origin;
 }
 
