@@ -46,7 +46,7 @@ import test from "../../../../../samples/guides/split-origins.test.ts?raw";
 
 ## If it fails
 
-- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the `Origin` header is not `baseURL` and not in `trustedOrigins`.
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the `Origin` header is not `baseURL` and not in `trustedOrigins`, or the browser marks a form post as not same-origin. Post JSON, or post the form from `baseURL`.
 - The client answers `network` when the browser blocks an answer for an origin that is not trusted.
 - `client.session()` answers `null` on another site when the cookie is `Lax`. Set `SameSite=None`.
 

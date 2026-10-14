@@ -108,10 +108,11 @@ export function createRouter(
     if (!route) return json({ error: "not_found" }, 404);
     if (request.method === "POST" && !route.allowCrossSiteForm) {
       const origin = request.headers.get("origin");
-      if (origin !== null && !originTrusted(config, origin)) {
+      const trusted = origin !== null && originTrusted(config, origin);
+      if (origin !== null && !trusted) {
         return json({ error: "origin_not_trusted" }, 403);
       }
-      if (fetchMetadataRefuses(request, origin !== null && originTrusted(config, origin))) {
+      if (fetchMetadataRefuses(request, trusted)) {
         return json({ error: "origin_not_trusted" }, 403);
       }
     }

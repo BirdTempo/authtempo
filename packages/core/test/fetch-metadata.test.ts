@@ -5,10 +5,13 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { BASE, everyFeature } from "./every-feature.js";
 
 const TRUSTED = "https://app.example.com";
-const SITES = [null, "same-origin", "none", "same-site", "cross-site"] as const;
+// "bogus" is a value that the Fetch standard does not define: the code refuses such a form and
+// passes such JSON.
+const SITES = [null, "same-origin", "none", "same-site", "cross-site", "bogus"] as const;
 const TYPES = [
   "application/json",
   "application/json; charset=utf-8",
+  "Application/JSON",
   "application/x-www-form-urlencoded",
   "multipart/form-data; boundary=x",
   "text/plain",
@@ -32,7 +35,7 @@ function request(
 /** The rule of plan 12b, written out once, to hold the code to. */
 function expected(site: string | null, type: string | null, trusted: boolean): boolean {
   if (site === null) return false;
-  const json = (type ?? "").split(";")[0]?.trim() === "application/json";
+  const json = (type ?? "").split(";")[0]?.trim().toLowerCase() === "application/json";
   if (!json) return site !== "same-origin" && site !== "none";
   return (site === "cross-site" || site === "same-site") && !trusted;
 }
@@ -67,9 +70,18 @@ describe("the router applies it on every POST route (plan 12b)", () => {
 
   it.each(posts)("refuses a cross-site form post on %s", async (path) => {
     const res = await handle(
-      request(`${config.basePath}${path}`, "cross-site", "application/x-www-form-urlencoded", null),
+      // A trusted Origin: a browser on a trusted app sends this, and only the new rule refuses it.
+      request(
+        `${config.basePath}${path}`,
+        "cross-site",
+        "application/x-www-form-urlencoded",
+        TRUSTED,
+      ),
     );
     // Apple's callback is the one POST that a provider sends cross-site (allowCrossSiteForm).
+    // /handoff/continue and /oauth/authorize answer the same 403 from their own handlers, so on
+    // those two routes this case cannot tell the router from the handler. The stub route test
+    // below closes that gap: its handler never refuses.
     if (path === "/social/apple/callback") {
       expect(res.status).not.toBe(403);
       return;
@@ -107,5 +119,33 @@ describe("the router applies it on every POST route (plan 12b)", () => {
       status: 403,
       body: { error: "origin_not_trusted" },
     });
+  });
+});
+
+describe("the router refuses before any handler runs (plan 12b)", () => {
+  it("refuses a cross-site form post on a stub route, and never calls its handler", async () => {
+    const config = everyFeature();
+    let calls = 0;
+    const handle = createRouter({ ...config, trustedOrigins: new Set([TRUSTED]) }, [
+      {
+        method: "POST",
+        path: "/x",
+        async handler() {
+          calls += 1;
+          return new Response(null, { status: 204 });
+        },
+      },
+    ]);
+    const path = `${config.basePath}/x`;
+    const form = "application/x-www-form-urlencoded";
+    const refused = await handle(request(path, "cross-site", form, TRUSTED));
+    expect({ status: refused.status, body: await refused.json(), calls }).toEqual({
+      status: 403,
+      body: { error: "origin_not_trusted" },
+      calls: 0,
+    });
+    // The same form from this origin reaches the handler: the stub route is mounted.
+    const passed = await handle(request(path, "same-origin", form, null));
+    expect({ status: passed.status, calls }).toEqual({ status: 204, calls: 1 });
   });
 });

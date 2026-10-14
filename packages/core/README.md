@@ -622,6 +622,7 @@ export default {
 - With `openid` the code exchange adds an ID token (`aud` = the client id, `nonce`, `sid`, `at_hash`, and `email` or `name` and `picture` by scope), and `/oauth/userinfo` answers the same claims. The ID token uses the `jwtMint.alg` (EdDSA or ES256). OIDC Discovery asks a provider to support RS256 too; core does not, so a relying party that accepts RS256 only cannot use it.
 - Limits: `oauth-register:ip` 10 per hour; `oauth-authorize:ip` 60 per 15 minutes; `oauth-token:ip` 60 per 15 minutes, shared with the revoke.
 - Not in version 1: a confidential client with a secret, a browser-based client on another origin (the token and register endpoints send no CORS headers to an origin that is not trusted), and a token exchange or a device flow.
+- A browser client on another origin gets 403 `origin_not_trusted` from the Fetch Metadata rule (plan 12b) on its form post to `POST /oauth/token` or `POST /oauth/revoke`, and on a `POST /oauth/userinfo` with no body. This holds also for a trusted origin.
 
 ## API tokens
 
@@ -983,7 +984,9 @@ Without a trigger, expired rows stay in the database.
   in the same per-isolate limiter as the magic link. An `oidc` entry reads
   its discovery document after this limit.
 - Every call to a provider (the token exchange, the user info step, the
-  discovery read) stops after 10 s and answers `oauth_failed`.
+  discovery read, and the JWKS read) stops after 10 s, follows no
+  redirect, and answers `oauth_failed` on a 3xx. An app's `userinfo` gets a
+  fetch with the same rule, also when it asks to follow.
 - The confirm page has no script, so a double click on its button sends
   two posts. The first consumes the token and sets the cookie. If the
   browser drops the first answer, the second answers `invalid_token`, and

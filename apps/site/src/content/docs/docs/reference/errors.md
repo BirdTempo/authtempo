@@ -107,8 +107,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="origin_not_trusted"><code>origin_not_trusted</code> 403</h3>
 
-- **Meaning:** The `Origin` header is not `baseURL` and not in `trustedOrigins`.
-- **Do:** Add the origin of the app to `trustedOrigins`.
+- **Meaning:** The `Origin` header is not `baseURL` and not in `trustedOrigins`. Or the request is a form post that the browser marks as not same-origin.
+- **Do:** Add the origin of the app to `trustedOrigins`. Post JSON, or post the form from `baseURL`.
 
 | Routes |
 | --- |
