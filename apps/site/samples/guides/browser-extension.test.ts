@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { call, codeIn, harness } from "../support/harness.ts";
 import { createExtensionAuth, EXTENSION_ORIGIN } from "./browser-extension.ts";
-import { createExtensionClient, signInByCode, type TokenBox } from "./browser-extension-client.ts";
+import {
+  createExtensionClient,
+  signInByCode,
+  signOut,
+  type TokenBox,
+} from "./browser-extension-client.ts";
 
 function memoryBox(): TokenBox & { value(): string | null } {
   let token: string | null = null;
@@ -15,6 +20,16 @@ function memoryBox(): TokenBox & { value(): string | null } {
     },
     value: () => token,
   };
+}
+
+/** The extension's fetch: the browser sends the extension's origin. */
+function extensionFetch(auth: ReturnType<typeof createExtensionAuth>): typeof globalThis.fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const req = new Request(input, init);
+    const headers = new Headers(req.headers);
+    headers.set("origin", EXTENSION_ORIGIN);
+    return auth.handle(new Request(req, { headers }));
+  }) as typeof globalThis.fetch;
 }
 
 describe("sign in from a browser extension", () => {
@@ -52,8 +67,8 @@ describe("sign in from a browser extension", () => {
       cookie: null,
       authorization: `Bearer ${box.value()}`,
     });
-    await client.signOut();
-    expect((await client.session()).ok).toBe(true);
+    // The sign-out helper clears the box itself, with no later read.
+    expect(await signOut(client, box)).toEqual({ ok: true, value: { ok: true } });
     expect(box.value()).toBeNull();
   });
 
@@ -98,5 +113,60 @@ describe("sign in from a browser extension", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toContain("SameSite=None");
     expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    // Token mode keeps the default: the API's cookie stays SameSite=Lax for every other site.
+    const t = harness();
+    const tokenAuth = createExtensionAuth(t);
+    await call(
+      tokenAuth,
+      "POST",
+      "/auth/otp/request",
+      { email: "ada@example.com" },
+      {
+        origin: EXTENSION_ORIGIN,
+      },
+    );
+    const tokenRes = await call(
+      tokenAuth,
+      "POST",
+      "/auth/otp/verify",
+      { email: "ada@example.com", code: codeIn(t, "ada@example.com") },
+      { origin: EXTENSION_ORIGIN },
+    );
+    expect(tokenRes.headers.get("set-cookie")).toContain("SameSite=Lax");
+  });
+
+  it("shows the person in a subscribed store after the sign-in", async () => {
+    const h = harness();
+    const box = memoryBox();
+    const client = createExtensionClient(box, extensionFetch(createExtensionAuth(h)));
+    // A popup renders from client.store: it subscribes before the sign-in.
+    const stop = client.store.subscribe(() => {});
+    await vi.waitFor(() => expect(client.store.get().isPending).toBe(false));
+    await signInByCode(client, box, "ada@example.com", async () => codeIn(h, "ada@example.com"));
+    await vi.waitFor(() => expect(client.store.get().data?.user.email).toBe("ada@example.com"));
+    stop();
+  });
+
+  it("keeps a newer token when the session read of an older token ends", async () => {
+    const h = harness();
+    const auth = createExtensionAuth(h);
+    const box = memoryBox();
+    let during: (() => Promise<void>) | null = null;
+    const base = extensionFetch(auth);
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const res = await base(input, init);
+      // A newer sign-in writes its token while the read of the older token is on its way back.
+      if (during && new URL(new Request(input, init).url).pathname.endsWith("/session"))
+        await during();
+      return res;
+    }) as typeof globalThis.fetch;
+    const client = createExtensionClient(box, fetch);
+    await signInByCode(client, box, "ada@example.com", async () => codeIn(h, "ada@example.com"));
+    // The server ends the older session.
+    for (const row of await h.storage.findMany("session", []))
+      await h.storage.delete("session", [{ field: "id", op: "eq", value: row.id }]);
+    during = () => box.set("ts_newer");
+    expect(await client.session()).toEqual({ ok: true, value: null });
+    expect(box.value()).toBe("ts_newer");
   });
 });

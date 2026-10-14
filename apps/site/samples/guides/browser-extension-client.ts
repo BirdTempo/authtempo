@@ -33,6 +33,18 @@ export async function signInByCode(
   if (!sent.ok) return sent;
   const r = await client.emailOtp.verify({ email, code: await askCode() });
   // A person with the second factor on gets a challenge, not a token.
-  if (r.ok && "token" in r.value) await box.set(r.value.token);
+  if (r.ok && "token" in r.value) {
+    await box.set(r.value.token);
+    // The verify read the session before the box held the token: read it again for the popup.
+    client.store.refetchIfStarted();
+  }
+  return r;
+}
+
+/** The sign-out. It clears the box when the server ended the session or did not know it. */
+export async function signOut(client: Client, box: TokenBox) {
+  const r = await client.signOut();
+  // A network failure keeps the token, so the person can sign out again.
+  if (r.ok || r.code === "unauthorized") await box.clear();
   return r;
 }

@@ -16,6 +16,8 @@ import test from "../../../../../samples/guides/browser-extension.test.ts?raw";
 
 **What it does:** the extension signs a person in by email code and keeps a bearer token. The API trusts the extension's origin.
 
+**Chrome only.** A Firefox extension cannot sign in today: each browser instance has a random origin, and the API answers 403 `origin_not_trusted`.
+
 ## Before you start
 
 - A working setup from a [getting started tutorial](/docs/start/).
@@ -29,6 +31,7 @@ import test from "../../../../../samples/guides/browser-extension.test.ts?raw";
 3. Make the client with `credentials: "omit"` and the stored token as the bearer.
 4. Sign in by email code in the popup, and keep the token in `chrome.storage.local`.
 5. Clear the token when the session ends. The client calls `onSessionEnd` with the token that ended. Clear the box only when it still holds that token.
+6. Sign out with the `signOut` of the sample. It clears the box when the server ended the session.
 
 <Code code={config} lang="ts" title="The API" />
 
@@ -39,8 +42,17 @@ import test from "../../../../../samples/guides/browser-extension.test.ts?raw";
 ## How it behaves
 
 - Token mode sends no cookie, so no cross-site cookie rule applies. It is the mode of this page.
-- Cookie mode needs `cookie: { sameSite: "None" }` on the API, because the extension is another site. The client then sends `credentials: "include"`.
-- Firefox gives each browser instance its own `moz-extension://` origin. `trustedOrigins` cannot name it. If Firefox sends that origin, the API answers 403.
+- Cookie mode needs `cookie: { sameSite: "None" }` on the API, because the extension is another site. This page shows the client of token mode only.
+- Firefox gives each browser instance its own [`moz-extension://` origin](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/web_accessible_resources). `trustedOrigins` cannot name it. If Firefox sends that origin, the API answers 403.
+
+## Security
+
+- `chrome.storage.local` is not encrypted on disk, and a content script of the extension can read it. The token is a bearer credential for the whole session.
+- Read the token only in the service worker or the popup. Never read it in a content script.
+- `chrome.storage.session` keeps the token in memory only. The cost: the person signs in again after each browser restart.
+- `host_permissions` lets the extension send any request to the API origin. Name the API origin only.
+- Cookie mode sets `SameSite=None` on the API's session cookie for every site, not only for the extension. A request from another site then carries the cookie.
+- Token mode is the safer default. Its cookie keeps `SameSite=Lax`, and the client sends no cookie.
 
 ## If it fails
 
