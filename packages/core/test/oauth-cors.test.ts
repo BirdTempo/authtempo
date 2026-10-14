@@ -245,12 +245,12 @@ describe("CORS on the token endpoint for a registered client's origin (plan 11d)
     );
   });
 
-  it("keeps the Fetch Metadata 403 of a cross-site form post with no Origin or a trusted Origin (plan 12b)", async () => {
+  it("keeps the Fetch Metadata 403 of a cross-site or same-site form post with no Origin (plan 12b)", async () => {
     const h = oauthHandle();
     const c = await codeFor(h);
-    for (const origin of [null, APP_ORIGIN]) {
+    for (const site of ["cross-site", "same-site"]) {
       const res = await h.auth.handle(
-        exchangeFrom(origin, c.code, c.clientId, c.verifier, { "sec-fetch-site": "cross-site" }),
+        exchangeFrom(null, c.code, c.clientId, c.verifier, { "sec-fetch-site": site }),
       );
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: "origin_not_trusted" });
@@ -258,6 +258,19 @@ describe("CORS on the token endpoint for a registered client's origin (plan 11d)
     expect((await h.auth.handle(exchangeFrom(null, c.code, c.clientId, c.verifier))).status).toBe(
       200,
     );
+  });
+
+  it("answers a cross-site or same-site form post from a trusted Origin with credentialed CORS: trust is not worse than a client's origin", async () => {
+    for (const site of ["cross-site", "same-site"]) {
+      const h = oauthHandle();
+      const c = await codeFor(h);
+      const res = await h.auth.handle(
+        exchangeFrom(APP_ORIGIN, c.code, c.clientId, c.verifier, { "sec-fetch-site": site }),
+      );
+      expect({ site, status: res.status }).toEqual({ site, status: 200 });
+      expect(res.headers.get("access-control-allow-origin")).toBe(APP_ORIGIN);
+      expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    }
   });
 
   it("keeps the 403 of a cross-site form post to revoke from the client's own origin (plan 12b)", async () => {

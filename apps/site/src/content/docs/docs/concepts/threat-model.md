@@ -94,7 +94,7 @@ An email code of 8 digits divides each figure of its row by 100.
 
 ## A browser client on another origin
 
-The token endpoint answers a browser on another origin only when that origin is in a redirect URI of the client that the request names. The answer names the exact origin, adds `Vary: Origin`, and allows no credentials. A refused origin spends no code and no refresh token. A preflight is answered only for a registered client, read by its id, so a preflight never makes core fetch a URL. The check counts on `oauth-token-origin:ip:<ip>`, 60 per 15 minutes ([Limits](/docs/reference/limits/)). Two risks stay open. A person who registers a client with an origin of their own gets CORS for that client only. It covers only the codes that a person allowed for that client by name. A script on the client's own origin can read the client's tokens, and core cannot see it.
+The token endpoint answers a browser on another origin only when that origin is in a redirect URI of the client that the request names. The answer names the exact origin, adds `Vary: Origin`, and allows no credentials. A refused origin spends no code and no refresh token. Core answers a preflight only for a registered client, read by its id. So a preflight never makes core fetch a URL. The check counts on `oauth-token-origin:ip:<ip>`, 60 per 15 minutes ([Limits](/docs/reference/limits/)). Two risks stay open. A person who registers a client with an origin of their own gets CORS for that client only. It covers only the codes that a person allowed for that client by name. A script on the client's own origin can read the client's tokens, and core cannot see it.
 
 ## Next
 

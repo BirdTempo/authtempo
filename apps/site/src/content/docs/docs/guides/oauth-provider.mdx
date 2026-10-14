@@ -50,7 +50,7 @@ import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
 - A refresh token (`offline_access`) rotates at each use. A used refresh token sent again deletes its whole family.
 - A password reset and a password change delete every refresh token and every pending code of the user. The consents stay.
 - A revoke under another client's `client_id` answers `unauthorized_client` and revokes nothing.
-- A browser client on another origin can call `/auth/oauth/token` from a web origin of its own redirect URIs. The answer carries `access-control-allow-origin` with that origin and no credentials. Its form post to `/auth/oauth/revoke`, and its `POST /auth/oauth/userinfo` with no body, answer 403 [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted). Every other origin also gets that 403 at `/auth/oauth/token`.
+- A browser client on another origin can call `/auth/oauth/token` from a web origin of its own redirect URIs. The answer carries `access-control-allow-origin` with that origin and no credentials. Its form post to `/auth/oauth/revoke`, and its `POST /auth/oauth/userinfo` with no body, answer 403 [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted). Every other foreign origin also gets that 403 at `/auth/oauth/token`. A trusted origin gets credentialed CORS there.
 
 ## If it fails
 

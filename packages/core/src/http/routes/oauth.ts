@@ -26,6 +26,7 @@ import {
 import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { OAUTH_ERRORS } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import type { OAuthClientRow } from "../../schema.js";
 import { consentPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
@@ -175,10 +176,19 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   };
   const originChecked = async (ip: string | null) =>
     config.limiter.allow(`oauth-token-origin:ip:${ipKey(ip)}`, ORIGIN_CHECK_PER_IP);
-  /** The grant of a form; the answer of the endpoint before any CORS header. */
-  const grantAnswer = async (form: URLSearchParams | null, ip: string | null) => {
+  /**
+   * The grant of a form; the answer of the endpoint before any CORS header.
+   * `client` is the row of `client_id` that the origin check read, so the
+   * grant does not read it again.
+   */
+  const grantAnswer = async (
+    form: URLSearchParams | null,
+    ip: string | null,
+    client?: OAuthClientRow,
+  ) => {
     if (!form) return tokenAnswer(oauthFail("invalid_request"));
     const clientId = form.get("client_id") ?? "";
+    const known = client ? { client } : {};
     const grant = form.get("grant_type");
     if (grant === "authorization_code")
       return tokenAnswer(
@@ -189,6 +199,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           redirectUri: form.get("redirect_uri") ?? "",
           resource: form.get("resource"),
           ip,
+          ...known,
         }),
       );
     if (grant === "refresh_token")
@@ -199,6 +210,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           scope: form.get("scope"),
           resource: form.get("resource"),
           ip,
+          ...known,
         }),
       );
     return tokenAnswer(oauthFail("unsupported_grant_type"));
@@ -247,16 +259,20 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const form = await formParams(ctx.request);
         const origin = ctx.request.headers.get("origin");
-        // No Origin or a trusted Origin: the router applied the Origin rule and the Fetch Metadata rule.
+        // No Origin: the router applied the Origin rule and the Fetch Metadata rule. A trusted
+        // Origin gets the router's credentialed CORS, as before plan 12b.
         // The router's config decides trust, so the handler and the router agree.
         if (origin === null || originTrusted(ctx.config, origin)) return grantAnswer(form, ctx.ip);
         // A foreign origin: the check runs before the grant, so a refused origin spends no code and no token.
         if (!(await originChecked(ctx.ip)))
           return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
+        // findClient, not registeredClient: its lastSeenAt write keeps a used client
+        // from the sweep. A refused probe can make that write too, at most once
+        // per client per day, under the per-IP count above.
         const client = form ? await findClient(config, form.get("client_id") ?? "") : null;
         if (!client || !redirectOrigins(client.redirectUris).has(origin))
           return json({ error: "origin_not_trusted" }, 403);
-        return clientCors(await grantAnswer(form, ctx.ip), origin);
+        return clientCors(await grantAnswer(form, ctx.ip, client), origin);
       },
     },
     {

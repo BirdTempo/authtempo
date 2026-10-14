@@ -32,13 +32,13 @@ export interface Route {
    */
   allowCrossSiteForm?: boolean;
   /**
-   * The handler checks a foreign Origin itself (plan 11d). The router passes
-   * a POST whose Origin is present and not trusted past the Origin rule and
-   * the Fetch Metadata rule, and the handler admits only an origin of the
-   * client that the request names, with CORS and no credentials. A POST with
-   * no Origin or a trusted Origin keeps both rules. Only `POST /oauth/token`
-   * sets it: it reads no cookie, so a cross-site post carries no ambient
-   * authority, and PKCE binds each code to its verifier.
+   * The handler checks the Origin itself (plan 11d). The router passes a
+   * POST with an Origin past the Origin rule and the Fetch Metadata rule. A
+   * trusted Origin gets the router's credentialed CORS. A foreign Origin
+   * passes only as an origin of the client that the request names, with
+   * CORS and no credentials. A POST with no Origin keeps both rules. Only
+   * `POST /oauth/token` sets it: it reads no cookie, so a cross-site post
+   * carries no ambient authority, and PKCE binds each code to its verifier.
    */
   clientOrigin?: boolean;
   /**
@@ -205,9 +205,11 @@ export function createRouter(
     if (request.method === "POST" && !route.allowCrossSiteForm) {
       const origin = request.headers.get("origin");
       const trusted = origin !== null && originTrusted(config, origin);
-      // A foreign Origin on a `clientOrigin` route goes to the handler, which
-      // refuses it unless it is a web origin of the named client (plan 11d).
-      if (route.clientOrigin && origin !== null && !trusted) return run(route, request, url);
+      // An Origin on a `clientOrigin` route goes to the handler (plan 11d). A
+      // trusted Origin passes there as before plan 12b; a foreign one passes
+      // only as a web origin of the named client. The route reads no cookie,
+      // so the Fetch Metadata rule protects nothing on it. No Origin keeps both rules.
+      if (route.clientOrigin && origin !== null) return run(route, request, url);
       if (origin !== null && !trusted) {
         return json({ error: "origin_not_trusted" }, 403);
       }

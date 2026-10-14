@@ -11,7 +11,7 @@ import {
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { resourceOf } from "../primitives/resource.js";
-import type { OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
+import type { OAuthClientRow, OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import { findClient } from "./oauth-clients.js";
@@ -251,11 +251,14 @@ export async function exchangeCode(
     redirectUri: string;
     resource: string | null;
     ip: string | null;
+    /** The client of `clientId` that the caller already read (plan 11d), so the grant reads it once. */
+    client?: OAuthClientRow;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
   if (await limited(config, input.ip)) return oauthFail("rate_limited");
   if (!CODE_RE.test(input.code)) return oauthFail("invalid_grant");
-  const client = await findClient(config, input.clientId);
+  const client =
+    input.client?.id === input.clientId ? input.client : await findClient(config, input.clientId);
   if (!client) return oauthFail("invalid_client");
   const valueHash = await sha256Hex(input.code);
   const consumed = await consumeVerification(config.storage, {
@@ -339,6 +342,8 @@ export async function refreshGrant(
     scope: string | null;
     resource: string | null;
     ip: string | null;
+    /** The client of `clientId` that the caller already read (plan 11d), so the grant reads it once. */
+    client?: OAuthClientRow;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
   if (await limited(config, input.ip)) return oauthFail("rate_limited");
@@ -360,7 +365,9 @@ export async function refreshGrant(
   if (input.resource !== null && input.resource !== row.resource)
     return oauthFail("invalid_target");
   // A CIMD document that does not answer now refuses this refresh and keeps the family.
-  if (!(await findClient(config, row.clientId))) return oauthFail("invalid_client");
+  const client =
+    input.client?.id === row.clientId ? input.client : await findClient(config, row.clientId);
+  if (!client) return oauthFail("invalid_client");
   const user = await liveUser(config, row.userId);
   if (!user) return reuse(config, row);
   const spent = await config.storage.update(
