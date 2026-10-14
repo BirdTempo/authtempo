@@ -21,7 +21,7 @@ sidebar:
 
 ## The command
 
-The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
 
 ```sh
 authtempo init my-app --stack workers-d1
@@ -47,6 +47,8 @@ authtempo init my-app --stack workers-d1
 | `workers-postgres` | `examples/worker-postgres` | [Workers on Postgres through Hyperdrive](/docs/start/workers-hyperdrive/) |
 | `node` | `examples/node` | [Node](/docs/start/node/) |
 | `bun` | `examples/node`, with `bun src/main.ts` as its start script | [Bun](/docs/start/bun/) |
+
+The `node` stack and the `bun` stack need Node 22.18 or newer. Node runs their `.ts` files with its type stripping.
 
 ## The files
 

@@ -23,7 +23,7 @@ sidebar:
 
 ## The command
 
-The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
 
 ```sh
 authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run
@@ -81,6 +81,10 @@ authtempo import supabase --users users.csv --identities identities.csv --format
 - With `--postgres`, it prints a second line. A connection string on the command line goes into the shell history.
 
 :::caution
+Warning: do not give a format that the app's seam does not verify. The import then writes those hashes, reports no refusal, and exits 0. Each of those users then fails every password sign-in.
+:::
+
+:::caution
 Warning: the D1 bundle holds every password hash. Do not commit it, and remove it after the Worker run.
 :::
 
@@ -93,6 +97,36 @@ Warning: the D1 bundle holds every password hash. Do not commit it, and remove i
 | 2 | A usage error, a malformed input file, or a stop. A stop prints one stopped line. |
 
 A skip that the export states, such as a deleted user, is listed in the report. A stop prints its `stopped:` line on stderr.
+
+## The report
+
+| Key | What it lists |
+| --- | --- |
+| `created` | The number of users, identities, passwords, passkeys, organizations, and members that the run wrote. |
+| `exists` | The number of users and organizations that exist by their import id. A second run writes nothing for them. |
+| `skipped` | Each skipped record, with its reason. A conflict and a refused record are skips too. |
+| `refusedHashes` | Each refused hash, with its format. The user then imports with no password. |
+| `dropped` | Each item that the run left out of a record that it wrote, such as `identity:github`. |
+| `partial` | Each record that lacks some of its rows, with the missing row kinds. |
+| `repaired` | Each record whose missing rows `--repair` wrote. |
+
+The command prints a summary of the report. `--report <file>` writes the full report as JSON, and `--json` holds it as `report`. `--target d1-bundle` writes no report, because the import Worker makes it.
+
+## The conflicts
+
+The conflicts are `unmatched_row`, `duplicate_row`, `status_compromised`, `status_unknown`, `no_source_id`, `email_taken`, `identity_taken`, `slug_taken`, `no_owner`, `duplicate_passkey`, and `user_not_imported`.
+
+- The import never merges two accounts. A taken address or identity skips the record.
+- A second run of the same export writes nothing.
+- A repair writes nothing for a user that a claim verified since the import. The record then stays `partial` with `not repaired: verified_since_import`.
+
+## The rules of the rows
+
+- An address is verified only where the export says so.
+- A social identity other than Google, Apple, GitHub, or LinkedIn is dropped and listed.
+- A GitHub identity imports only as the numeric user id of GitHub.
+- A LinkedIn identity imports only as the OpenID Connect `sub`. An id of the older LinkedIn API is dropped and listed as `identity:linkedin_legacy`.
+- A hash in a format that `--formats` does not name is refused and listed. The user then imports with no password.
 
 ## Next
 

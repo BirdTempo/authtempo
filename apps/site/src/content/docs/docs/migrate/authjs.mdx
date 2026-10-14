@@ -40,8 +40,10 @@ import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
 
 6. Run the import as a dry run. Add `--same-passkey-rp-id` only when the new API keeps the old relying party id.
 
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
+
 ```sh
-pnpm exec authtempo import authjs --authjs-tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --target postgres --url-env DATABASE_URL --dry-run
+authtempo import authjs --authjs-tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --target postgres --url-env DATABASE_URL --dry-run
 ```
 
 7. Run the same command without `--dry-run`.

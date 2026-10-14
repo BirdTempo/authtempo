@@ -11,13 +11,24 @@ authtempo help <command>
 ## Install
 
 The packages are not on a registry yet: publication is the owner's call.
-In this repo, `examples/worker` has the CLI as a dev dependency, so pnpm
-links the `authtempo` binary there: build it with
-`pnpm --filter @authtempo/cli build`, then run
-`pnpm --filter authtempo-example-worker exec authtempo --help`, or
-`node packages/cli/dist/bin/authtempo.js`. After the first
-release, install it with `pnpm add -D @authtempo/cli`, or run it with
-`pnpm dlx @authtempo/cli`.
+Until then, build the CLI once in a clone of this repo, then run each command
+with `node` and the absolute path of the clone, from the folder of your app:
+
+```bash
+cd /path/to/authtempo
+pnpm turbo run build --filter=@authtempo/cli
+cd /path/to/my-app
+node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
+```
+
+Write the path of your clone in place of `/path/to/authtempo`. Each relative
+path that a command reads or writes, such as `--config` or `--users`,
+resolves from the current folder. `test/documented-run.test.ts` runs this
+form from a temporary folder. `examples/worker` links the binary too, but
+`pnpm --filter authtempo-example-worker exec authtempo` runs in
+`examples/worker`, not in your folder, and exits 1 on any failure, so use it
+for `--help` only. After the first release, install the CLI with
+`pnpm add -D @authtempo/cli`, or run it with `pnpm dlx @authtempo/cli`.
 
 ## The rules
 
@@ -25,9 +36,12 @@ release, install it with `pnpm add -D @authtempo/cli`, or run it with
   record that needs a person); 2 a usage error, a malformed input, or a
   stop. A stop prints one `stopped:` line on stderr.
 - stdout holds the result. Usage errors, warnings, the `stopped:` line,
-  and each line that names a host, a database, or a file that the command
-  reads or writes go to stderr. `--json` prints one JSON document on stdout;
-  `src/json.ts` exports each shape.
+  and each progress line that names what the command reads or connects to
+  go to stderr. A result line may name a file or the base URL, such as
+  `wrote <path>` of `init`. `--json` prints one JSON document on stdout;
+  `src/json.ts` exports each shape. On a usage error or a stop, `--json`
+  prints no document; the `stopped:` line on stderr is the result. Plan 11e
+  adds `stopped` to each shape.
 - No flag takes a secret as its value. A connection string comes from
   `--url-env <NAME>` (default `DATABASE_URL`) or `--url-file <path>`; the
   operator secret from `--token-env <NAME>` (default

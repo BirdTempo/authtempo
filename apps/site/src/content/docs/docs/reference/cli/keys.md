@@ -21,7 +21,7 @@ sidebar:
 
 ## The command
 
-The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
 
 ```sh
 authtempo keys rotate https://api.example.com --yes
@@ -31,7 +31,7 @@ authtempo keys rotate https://api.example.com --yes
 | --- | --- |
 | `<base url>` | The origin of the API, with no path. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
-| `--token-file <path>` | The file of the operator secret. `-` is stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--token-file <path>` | The file of the operator secret. A dash reads stdin, and then the command needs `--yes`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--yes` | Rotates with no question. A run with no terminal needs it. |

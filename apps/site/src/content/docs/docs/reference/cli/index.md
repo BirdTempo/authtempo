@@ -17,20 +17,25 @@ sidebar:
 
 ## Before you start
 
-- Node 22.18 or newer.
+- Node 22 or newer.
 - A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so the command runs only from the repo. [Choose your stack](/docs/start/) tells why.
 
 ## Run it from this repo
 
-The root of the repo has no `authtempo` binary. The example Worker depends on `@authtempo/cli`, so pnpm links the binary there. Build the CLI first, and then run a command through the example Worker, or with `node`.
+The root of the repo has no `authtempo` binary, and an app that `authtempo init` writes does not depend on `@authtempo/cli`. Build the CLI once in the repo. Then run each command with `node` and the absolute path of the repo, in the folder of your app.
 
 ```sh
+cd /path/to/authtempo
 pnpm turbo run build --filter=@authtempo/cli
-pnpm --filter authtempo-example-worker exec authtempo --help
-node packages/cli/dist/bin/authtempo.js --help
+cd /path/to/my-app
+node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
 ```
 
-An app that `authtempo init` writes does not depend on `@authtempo/cli`. Run each command for that app from the repo, in one of these two forms.
+- Write the path of your clone in place of `/path/to/authtempo`.
+- The command reads and writes each relative path, such as `--config` or `--users`, from the current folder.
+- A test runs this form from a temporary folder, and checks the folder and the exit codes.
+
+`pnpm --filter authtempo-example-worker exec authtempo` runs in `examples/worker`, not in your folder, and exits 1 on any failure. Use it for `--help` only.
 
 ## The commands
 
@@ -64,8 +69,10 @@ A stop prints its `stopped:` line on stderr.
 ## The output
 
 - stdout holds the result.
-- stderr holds the usage errors, the warnings, the `stopped:` line, and each line that names a host, a database, or a file.
+- stderr holds the usage errors, the warnings, the `stopped:` line, and each progress line that names what the command reads or connects to.
+- A result line on stdout can name a file or the base URL, such as `wrote <path>` of `init`.
 - `--json` prints one JSON document on stdout, and nothing else there. A script reads that document, not the human lines.
+- On a usage error or a stop, `--json` prints no document; the `stopped:` line on stderr is the result. Plan 11e adds `stopped` to each shape.
 - The human lines can change in a later version. A JSON document only gains keys, and a removal comes after a deprecation.
 - The CLI writes no color and no terminal control.
 

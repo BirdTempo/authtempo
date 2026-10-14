@@ -22,7 +22,7 @@ sidebar:
 
 ## The command
 
-The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
 
 ```sh
 authtempo migrate --target postgres --url-env DATABASE_URL
@@ -70,8 +70,13 @@ authtempo migrate --target d1 --database my-app --remote
 - With `--tables core`, the `migrations_dir` of the binding must hold each file of `@authtempo/adapter-d1` with the same text.
 - Another folder stops the run, and the message names both folders. wrangler would apply the wrong files and report success.
 - With `--tables compat`, the command copies each compat file into the `migrations_dir` of the app under its next number.
+- With `--tables compat`, a `migrations_dir` in a package or under `node_modules` stops the run with exit 2, before the first write. The default folder of a core D1 app is that of `@authtempo/adapter-d1`, so point `migrations_dir` at a folder of the app first.
 - A file whose text the folder holds already is not copied again.
 - wrangler records each applied file in its table `d1_migrations`.
+
+:::caution
+Warning: do not edit a copied compat file. The next run copies it again under a new number, and wrangler fails on it.
+:::
 
 :::caution
 Warning: do not deploy a new core before its migrations run. Every request then answers 500 until they run.

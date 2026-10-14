@@ -107,8 +107,15 @@ export const UNPUBLISHED: boolean = (() => {
   };
   return pkg.private === true || pkg.version === "0.0.0";
 })();
+/**
+ * The scaffold does not depend on @authtempo/cli, so `authtempo` in the next
+ * steps is on no path until publication. The note gives the documented run
+ * form (test/documented-run.test.ts holds it to the docs page): node with the
+ * absolute path of the clone, run in the folder of the app, so each relative
+ * path resolves there and exit 2 stays exit 2.
+ */
 export const UNPUBLISHED_NOTE =
-  "The packages are not on a registry yet: pnpm install works only inside the authtempo workspace until they are published.";
+  "The packages are not on a registry yet: pnpm install works only inside the authtempo workspace until they are published. Until then, run each authtempo step as node /path/to/authtempo/packages/cli/dist/bin/authtempo.js in the folder of the app. Write the path of your clone in place of /path/to/authtempo.";
 
 const BASE_EXTENDS = '"extends": "../../tsconfig.base.json"';
 /** The test script of the D1 example: its bundle proof is a file of the repo, not of the app. */
