@@ -262,6 +262,10 @@ describe("migration 0005 (plan 12c)", () => {
   it("ships both D1 files as the one constant's SQLite text", () => {
     expect(normalize(shipped0005)).toBe(normalize(COMPAT_MIGRATION_0005_SQL.sqlite));
     expect(normalize(shipped0005Before17)).toBe(normalize(COMPAT_MIGRATION_0005_SQL.sqlite));
+    // No file holds the Postgres text, so this line holds it to the totp cleanup.
+    expect(COMPAT_MIGRATION_0005_SQL.postgres).toContain(
+      "DELETE FROM ta_totp WHERE enabled_at IS NULL;",
+    );
   });
 
   it("creates core's table with core's columns, copies the enabled totp rows, and moves the versions to 8 and 5", () => {
