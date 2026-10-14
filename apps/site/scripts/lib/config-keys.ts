@@ -163,6 +163,7 @@ export const CONFIG_KEYS = {
     audience: true,
     ttlMinutes: true,
     claims: true,
+    rotateEvery: true,
   } satisfies Keys<JwtMintConfig>,
   oauth: {
     resources: true,

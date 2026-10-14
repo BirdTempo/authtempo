@@ -194,6 +194,7 @@ Another key of `jwtMint` is refused.
 | `jwtMint.audience` | string or string list | `[baseURL]` | 1 to 10 strings of 1 to 2048 characters with no control character, and none an `oauth.resources` entry. |
 | `jwtMint.ttlMinutes` | number | 15 | An integer from 1 to 60. |
 | `jwtMint.claims` | function of the user and the session | none | Answers an object of claims. Core sets the reserved claims itself. |
+| `jwtMint.rotateEvery` | number of days | none: no timer | A whole number from 1 to 365. The first signature with a key this old makes a new key. A JWKS read never rotates. |
 
 ## OAuth provider
 

@@ -29,6 +29,8 @@ export const SIGNING_SLOT = "signing";
 const KID_MAX = 64;
 /** A session id is a ULID of 26 characters; a longer value names no row and costs no read. */
 const SID_MAX = 64;
+/** One day in milliseconds: `jwtMint.rotateEvery` counts days (plan 11c). */
+const DAY_MS = 86_400_000;
 
 /** The claims a session JWT carries from core. `jwtMint.claims` adds names, never these. */
 export const RESERVED_CLAIMS: ReadonlySet<string> = new Set([
@@ -97,17 +99,41 @@ async function retireKey(config: ResolvedConfig, row: JwkRow): Promise<void> {
 }
 
 /**
+ * True when the timer of `jwtMint.rotateEvery` says that `row` must retire
+ * (plan 11c): the key is at least that many days old. False when the config
+ * sets no timer.
+ */
+function rotationDue(config: ResolvedConfig, row: JwkRow): boolean {
+  const days = config.jwtMint?.rotateEvery ?? null;
+  return days !== null && row.createdAt.getTime() + days * DAY_MS <= config.clock.now().getTime();
+}
+
+/**
  * The signing key of `alg`. The first call writes one. Two isolates that
  * race write two, and the unique key on `slot` keeps one: the loser reads
  * the winner's row on the next turn. A signing key of another alg retires,
  * and a new one takes the slot. Not in a transaction: the unique error is
- * caught here (plan 3 rule).
+ * caught here (plan 3 rule). With `rotateDue` (the signing path only), a key
+ * that the timer of `jwtMint.rotateEvery` names retires first (plan 11c).
  */
-export async function signingKey(config: ResolvedConfig, alg: JwsAlg): Promise<JwkRow> {
+export async function signingKey(
+  config: ResolvedConfig,
+  alg: JwsAlg,
+  options: { rotateDue?: boolean } = {},
+): Promise<JwkRow> {
   const { storage } = config;
   for (let attempt = 0; attempt < 3; attempt++) {
     const row = await storage.findOne("jwk", [{ field: "slot", op: "eq", value: SIGNING_SLOT }]);
-    if (row && algOf(row) === alg) return row;
+    if (row && algOf(row) === alg) {
+      // The lazy timer (plan 11c). The retire is the claim: it matches the
+      // row by id and slot, so of two callers that read the same old key one
+      // moves it and the other moves none. Both then race to create, the
+      // unique key on slot keeps one new key, and the loser reads the
+      // winner's key on the next turn.
+      if (options.rotateDue !== true || !rotationDue(config, row)) return row;
+      await retireKey(config, row);
+      continue;
+    }
     if (row) {
       await retireKey(config, row);
       continue;
@@ -145,7 +171,7 @@ export async function signToken(
 ): Promise<string> {
   const { alg } = mintConfig(config);
   for (let attempt = 0; attempt < 2; attempt++) {
-    const row = await signingKey(config, alg);
+    const row = await signingKey(config, alg, { rotateDue: true });
     const key = await openPrivateKey(config.secret, row.id, row.privateKey, alg);
     if (key) return signJws({ alg, kid: row.id, typ, key, payload });
     console.error("authtempo: a signing key does not open under this secret; it retires", row.id);

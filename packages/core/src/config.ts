@@ -292,6 +292,13 @@ export interface JwtMintConfig {
     user: UserRow,
     session: SessionRow,
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  /**
+   * The days between two automatic rotations of the signing key: a whole
+   * number from 1 to 365 (plan 11c). Off when absent. The timer is lazy: the
+   * first signature with a key this old retires the key and signs with a new
+   * one. A JWKS read never rotates. The retired key verifies for 24 hours.
+   */
+  rotateEvery?: number;
 }
 
 export interface ResolvedJwtMint {
@@ -304,6 +311,8 @@ export interface ResolvedJwtMint {
         session: SessionRow,
       ) => Record<string, unknown> | Promise<Record<string, unknown>>)
     | null;
+  /** Days, or null: no timer (plan 11c). */
+  rotateEvery: number | null;
 }
 
 export interface OAuthConfig {
@@ -899,6 +908,7 @@ const JWT_MINT_KEYS: Readonly<Record<keyof JwtMintConfig, true>> = {
   audience: true,
   ttlMinutes: true,
   claims: true,
+  rotateEvery: true,
 };
 
 /** `jwtMint` (plan 9g). Absent: on, with the defaults. `false`: off. */
@@ -913,7 +923,7 @@ function resolveJwtMint(
   for (const [key, value] of Object.entries(o))
     if (value !== undefined && !Object.hasOwn(JWT_MINT_KEYS, key))
       throw new ConfigError(
-        `jwtMint.${key} is not an option; core has alg, audience, ttlMinutes, and claims`,
+        `jwtMint.${key} is not an option; core has alg, audience, ttlMinutes, claims, and rotateEvery`,
       );
   const alg = o.alg ?? "EdDSA";
   if (alg !== "EdDSA" && alg !== "ES256")
@@ -940,7 +950,20 @@ function resolveJwtMint(
     throw new ConfigError("jwtMint.ttlMinutes must be an integer from 1 to 60");
   if (o.claims !== undefined && typeof o.claims !== "function")
     throw new ConfigError("jwtMint.claims must be a function");
-  return { alg, audience: [...(audience as string[])], ttlMinutes, claims: o.claims ?? null };
+  // Days (plan 11c). 365 bounds a typo in the unit, such as 3600 for one hour.
+  const rotateEvery = o.rotateEvery ?? null;
+  if (
+    rotateEvery !== null &&
+    (!Number.isSafeInteger(rotateEvery) || rotateEvery < 1 || rotateEvery > 365)
+  )
+    throw new ConfigError("jwtMint.rotateEvery must be a whole number of days from 1 to 365");
+  return {
+    alg,
+    audience: [...(audience as string[])],
+    ttlMinutes,
+    claims: o.claims ?? null,
+    rotateEvery,
+  };
 }
 
 const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {

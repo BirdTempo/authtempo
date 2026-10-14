@@ -640,6 +640,7 @@ describe("jwtMint (plan 9g)", () => {
       audience: ["https://api.example.com"],
       ttlMinutes: 15,
       claims: null,
+      rotateEvery: null,
     });
     expect(resolveConfig({ ...base, jwtMint: false }).jwtMint).toBeNull();
     const claims = () => ({ role: "admin" });
@@ -648,7 +649,17 @@ describe("jwtMint (plan 9g)", () => {
         ...base,
         jwtMint: { alg: "ES256", audience: "https://rs.example.com", ttlMinutes: 60, claims },
       }).jwtMint,
-    ).toEqual({ alg: "ES256", audience: ["https://rs.example.com"], ttlMinutes: 60, claims });
+    ).toEqual({
+      alg: "ES256",
+      audience: ["https://rs.example.com"],
+      ttlMinutes: 60,
+      claims,
+      rotateEvery: null,
+    });
+    expect(resolveConfig({ ...base, jwtMint: { rotateEvery: 1 } }).jwtMint?.rotateEvery).toBe(1);
+    expect(resolveConfig({ ...base, jwtMint: { rotateEvery: 365 } }).jwtMint?.rotateEvery).toBe(
+      365,
+    );
     expect(
       resolveConfig({ ...base, jwtMint: { audience: ["a", "b"], ttlMinutes: 1 } }).jwtMint,
     ).toMatchObject({ audience: ["a", "b"], ttlMinutes: 1 });
@@ -657,6 +668,7 @@ describe("jwtMint (plan 9g)", () => {
   it("refuses a value out of range, a key core does not have, and a value that is not an object", () => {
     const AUD =
       "jwtMint.audience must be 1 to 10 strings of 1 to 2048 characters with no control character";
+    const ROTATE = "jwtMint.rotateEvery must be a whole number of days from 1 to 365";
     const bad: [unknown, string][] = [
       [{ alg: "RS256" }, "jwtMint.alg must be EdDSA or ES256"],
       [{ ttlMinutes: 0 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
@@ -667,9 +679,13 @@ describe("jwtMint (plan 9g)", () => {
       [{ audience: Array.from({ length: 11 }, (_, i) => `a${i}`) }, AUD],
       [{ audience: ["a\nb"] }, AUD],
       [{ claims: "x" }, "jwtMint.claims must be a function"],
+      [{ rotateEvery: 0 }, ROTATE],
+      [{ rotateEvery: 366 }, ROTATE],
+      [{ rotateEvery: 1.5 }, ROTATE],
+      [{ rotateEvery: "30" }, ROTATE],
       [
         { issuer: "x" },
-        "jwtMint.issuer is not an option; core has alg, audience, ttlMinutes, and claims",
+        "jwtMint.issuer is not an option; core has alg, audience, ttlMinutes, claims, and rotateEvery",
       ],
       [true, "jwtMint must be an object or false"],
     ];
