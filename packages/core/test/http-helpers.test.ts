@@ -625,4 +625,12 @@ describe("the TOTP challenge page (plan 9f)", () => {
     const passkey = defaultTotpPage({ ...input, methods: ["passkey", "backup"], method: "backup" });
     expect(passkey).toContain("A passkey works in the app's own sign-in page.");
   });
+
+  it("links no method that the challenge does not offer (plan 12c)", () => {
+    expect(defaultTotpPage(input)).not.toContain("method=email");
+    const email = defaultTotpPage({ ...input, methods: ["email", "backup"], method: "email" });
+    expect(email).not.toContain("Use a code from your authenticator app");
+    const only = defaultTotpPage({ ...input, methods: ["totp"] });
+    expect(only).not.toContain("Use a backup code");
+  });
 });

@@ -622,4 +622,113 @@ describe("the challenge page (plan 12c)", () => {
     );
     expect(done.headers.get("location")).toBe(`${BASE_URL}/inbox`);
   });
+
+  it("refuses another user's trust cookie and an expired one on the trusted button", async () => {
+    const h = pwHandle({ hash: FAST });
+    await enrolled(h, await verifiedUser(h));
+    const bea = "bea@example.com";
+    const fb = await enrolled(h, await verifiedUser(h, bea));
+    const sb = await h.auth.handle(post("/auth/password/sign-in", { email: bea, password: PW }));
+    const cb = ((await sb.json()) as { twoFactor: { challenge: string } }).twoFactor.challenge;
+    const vb = await h.auth.handle(
+      post("/auth/totp/verify", { challenge: cb, code: await fb.code(), trustDevice: true }),
+    );
+    const beaTrust = pair(cookieNamed(vb, "tempo_totp_trust") ?? "");
+    expect(beaTrust).toMatch(/^tempo_totp_trust=td_/);
+    // Bea's live trust row is no trust for Ann's challenge: on the page and on the post.
+    const c = await challenge(h);
+    const page = await (
+      await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}`, { cookie: beaTrust }))
+    ).text();
+    expect(page).not.toContain("Continue on this trusted device");
+    const other = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&action=trusted`, { cookie: beaTrust }),
+    );
+    expect(other.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    // After the trust days, Bea's own row is no trust.
+    h.clock.advance(31 * 86_400_000);
+    const sb2 = await h.auth.handle(post("/auth/password/sign-in", { email: bea, password: PW }));
+    const cb2 =
+      ((await sb2.json()) as { twoFactor?: { challenge: string } }).twoFactor?.challenge ?? "";
+    expect(cb2).toMatch(/^tf_/);
+    const page2 = await (
+      await h.auth.handle(get(`/auth/totp/challenge?challenge=${cb2}`, { cookie: beaTrust }))
+    ).text();
+    expect(page2).not.toContain("Continue on this trusted device");
+    const old = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${cb2}&action=trusted`, { cookie: beaTrust }),
+    );
+    expect(old.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+  });
+
+  it("writes nothing on the page GET (deviation 11)", async () => {
+    const h = pwHandle({ hash: FAST });
+    const f = await enrolled(h, await verifiedUser(h));
+    const verify = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: await challenge(h),
+        code: await f.code(),
+        trustDevice: true,
+      }),
+    );
+    const trust = pair(cookieNamed(verify, "tempo_totp_trust") ?? "");
+    const c = await challenge(h);
+    const writes = (["create", "update", "delete", "transaction"] as const).map((m) =>
+      vi.spyOn(h.storage, m),
+    );
+    for (const q of ["", "&method=email", "&backup=1"]) {
+      const res = await h.auth.handle(
+        get(`/auth/totp/challenge?challenge=${c}${q}`, { cookie: trust }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("Continue on this trusted device");
+    }
+    for (const w of writes) expect(w).not.toHaveBeenCalled();
+  });
+
+  it("serves no email form for a challenge that offers no email code (a magic link)", async () => {
+    const h = pwHandle({ hash: FAST });
+    const cookie = await verifiedUser(h);
+    await enrolled(h, cookie);
+    const on = await h.auth.handle(
+      post("/auth/second-factor/email/enable", { password: PW }, { cookie }),
+    );
+    expect(on.status).toBe(200);
+    await h.auth.handle(post("/auth/magic-link/request", { email: EMAIL }));
+    const token = h.mails.findLast((m) => m.subject.startsWith("Sign in"))?.token ?? "";
+    const gated = await h.auth.handle(form("/auth/magic-link/verify", `token=${token}`));
+    const c = new URL(gated.headers.get("location") ?? "").searchParams.get("challenge") ?? "";
+    expect(c).toMatch(/^tf_/);
+    const page = await (
+      await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}&method=email`))
+    ).text();
+    expect(page).toContain('name="code"');
+    expect(page).not.toContain('name="emailCode"');
+    expect(page).not.toContain("Send a code to my email");
+    expect(page).not.toContain("method=email");
+    // The send button of a page with no email method is refused, and no mail goes.
+    const mails = h.mails.length;
+    const sent = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&action=send-email`),
+    );
+    expect(sent.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_body`);
+    expect(h.mails.length).toBe(mails);
+  });
+
+  it("refuses a fourth send of one challenge on the page and sends no mail", async () => {
+    const h = pwHandle({ hash: FAST });
+    const cookie = await verifiedUser(h);
+    await enrolled(h, cookie);
+    await h.auth.handle(post("/auth/second-factor/email/enable", { password: PW }, { cookie }));
+    const c = await challenge(h);
+    const send = () =>
+      h.auth.handle(form("/auth/totp/challenge", `challenge=${c}&action=send-email`));
+    for (let i = 0; i < 3; i++)
+      expect((await send()).headers.get("location")).toBe(
+        `${BASE_URL}/auth/totp/challenge?challenge=${c}&method=email`,
+      );
+    const mails = h.mails.length;
+    expect((await send()).headers.get("location")).toBe(`${BASE_URL}/?auth_error=rate_limited`);
+    expect(h.mails.length).toBe(mails);
+  });
 });
