@@ -11,7 +11,13 @@ import type {
 } from "@authtempo/core";
 import { ERRORS } from "@authtempo/core/errors";
 import { type ClientOperation, callOf } from "./calls.js";
-import { type ClientResult, fail, ok } from "./result.js";
+import { type ClientFailure, type ClientResult, fail, ok } from "./result.js";
+import {
+  createSessionStore,
+  SESSION_CHANNEL,
+  type SessionState,
+  type SessionStore,
+} from "./store.js";
 import { createRawTransport, type Query, type TransportOptions } from "./transport.js";
 import { type BrowserWebAuthn, browserWebAuthn, WebAuthnCancelled } from "./webauthn.js";
 
@@ -74,12 +80,36 @@ export type TwoFactorSessionJSON = { token: string } & PublicSession & {
 export interface ClientOptions extends TransportOptions {
   /** The browser WebAuthn seam. Default `browserWebAuthn()`. Tests inject a soft one. */
   webauthn?: BrowserWebAuthn | undefined;
+  /**
+   * Tell the other tabs of this origin after a change, and read again when one
+   * tells, on the `BroadcastChannel` named `authtempo-session`. Default true
+   * where the runtime has `BroadcastChannel`.
+   */
+  broadcast?: boolean | undefined;
+  /** Read the session again when the page becomes visible. Default true where `document` exists. */
+  refetchOnVisible?: boolean | undefined;
+  /**
+   * Runs when `session()` answers null for a client with a `token` option: the
+   * token is dead, and the app clears it from its store (plan 11d).
+   */
+  onSessionEnd?: (() => void | Promise<void>) | undefined;
 }
+
+/** The state of `client.store`. */
+export type ClientSessionState = SessionState<PublicSession, ClientFailure>;
 
 export interface Client {
   /** The caller's session, or null when the API answers 401. A null is a normal state, not a failure. */
   session(): Promise<ClientResult<PublicSession | null>>;
   signOut(): Promise<ClientResult<{ ok: true }>>;
+  /**
+   * The session store (plan 11d): one read at the first subscriber, and one
+   * after each call that changes the session (every sign-in, the sign-out,
+   * the second factor verify and enable, a password reset or change, the
+   * address verify, the active organization, and the handoff redeem), after
+   * another tab's change, and when the page becomes visible. No poll.
+   */
+  store: SessionStore<PublicSession, ClientFailure>;
   magicLink: {
     request(input: {
       email: string;
@@ -370,6 +400,47 @@ export function createClient(options: ClientOptions): Client {
     const c = callOf(operation);
     return call<T>(c.method, c.path, body, query, headers);
   };
+  async function session(): Promise<ClientResult<PublicSession | null>> {
+    const r = await send<PublicSession>("session");
+    if (!r.ok && r.code === "unauthorized") {
+      // A bearer client's token is dead: the app clears it (the client README rule, plan 11d).
+      // A store that fails to clear must not turn an answer into a throw.
+      const end = options.onSessionEnd;
+      if (options.token && end)
+        await Promise.resolve()
+          .then(end)
+          .catch(() => {});
+      return ok(null);
+    }
+    return r;
+  }
+  const store = createSessionStore<PublicSession, ClientFailure>({
+    read: async () => {
+      const r = await session();
+      return r.ok ? { data: r.value, error: null } : { data: null, error: r };
+    },
+    onThrow: () => ({ ok: false, code: "unexpected", status: 0 }),
+  });
+  const channel =
+    (options.broadcast ?? true) && typeof BroadcastChannel !== "undefined"
+      ? new BroadcastChannel(SESSION_CHANNEL)
+      : null;
+  // Node keeps the process alive while a channel is open; a browser has no unref.
+  (channel as { unref?: () => void } | null)?.unref?.();
+  channel?.addEventListener("message", () => store.refetchIfStarted());
+  if ((options.refetchOnVisible ?? true) && typeof document !== "undefined")
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") store.refetchIfStarted();
+    });
+  /** After a call that changes the session succeeds: read again, and tell the other tabs. */
+  const changes = async <T>(p: Promise<ClientResult<T>>): Promise<ClientResult<T>> => {
+    const r = await p;
+    if (r.ok) {
+      store.refetchIfStarted();
+      channel?.postMessage("changed");
+    }
+    return r;
+  };
   const webauthn = options.webauthn ?? browserWebAuthn();
   /** Runs one ceremony; a dismissed prompt is `cancelled`, any other throw is `unexpected`. */
   async function ceremony<T>(run: () => Promise<T>): Promise<ClientResult<T>> {
@@ -380,24 +451,23 @@ export function createClient(options: ClientOptions): Client {
     }
   }
   return {
-    async session() {
-      const r = await send<PublicSession>("session");
-      if (!r.ok && r.code === "unauthorized") return ok(null);
-      return r;
-    },
+    session,
+    store,
     // The empty object makes the content type JSON and the body harmless to read; the router's POST Origin rule still applies.
-    signOut: () => send<{ ok: true }>("signOut", {}),
+    signOut: () => changes(send<{ ok: true }>("signOut", {})),
     magicLink: {
       request: ({ captchaToken, ...rest }) =>
         send<{ sent: true }>("magicLink.request", rest, undefined, captchaHeader(captchaToken)),
       verify: ({ token, trustDevice }) =>
-        send<PublicSession | TwoFactorChallengeJSON>("magicLink.verify", {
-          token,
-          ...(trustDevice !== undefined ? { trustDevice } : {}),
-        }),
+        changes(
+          send<PublicSession | TwoFactorChallengeJSON>("magicLink.verify", {
+            token,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+          }),
+        ),
     },
     handoff: {
-      redeem: (input) => send<{ token: string } & PublicSession>("handoff.redeem", input),
+      redeem: (input) => changes(send<{ token: string } & PublicSession>("handoff.redeem", input)),
     },
     passkey: {
       async register(input = {}) {
@@ -422,9 +492,7 @@ export function createClient(options: ClientOptions): Client {
         if (!options.ok) return options;
         const response = await ceremony(() => webauthn.get(options.value));
         if (!response.ok) return response;
-        return send<PublicSession>("passkey.signIn.verify", {
-          response: response.value,
-        });
+        return changes(send<PublicSession>("passkey.signIn.verify", { response: response.value }));
       },
     },
     passkeys: {
@@ -436,29 +504,33 @@ export function createClient(options: ClientOptions): Client {
     },
     password: {
       signUp: ({ name, captchaToken, ...rest }) =>
-        send<
-          | ({ token: string } & PublicSession)
-          | { user: PublicSession["user"]; verifyRequired: true }
-          | { sent: true }
-        >(
-          "password.signUp",
-          { ...rest, ...(name !== undefined ? { name } : {}) },
-          undefined,
-          captchaHeader(captchaToken),
+        changes(
+          send<
+            | ({ token: string } & PublicSession)
+            | { user: PublicSession["user"]; verifyRequired: true }
+            | { sent: true }
+          >(
+            "password.signUp",
+            { ...rest, ...(name !== undefined ? { name } : {}) },
+            undefined,
+            captchaHeader(captchaToken),
+          ),
         ),
       signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
-        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
-          "password.signIn",
-          {
-            ...rest,
-            ...(trustDevice !== undefined ? { trustDevice } : {}),
-            ...(next !== undefined ? { next } : {}),
-          },
-          undefined,
-          captchaHeader(captchaToken),
+        changes(
+          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
+            "password.signIn",
+            {
+              ...rest,
+              ...(trustDevice !== undefined ? { trustDevice } : {}),
+              ...(next !== undefined ? { next } : {}),
+            },
+            undefined,
+            captchaHeader(captchaToken),
+          ),
         ),
       resendVerification: (input) => send<{ sent: true }>("password.resendVerification", input),
-      verifyEmail: (input) => send<{ verified: true }>("password.verifyEmail", input),
+      verifyEmail: (input) => changes(send<{ verified: true }>("password.verifyEmail", input)),
       requestReset: ({ next, captchaToken, ...rest }) =>
         send<{ sent: true }>(
           "password.requestReset",
@@ -467,25 +539,31 @@ export function createClient(options: ClientOptions): Client {
           captchaHeader(captchaToken),
         ),
       reset: ({ trustDevice, ...rest }) =>
-        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("password.reset", {
-          ...rest,
-          ...(trustDevice !== undefined ? { trustDevice } : {}),
-        }),
+        changes(
+          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("password.reset", {
+            ...rest,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+          }),
+        ),
       change: ({ currentPassword, newPassword }) =>
-        send<{ ok: true }>("password.change", {
-          ...(currentPassword !== undefined ? { currentPassword } : {}),
-          newPassword,
-        }),
+        changes(
+          send<{ ok: true }>("password.change", {
+            ...(currentPassword !== undefined ? { currentPassword } : {}),
+            newPassword,
+          }),
+        ),
     },
     emailOtp: {
       request: ({ email, captchaToken }) =>
         send<{ sent: true }>("emailOtp.request", { email }, undefined, captchaHeader(captchaToken)),
       verify: ({ email, code, trustDevice }) =>
-        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.verify", {
-          email,
-          code,
-          ...(trustDevice !== undefined ? { trustDevice } : {}),
-        }),
+        changes(
+          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.verify", {
+            email,
+            code,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+          }),
+        ),
       requestReset: ({ email, captchaToken }) =>
         send<{ sent: true }>(
           "emailOtp.requestReset",
@@ -494,12 +572,14 @@ export function createClient(options: ClientOptions): Client {
           captchaHeader(captchaToken),
         ),
       reset: ({ email, code, password, trustDevice }) =>
-        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.reset", {
-          email,
-          code,
-          password,
-          ...(trustDevice !== undefined ? { trustDevice } : {}),
-        }),
+        changes(
+          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.reset", {
+            email,
+            code,
+            password,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+          }),
+        ),
     },
     organizations: {
       create: ({ metadata, ...rest }) =>
@@ -564,7 +644,7 @@ export function createClient(options: ClientOptions): Client {
           ),
         decline: (input) => send<{ ok: true }>("organizations.invitations.decline", input),
       },
-      setActive: (input) => send<PublicSession>("organizations.setActive", input),
+      setActive: (input) => changes(send<PublicSession>("organizations.setActive", input)),
     },
     tokens: {
       create: ({ expiresInDays, organizationId, ...rest }) =>
@@ -596,15 +676,17 @@ export function createClient(options: ClientOptions): Client {
         send<{ secret: string; uri: string; backupCodes: string[] }>("totp.setup", {
           password: input.password,
         }),
-      enable: (input) => send<TotpStatusJSON>("totp.enable", input),
+      enable: (input) => changes(send<TotpStatusJSON>("totp.enable", input)),
       verify: ({ code, backupCode, emailCode, trustDevice, ...rest }) =>
-        send<TwoFactorSessionJSON>("totp.verify", {
-          ...rest,
-          ...(code !== undefined ? { code } : {}),
-          ...(backupCode !== undefined ? { backupCode } : {}),
-          ...(emailCode !== undefined ? { emailCode } : {}),
-          ...(trustDevice !== undefined ? { trustDevice } : {}),
-        }),
+        changes(
+          send<TwoFactorSessionJSON>("totp.verify", {
+            ...rest,
+            ...(code !== undefined ? { code } : {}),
+            ...(backupCode !== undefined ? { backupCode } : {}),
+            ...(emailCode !== undefined ? { emailCode } : {}),
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+          }),
+        ),
       disable: (input) => send<{ ok: true }>("totp.disable", input),
       regenerateBackupCodes: (input) =>
         send<{ backupCodes: string[] }>("totp.regenerateBackupCodes", input),
@@ -622,10 +704,13 @@ export function createClient(options: ClientOptions): Client {
           if (!options.ok) return options;
           const response = await ceremony(() => webauthn.get(options.value));
           if (!response.ok) return response;
-          return send<SecondFactorEnableJSON>("secondFactor.passkey.enable.verify", {
-            password,
-            response: response.value,
-          });
+          // An enable ends the other sessions of the user, as `totp.enable` does.
+          return changes(
+            send<SecondFactorEnableJSON>("secondFactor.passkey.enable.verify", {
+              password,
+              response: response.value,
+            }),
+          );
         },
         async verify({ challenge, trustDevice }) {
           const options = await send<PublicKeyCredentialRequestOptionsJSON>(
@@ -635,16 +720,19 @@ export function createClient(options: ClientOptions): Client {
           if (!options.ok) return options;
           const response = await ceremony(() => webauthn.get(options.value));
           if (!response.ok) return response;
-          return send<TwoFactorSessionJSON>("secondFactor.passkey.verify.verify", {
-            challenge,
-            passkey: response.value,
-            ...(trustDevice !== undefined ? { trustDevice } : {}),
-          });
+          // The passkey verify of a challenge opens a session, as `totp.verify` does.
+          return changes(
+            send<TwoFactorSessionJSON>("secondFactor.passkey.verify.verify", {
+              challenge,
+              passkey: response.value,
+              ...(trustDevice !== undefined ? { trustDevice } : {}),
+            }),
+          );
         },
       },
       email: {
         enable: ({ password }) =>
-          send<SecondFactorEnableJSON>("secondFactor.email.enable", { password }),
+          changes(send<SecondFactorEnableJSON>("secondFactor.email.enable", { password })),
         send: ({ challenge }) => send<{ sent: true }>("secondFactor.email.send", { challenge }),
       },
       disable: ({ method, password }) =>

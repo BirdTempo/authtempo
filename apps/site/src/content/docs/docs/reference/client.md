@@ -30,6 +30,9 @@ sources:
 | `token` | none | A function that answers the bearer token, or null. |
 | `fetch` | `globalThis.fetch` | The fetch of every call. |
 | `webauthn` | `browserWebAuthn()` | The passkey seam, of the type `BrowserWebAuthn`. |
+| `broadcast` | `true` where `BroadcastChannel` exists | Tell the other tabs of the origin after a change, on the channel `authtempo-session`, and read again when one tells. |
+| `refetchOnVisible` | `true` where `document` exists | Read the session again when the page becomes visible. |
+| `onSessionEnd` | none | Runs when `session()` answers `null` for a client with a `token` option. Clear the stored token there. |
 
 `createTransport(options)` answers a `Call` for a route of your own app's code. Its path is a `RoutePath` of `@authtempo/core/routes`, so a path that core does not serve fails the compile. A query goes in the fourth argument, never in the path. More request headers go in the fifth argument.
 
@@ -48,6 +51,20 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `cancelled` | The person dismissed the passkey prompt, or no authenticator matched. |
 
 `client.errors` and the export `ERRORS` are the error table of core.
+
+## The session store
+
+`client.store` holds the session for a page. Its state, a `ClientSessionState`, is `{ data, error, isPending, isRefetching }`: `data` is the `PublicSession` or `null`, and `error` is a `ClientFailure` or `null`.
+
+- `store.subscribe(listener)` adds a listener. The first one starts the first read. It answers the function that removes the listener.
+- `store.get()` answers the state. The object stays the same until the next change.
+- `store.refetch()` reads the session again.
+- The store reads again after each sign-in and after the sign-out.
+- It reads again after the second factor verify and enable, a password reset or change, and the address verify.
+- It reads again after a change of the active organization and after the handoff redeem.
+- It reads again when another tab of the origin changes the session, and when the page becomes visible. It does not poll.
+
+`createSessionStore` makes the same store over a read of your own.
 
 ## Operations
 
@@ -123,12 +140,14 @@ The password, email code, and second factor operations answer `not_found` when t
 | `WebAuthnCancelled` | The error that the seam throws for a dismissed prompt. The client answers `cancelled` for it. |
 | `ERRORS` | The error table of core. |
 | `CLIENT_CALLS` | The table of every route that the client calls, with each operation, method, and path. The client takes each path from it. |
+| `createSessionStore` | Makes a session store over a read function. |
+| `SESSION_CHANNEL` | The name of the `BroadcastChannel`, `authtempo-session`. |
 
 The types of the package:
 
 | Area | Types |
 | --- | --- |
-| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation` |
+| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON` |
 | Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON` |
 

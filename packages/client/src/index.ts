@@ -5,6 +5,7 @@ export {
   type ChallengeMethodJSON,
   type Client,
   type ClientOptions,
+  type ClientSessionState,
   createClient,
   type InvitationJSON,
   type MemberJSON,
@@ -17,6 +18,12 @@ export {
   type TwoFactorSessionJSON,
 } from "./client.js";
 export type { ClientCode, ClientFailure, ClientResult } from "./result.js";
+export {
+  createSessionStore,
+  SESSION_CHANNEL,
+  type SessionState,
+  type SessionStore,
+} from "./store.js";
 export { type Call, createTransport, type Query, type TransportOptions } from "./transport.js";
 export {
   type BrowserWebAuthn,

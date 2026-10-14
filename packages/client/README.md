@@ -58,6 +58,24 @@ core does not serve fails the compile. `createTransport` gives the same
 typed call to your own code. A query goes in the fourth argument, and
 more request headers go in the fifth.
 
+## The session store
+
+`client.store` holds the session for a page. Its state is
+`{ data, error, isPending, isRefetching }`.
+
+- `store.subscribe(listener)` adds a listener. The first one starts the
+  first read. It answers the function that removes the listener.
+- `store.get()` answers the state. The object stays the same until the
+  next change.
+- `store.refetch()` reads the session again.
+- The store reads again after each sign-in and after the sign-out.
+- It reads again after the second factor verify and enable, a password
+  reset or change, and the address verify.
+- It reads again after a change of the active organization and after the
+  handoff redeem.
+- It reads again when another tab of the origin changes the session, and
+  when the page becomes visible. It does not poll.
+
 ## Operations
 
 | Operation | Route | Answer type |

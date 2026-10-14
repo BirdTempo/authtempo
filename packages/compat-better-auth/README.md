@@ -405,6 +405,8 @@ The store starts no read for a call made while it notifies, so the reads end.
 A listener that refetches later (for example in a timer or an effect) on every
 notify still reads with no end. Refetch on a change of the data, not on every
 notify.
+The store is the session store of `@authtempo/client` (plan 11d); this package
+maps its state to Better Auth's shape.
 
 `signIn.email` with `rememberMe: false` answers `NOT_SUPPORTED` (501): core
 keeps no short session. `rememberMe: true` works.
