@@ -140,6 +140,10 @@ describe("POST /token/live (plan 11d)", () => {
     const DAY = 86_400_000;
     const h = liveHandle({ session: { absoluteDays: 1 } });
     const user = await h.seedUser("ada@example.com");
+    // h.config comes from makeAuth and has no absoluteDays, so the row is the
+    // pre-cap state: expiresAt 30 days out, past the cap. Do not move this call
+    // onto the capped config. That config sets expiresAt at the cap, the
+    // expiresAt check alone then answers false, and the test cannot fail.
     const { token, session } = await createSession(h.config, {
       userId: user.id,
       ip: null,
