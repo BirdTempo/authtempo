@@ -2,6 +2,7 @@ import type { ResolvedConfig, ResolvedTotp } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { constantTimeEqual, hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { currentSecret } from "../primitives/keyring.js";
 import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primitives/totp.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
@@ -63,7 +64,9 @@ export async function newBackupCodes(
   const raw = Array.from({ length: totp.backupCodes }, () =>
     randomBackupCode(totp.backupCodeLength),
   );
-  const hashes = await Promise.all(raw.map((c) => backupCodeHash(config.secret, rowId, c)));
+  const hashes = await Promise.all(
+    raw.map((c) => backupCodeHash(currentSecret(config.keyring), rowId, c)),
+  );
   return { codes: raw.map(groupBackupCode), hashes };
 }
 
@@ -88,7 +91,7 @@ export async function spendBackupCode(
   // adapter whose `eq` on a date never matches.
   for (let round = 0; round <= row.backupCodes.length; round++) {
     if (!current) return null;
-    const candidate = await backupCodeHash(config.secret, current.id, typed);
+    const candidate = await backupCodeHash(currentSecret(config.keyring), current.id, typed);
     let found = -1;
     current.backupCodes.forEach((hash, i) => {
       if (constantTimeEqual(candidate, hash)) found = i;

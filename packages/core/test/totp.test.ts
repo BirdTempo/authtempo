@@ -16,6 +16,7 @@ import {
 import { countAttempt } from "../src/engine/verification.js";
 import { openSealed } from "../src/primitives/aead.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import { base32Decode, normalizeBackupCode, otpauthUri, totpCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
@@ -51,12 +52,17 @@ describe("the setup (plan 9f)", () => {
     expect(row?.backupCodes).toEqual(
       await Promise.all(
         backupCodes.map((c) =>
-          hmacSha256Hex(auth.config.secret, `${row?.id}:${normalizeBackupCode(c)}`),
+          hmacSha256Hex(currentSecret(auth.config.keyring), `${row?.id}:${normalizeBackupCode(c)}`),
         ),
       ),
     );
     expect(
-      await openSealed(auth.config.secret, "tempo-auth totp", row?.secret ?? "", session.user.id),
+      await openSealed(
+        currentSecret(auth.config.keyring),
+        "tempo-auth totp",
+        row?.secret ?? "",
+        session.user.id,
+      ),
     ).toEqual(base32Decode(secret));
     expect(
       await openSealed(

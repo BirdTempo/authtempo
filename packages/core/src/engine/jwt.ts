@@ -12,6 +12,7 @@ import {
   signJws,
   verifyJws,
 } from "../primitives/jwk.js";
+import { currentSecret } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
@@ -150,7 +151,7 @@ export async function signingKey(
       return await storage.create("jwk", {
         id: kid,
         publicJwk: { ...generated.publicJwk },
-        privateKey: await sealPrivateKey(config.secret, kid, generated.pkcs8),
+        privateKey: await sealPrivateKey(currentSecret(config.keyring), kid, generated.pkcs8),
         slot: SIGNING_SLOT,
         retiredAt: null,
         createdAt: now,
@@ -177,7 +178,7 @@ export async function signToken(
   const { alg } = mintConfig(config);
   for (let attempt = 0; attempt < 2; attempt++) {
     const row = await signingKey(config, alg, ROTATE_DUE);
-    const key = await openPrivateKey(config.secret, row.id, row.privateKey, alg);
+    const key = await openPrivateKey(currentSecret(config.keyring), row.id, row.privateKey, alg);
     if (key) return signJws({ alg, kid: row.id, typ, key, payload });
     console.error("authtempo: a signing key does not open under this secret; it retires", row.id);
     await retireKey(config, row);

@@ -10,6 +10,7 @@ import { hookRefusal } from "../src/engine/hooks.js";
 import { passwordSignUp } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { hmacSha256Hex, sha256Hex } from "../src/primitives/crypto.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
@@ -59,7 +60,9 @@ describe("email code request (plan 9e)", () => {
     const [row] = await rows(auth);
     expect(row).toMatchObject({ identifier: EMAIL, consumedAt: null, data: { attempts: 0 } });
     expect(row?.expiresAt.getTime()).toBe(auth.clock.now().getTime() + 10 * 60_000);
-    expect(row?.valueHash).toBe(await codeHash(auth.config.secret, row?.id ?? "", code));
+    expect(row?.valueHash).toBe(
+      await codeHash(currentSecret(auth.config.keyring), row?.id ?? "", code),
+    );
     expect(JSON.stringify(await auth.storage.findMany("verification", []))).not.toContain(code);
   });
 
@@ -413,7 +416,9 @@ describe("email code verify (plan 9e)", () => {
     const code = await request(auth);
     const [row] = await rows(auth);
     const id = row?.id ?? "";
-    expect(row?.valueHash).toBe(await hmacSha256Hex(auth.config.secret, `${id}:${code}`));
+    expect(row?.valueHash).toBe(
+      await hmacSha256Hex(currentSecret(auth.config.keyring), `${id}:${code}`),
+    );
     expect(row?.valueHash).not.toBe(
       await hmacSha256Hex("another secret of 32 characters!", `${id}:${code}`),
     );

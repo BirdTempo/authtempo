@@ -29,6 +29,15 @@ import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import type { JwsAlg } from "./primitives/jwk.js";
+import {
+  createKeyring,
+  ENTROPY_REFUSE_BITS,
+  ENTROPY_WARN_BITS,
+  entropyBits,
+  type Keyring,
+  SECRET_VERSION_MAX,
+  type SecretVersion,
+} from "./primitives/keyring.js";
 import { hasControlChar } from "./primitives/text.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
@@ -65,8 +74,19 @@ export interface AuthConfig {
   basePath?: string;
   /** Origin of the server that mounts `handle`, no path, no trailing slash. */
   baseURL: string;
-  /** At least 32 characters. */
-  secret: string;
+  /**
+   * The app secret, read as version 1 (plan 12b). At least 32 characters and
+   * an estimate of 100 bits or more: use 32 random bytes, for example
+   * `openssl rand -base64 32`. Give `secret`, `secrets`, or both.
+   */
+  secret?: string;
+  /**
+   * The app secrets by version, the current version first (plan 12b, spec
+   * 22). The current version seals and keys every new value. An old version
+   * stays here until `api.secrets.status` counts no row under it. With
+   * `secret` too, `secret` is version 1.
+   */
+  secrets?: SecretVersion[];
   /**
    * The name of the app, shown on the sign-in pages and in the mail
    * subjects. 1 to 80 characters, no control character. Default: the host
@@ -449,7 +469,8 @@ export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
   appName: string;
-  secret: string;
+  /** The app secrets by version (plan 12b). No code reads one secret string: each read names its version. */
+  keyring: Keyring;
   trustedOrigins: ReadonlySet<string>;
   appURL: string;
   cookie: { sameSite: "Lax" | "None" };
@@ -548,7 +569,7 @@ export class ConfigError extends Error {
 
 /** Applies defaults and refuses a config that cannot keep the security rules. */
 export function resolveConfig(input: AuthConfig): ResolvedConfig {
-  if (input.secret.length < 32) throw new ConfigError("secret must be at least 32 characters");
+  const keyring = resolveSecrets(input.secret, input.secrets);
   let origin: URL;
   try {
     origin = new URL(input.baseURL);
@@ -740,7 +761,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     basePath,
     baseURL: input.baseURL,
     appName,
-    secret: input.secret,
+    keyring,
     trustedOrigins: new Set(input.trustedOrigins),
     appURL,
     cookie: { sameSite },
@@ -803,6 +824,83 @@ function listOf<T>(path: string, value: T[] | undefined): T[] {
   for (const [i, entry] of value.entries())
     if (!isPlainObject(entry)) throw new ConfigError(`${path}[${i}] must be an object`);
   return value;
+}
+
+/** The shortest secret value, in UTF-16 code units, as before plan 12b. */
+const SECRET_MIN_LENGTH = 32;
+
+/**
+ * `secret` and `secrets` as one keyring (plan 12b, spec 22). The rules:
+ * one of the two at least; a version is an integer from 1 to 999999; no
+ * version and no value twice; with both keys, `secret` is version 1. The
+ * entropy rule refuses only the current value: a weak old version gets one
+ * warning line, because a refusal would block the move away from it.
+ */
+function resolveSecrets(secret: unknown, secrets: unknown): Keyring {
+  if (secret === undefined && secrets === undefined)
+    throw new ConfigError("secret or secrets is required");
+  if (secret !== undefined && typeof secret !== "string")
+    throw new ConfigError("secret must be a string");
+  const entries: Array<SecretVersion & { path: string }> = [];
+  if (secrets !== undefined) {
+    if (!Array.isArray(secrets) || secrets.length < 1)
+      throw new ConfigError("secrets must be a list of 1 or more { version, value } entries");
+    for (const [i, entry] of secrets.entries()) {
+      if (!isPlainObject(entry)) throw new ConfigError(`secrets[${i}] must be an object`);
+      for (const key of Object.keys(entry))
+        if (key !== "version" && key !== "value")
+          throw new ConfigError(
+            `secrets[${i}].${key} is not an option; an entry has version and value`,
+          );
+      const { version, value } = entry;
+      if (
+        typeof version !== "number" ||
+        !Number.isSafeInteger(version) ||
+        version < 1 ||
+        version > SECRET_VERSION_MAX
+      )
+        throw new ConfigError(
+          `secrets[${i}].version must be an integer from 1 to ${SECRET_VERSION_MAX}`,
+        );
+      if (typeof value !== "string") throw new ConfigError(`secrets[${i}].value must be a string`);
+      entries.push({ version, value, path: `secrets[${i}]` });
+    }
+  }
+  if (secret !== undefined) {
+    const one = entries.find((e) => e.version === 1);
+    if (one && one.value !== secret)
+      throw new ConfigError(
+        "secret and secrets version 1 hold different values; give the old secret once, as version 1",
+      );
+    if (!one) entries.push({ version: 1, value: secret, path: "secret" });
+  }
+  const seen = new Set<number>();
+  for (const e of entries) {
+    if (seen.has(e.version)) throw new ConfigError(`secrets has version ${e.version} twice`);
+    seen.add(e.version);
+  }
+  if (new Set(entries.map((e) => e.value)).size !== entries.length)
+    throw new ConfigError(
+      "secrets has one value under two versions; each version needs its own value",
+    );
+  for (const e of entries)
+    if (e.value.length < SECRET_MIN_LENGTH)
+      throw new ConfigError(
+        `${e.path === "secret" ? "secret" : `${e.path}.value`} must be at least ${SECRET_MIN_LENGTH} characters`,
+      );
+  for (const [i, e] of entries.entries()) {
+    const bits = Math.floor(entropyBits(e.value));
+    // The message names the key and the estimate, never the value.
+    if (i === 0 && bits < ENTROPY_REFUSE_BITS)
+      throw new ConfigError(
+        `${e.path} has an estimated ${bits} bits of entropy; at least ${ENTROPY_REFUSE_BITS} are required. Make a new one with 32 random bytes, for example: openssl rand -base64 32`,
+      );
+    if (bits < ENTROPY_WARN_BITS)
+      console.warn(
+        `authtempo: ${e.path} has an estimated ${bits} bits of entropy; ${ENTROPY_WARN_BITS} or more is recommended`,
+      );
+  }
+  return createKeyring(entries.map(({ version, value }) => ({ version, value })));
 }
 
 const NO_LIMITS: ResolvedLimits = {

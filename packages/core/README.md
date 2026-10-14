@@ -5,7 +5,7 @@ import { createAuth, createMemoryAdapter } from "@authtempo/core";
 
 const auth = createAuth({
   baseURL: "https://api.example.com",
-  secret: env.AUTH_SECRET,                 // at least 32 characters
+  secret: env.AUTH_SECRET,                 // at least 32 characters, 100 bits or more
   trustedOrigins: ["https://app.example.com", "consumera://"],
   storage: createMemoryAdapter(),          // use a D1 or Postgres adapter in production
   mail: { send: async (m) => { /* your transport */ } },
@@ -15,6 +15,10 @@ const auth = createAuth({
 if (url.pathname.startsWith("/auth/")) return auth.handle(request);
 const s = await auth.session(request);     // { user, session } or null
 ```
+
+Give `secret`, or `secrets` as a list of `{ version, value }` with the current version first. `secret` alone is version 1. A value has at least 32 characters.
+
+The estimate of a secret is its length times log2 of its distinct characters. `createAuth` refuses a current secret under 100 bits and warns from 100 to 119 bits. The estimate does not catch a pattern. Make a secret with 32 random bytes: `openssl rand -base64 32`.
 
 ## Routes under `basePath` (default `/auth`)
 

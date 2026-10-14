@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { currentSecret } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
@@ -309,7 +310,7 @@ export async function sendSecondFactorEmail(
     {
       data: {
         ...data,
-        emailCodeHash: await emailCodeHash(config.secret, row.id, code),
+        emailCodeHash: await emailCodeHash(currentSecret(config.keyring), row.id, code),
         emailSends: sends + 1,
         emailSentAt: now.toISOString(),
       },
@@ -336,7 +337,11 @@ export async function acceptEmailCode(
   code: string,
 ): Promise<boolean> {
   const stored = (challenge.data as { emailCodeHash?: unknown } | null)?.emailCodeHash;
-  const candidate = await emailCodeHash(config.secret, challenge.id, code.replace(/\s/g, ""));
+  const candidate = await emailCodeHash(
+    currentSecret(config.keyring),
+    challenge.id,
+    code.replace(/\s/g, ""),
+  );
   const right = constantTimeEqual(candidate, typeof stored === "string" ? stored : NO_HASH);
   return typeof stored === "string" && right;
 }

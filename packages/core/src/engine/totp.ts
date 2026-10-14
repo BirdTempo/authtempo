@@ -3,6 +3,7 @@ import { safeNext } from "../http/safe-next.js";
 import { openSealed, seal } from "../primitives/aead.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { currentSecret } from "../primitives/keyring.js";
 import { base32Encode, otpauthUri, verifyTotp } from "../primitives/totp.js";
 import { fail, ok, type Result } from "../result.js";
 import type {
@@ -129,7 +130,7 @@ function enabledRow(storage: StorageAdapter, userId: string): Promise<TotpRow | 
 }
 
 function openSecret(config: ResolvedConfig, row: TotpRow): Promise<Uint8Array | null> {
-  return openSealed(config.secret, SEAL_INFO, row.secret, row.userId);
+  return openSealed(currentSecret(config.keyring), SEAL_INFO, row.secret, row.userId);
 }
 
 /**
@@ -243,7 +244,7 @@ export async function setupTotp(
   const { codes, hashes } = factor
     ? { codes: [], hashes: [] }
     : await newBackupCodes(config, totp, id);
-  const sealed = await seal(config.secret, SEAL_INFO, secret, user.id);
+  const sealed = await seal(currentSecret(config.keyring), SEAL_INFO, secret, user.id);
   if (existing) {
     // In place, and only while unconfirmed: zero rows means an enable confirmed it since the read.
     const n = await config.storage.update(

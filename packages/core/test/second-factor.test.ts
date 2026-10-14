@@ -29,6 +29,7 @@ import {
 } from "../src/engine/totp.js";
 import { MAILED_CODES_PER_EMAIL_DAY } from "../src/engine/verification.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import { base32Decode, normalizeBackupCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
@@ -64,7 +65,10 @@ describe("the factor row (plan 12c)", () => {
     expect(factor?.backupCodes).toEqual(
       await Promise.all(
         backupCodes.map((c) =>
-          hmacSha256Hex(auth.config.secret, `${factor?.id}:${normalizeBackupCode(c)}`),
+          hmacSha256Hex(
+            currentSecret(auth.config.keyring),
+            `${factor?.id}:${normalizeBackupCode(c)}`,
+          ),
         ),
       ),
     );
@@ -80,7 +84,7 @@ describe("the factor row (plan 12c)", () => {
     // The list that migration 0008 copies from a plan 9f row: 8 characters, version 1.
     const old = "abcd2345";
     await auth.storage.update("secondFactor", [{ field: "id", op: "eq", value: factor.id }], {
-      backupCodes: [await hmacSha256Hex(auth.config.secret, `${factor.id}:${old}`)],
+      backupCodes: [await hmacSha256Hex(currentSecret(auth.config.keyring), `${factor.id}:${old}`)],
       backupCodesVersion: 1,
     });
     expect(await totpStatus(auth.config, { userId: user.id })).toMatchObject({

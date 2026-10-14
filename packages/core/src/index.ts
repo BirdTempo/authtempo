@@ -135,6 +135,7 @@ export {
 } from "./primitives/derive-gate.js";
 export { newId } from "./primitives/ids.js";
 export type { JwsAlg, PublicJwk } from "./primitives/jwk.js";
+export type { Keyring, SecretVersion } from "./primitives/keyring.js";
 export type { Result } from "./result.js";
 export {
   type ApiTokenRow,

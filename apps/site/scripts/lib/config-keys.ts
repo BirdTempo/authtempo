@@ -16,6 +16,7 @@ import type {
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
+  SecretVersion,
   TotpConfig,
   TotpGateConfig,
 } from "@authtempo/core";
@@ -40,6 +41,7 @@ export const CONFIG_KEYS = {
     basePath: true,
     baseURL: true,
     secret: true,
+    secrets: true,
     appName: true,
     trustedOrigins: true,
     appURL: true,
@@ -66,6 +68,7 @@ export const CONFIG_KEYS = {
     operator: true,
     hooks: true,
   } satisfies Keys<AuthConfig>,
+  "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
   session: { ttlDays: true, slidingRefreshDays: true } satisfies Keys<Part<"session">>,
   magicLink: {

@@ -8,6 +8,7 @@ import {
   resetPassword,
 } from "../src/engine/password.js";
 import { newId } from "../src/primitives/ids.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, pwAuth } from "./password-helpers.js";
 
@@ -392,7 +393,7 @@ describe("password.legacyVerify (spec 17.4)", () => {
       expect(() =>
         resolveConfig({
           baseURL: base.baseURL,
-          secret: base.secret,
+          secret: currentSecret(base.keyring),
           trustedOrigins: [],
           storage: base.storage,
           mail: base.mail,
