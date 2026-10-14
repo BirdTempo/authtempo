@@ -1098,7 +1098,8 @@ INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdA
         expect(start.status).toBe(302);
         const state = new URL(start.headers.get("location") ?? "").searchParams.get("state");
         const bind = (
-          start.headers.getSetCookie().find((c) => c.startsWith("tempo_session_oauth=")) ?? ""
+          start.headers.getSetCookie().find((c) => c.startsWith("__Secure-tempo_session_oauth=")) ??
+          ""
         ).split(";")[0] as string;
         expect(bind).not.toBe("");
         const done = await auth.handler(

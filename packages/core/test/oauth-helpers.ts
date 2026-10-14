@@ -58,7 +58,7 @@ export async function signedIn(h: Handle, email = "ada@example.com", verified = 
     ip: null,
     userAgent: null,
   });
-  return { user, session, token, cookie: `tempo_session=${token}` };
+  return { user, session, token, cookie: `__Host-tempo_session=${token}` };
 }
 
 /** A client registered through the route. Answers its client id. */

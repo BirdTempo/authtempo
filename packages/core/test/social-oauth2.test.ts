@@ -229,7 +229,7 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(`${BASE_URL}/?auth_error=oauth_failed`);
     expect(res.headers.getSetCookie()).toEqual([
-      "tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
+      "__Secure-tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
     ]);
     expect(timeout).toHaveBeenCalledWith(PROVIDER_TIMEOUT_MS);
     expect(error).toHaveBeenCalledWith(
@@ -452,7 +452,7 @@ describe("an oauth2 provider (plan 9c)", () => {
       }),
     );
     expect(done.headers.get("location")).toBe(`${BASE_URL}/home`);
-    expect(done.headers.getSetCookie().some((c) => /^tempo_session=ts_/.test(c))).toBe(true);
+    expect(done.headers.getSetCookie().some((c) => /^__Host-tempo_session=ts_/.test(c))).toBe(true);
     expect((await handle(get("/auth/social/other/start"))).status).toBe(404);
   });
 });

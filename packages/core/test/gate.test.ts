@@ -347,8 +347,8 @@ describe("the gate on the social callback route (plan 12c)", () => {
       new RegExp(`^${BASE_URL}/auth/totp/challenge\\?challenge=tf_`),
     );
     const cookies = res.headers.getSetCookie();
-    expect(cookies.some((c) => c.startsWith("tempo_session="))).toBe(false);
-    expect(cookies.some((c) => c.startsWith("tempo_session_oauth=;"))).toBe(true);
+    expect(cookies.some((c) => c.startsWith("__Host-tempo_session="))).toBe(false);
+    expect(cookies.some((c) => c.startsWith("__Secure-tempo_session_oauth=;"))).toBe(true);
   });
 
   it("reads the trust cookie at the GET callback and opens the session (deviation 12)", async () => {
@@ -359,6 +359,6 @@ describe("the gate on the social callback route (plan 12c)", () => {
     const res = await callback(auth, tokens, `tempo_totp_trust=${token}`);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(`${BASE_URL}/home`);
-    expect(res.headers.getSetCookie().some((c) => /^tempo_session=ts_/.test(c))).toBe(true);
+    expect(res.headers.getSetCookie().some((c) => /^__Host-tempo_session=ts_/.test(c))).toBe(true);
   });
 });

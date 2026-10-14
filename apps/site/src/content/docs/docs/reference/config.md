@@ -37,8 +37,8 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `limiter` | `LimiterPort` | the memory limiter | The memory limiter counts per isolate and is for tests. Use the owned limiter of the adapter. |
 | `clientIp` | function of the request | reads `cf-connecting-ip` | Answers the client IP, or null. Off Workers, read the header of your trusted proxy. |
 | `clock` | `Clock` | the system clock | `{ now(): Date }`. Tests inject one. |
-| `cookieName` | string | `"tempo_session"` | The session cookie. The binding cookie is this name plus `_oauth`. |
-| `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }` | See the keys under Session. |
+| `cookieName` | string | `"__Host-tempo_session"` | The session cookie. The binding cookie drops a `__Host-` or `__Secure-` prefix, takes `__Secure-`, and adds `_oauth`. With the default name, core moves the old `tempo_session` cookie for one release. |
+| `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }`, no `absoluteDays` | See the keys under Session. |
 | `magicLink` | object | the defaults below | See the keys under Magic link. |
 | `social` | object | no provider | See the keys under Social. |
 | `jwt` | `JwtSeam` | jose 6.2.12 | The ID token verifier and the Apple secret signer. Tests inject a fake. |
@@ -66,6 +66,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | --- | --- | --- | --- |
 | `session.ttlDays` | number | 30 | The life of a session in days. |
 | `session.slidingRefreshDays` | number | 7 | A session older than this moves its expiry forward when it is used. |
+| `session.absoluteDays` | number | none | 1 to 365. A session ends this many days after it opened, whatever its sliding refresh. |
 
 ## Magic link
 
@@ -185,7 +186,7 @@ Another key of `totp` is refused.
 | `totp.backupCodes` | number | 10 | An integer from 5 to 20. |
 | `totp.backupCodeLength` | number | 23 | An integer from 23 to 32. A code of 23 characters holds 113.9 bits, above the 112 bits of ASVS 5.0 6.5.2. |
 | `totp.trustDays` | number | 30 | An integer from 1 to 365. |
-| `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName`. |
+| `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName` or `tempo_session`. |
 | `totp.challengePage` | function of `TotpChallengePageInput` | `defaultTotpPage` | Answers the markup of the challenge form. |
 | `totp.gate` | object | all three on | The second factor's gate on the sign-in methods other than the password. Another key is refused. The handoff has no key: it continues a browser session that passed the gate. |
 | `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |

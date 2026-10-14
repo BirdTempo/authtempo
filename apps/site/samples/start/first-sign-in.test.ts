@@ -16,7 +16,8 @@ function browser(auth: Auth): typeof fetch {
     const res = await auth.handle(new Request(req.url, { method: req.method, headers, body }));
     for (const c of res.headers.getSetCookie()) {
       const pair = c.split(";")[0] ?? "";
-      if (pair.startsWith("tempo_session=")) cookie = pair === "tempo_session=" ? "" : pair;
+      if (pair.startsWith("__Host-tempo_session="))
+        cookie = pair === "__Host-tempo_session=" ? "" : pair;
     }
     return res;
   }) as typeof fetch;

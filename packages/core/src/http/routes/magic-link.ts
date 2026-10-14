@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
-import { publicSession, resolveSession } from "../../engine/sessions.js";
+import { publicSession, resolveSession, sessionMaxAgeSeconds } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { sessionCookie } from "../cookies.js";
@@ -83,7 +83,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
           return jsonCaller
             ? twoFactorJson(result.value)
             : redirect(challengePageUrl(config, result.value.twoFactor.challenge));
-        const maxAge = config.session.ttlDays * 86_400;
+        const maxAge = sessionMaxAgeSeconds(config);
         const cookie = sessionCookie(
           config.cookieName,
           result.value.token,

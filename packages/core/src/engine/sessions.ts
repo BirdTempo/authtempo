@@ -14,6 +14,25 @@ import {
 } from "./hooks.js";
 
 const DAY_MS = 86_400_000;
+
+/**
+ * The expiry of a session at `now`: `ttlDays` from now, and never past
+ * `createdAt + absoluteDays` (plan 12b). Create and the sliding refresh use it.
+ */
+export function sessionExpiry(config: ResolvedConfig, createdAt: Date, now: Date): Date {
+  const sliding = now.getTime() + config.session.ttlDays * DAY_MS;
+  const cap =
+    config.session.absoluteDays === null
+      ? Number.POSITIVE_INFINITY
+      : createdAt.getTime() + config.session.absoluteDays * DAY_MS;
+  return new Date(Math.min(sliding, cap));
+}
+
+/** The `Max-Age` of the cookie of a new session: its life, in whole seconds (plan 12b). */
+export function sessionMaxAgeSeconds(config: ResolvedConfig): number {
+  const days = Math.min(config.session.ttlDays, config.session.absoluteDays ?? Infinity);
+  return Math.floor((days * DAY_MS) / 1000);
+}
 export const SESSION_TOKEN_PREFIX = "ts_";
 const TOKEN_RE = /^ts_[A-Za-z0-9_-]{43}$/;
 
@@ -57,7 +76,7 @@ export async function createSession(
     id: newId(now),
     userId: input.userId,
     tokenHash: await sha256Hex(token),
-    expiresAt: new Date(now.getTime() + config.session.ttlDays * DAY_MS),
+    expiresAt: sessionExpiry(config, now, now),
     lastSeenAt: now,
     ip: input.ip,
     userAgent: input.userAgent,
@@ -259,7 +278,12 @@ export async function resolveSession(
     { field: "tokenHash", op: "eq", value: tokenHash },
   ]);
   if (!session) return null;
-  if (session.expiresAt.getTime() <= now.getTime()) {
+  // The absolute cap ends a session whose expiresAt is later: a row written
+  // before `absoluteDays` was set (plan 12b).
+  const capped =
+    config.session.absoluteDays !== null &&
+    session.createdAt.getTime() + config.session.absoluteDays * DAY_MS <= now.getTime();
+  if (capped || session.expiresAt.getTime() <= now.getTime()) {
     const n = await config.storage.delete("session", [
       { field: "id", op: "eq", value: session.id },
     ]);
@@ -273,7 +297,7 @@ export async function resolveSession(
   if (!user) return null;
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
   if (sinceSeen >= config.session.slidingRefreshDays * DAY_MS) {
-    const expiresAt = new Date(now.getTime() + config.session.ttlDays * DAY_MS);
+    const expiresAt = sessionExpiry(config, session.createdAt, now);
     await config.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
       expiresAt,
       lastSeenAt: now,
@@ -309,15 +333,38 @@ export function readBearer(request: Pick<Request, "headers">): string | null {
  * The cookie wins over the bearer header, so a web page cannot be overridden by a stray header.
  * Public from `@authtempo/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
  * the session token with this function, so the cookie and bearer rule has one copy. It reads
- * only `cookieName` and the headers, so the shim passes `{ cookieName }` and `{ headers }`.
+ * only `cookieName`, `legacyCookieName`, and the headers, so the shim passes `{ cookieName }`
+ * and `{ headers }`. Since plan 12b it also reads the old cookie name when the config names
+ * one (`legacyCookieName`), for one release.
  */
 export function readSessionToken(
-  config: Pick<ResolvedConfig, "cookieName">,
+  config: Pick<ResolvedConfig, "cookieName"> & { legacyCookieName?: string | null },
   request: Pick<Request, "headers">,
 ): string | null {
   const cookie = readCookie(request, config.cookieName);
   if (cookie) return cookie;
+  const legacy = config.legacyCookieName ? readCookie(request, config.legacyCookieName) : null;
+  if (legacy) return legacy;
   return readBearer(request);
+}
+
+/** The live session row of `token`, with no write: no refresh, no delete (plan 12b, the cookie move). */
+export async function peekSession(
+  config: ResolvedConfig,
+  token: string,
+): Promise<SessionRow | null> {
+  if (!TOKEN_RE.test(token)) return null;
+  const row = await config.storage.findOne("session", [
+    { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
+  ]);
+  if (!row) return null;
+  // Live as `resolveSession` reads it: before expiresAt and before the absolute cap.
+  const now = config.clock.now().getTime();
+  const cap =
+    config.session.absoluteDays === null
+      ? Number.POSITIVE_INFINITY
+      : row.createdAt.getTime() + config.session.absoluteDays * DAY_MS;
+  return row.expiresAt.getTime() > now && cap > now ? row : null;
 }
 
 /** The caller's session from the cookie or the bearer header, or null. */

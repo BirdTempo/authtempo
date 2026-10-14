@@ -8,7 +8,12 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../../engine/passkeys.js";
-import { publicSession, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import {
+  publicSession,
+  renewedSessionCookie,
+  sessionFromRequest,
+  sessionMaxAgeSeconds,
+} from "../../engine/sessions.js";
 import { sessionCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
@@ -86,7 +91,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
           userAgent: ctx.request.headers.get("user-agent"),
         });
         if (!r.ok) return respond(r);
-        const maxAge = config.session.ttlDays * 86_400;
+        const maxAge = sessionMaxAgeSeconds(config);
         return json(
           publicSession({ user: r.value.user, session: r.value.session, refreshed: false }),
           200,

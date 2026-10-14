@@ -27,7 +27,7 @@ it("signs a person in by magic link on D1 and reads /me with the session cookie"
   const verify = await app.fetch(json("/auth/magic-link/verify", { token }), env);
   expect(verify.status).toBe(200);
   const cookie = (verify.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
-  expect(cookie.startsWith("tempo_session=ts_")).toBe(true);
+  expect(cookie.startsWith("__Host-tempo_session=ts_")).toBe(true);
 
   const me = await app.fetch(new Request(`${BASE}/me`, { headers: { cookie } }), env);
   expect(await me.json()).toEqual({ email: "ada@example.com" });

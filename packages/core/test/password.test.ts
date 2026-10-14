@@ -168,7 +168,7 @@ describe("POST /password/sign-up", () => {
     expect(body.token).toMatch(/^ts_/);
     expect(body.user).toMatchObject({ email: EMAIL, emailVerified: false });
     expect(res.headers.get("set-cookie")).toMatch(
-      /^tempo_session=ts_.*HttpOnly; Secure; SameSite=Lax$/,
+      /^__Host-tempo_session=ts_.*HttpOnly; Secure; SameSite=Lax$/,
     );
     expect(h.mails).toHaveLength(1);
     expect(h.mails[0]?.token).toMatch(/^pv_[A-Za-z0-9_-]{43}$/);
@@ -651,7 +651,7 @@ describe("POST /password/sign-in", () => {
     expect(body.token).toMatch(/^ts_/);
     expect(body.user).toMatchObject({ email: EMAIL });
     expect(res.headers.get("set-cookie")).toMatch(
-      /^tempo_session=ts_.*HttpOnly; Secure; SameSite=Lax$/,
+      /^__Host-tempo_session=ts_.*HttpOnly; Secure; SameSite=Lax$/,
     );
     expect(await h.auth.api.getSession(body.token)).toMatchObject({
       session: { id: body.session.id },

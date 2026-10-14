@@ -25,8 +25,9 @@ describe("resolveConfig", () => {
   it("fills defaults", () => {
     const c = resolveConfig(base);
     expect(c.basePath).toBe("/auth");
-    expect(c.cookieName).toBe("tempo_session");
-    expect(c.session).toEqual({ ttlDays: 30, slidingRefreshDays: 7 });
+    expect(c.cookieName).toBe("__Host-tempo_session");
+    expect(c.legacyCookieName).toBe("tempo_session");
+    expect(c.session).toEqual({ ttlDays: 30, slidingRefreshDays: 7, absoluteDays: null });
     expect(c.magicLink.ttlMinutes).toBe(15);
     expect(c.magicLink.linkBuilder("tok", "/x")).toBe(
       "https://api.example.com/auth/magic-link/verify?token=tok",
@@ -607,7 +608,7 @@ describe("totp (plan 9f)", () => {
       "totp.backupCodeLength must be an integer from 23 to 32: a backup code holds 112 bits or more (ASVS 5.0 6.5.2)";
     const DAYS = "totp.trustDays must be an integer from 1 to 365";
     const COOKIE =
-      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name";
+      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name or tempo_session";
     const bad: [unknown, string][] = [
       [{ issuer: "" }, ISSUER],
       [{ issuer: "a".repeat(81) }, ISSUER],
@@ -622,6 +623,8 @@ describe("totp (plan 9f)", () => {
       [{ trustDays: 0 }, DAYS],
       [{ trustDays: 366 }, DAYS],
       [{ trustCookieName: "has space" }, COOKIE],
+      [{ trustCookieName: "__Host-tempo_session" }, COOKIE],
+      // The old session cookie name (plan 12b): the router reads and clears it for one release.
       [{ trustCookieName: "tempo_session" }, COOKIE],
       [{ trustCookieName: "" }, COOKIE],
       [{ challengePage: "html" }, "totp.challengePage must be a function"],

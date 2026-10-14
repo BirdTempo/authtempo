@@ -18,7 +18,7 @@ it("signs in through an oauth2 provider end to end on D1, refuses a replay, and 
   expect(authorize.searchParams.has("nonce")).toBe(false);
   expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
   const bind = (start.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
-  expect(bind).toMatch(/^tempo_session_oauth=/);
+  expect(bind).toMatch(/^__Secure-tempo_session_oauth=/);
 
   // The provider's authorize step sends the browser back with a code bound to the challenge.
   const back = await SELF.fetch(authorize.href, { redirect: "manual" });
@@ -35,7 +35,7 @@ it("signs in through an oauth2 provider end to end on D1, refuses a replay, and 
   const session =
     done.headers
       .getSetCookie()
-      .find((c) => c.startsWith("tempo_session=ts_"))
+      .find((c) => c.startsWith("__Host-tempo_session=ts_"))
       ?.split(";")[0] ?? "";
   expect(session).not.toBe("");
   const me = await SELF.fetch(`${BASE}/me`, { headers: { cookie: session } });

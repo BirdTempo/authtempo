@@ -25,24 +25,26 @@ import { createMemoryAdapter } from "../src/storage/memory.js";
 
 describe("cookies", () => {
   it("sets an HttpOnly Secure SameSite=Lax cookie on /", () => {
-    const c = sessionCookie("tempo_session", "ts_abc", 60, "Lax");
-    expect(sessionCookie("tempo_session", "ts_abc", 60, "None")).toBe(
-      "tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=None",
+    const c = sessionCookie("__Host-tempo_session", "ts_abc", 60, "Lax");
+    expect(sessionCookie("__Host-tempo_session", "ts_abc", 60, "None")).toBe(
+      "__Host-tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=None",
     );
-    expect(c).toBe("tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax");
+    expect(c).toBe(
+      "__Host-tempo_session=ts_abc; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax",
+    );
   });
   it("clears with Max-Age=0", () => {
-    expect(clearSessionCookie("tempo_session", "Lax")).toBe(
-      "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+    expect(clearSessionCookie("__Host-tempo_session", "Lax")).toBe(
+      "__Host-tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
     );
   });
   it("reads one cookie among several", () => {
     const req = new Request("https://x/", {
-      headers: { cookie: "a=1; tempo_session=ts_abc; b=2" },
+      headers: { cookie: "a=1; __Host-tempo_session=ts_abc; b=2" },
     });
-    expect(readCookie(req, "tempo_session")).toBe("ts_abc");
+    expect(readCookie(req, "__Host-tempo_session")).toBe("ts_abc");
     expect(readCookie(req, "nope")).toBeNull();
-    expect(readCookie(new Request("https://x/"), "tempo_session")).toBeNull();
+    expect(readCookie(new Request("https://x/"), "__Host-tempo_session")).toBeNull();
   });
   it("sets the trust cookie on the auth path, and clears it there (plan 9f)", () => {
     expect(trustCookie("tempo_totp_trust", "td_abc", "/auth/", 2_592_000, "Lax")).toBe(
@@ -183,11 +185,11 @@ describe("confirm page", () => {
 
 describe("oauth binding cookie", () => {
   it("is HttpOnly, Secure, SameSite=None on the social path", () => {
-    expect(oauthCookie("tempo_session_oauth", "abc", "/auth/social", 600)).toBe(
-      "tempo_session_oauth=abc; Path=/auth/social; Max-Age=600; HttpOnly; Secure; SameSite=None",
+    expect(oauthCookie("__Secure-tempo_session_oauth", "abc", "/auth/social", 600)).toBe(
+      "__Secure-tempo_session_oauth=abc; Path=/auth/social; Max-Age=600; HttpOnly; Secure; SameSite=None",
     );
-    expect(clearOauthCookie("tempo_session_oauth", "/auth/social")).toBe(
-      "tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
+    expect(clearOauthCookie("__Secure-tempo_session_oauth", "/auth/social")).toBe(
+      "__Secure-tempo_session_oauth=; Path=/auth/social; Max-Age=0; HttpOnly; Secure; SameSite=None",
     );
   });
 });

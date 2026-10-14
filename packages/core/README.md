@@ -151,8 +151,8 @@ default `SameSite=Lax` the cookie goes on every same-site request, so an
 app on a sibling subdomain of the API works as is. An app on another
 site needs `cookie: { sameSite: "None" }`; then any site can make the
 browser send the cookie, and the Origin rule on POST is what refuses
-them. The cookie names stay `tempo_session` and `tempo_session_oauth` in
-version 1; a `__Host-` prefix is a version 2 item.
+them. The session cookie is `__Host-tempo_session` and the binding cookie
+is `__Secure-tempo_session_oauth` (plan 12b).
 
 Every POST also passes the Fetch Metadata rule. A form post (a form,
 multipart, `text/plain`, or no content type) needs `Sec-Fetch-Site` to be
@@ -996,10 +996,13 @@ Without a trigger, expired rows stay in the database.
 - One binding cookie per browser: a second social start, in another tab
   or for the other provider, replaces it, and the first flow then answers
   `invalid_token`. Start again.
-- The binding cookie and the session cookie are plain host cookies. A
-  host on a sibling subdomain of the API can set a cookie with the same
-  name for the parent domain. Keep the API on its own registrable domain,
-  or wait for the `__Host-` decision in plan 5.
+- The session cookie is `__Host-tempo_session` (plan 12b). For one
+  release core reads the old `tempo_session` and moves it. The binding
+  cookie is `__Secure-tempo_session_oauth` on the social path. The trust
+  cookie is a plain host cookie.
+- `session.absoluteDays` (1 to 365, off by default) ends a session that
+  many days after it opened, whatever its sliding refresh (ASVS 5.0.0
+  7.3.2). The person then signs in again.
 - A passkey challenge is valid for five minutes and for one use. Passkey
   sign-in options are limited to 30 per IP, and verifies to 20 per IP,
   per 15 minutes, in the same per-isolate limiter.

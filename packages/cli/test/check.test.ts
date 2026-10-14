@@ -16,7 +16,7 @@ import { type FakeIo, fakeIo } from "./support/fake-io.js";
 import { ADMIN_URL, freshDatabase } from "./support/pg.js";
 
 const BASE = "https://api.example.com";
-const COOKIE = "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
+const COOKIE = "__Host-tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
 type Route = (init: RequestInit) => Response;
 
 const signedOut = (cookie: string | null) =>

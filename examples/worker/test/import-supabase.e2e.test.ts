@@ -77,7 +77,7 @@ it("imports a Supabase export on D1, signs in with the bcrypt password, and reha
   const right = await signIn("allmine");
   expect(right.status).toBe(200);
   const cookie = right.headers.get("set-cookie") ?? "";
-  expect(cookie).toMatch(/tempo_session=/);
+  expect(cookie).toMatch(/__Host-tempo_session=/);
   // The first sign-in writes PBKDF2 (1000 iterations in TEST_MODE) over the bcrypt row.
   const rehashed = await hashOf();
   expect(rehashed).toMatch(/^pbkdf2-sha256\$1000\$/);

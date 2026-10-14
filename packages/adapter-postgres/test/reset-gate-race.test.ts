@@ -71,7 +71,7 @@ async function user(r: Race, email: string) {
   const cookie =
     link.headers
       .getSetCookie()
-      .find((c) => c.startsWith("tempo_session="))
+      .find((c) => c.startsWith("__Host-tempo_session="))
       ?.split(";")[0] ?? "";
   expect((await r.post("/password/change", { newPassword: PASSWORD }, cookie)).status).toBe(200);
   const rows = await db.sql<{ id: string }[]>`SELECT id FROM ta_user WHERE email = ${email}`;
@@ -177,7 +177,7 @@ describe("the reset gate on Postgres (plan 12c)", () => {
       const cookie =
         signIn.headers
           .getSetCookie()
-          .find((c) => c.startsWith("tempo_session="))
+          .find((c) => c.startsWith("__Host-tempo_session="))
           ?.split(";")[0] ?? "";
       await r.post("/password/reset/request", { email });
       const token = r.lastToken(email);

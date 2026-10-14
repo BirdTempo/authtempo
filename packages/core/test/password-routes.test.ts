@@ -62,14 +62,14 @@ describe("password verify routes", () => {
     const res = await h.auth.handle(form("/auth/password/verify", `token=${first}`));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://api.example.com/");
-    expect(res.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    expect(res.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
 
     await h.auth.handle(post("/auth/password/sign-up", { email: "b@example.com", password: PW }));
     const second = lastToken(h, "Confirm");
     const js = await h.auth.handle(post("/auth/password/verify", { token: second }));
     expect(js.status).toBe(200);
     expect(await js.json()).toEqual({ verified: true });
-    expect(js.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    expect(js.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
 
     const replay = await h.auth.handle(post("/auth/password/verify", { token: second }));
     expect(replay.status).toBe(400);
@@ -126,7 +126,7 @@ describe("password reset routes", () => {
     );
     expect(done.status).toBe(302);
     expect(done.headers.get("location")).toBe("https://api.example.com/");
-    expect(done.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    expect(done.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
     const replay = await h.auth.handle(
       form("/auth/password/reset", `token=${token}&password=new+password+2`),
     );
@@ -241,7 +241,7 @@ describe("the reset page and code points (plan 8b)", () => {
     );
     expect(accepted.status).toBe(302);
     expect(accepted.headers.get("location")).toBe("https://api.example.com/");
-    expect(accepted.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+    expect(accepted.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
   });
 });
 

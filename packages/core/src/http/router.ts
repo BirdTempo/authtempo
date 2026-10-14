@@ -1,4 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
+import { peekSession } from "../engine/sessions.js";
+import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { json } from "./json.js";
 
 export interface RouteContext {
@@ -60,6 +62,38 @@ function cors(res: Response, origin: string): Response {
 }
 
 /**
+ * The one-release move of the old session cookie (plan 12b). A request that
+ * carries `tempo_session` and no `__Host-tempo_session` gets the new cookie
+ * with the same token, unless the handler set it, and a clear of the old
+ * one. A dead token gets the clear only. One read of the session row, once
+ * per browser. Every route core ships builds its own Response, so the
+ * headers are mutable here.
+ */
+async function moveLegacyCookie(
+  config: ResolvedConfig,
+  request: Request,
+  res: Response,
+): Promise<Response> {
+  const legacy = config.legacyCookieName;
+  if (legacy === null) return res;
+  const old = readCookie(request, legacy);
+  if (old === null || readCookie(request, config.cookieName) !== null) return res;
+  const sets = res.headers.getSetCookie();
+  if (!sets.some((c) => c.startsWith(`${config.cookieName}=`))) {
+    const row = await peekSession(config, old);
+    if (row) {
+      const seconds = Math.floor((row.expiresAt.getTime() - config.clock.now().getTime()) / 1000);
+      res.headers.append(
+        "set-cookie",
+        sessionCookie(config.cookieName, old, Math.max(0, seconds), config.cookie.sameSite),
+      );
+    }
+  }
+  res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
+  return res;
+}
+
+/**
  * The client IP comes from `config.clientIp`. On Workers the platform sets
  * `cf-connecting-ip`, and the default reads it. On any other host a caller
  * can set that header, so a deployment there must pass its own `clientIp`
@@ -98,7 +132,7 @@ export function createRouter(
         origin,
       );
     }
-    const res = await dispatch(request);
+    const res = await moveLegacyCookie(config, request, await dispatch(request));
     return trusted ? cors(res, origin) : res;
   };
 

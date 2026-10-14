@@ -77,9 +77,9 @@ export function call(
   );
 }
 
-/** The `tempo_session=…` pair that a response sets, or "" when it sets none. */
+/** The `__Host-tempo_session=…` pair that a response sets, or "" when it sets none. */
 export function sessionCookieOf(res: Response): string {
-  const c = res.headers.getSetCookie().find((x) => x.startsWith("tempo_session="));
+  const c = res.headers.getSetCookie().find((x) => x.startsWith("__Host-tempo_session="));
   return c?.split(";")[0] ?? "";
 }
 

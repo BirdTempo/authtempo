@@ -1,3 +1,28 @@
+/**
+ * The default session cookie (plan 12b, owner decision 3). The `__Host-`
+ * prefix makes a browser refuse the cookie unless it is `Secure`, has
+ * `Path=/`, and has no `Domain`, so a sibling subdomain cannot set it for
+ * the parent domain. The rest of the name keeps the old product name
+ * tempo-auth, as the table prefix `ta_` does.
+ */
+export const DEFAULT_SESSION_COOKIE = "__Host-tempo_session";
+/**
+ * The session cookie before plan 12b. For one release core reads it when a
+ * request carries no `__Host-tempo_session`, and moves it (the router). The
+ * release after removes the read (row 12j). Load-bearing: a browser of a
+ * deployed app holds this name.
+ */
+export const LEGACY_SESSION_COOKIE = "tempo_session";
+
+/**
+ * The binding cookie of a social sign-in. Its path is `<basePath>/social`,
+ * and a browser drops a `__Host-` cookie whose path is not `/`, so the name
+ * drops that prefix and takes `__Secure-` (plan 12b).
+ */
+export function bindingCookieName(cookieName: string): string {
+  return `__Secure-${cookieName.replace(/^__(Host|Secure)-/, "")}_oauth`;
+}
+
 export type SameSite = "Lax" | "None";
 
 export function sessionCookie(

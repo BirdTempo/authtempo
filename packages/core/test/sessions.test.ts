@@ -127,12 +127,14 @@ describe("sessions engine", () => {
 
   it("reads the cookie first, then the bearer header", () => {
     const { config } = makeAuth();
-    expect(readSessionToken(config, get("/x", { cookie: "tempo_session=ts_c" }))).toBe("ts_c");
+    expect(readSessionToken(config, get("/x", { cookie: "__Host-tempo_session=ts_c" }))).toBe(
+      "ts_c",
+    );
     expect(readSessionToken(config, get("/x", { authorization: "Bearer ts_b" }))).toBe("ts_b");
     expect(
       readSessionToken(
         config,
-        get("/x", { cookie: "tempo_session=ts_c", authorization: "Bearer ts_b" }),
+        get("/x", { cookie: "__Host-tempo_session=ts_c", authorization: "Bearer ts_b" }),
       ),
     ).toBe("ts_c");
     expect(readSessionToken(config, get("/x", { authorization: "Basic abc" }))).toBeNull();
@@ -141,8 +143,10 @@ describe("sessions engine", () => {
 
   it("exports the reader from the package root for a caller with only headers (plan 9 Task 4)", () => {
     const read = (h: Record<string, string>) =>
-      publicReadSessionToken({ cookieName: "tempo_session" }, { headers: new Headers(h) });
-    expect(read({ cookie: "tempo_session=ts_c", authorization: "Bearer ts_b" })).toBe("ts_c");
+      publicReadSessionToken({ cookieName: "__Host-tempo_session" }, { headers: new Headers(h) });
+    expect(read({ cookie: "__Host-tempo_session=ts_c", authorization: "Bearer ts_b" })).toBe(
+      "ts_c",
+    );
     expect(read({ authorization: "Bearer ts_b" })).toBe("ts_b");
   });
 });
@@ -153,7 +157,7 @@ describe("session routes", () => {
     const handle = createRouter(config, sessionRoutes(config));
     const user = await seedUser("a@example.com");
     const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
-    const ok = await handle(get("/auth/session", { cookie: `tempo_session=${token}` }));
+    const ok = await handle(get("/auth/session", { cookie: `__Host-tempo_session=${token}` }));
     expect(ok.status).toBe(200);
     const body = (await ok.json()) as { user: { email: string }; session: { expiresAt: string } };
     expect(body.user.email).toBe("a@example.com");
@@ -167,7 +171,9 @@ describe("session routes", () => {
     const handle = createRouter(config, sessionRoutes(config));
     const user = await seedUser("a@example.com");
     const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
-    const res = await handle(post("/auth/sign-out", {}, { cookie: `tempo_session=${token}` }));
+    const res = await handle(
+      post("/auth/sign-out", {}, { cookie: `__Host-tempo_session=${token}` }),
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(await resolveSession(config, token)).toBeNull();
@@ -179,7 +185,7 @@ describe("session routes", () => {
     const handle = createRouter(config, sessionRoutes(config));
     const user = await seedUser("a@example.com");
     const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
-    const cookie = `tempo_session=${token}`;
+    const cookie = `__Host-tempo_session=${token}`;
     clock.advance(7 * DAY - 1);
     const before = await handle(get("/auth/session", { cookie }));
     expect(before.status).toBe(200);
@@ -188,7 +194,7 @@ describe("session routes", () => {
     const at = await handle(get("/auth/session", { cookie }));
     expect(at.status).toBe(200);
     const set = at.headers.get("set-cookie") ?? "";
-    expect(set).toContain(`tempo_session=${token};`);
+    expect(set).toContain(`__Host-tempo_session=${token};`);
     expect(set).toContain(`Max-Age=${30 * 86_400};`);
     expect(set).toContain("HttpOnly");
   });
@@ -208,10 +214,10 @@ describe("session routes", () => {
     const { config } = makeAuth();
     const handle = createRouter(config, sessionRoutes(config));
     const dead = await handle(
-      get("/auth/session", { cookie: `tempo_session=ts_${"A".repeat(43)}` }),
+      get("/auth/session", { cookie: `__Host-tempo_session=ts_${"A".repeat(43)}` }),
     );
     expect(dead.status).toBe(401);
-    expect(dead.headers.get("set-cookie")).toContain("tempo_session=; ");
+    expect(dead.headers.get("set-cookie")).toContain("__Host-tempo_session=; ");
     expect(dead.headers.get("set-cookie")).toContain("Max-Age=0");
     const none = await handle(
       get("/auth/session", { authorization: `Bearer ts_${"A".repeat(43)}` }),

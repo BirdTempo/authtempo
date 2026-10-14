@@ -86,9 +86,11 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `SCHEMA_VERSION` | The schema version that this core needs. |
 | `API_TOKEN_PREFIX` | `tk_`. |
 | `DEFAULT_RESERVED_SLUGS` | The default reserved slugs. |
+| `DEFAULT_SESSION_COOKIE` | `__Host-tempo_session`, the default name of the session cookie. |
 | `DERIVE_GATE_MAX` | 2, the derives that the gate lets run at once. |
 | `HOOK_REFUSED_TEXT` | The message for a refusal with no valid message. |
 | `KEY_SEPARATOR` | U+001F, the separator of `limiterKey`. |
+| `LEGACY_SESSION_COOKIE` | `tempo_session`, the old session cookie. For one release core reads it and moves it. |
 | `LEGACY_VERIFY_HASH` | The hash value of a user whose password the old system checks. |
 | `PBKDF2_ITERATIONS` | 100000. |
 | `PENDING_HASH_PREFIX` | The prefix of a password row that an import repair holds back. |

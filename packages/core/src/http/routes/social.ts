@@ -1,8 +1,15 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { sessionMaxAgeSeconds } from "../../engine/sessions.js";
 import { completeSocial, startSocial } from "../../engine/social.js";
 import { readBody } from "../body.js";
-import { clearOauthCookie, oauthCookie, readCookie, sessionCookie } from "../cookies.js";
+import {
+  bindingCookieName,
+  clearOauthCookie,
+  oauthCookie,
+  readCookie,
+  sessionCookie,
+} from "../cookies.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import { challengePageUrl, trustTokenOf } from "../session-answer.js";
@@ -26,7 +33,7 @@ interface CallbackParams {
 }
 
 export function socialRoutes(config: ResolvedConfig): Route[] {
-  const bindName = `${config.cookieName}_oauth`;
+  const bindName = bindingCookieName(config.cookieName);
   const bindPath = `${config.basePath}/social`;
   const failed = (code: string) => {
     const res = redirect(authErrorUrl(config, code));
@@ -89,7 +96,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           sessionCookie(
             config.cookieName,
             r.value.token,
-            config.session.ttlDays * 86_400,
+            sessionMaxAgeSeconds(config),
             config.cookie.sameSite,
           ),
         );

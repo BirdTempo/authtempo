@@ -47,7 +47,7 @@ it("signs up, confirms by the mailed link, signs in, resets, and signs in again 
   );
   expect(verified.status).toBe(302);
   expect(verified.headers.get("location")).toBe(`${BASE}/`);
-  expect(verified.headers.get("set-cookie")).toMatch(/^tempo_session=ts_/);
+  expect(verified.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
   const user = await env.DB.prepare("SELECT email_verified FROM ta_user WHERE email = ?")
     .bind(EMAIL)
     .first<{ email_verified: number }>();

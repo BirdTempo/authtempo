@@ -112,6 +112,7 @@ export { normalizeEmail, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./errors.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
+export { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
 export {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,

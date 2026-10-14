@@ -18,6 +18,7 @@ import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
+import { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
 import {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -120,8 +121,22 @@ export interface AuthConfig {
    */
   clientIp?: (request: Request) => string | null;
   clock?: Clock;
+  /**
+   * The session cookie. Default `__Host-tempo_session` (plan 12b). With that
+   * name, core also reads the old `tempo_session` for one release and moves
+   * it. Another name gets no such read.
+   */
   cookieName?: string;
-  session?: { ttlDays?: number; slidingRefreshDays?: number };
+  session?: {
+    ttlDays?: number;
+    slidingRefreshDays?: number;
+    /**
+     * The absolute lifetime of a session, 1 to 365 days (plan 12b, ASVS
+     * 5.0.0 7.3.2). Off by default. A session ends at `createdAt` plus this,
+     * whatever its sliding refresh, and the person signs in again.
+     */
+    absoluteDays?: number;
+  };
   magicLink?: {
     ttlMinutes?: number;
     linkBuilder?: (token: string, next: string) => string;
@@ -481,7 +496,9 @@ export interface ResolvedConfig {
   clientIp: (request: Request) => string | null;
   clock: Clock;
   cookieName: string;
-  session: { ttlDays: number; slidingRefreshDays: number };
+  /** The old session cookie that the router moves, or null when `cookieName` is not the default (plan 12b). */
+  legacyCookieName: string | null;
+  session: { ttlDays: number; slidingRefreshDays: number; absoluteDays: number | null };
   magicLink: {
     ttlMinutes: number;
     linkBuilder: (token: string, next: string) => string;
@@ -759,7 +776,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     };
   }
   // One source for the session cookie name: the trust cookie check of `totp` reads it too.
-  const cookieName = input.cookieName ?? "tempo_session";
+  const cookieName = input.cookieName ?? DEFAULT_SESSION_COOKIE;
   const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
   return {
     basePath,
@@ -775,10 +792,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     clientIp: input.clientIp ?? workersClientIp,
     clock,
     cookieName,
-    session: {
-      ttlDays: input.session?.ttlDays ?? 30,
-      slidingRefreshDays: input.session?.slidingRefreshDays ?? 7,
-    },
+    legacyCookieName: cookieName === DEFAULT_SESSION_COOKIE ? LEGACY_SESSION_COOKIE : null,
+    session: resolveSessionConfig(input.session),
     magicLink: {
       ttlMinutes: input.magicLink?.ttlMinutes ?? 15,
       linkBuilder:
@@ -912,6 +927,36 @@ const NO_LIMITS: ResolvedLimits = {
   membersPerOrganization: null,
   pendingInvitationsPerOrganization: null,
 };
+
+const SESSION_KEYS: Readonly<Record<keyof NonNullable<AuthConfig["session"]>, true>> = {
+  ttlDays: true,
+  slidingRefreshDays: true,
+  absoluteDays: true,
+};
+
+/** `session`. ttlDays and slidingRefreshDays keep the defaults of version 1; absoluteDays is off by default (plan 12b). */
+function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["session"] {
+  const o = input ?? {};
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(SESSION_KEYS, key))
+      throw new ConfigError(
+        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, and absoluteDays`,
+      );
+  const { absoluteDays } = o;
+  if (
+    absoluteDays !== undefined &&
+    (typeof absoluteDays !== "number" ||
+      !Number.isSafeInteger(absoluteDays) ||
+      absoluteDays < 1 ||
+      absoluteDays > 365)
+  )
+    throw new ConfigError("session.absoluteDays must be an integer from 1 to 365");
+  return {
+    ttlDays: o.ttlDays ?? 30,
+    slidingRefreshDays: o.slidingRefreshDays ?? 7,
+    absoluteDays: absoluteDays ?? null,
+  };
+}
 
 function resolveLimits(input: OrganizationLimits | undefined): ResolvedLimits {
   const out: ResolvedLimits = { ...NO_LIMITS };
@@ -1068,10 +1113,11 @@ function resolveTotp(
   if (
     typeof trustCookieName !== "string" ||
     !COOKIE_NAME_RE.test(trustCookieName) ||
-    trustCookieName === cookieName
+    trustCookieName === cookieName ||
+    trustCookieName === LEGACY_SESSION_COOKIE
   )
     throw new ConfigError(
-      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name",
+      "totp.trustCookieName must be 1 to 64 letters, digits, dots, underscores, or dashes, and not the session cookie's name or tempo_session",
     );
   if (o.challengePage !== undefined && typeof o.challengePage !== "function")
     throw new ConfigError("totp.challengePage must be a function");

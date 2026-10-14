@@ -83,7 +83,7 @@ These counts live in their rows, so they hold under every limiter.
 
 | Item | Life |
 | --- | --- |
-| Session | `session.ttlDays`, 30 days by default, with a sliding refresh after `session.slidingRefreshDays` |
+| Session | `session.ttlDays`, 30 days by default, with a sliding refresh after `session.slidingRefreshDays`. With `session.absoluteDays`, at most that many days after the sign-in |
 | Magic link | `magicLink.ttlMinutes`, 15 minutes by default |
 | Email code | `emailOtp.ttlMinutes`, 10 minutes by default |
 | Reset link | `password.resetTtlMinutes`, 15 minutes by default |

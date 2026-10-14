@@ -86,7 +86,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | --- | --- |
 | Needs | Nothing |
 | Input | `?next=` |
-| Answer | 302 to the provider, with the binding cookie `tempo_session_oauth`. A failure redirects to `/?auth_error=<code>` |
+| Answer | 302 to the provider, with the binding cookie `__Secure-tempo_session_oauth`. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed) |
 
 <h3 id="get-social-provider-callback"><code>GET /social/:provider/callback</code></h3>

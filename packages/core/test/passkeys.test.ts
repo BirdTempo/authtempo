@@ -428,7 +428,7 @@ describe("passkey routes", () => {
       ip: null,
       userAgent: null,
     });
-    return { user, cookie: `tempo_session=${token}` };
+    return { user, cookie: `__Host-tempo_session=${token}` };
   }
 
   it("registers and signs in through the routes, with the cookie on sign-in", async () => {
@@ -466,7 +466,7 @@ describe("passkey routes", () => {
     expect(signIn.status).toBe(200);
     expect(await signIn.json()).toMatchObject({ user: { email: "ada@example.com" } });
     expect(signIn.headers.get("set-cookie")).toMatch(
-      /^tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
+      /^__Host-tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
     );
     expect(await auth.storage.findMany("session", [])).toHaveLength(2);
   });
@@ -479,7 +479,7 @@ describe("passkey routes", () => {
     const first = await handle(get("/auth/passkeys", { cookie }));
     expect(first.status).toBe(200);
     expect(first.headers.get("set-cookie")).toMatch(
-      /^tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
+      /^__Host-tempo_session=ts_[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/,
     );
     const second = await handle(get("/auth/passkeys", { cookie }));
     expect(second.status).toBe(200);
@@ -522,7 +522,7 @@ describe("passkey routes", () => {
     });
     const { token } = await createSession(auth.config, { userId: u.id, ip: null, userAgent: null });
     const res = await handle(
-      post("/auth/passkey/register/options", {}, { cookie: `tempo_session=${token}` }),
+      post("/auth/passkey/register/options", {}, { cookie: `__Host-tempo_session=${token}` }),
     );
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "email_unverified" });

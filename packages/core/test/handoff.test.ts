@@ -467,7 +467,7 @@ describe("handoff routes", () => {
       ip: null,
       userAgent: null,
     });
-    return `tempo_session=${token}`;
+    return `__Host-tempo_session=${token}`;
   }
   const formPost = (h: string, headers: Record<string, string>) =>
     new Request(`${BASE_URL}/auth/handoff/continue`, {
