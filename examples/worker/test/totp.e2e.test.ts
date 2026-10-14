@@ -1,6 +1,13 @@
-import { env, SELF } from "cloudflare:test";
+import {
+  createExecutionContext,
+  createScheduledController,
+  env,
+  SELF,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { expect, it } from "vitest";
+import worker from "../src/index";
 import { BASE, lastLink } from "./helpers.js";
 
 const PW = "correct horse battery";
@@ -183,7 +190,7 @@ it("serves the challenge page and its form on D1, and caps the challenge at five
   expect(await late.json()).toEqual({ error: "too_many_attempts" });
 });
 
-it("skips the gate with the trust cookie on D1, and deletes an expired trusted device", async () => {
+it("skips the gate with the trust cookie on D1; an expired trusted device asks for the factor, and the sweep deletes it", async () => {
   const email = "totp-c@example.com";
   const f = await enrolled(email);
   const first = (await (await challengeFor(email)).json()) as { twoFactor: { challenge: string } };
@@ -209,6 +216,16 @@ it("skips the gate with the trust cookie on D1, and deletes an expired trusted d
     .run();
   const gated = await challengeFor(email, trust);
   expect(((await gated.json()) as { twoFactor?: unknown }).twoFactor).toBeDefined();
+  // The trust read writes nothing (plan 12c final review, m3). The sweep deletes the row.
+  expect(await rowsFor("ta_trusted_device", email)).toBe(1);
+  // SELF.scheduled fails with a DataCloneError (see sweep.e2e.test.ts), so call the handler.
+  const ctx = createExecutionContext();
+  await worker.scheduled(
+    createScheduledController({ cron: "*/15 * * * *" }),
+    env as unknown as Env,
+    ctx,
+  );
+  await waitOnExecutionContext(ctx);
   expect(await rowsFor("ta_trusted_device", email)).toBe(0);
 });
 
