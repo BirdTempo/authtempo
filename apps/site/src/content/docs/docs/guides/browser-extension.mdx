@@ -1,0 +1,54 @@
+---
+title: Sign in from a browser extension
+description: Sign a person in from a Chrome extension by email code, with a bearer token or a cookie.
+type: how-to
+sources:
+  - docs/superpowers/plans/2026-10-14-11d-sdks.md
+  - packages/client/README.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/browser-extension.ts?raw";
+import client from "../../../../../samples/guides/browser-extension-client.ts?raw";
+import test from "../../../../../samples/guides/browser-extension.test.ts?raw";
+
+**For:** a developer of a browser extension that calls an authtempo API.
+
+**What it does:** the extension signs a person in by email code and keeps a bearer token. The API trusts the extension's origin.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- The ID of the extension. Chrome shows it on its extensions page. The [`key` field of `manifest.json`](https://developer.chrome.com/docs/extensions/reference/manifest/key) keeps one ID for an unpacked build.
+- The [email code](/docs/guides/email-code/) sign-in on the API.
+
+## Steps
+
+1. Add `chrome-extension://` and the ID to `trustedOrigins` on the API. Write the exact origin: core refuses a wildcard.
+2. Add the API's origin to `host_permissions` in `manifest.json`.
+3. Make the client with `credentials: "omit"` and the stored token as the bearer.
+4. Sign in by email code in the popup, and keep the token in `chrome.storage.local`.
+5. Clear the token when the session ends. The client calls `onSessionEnd` with the token that ended. Clear the box only when it still holds that token.
+
+<Code code={config} lang="ts" title="The API" />
+
+<Code code={client} lang="ts" title="The extension" />
+
+<Code code={test} lang="ts" title="The sign-in as a test" />
+
+## How it behaves
+
+- Token mode sends no cookie, so no cross-site cookie rule applies. It is the mode of this page.
+- Cookie mode needs `cookie: { sameSite: "None" }` on the API, because the extension is another site. The client then sends `credentials: "include"`.
+- Firefox gives each browser instance its own `moz-extension://` origin. `trustedOrigins` cannot name it. If Firefox sends that origin, the API answers 403.
+
+## If it fails
+
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the extension's origin is not in `trustedOrigins`, or the ID changed.
+- [`invalid_code`](/docs/reference/errors/#invalid_code): the email code is wrong or expired.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many codes for one address.
+
+## Next
+
+- [The client package](/docs/reference/client/)
+- [Run the app on another origin](/docs/guides/split-origins/)
