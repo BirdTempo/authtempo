@@ -548,6 +548,9 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         const r = await run(
           (c) => c.password.signUp({ email, password, ...(name !== "" ? { name } : {}) }),
           (v) => {
+            // The server's requireEmailVerification (plan 12b): no session, so
+            // no token to keep. Better Auth answers token null.
+            if (!("token" in v)) return { token: null, user: toClientUser(v.user) };
             keepToken(v.token);
             return { token: v.token, user: toClientUser(v.user) };
           },

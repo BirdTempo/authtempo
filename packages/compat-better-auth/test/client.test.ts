@@ -24,7 +24,13 @@ import type { BetterAuthOptions, CompatDatabase, InvitationEmailData } from "../
 const BASE = "https://api.example.com";
 const PASSWORD = "correct horse battery";
 
-function server(o: { minPasswordLength?: number; plugins?: BetterAuthOptions["plugins"] } = {}) {
+function server(
+  o: {
+    minPasswordLength?: number;
+    plugins?: BetterAuthOptions["plugins"];
+    requireEmailVerification?: boolean;
+  } = {},
+) {
   const invitations: InvitationEmailData[] = [];
   const mails: { kind: "verify" | "reset"; email: string; token: string }[] = [];
   const database: CompatDatabase = {
@@ -41,6 +47,9 @@ function server(o: { minPasswordLength?: number; plugins?: BetterAuthOptions["pl
     emailAndPassword: {
       enabled: true,
       ...(o.minPasswordLength !== undefined ? { minPasswordLength: o.minPasswordLength } : {}),
+      ...(o.requireEmailVerification !== undefined
+        ? { requireEmailVerification: o.requireEmailVerification }
+        : {}),
       sendResetPassword: async (d) =>
         void mails.push({ kind: "reset", email: d.user.email, token: d.token }),
     },
@@ -454,6 +463,21 @@ function memoryStorage() {
 }
 
 describe("expoClient", () => {
+  it("answers { token: null, user } and keeps no token at a sign-up with requireEmailVerification (plan 12b)", async () => {
+    const s = server({ requireEmailVerification: true });
+    const setItem = vi.fn();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      plugins: [expoClient({ scheme: "reception", storage: { getItem: () => null, setItem } })],
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    const up = await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    expect(up.error).toBeNull();
+    expect(up.data).toMatchObject({ token: null, user: { email: "pat@example.com" } });
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it("stores the token, answers it from getCookie, and sends it as the bearer header", async () => {
     const s = server();
     const storage = memoryStorage();

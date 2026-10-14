@@ -1,5 +1,6 @@
 import { twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
+import type { BetterAuthInstance } from "../src/types.js";
 import { consumere, consumeri } from "./options.js";
 
 const cf = betterAuth(consumere);
@@ -87,4 +88,26 @@ export async function requireVerifiedCalls() {
   // @ts-expect-error with requireEmailVerification the sign-up opens no session, so the token is null
   const token: string = up.token;
   return [maybe, token];
+}
+// Options typed as the wide BetterAuthOptions: the key can be true at run time, so the token can be null.
+export async function wideOptionsCalls(wide: BetterAuthInstance) {
+  const up = await wide.api.signUpEmail({
+    body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+  });
+  const maybe: string | null = up.token;
+  // @ts-expect-error a wide option type may turn requireEmailVerification on, so the token can be null
+  const token: string = up.token;
+  return [maybe, token];
+}
+// A literal false keeps the token a string.
+const rvOff = betterAuth({
+  ...consumeri,
+  emailAndPassword: { enabled: true, requireEmailVerification: false as const },
+});
+export async function requireVerifiedOffCalls() {
+  const up = await rvOff.api.signUpEmail({
+    body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+  });
+  const token: string = up.token;
+  return token;
 }

@@ -462,18 +462,19 @@ export type HasTwoFactor<O extends BetterAuthOptions> = O extends {
   : false;
 
 /**
- * True when the option type names `emailAndPassword.requireEmailVerification`
- * with a value that can be true (plan 12b Task 15). Then `signUpEmail` can
- * answer `token: null`. A wide `BetterAuthOptions` is false, as for
- * `HasTwoFactor`, so code that types its options wide keeps the old type.
+ * True when the option type has the key
+ * `emailAndPassword.requireEmailVerification`, optional or not, with a type
+ * other than `false` (plan 12b Task 15). Then `signUpEmail` can answer
+ * `token: null`. A wide `BetterAuthOptions` has the optional key, so it is
+ * true: its value at run time can be true. Only a literal object with no
+ * such key, or with `false` as a literal type, keeps `token: string`.
  */
-export type RequiresVerification<O extends BetterAuthOptions> = O extends {
-  emailAndPassword: { requireEmailVerification: infer R };
-}
-  ? [R] extends [false | undefined]
-    ? false
-    : true
-  : false;
+export type RequiresVerification<O extends BetterAuthOptions> =
+  "requireEmailVerification" extends keyof NonNullable<O["emailAndPassword"]>
+    ? [NonNullable<O["emailAndPassword"]>["requireEmailVerification"]] extends [false | undefined]
+      ? false
+      : true
+    : false;
 
 export interface CompatServerApi<TF extends boolean = false, RV extends boolean = false> {
   /** `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f). */
@@ -704,7 +705,8 @@ export interface AuthClient<TF extends boolean = false> {
       name: string;
       image?: string;
       callbackURL?: string;
-    }): Promise<CompatClientResult<{ token: string; user: ClientUser }>>;
+      // null while the server's requireEmailVerification is on (plan 12b): no session opens.
+    }): Promise<CompatClientResult<{ token: string | null; user: ClientUser }>>;
   };
   signOut(): Promise<CompatClientResult<{ success: true }>>;
   getSession(): Promise<CompatClientResult<{ session: ClientSession; user: ClientUser } | null>>;

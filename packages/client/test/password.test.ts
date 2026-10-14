@@ -8,12 +8,22 @@ const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
 
 describe("password", () => {
+  it("answers the user, verifyRequired, and no cookie at sign-up with password.requireVerified (plan 12b)", async () => {
+    const server = makeServer({ password: { hash: FAST, requireVerified: true } });
+    const { fetch, jar } = inProcessFetch(server.auth);
+    const client = createClient({ baseURL: BASE_URL, fetch });
+    const up = await client.password.signUp({ email: EMAIL, password: PW });
+    expect(up.ok && up.value).toMatchObject({ verifyRequired: true, user: { email: EMAIL } });
+    expect(up.ok && "token" in up.value).toBe(false);
+    expect(jar.size).toBe(0);
+  });
+
   it("signs up, signs in, resets, and changes, with the cookie and with the bearer token", async () => {
     const server = makeServer({ password: { hash: FAST } });
     const { fetch, jar } = inProcessFetch(server.auth);
     const client = createClient({ baseURL: BASE_URL, fetch });
     const up = await client.password.signUp({ email: EMAIL, password: PW });
-    expect(up.ok && up.value.token).toMatch(/^ts_/);
+    expect(up.ok && "token" in up.value && up.value.token).toMatch(/^ts_/);
     expect(up.ok && up.value.user.emailVerified).toBe(false);
     expect(jar.size).toBe(1);
     expect(await client.password.signIn({ email: EMAIL, password: "wrong password" })).toEqual({

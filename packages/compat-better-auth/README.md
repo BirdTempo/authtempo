@@ -71,8 +71,10 @@ The others wait, and no sign-in is refused.
 
 `requireEmailVerification: true` maps to core's `password.requireVerified`
 (plan 12b). A sign-up opens no session and answers `{ token: null, user }`.
-A taken address answers the same shape with a new synthetic user, as Better
-Auth does. A right password of an unverified address answers
+`api.signUpEmail` answers a taken address with the same shape and a new
+synthetic user, as Better Auth does. The handler route and the client still
+answer `USER_ALREADY_EXISTS` (409) for it. A right password of an unverified
+address answers
 `EMAIL_NOT_VERIFIED` (403). Core mails a new verify link at each unverified
 sign-in, at most 3 per 15 minutes, also when `sendOnSignIn` is absent. An app
 that leaves `sendOnSignIn` out now gets that mail, where Better Auth sends

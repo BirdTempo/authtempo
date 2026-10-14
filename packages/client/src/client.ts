@@ -113,13 +113,15 @@ export interface Client {
   /**
    * Every operation answers `not_found` when the server runs without the `password` config.
    * `signUp`, `signIn`, and `reset` answer the bearer token. A browser app keeps the cookie, and a native app stores the token.
+   * While the server's `password.requireVerified` is on, `signUp` answers `{ user, verifyRequired: true }` and no token.
    */
   password: {
-    signUp(input: {
-      email: string;
-      password: string;
-      name?: string | undefined;
-    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    signUp(input: { email: string; password: string; name?: string | undefined }): Promise<
+      ClientResult<
+        // The second shape: the server's password.requireVerified is on (plan 12b). No session opens.
+        ({ token: string } & PublicSession) | { user: PublicSession["user"]; verifyRequired: true }
+      >
+    >;
     /**
      * A session, or `{ twoFactor }` for a user with the second factor on
      * (plan 9f): then call `totp.verify` with the challenge. `trustDevice` is
@@ -389,7 +391,10 @@ export function createClient(options: ClientOptions): Client {
     },
     password: {
       signUp: ({ name, ...rest }) =>
-        call<{ token: string } & PublicSession>("POST", "/password/sign-up", {
+        call<
+          | ({ token: string } & PublicSession)
+          | { user: PublicSession["user"]; verifyRequired: true }
+        >("POST", "/password/sign-up", {
           ...rest,
           ...(name !== undefined ? { name } : {}),
         }),
