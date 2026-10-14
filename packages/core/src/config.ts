@@ -14,6 +14,7 @@ import {
 } from "./engine/hooks.js";
 import type { CimdEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
+import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
@@ -285,6 +286,15 @@ export interface PasswordConfig {
    * would lock out each unverified user of a live app at the upgrade.
    */
   requireVerified?: boolean;
+  /**
+   * The answer of a sign-up (plan 12b, ASVS 5.0.0 6.3.8). Default true: every
+   * sign-up answers `{ sent: true }` with no session, and a known address
+   * gets a mail. False: the answer of plan 8, a session or `email_taken`.
+   * `requireVerified` changes only the answer of `false`.
+   */
+  uniformSignUp?: boolean;
+  /** The mail to an address that has an account, at a uniform sign-up. Core sends it to the address, whatever `to` it answers. Default `defaultExistingAccountMail`. */
+  existingAccountMail?: (input: ExistingAccountMailInput) => MailMessage;
 }
 
 export interface EmailOtpConfig {
@@ -551,6 +561,8 @@ export interface ResolvedConfig {
     resetPage: (input: ResetPageInput) => string;
     legacyVerify: Required<LegacyVerifyConfig> | null;
     requireVerified: boolean;
+    uniformSignUp: boolean;
+    existingAccountMail: (input: ExistingAccountMailInput) => MailMessage;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
   totp: ResolvedTotp | null;
@@ -791,6 +803,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     const requireVerified = p.requireVerified ?? false;
     if (typeof requireVerified !== "boolean")
       throw new ConfigError("password.requireVerified must be a boolean");
+    if (p.uniformSignUp !== undefined && typeof p.uniformSignUp !== "boolean")
+      throw new ConfigError("password.uniformSignUp must be a boolean");
+    if (p.existingAccountMail !== undefined && typeof p.existingAccountMail !== "function")
+      throw new ConfigError("password.existingAccountMail must be a function");
     password = {
       hash: p.hash ?? createPbkdf2PasswordHash(),
       minLength,
@@ -799,6 +815,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       resetPage: p.resetPage ?? defaultResetPage,
       legacyVerify,
       requireVerified,
+      uniformSignUp: p.uniformSignUp ?? true,
+      existingAccountMail: p.existingAccountMail ?? defaultExistingAccountMail,
     };
   }
   const signUp = input.signUp ?? "open";

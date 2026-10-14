@@ -781,7 +781,7 @@ describe("the Better Auth foreign keys on postgres", () => {
 
 describe("the compat migration and core's own write paths on postgres", () => {
   const fast = createPbkdf2PasswordHash({ iterations: 1000 });
-  const authOn = (s: ReturnType<typeof betterAuthSchemaStorage>) =>
+  const authOn = (s: ReturnType<typeof betterAuthSchemaStorage>, uniformSignUp = true) =>
     createAuth({
       baseURL: "https://api.example.com",
       secret: "0123456789abcdef0123456789abcdef",
@@ -789,7 +789,7 @@ describe("the compat migration and core's own write paths on postgres", () => {
       storage: s.storage,
       limiter: s.limiter,
       mail: { send: async () => {} },
-      password: { hash: fast },
+      password: { hash: fast, uniformSignUp },
       organizations: {},
     });
 
@@ -837,7 +837,8 @@ describe("the compat migration and core's own write paths on postgres", () => {
     try {
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
       await s.migrate();
-      const pw = authOn(s).api.password;
+      // The detailed answer of plan 8 writes the session row too (plan 12b).
+      const pw = authOn(s, false).api.password;
       if (!pw) throw new Error("the password api is missing");
       const r = await pw.signUp({
         email: "new@example.com",
@@ -854,6 +855,20 @@ describe("the compat migration and core's own write paths on postgres", () => {
       expect(rows.map((x) => x.providerId)).toContain("credential");
       const credential = rows.find((x) => x.providerId === "credential");
       expect(credential?.password).toMatch(/^pbkdf2-sha256\$1000\$/);
+      expect((await pg.sql.unsafe('SELECT "id" FROM "session"')).length).toBe(1);
+      // The uniform answer (the default) writes the user and the password, and no session.
+      const uniform = await authOn(s).api.password?.signUp({
+        email: "other@example.com",
+        password: "a long passphrase 1",
+        ip: null,
+        userAgent: null,
+      });
+      expect(uniform).toEqual({ ok: true, value: { sent: true } });
+      const other = await pg.sql.unsafe<{ password: string | null }[]>(
+        'SELECT a."password" FROM "account" a JOIN "user" u ON u."id" = a."userId" WHERE u."email" = $1 AND a."providerId" = $2',
+        ["other@example.com", "credential"],
+      );
+      expect(other[0]?.password).toMatch(/^pbkdf2-sha256\$1000\$/);
       expect((await pg.sql.unsafe('SELECT "id" FROM "session"')).length).toBe(1);
     } finally {
       await pg.close();

@@ -49,10 +49,14 @@ describe("passwordSignUp", () => {
     const r = await signUp(auth, { email: " Ada@Example.com ", name: "Ada" });
     if (!r.ok) throw new Error(r.code);
     expect(upSession(r.value).token).toMatch(/^ts_[A-Za-z0-9_-]{43}$/);
-    expect(r.value.user).toMatchObject({ email: EMAIL, emailVerified: false, name: "Ada" });
+    expect(upSession(r.value).user).toMatchObject({
+      email: EMAIL,
+      emailVerified: false,
+      name: "Ada",
+    });
     const rows = await auth.storage.findMany("password", []);
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.userId).toBe(r.value.user.id);
+    expect(rows[0]?.userId).toBe(upSession(r.value).user.id);
     expect(rows[0]?.hash).toMatch(/^pbkdf2-sha256\$1000\$/);
     expect(await auth.storage.findMany("session", [])).toHaveLength(1);
     expect(auth.mail).toHaveLength(1);

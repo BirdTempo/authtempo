@@ -71,7 +71,9 @@ export interface Mapped {
  * `otp-verify`, with `otp:email:` and `otp-verify:email:`, plan 9e). Every other flow (sign-up, the reset
  * POST, invitation accept, handoff, passkey, social start) has only the
  * per-IP limit, so it keeps core's shared unknown bucket: without it such a
- * flow has no limit at all (review I-2).
+ * flow has no limit at all (review I-2). The sign-up also has a per-email
+ * limit since plan 12b (`password-sign-up:email:`), but it keeps the IP
+ * bucket: one script can sign up many addresses, one per address.
  *
  * One exception has no per-email limit: `totp-verify` (plan 9f). Its binding
  * limits are per user: `totp-code:user` (10 code checks per 15 minutes) and
@@ -311,6 +313,10 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             // requireVerified. A sign-up answers no session, and an unverified
             // sign-in answers EMAIL_NOT_VERIFIED.
             ...(ep.requireEmailVerification === true ? { requireVerified: true } : {}),
+            // Better Auth's own answer until Task 12 of plan 12b maps autoSignIn
+            // and requireEmailVerification. Core's default `{ sent: true }` has
+            // no user for Better Auth's `{ token, user }` answer.
+            uniformSignUp: false,
           },
         }
       : {}),

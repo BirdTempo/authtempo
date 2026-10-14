@@ -143,6 +143,7 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
     // Plan 10: sign-up on the page. The sign-up answer sets the session cookie, so success
     // goes to the continue path as the sign-in does. With password.requireVerified on, it sets
     // no cookie, and the page asks for the mailed link. The codes come from core's ERRORS table.
+    // With the uniform answer (plan 12b) the page asks the person to read the mail, and enables the buttons again.
     // reportValidity runs the type=email check and the required attributes, as the
     // submit button does, so an empty field never posts. The button stays disabled
     // while the request runs so that a second click does not post twice. The form's
@@ -160,7 +161,8 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
       postJson("/password/sign-up", { email: pwForm.elements.email.value, password: pwForm.elements.password.value }).then(function (res) {
         // password.requireVerified (plan 12b): the sign-up opens no session, and the mailed link signs in.
         if (res.ok) return res.json().then(function (body) {
-          if (body && body.verifyRequired) fail("Check your email for a link to confirm your address.");
+          if (body && body.sent) fail("Check your email to continue.");
+          else if (body && body.verifyRequired) fail("Check your email for a link to confirm your address.");
           else location.href = cont;
         }, function () { location.href = cont; });
         if (res.status === 429) { fail("Too many attempts. Try again later."); return; }

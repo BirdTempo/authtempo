@@ -20,6 +20,7 @@ import { currentSecret } from "../src/primitives/keyring.js";
 import { base32Decode, normalizeBackupCode, otpauthUri, totpCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
+import { upSession } from "./password-helpers.js";
 import {
   codeNow,
   EMAIL,
@@ -133,7 +134,9 @@ describe("the setup (plan 9f)", () => {
       userAgent: null,
     });
     if (!up.ok) throw new Error(up.code);
-    expect(await setupTotp(auth.config, { userId: up.value.user.id, password: PASSWORD })).toEqual({
+    expect(
+      await setupTotp(auth.config, { userId: upSession(up.value).user.id, password: PASSWORD }),
+    ).toEqual({
       ok: false,
       code: "email_unverified",
       status: 403,

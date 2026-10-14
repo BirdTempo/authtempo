@@ -486,10 +486,11 @@ describe("sign-in page", () => {
     const start = on.indexOf(`postJson("/password/sign-up"`);
     expect(start).toBeGreaterThan(-1);
     const handler = on.slice(start, on.indexOf(".catch(", start));
-    // The same success path as the sign-in: the sign-up answer sets the cookie (spec 8.7 item 1).
-    // With password.requireVerified on, it sets none, and the page asks for the link (plan 12b).
+    // The uniform answer (plan 12b) asks the person to read the mail. With
+    // password.requireVerified on, the detailed answer sets no cookie, and the
+    // page asks for the link. A session answer goes on as the sign-in does.
     expect(handler).toContain(
-      `if (body && body.verifyRequired) fail("Check your email for a link to confirm your address.");\n          else location.href = cont;`,
+      `if (body && body.sent) fail("Check your email to continue.");\n          else if (body && body.verifyRequired) fail("Check your email for a link to confirm your address.");\n          else location.href = cont;`,
     );
     expect(handler).toContain(`fail("An account with this address exists. Sign in instead.");`);
     expect(handler).toContain(`fail("Too many attempts. Try again later.");`);

@@ -25,9 +25,11 @@ it("stores a hash at 100000 iterations when TEST_MODE is unset", async () => {
     prodEnv,
   );
   expect(up.status).toBe(200);
-  const { user } = (await up.json()) as { user: { id: string } };
-  const stored = await env.DB.prepare("SELECT hash FROM ta_password WHERE user_id = ?")
-    .bind(user.id)
+  expect(await up.json()).toEqual({ sent: true });
+  const stored = await env.DB.prepare(
+    "SELECT p.hash FROM ta_password p JOIN ta_user u ON u.id = p.user_id WHERE u.email = ?",
+  )
+    .bind("cost@example.com")
     .first<{ hash: string }>();
   expect(stored?.hash).toMatch(/^pbkdf2-sha256\$100000\$/);
 });

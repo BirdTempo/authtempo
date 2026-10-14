@@ -349,6 +349,8 @@ optional.
 | `resetTtlMinutes` | 15 | The life of a reset link, 1 to 1440. |
 | `resetPage` | `defaultResetPage` | The HTML of the reset page. |
 | `requireVerified` | `false` | True refuses the password sign-in of an unverified address. |
+| `uniformSignUp` | `true` | Every sign-up answers `{ sent: true }` with no session. A known address gets a mail. False keeps a session at sign-up and `email_taken`. |
+| `existingAccountMail` | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address. |
 
 The default hash is PBKDF2-HMAC-SHA256 on Web Crypto. A hash is stored as
 `pbkdf2-sha256$<iterations>$<salt>$<hash>`. The salt is 16 random bytes and
@@ -395,10 +397,20 @@ learns that the address is unverified. A new verify link goes out first. It
 counts on `password-resend:email:<email>`, the key of the resend route, so
 at most 3 links go per 15 minutes. Over the limit, no mail goes, and the
 answer stays `email_unverified`. The other pending links of the address go
-first, so one link at a time is live. A sign-up with the key on writes the
-user and the password, mails the link, and opens no session: it answers
-200 `{ user, verifyRequired: true }` with no cookie, and the session hooks
-do not run. The verify link signs the person in.
+first, so one link at a time is live. With `uniformSignUp: false`, a
+sign-up with the key on writes the user and the password, mails the link,
+and opens no session: it answers 200 `{ user, verifyRequired: true }` with
+no cookie, and the session hooks do not run. The verify link signs the
+person in.
+
+`uniformSignUp` (plan 12b, ASVS 5.0.0 6.3.8). Every sign-up that passes the
+body check, the policy, and the breach check answers 200 `{ sent: true }`
+with no cookie. A new address gets the unverified user, the password, and
+the verify link, and the link opens the session. A known address gets no
+row and one mail that points to the sign-in, and a claim race or a refusal
+by `signUp: "invited"` gets no row and no mail. The hash runs before the
+transaction on every path, but the transaction of a new address writes
+more than the read of a known one, so core does not claim 6.3.8 in full.
 
 A reset of a user with the second factor on opens no session (plan 12c).
 It sets the password and ends every session, as before. Then it writes a
@@ -414,6 +426,7 @@ The limits, in the same limiter as the other routes:
 | Key | Limit |
 | --- | --- |
 | `password-sign-up:ip:<ip>` | 10 per hour |
+| `password-sign-up:email:<email>` | 5 per hour |
 | `password:ip:<ip>` | 20 per 15 minutes |
 | `password:email:<email>` | 10 per 15 minutes |
 | `password-reset:ip:<ip>` | 20 per 15 minutes |

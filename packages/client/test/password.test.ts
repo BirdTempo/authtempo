@@ -8,8 +8,26 @@ const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
 
 describe("password", () => {
+  it("answers sent and no cookie at sign-up by default, and the verify link opens the session (plan 12b)", async () => {
+    const server = makeServer({ password: { hash: FAST } });
+    const { fetch, jar } = inProcessFetch(server.auth);
+    const client = createClient({ baseURL: BASE_URL, fetch });
+    expect(await client.password.signUp({ email: EMAIL, password: PW })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(jar.size).toBe(0);
+    const v = await client.password.verifyEmail({
+      token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
+    });
+    expect(v.ok).toBe(true);
+    expect(jar.size).toBe(1);
+  });
+
   it("answers the user, verifyRequired, and no cookie at sign-up with password.requireVerified (plan 12b)", async () => {
-    const server = makeServer({ password: { hash: FAST, requireVerified: true } });
+    const server = makeServer({
+      password: { hash: FAST, requireVerified: true, uniformSignUp: false },
+    });
     const { fetch, jar } = inProcessFetch(server.auth);
     const client = createClient({ baseURL: BASE_URL, fetch });
     const up = await client.password.signUp({ email: EMAIL, password: PW });
@@ -19,12 +37,13 @@ describe("password", () => {
   });
 
   it("signs up, signs in, resets, and changes, with the cookie and with the bearer token", async () => {
-    const server = makeServer({ password: { hash: FAST } });
+    // The detailed answer of plan 8: a session at sign-up (plan 12b).
+    const server = makeServer({ password: { hash: FAST, uniformSignUp: false } });
     const { fetch, jar } = inProcessFetch(server.auth);
     const client = createClient({ baseURL: BASE_URL, fetch });
     const up = await client.password.signUp({ email: EMAIL, password: PW });
     expect(up.ok && "token" in up.value && up.value.token).toMatch(/^ts_/);
-    expect(up.ok && up.value.user.emailVerified).toBe(false);
+    expect(up.ok && "token" in up.value && up.value.user.emailVerified).toBe(false);
     expect(jar.size).toBe(1);
     expect(await client.password.signIn({ email: EMAIL, password: "wrong password" })).toEqual({
       ok: false,

@@ -97,6 +97,24 @@ function server(
 }
 
 describe("createAuthClient", () => {
+  it("answers UNEXPECTED_RESPONSE and no user when a core server sends the uniform sign-up answer (plan 12b)", async () => {
+    // A core server with its default answer. The shim's own server sets uniformSignUp false.
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: {
+        customFetchImpl: async () =>
+          new Response(JSON.stringify({ sent: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      },
+    });
+    const up = await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    expect(up.data).toBeNull();
+    expect(up.error).toMatchObject({ code: "UNEXPECTED_RESPONSE", status: 200 });
+  });
+
   it("signs up, signs in, and reads the session in Better Auth's shapes (Review Focus 4)", async () => {
     const s = server();
     const c = createAuthClient({

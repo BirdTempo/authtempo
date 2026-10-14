@@ -16,7 +16,9 @@ function authFor(signUp: Rule, extra: Record<string, unknown> = {}) {
   return makeAuth({
     signUp,
     organizations: {},
-    password: { hash: FAST },
+    // The detailed answer (`sign_up_closed`, `email_taken`), which these tests
+    // read. The uniform answer under each rule has its own tests (plan 12b).
+    password: { hash: FAST, uniformSignUp: false },
     ...extra,
   } as never);
 }

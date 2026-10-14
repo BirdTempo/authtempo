@@ -525,7 +525,8 @@ describe("handoff routes", () => {
 
   it("creates an account on the sign-in page and continues the handoff to a redeem (plan 10)", async () => {
     const auth = handoffAuth({
-      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) },
+      // The detailed answer of plan 8: the sign-up opens the session (plan 12b).
+      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
     });
     const handle = createRouter(auth.config, [
       ...handoffRoutes(auth.config),

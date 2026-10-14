@@ -151,6 +151,8 @@ export const CONFIG_KEYS = {
     resetPage: true,
     legacyVerify: true,
     requireVerified: true,
+    uniformSignUp: true,
+    existingAccountMail: true,
   } satisfies Keys<PasswordConfig>,
   "password.legacyVerify": { verify: true, timeoutMs: true } satisfies Keys<LegacyVerifyConfig>,
   emailOtp: {

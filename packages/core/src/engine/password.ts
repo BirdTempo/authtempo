@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from "../config.js";
+import type { MailMessage, ResolvedConfig } from "../config.js";
 import type { ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
@@ -38,6 +38,11 @@ export const PASSWORD_RESET_PREFIX = "pr_";
 export const PASSWORD_RESET_TOKEN_RE = /^pr_[A-Za-z0-9_-]{43}$/;
 // 10 per hour per IP: a person makes one account; a script that makes many is slowed.
 const SIGN_UP_PER_IP = { seconds: 3600, max: 10 };
+// Per hour, per address, in both answers (plan 12b). A uniform sign-up of a
+// known address mails its owner, so a bound per address stops many IP
+// addresses from sending that mail without end. A new and a known address
+// get the same 429, so the limit tells nothing.
+const SIGN_UP_PER_EMAIL = { seconds: 3600, max: 5 };
 // Per 15 minutes. The email limit stops a guess run on one account from many
 // addresses; the IP limit stops one address that tries many accounts.
 const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
@@ -93,8 +98,28 @@ export interface PasswordSignUpPending {
   verifyRequired: true;
 }
 
-/** A session, or the user with no session while `password.requireVerified` is on. */
-export type PasswordSignUpResult = PasswordSession | PasswordSignUpPending;
+/**
+ * `{ sent: true }` for every address while `password.uniformSignUp` is on
+ * (the default, plan 12b). With it off: a session, or the user with no
+ * session while `password.requireVerified` is on.
+ */
+export type PasswordSignUpResult = PasswordSession | PasswordSignUpPending | { sent: true };
+
+/** What the mail to a known address gets (plan 12b). */
+export interface ExistingAccountMailInput {
+  email: string;
+  appName: string;
+  appURL: string;
+}
+
+/** The default mail to an address that has an account. `password.existingAccountMail` replaces it. */
+export function defaultExistingAccountMail(input: ExistingAccountMailInput): MailMessage {
+  return {
+    to: input.email,
+    subject: `Your account at ${input.appName}`,
+    text: `Someone asked to create an account for ${input.appName} with this address. You already have an account. Sign in at ${input.appURL}. If you forgot your password, ask for a reset on the sign-in page.\n\nIf it was not you, ignore this message. Nothing changed.`,
+  };
+}
 
 export interface PasswordSignUp {
   email: string;
@@ -145,14 +170,17 @@ async function screen(
 }
 
 interface Created {
-  answer: PasswordSignUpResult;
+  answer: PasswordSession | PasswordSignUpPending;
   passwordId: string;
 }
 
 /**
- * Creates an unverified user with a password and a session, then mails a
- * link that confirms the address. While `password.requireVerified` is on,
- * it opens no session and answers the user with `verifyRequired: true`.
+ * Creates an unverified user with a password, then mails a link that
+ * confirms the address. While `password.uniformSignUp` is on (the default),
+ * it opens no session and answers `{ sent: true }` for every address (plan
+ * 12b, see `uniformSignUp`). With it off, it opens a session; while
+ * `password.requireVerified` is on, it opens none and answers the user with
+ * `verifyRequired: true`.
  */
 export async function passwordSignUp(
   config: ResolvedConfig,
@@ -171,9 +199,14 @@ export async function passwordSignUp(
   if (name !== undefined && !validUserName(name)) return fail("invalid_body");
   const refused = await screen(pw, input.password, email);
   if (refused) return fail(refused);
+  // After the body checks, which answer the same for every address and send
+  // no mail, and before the hash: only a sign-up that can mail counts.
+  if (!(await config.limiter.allow(`password-sign-up:email:${email}`, SIGN_UP_PER_EMAIL)))
+    return fail("rate_limited");
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
   const now = config.clock.now();
+  if (pw.uniformSignUp) return uniformSignUp(config, { email, name: name ?? null, hash }, now);
   let created: Result<Created> | null = null;
   for (let attempt = 0; created === null; attempt++) {
     try {
@@ -319,6 +352,105 @@ function insertSignUp(
       : { user, verifyRequired: true };
     return ok({ answer, passwordId: password.id });
   });
+}
+
+type UniformOutcome =
+  | { outcome: "created"; passwordId: string }
+  | { outcome: "existing" | "quiet" };
+
+/**
+ * The uniform sign-up (plan 12b): `{ sent: true }` on every path, no
+ * session. A new address gets the verify mail, a known one the
+ * existing-account mail, and a refused or raced one no mail. The retry on
+ * a unique violation runs outside the transaction (plan 3 rule).
+ */
+async function uniformSignUp(
+  config: ResolvedConfig,
+  row: { email: string; name: string | null; hash: string },
+  now: Date,
+): Promise<Result<{ sent: true }>> {
+  let done: UniformOutcome | null = null;
+  for (let attempt = 0; done === null; attempt++) {
+    try {
+      const r = await hookGuard(() => insertUniform(config, row, now));
+      if (r.ok) done = r.value;
+      // The "invited" rule refused: the same answer as every other path, and no mail.
+      else if (r.code === "sign_up_closed") done = { outcome: "quiet" };
+      else return r;
+    } catch (err) {
+      // A parallel sign-up created the user between the read and the create.
+      // Run once more outside the failed transaction: the read finds the row.
+      if (
+        attempt === 0 &&
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        (err.model === "user" || err.model === "password")
+      )
+        continue;
+      throw err;
+    }
+  }
+  if (done.outcome === "created") await sendVerifyMail(config, row.email, done.passwordId, now);
+  if (done.outcome === "existing") await sendExistingAccountMail(config, row.email);
+  return ok({ sent: true });
+}
+
+/**
+ * One transaction with no session: the user and the pending password row,
+ * the claim guard, and the activation, as `insertSignUp` writes them. A
+ * known address writes nothing.
+ */
+function insertUniform(
+  config: ResolvedConfig,
+  row: { email: string; name: string | null; hash: string },
+  now: Date,
+): Promise<Result<UniformOutcome>> {
+  return config.storage.transaction(async (tx): Promise<Result<UniformOutcome>> => {
+    // "invited": before the existence read, as in `insertSignUp` (plan 12b
+    // Task 8). A known and a new address with no invitation then do the
+    // same reads and get no mail, so the time of the answer tells nothing.
+    if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
+    const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: row.email }]);
+    if (existing) return ok({ outcome: "existing" });
+    // The order and the guards of `insertSignUp`, with no session.
+    const user = await tx.create("user", {
+      id: newId(now),
+      email: row.email,
+      emailVerified: false,
+      name: row.name,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
+    const password = await tx.create("password", {
+      id: newId(now),
+      userId: user.id,
+      hash: pending,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const own = [
+      { field: "id" as const, op: "eq" as const, value: password.id },
+      { field: "hash" as const, op: "eq" as const, value: pending },
+    ];
+    if (!(await userStillUnverified(tx, user.id, now))) {
+      await tx.delete("password", own);
+      return ok({ outcome: "quiet" });
+    }
+    const active = await tx.update("password", own, { hash: row.hash, updatedAt: now });
+    return ok(
+      active === 0 ? { outcome: "quiet" } : { outcome: "created", passwordId: password.id },
+    );
+  });
+}
+
+/** The mail to a known address, after the commit. To the address, whatever the builder wrote. */
+async function sendExistingAccountMail(config: ResolvedConfig, email: string): Promise<void> {
+  const pw = config.password;
+  if (!pw) return;
+  const message = pw.existingAccountMail({ email, appName: config.appName, appURL: config.appURL });
+  await config.mail.send({ ...message, to: email });
 }
 
 /** One `password-verify` row and one mail. The link opens a confirm page with no side effect. */

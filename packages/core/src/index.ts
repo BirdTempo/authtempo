@@ -69,6 +69,7 @@ export type { MemberSummary, OrganizationSummary } from "./engine/organizations.
 export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
+  ExistingAccountMailInput,
   PasswordChange,
   PasswordReauth,
   PasswordResend,
@@ -85,7 +86,11 @@ export type {
   ResetChallenge,
   ResetResult,
 } from "./engine/password.js";
-export { LEGACY_VERIFY_HASH, PENDING_HASH_PREFIX } from "./engine/password.js";
+export {
+  defaultExistingAccountMail,
+  LEGACY_VERIFY_HASH,
+  PENDING_HASH_PREFIX,
+} from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { SignInChallenge } from "./engine/second-factor.js";
 export type { MethodEnabled } from "./engine/second-factor-methods.js";

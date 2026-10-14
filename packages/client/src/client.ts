@@ -113,13 +113,17 @@ export interface Client {
   /**
    * Every operation answers `not_found` when the server runs without the `password` config.
    * `signUp`, `signIn`, and `reset` answer the bearer token. A browser app keeps the cookie, and a native app stores the token.
-   * While the server's `password.requireVerified` is on, `signUp` answers `{ user, verifyRequired: true }` and no token.
+   * By default the server answers `{ sent: true }` and opens the session at the verify link (plan 12b).
+   * With the server's `password.uniformSignUp: false` and `password.requireVerified` on, `signUp` answers `{ user, verifyRequired: true }` and no token.
    */
   password: {
     signUp(input: { email: string; password: string; name?: string | undefined }): Promise<
       ClientResult<
-        // The second shape: the server's password.requireVerified is on (plan 12b). No session opens.
-        ({ token: string } & PublicSession) | { user: PublicSession["user"]; verifyRequired: true }
+        // The third shape is the default (plan 12b). The second: uniformSignUp off and
+        // requireVerified on. Neither opens a session.
+        | ({ token: string } & PublicSession)
+        | { user: PublicSession["user"]; verifyRequired: true }
+        | { sent: true }
       >
     >;
     /**
@@ -394,6 +398,7 @@ export function createClient(options: ClientOptions): Client {
         call<
           | ({ token: string } & PublicSession)
           | { user: PublicSession["user"]; verifyRequired: true }
+          | { sent: true }
         >("POST", "/password/sign-up", {
           ...rest,
           ...(name !== undefined ? { name } : {}),

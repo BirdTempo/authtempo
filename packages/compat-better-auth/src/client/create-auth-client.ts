@@ -546,7 +546,19 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         // Core's verify link lands on the app origin. The server api refuses it too.
         if (callbackURL !== undefined) return notSupported("core takes no callbackURL at sign-up");
         const r = await run(
-          (c) => c.password.signUp({ email, password, ...(name !== "" ? { name } : {}) }),
+          async (c) => {
+            const up = await c.password.signUp({
+              email,
+              password,
+              ...(name !== "" ? { name } : {}),
+            });
+            if (!up.ok) return up;
+            // Core's uniform answer (plan 12b) carries no user, and Better
+            // Auth's answer needs one. The shim's server sets uniformSignUp
+            // false, so only a core server with its default answers this.
+            if ("sent" in up.value) return { ok: false, code: "unexpected", status: 200 } as const;
+            return { ok: true, value: up.value } as const;
+          },
           (v) => {
             // The server's requireEmailVerification (plan 12b): no session, so
             // no token to keep. Better Auth answers token null.

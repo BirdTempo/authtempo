@@ -14,7 +14,7 @@ import { currentSecret } from "../src/primitives/keyring.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
+import { FAST, upSession } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 type Auth = ReturnType<typeof makeAuth>;
@@ -361,7 +361,8 @@ describe("email code verify (plan 9e)", () => {
   });
 
   it("applies the claim rule: an unverified claimant's session and password go, and the proof opens a session (Review Focus 3)", async () => {
-    const auth = makeAuth({ password: { hash: FAST } });
+    // The detailed answer of plan 8: the claimant's session at sign-up (plan 12b).
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const up = await passwordSignUp(auth.config, {
       email: EMAIL,
       password: "correct horse battery",
@@ -372,7 +373,7 @@ describe("email code verify (plan 9e)", () => {
     const v = await verify(auth, await request(auth));
     if (!v.ok) throw new Error(v.code);
     if (!("token" in v.value)) throw new Error("the sign-in answered a challenge");
-    expect(v.value.user).toMatchObject({ id: up.value.user.id, emailVerified: true });
+    expect(v.value.user).toMatchObject({ id: upSession(up.value).user.id, emailVerified: true });
     expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
       v.value.session.id,
     ]);

@@ -17,15 +17,17 @@ import {
 import { resolveSession } from "../src/engine/sessions.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST, sessionOnly, signUpAndVerify } from "./password-helpers.js";
+import { FAST, sessionOnly, signUpAndVerify, upSession } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const OLD = "correct horse battery";
 const NEW = "a new long password";
 type Auth = ReturnType<typeof makeAuth>;
 
+// The detailed answer of plan 8 (a session and the user at sign-up), which
+// these tests read. The uniform answer has its own tests (plan 12b).
 const resetAuth = (extra: Partial<AuthConfig> = {}) =>
-  makeAuth({ password: { hash: FAST }, ...extra });
+  makeAuth({ password: { hash: FAST, uniformSignUp: false }, ...extra });
 
 /** The code in the newest mail to `to`. */
 function codeFrom(auth: Auth, to = EMAIL): string {
@@ -172,7 +174,7 @@ describe("reset by code (plan 9e)", () => {
     const r = await reset(auth, await requestReset(auth));
     if (!r.ok) throw new Error(r.code);
     if (!("token" in r.value)) throw new Error("the reset answered a challenge");
-    expect(r.value.user).toMatchObject({ id: up.value.user.id, emailVerified: true });
+    expect(r.value.user).toMatchObject({ id: upSession(up.value).user.id, emailVerified: true });
     expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
       r.value.session.id,
     ]);

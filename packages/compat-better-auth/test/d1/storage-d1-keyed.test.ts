@@ -77,16 +77,18 @@ describe("the Better Auth foreign keys on D1", () => {
 
   it("runs core's email sign-up through createAuth: 1 user, 1 account row (the password), 1 session", async () => {
     const s = storage();
-    const auth = createAuth({
-      baseURL: "https://api.example.com",
-      secret: "0123456789abcdef0123456789abcdef",
-      trustedOrigins: [],
-      storage: s.storage,
-      limiter: s.limiter,
-      mail: { send: async () => {} },
-      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) },
-    });
-    const pw = auth.api.password;
+    const authWith = (uniformSignUp: boolean) =>
+      createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [],
+        storage: s.storage,
+        limiter: s.limiter,
+        mail: { send: async () => {} },
+        password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp },
+      });
+    // The detailed answer of plan 8 writes the session row too (plan 12b).
+    const pw = authWith(false).api.password;
     if (!pw) throw new Error("the password api is missing");
     const r = await pw.signUp({
       email: "new@example.com",
@@ -104,6 +106,17 @@ describe("the Better Auth foreign keys on D1", () => {
       `SELECT "password" FROM "account" WHERE "providerId" = 'credential'`,
     ).first("password");
     expect(credential).toMatch(/^pbkdf2-sha256\$1000\$/);
+    // The uniform answer (the default) writes the user and the password, and no session.
+    const uniform = await authWith(true).api.password?.signUp({
+      email: "other@example.com",
+      password: "a long passphrase 1",
+      ip: null,
+      userAgent: null,
+    });
+    expect(uniform).toEqual({ ok: true, value: { sent: true } });
+    expect([await count('"user"'), await count('"account"'), await count('"session"')]).toEqual([
+      2, 2, 1,
+    ]);
   });
 
   it("refuses a password row before its user row, and keeps no row", async () => {

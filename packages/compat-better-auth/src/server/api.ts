@@ -93,6 +93,9 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
         };
       }
       const v = unwrap(r);
+      // The map sets uniformSignUp: false, so core never answers `{ sent: true }`
+      // here. A config that skips the map gets a clear fault, not a wrong answer.
+      if ("sent" in v) throw compatApiError("NOT_SUPPORTED", "core answered the uniform sign-up");
       // Core's answer while requireVerified is on: the user and no session.
       if (!("token" in v)) return { token: null, user: toUser(v.user) };
       return { token: v.token, user: toUser(v.user) };

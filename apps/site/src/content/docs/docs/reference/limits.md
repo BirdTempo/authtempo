@@ -31,6 +31,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `handoff-start:ip:<ip>` | 15 minutes | 30 | Handoff start |
 | `handoff-redeem:ip:<ip>` | 15 minutes | 20 | Handoff redeem |
 | `password-sign-up:ip:<ip>` | 1 hour | 10 | Password sign-up |
+| `password-sign-up:email:<email>` | 1 hour | 5 | Password sign-up |
 | `password:ip:<ip>` | 15 minutes | 20 | Password sign-in |
 | `password:email:<email>` | 15 minutes | 10 | Password sign-in |
 | `password-resend:ip:<ip>` | 15 minutes | 20 | Verify mail resend |

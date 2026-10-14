@@ -53,7 +53,9 @@ function recorded(over: SessionHooks = {}, extra: Partial<AuthConfig> = {}) {
   };
   const auth = makeAuth({
     organizations: {},
-    password: { hash: FAST },
+    // The detailed answer of plan 8 (a session and the user at sign-up), which
+    // these tests read. The uniform answer has its own tests (plan 12b).
+    password: { hash: FAST, uniformSignUp: false },
     ...extra,
     hooks: {
       session: {
@@ -735,7 +737,11 @@ describe("session end hooks (plan 9d)", () => {
     // The claim: a magic link proves bob's address and ends the claimant's two sessions.
     const bob = await signUp(auth, "bob@example.com");
     if (!bob.ok) throw new Error(bob.code);
-    await createSession(auth.config, { userId: bob.value.user.id, ip: null, userAgent: null });
+    await createSession(auth.config, {
+      userId: upSession(bob.value).user.id,
+      ip: null,
+      userAgent: null,
+    });
     calls.length = 0;
     restore = signOutAfterRead(upSession(bob.value).token);
     expect((await magicSignIn(auth, "bob@example.com")).ok).toBe(true);

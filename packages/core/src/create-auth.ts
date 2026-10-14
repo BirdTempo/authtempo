@@ -149,7 +149,11 @@ import type {
 
 /** Present on `api` only when the config has a `password` section. */
 export interface PasswordApi {
-  /** A session, or `{ user, verifyRequired: true }` while `password.requireVerified` is on (plan 12b). */
+  /**
+   * `{ sent: true }` for every address while `password.uniformSignUp` is on
+   * (the default, plan 12b). With it off: a session, or `{ user,
+   * verifyRequired: true }` while `password.requireVerified` is on.
+   */
   signUp(input: PasswordSignUp): Promise<Result<PasswordSignUpResult>>;
   /** A session, or `{ twoFactor }` for a user with the second factor on (plan 9f). */
   signIn(input: PasswordSignIn): Promise<Result<PasswordSignInResult>>;

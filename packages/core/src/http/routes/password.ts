@@ -96,7 +96,9 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           userAgent: ctx.request.headers.get("user-agent"),
         });
         if (!r.ok) return respond(r);
-        // password.requireVerified (plan 12b): the user, no session, and no cookie.
+        // The uniform answer (plan 12b): the same bytes for every address, no cookie.
+        if ("sent" in r.value) return json({ sent: true });
+        // password.requireVerified with uniformSignUp off (plan 12b): the user, no session, and no cookie.
         if ("verifyRequired" in r.value)
           return json({ user: publicUser(r.value.user), verifyRequired: true });
         return signedIn(r.value);
