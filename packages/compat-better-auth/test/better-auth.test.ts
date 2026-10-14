@@ -252,7 +252,7 @@ describe("betterAuth", () => {
       linkedin: { clientId: "l", clientSecret: "ls" },
     });
     expect(m.config.cookie).toEqual({ sameSite: "None" });
-    expect(m.config.cookieName).toBe("tempo_session");
+    expect(m.config.cookieName).toBe("__Host-tempo_session");
     const lax = mapOptions({
       baseURL: BASE,
       secret: TEST_SECRET,
@@ -336,7 +336,9 @@ describe("betterAuth", () => {
     expect(s?.session.expiresAt).toBeInstanceOf(Date);
     expect(s?.user.name).toBe("");
     expect(await auth.api.getSession({ headers: new Headers() })).toBeNull();
-    await auth.api.signOut({ headers: new Headers({ cookie: `tempo_session=${up.token}` }) });
+    await auth.api.signOut({
+      headers: new Headers({ cookie: `__Host-tempo_session=${up.token}` }),
+    });
     expect(
       await auth.api.getSession({ headers: new Headers({ authorization: `Bearer ${up.token}` }) }),
     ).toBeNull();
@@ -632,7 +634,7 @@ describe("withPolicyCode on the reset and change routes (M-7)", () => {
     const verified = await auth.handler(json("/password/verify", { token: verifyToken }));
     expect(verified.status).toBe(200);
     const session =
-      /tempo_session=([^;]+)/.exec(verified.headers.get("set-cookie") ?? "")?.[1] ?? "";
+      /__Host-tempo_session=([^;]+)/.exec(verified.headers.get("set-cookie") ?? "")?.[1] ?? "";
     const res = await auth.handler(
       json(
         "/password/change",

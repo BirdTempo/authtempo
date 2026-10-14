@@ -1,5 +1,7 @@
 import {
+  DEFAULT_SESSION_COOKIE,
   type InvitationSummary,
+  LEGACY_SESSION_COOKIE,
   type MemberSummary,
   type OrganizationSummary,
   readSessionToken,
@@ -109,9 +111,11 @@ export const SESSION_KEYS = keys<Session>()([
 /**
  * The session cookie name. The one copy in this package: `mapOptions` passes
  * it to core as `cookieName`, and the reader below, the bearer copy, and the
- * client read it here.
+ * client read it here. Since plan 12b the name is core's default, so core's
+ * router moves the old `tempo_session` for one release, and `readToken`
+ * reads it too. The Expo storage key keeps the old name (create-auth-client.ts).
  */
-export const COOKIE_NAME = "tempo_session";
+export const COOKIE_NAME = DEFAULT_SESSION_COOKIE;
 
 /**
  * The cookie or the bearer header, read by core's own `readSessionToken`
@@ -120,7 +124,10 @@ export const COOKIE_NAME = "tempo_session";
  * who the caller is.
  */
 export function readToken(headers: Headers): string | null {
-  return readSessionToken({ cookieName: COOKIE_NAME }, { headers });
+  return readSessionToken(
+    { cookieName: COOKIE_NAME, legacyCookieName: LEGACY_SESSION_COOKIE },
+    { headers },
+  );
 }
 
 /**

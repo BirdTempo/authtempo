@@ -82,12 +82,15 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 ## How it behaves
 
 - Better Auth's defaults apply: a session lives 7 days and refreshes after 1 day.
-- The session cookie is `tempo_session`, not `better-auth.session_token`. Change each test and each legal page that names the old cookie.
+- The session cookie is `__Host-tempo_session`, not `better-auth.session_token`. Change each test and each legal page that names the old cookie. For one release the shim also reads `tempo_session`, the name before plan 12b, and the handler moves it. On Expo, `getCookie()` answers `__Host-tempo_session=<token>`, and the storage key keeps the name `<storagePrefix>_tempo_session`.
 - The cookie name keeps the old product name tempo-auth for compatibility. [Cookies](/docs/reference/cookies/) states the rule.
 - The one key that is not Better Auth's is `authtempo`. `authtempo.appURL` is the origin where each sign-in lands, by default the origin of `baseURL`. An absolute `callbackURL` off that origin answers 403 with `INVALID_CALLBACK_URL`. `authtempo.passwordHash` replaces `betterAuthPasswordHash()`.
 - `session.token` holds the SHA-256 of the token. App SQL that reads it reads a hash.
 - A reset ends every session, where Better Auth kept the others.
 - `requireEmailVerification: true` maps to `password.requireVerified`. An unverified sign-in answers `EMAIL_NOT_VERIFIED` and gets a new verify link, also when `sendOnSignIn` is absent.
+- `secrets: [{ version, value }]` maps to core's `secrets`. Version 0 is refused: renumber from 1. With `secret`, version 1 must be the value of `secret`. The shim does not read `BETTER_AUTH_SECRETS`.
+- `autoSignIn: false` is refused. The sign-up answer stays Better Auth's: a session, and `USER_ALREADY_EXISTS` for a taken address.
+- `disableSignUp` maps to core's `signUp: false` only when every method that creates a user sets it and no social provider is configured. A mix is refused at start.
 - Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The callback URL at each provider is `<baseURL><basePath>/social/<provider>/callback`, not `/api/auth/callback/<provider>`.
 - The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.

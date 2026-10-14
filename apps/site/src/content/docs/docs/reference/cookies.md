@@ -29,7 +29,7 @@ The `__Host-` prefix makes a browser refuse the session cookie unless it is `Sec
 
 - `cookieName` renames the session cookie. The binding cookie is that name with no `__Host-` or `__Secure-` prefix, plus `__Secure-` in front and `_oauth` at the end.
 - The old session cookie `tempo_session`: for one release, a request that carries it and no `__Host-tempo_session` stays signed in. The answer sets `__Host-tempo_session` with the same token and clears `tempo_session`. Only the default name gets this move. `auth.handle`, `auth.session`, and `auth.caller` read the old cookie. Only `auth.handle` moves it.
-- The Better Auth shim keeps the cookie name `tempo_session` in this release, and gets no move.
+- The Better Auth shim uses the default name, so it gets the same move. Its `api.getSession` reads the old cookie too. The Expo storage key keeps the name `<storagePrefix>_tempo_session`.
 - `totp.trustCookieName` renames the trust cookie.
 - A sign-out clears the cookie. A sign-out with the old cookie clears both names. After a reset or a claim, the next `GET /session` clears it.
 

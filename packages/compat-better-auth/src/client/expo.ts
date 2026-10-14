@@ -2,7 +2,8 @@ import { type ClientPlugin, COMPAT_CLIENT_PLUGIN, type ExpoClientOptions } from 
 
 /**
  * `@better-auth/expo/client`'s `expoClient`. The token lives in `storage`
- * under `<storagePrefix>_tempo_session`. No Expo module is imported here:
+ * under `<storagePrefix>_tempo_session`, the name of plan 9 (plan 12b
+ * keeps it). No Expo module is imported here:
  * the system-browser sign-in needs `webBrowser` (expo-web-browser) and, on
  * Hermes, `crypto` (expo-crypto), passed in.
  */

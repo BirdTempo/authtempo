@@ -220,7 +220,8 @@ const PLUGIN_RULES: Record<string, Rule> = {
   "magic-link": object({
     sendMagicLink: fn,
     expiresIn: seconds(60, 60, 86_400, "core takes whole minutes"),
-    disableSignUp: only(false, "core creates the user at the first magic link"),
+    // Plan 12b: the one sign-up rule of core; checkOptions refuses a mix of methods.
+    disableSignUp: boolean,
     storeToken: (v, p, out) => {
       if (v === "plain") note(out, p, "accepted: core stores only the hash of the token");
       else if (v !== "hashed") refuse(out, p, "expected hashed or plain");
@@ -241,7 +242,8 @@ const PLUGIN_RULES: Record<string, Rule> = {
         refuse(out, p, "core takes 3 to 10");
     },
     storeOTP: only("hashed", "core stores a keyed hash; pass hashed or leave it out"),
-    disableSignUp: only(false, "core creates the user at the first code"),
+    // Plan 12b: the one sign-up rule of core; checkOptions refuses a mix of methods.
+    disableSignUp: boolean,
     generateOTP: refused("core makes the code itself, from crypto.getRandomValues"),
     overrideDefaultEmailVerification: only(
       false,
@@ -377,6 +379,25 @@ const TOP: Record<string, Rule> = {
   baseURL: string,
   basePath: string,
   secret: string,
+  // Plan 12b: Better Auth's versioned secrets. Core reads a row of before
+  // version 9 of the schema as version 1, so version 0 has no meaning there.
+  // Core checks every other rule of an entry (spec 22), and betterAuth turns
+  // its ConfigError into the same error.
+  secrets: (v, p, out) => {
+    if (!Array.isArray(v)) {
+      refuse(out, p, "expected a list of { version, value }");
+      return;
+    }
+    v.forEach((e, i) => {
+      const entry = e as { version?: unknown; value?: unknown } | null;
+      if (entry?.version === 0)
+        refuse(
+          out,
+          `${p}[${i}].version`,
+          "core reads a row from before plan 12b as version 1; renumber from 1",
+        );
+    });
+  },
   trustedOrigins: (v, p, out) => {
     if (typeof v === "function") {
       refuse(out, p, "a function is refused; pass a list of exact origins");
@@ -427,8 +448,16 @@ const TOP: Record<string, Rule> = {
     ),
     // Plan 12b Task 15: maps to core's password.requireVerified.
     requireEmailVerification: boolean,
-    autoSignIn: only(true, "core signs the person in at sign-up"),
-    disableSignUp: only(false, "core serves sign-up whenever passwords are on"),
+    // Better Auth's false answers { token: null, user } and still lets an
+    // unverified user sign in (dist/api/routes/sign-up.mjs lines 163 and 164,
+    // read 2026-10-15). Core opens no session at sign-up only while
+    // requireVerified is on, and then refuses that sign-in.
+    autoSignIn: only(
+      true,
+      "core opens a session at sign-up unless requireEmailVerification is true; set that for Better Auth's { token: null, user }",
+    ),
+    // Plan 12b: the one sign-up rule of core; checkOptions refuses a mix of methods.
+    disableSignUp: boolean,
     revokeSessionsOnPasswordReset: only(true, "core ends every session on a reset"),
     resetPasswordTokenExpiresIn: MINUTES,
     sendResetPassword: fn,
@@ -538,6 +567,25 @@ export function pluginOf<I extends CompatPlugin["id"]>(
   return null;
 }
 
+/**
+ * The disableSignUp of each configured method that creates a user (plan 12b).
+ * `checkOptions` refuses a mixed list, and `mapOptions` maps a list of only
+ * true to core's `signUp: false`: one list for both.
+ */
+export function signUpVotes(options: BetterAuthOptions): boolean[] {
+  const votes: boolean[] = [];
+  if (options.emailAndPassword?.enabled === true)
+    votes.push(options.emailAndPassword.disableSignUp === true);
+  const magic = pluginOf(options, "magic-link");
+  if (magic) votes.push(magic.options.disableSignUp === true);
+  const otp = pluginOf(options, "email-otp");
+  if (otp) votes.push(otp.options.disableSignUp === true);
+  const social = options.socialProviders;
+  if (typeof social === "object" && social !== null)
+    for (const p of Object.values(social)) if (p !== undefined) votes.push(false);
+  return votes;
+}
+
 /** The app schemes of trustedOrigins, which core's handoff redirects to. Core's isAppScheme is the one copy of the rule. */
 export function appSchemes(options: BetterAuthOptions): string[] {
   const list = Array.isArray(options.trustedOrigins) ? options.trustedOrigins : [];
@@ -548,9 +596,28 @@ export function appSchemes(options: BetterAuthOptions): string[] {
 export function checkOptions(options: BetterAuthOptions): OptionCheck {
   const out: OptionCheck = { refusals: [], notes: [] };
   object(TOP)(options, "", out);
-  for (const key of ["baseURL", "secret", "database"] as const) {
+  for (const key of ["baseURL", "database"] as const) {
     if (options[key] === undefined) refuse(out, key, "required");
   }
+  // Better Auth takes secret, secrets, or both, and so does core (plan 12b).
+  if (options.secret === undefined && options.secrets === undefined)
+    refuse(out, "secret", "required");
+  // Plan 12b: with secret and secrets, version 1 is the value of secret.
+  if (typeof options.secret === "string" && Array.isArray(options.secrets))
+    options.secrets.forEach((e, i) => {
+      if (e?.version === 1 && e.value !== options.secret)
+        refuse(out, `secrets[${i}].value`, "version 1 must be the value of secret");
+    });
+  // Plan 12b: core's signUp covers every method that creates a user. Each
+  // configured method votes; a social provider votes false, because Better
+  // Auth's per-provider disableSignUp is refused by the provider's shape.
+  const votes = signUpVotes(options);
+  if (votes.some(Boolean) && !votes.every(Boolean))
+    refuse(
+      out,
+      "disableSignUp",
+      "core's signUp rule covers every method; set disableSignUp on every method or on none",
+    );
   if (typeof options.baseURL === "string") {
     let path = "";
     try {

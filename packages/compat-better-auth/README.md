@@ -114,7 +114,7 @@ What changes at cutover:
 - Users, Google, Apple, GitHub, and LinkedIn accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The `ta_meta` and `ta_limit` tables go in the first schema of the search path, also when the Better Auth tables sit in another schema.
 - A passkey counter above 2147483647 fails: Better Auth's `counter` column is `integer`.
-- The session cookie is `tempo_session`, not `better-auth.session_token`. App code, tests, and legal pages that name the old cookie must change. For example, consumer-i's site lists `__Secure-better-auth.session_token` in its cookie text (`apps/site/test/legal.test.ts`).
+- The session cookie is `__Host-tempo_session`, not `better-auth.session_token`. For one release the shim also reads `tempo_session`, the name of plan 9, and moves it: the handler sets `__Host-tempo_session` with the same token and clears `tempo_session`. `api.getSession` reads the old name too, but sets no cookie. App code, tests, and legal pages that name the old cookie must change. For example, consumer-i's site lists `__Secure-better-auth.session_token` in its cookie text (`apps/site/test/legal.test.ts`).
 - Better Auth-era `account` rows of providers that the package does not map (any provider other than Google, Apple, GitHub, and LinkedIn) stay in the table. Core reads them as identities of their users, so a claim of the address deletes them as it deletes any identity other than the proving one. The factory refuses such a provider in `socialProviders` with the reason `not mapped; add it through core's social.oidc or social.oauth2`. On core's `createAuth`, a list entry whose `name` is the Better Auth provider id and whose subject is the id that Better Auth stored as `accountId` links these rows on the first sign-in. A compat app that needs such a provider uses core's `createAuth` for it, because `betterAuth()` takes no list entry.
 - Register `<baseURL><basePath>/social/<provider>/callback` at each provider (Google, Apple, GitHub, LinkedIn) before cutover. Better Auth used `<baseURL>/api/auth/callback/<provider>`. A GitHub OAuth App has one callback URL, so change it at cutover, or use a GitHub App, which takes several. Google and LinkedIn take a list, so add the new URI before cutover.
 - GitHub and LinkedIn accounts link on the first sign-in by the id Better Auth stored: the numeric GitHub id, and LinkedIn's OpenID `sub`. LinkedIn's `sub` stays the same only while the client id stays the same.
@@ -259,6 +259,41 @@ the link on the app origin.
 verify link at each unverified sign-in, at most 3 per 15 minutes. Absent and
 `true` are accepted.
 
+### Secrets and sign-up
+
+These rules come from plan 12b.
+
+- `secrets: [{ version, value }]` maps to core's `secrets`, one entry for one
+  entry, the current version first. Give `secret`, `secrets`, or both, as in
+  Better Auth.
+- `secrets[i].version` 0 is refused: core reads a row from before plan 12b as
+  version 1, so renumber from 1. Better Auth accepts version 0.
+- With `secret` and `secrets`, version 1 must be the value of `secret`.
+  Another value is refused at `secrets[i].value`. Core refuses every other
+  bad entry, and the error names it as `config: <reason>`.
+- The shim does not read the `BETTER_AUTH_SECRETS` environment variable: it
+  maps options only. Pass the list as `secrets`.
+- `emailAndPassword.autoSignIn: false` is refused: core opens a session at
+  sign-up unless `requireEmailVerification` is true. Set that for Better
+  Auth's `{ token: null, user }`.
+- The sign-up answer is Better Auth's: a session for a new address, and
+  `USER_ALREADY_EXISTS` for a taken one. The shim sets core's
+  `password.uniformSignUp: false`, because core's uniform answer has no user
+  for Better Auth's `{ token, user }`. So a caller can learn that an address
+  has an account, as with Better Auth. Use core's `createAuth` for the
+  uniform answer.
+- `disableSignUp` is accepted on `emailAndPassword`, `magicLink`, and
+  `emailOTP`. Core has one sign-up rule for every method. `true` on every
+  configured method that creates a user, with no social provider, maps to
+  core's `signUp: false`. `true` on some methods and not on others is refused
+  at `disableSignUp`: set it on every method or on none. A configured social
+  provider counts as `false`, because the provider's shape refuses Better
+  Auth's per-provider `disableSignUp`.
+- With `signUp: false`, `api.signUpEmail` throws
+  `EMAIL_PASSWORD_SIGN_UP_DISABLED` with 400, Better Auth's code and status.
+  The client's `signUp.email` answers the same code with core's status, 403.
+  The other methods answer core's `sign_up_closed` as `SIGN_UP_CLOSED`.
+
 Errors: `APIError` on the server and `error` on the client carry Better Auth's
 code (`body.code`, `error.code`) and core's HTTP status. The table is
 `BETTER_AUTH_CODES`.
@@ -336,7 +371,9 @@ refused too. In React Native there is no page origin, so use a path.
 
 On Expo, `expoClient({ scheme, storagePrefix, storage })` keeps the session
 token in `storage` and sends it as the bearer header. `getCookie()` answers
-`tempo_session=<token>`, which the server reads as the session cookie.
+`__Host-tempo_session=<token>`, which the server reads as the session cookie.
+The storage key keeps the name of plan 9, `<storagePrefix>_tempo_session`, so
+an app update signs no Expo user out.
 `signIn.email` and `signUp.email` run in the app. `signIn.social` and
 `signIn.magicLink` run in the system browser through authtempo's handoff and
 need `webBrowser` (the `expo-web-browser` module) and `crypto` (the
@@ -442,7 +479,8 @@ Only `auth.handler` keeps the plugin behavior in this table: the magic link 404,
 - `storeOTP` is `hashed` or absent. Core stores HMAC-SHA256 under the app
   secret of the row id and the code either way. `plain`, `encrypted`, and an
   object are refused.
-- Refused by name: `generateOTP`, `disableSignUp: true`,
+- `disableSignUp` follows the one sign-up rule (see "Secrets and sign-up").
+- Refused by name: `generateOTP`,
   `overrideDefaultEmailVerification: true`, `sendVerificationOnSignUp: true`,
   `resendStrategy: "reuse"`, `changeEmail`, and `rateLimit`.
 

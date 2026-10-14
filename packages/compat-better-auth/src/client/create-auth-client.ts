@@ -9,7 +9,7 @@ import {
   type PasskeySummaryJSON,
   type TwoFactorSessionJSON,
 } from "@authtempo/client";
-import type { PublicSession } from "@authtempo/core";
+import { LEGACY_SESSION_COOKIE, type PublicSession } from "@authtempo/core";
 import { createHandoff } from "@authtempo/handoff";
 import { expoCrypto, expoOpener } from "@authtempo/handoff/expo";
 import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
@@ -204,7 +204,11 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       return undefined;
     }
   };
-  const storageKey = expo ? `${expo.storagePrefix ?? "better-auth"}_${COOKIE_NAME}` : null;
+  // The key in the app's storage keeps the name of plan 9: a new key would
+  // sign every Expo user out (plan 12b). getCookie() names the cookie COOKIE_NAME.
+  const storageKey = expo
+    ? `${expo.storagePrefix ?? "better-auth"}_${LEGACY_SESSION_COOKIE}`
+    : null;
   // An unreadable store means no token: the call goes out without one.
   const readStored = () => {
     try {
@@ -566,6 +570,8 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
             keepToken(v.token);
             return { token: v.token, user: toClientUser(v.user) };
           },
+          // The server's disableSignUp (plan 12b): Better Auth's own code, as the server api answers.
+          (f) => (f.code === "sign_up_closed" ? "EMAIL_PASSWORD_SIGN_UP_DISABLED" : undefined),
         );
         if (r.data) store.refetchIfStarted();
         return r;

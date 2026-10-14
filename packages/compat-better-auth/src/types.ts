@@ -361,6 +361,8 @@ export interface BetterAuthOptions {
   baseURL?: string;
   basePath?: string;
   secret?: string;
+  /** The app secrets by version, the current first (Better Auth 1.7). Mapped to core's `secrets` (plan 12b). */
+  secrets?: Array<{ version: number; value: string }>;
   trustedOrigins?: string[] | ((request?: Request) => string[] | Promise<string[]>);
   database?: CompatDatabase;
   emailAndPassword?: {
@@ -816,7 +818,7 @@ export interface AuthClient<TF extends boolean = false> {
   };
   /** In `./client` a store. `./react` replaces it with the hook. */
   useSession: SessionStore;
-  /** Expo only: the stored session as one cookie header value, `tempo_session=<token>`, or "" when none. */
+  /** Expo only: the stored session as one cookie header value, `__Host-tempo_session=<token>`, or "" when none. */
   getCookie(): string;
   $Infer: { Session: { session: ClientSession; user: ClientUser } };
 }

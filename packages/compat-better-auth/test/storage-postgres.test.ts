@@ -1126,7 +1126,10 @@ INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdA
         expect(
           done.headers
             .getSetCookie()
-            .some((c) => c.startsWith("tempo_session=") && !c.startsWith("tempo_session=;")),
+            .some(
+              (c) =>
+                c.startsWith("__Host-tempo_session=") && !c.startsWith("__Host-tempo_session=;"),
+            ),
         ).toBe(true);
       }
       const sessions = await pg.sql.unsafe<{ userId: string }[]>(

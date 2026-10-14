@@ -71,7 +71,12 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 | The verify link lives 1 hour | It lives as long as the magic link. |
 | `requireEmailVerification: true` mails a new link at an unverified sign-in only with `sendOnSignIn: true` | It maps to `password.requireVerified`. The sign-in answers `EMAIL_NOT_VERIFIED` and always mails a new link, at most 3 per 15 minutes. `sendOnSignIn: false` is refused at start. |
 | `trustedOrigins` takes a function and wildcards | Each entry is an exact origin or an app scheme. |
-| The session cookie `better-auth.session_token` | The session cookie `tempo_session`. |
+| The session cookie `better-auth.session_token` | The session cookie `__Host-tempo_session`. For one release the shim also reads `tempo_session`, the name before plan 12b, and the handler moves it. |
+| `secrets: [{ version, value }]` accepts version 0 | It maps to core's `secrets`, one entry for one entry. Version 0 is refused: core reads a row from before plan 12b as version 1, so renumber from 1. With `secret`, version 1 must be the value of `secret`. |
+| `BETTER_AUTH_SECRETS` in the environment | Not read: the shim maps options only. Pass the list as `secrets`. |
+| `autoSignIn: false` answers `{ token: null, user }` | Refused at start: core opens a session at sign-up unless `requireEmailVerification` is true. |
+| A sign-up answers a session, and `USER_ALREADY_EXISTS` for a taken address | The same. The shim sets core's `password.uniformSignUp: false`, so a caller can learn that an address has an account, as with Better Auth. |
+| `disableSignUp` on each method | Core has one sign-up rule. `true` on every method that creates a user, with no social provider, maps to core's `signUp: false`. A mix is refused at start. `api.signUpEmail` then answers `EMAIL_PASSWORD_SIGN_UP_DISABLED` with 400. |
 
 - `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with no `ipAddressHeaders` and no `disableIpTracking: true`.
 - A call argument that core cannot keep, such as `rememberMe: false`, answers `APIError` `NOT_SUPPORTED` with status 501.

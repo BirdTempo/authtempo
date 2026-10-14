@@ -11,7 +11,7 @@ import {
   type CompatDatabase,
   type CompatPlugin,
 } from "../types.js";
-import { appSchemes, pluginOf } from "./check-options.js";
+import { appSchemes, pluginOf, signUpVotes } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
 import { compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
@@ -204,7 +204,18 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const config: AuthConfig = {
     baseURL: origin,
     basePath,
-    secret: options.secret ?? "",
+    // Plan 12b: secrets map one entry for one entry. With neither key, core's
+    // own refusal of an empty secret names the problem.
+    ...(options.secret !== undefined || options.secrets === undefined
+      ? { secret: options.secret ?? "" }
+      : {}),
+    // A copy, not a rebuild: core checks each entry and names a bad one.
+    ...(options.secrets !== undefined ? { secrets: [...options.secrets] } : {}),
+    // Plan 12b: disableSignUp on every method that creates a user is core's
+    // signUp false. checkOptions refuses a mix, so no other list reaches here.
+    ...(signUpVotes(options).length > 0 && signUpVotes(options).every(Boolean)
+      ? { signUp: false as const }
+      : {}),
     trustedOrigins: Array.isArray(options.trustedOrigins) ? [...options.trustedOrigins] : [],
     ...(options.appName !== undefined ? { appName: options.appName } : {}),
     ...(options.authtempo?.appURL !== undefined ? { appURL: options.authtempo.appURL } : {}),
@@ -313,9 +324,9 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             // requireVerified. A sign-up answers no session, and an unverified
             // sign-in answers EMAIL_NOT_VERIFIED.
             ...(ep.requireEmailVerification === true ? { requireVerified: true } : {}),
-            // Better Auth's own answer until Task 12 of plan 12b maps autoSignIn
-            // and requireEmailVerification. Core's default `{ sent: true }` has
-            // no user for Better Auth's `{ token, user }` answer.
+            // Better Auth's own answer: a session at sign-up, and its error for
+            // a taken address. The shim's signUp.email answers { token, user },
+            // which the uniform answer cannot fill (plan 12b).
             uniformSignUp: false,
           },
         }

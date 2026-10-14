@@ -514,7 +514,7 @@ describe("expoClient", () => {
       name: "Pat",
     });
     expect(storage.map.get("reception_tempo_session")).toBe(up.data?.token);
-    expect(c.getCookie()).toBe(`tempo_session=${up.data?.token}`);
+    expect(c.getCookie()).toBe(`__Host-tempo_session=${up.data?.token}`);
     expect((await c.getSession()).data?.user.email).toBe("pat@example.com");
     expect(s.seen.at(-1)?.headers.get("authorization")).toBe(`Bearer ${up.data?.token}`);
     // The cookie header line works on its own too, as consumer-i's query.ts sends it.

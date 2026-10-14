@@ -67,6 +67,11 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
       });
       if (!r.ok && r.code === "password_policy")
         throw new APIError(400, passwordPolicyCode(body.password, minPasswordLength));
+      // disableSignUp on every method maps to core's signUp: false (plan 12b).
+      // Better Auth 1.7.2 answers that sign-up with its own code and 400
+      // (dist/api/routes/sign-up.mjs lines 145 to 147, read 2026-10-15).
+      if (!r.ok && r.code === "sign_up_closed")
+        throw new APIError(400, "EMAIL_PASSWORD_SIGN_UP_DISABLED");
       // With requireEmailVerification, Better Auth 1.7.2 answers a taken
       // address as a new one: { token: null, user } with a synthetic user
       // under a new id (dist/api/routes/sign-up.mjs lines 163 to 199,
@@ -93,8 +98,11 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
         };
       }
       const v = unwrap(r);
-      // The map sets uniformSignUp: false, so core never answers `{ sent: true }`
-      // here. A config that skips the map gets a clear fault, not a wrong answer.
+      // This line cannot run: createApi takes only the config of mapOptions,
+      // which sets uniformSignUp: false, so core never answers `{ sent: true }`.
+      // The type cannot know that, because the setting is a value, so no typed
+      // exhaustiveness check fits. The throw keeps a later change of the map a
+      // clear fault, not a wrong answer.
       if ("sent" in v) throw compatApiError("NOT_SUPPORTED", "core answered the uniform sign-up");
       // Core's answer while requireVerified is on: the user and no session.
       if (!("token" in v)) return { token: null, user: toUser(v.user) };
