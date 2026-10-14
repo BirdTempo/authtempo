@@ -12,9 +12,9 @@ export type ClientCall = {
 /**
  * Every route that the client calls (plan 11d, spec 20). The client takes each
  * path from this table, `calls.test.ts` proves that a run of every operation
- * calls exactly these routes, and the drift test of `@authtempo/sdk-conformance`
- * holds the table to `ROUTES`. A ceremony of two calls has one row per call,
- * and two operations can call one route.
+ * calls exactly these routes, and the drift test of plan 11d Task 13 (the SDK
+ * conformance package) holds the table to `ROUTES`. A ceremony of two calls
+ * has one row per call, and two operations can call one route.
  */
 export const CLIENT_CALLS = [
   { operation: "session", method: "GET", path: "/session" },

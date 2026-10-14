@@ -1,8 +1,26 @@
 import { ROUTES } from "@authtempo/core/routes";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CLIENT_CALLS } from "../src/calls.js";
 import { createClient } from "../src/client.js";
+// The text of client.ts, read by Vite (test/raw.d.ts types it). The client has no Node types.
+import clientSource from "../src/client.ts?raw";
 import type { BrowserWebAuthn } from "../src/webauthn.js";
+
+/** The operations that the client looks up in the table, in call order. */
+const looked = vi.hoisted(() => [] as string[]);
+
+// Two routes serve two operations each, so the routes alone cannot show that
+// each operation reads its own row. The spy keeps the name of each lookup.
+vi.mock("../src/calls.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/calls.js")>();
+  return {
+    ...real,
+    callOf: ((operation) => {
+      looked.push(operation);
+      return real.callOf(operation);
+    }) as typeof real.callOf,
+  };
+});
 
 const BASE = "https://api.example.com";
 
@@ -34,6 +52,7 @@ describe("the call table of the client (plan 11d)", () => {
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
     const { seen, fetch } = recording();
+    looked.length = 0;
     const c = createClient({ baseURL: BASE, fetch, webauthn: seam });
     const org = { organizationId: "o1" };
     await c.session();
@@ -92,6 +111,15 @@ describe("the call table of the client (plan 11d)", () => {
     expect([...new Set(seen)].sort()).toEqual(
       [...new Set(CLIENT_CALLS.map((r) => `${r.method} ${r.path}`))].sort(),
     );
+    // Each operation of the table, and no other name, is looked up.
+    expect([...new Set(looked)].sort()).toEqual(CLIENT_CALLS.map((r) => r.operation).sort());
+    // Each request comes from a lookup: no call goes around the table.
+    expect(seen).toHaveLength(looked.length);
+  });
+
+  it("has one raw call in client.ts, the one inside send", () => {
+    expect(clientSource.match(/\bcall</g)).toHaveLength(1);
+    expect(clientSource).toContain("return call<T>(c.method, c.path, body, query, headers);");
   });
 
   it("sends a query apart from the path", async () => {

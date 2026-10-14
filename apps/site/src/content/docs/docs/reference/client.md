@@ -114,7 +114,7 @@ The password, email code, and second factor operations answer `not_found` when t
 | Export | What it is |
 | --- | --- |
 | `createClient` | Makes a `Client`. |
-| `createTransport` | The request layer under the client, with its `TransportOptions` and the `Call` type. |
+| `createTransport` | The typed call for a route of your own app's code, with its `TransportOptions` and the `Call` type. The client uses the same request code, and takes its paths from `CLIENT_CALLS`. |
 | `browserWebAuthn` | The passkey seam of a browser, on `navigator.credentials`. |
 | `supportsPasskeys` | True when the browser can run the passkey ceremonies. |
 | `credentialToJSON` | Converts a credential of the browser to the JSON that core reads. |

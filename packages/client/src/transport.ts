@@ -81,18 +81,18 @@ export function createRawTransport(options: TransportOptions): RawCall {
     path: string,
     body?: unknown,
     query?: Query,
-    extra?: Readonly<Record<string, string>>,
+    headers?: Readonly<Record<string, string>>,
   ): Promise<ClientResult<T>> => {
-    const headers: Record<string, string> = { accept: "application/json" };
-    if (body !== undefined) headers["content-type"] = "application/json";
-    if (extra) Object.assign(headers, extra);
+    const sent: Record<string, string> = { accept: "application/json" };
+    if (body !== undefined) sent["content-type"] = "application/json";
+    if (headers) Object.assign(sent, headers);
     const token = options.token ? await options.token() : null;
-    if (token) headers.authorization = `Bearer ${token}`;
+    if (token) sent.authorization = `Bearer ${token}`;
     let res: Response;
     try {
       res = await doFetch(`${baseURL}${basePath}${path}${searchOf(query)}`, {
         method,
-        headers,
+        headers: sent,
         credentials,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
@@ -119,5 +119,6 @@ export function createRawTransport(options: TransportOptions): RawCall {
 
 /** The typed call for an app's own route call. */
 export function createTransport(options: TransportOptions): Call {
-  return createRawTransport(options) as Call;
+  const call: Call = createRawTransport(options);
+  return call;
 }
