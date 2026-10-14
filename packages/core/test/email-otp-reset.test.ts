@@ -93,6 +93,7 @@ describe("reset by code (plan 9e)", () => {
     const code = await requestReset(auth);
     const r = await reset(auth, code);
     if (!r.ok) throw new Error(r.code);
+    if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     expect(r.value.user).toMatchObject({ email: EMAIL, emailVerified: true });
     expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
       r.value.session.id,
@@ -112,6 +113,7 @@ describe("reset by code (plan 9e)", () => {
       "new@example.com",
     );
     if (!r.ok) throw new Error(r.code);
+    if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     expect(r.value.user).toMatchObject({ email: "new@example.com", emailVerified: true });
     expect((await signIn(auth, NEW, "new@example.com")).ok).toBe(true);
   });
@@ -168,6 +170,7 @@ describe("reset by code (plan 9e)", () => {
     if (!up.ok) throw new Error(up.code);
     const r = await reset(auth, await requestReset(auth));
     if (!r.ok) throw new Error(r.code);
+    if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     expect(r.value.user).toMatchObject({ id: up.value.user.id, emailVerified: true });
     expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
       r.value.session.id,

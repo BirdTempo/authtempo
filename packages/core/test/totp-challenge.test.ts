@@ -410,7 +410,7 @@ describe("the verify (plan 9f)", () => {
 describe("the challenge and the flows that end sessions (plan 9f)", () => {
   it("leaves no session from the verify when a reset lands between the challenge and the verify", async () => {
     const auth = totpAuth();
-    const { secret } = await enrolled(auth);
+    const { user, secret } = await enrolled(auth);
     const challenge = await challengeOf(auth);
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     const reset = await resetPassword(auth.config, {
@@ -419,13 +419,14 @@ describe("the challenge and the flows that end sessions (plan 9f)", () => {
       ip: null,
       userAgent: null,
     });
-    if (!reset.ok) throw new Error(reset.code);
+    // Since plan 12c a reset of a user with the factor on opens no session (ASVS 5.0 6.4.3).
+    if (!reset.ok || !("twoFactor" in reset.value)) throw new Error("no reset challenge");
     expect(await verify(auth, { challenge, code: await codeNow(auth, secret) })).toMatchObject({
       code: "invalid_token",
     });
-    expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
-      reset.value.session.id,
-    ]);
+    expect(
+      await auth.storage.findMany("session", [{ field: "userId", op: "eq", value: user.id }]),
+    ).toEqual([]);
   });
 
   it("deletes the user's challenges at a password change", async () => {

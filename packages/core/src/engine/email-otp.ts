@@ -6,6 +6,7 @@ import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
+import type { TwoFactorPending } from "./second-factor.js";
 import { endedList, sessionOpened, sessionSteps, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { attemptsOf, countAttempt } from "./verification.js";
@@ -294,6 +295,8 @@ export interface EmailOtpReset {
   password: string;
   ip: string | null;
   userAgent: string | null;
+  /** The clear `td_` token of a trusted device (plan 12c): it skips the reset's challenge. */
+  trustDevice?: string | undefined;
 }
 
 /**
@@ -315,11 +318,12 @@ export function requestResetOtp(
  * hash, and one transaction that spends the code first, sets or creates the
  * password, ends every session, applies the claim rule, runs the session
  * hook before its first write, and opens a session.
+ * A user with the second factor on gets the challenge in place of the session (plan 12c).
  */
 export async function resetPasswordWithOtp(
   config: ResolvedConfig,
   input: EmailOtpReset,
-): Promise<Result<EmailOtpSession>> {
+): Promise<Result<EmailOtpSession | TwoFactorPending>> {
   if (!config.emailOtp || !config.password) return fail("not_found");
   const gate = await verifyGate(config, input);
   if (!gate.ok) return gate;
@@ -329,5 +333,7 @@ export async function resetPasswordWithOtp(
   const row = checked.value;
   const reset = await resetWithProof(config, input, row, (tx) => consumeCode(tx, row, now), now);
   if (!reset.ok) return reset;
+  // A user with the second factor on gets the challenge, not a session (plan 12c).
+  if ("twoFactor" in reset.value) return ok({ twoFactor: reset.value.twoFactor });
   return ok({ token: reset.value.token, user: reset.value.user, session: reset.value.session });
 }

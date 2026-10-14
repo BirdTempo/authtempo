@@ -16,13 +16,18 @@ import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
-import { readCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage } from "../password-pages.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
-import { sessionCookieFor, signedInResponse, twoFactorJson } from "../session-answer.js";
+import {
+  challengePageUrl,
+  sessionCookieFor,
+  signedInResponse,
+  trustTokenOf,
+  twoFactorJson,
+} from "../session-answer.js";
 
 const signUpBody = z.object({
   email: z.string().max(320),
@@ -53,6 +58,8 @@ const resetBody = z.object({
   token: z.string().max(64),
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
+  // Plan 12c: a native app's trust token; a browser sends the cookie.
+  trustDevice: z.string().max(64).optional(),
 });
 
 const changeBody = z.object({
@@ -102,14 +109,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           password: body.value.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
-          // The body's token wins over the cookie: a native app sends the
-          // body, a browser sends the cookie. `||`, not `??`: an empty body
-          // value is no token, so the cookie still applies.
-          trustDevice:
-            body.value.trustDevice ||
-            (config.totp
-              ? (readCookie(ctx.request, config.totp.trustCookieName) ?? undefined)
-              : undefined),
+          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
           next: body.value.next,
         });
         if (!r.ok) return respond(r);
@@ -213,6 +213,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           password: body.value.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
         });
         if (!r.ok) {
           if (jsonCaller) return respond(r);
@@ -223,6 +224,13 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
             );
           return failed(r.code);
         }
+        // The factor is on (plan 12c, owner decision 1 of 2026-10-14): no
+        // cookie. JSON answers the challenge; a form goes to the challenge
+        // page, whose row holds the link's `next`. 302, as every form route.
+        if ("twoFactor" in r.value)
+          return jsonCaller
+            ? twoFactorJson(r.value)
+            : redirect(challengePageUrl(config, r.value.twoFactor.challenge));
         if (jsonCaller) return signedIn(r.value);
         const res = redirect(resolveNext(config, r.value.next));
         res.headers.set("set-cookie", cookieFor(r.value.token));

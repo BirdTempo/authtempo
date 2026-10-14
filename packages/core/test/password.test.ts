@@ -950,6 +950,7 @@ describe("requestPasswordReset and resetPassword", () => {
       ...req,
     });
     if (!r.ok) throw new Error(r.code);
+    if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     expect(await resolveSession(auth.config, old.token)).toBeNull();
     expect(await resolveSession(auth.config, r.value.token)).not.toBeNull();
     expect(
@@ -1054,6 +1055,7 @@ describe("changePassword", () => {
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     const r = await resetPassword(auth.config, { token: resetToken(auth), password: PW, ...req });
     if (!r.ok) throw new Error(r.code);
+    if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     const resolved = await resolveSession(auth.config, r.value.token);
     if (!resolved) throw new Error("no session");
     return resolved;

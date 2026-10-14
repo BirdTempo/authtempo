@@ -1203,6 +1203,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     const won = winner as Awaited<ReturnType<typeof resetPassword>> | null;
     if (!won?.ok) throw new Error("the winner's reset failed");
     if (!loser.ok) throw new Error(loser.code);
+    if (!("token" in loser.value)) throw new Error("the reset answered a challenge");
     expect(loser.value.user.id).toBe(won.value.user.id);
     expect(await inner.findMany("user", [])).toHaveLength(1);
     expect(await inner.findMany("password", [])).toHaveLength(1);
@@ -1232,6 +1233,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       userAgent: null,
     });
     if (!set.ok) throw new Error(set.code);
+    if (!("token" in set.value)) throw new Error("the reset answered a challenge");
     const session = await resolveSession(auth.config, set.value.token);
     if (!session) throw new Error("no session");
     let other: Awaited<ReturnType<typeof changePassword>> | null = null;
@@ -1334,6 +1336,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken", status: 409 });
     const proved = owner as Awaited<ReturnType<typeof resetPassword>> | null;
     if (!proved?.ok) throw new Error("the owner's reset failed");
+    if (!("token" in proved.value)) throw new Error("the reset answered a challenge");
     const userId = proved.value.user.id;
     const users = await auth.storage.findMany("user", []);
     expect(users.map((u) => [u.id, u.email, u.emailVerified])).toEqual([[userId, EMAIL, true]]);
@@ -1383,6 +1386,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof resetPassword>> | null;
     if (!proved?.ok) throw new Error("the owner's reset failed");
+    if (!("token" in proved.value)) throw new Error("the reset answered a challenge");
     const sessions = await auth.storage.findMany("session", []);
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
     expect((await signInAs(auth, "owner password")).ok).toBe(true);
@@ -1416,6 +1420,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(claimant).toMatchObject({ ok: false, code: "email_taken_unverified" });
     const proved = owner as Awaited<ReturnType<typeof resetPassword>> | null;
     if (!proved?.ok) throw new Error("the owner's reset failed");
+    if (!("token" in proved.value)) throw new Error("the reset answered a challenge");
     const sessions = await auth.storage.findMany("session", []);
     expect(sessions.map((x) => x.tokenHash)).toEqual([await sha256Hex(proved.value.token)]);
     expect((await signInAs(auth, "owner password")).ok).toBe(true);

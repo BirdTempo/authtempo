@@ -76,6 +76,7 @@ import {
   type PasswordVerify,
   passwordSignIn,
   passwordSignUp,
+  type ResetResult,
   requestPasswordReset,
   resendPasswordVerification,
   resetPassword,
@@ -120,6 +121,7 @@ import {
   type TotpSetup,
   type TotpSetupInput,
   type TotpStatus,
+  type TwoFactorPending,
   type TwoFactorSession,
   type TwoFactorVerify,
   totpStatus,
@@ -149,7 +151,7 @@ export interface PasswordApi {
   /** A new verify link for an unverified user with a password. Always `{ sent: true }`, except `rate_limited`. */
   resendVerification(input: PasswordResend): Promise<Result<{ sent: true }>>;
   requestReset(input: PasswordResetRequest): Promise<Result<{ sent: true }>>;
-  reset(input: PasswordReset): Promise<Result<PasswordSession & { next: string }>>;
+  reset(input: PasswordReset): Promise<Result<ResetResult>>;
   change(input: PasswordChange): Promise<Result<{ ok: true }>>;
 }
 
@@ -226,7 +228,7 @@ export interface EmailOtpApi {
   /** A reset code. `not_found` without a `password` config. */
   requestReset(input: EmailOtpRequest): Promise<Result<{ sent: true }>>;
   /** The reset by code. `not_found` without a `password` config. */
-  reset(input: EmailOtpReset): Promise<Result<EmailOtpSession>>;
+  reset(input: EmailOtpReset): Promise<Result<EmailOtpSession | TwoFactorPending>>;
 }
 
 export interface AuthApi {

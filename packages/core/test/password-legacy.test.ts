@@ -364,6 +364,7 @@ describe("password.legacyVerify (spec 17.4)", () => {
           userAgent: null,
         });
         if (!r.ok) throw new Error(r.code);
+        if (!("token" in r.value)) throw new Error("the reset answered a challenge");
         resetSession = r.value.session.id;
         answered = !signal.aborted;
         return true;

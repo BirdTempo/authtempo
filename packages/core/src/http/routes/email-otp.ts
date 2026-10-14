@@ -9,7 +9,7 @@ import {
 } from "../../engine/email-otp.js";
 import { readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
-import { signedInResponse } from "../session-answer.js";
+import { signedInResponse, trustTokenOf, twoFactorJson } from "../session-answer.js";
 
 const requestBody = z.object({ email: z.string().max(320) });
 const verifyBody = z.object({ email: z.string().max(320), code: z.string().max(16) });
@@ -18,6 +18,8 @@ const resetBody = z.object({
   code: z.string().max(16),
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
+  // Plan 12c: a native app's trust token; a browser sends the cookie.
+  trustDevice: z.string().max(64).optional(),
 });
 
 /**
@@ -79,8 +81,11 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
           password: body.value.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
         });
-        return r.ok ? signedIn(r.value) : respond(r);
+        if (!r.ok) return respond(r);
+        // A user with the second factor on: the challenge, and no cookie (plan 12c).
+        return "twoFactor" in r.value ? twoFactorJson(r.value) : signedIn(r.value);
       },
     },
   ];

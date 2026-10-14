@@ -8,10 +8,12 @@ import { type StorageAdapter, StorageError, type Where } from "../storage/port.j
 import { hookGuard } from "./hooks.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
+import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
 import {
   endedList,
   endSessions,
   openSession,
+  type PreparedSession,
   prepareSession,
   type ResolvedSession,
   sessionOpened,
@@ -697,7 +699,22 @@ export interface PasswordReset {
   password: string;
   ip: string | null;
   userAgent: string | null;
+  /** The clear `td_` token of a trusted device (plan 12c). A live token of the user skips the reset's challenge, as at the sign-in. */
+  trustDevice?: string | undefined;
 }
+
+/**
+ * A reset of a user with the second factor on (plan 12c, owner decision 1 of
+ * 2026-10-14): the password is set and every session ends, and the sign-in's
+ * challenge takes the session's place. `next` is the reset link's landing path.
+ */
+export interface ResetChallenge extends TwoFactorPending {
+  next: string;
+  user: UserRow;
+}
+
+/** What a reset answers: a session, or the challenge for a user with the factor on. */
+export type ResetResult = (PasswordSession & { next: string }) | ResetChallenge;
 
 /**
  * A reset proves the mailbox, as a magic link does. The order: the limit,
@@ -710,11 +727,12 @@ export interface PasswordReset {
  * user loses every session and every handoff code, and keeps the passkeys
  * and the social identities (spec 8.7, deviation 2); the other reset
  * links of the address go; a new session starts.
+ * A user with the second factor on gets no session: the reset answers the challenge (plan 12c).
  */
 export async function resetPassword(
   config: ResolvedConfig,
   input: PasswordReset,
-): Promise<Result<PasswordSession & { next: string }>> {
+): Promise<Result<ResetResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
   if (!PASSWORD_RESET_TOKEN_RE.test(input.token)) return fail("invalid_token");
@@ -759,20 +777,22 @@ export type ResetConsume = (tx: StorageAdapter) => Promise<Result<VerificationRo
  * The reset's transaction, its retry, and its after hooks, for the reset
  * link and the reset code (plan 9e). `consume` spends the proof as the
  * transaction's first statement. `input` carries the session's ip and user
- * agent.
+ * agent, and the trust token of the device (plan 12c).
  */
 export async function runReset(
   config: ResolvedConfig,
-  input: { ip: string | null; userAgent: string | null },
+  input: { ip: string | null; userAgent: string | null; trustDevice?: string | undefined },
   consume: ResetConsume,
   hash: string,
   now: Date,
-): Promise<Result<PasswordSession & { next: string }>> {
+): Promise<Result<ResetResult>> {
   const ended: ResetEnded = { claim: endedList(config), reset: endedList(config) };
-  let reset: Result<PasswordSession & { next: string }> | null = null;
+  // The trust row that skipped the gate, for its `lastSeenAt` after the commit.
+  const trust: { id: string | null } = { id: null };
+  let reset: Result<ResetResult> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
-      reset = await hookGuard(() => applyReset(config, input, consume, hash, now, ended));
+      reset = await hookGuard(() => applyReset(config, input, consume, hash, now, ended, trust));
     } catch (err) {
       // Two resets for one address raced: the loser's user, email
       // identity, or password create failed on a unique key. Caught here,
@@ -794,7 +814,11 @@ export async function runReset(
     // verified user's own rows with `password_reset` (fix round 1).
     await sessionsEnded(config, ended.claim, "claim");
     await sessionsEnded(config, ended.reset, "password_reset");
-    await sessionOpened(config, reset.value.session, reset.value.user, "password");
+    // A gated reset opened no session: the verify of its challenge fires the hook.
+    if ("token" in reset.value) {
+      await touchTrust(config, trust.id, now);
+      await sessionOpened(config, reset.value.session, reset.value.user, "password");
+    }
   }
   return reset;
 }
@@ -809,11 +833,16 @@ export async function runReset(
  */
 export async function resetWithProof(
   config: ResolvedConfig,
-  input: { password: string; ip: string | null; userAgent: string | null },
+  input: {
+    password: string;
+    ip: string | null;
+    userAgent: string | null;
+    trustDevice?: string | undefined;
+  },
   proof: VerificationRow,
   consume: ResetConsume,
   now: Date,
-): Promise<Result<PasswordSession & { next: string }>> {
+): Promise<Result<ResetResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
   const refused = await screen(pw, input.password, proof.identifier);
@@ -841,84 +870,120 @@ interface ResetEnded {
 
 function applyReset(
   config: ResolvedConfig,
-  input: { ip: string | null; userAgent: string | null },
+  input: { ip: string | null; userAgent: string | null; trustDevice?: string | undefined },
   consume: ResetConsume,
   hash: string,
   now: Date,
   ended: ResetEnded,
-): Promise<Result<PasswordSession & { next: string }>> {
-  return config.storage.transaction(
-    async (tx): Promise<Result<PasswordSession & { next: string }>> => {
-      // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
-      if (ended.claim) ended.claim.length = 0;
-      if (ended.reset) ended.reset.length = 0;
-      // The first statement. Two POSTs of one proof race here, and only one
-      // wins. A refusal comes before any write, so nothing is left to undo.
-      const consumed = await consume(tx);
-      if (!consumed.ok) return consumed;
-      const email = consumed.value.identifier;
-      const next = safeNext((consumed.value.data as { next?: unknown } | null)?.next);
-      const found = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
-      let minted: UserRow | null = null;
-      let user: UserRow;
-      if (!found) {
-        minted = {
-          id: newId(now),
-          email,
-          emailVerified: true,
-          name: null,
-          image: null,
-          createdAt: now,
-          updatedAt: now,
-        };
-        user = minted;
-      } else user = found.emailVerified ? found : { ...found, emailVerified: true, updatedAt: now };
-      // The reset consumes its link first, and the hook runs before every
-      // other write (plan 9d, fix round 2). The link row belongs to this
-      // request alone, so the D1 undo of the consume is exact; an undo of the
-      // writes below would not be (see `insertSignUp`). A refusal undoes the
-      // consume with the transaction, so the link stays usable.
-      // The user the hook sees is the user this reset leaves: found, claimed, or minted.
-      const prepared = await prepareSession(
+  trust: { id: string | null },
+): Promise<Result<ResetResult>> {
+  return config.storage.transaction(async (tx): Promise<Result<ResetResult>> => {
+    // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
+    if (ended.claim) ended.claim.length = 0;
+    if (ended.reset) ended.reset.length = 0;
+    trust.id = null;
+    // The first statement. Two POSTs of one proof race here, and only one
+    // wins. A refusal comes before any write, so nothing is left to undo.
+    const consumed = await consume(tx);
+    if (!consumed.ok) return consumed;
+    const email = consumed.value.identifier;
+    const next = safeNext((consumed.value.data as { next?: unknown } | null)?.next);
+    const found = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
+    let minted: UserRow | null = null;
+    let user: UserRow;
+    if (!found) {
+      minted = {
+        id: newId(now),
+        email,
+        emailVerified: true,
+        name: null,
+        image: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      user = minted;
+    } else user = found.emailVerified ? found : { ...found, emailVerified: true, updatedAt: now };
+    // The second factor (plan 12c, owner decision 1 of 2026-10-14): a reset
+    // must not bypass a factor that is on (ASVS 5.0 6.4.3). These are reads,
+    // so they come before the session hook below. A minted user and a
+    // claimant (an unverified user) have no factor row: every enable needs a
+    // verified address. A live trust token of the user skips the gate, as at
+    // the password sign-in: the next sign-in on that device skips it too.
+    const gate = found?.emailVerified
+      ? await gateRead(config, tx, found.id, input.trustDevice, now)
+      : null;
+    const gatedRow = gate?.gated ? gate.row : null;
+    if (gate && !gate.gated) trust.id = gate.trustId;
+    // The reset consumes its link first, and the hook runs before every
+    // other write (plan 9d, fix round 2). The link row belongs to this
+    // request alone, so the D1 undo of the consume is exact; an undo of the
+    // writes below would not be (see `insertSignUp`). A refusal undoes the
+    // consume with the transaction, so the link stays usable.
+    // The user the hook sees is the user this reset leaves: found, claimed, or minted.
+    // A gated reset opens no session here, so no hook runs: the verify of
+    // its challenge runs it through `openSession`.
+    const prepared: PreparedSession | null = gatedRow
+      ? null
+      : await prepareSession(
+          config,
+          { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
+          tx,
+        );
+    if (minted) await tx.create("user", minted);
+    // The new password row before any session delete. A password sign-in
+    // in flight re-checks its row by id and by the hash it verified as its
+    // last statement. When that re-check still finds the old hash, this
+    // write has not run, so the session delete below still removes that
+    // sign-in's session. The opposite order lets an old-password sign-in
+    // commit a session after the delete.
+    const passwordId = await setPassword(tx, user.id, hash, now);
+    // The second-factor challenges before any session delete, for the order
+    // above: a verify spends its challenge as its last statement (plan 9f).
+    await deleteTwoFactorChallenges(tx, user.id);
+    if (found && !found.emailVerified) {
+      // The claim deletes the claimant's sessions, identities, passkeys,
+      // handoff codes, and every other password row, and keeps the new password.
+      await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
+    } else {
+      await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset ?? null);
+      await deleteHandoffCodes(tx, user.id);
+    }
+    // The OAuth refresh tokens and codes end with the sessions: a reset after a
+    // compromise must cut off every agent too. The consents stay, so the
+    // person signs each client in again with no new consent (plan 9g final fix wave).
+    await deleteOAuthTokens(tx, user.id);
+    // The other links and codes for this address. A person who reads the
+    // mailbox later must not set a password with a second proof (plan 9e).
+    await tx.delete("verification", [
+      { field: "purpose", op: "in", value: RESET_PURPOSES },
+      { field: "identifier", op: "eq", value: email },
+      { field: "consumedAt", op: "eq", value: null },
+    ]);
+    await ensureEmailIdentity(tx, user.id, email, now);
+    if (gatedRow) {
+      // The last write, after the challenge delete above, so this reset's
+      // own challenge survives it. A second reset of the address deletes it
+      // in its own delete: the newer password owns the challenge.
+      const { pending } = await writeChallenge(
         config,
-        { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
         tx,
+        gatedRow,
+        {
+          userId: user.id,
+          via: "password",
+          from: "reset",
+          ip: input.ip,
+          userAgent: input.userAgent,
+          next,
+        },
+        now,
       );
-      if (minted) await tx.create("user", minted);
-      // The new password row before any session delete. A password sign-in
-      // in flight re-checks its row by id and by the hash it verified as its
-      // last statement. When that re-check still finds the old hash, this
-      // write has not run, so the session delete below still removes that
-      // sign-in's session. The opposite order lets an old-password sign-in
-      // commit a session after the delete.
-      const passwordId = await setPassword(tx, user.id, hash, now);
-      // The second-factor challenges before any session delete, for the order
-      // above: a verify spends its challenge as its last statement (plan 9f).
-      await deleteTwoFactorChallenges(tx, user.id);
-      if (found && !found.emailVerified) {
-        // The claim deletes the claimant's sessions, identities, passkeys,
-        // handoff codes, and every other password row, and keeps the new password.
-        await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
-      } else {
-        await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset ?? null);
-        await deleteHandoffCodes(tx, user.id);
-      }
-      // The OAuth refresh tokens and codes end with the sessions: a reset after a
-      // compromise must cut off every agent too. The consents stay, so the
-      // person signs each client in again with no new consent (plan 9g final fix wave).
-      await deleteOAuthTokens(tx, user.id);
-      // The other links and codes for this address. A person who reads the
-      // mailbox later must not set a password with a second proof (plan 9e).
-      await tx.delete("verification", [
-        { field: "purpose", op: "in", value: RESET_PURPOSES },
-        { field: "identifier", op: "eq", value: email },
-        { field: "consumedAt", op: "eq", value: null },
-      ]);
-      await ensureEmailIdentity(tx, user.id, email, now);
-      const s = await writeSession(config, prepared, tx);
-      return ok({ token: s.token, user, session: s.session, next });
-    },
-  );
+      return ok({ ...pending, next, user });
+    }
+    if (!prepared) throw new Error("authtempo: the session hook step did not run");
+    const s = await writeSession(config, prepared, tx);
+    return ok({ token: s.token, user, session: s.session, next });
+  });
 }
 
 /**

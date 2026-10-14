@@ -13,10 +13,14 @@ const pair = (cookie: string) => cookie.split(";")[0] ?? "";
 const cookieNamed = (res: Response, name: string) =>
   res.headers.getSetCookie().find((c) => c.startsWith(`${name}=`)) ?? null;
 
-function form(path: string, body: string): Request {
+function form(path: string, body: string, headers: Record<string, string> = {}): Request {
   return new Request(`${BASE_URL}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", origin: APP_ORIGIN },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      origin: APP_ORIGIN,
+      ...headers,
+    },
     body,
   });
 }
@@ -373,5 +377,67 @@ describe("the TOTP routes (plan 9f)", () => {
     expect(cookieNamed(signIn, "tempo_session")).not.toBeNull();
     expect(h.auth.api.totp).toBeUndefined();
     expect(pwHandle({ hash: FAST }).auth.api.totp).toBeDefined();
+  });
+});
+
+describe("the reset gate on the routes (plan 12c)", () => {
+  /** A reset link from the mail, after the route's request. */
+  async function resetToken(h: Handle): Promise<string> {
+    await h.auth.handle(post("/auth/password/reset/request", { email: EMAIL, next: "/after" }));
+    const token = h.mails.findLast((m) => m.to === EMAIL && m.subject.startsWith("Reset"))?.token;
+    if (!token) throw new Error("no reset link");
+    return token;
+  }
+
+  it("answers the form with 302 to the challenge page and no session cookie", async () => {
+    const h = pwHandle({ hash: FAST });
+    await enrolled(h, await verifiedUser(h));
+    const token = await resetToken(h);
+    const res = await h.auth.handle(
+      form("/auth/password/reset", `token=${token}&password=a+brand+new+long+password`),
+    );
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(`${location.origin}${location.pathname}`).toBe(`${BASE_URL}/auth/totp/challenge`);
+    expect(location.searchParams.get("challenge")).toMatch(/^tf_/);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("answers JSON with 200 and the challenge, and no cookie", async () => {
+    const h = pwHandle({ hash: FAST });
+    await enrolled(h, await verifiedUser(h));
+    const token = await resetToken(h);
+    const res = await h.auth.handle(
+      post("/auth/password/reset", { token, password: "a brand new long password" }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    const body = (await res.json()) as { twoFactor: { challenge: string; methods: string[] } };
+    expect(body.twoFactor.challenge).toMatch(/^tf_/);
+    expect(body.twoFactor.methods).toEqual(["totp", "backup"]);
+  });
+
+  it("opens the session for the form on a device with the trust cookie, and lands on next", async () => {
+    const h = pwHandle({ hash: FAST });
+    const f = await enrolled(h, await verifiedUser(h));
+    const verify = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: await challenge(h),
+        code: await f.code(),
+        trustDevice: true,
+      }),
+    );
+    const trust = cookieNamed(verify, "tempo_totp_trust");
+    if (!trust) throw new Error("no trust cookie");
+    const token = await resetToken(h);
+    const res = await h.auth.handle(
+      form("/auth/password/reset", `token=${token}&password=a+brand+new+long+password`, {
+        cookie: pair(trust),
+      }),
+    );
+    expect(res.status).toBe(302);
+    // appURL is baseURL in this test config, so `next` lands on the API origin.
+    expect(res.headers.get("location")).toBe(`${BASE_URL}/after`);
+    expect(cookieNamed(res, "tempo_session")).toMatch(/^tempo_session=ts_/);
   });
 });

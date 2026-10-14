@@ -105,6 +105,7 @@ describe("the session delete of a reset, a change, a claim, and a TOTP enable (p
         userAgent: null,
       });
       if (!r.ok) throw new Error(r.code);
+      if (!("token" in r.value)) throw new Error("the reset answered a challenge");
       expect(sessionDeletes(writes)).toBe(listen ? 4 : 1);
       expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
         r.value.session.id,

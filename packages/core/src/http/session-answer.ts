@@ -2,7 +2,7 @@ import type { ResolvedConfig } from "../config.js";
 import type { TwoFactorPending } from "../engine/second-factor.js";
 import { publicSession } from "../engine/sessions.js";
 import type { SessionRow, UserRow } from "../schema.js";
-import { sessionCookie } from "./cookies.js";
+import { readCookie, sessionCookie } from "./cookies.js";
 import { json } from "./json.js";
 
 /** The session cookie for `token`, with the config's name, lifetime, and SameSite. */
@@ -49,4 +49,20 @@ export function twoFactorJson(p: TwoFactorPending): Response {
 /** The challenge page of a browser flow (plan 12c), on `baseURL`, as the challenge page's own redirect builds it (`routes/totp.ts`). */
 export function challengePageUrl(config: ResolvedConfig, challenge: string): string {
   return `${config.baseURL}${config.basePath}/totp/challenge?challenge=${encodeURIComponent(challenge)}`;
+}
+
+/**
+ * The trust token of a request (plan 9f). The body's token wins over the
+ * cookie: a native app sends the body, a browser sends the cookie. `||`, not
+ * `??`: an empty body value is no token, so the cookie still applies.
+ */
+export function trustTokenOf(
+  config: ResolvedConfig,
+  request: Request,
+  fromBody: string | undefined,
+): string | undefined {
+  return (
+    fromBody ||
+    (config.totp ? (readCookie(request, config.totp.trustCookieName) ?? undefined) : undefined)
+  );
 }

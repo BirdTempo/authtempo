@@ -399,6 +399,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
       userAgent: null,
     });
     if (!r.ok) throw new Error(r.code);
+    if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
     await expectEnded(h, c, tokens.refresh_token ?? "");
     await authorizeAgain(h, c.clientId, `tempo_session=${r.value.token}`);
@@ -418,6 +419,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
       userAgent: null,
     });
     if (!r.ok) throw new Error(r.code);
+    if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
     await expectEnded(h, c, tokens.refresh_token ?? "");
     await authorizeAgain(h, c.clientId, `tempo_session=${r.value.token}`);

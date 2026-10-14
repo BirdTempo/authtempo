@@ -77,6 +77,8 @@ export type {
   PasswordSignUp,
   PasswordVerified,
   PasswordVerify,
+  ResetChallenge,
+  ResetResult,
 } from "./engine/password.js";
 export { LEGACY_VERIFY_HASH, PENDING_HASH_PREFIX } from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";

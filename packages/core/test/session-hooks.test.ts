@@ -401,7 +401,8 @@ describe("session create hooks (plan 9d)", () => {
     expect(read("passkeys.ts")).toContain('via: "passkey"');
     expect(read("handoff.ts")).toContain('via: "handoff"');
     expect(read("email-otp.ts")).toContain('via: "email_otp"');
-    expect(read("password.ts").split('via: "password"')).toHaveLength(5);
+    // Four session inputs and the reset's challenge input (plan 12c).
+    expect(read("password.ts").split('via: "password"')).toHaveLength(6);
     // The password gate's challenge input (plan 9f). The verify opens the
     // session with the challenge's via, not a fixed one (plan 12c).
     expect(read("totp.ts").split('via: "password"')).toHaveLength(2);
