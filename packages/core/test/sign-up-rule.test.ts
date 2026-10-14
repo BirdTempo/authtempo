@@ -158,6 +158,29 @@ describe("the sign-up rule (plan 12b)", () => {
     expect(await users(auth)).toEqual(["ada@example.com", NEW]);
   });
 
+  it("answers sent for every address under invited with uniformSignUp on, and mails only an invited one (plan 12b)", async () => {
+    // The default answer: the extra password key drops the builder's uniformSignUp false.
+    const auth = authFor("invited", { password: { hash: FAST } });
+    await auth.seedUser("ada@example.com");
+    const up = (email: string) =>
+      passwordSignUp(auth.config, {
+        email,
+        password: "correct horse battery",
+        ip: null,
+        userAgent: null,
+      });
+    // No invitation: the same answer for a known and a new address, no row, and no mail.
+    expect(await up("ada@example.com")).toEqual({ ok: true, value: { sent: true } });
+    expect(await up(NEW)).toEqual({ ok: true, value: { sent: true } });
+    expect(await users(auth)).toEqual(["ada@example.com"]);
+    expect(auth.mail).toEqual([]);
+    // An invitation: the same answer, the new user, and the verify mail.
+    await invite(auth, NEW, DAY);
+    expect(await up(NEW)).toEqual({ ok: true, value: { sent: true } });
+    expect(await users(auth)).toEqual(["ada@example.com", NEW]);
+    expect(auth.mail.map((m) => m.to)).toEqual([NEW]);
+  });
+
   it("refuses a social create under invited when the provider address is unverified", async () => {
     const unproved = await viaSocial("invited", NEW, { verified: false, invited: true });
     expect(unproved.r).toMatchObject({ ok: false, code: "sign_up_closed" });
