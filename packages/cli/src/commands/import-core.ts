@@ -14,6 +14,7 @@ import {
   summary,
 } from "@authtempo/import";
 import { LEGACY_FORMATS, type LegacyFormat } from "@authtempo/legacy-hashes";
+import { storageFailure } from "../seams/postgres.js";
 
 // The parse checks and the run of the import CLI, moved from
 // packages/import/src/cli.ts by plan 11c with no change of behavior. The
@@ -247,7 +248,7 @@ export async function runParsed(parsed: ParsedImport, io: CliIo): Promise<Import
   try {
     target = await io.openStorage(values.postgres as string, values["better-auth"] === true);
   } catch (e) {
-    return stop(`storage: ${message(e)}; nothing was written`, null);
+    return stop(`${storageFailure(e, values.postgres as string)}; nothing was written`, null);
   }
   try {
     const report = await importUsers(target.storage, source, parsed.options);

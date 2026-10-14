@@ -18,7 +18,7 @@ const helpFlags = (flags: readonly { flag: string }[]) =>
 const NAMES = ["init", "migrate", "import", "check", "keys"];
 
 describe("the common rules (spec 19)", () => {
-  it("has the commands of the tasks so far, and one help text for each", () => {
+  it("has the five commands, and one help text for each", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
     expect(HELP).toEqual([ROOT_HELP, ...Object.values(COMMANDS).map((c) => c.help)]);
   });

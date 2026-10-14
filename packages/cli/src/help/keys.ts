@@ -23,7 +23,7 @@ export const KEYS_HELP: HelpText = {
     },
     {
       flag: "--token-file <path>",
-      says: "The file that holds the operator secret. A dash reads stdin.",
+      says: "The file that holds the operator secret. A dash reads stdin, and then the command needs --yes.",
     },
     { flag: "--base-path <path>", says: "The basePath of the deployment. The default is /auth." },
     {

@@ -129,7 +129,11 @@ export async function startExampleWorker(
       // The group ended already.
     }
   };
-  const killSync = () => group("SIGKILL");
+  // The signal path also removes the persist folder, as stop does.
+  const killSync = () => {
+    group("SIGKILL");
+    rmSync(persist, { recursive: true, force: true });
+  };
   killers.add(killSync);
   const stop = async () => {
     group("SIGTERM");

@@ -9,10 +9,11 @@ import {
 } from "../src/checks.js";
 import { CHECK_JSON_KEYS } from "../src/json.js";
 import { main } from "../src/main.js";
+import { describeUrl } from "../src/output.js";
 import { adapterD1Dir } from "../src/seams/d1.js";
 import { SCHEMA_VERSION } from "../src/version.js";
 import { type FakeIo, fakeIo } from "./support/fake-io.js";
-import { freshDatabase } from "./support/pg.js";
+import { ADMIN_URL, freshDatabase } from "./support/pg.js";
 
 const BASE = "https://api.example.com";
 const COOKIE = "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
@@ -335,6 +336,30 @@ describe("authtempo check (spec 19)", () => {
       );
       expect(r.checks.at(-1)).toMatchObject({ id: "schema_version", status, code });
     }
+  });
+
+  it("writes no escape sequence from the server: a control character in the issuer prints as ?", async () => {
+    const routes = healthy();
+    const evil = "https://other.example/\u001b[2J\u0007";
+    routes.set("GET /.well-known/openid-configuration", doc(evil));
+    routes.set("GET /.well-known/oauth-authorization-server", doc(evil));
+    const io = fakeIo({ fetch: deployment(routes) });
+    expect(await main(["check", BASE], io)).toBe(1);
+    const line = io.stdout.find((l) => l.includes("well_known_issuer"));
+    expect(line).toBe(
+      `fail  well_known well_known_issuer: the issuer is https://other.example/?[2J?; the base is ${BASE}/auth`,
+    );
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the test looks for control characters.
+    const control = /[\u0000-\u0008\u000a-\u001f\u007f]/;
+    for (const l of [...io.stdout, ...io.stderr]) expect(l).not.toMatch(control);
+  });
+
+  it("names a refused database by its SQLSTATE and its host only, never by its user", async () => {
+    const url = ADMIN_URL.replace(/\/\/[^@]+@/, "//no_such_user_canary:wrong-pass-canary@");
+    const io = fakeIo({ env: { DATABASE_URL: url }, fetch: deployment(healthy()) });
+    expect(await main(["check", BASE, "--target", "postgres"], io)).toBe(2);
+    expect(io.stderr.at(-1)).toBe(`stopped: storage: 28P01 at ${describeUrl(url)}`);
+    for (const l of [...io.stdout, ...io.stderr]) expect(l).not.toContain("canary");
   });
 
   it("needs --target for the inputs of a database", async () => {

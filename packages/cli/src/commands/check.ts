@@ -10,7 +10,7 @@ import { baseOf, basePathOf, timeoutOf } from "../net.js";
 import { describeUrl, printJson } from "../output.js";
 import { readableVersion, readD1Version } from "../schema-version.js";
 import { findWranglerConfig, readD1Project, wranglerOf } from "../seams/d1.js";
-import { openPostgres } from "../seams/postgres.js";
+import { openPostgres, storageFailure } from "../seams/postgres.js";
 import { readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
@@ -70,10 +70,18 @@ export const checkCommand: Command = {
         ctx.err(`connecting to ${describeUrl(url)}`);
         const pg = openPostgres(url, 1);
         try {
+          let applied: string[];
+          let text: string | null;
+          try {
+            await pg.ping();
+            applied = await pg.appliedCore();
+            text = await pg.schemaVersionText();
+          } catch (e) {
+            throw new Stop(storageFailure(e, url));
+          }
           // The rule of migrate: a version that is no whole number, or no version row over
           // applied migrations, stops the run (exit 2), because this CLI cannot place the database.
-          const applied = await pg.appliedCore();
-          return readableVersion(await pg.schemaVersionText(), applied.length);
+          return readableVersion(text, applied.length);
         } finally {
           await pg.close();
         }

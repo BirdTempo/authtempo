@@ -457,6 +457,23 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0004_NAME,
 ];
 
+/**
+ * The Postgres text of each compat migration, in the order of
+ * COMPAT_MIGRATION_NAMES (review of plan 11c, m13). The runner takes its
+ * names from that list, so the CLI, the D1 files, and the runner cannot
+ * drift apart. A length that differs stops the module at load.
+ */
+const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
+  (names) => compatMigrationSql("postgres", names),
+  () => COMPAT_MIGRATION_0002_SQL,
+  () => COMPAT_MIGRATION_0003_SQL.postgres,
+  () => COMPAT_MIGRATION_0004_SQL.postgres,
+];
+if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
+  throw new Error(
+    `the compat runner has ${POSTGRES_TEXTS.length} texts for ${COMPAT_MIGRATION_NAMES.length} names in COMPAT_MIGRATION_NAMES`,
+  );
+
 /** One fixed advisory lock key for every compat migration run. */
 const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migrations'))";
 
@@ -467,12 +484,12 @@ const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migration
  * `compat_better_auth` row of ta_meta: no third table.
  */
 export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): Promise<string[]> {
-  const migrations = [
-    { version: 1, name: MIGRATION_NAME, text: compatMigrationSql("postgres", names) },
-    { version: 2, name: MIGRATION_0002_NAME, text: COMPAT_MIGRATION_0002_SQL },
-    { version: 3, name: MIGRATION_0003_NAME, text: COMPAT_MIGRATION_0003_SQL.postgres },
-    { version: 4, name: MIGRATION_0004_NAME, text: COMPAT_MIGRATION_0004_SQL.postgres },
-  ];
+  // Migration n writes compat_better_auth = n, so the version is the place in the list.
+  const migrations = COMPAT_MIGRATION_NAMES.map((name, i) => ({
+    version: i + 1,
+    name,
+    text: (POSTGRES_TEXTS[i] as (names: Names) => string)(names),
+  }));
   const applied: string[] = [];
   for (const m of migrations) {
     const ran = await sql.begin(async (tx) => {

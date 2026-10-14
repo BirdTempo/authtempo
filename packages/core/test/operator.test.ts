@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import { isOperatorSecret } from "../src/operator-secret.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth } from "./helpers.js";
@@ -67,6 +68,27 @@ describe("the operator route (plan 11c)", () => {
       expect(await res.json()).toEqual({ error: "unauthorized" });
     }
     expect(await kids(h)).toEqual(before);
+  });
+
+  it("takes a secret of 32 to 512 visible ASCII characters: 32 and 512 pass, 31 and 513 fail", async () => {
+    expect(isOperatorSecret("x".repeat(32))).toBe(true);
+    expect(isOperatorSecret("x".repeat(512))).toBe(true);
+    expect(isOperatorSecret("x".repeat(31))).toBe(false);
+    expect(isOperatorSecret("x".repeat(513))).toBe(false);
+    expect(isOperatorSecret(`${"x".repeat(32)} `)).toBe(false);
+    expect(isOperatorSecret("é".repeat(32))).toBe(false);
+    // The route holds the same rule: each length gets its own deployment, under the limit of five.
+    for (const [secret, status] of [
+      ["a".repeat(32), 200],
+      ["b".repeat(512), 200],
+      ["c".repeat(31), 401],
+      ["d".repeat(513), 401],
+    ] as const) {
+      const h = await operatorHandle({ operator: { secretHash: await sha256Hex(secret) } });
+      expect((await h.auth.handle(rotate(`Operator ${secret}`))).status, `${secret.length}`).toBe(
+        status,
+      );
+    }
   });
 
   it("makes a new signing key for the right secret: the JWKS lists it first, and the old key stays 24 hours", async () => {

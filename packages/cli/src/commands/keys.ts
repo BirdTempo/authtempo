@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { isOperatorSecret } from "@authtempo/core/operator-secret";
 import { COMMON_OPTIONS, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
 import { Stop, UsageError } from "../errors.js";
@@ -61,6 +62,11 @@ export const keysCommand: Command = {
       throw new UsageError(
         "keys rotate asks for a confirmation: give --yes when no person can answer",
       );
+    // The secret reads stdin to its end, so the question would read an ended stream.
+    if (!yes && values["token-file"] === "-")
+      throw new UsageError(
+        "--token-file - reads the secret from stdin, so the command cannot ask: give --yes",
+      );
     const secret = readSecret(ctx, {
       envFlag: "token-env",
       fileFlag: "token-file",
@@ -69,6 +75,13 @@ export const keysCommand: Command = {
       defaultEnv: "AUTHTEMPO_OPERATOR_SECRET",
       what: "the operator secret",
     });
+    // Core's own rule (one source): a value of another form costs one of the
+    // five calls per hour and reads as a refusal, and fetch refuses a header
+    // that is not ASCII with no answer.
+    if (!isOperatorSecret(secret))
+      throw new UsageError(
+        "the operator secret is 32 to 512 visible ASCII characters; the deployment refuses any other value",
+      );
     ctx.err(`rotating the signing key of ${base}; the old key verifies for 24 hours`);
     if (!yes && !(await ctx.confirm("Rotate the signing key?")))
       throw new Stop("no rotation: the answer was not yes");
@@ -97,7 +110,17 @@ export const keysCommand: Command = {
     if (res.status !== 200 || typeof body?.kid !== "string")
       throw new Stop(`the operator route answered ${res.status} with no kid`);
     const kid = body.kid;
-    const after = await keySet(ctx, jwks, ms);
+    // The rotation is done: a failed read after it prints the kid with a
+    // warning and exit 0, so a person does not run it again and make a second key.
+    let after: string[] | null;
+    try {
+      after = await keySet(ctx, jwks, ms);
+    } catch (e) {
+      after = [kid];
+      ctx.err(
+        `warning: the rotation made ${kid}, but the read of the key set failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
     if (!after?.includes(kid))
       ctx.err(
         `warning: the key set does not list ${kid} yet; a cache can hold the old set for 300 seconds`,

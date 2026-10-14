@@ -38,6 +38,24 @@ describe("readSecret (spec 19, the no-secret rule)", () => {
     );
   });
 
+  it("names an unset variable only when the name has 40 characters or fewer: a long name can be a secret", () => {
+    const ctx = guarded(fakeIo());
+    const short = "A".repeat(40);
+    expect(() => readSecret(ctx, { ...FLAGS, env: short, file: undefined })).toThrowError(
+      `set ${short} to the connection string, or give --url-env or --url-file`,
+    );
+    const hex = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6";
+    let message = "";
+    try {
+      readSecret(ctx, { ...FLAGS, env: hex, file: undefined });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toBe(
+      "set the variable that --url-env names to the connection string, or give --url-env or --url-file",
+    );
+  });
+
   it("refuses a value where a flag wants the name of a variable, and the message holds no part of it", () => {
     const ctx = guarded(fakeIo());
     let message = "";

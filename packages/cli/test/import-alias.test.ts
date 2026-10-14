@@ -10,7 +10,14 @@ import { SUPABASE_FIXTURE_CREATED } from "../../import/test/fixtures/supabase-co
 import identities from "../../import/test/fixtures/supabase-identities.csv?raw";
 import users from "../../import/test/fixtures/supabase-users.csv?raw";
 import { FIRESCRYPT } from "../../import/test/readers/all.js";
-import { type CliIo, exitCode, runCli, USAGE, writePrivate } from "../src/commands/import-alias.js";
+import {
+  type CliIo,
+  exitCode,
+  runCli,
+  scrubbedIo,
+  USAGE,
+  writePrivate,
+} from "../src/commands/import-alias.js";
 
 /** Every format: the tests below that do not test --formats pass all five. */
 const ALL = LEGACY_FORMATS.join(",");
@@ -301,12 +308,13 @@ describe("authtempo-import", () => {
   it("prints one stopped line and writes the report on a storage error", async () => {
     const t = io(FILES);
     t.value.openStorage = async () => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:5439");
+      throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5439"), {
+        code: "ECONNREFUSED",
+      });
     };
     expect(await runCli([...BASE, "--report", "r.json"], t.value)).toBe(2);
-    expect(t.err).toEqual([
-      "stopped: storage: connect ECONNREFUSED 127.0.0.1:5439; nothing was written",
-    ]);
+    // The driver's text is not printed (spec 19): the code and the host only.
+    expect(t.err).toEqual(["stopped: storage: ECONNREFUSED at x; nothing was written"]);
     expect(JSON.parse(t.written["r.json"] ?? "{}")).toMatchObject({ report: null });
 
     // "storage:" only for a StorageError; any other error is the importer's own.
@@ -326,6 +334,22 @@ describe("authtempo-import", () => {
     expect(other.err).toEqual([
       "stopped: import: terminating connection; records before it may be written; run again",
     ]);
+  });
+
+  it("scrubs the --postgres value and its password from every line, also from a driver error that echoes them", async () => {
+    const url = "postgres://app:s3cret-canary@db.example.com:5432/app";
+    for (const form of [["--postgres", url], [`--postgres=${url}`]]) {
+      const argv = [...BASE.filter((a) => a !== "--postgres" && a !== "postgres://x"), ...form];
+      const t = io(FILES);
+      t.storage.transaction = async () => {
+        throw new Error(`password authentication failed: app:s3cret-canary at ${url}`);
+      };
+      expect(await runCli(argv, scrubbedIo(argv, t.value))).toBe(2);
+      expect(t.err.at(-1)).toBe(
+        "stopped: import: password authentication failed: *** at ***; records before it may be written; run again",
+      );
+      for (const line of [...t.out, ...t.err]) expect(line).not.toContain("s3cret-canary");
+    }
   });
 
   it("refuses firebase with no --firebase-rounds: exit 2, the usage text, no file read", async () => {

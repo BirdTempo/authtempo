@@ -7,6 +7,7 @@ import { betterAuthSchemaStorage, COMPAT_MIGRATION_NAMES } from "@authtempo/comp
 import type { StorageAdapter } from "@authtempo/core";
 import { META_TABLE, SCHEMA_VERSION_KEY } from "@authtempo/core/sql";
 import postgres, { type Sql } from "postgres";
+import { describeUrl } from "../output.js";
 
 /** Postgres SQLSTATE for "undefined table": the migrations never ran. */
 const UNDEFINED_TABLE = "42P01";
@@ -24,6 +25,19 @@ export const CORE_MIGRATIONS: readonly string[] = MIGRATIONS.map((m) => m.name);
  * files carry the same names, so one list serves both dialects.
  */
 export const compatMigrationNames = (): string[] => [...COMPAT_MIGRATION_NAMES];
+
+/**
+ * A driver error as a person may see it (spec 19): `storage: <code> at
+ * <host:port/name>`. The code is the SQLSTATE of a Postgres error or the
+ * errno code of a network error. The message of the driver is not printed:
+ * postgres.js names the user in an auth failure, and spec 19 names a
+ * database by its host, its port, and its name only.
+ */
+export function storageFailure(e: unknown, url: string): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  const shown = typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : "an error";
+  return `storage: ${shown} at ${describeUrl(url)}`;
+}
 
 const isUndefinedTable = (e: unknown) => (e as { code?: unknown } | null)?.code === UNDEFINED_TABLE;
 

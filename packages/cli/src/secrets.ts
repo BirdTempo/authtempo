@@ -5,6 +5,9 @@ import type { Ctx } from "./output.js";
 /** The name of an environment variable: a person who types a URL or a token here gets a usage error. */
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** The longest variable name that a message prints (review of plan 11c, m12). A secret is longer. */
+const MAX_SHOWN_NAME = 40;
+
 export interface SecretFlags {
   /** The flag names, such as url-env and url-file, for the messages. */
   envFlag: string;
@@ -43,7 +46,10 @@ export function readSecret(ctx: Ctx, f: SecretFlags): string {
       throw new UsageError(`--${f.envFlag} takes the name of a variable, not a value`);
     const v = ctx.env[name];
     if (v === undefined || v.length === 0)
-      throw new UsageError(`set ${name} to ${f.what}, or give --${f.envFlag} or --${f.fileFlag}`);
+      // A long name can be a hex secret typed in the place of a name, so it is not printed.
+      throw new UsageError(
+        `set ${name.length <= MAX_SHOWN_NAME ? name : `the variable that --${f.envFlag} names`} to ${f.what}, or give --${f.envFlag} or --${f.fileFlag}`,
+      );
     value = v;
   }
   ctx.addSecret(value);

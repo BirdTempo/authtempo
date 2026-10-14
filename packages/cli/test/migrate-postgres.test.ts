@@ -152,8 +152,21 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
   it("stops with exit 2 on a refused connection, and no output holds the password", () => {
     const r = migrate([], "postgres://app:s3cret-canary@127.0.0.1:1/none");
     expect(r.status).toBe(2);
-    expect(linesOf(r.stderr).at(-1)).toMatch(/^stopped: storage: .+; nothing was written$/);
+    expect(linesOf(r.stderr).at(-1)).toBe(
+      "stopped: storage: ECONNREFUSED at 127.0.0.1:1/none; nothing was written",
+    );
     expect(r.stdout + r.stderr).not.toContain("s3cret-canary");
+  });
+
+  it("names a refused login by its SQLSTATE and the host only: no line names the user", () => {
+    const url = db.url.replace(/\/\/[^@]+@/, "//no_such_user_canary:wrong-pass-canary@");
+    const r = migrate([], url);
+    expect(r.status).toBe(2);
+    const host = new URL(url);
+    expect(linesOf(r.stderr).at(-1)).toBe(
+      `stopped: storage: 28P01 at ${host.hostname}:${host.port}${host.pathname}; nothing was written`,
+    );
+    expect(r.stdout + r.stderr).not.toContain("canary");
   });
 
   it("reads the connection string from --url-file and from stdin", () => {

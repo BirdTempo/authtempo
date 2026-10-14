@@ -54,6 +54,8 @@ export function fakeIo(
     },
     readStdin: () => o.stdin ?? "",
     exists: (path) => files.has(path) || [...files.keys()].some((k) => k.startsWith(`${path}/`)),
+    // The memory files hold no link.
+    realpath: (path) => path,
     listDir(path) {
       const prefix = `${path}/`;
       const names = [...files.keys()]

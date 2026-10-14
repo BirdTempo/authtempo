@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -34,6 +35,8 @@ export interface Io {
   readFile(path: string): string;
   readStdin(): string;
   exists(path: string): boolean;
+  /** The path with each link resolved. The path must exist. */
+  realpath(path: string): string;
   listDir(path: string): string[];
   /** Makes the folders on the way, and refuses a file that exists. */
   writeNew(path: string, text: string): void;
@@ -79,6 +82,7 @@ export function nodeIo(): Io {
     readFile: (path) => readFileSync(path, "utf8"),
     readStdin: () => readFileSync(0, "utf8"),
     exists: (path) => existsSync(path),
+    realpath: (path) => realpathSync(path),
     listDir: (path) => readdirSync(path),
     writeNew(path, text) {
       mkdirSync(dirname(path), { recursive: true });

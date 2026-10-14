@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { type AnyModelMap, issuerFor, MAPPING } from "../src/storage/mapping.js";
-import { compatMigrationSql } from "../src/storage/migration.js";
+import { COMPAT_MIGRATION_NAMES, compatMigrationSql } from "../src/storage/migration.js";
 import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG } from "./fixtures.js";
@@ -93,6 +93,19 @@ const user = (id: string, email: string) => ({
   updatedAt: at,
 });
 const eq = <F extends string>(field: F, value: unknown) => ({ field, op: "eq" as const, value });
+
+describe("the compat runner on postgres (plan 11c)", () => {
+  it("reports the names of COMPAT_MIGRATION_NAMES, in order: the CLI and the D1 files read that list", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await pg.sql.unsafe(BETTER_AUTH_ERA);
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      expect(await s.migrate()).toEqual([...COMPAT_MIGRATION_NAMES]);
+    } finally {
+      await pg.close();
+    }
+  });
+});
 
 describe("the Better Auth mapping on postgres", () => {
   let pg: { sql: Sql; close(): Promise<void> };

@@ -29,13 +29,28 @@ export interface Ctx extends Io {
   addSecret(value: string): void;
 }
 
-/** The no-secret rule at the last line of defence (spec 19): no output line holds a secret that a command read. */
+/**
+ * Each C0 control character but tab, and DEL. Text from a server, a driver,
+ * or wrangler can hold an escape sequence that moves the cursor or clears
+ * the terminal (spec 19: the CLI writes no escape sequence).
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the filter matches control characters on purpose.
+const CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f]/g;
+
+/** A line as the terminal gets it: the scrub, then each control character as `?`. */
+const clean = (line: string, secrets: ReadonlySet<string>) =>
+  scrub(line, secrets).replace(CONTROL, "?");
+
+/**
+ * The no-secret rule at the last line of defence (spec 19): no output line
+ * holds a secret that a command read, and no line holds a control character.
+ */
 export function guarded(io: Io): Ctx {
   const secrets = new Set<string>();
   return {
     ...io,
-    out: (line) => io.out(scrub(line, secrets)),
-    err: (line) => io.err(scrub(line, secrets)),
+    out: (line) => io.out(clean(line, secrets)),
+    err: (line) => io.err(clean(line, secrets)),
     addSecret(value) {
       for (const p of secretParts(value)) secrets.add(p);
     },

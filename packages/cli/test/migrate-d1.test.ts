@@ -10,6 +10,8 @@ const ADAPTER = join(D1_MODULES, "@authtempo/adapter-d1/migrations");
 const ADAPTER_FILES = readdirSync(ADAPTER)
   .filter((f) => f.endsWith(".sql"))
   .sort();
+/** Every entry of the adapter's folder before any test: a compat run must leave it as it is. */
+const ADAPTER_ENTRIES = readdirSync(ADAPTER).sort();
 const CORE = ADAPTER_FILES.map((f) => f.slice(0, -".sql".length));
 const COMPAT_DIR = join(PKG, "../compat-better-auth/migrations/d1");
 const BA_SQLITE = readFileSync(
@@ -130,6 +132,25 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     const again = migrate(p.dir, ["--tables", "compat"]);
     expect(again.status).toBe(0);
     expect(linesOf(again.stdout)).toEqual(["version before: 7; version after: 7"]);
+  });
+
+  it("refuses --tables compat when migrations_dir is the adapter's own folder, and writes into no package", () => {
+    // The default fixture: migrations_dir is node_modules/@authtempo/adapter-d1/migrations,
+    // which in the workspace links to packages/adapter-d1/migrations.
+    const p = d1Project();
+    for (const extra of [
+      ["--tables", "compat"],
+      ["--tables", "compat", "--dry-run"],
+    ]) {
+      const r = migrate(p.dir, extra);
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(linesOf(r.stderr).at(-1)).toBe(
+        `stopped: migrations_dir ${join(p.dir, "node_modules/@authtempo/adapter-d1/migrations")} is the folder of @authtempo/adapter-d1; with --tables compat, point migrations_dir at a folder of the app`,
+      );
+      expect(readdirSync(ADAPTER).sort()).toEqual(ADAPTER_ENTRIES);
+      expect(ADAPTER_FILES).toHaveLength(7);
+    }
   });
 
   it("stops after a run that leaves the database at version 8, and before any write on the next run", () => {

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
@@ -16,7 +16,12 @@ import {
   readD1Project,
   wranglerOf,
 } from "../seams/d1.js";
-import { CORE_MIGRATIONS, compatMigrationNames, openPostgres } from "../seams/postgres.js";
+import {
+  CORE_MIGRATIONS,
+  compatMigrationNames,
+  openPostgres,
+  storageFailure,
+} from "../seams/postgres.js";
 import { readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
@@ -85,7 +90,7 @@ async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<
     try {
       await pg.ping();
     } catch (e) {
-      throw new Stop(`storage: ${e instanceof Error ? e.message : String(e)}; nothing was written`);
+      throw new Stop(`${storageFailure(e, url)}; nothing was written`);
     }
     const done = new Set(await pg.appliedCore());
     const before = readableVersion(await pg.schemaVersionText(), done.size);
@@ -121,6 +126,30 @@ function checkAdapterFiles(ctx: Ctx, dir: string): void {
   if (missing.length > 0)
     throw new Stop(
       `migrations_dir ${dir} lacks the adapter's files ${missing.join(", ")} of ${source}; point migrations_dir at node_modules/@authtempo/adapter-d1/migrations`,
+    );
+}
+
+/**
+ * The guard of the compat copy (review of plan 11c, M2): the copy writes into
+ * migrations_dir, so that folder must be the app's own. The default of a core
+ * D1 app is the adapter's folder; in a workspace it links to the shipped
+ * migrations of @authtempo/adapter-d1, and each app that links the adapter
+ * would apply the compat SQL. A folder inside a package, or under
+ * node_modules, stops the run before the first read of the database.
+ */
+function checkCompatDir(ctx: Ctx, dir: string): void {
+  if (!ctx.exists(dir)) return; // copyCompat names the missing folder.
+  const real = ctx.realpath(dir);
+  const adapter = ctx.realpath(adapterD1Dir());
+  if (real === adapter)
+    throw new Stop(
+      `migrations_dir ${dir} is the folder of @authtempo/adapter-d1; with --tables compat, point migrations_dir at a folder of the app`,
+    );
+  const packages = [dirname(adapter), dirname(dirname(ctx.realpath(compatD1Dir(false))))];
+  const inside = (root: string) => real === root || real.startsWith(`${root}${sep}`);
+  if (packages.some(inside) || [dir, real].some((p) => p.split(sep).includes("node_modules")))
+    throw new Stop(
+      `migrations_dir ${dir} is a folder of a package; with --tables compat, point migrations_dir at a folder of the app`,
     );
 }
 
@@ -165,6 +194,7 @@ async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<Migrat
     );
   const t: D1Target = { ...project, remote: v.remote === true };
   if (plan.tables === "core") checkAdapterFiles(ctx, project.migrationsDir);
+  else checkCompatDir(ctx, project.migrationsDir);
   plan.note(`reading the ${t.remote ? "remote" : "local"} D1 database ${t.database}`);
   const { version: before, applied: appliedBefore } = await readD1Version(ctx, t);
   gate(before);

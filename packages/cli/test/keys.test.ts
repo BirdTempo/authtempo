@@ -116,6 +116,62 @@ describe("authtempo keys rotate (spec 19)", () => {
     );
   });
 
+  it("prints the kid with a warning, and exits 0, when the read of the key set after the rotation fails", async () => {
+    const real = deployment();
+    let reads = 0;
+    const { code, io } = await rotate([BASE, "--yes"], {
+      fetch: async (url, init) => {
+        if (url === `${BASE}/auth/jwks` && ++reads === 2)
+          return Response.json({ error: "internal" }, { status: 500 });
+        return real(url, init);
+      },
+    });
+    expect(code).toBe(0);
+    expect(io.stdout).toEqual(["kid: K2"]);
+    expect(io.stderr.at(-1)).toBe(
+      `warning: the rotation made K2, but the read of the key set failed: GET ${BASE}/auth/jwks answered 500 with no key set`,
+    );
+  });
+
+  it("refuses a secret that is not 32 to 512 visible ASCII characters, before any request", async () => {
+    for (const bad of [
+      "x".repeat(31),
+      "x".repeat(513),
+      `${"x".repeat(32)} y`,
+      `${"é".repeat(32)}`,
+    ]) {
+      const { code, io } = await rotate([BASE, "--yes"], {
+        env: { AUTHTEMPO_OPERATOR_SECRET: bad },
+      });
+      expect(code).toBe(2);
+      expect(io.requests).toEqual([]);
+      expect(io.stderr[0]).toBe(
+        "the operator secret is 32 to 512 visible ASCII characters; the deployment refuses any other value",
+      );
+    }
+    for (const good of ["x".repeat(32), "x".repeat(512)]) {
+      const { code } = await rotate([BASE, "--yes"], {
+        env: { AUTHTEMPO_OPERATOR_SECRET: good },
+        fetch: deployment({ route: 200 }),
+      });
+      expect(code).toBe(0);
+    }
+  });
+
+  it("needs --yes with --token-file -: stdin holds the secret, so it cannot hold the answer", async () => {
+    const { code, io } = await rotate([BASE, "--token-file", "-"], {
+      env: {},
+      stdin: SECRET,
+      stdinIsTTY: true,
+      answer: true,
+    });
+    expect(code).toBe(2);
+    expect(io.requests).toEqual([]);
+    expect(io.stderr[0]).toBe(
+      "--token-file - reads the secret from stdin, so the command cannot ask: give --yes",
+    );
+  });
+
   it("reads the secret from --token-file and from stdin", async () => {
     const file = await rotate([BASE, "--yes", "--token-file", "op.txt"], {
       env: {},

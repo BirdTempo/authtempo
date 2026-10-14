@@ -16,11 +16,11 @@ export class HostError extends Stop {
  * HostError that names the method and the URL. The cause's message is not
  * printed: a driver or a proxy can echo a header in it.
  *
- * The request follows no redirect (review of plan 11c Task 3). fetch keeps
- * the Authorization header on a redirect, and a 307 to another origin let
- * that origin answer for the deployment. A 3xx answer is a stop that names
- * the status. `redirect: "manual"` gives the 3xx answer in Node.js; a runtime
- * that hides it gives an "opaqueredirect" answer, which stops the same way.
+ * The request follows no redirect (review of plan 11c Task 3): a 307 to
+ * another origin would let the other origin answer for the deployment. A
+ * 3xx answer is a stop that names the status. `redirect: "manual"` gives the
+ * 3xx answer in Node.js; a runtime that hides it gives an "opaqueredirect"
+ * answer, which stops the same way.
  */
 export async function fetchWithin(
   fetcher: Fetcher,

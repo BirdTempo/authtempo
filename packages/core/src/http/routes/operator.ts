@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../../config.js";
 import { rotateKey } from "../../engine/jwt.js";
+import { isOperatorSecret } from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { json } from "../json.js";
 import type { Route } from "../router.js";
@@ -13,10 +14,10 @@ export const OPERATOR_PER_IP = { seconds: 3600, max: 5 };
 
 /**
  * `Operator <secret>`. The scheme is case-insensitive (RFC 9110 section
- * 11.1). The secret is 32 to 512 visible ASCII characters, so a header of
- * any other form answers 401 with no hash.
+ * 11.1). The secret has the form of `isOperatorSecret`, so a header of any
+ * other form answers 401 with no hash.
  */
-const OPERATOR_AUTH = /^Operator ([\x21-\x7e]{32,512})$/i;
+const OPERATOR_AUTH = /^Operator (\S+)$/i;
 
 /**
  * The operator route (plan 11c). Off unless the config sets `operator`. The
@@ -37,7 +38,11 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
           return json({ error: "rate_limited" }, 429);
         const secret = OPERATOR_AUTH.exec(ctx.request.headers.get("authorization") ?? "")?.[1];
         // Core keeps the hash only, as for every token; the digests compare in constant time.
-        if (!secret || !constantTimeEqual(await sha256Hex(secret), operator.secretHash))
+        if (
+          !secret ||
+          !isOperatorSecret(secret) ||
+          !constantTimeEqual(await sha256Hex(secret), operator.secretHash)
+        )
           return json({ error: "unauthorized" }, 401);
         return json(await rotateKey(config));
       },

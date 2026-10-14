@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { writePrivate } from "../io.js";
+import { scrub, secretParts } from "../output.js";
 import { openPostgres } from "../seams/postgres.js";
 import { type CliIo, type ParsedImport, parseImportValues, runParsed } from "./import-core.js";
 
@@ -98,6 +99,25 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     return 2;
   }
   return (await runParsed(parsed, io)).code;
+}
+
+/**
+ * The io of the alias with the scrub of spec 19: the value of `--postgres`,
+ * its password, and its user and password pair leave no line. The alias
+ * takes the connection string on the command line, so a driver error can
+ * echo it; the bin file wraps `nodeImportIo` with this.
+ */
+export function scrubbedIo(argv: readonly string[], io: CliIo): CliIo {
+  const secrets = new Set<string>();
+  argv.forEach((a, i) => {
+    const url = a.startsWith("--postgres=")
+      ? a.slice("--postgres=".length)
+      : a === "--postgres"
+        ? argv[i + 1]
+        : undefined;
+    if (url) for (const p of secretParts(url)) secrets.add(p);
+  });
+  return { ...io, out: (l) => io.out(scrub(l, secrets)), err: (l) => io.err(scrub(l, secrets)) };
 }
 
 /** The real io of the alias: files on disk, and Postgres through the seam. */
