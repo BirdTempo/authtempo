@@ -84,9 +84,12 @@ export async function provePassword(
  * Turns a method on for the session's user, after the caller's proofs. The
  * first method writes the row with new backup codes and ends the other
  * sessions with `two_factor` (`addMethod`). The passkey method needs a
- * passkey: the count runs after `addMethod` holds the row, so a parallel
- * delete of the last passkey either waits for this commit or finds the
- * method on.
+ * passkey. After `addMethod`, the enable writes `updatedAt` of every passkey
+ * row of the user, so it holds those rows until its commit. Zero rows: no
+ * passkey, and the throw undoes the method. A parallel `deletePasskey` waits
+ * on its delete of a held row and then reads the committed factor row, so it
+ * sees the method on (Postgres READ COMMITTED). Both take the factor row
+ * first and the passkey rows second, so neither waits on the other in turn.
  */
 export async function enableMethod(
   config: ResolvedConfig,
@@ -113,12 +116,14 @@ export async function enableMethod(
         now,
         ended,
       );
-      if (
-        method === "passkey" &&
-        (await tx.findMany("passkey", [{ field: "userId", op: "eq", value: session.user.id }]))
-          .length === 0
-      )
-        throw new NoPasskeyError();
+      if (method === "passkey") {
+        const held = await tx.update(
+          "passkey",
+          [{ field: "userId", op: "eq", value: session.user.id }],
+          { updatedAt: now },
+        );
+        if (held === 0) throw new NoPasskeyError();
+      }
       return a;
     });
   } catch (err) {

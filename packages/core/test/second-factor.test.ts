@@ -5,16 +5,17 @@ import {
   passkeyRegistrationOptions,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
-import { passwordSignIn } from "../src/engine/password.js";
+import { passwordSignIn, passwordSignUp } from "../src/engine/password.js";
 import { factorRow } from "../src/engine/second-factor.js";
 import {
   disableMethod,
   enableEmailMethod,
+  enableMethod,
   enablePasskeyMethod,
   passkeyChallengeOptions,
   sendSecondFactorEmail,
 } from "../src/engine/second-factor-methods.js";
-import { createSession } from "../src/engine/sessions.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
 import {
   disableTotp,
   disableTotpWithCode,
@@ -345,6 +346,127 @@ describe("a passkey as a second-factor method (plan 12c)", () => {
       }),
     ).toMatchObject({ code: "totp_not_enabled" });
   });
+
+  it("refuses at the verify an assertion by another user's passkey over this challenge's options, and counts it on the challenge", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    const on = await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    if (!on.ok) throw new Error(on.code);
+    // Bea holds a registered passkey at the same relying party.
+    const { soft: beaSoft } = await withPasskey(auth, "bea@example.com");
+    const first = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!first.ok || !("twoFactor" in first.value)) throw new Error("no challenge");
+    const options = await passkeyChallengeOptions(auth.config, {
+      challenge: first.value.twoFactor.challenge,
+      ip: null,
+    });
+    if (!options.ok) throw new Error(options.code);
+    const sessionsBefore = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: session.user.id },
+    ]);
+    expect(
+      await verifyTwoFactor(auth.config, {
+        challenge: first.value.twoFactor.challenge,
+        passkey: await beaSoft.authenticate(options.value.challenge),
+        ip: null,
+      }),
+    ).toMatchObject({ ok: false, code: "invalid_code" });
+    const [row] = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "two-factor" },
+    ]);
+    expect((row?.data as { attempts?: number } | null)?.attempts).toBe(1);
+    expect(
+      await auth.storage.findMany("session", [
+        { field: "userId", op: "eq", value: session.user.id },
+      ]),
+    ).toHaveLength(sessionsBefore.length);
+  });
+
+  it("refuses an unverified user with email_unverified before the password and the assertion, and writes no row", async () => {
+    const auth = totpAuth({ passkey: RP });
+    // An unverified user cannot register a passkey, so Ada's assertion stands
+    // in. Without the check, the enable answers passkey_failed instead.
+    const { soft } = await withPasskey(auth);
+    const up = await passwordSignUp(auth.config, {
+      email: "bea@example.com",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const bea = await resolveSession(auth.config, up.value.token);
+    if (!bea) throw new Error("no session");
+    expect(bea.user.emailVerified).toBe(false);
+    expect(
+      await enablePasskeyMethod(auth.config, {
+        session: bea,
+        password: PASSWORD,
+        response: await signInAssertion(auth, soft),
+      }),
+    ).toEqual({ ok: false, code: "email_unverified", status: 403 });
+    expect(await auth.storage.findMany("secondFactor", [])).toEqual([]);
+  });
+
+  it("refuses the passkey method for a user with no passkey, and writes no row", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const session = await verifiedSession(auth);
+    expect(await enableMethod(auth.config, session, "passkey")).toEqual({
+      ok: false,
+      code: "passkey_failed",
+      status: 400,
+    });
+    expect(await auth.storage.findMany("secondFactor", [])).toEqual([]);
+  });
+
+  it("answers invalid_token at the options of an expired challenge, and invalid_body at a challenge with no passkey method", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    const on = await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    if (!on.ok) throw new Error(on.code);
+    const first = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!first.ok || !("twoFactor" in first.value)) throw new Error("no challenge");
+    auth.clock.advance(300_001);
+    expect(
+      await passkeyChallengeOptions(auth.config, {
+        challenge: first.value.twoFactor.challenge,
+        ip: null,
+      }),
+    ).toEqual({ ok: false, code: "invalid_token", status: 400 });
+    // Bea has the TOTP method only.
+    await enrolled(auth, "bea@example.com");
+    const bea = await passwordSignIn(auth.config, {
+      email: "bea@example.com",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!bea.ok || !("twoFactor" in bea.value)) throw new Error("no challenge");
+    expect(bea.value.twoFactor.methods).toEqual(["totp", "backup"]);
+    expect(
+      await passkeyChallengeOptions(auth.config, {
+        challenge: bea.value.twoFactor.challenge,
+        ip: null,
+      }),
+    ).toEqual({ ok: false, code: "invalid_body", status: 400 });
+  });
 });
 
 describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 1)", () => {
@@ -413,6 +535,45 @@ describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 
     });
     if (!enabled.ok) throw new Error(enabled.code);
     expect((await factorRow(auth.storage, session.user.id))?.backupCodes).toHaveLength(10);
+  });
+
+  it("refuses the TOTP enable with totp_not_enabled when the passkey method turned on after the setup, and a new setup answers no codes", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    if (!setup.ok) throw new Error(setup.code);
+    expect(setup.value.backupCodes).toHaveLength(10);
+    const on = await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    if (!on.ok) throw new Error(on.code);
+    const factor = await factorRow(auth.storage, session.user.id);
+    expect(
+      await enableTotp(auth.config, {
+        session,
+        code: await codeNow(auth, base32Decode(setup.value.secret)),
+      }),
+    ).toEqual({ ok: false, code: "totp_not_enabled", status: 400 });
+    expect(await factorRow(auth.storage, session.user.id)).toEqual(factor);
+    const totp = await auth.storage.findOne("totp", [
+      { field: "userId", op: "eq", value: session.user.id },
+    ]);
+    expect(totp?.enabledAt).toBeNull();
+    const again = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    if (!again.ok) throw new Error(again.code);
+    expect(again.value.backupCodes).toEqual([]);
+    auth.clock.advance(30_000);
+    const enabled = await enableTotp(auth.config, {
+      session,
+      code: await codeNow(auth, base32Decode(again.value.secret)),
+    });
+    if (!enabled.ok) throw new Error(enabled.code);
+    expect(enabled.value.methods).toEqual(["passkey", "totp"]);
+    expect((await factorRow(auth.storage, session.user.id))?.backupCodes).toEqual(
+      factor?.backupCodes,
+    );
   });
 });
 

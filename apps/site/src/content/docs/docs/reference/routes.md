@@ -313,7 +313,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ challenge }` with one of `code`, `backupCode`, `emailCode`, or `passkey`, and `trustDevice?` |
+| Input | JSON `{ challenge }` with one of `code`, `backupCode`, `emailCode`, or `passkey`, and `trustDevice?`. `passkey` is an assertion over the options of [`POST /second-factor/passkey/options`](/docs/reference/routes/#post-second-factor-passkey-options). |
 | Answer | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 

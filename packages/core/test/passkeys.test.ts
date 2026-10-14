@@ -577,5 +577,9 @@ describe("the last passkey of the passkey method (plan 12c)", () => {
       code: "second_factor_last_method",
       status: 409,
     });
+    // The refusal undoes the delete: the last passkey stays.
+    expect(
+      await auth.storage.findMany("passkey", [{ field: "userId", op: "eq", value: user.id }]),
+    ).toHaveLength(1);
   });
 });

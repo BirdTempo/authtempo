@@ -388,13 +388,28 @@ export async function listPasskeys(
   return ok(rows.map(summary));
 }
 
+/** Thrown inside the delete's transaction when it took the last passkey of the passkey method. The throw undoes the delete. */
+class LastMethodError extends Error {
+  constructor() {
+    super("authtempo: the last passkey of the passkey method");
+    this.name = "LastMethodError";
+  }
+}
+
 /**
  * Deletes one passkey of the user. While `passkey` is a second-factor method,
  * the last passkey stays: `second_factor_last_method` (plan 12c). The person
- * turns the method off first, or registers another passkey. The delete holds
- * the factor row by a compare-and-set on `updatedAt` before it counts, so two
- * parallel deletes of the last two passkeys have one winner: Postgres makes
- * the second wait for the first commit, and its compare then matches no row.
+ * turns the method off first, or registers another passkey.
+ *
+ * The locks, on Postgres READ COMMITTED. With a factor row, the delete first
+ * writes its `updatedAt` by a compare-and-set, which holds the factor row: of
+ * two parallel deletes, the second waits for the first commit, and its
+ * compare then matches no row (`conflict`). The delete statement holds the
+ * passkey row; it waits for a parallel `enableMethod`, which holds every
+ * passkey row of the user. After the delete, the factor row and the passkeys
+ * left are read again. These reads see a factor row that a parallel first
+ * enable committed, which the first read could not see. With the method on
+ * and no passkey left, the throw undoes the delete.
  */
 export async function deletePasskey(
   config: ResolvedConfig,
@@ -415,21 +430,23 @@ export async function deletePasskey(
           { updatedAt: later(now, factor.updatedAt) },
         );
         if (held === 0) throw new FactorRaceError();
-        if (factor.methods.includes("passkey")) {
-          const keys = await tx.findMany("passkey", [
-            { field: "userId", op: "eq", value: input.user.id },
-          ]);
-          if (keys.length <= 1 && keys.some((k) => k.id === input.id))
-            return fail("second_factor_last_method");
-        }
       }
       const deleted = await tx.delete("passkey", [
         { field: "id", op: "eq", value: input.id },
         { field: "userId", op: "eq", value: input.user.id },
       ]);
-      return deleted === 1 ? ok({ ok: true }) : fail("not_found");
+      if (deleted !== 1) return fail("not_found");
+      const after = await factorRow(tx, input.user.id);
+      if (after?.methods.includes("passkey")) {
+        const left = await tx.findMany("passkey", [
+          { field: "userId", op: "eq", value: input.user.id },
+        ]);
+        if (left.length === 0) throw new LastMethodError();
+      }
+      return ok({ ok: true });
     });
   } catch (err) {
+    if (err instanceof LastMethodError) return fail("second_factor_last_method");
     // A parallel delete, enable, or disable wrote the row first. The person retries.
     if (err instanceof FactorRaceError) return fail("conflict");
     throw err;
