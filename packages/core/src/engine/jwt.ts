@@ -19,6 +19,7 @@ import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { sessionCapMs } from "./sessions.js";
 
 /**
  * JWT minting (plan 9g, spec 8.12). Core owns the keys: it writes the first
@@ -334,7 +335,13 @@ export async function mintSessionJwt(
     { field: "id", op: "eq", value: input.sessionId },
     { field: "userId", op: "eq", value: input.userId },
   ]);
-  if (!session || session.expiresAt.getTime() <= now.getTime()) return fail("unauthorized");
+  // The absolute cap ends a session whose expiresAt is later (plan 12b), as in resolveSession.
+  if (
+    !session ||
+    session.expiresAt.getTime() <= now.getTime() ||
+    sessionCapMs(config, session.createdAt) <= now.getTime()
+  )
+    return fail("unauthorized");
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
@@ -382,7 +389,8 @@ export async function verifySessionJwt(
 }
 
 /**
- * True while the session of `sid` exists and is not expired (plan 9g final
+ * True while the session of `sid` exists, is not expired, and is inside the
+ * absolute cap of `session.absoluteDays` (plan 12b) (plan 9g final
  * fix wave, review M-1). A resource server that must end access at a
  * sign-out asks this with the `sid` of a verified session JWT. It reads the
  * row by id only: it renews nothing and resolves no user.
@@ -396,7 +404,8 @@ export async function sessionLive(
   const row = await config.storage.findOne("session", [
     { field: "id", op: "eq", value: input.sid },
   ]);
-  return row !== null && row.expiresAt.getTime() > config.clock.now().getTime();
+  const now = config.clock.now().getTime();
+  return row !== null && row.expiresAt.getTime() > now && sessionCapMs(config, row.createdAt) > now;
 }
 
 /**

@@ -126,6 +126,35 @@ describe("POST /token/live (plan 11d)", () => {
     expect((await h.auth.handle(live(s.jwt))).status).toBe(200);
   });
 
+  it("answers live false, and mints nothing, when the absolute cap ended the session", async () => {
+    const DAY = 86_400_000;
+    const h = liveHandle({ session: { absoluteDays: 1 } });
+    const user = await h.seedUser("ada@example.com");
+    const { token, session } = await createSession(h.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    // Mint 5 minutes before the cap; the JWT lives 15 minutes, so it outlives the cap.
+    h.clock.advance(DAY - 5 * 60_000);
+    const minted = await h.auth.handle(
+      get("/auth/token", { cookie: `${DEFAULT_COOKIE_NAME}=${token}` }),
+    );
+    const { token: jwt } = (await minted.json()) as { token: string };
+    expect(await (await h.auth.handle(live(jwt))).json()).toEqual({ live: true });
+    h.clock.advance(6 * 60_000);
+    // The row still exists here. The live check and the mint run before the session
+    // route, because a session read deletes a capped row and would hide a gap.
+    expect(await (await h.auth.handle(live(jwt))).json()).toEqual({ live: false });
+    const r = await h.auth.api.jwt?.mint({ userId: user.id, sessionId: session.id });
+    expect(r).toEqual({ ok: false, code: "unauthorized", status: 401 });
+    // The session route agrees: the cap ended the session.
+    const s = await h.auth.handle(
+      get("/auth/session", { cookie: `${DEFAULT_COOKIE_NAME}=${token}` }),
+    );
+    expect(s.status).toBe(401);
+  });
+
   it("does not exist with jwtMint off", async () => {
     const h = liveHandle({ jwtMint: false });
     expect((await h.auth.handle(live("x"))).status).toBe(404);
