@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Node and Bun run these .ts files as they are. Node's type stripping needs
+    // the .ts extension in each relative import.
+    "allowImportingTsExtensions": true,
+    "types": ["node", "bun"]
+  },
+  "include": ["src", "test"]
+}

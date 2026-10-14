@@ -1,0 +1,62 @@
+---
+title: Sign in with an email code
+description: Sign a person in, or reset a password, with a code of 6 or 8 digits by mail.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.10
+  - packages/core/README.md "Email codes"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/email-code.ts?raw";
+import client from "../../../../../samples/guides/email-code-client.ts?raw";
+import test from "../../../../../samples/guides/email-code.test.ts?raw";
+
+**For:** an app developer whose users sign in on a device where the mailbox is not, or whose mail client strips links.
+
+**What it does:** core mails a code. The person types the code into the app, and the app gets a session.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- A `password` config, only if you also want the reset by code. [Passwords](/docs/reference/config/#passwords) lists its keys.
+
+## Steps
+
+1. Keep `emailOtp` on. It is on by default. `emailOtp: false` turns it off.
+2. Set `emailOtp.length` to 8 for an account of high value.
+
+<Code code={config} lang="ts" title="The email code config" />
+
+3. In the app, call `client.emailOtp.request({ email })`.
+4. Show a field for the code. Then call `client.emailOtp.verify({ email, code })`.
+5. Store the `token` of the answer in the device's secure store. A browser app keeps the cookie.
+
+<Code code={client} lang="ts" title="The sign-in by code in a device app" />
+
+<Code code={test} lang="ts" title="The flow as a test" />
+
+## How it behaves
+
+- One code per address and purpose is live. A new request spends the earlier code.
+- A wrong code counts one guess. The guess that reaches `maxAttempts` spends the code. Every later try then answers `too_many_attempts` until a new request.
+- A wrong, expired, spent, or unknown code answers `invalid_code`. Core does not tell them apart.
+- Core stores HMAC-SHA256 under `secret` of the row id and the code. A copy of the table gives no code.
+- Core sends each code to the address of the code, whatever `to` your mail builder answers.
+- A request has three [limits](/docs/reference/limits/): `otp:email:<email>` 3 per 15 minutes, `otp:ip:<ip>` 20 per 15 minutes, and `otp:email-day:<email>` 20 per 24 hours.
+- A verify or a reset by code has two [limits](/docs/reference/limits/): `otp-verify:email:<email>` 10 per 15 minutes, and `otp-verify:ip:<ip>` 30 per 15 minutes.
+- A reset by code takes `{ email, code, password }` at `POST /auth/otp/reset`. A refused password spends the code.
+
+## If it fails
+
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the request has no valid address or code.
+- [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, old, or spent. Ask the person to type it again.
+- [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): the code took its last guess. Request a new code.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the request or of the verify is full. Wait 15 minutes, or 24 hours after 20 requests in a day.
+- [`password_policy`](/docs/reference/errors/#password_policy) and [`password_breached`](/docs/reference/errors/#password_breached): the reset refused the new password, and spent the code.
+
+## Next
+
+- [Sign in with a magic link](/docs/guides/magic-link/)
+- [The threat model](/docs/concepts/threat-model/)
+- [Limits](/docs/reference/limits/)

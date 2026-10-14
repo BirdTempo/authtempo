@@ -1,0 +1,22 @@
+{
+  "name": "authtempo-example-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node test/e2e.ts && bun test/e2e.ts"
+  },
+  "dependencies": {
+    "@authtempo/adapter-postgres": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.3",
+    "@types/node": "24.19.1",
+    "bun": "1.4.3",
+    "typescript": "7.0.2"
+  }
+}

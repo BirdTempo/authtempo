@@ -1,0 +1,86 @@
+---
+title: From Auth.js
+description: Move the users, the identities, the password hashes, and the passkeys of an Auth.js app into authtempo, and change the app's auth calls.
+type: how-to
+sources:
+  - packages/import/README.md "Auth.js"
+  - packages/legacy-hashes/README.md "@authtempo/legacy-hashes"
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+sidebar:
+  order: 7
+---
+
+import { Code } from "@astrojs/starlight/components";
+import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
+
+**For:** an operator and a developer who move an app from Auth.js to authtempo.
+
+**What it does:** you read the tables of Auth.js into one JSON file, and import it into core's tables. Then you change the app's calls to `@authtempo/client`.
+
+## Before you start
+
+- An API with authtempo. Set `password` when the old app has a password column of its own. Do a [getting started tutorial](/docs/start/) first.
+- The Auth.js tables on Postgres, with the Prisma names `User`, `Account`, and `Authenticator`. [The command](/docs/reference/import-cli/#the-command) reads their export.
+- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+
+## Steps
+
+1. Read the three tables into `tables.json`, and keep the file private.
+
+```sh
+(umask 077; psql -At "$DATABASE_URL_OLD" -c "select json_build_object('users', (select coalesce(json_agg(json_build_object('id', u.id, 'email', u.email, 'emailVerified', u.\"emailVerified\" at time zone 'UTC', 'name', u.name, 'image', u.image, 'passwordHash', u.\"passwordHash\")), '[]') from \"User\" u), 'accounts', (select coalesce(json_agg(json_build_object('userId', a.\"userId\", 'type', a.type, 'provider', a.provider, 'providerAccountId', a.\"providerAccountId\")), '[]') from \"Account\" a), 'authenticators', (select coalesce(json_agg(json_build_object('credentialID', x.\"credentialID\", 'userId', x.\"userId\", 'credentialPublicKey', x.\"credentialPublicKey\", 'counter', x.counter, 'credentialDeviceType', x.\"credentialDeviceType\", 'credentialBackedUp', x.\"credentialBackedUp\", 'transports', x.transports)), '[]') from \"Authenticator\" x))" > tables.json)
+```
+
+2. Put the app's own password column in the select in place of `passwordHash`.
+3. Remove that pair from the select when the app has no password column.
+4. When the `emailVerified` column is already `timestamptz`, remove `at time zone 'UTC'` from the select.
+5. Chain the legacy seam before core's PBKDF2 in the API. Pass the format of the app's hashes as `formats`, such as `["bcrypt"]`.
+
+<Code code={seam} lang="ts" title="The API after the import" />
+
+6. Run the import as a dry run. Add `--same-passkey-rp-id` only when the new API keeps the old relying party id.
+
+```sh
+pnpm exec authtempo-import authjs --tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --postgres "$DATABASE_URL" --dry-run
+```
+
+7. Run the same command without `--dry-run`.
+8. Delete `tables.json` with `rm tables.json`.
+9. Change each auth call of the app with the table below.
+10. Do the steps of [The cutover](/docs/migrate/cutover/).
+
+## The calls
+
+| Auth.js | authtempo |
+| --- | --- |
+| `signIn("google")` | Send the browser to `/auth/social/google/start?next=/` on the API. |
+| `signIn("resend", { email })` | `client.magicLink.request({ email })` |
+| `signIn("credentials", { email, password })` | `client.password.signIn({ email, password })` |
+| `signOut()` | `client.signOut()` |
+| `useSession()`, `getSession()` | `client.session()` |
+| `auth()`, `getServerSession()` on the server | `auth.session(request)` |
+
+## How it behaves
+
+- The select leaves out the OAuth tokens of `Account`. A refresh token gives access to the person's account at the provider.
+- Without the time zone, every user imports unverified, and the report lists `email_verified:unreadable`.
+- A passkey with a key, a counter, or a device field that core could not write is refused and listed.
+- A credential id on two users imports on neither.
+- Account rows other than `oauth` and `oidc` are dropped and listed.
+- A `linkedin` account of type `oidc` imports as LinkedIn. One of type `oauth` is listed as `identity:linkedin_legacy`.
+
+:::caution
+Warning: `tables.json` holds the password hashes. Write it with `umask 077`, and delete it after the run.
+:::
+
+## If it fails
+
+- The command stops at start: `--password-column` names a column that no row has.
+- The passkeys are dropped and listed: the run has no `--same-passkey-rp-id`, or the relying party id changed.
+- [`passkey_failed`](/docs/reference/errors/#passkey_failed): the API runs on another relying party id than the old app.
+
+## Next
+
+- [The cutover](/docs/migrate/cutover/)
+- [Sign in with a passkey](/docs/guides/passkeys/)
+- [Import CLI](/docs/reference/import-cli/)

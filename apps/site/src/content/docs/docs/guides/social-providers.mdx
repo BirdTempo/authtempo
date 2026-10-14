@@ -1,0 +1,63 @@
+---
+title: Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider
+description: Add the GitHub and LinkedIn presets, an OpenID Connect provider, or an OAuth 2.0 provider with its user info call.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
+  - packages/core/README.md "Social sign-in"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/social-providers.ts?raw";
+import test from "../../../../../samples/guides/social-providers.test.ts?raw";
+
+**For:** an app developer who wants a provider other than Google and Apple.
+
+**What it does:** each provider gets a start route and a callback route under `/auth/social/<name>/`, and a button on core's sign-in page.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- An OAuth app at the provider, with its client id and secret. [Social](/docs/reference/config/#social) lists the keys that hold them.
+
+## Steps
+
+1. For GitHub, set `social.github` to `{ clientId, clientSecret }`. Core asks for the scope `read:user user:email`.
+2. For LinkedIn, set `social.linkedin`.
+3. In the LinkedIn app, add the product "Sign In with LinkedIn using OpenID Connect".
+4. For an OpenID Connect provider, add an entry to `social.oidc` with its `issuer`.
+5. Set `endpoints` on that entry. Then a sign-in does not depend on the provider's discovery document.
+6. For a provider with no ID token, add an entry to `social.oauth2` with a `userinfo` function.
+7. In `userinfo`, call the provider with the `fetch` that core gives.
+8. In the answer of `userinfo`, set `emailVerified: true` only for a proved address.
+9. At each provider, register `https://api.example.com/auth/social/<name>/callback` as the redirect URI.
+
+<Code code={config} lang="ts" title="GitHub, an OIDC entry, and an OAuth2 entry" />
+
+<Code code={test} lang="ts" title="The start of each flow as a test" />
+
+## How it behaves
+
+- A `name` matches `^[a-z][a-z0-9-]{0,31}$`, is unique across both lists, and is not `google`, `apple`, `github`, `linkedin`, `email`, or `credential`.
+- The `label` is the button text, 1 to 80 characters.
+- An `oidc` entry with no `endpoints` reads `<issuer>/.well-known/openid-configuration` at its first start, and keeps it for the life of the instance.
+- The issuer of that document must equal `issuer` exactly. A failed read answers `oauth_failed` and is not kept.
+- GitHub counts an address as verified only when its primary address has `verified: true`.
+- LinkedIn's subject is pairwise for each client id. A new LinkedIn client id gives every person a new subject.
+- Every call to a provider stops after 10 seconds. Core never stores or logs a provider's access token.
+
+## If it fails
+
+The failures of [Sign in with Google and Apple](/docs/guides/social/) apply here too. Two more causes:
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the `userinfo` function threw, or did not answer in 10 seconds.
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the discovery document has another `issuer` or a URL that is not `https:`.
+
+`createAuth` refuses a bad entry at construction, with a message that names the key.
+
+## Next
+
+- [Sign in with Google and Apple](/docs/guides/social/)
+- [Configuration](/docs/reference/config/)
+- [The threat model](/docs/concepts/threat-model/)

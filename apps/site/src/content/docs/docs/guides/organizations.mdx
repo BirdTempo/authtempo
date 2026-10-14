@@ -1,0 +1,69 @@
+---
+title: Add organizations and roles
+description: Turn on organizations, ranked roles, mailed invitations, and the active organization of a session.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.6
+  - packages/core/README.md "Organizations"
+  - packages/core/README.md "Limits"
+  - packages/client/README.md "Organizations"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/organizations.ts?raw";
+import test from "../../../../../samples/guides/organizations.test.ts?raw";
+
+**For:** an app developer whose users work in teams.
+
+**What it does:** core adds organizations, members with ranked roles, invitations by mail, and an active organization on each session.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- Users with a verified address. Every organization write refuses an unverified caller. [The claim rule](/docs/concepts/claim-rule/) tells what verifies an address.
+
+## Steps
+
+1. Add `organizations: {}` to the config. With no `organizations` key, the organization routes answer 404.
+2. Set `ranks` when the four default roles do not fit. The table must name `owner`.
+3. Set `limits` for the counts that your plan sells. Each count is off by default.
+
+<Code code={config} lang="ts" title="The organizations config" />
+
+4. Call `client.organizations.create({ slug, name })`. The creator becomes `owner`.
+5. Call `client.organizations.invitations.invite({ organizationId, email, role })`. Core mails the link.
+6. On the page of the link, call `client.organizations.invitations.accept({ token })` for the signed-in person.
+7. Call `client.organizations.setActive({ organizationId })` when the person picks an organization.
+8. In each route of your app, check the member's rank again. The active organization is a choice, not a right.
+
+<Code code={test} lang="ts" title="Create, invite, and accept as a test" />
+
+## How it behaves
+
+- A role string may hold several roles joined by a comma. Its rank is the highest rank present, and an unknown role ranks 0.
+- A caller grants or sets only a role at or below the caller's own rank. A caller never touches a member of a higher rank.
+- The last owner cannot leave, be demoted, or be removed.
+- A slug is lower case after NFKC, up to 64 characters. The default reserved slugs are `admin`, `api`, `auth`, `internal`, `operator`, `ops`, `platform`, `system`, and `www`.
+- An organization holds one pending invitation for each address. A new invitation replaces the old one, and the old link stops.
+- The invitation token is in the mail only. No answer of a route carries it.
+- To accept, the caller's verified address must equal the invited address.
+- Invite has two [limits](/docs/reference/limits/): `invite:user:<userId>` 20 per 15 minutes, and `invite:email:<email>` 5 per hour.
+- Accept has one [limit](/docs/reference/limits/): `invitation-accept:ip:<ip>` 20 per 15 minutes.
+
+## If it fails
+
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller is not a member, or the rank is too low.
+- [`slug_reserved`](/docs/reference/errors/#slug_reserved) and [`slug_taken`](/docs/reference/errors/#slug_taken): pick another slug.
+- [`last_owner`](/docs/reference/errors/#last_owner): the write would leave no owner. Promote another member first.
+- [`conflict`](/docs/reference/errors/#conflict): a write at the same time changed the member. Read it again and retry.
+- [`already_member`](/docs/reference/errors/#already_member) and [`email_mismatch`](/docs/reference/errors/#email_mismatch): the add or the accept does not fit the member.
+- [`organization_limit`](/docs/reference/errors/#organization_limit), [`member_limit`](/docs/reference/errors/#member_limit), and [`invitation_limit`](/docs/reference/errors/#invitation_limit): a count of `limits` is full.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): the caller must prove the address first.
+- [`invalid_token`](/docs/reference/errors/#invalid_token) and [`token_expired`](/docs/reference/errors/#token_expired): the invitation is spent, revoked, old, or its inviter lost the rank.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many invitations or accepts.
+
+## Next
+
+- [Run your code at a flow point](/docs/guides/hooks/)
+- [Give a script an API token](/docs/guides/api-tokens/)
+- [Routes](/docs/reference/routes/#post-organizations-create)

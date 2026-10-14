@@ -1,0 +1,72 @@
+---
+title: Be the OAuth and OIDC provider for MCP clients
+description: Let agents and MCP clients get access tokens for a resource of your app, with consent, PKCE, and rotating refresh tokens.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
+  - packages/core/README.md "OAuth 2.1 and OIDC provider"
+  - packages/client/README.md "Connected apps"
+  - examples/worker/src/index.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/oauth-provider.ts?raw";
+import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
+
+**For:** an app developer whose users connect agents, MCP clients, or other apps to the app.
+
+**What it does:** core becomes an OAuth 2.1 authorization server and an OpenID Connect provider for public clients.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- `jwtMint` on. It is on by default. An access token is a JWT that core signs. [JWT minting](/docs/reference/config/#jwt-minting) lists its keys.
+
+## Steps
+
+1. Set `oauth.resources` to the URLs of the resources that a client may ask for, 1 to 20.
+2. Set `oauth.scopes` to the scopes of your app, each with the text of the consent page.
+3. Keep `registration.cimd` off.
+   - To turn it on, pass `oauth.fetch`, your own fetch that refuses private addresses.
+4. Mount `auth.wellKnown(request)` for every path that starts with `/.well-known/` at the origin root.
+5. In each resource route, read the caller with `auth.caller(request)`.
+   - Answer 401 to a caller that is not `kind: "oauth"`.
+6. Check the scope of each tool in the route. A token with only `openid` must not call a tool.
+
+<Code code={config} lang="ts" title="The provider config and an MCP route" />
+
+<Code code={test} lang="ts" title="The metadata and the registration as a test" />
+
+7. Build a "connected apps" page with `client.oauth.grants()` and `client.oauth.revoke({ clientId })`.
+
+## How it behaves
+
+- Every client is public: no secret, and PKCE S256 on every code. A redirect URI must match exactly.
+- A client registers at `POST /auth/oauth/register`, or its client id is the https URL of its metadata document.
+- A browser with no session goes to core's sign-in page and comes back. An unverified user is refused.
+- The sign-in page and the consent page carry `request_id`, the id of a request that core holds for 10 minutes. The consent decides on the held request, not on the form.
+- A consent covers its scopes for every resource. A new scope asks again.
+- An access token has `typ: "at+jwt"`, `aud` the resource, and lives `accessTtlMinutes`. It passes only under its own resource, and nobody can revoke it.
+- A refresh token (`offline_access`) rotates at each use. A used refresh token sent again deletes its whole family.
+- A password reset and a password change delete every refresh token and every pending code of the user. The consents stay.
+- A revoke under another client's `client_id` answers `unauthorized_client` and revokes nothing.
+
+## If it fails
+
+The provider routes answer the codes of the OAuth table:
+
+- [`invalid_request`](/docs/reference/errors/#oauth-invalid_request): a parameter is missing, repeated, or wrong, or the held request is spent or older than 10 minutes.
+- [`invalid_client`](/docs/reference/errors/#oauth-invalid_client): the client id is unknown.
+- [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant): the code or the refresh token is spent, expired, or of another client.
+- [`invalid_target`](/docs/reference/errors/#oauth-invalid_target): the `resource` is not one of `oauth.resources`, or not the grant's.
+- [`access_denied`](/docs/reference/errors/#oauth-access_denied): the person refused, or the user is unverified.
+- [`login_required`](/docs/reference/errors/#oauth-login_required) and [`consent_required`](/docs/reference/errors/#oauth-consent_required): `prompt=none` with no session or no consent.
+- [`invalid_token`](/docs/reference/errors/#oauth-invalid_token) and [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope): the userinfo bearer is not valid, or lacks `openid`.
+- [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client): a revoke under another client's id.
+- [`rate_limited`](/docs/reference/errors/#oauth-rate_limited): a limit of the provider is full.
+
+## Next
+
+- [Well-known documents](/docs/reference/well-known/)
+- [Tokens and prefixes](/docs/reference/tokens/)
+- [Mint a JWT for your other services](/docs/guides/jwt/)

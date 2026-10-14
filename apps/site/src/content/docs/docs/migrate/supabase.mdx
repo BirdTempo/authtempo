@@ -1,0 +1,97 @@
+---
+title: From Supabase Auth
+description: Move the users, the identities, and the password hashes of Supabase Auth into authtempo, and change the app's auth calls.
+type: how-to
+sources:
+  - packages/import/README.md "Supabase"
+  - packages/import/README.md "The exit status and the report"
+  - packages/legacy-hashes/README.md "@authtempo/legacy-hashes"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+sidebar:
+  order: 3
+---
+
+import { Code } from "@astrojs/starlight/components";
+import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
+import test from "../../../../../samples/migrate/legacy-hash.test.ts?raw";
+
+**For:** an operator and a developer who move an app from Supabase Auth to authtempo.
+
+**What it does:** you export two tables of Supabase, import them into core's tables, and change the app's calls of `supabase.auth` to `@authtempo/client`.
+
+## Before you start
+
+- An API with authtempo and `password` set. Do a [getting started tutorial](/docs/start/) first.
+- Access to the Supabase database with `psql`. The Admin API returns no hash. [The command](/docs/reference/import-cli/#the-command) reads the export.
+- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+
+## Steps
+
+1. Export the users and the identities of Supabase as two CSV files.
+
+```sh
+psql "$SUPABASE_DB_URL" -c "\copy (select id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, is_anonymous, deleted_at, banned_until, is_sso_user from auth.users) to 'users.csv' with csv header"
+psql "$SUPABASE_DB_URL" -c "\copy (select provider, provider_id, user_id from auth.identities) to 'identities.csv' with csv header"
+```
+
+2. Chain the legacy seam before core's PBKDF2 in the API. Pass `["bcrypt", "argon2id"]` as `formats`.
+
+<Code code={seam} lang="ts" title="The API after the import" />
+
+3. Run the import as a dry run, and read the report.
+
+```sh
+pnpm exec authtempo-import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --postgres "$DATABASE_URL" --dry-run
+```
+
+4. Run the same command without `--dry-run`.
+5. Sign in once with a known user and the old password.
+6. Change each auth call of the app with the table below.
+7. Do the steps of [The cutover](/docs/migrate/cutover/).
+
+The test below imports one Supabase user and signs in with the old password.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
+## The calls
+
+| Supabase | authtempo |
+| --- | --- |
+| `supabase.auth.signInWithOtp({ email })` | `client.magicLink.request({ email })` |
+| `supabase.auth.signInWithPassword({ email, password })` | `client.password.signIn({ email, password })` |
+| `supabase.auth.signUp({ email, password })` | `client.password.signUp({ email, password })` |
+| `supabase.auth.signInWithOAuth({ provider: "google" })` | Send the browser to `/auth/social/google/start?next=/` on the API. |
+| `supabase.auth.resetPasswordForEmail(email)` | `client.password.requestReset({ email })` |
+| `supabase.auth.updateUser({ password })` | `client.password.change({ newPassword })` |
+| `supabase.auth.getSession()`, `supabase.auth.getUser()` | `client.session()` |
+| `supabase.auth.signOut()` | `client.signOut()` |
+| `supabase.auth.onAuthStateChange(callback)` | No event. Call `client.session()` after each sign-in and each sign-out. |
+| `supabase.auth.getUser(jwt)` on the server | `auth.session(request)` |
+
+A policy of row level security that reads `auth.uid()` does not move. Check the user in the API with `auth.session`, or mint a [session JWT](/docs/guides/jwt/) for the database.
+
+## How it behaves
+
+- A user with `email_confirmed_at` set imports verified. Every other user imports unverified.
+- An SSO user is skipped as `sso_user`, and a banned user as `banned`. The command still exits 0 for them.
+- A phone-only user has no address and is skipped as `no_email`.
+- The `github` provider imports as GitHub, and `linkedin_oidc` as LinkedIn. The older `linkedin` provider is listed as `identity:linkedin_legacy`.
+- A row with the tag `$fbscrypt$` needs `--firebase-signer-key`, `--firebase-salt-separator`, and `firescrypt` in `--formats`. Give the same two values as the seam's `firebase` option.
+- Supabase passkeys do not move.
+
+:::caution
+Warning: do not give a format in `--formats` that the seam does not verify. The import then writes those hashes and exits 0, and each of those users fails every password sign-in.
+:::
+
+## If it fails
+
+- The command exits 1: a person must look at a refused hash, a refused record, a conflict, or a `partial` record. [Import CLI](/docs/reference/import-cli/) lists each.
+- The command stops before any read: a column of the select is missing from the CSV header.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the hash format is not in the seam's `formats`, or the password is wrong.
+
+## Next
+
+- [The cutover](/docs/migrate/cutover/)
+- [Import CLI](/docs/reference/import-cli/)
+- [Sign in with a password](/docs/guides/password/)

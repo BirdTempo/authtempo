@@ -1,0 +1,56 @@
+---
+title: Set up a shared limiter
+description: Replace the memory limiter with the owned limiter on D1 or Postgres, so that every isolate shares one count.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+  - packages/core/README.md "Limits in version 1"
+  - packages/adapter-d1/README.md "Limiter"
+  - packages/adapter-postgres/README.md "Limiter"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import postgresLimiter from "../../../../../samples/guides/limiter.ts?raw";
+import d1Worker from "../../../../../../../examples/worker-d1/src/index.ts?raw";
+
+**For:** an operator who needs the limits of the price page to hold on every isolate.
+
+**What it does:** the owned limiter keeps one count for each key and window in the table `ta_limit`. Every isolate and every process shares that count.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- Schema version 3 or newer. The limiter's table came with migration `0003_schema_v3`. [The versions](/docs/reference/schema/#the-versions) table lists each one.
+
+## Steps
+
+1. On D1, pass `limiter: createD1Limiter(env.DB)` to `createAuth`.
+
+<Code code={d1Worker} lang="ts" title="examples/worker-d1/src/index.ts" />
+
+2. On Postgres, pass `limiter: createPostgresLimiter(sql)` on the same client as the storage.
+
+<Code code={postgresLimiter} lang="ts" title="The storage and the limiter on Postgres" />
+
+3. Off Workers, set `clientIp` to a function that reads the header of your trusted proxy.
+4. Run the [sweep](/docs/guides/sweep/), so that ended windows leave `ta_limit`.
+
+## How it behaves
+
+- The default limiter counts in memory. On Workers each isolate counts on its own, so the real limit is the limit times the isolate count.
+- Each call of the owned limiter runs one statement, so two calls at the same moment cannot both pass at the last slot.
+- The stored key is the key, the seconds, and the maximum, joined by U+001F. A key with U+001F throws.
+- A request with no client IP counts against one shared bucket of its flow, `<flow>:ip:unknown`.
+- On Workers, the default `clientIp` reads `cf-connecting-ip`, which Cloudflare sets and a caller cannot forge.
+- A per-code cap and a per-challenge cap live in their rows, so they hold under every limiter.
+
+## If it fails
+
+- [`rate_limited`](/docs/reference/errors/#rate_limited): a limit is full. [Limits](/docs/reference/limits/) lists every key, window, and maximum.
+- A shared limit that seems to allow too much is often the memory limiter. Check the `limiter` key of the config.
+
+## Next
+
+- [Limits](/docs/reference/limits/)
+- [The threat model](/docs/concepts/threat-model/)
+- [Delete expired rows](/docs/guides/sweep/)

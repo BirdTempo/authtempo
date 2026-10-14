@@ -1,0 +1,108 @@
+---
+title: From Better Auth
+description: Run an app written for Better Auth 1.7 on authtempo, on its own tables, through a package alias.
+type: how-to
+sources:
+  - packages/compat-better-auth/README.md "The alias"
+  - 'packages/compat-better-auth/README.md "Storage: in place on the Better Auth tables"'
+  - packages/compat-better-auth/README.md "What fails at start"
+  - packages/compat-better-auth/README.md "Plugins"
+  - packages/compat-better-auth/README.md "JWT and the OAuth provider"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16
+sidebar:
+  order: 2
+---
+
+import { Code } from "@astrojs/starlight/components";
+import server from "../../../../../samples/migrate/better-auth.ts?raw";
+import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
+
+**For:** a developer whose app runs Better Auth 1.7 and must keep its code and its tables.
+
+**What it does:** the Better Auth package names point at `@authtempo/compat-better-auth`. The app's code then runs on the engine of authtempo, on the app's own Better Auth tables.
+
+## Before you start
+
+- An app on Better Auth 1.7, on Postgres through postgres.js or on D1. [Better Auth compatibility](/docs/reference/compat-better-auth/) lists what it keeps.
+- The tables `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, and `passkey`. Create a missing table with Better Auth's own SQL for it. [The Better Auth tables](/docs/reference/schema/#the-better-auth-tables) section lists them.
+- The packages of authtempo in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.
+
+## Steps
+
+1. In the app's `package.json`, point each Better Auth name that the app imports at the compatibility package.
+
+```json
+{
+  "dependencies": {
+    "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@authtempo/core": "0.0.0",
+    "@authtempo/client": "0.0.0",
+    "@authtempo/handoff": "0.0.0",
+    "@authtempo/adapter-d1": "0.0.0",
+    "@authtempo/adapter-postgres": "0.0.0"
+  }
+}
+```
+
+2. Keep both adapters in the list, also for an app on one database. The server entry loads both.
+3. Remove each import of `better-auth/db`, `better-auth/types`, and the access subpaths. The package does not export them.
+4. Start the server once. Read the list of the one `BetterAuthCompatError`, and change or remove each option that it names.
+
+<Code code={server} lang="ts" title="A Better Auth server on authtempo" />
+
+5. Wrap the handler in place of `hooks`. Core has no request hooks.
+6. On Postgres, call `betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate()` once per deploy, before the first request.
+7. On D1, copy the four compat files into the app's `migrations_dir`, in order, each with the app's next number.
+8. Take the files from `migrations/d1/` for Better Auth 1.7 tables, or from `migrations/d1-before-1.7/` for older tables.
+9. Apply them with `pnpm --filter my-app exec wrangler d1 migrations apply <database> --remote`.
+10. Register the new callback URL at each social provider before the cutover.
+
+The test below runs the sample against a database in memory. It also shows the error at start.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
+## The D1 files
+
+| File | What it does |
+| --- | --- |
+| `0001_compat_better_auth.sql` | Adds `ta_meta` and `ta_limit`, the `ta` columns that Better Auth lacks, and the unique keys that core needs. |
+| `0002_compat_schema_v5.sql` | Moves the version to 5. It changes no table. |
+| `0003_compat_schema_v6.sql` | Adds `ta_totp` and `ta_trusted_device`. |
+| `0004_compat_schema_v7.sql` | Adds `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, and `ta_oauth_token`. |
+
+A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
+
+The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
+
+## How it behaves
+
+- Better Auth's defaults apply: a session lives 7 days and refreshes after 1 day.
+- The session cookie is `tempo_session`, not `better-auth.session_token`. Change each test and each legal page that names the old cookie.
+- The cookie name keeps the old product name tempo-auth for compatibility. [Cookies](/docs/reference/cookies/) states the rule.
+- The one key that is not Better Auth's is `authtempo`. `authtempo.appURL` is the origin where each sign-in lands, by default the origin of `baseURL`. An absolute `callbackURL` off that origin answers 403 with `INVALID_CALLBACK_URL`. `authtempo.passwordHash` replaces `betterAuthPasswordHash()`.
+- `session.token` holds the SHA-256 of the token. App SQL that reads it reads a hash.
+- A reset ends every session, where Better Auth kept the others.
+- Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
+- The callback URL at each provider is `<baseURL><basePath>/social/<provider>/callback`, not `/api/auth/callback/<provider>`.
+- The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.
+- A Better Auth path that the app calls with its own `fetch` answers 404. Call the client method instead.
+
+:::caution
+Warning: a new `secret` locks every user with the second factor out of it. Keep the `secret` that the app has.
+:::
+
+## If it fails
+
+- `BetterAuthCompatError` at start: change each option in its list.
+- `relation "ta_limit" already exists`: the schema holds the tables of the Postgres adapter. Run the compatibility storage on a schema without them.
+- `no such column: issuer` on D1: the 1.7 file ran on older tables. Use the `d1-before-1.7` file.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link or an invitation from before the cutover. Send it again.
+
+## Next
+
+- [Better Auth compatibility](/docs/reference/compat-better-auth/)
+- [The cutover](/docs/migrate/cutover/)
+- [Run your code at a flow point](/docs/guides/hooks/)

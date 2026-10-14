@@ -1,0 +1,70 @@
+---
+title: Sign in from a native or desktop app
+description: Sign a person in from Expo or Electron through the system browser, and redeem a one-time code for a bearer token.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.5
+  - packages/core/README.md "Handoff for native and desktop apps"
+  - packages/handoff/README.md "Expo"
+  - packages/handoff/README.md "Electron"
+  - docs/superpowers/runbooks/2026-10-10-expo-cookie-proof.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/handoff.ts?raw";
+import app from "../../../../../samples/guides/handoff-app.ts?raw";
+import test from "../../../../../samples/guides/handoff.test.ts?raw";
+
+**For:** a developer of an Expo app or an Electron app.
+
+**What it does:** the app opens core's sign-in page in the system browser. The person signs in with any method, and the app receives a bearer token.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- An app scheme, such as `myapp://`, that the device routes to your app. [The opener contract](/docs/reference/handoff/#the-opener-contract) uses it.
+
+## Steps
+
+1. Set `handoff.schemes` on the API to the app scheme, with its `://`.
+
+<Code code={config} lang="ts" title="The handoff config" />
+
+2. In the app, make a handoff with the redirect `myapp://auth` and the opener of the platform.
+3. In Expo, pass `expoOpener(WebBrowser)` and `expoCrypto(Crypto)`. Hermes has no `crypto.subtle`.
+4. In Electron, call `app.requestSingleInstanceLock()` first, then `app.setAsDefaultProtocolClient("myapp")`.
+5. In Electron, forward the URL of the `second-instance` event to `opener.receive`.
+6. Call `handoff.signIn()`. It answers `{ token, user, session }`.
+7. Store the token. In Electron, use `createTokenStore` on `safeStorage`, in the main process only.
+8. Make the client with `credentials: "omit"` and `token: () => store.get()`.
+
+<Code code={app} lang="ts" title="The app side" />
+
+<Code code={test} lang="ts" title="A full handoff as a test" />
+
+## How it behaves
+
+- The app makes a PKCE verifier. The verifier leaves the app once, in the redeem body.
+- The sign-in page shows every method of the config. Each method ends on a confirm page that names the account.
+- The code is minted only when the person presses the button of the confirm page. It lives two minutes and redeems once.
+- The URL that the app receives must start with exactly the configured redirect, or no redeem happens.
+- Show `user.email` after each sign-in, so that the person sees a sign-in to another account.
+- The start has the [limit](/docs/reference/limits/) `handoff-start:ip:<ip>` 30 per 15 minutes. The redeem has `handoff-redeem:ip:<ip>` 20 per 15 minutes.
+
+:::caution
+Warning: `handoff.devRedirectPattern` admits any URL that it matches. Keep it to the host and the port of your development server, and leave it unset in production.
+:::
+
+## If it fails
+
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the challenge or the redirect of the start is malformed, or no scheme of the config admits it.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the code is spent or unknown, or the verifier does not match.
+- [`token_expired`](/docs/reference/errors/#token_expired): the code is older than two minutes.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many starts or redeems from the IP.
+- `redirect_mismatch` and `cancelled` come from the handoff package, not from the server. The [handoff reference](/docs/reference/handoff/) lists them.
+
+## Next
+
+- [The handoff package](/docs/reference/handoff/)
+- [Sign in with a passkey](/docs/guides/passkeys/)
+- [Sessions, API tokens, and JWTs](/docs/concepts/credentials/)

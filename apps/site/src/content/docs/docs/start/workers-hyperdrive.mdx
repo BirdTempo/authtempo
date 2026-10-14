@@ -1,0 +1,85 @@
+---
+title: Workers on Postgres through Hyperdrive
+description: Run authtempo in a Cloudflare Worker on Postgres through Hyperdrive, and sign in with a magic link.
+type: tutorial
+sources:
+  - packages/adapter-postgres/README.md "On Cloudflare Workers"
+  - packages/adapter-postgres/README.md "Migrations"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 4
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 14
+sidebar:
+  order: 3
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../../examples/worker-postgres/wrangler.jsonc?raw";
+import worker from "../../../../../../../examples/worker-postgres/src/index.ts?raw";
+import migrate from "../../../../../../../examples/worker-postgres/scripts/migrate.ts?raw";
+import test from "../../../../../../../examples/worker-postgres/test/sign-in.test.ts?raw";
+
+**For:** a developer who wants sign-in in a Cloudflare Worker with a Postgres database.
+
+**What it does:** you make a Worker that reaches Postgres through Hyperdrive and serves the authtempo routes under `/auth`. A test signs a person in with a magic link on a local Postgres.
+
+## Before you start
+
+- Node 22.18 or newer, pnpm 12.8.1, and Docker.
+- A clone of the authtempo repo. Your app lives in its pnpm workspace, as [Choose your stack](/docs/start/) tells.
+- A Postgres database for the deploy. [Postgres](/docs/reference/schema/#postgres) tells how to migrate it.
+- A Cloudflare account, on Workers Paid if you add passwords.
+
+## Steps
+
+1. Copy the folder `examples/worker-postgres` of the repo to `examples/my-app`.
+2. In `examples/my-app/package.json`, change `name` to `my-app`.
+3. Run `pnpm install` at the root of the repo.
+4. Start the local Postgres with `docker compose up -d` at the root of the repo. It listens on port 5439.
+5. Read `wrangler.jsonc`. It keeps `nodejs_compat` on, because the driver opens a socket through Node.js APIs.
+
+<Code code={config} lang="jsonc" title="examples/my-app/wrangler.jsonc" />
+
+6. Read `src/index.ts`. It opens one client for each request and ends it after the answer.
+
+<Code code={worker} lang="ts" title="examples/my-app/src/index.ts" />
+
+7. Read `scripts/migrate.ts`. It applies the migrations. Run it on each deploy, before the new Worker serves a request.
+
+<Code code={migrate} lang="ts" title="examples/my-app/scripts/migrate.ts" />
+
+8. Run the test. It makes a new database, applies the migrations, and signs a person in.
+
+```sh
+pnpm turbo run test --filter=my-app
+```
+
+<Code code={test} lang="ts" title="examples/my-app/test/sign-in.test.ts" />
+
+9. Make a Hyperdrive config for your database.
+
+```sh
+pnpm --filter my-app exec wrangler hyperdrive create my-app --connection-string="postgres://USER:PASSWORD@HOST:5432/DATABASE"
+```
+
+10. Copy the `id` that the command prints into `wrangler.jsonc`.
+11. Apply the migrations to your database.
+
+```sh
+DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" pnpm --filter my-app migrate
+```
+
+12. Replace the body of `mail.send` in `src/index.ts` with a call to your mail provider.
+13. Set `BASE_URL` in `wrangler.jsonc` to the origin of your Worker.
+14. Store a secret of 32 characters or more with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`.
+15. Deploy the Worker with `pnpm --filter my-app exec wrangler deploy`.
+
+:::caution
+Warning: with one connection for each request, a before hook that queries the same client stops the request. The request never ends. Read [The one-connection rule](/docs/concepts/one-connection/) before you add a hook.
+:::
+
+The test runs the code of the Worker on Node against the local Postgres. The repo has no run of this adapter on workerd through Hyperdrive yet, so do one real sign-in after the first deploy.
+
+## Next
+
+- [Your first sign-in from a web app](/docs/start/first-sign-in/)
+- [Upgrades and schema versions](/docs/operations/upgrades/)
+- [Set up a shared limiter](/docs/guides/limiter/)

@@ -981,3 +981,7 @@ Six methods: `create`, `findOne`, `findMany`, `update`, `delete`,
 `transaction`. Clauses join with AND. Operators: `eq ne in lt lte gt gte`.
 One sort field. No joins. Run `runAdapterConformance` from
 `@authtempo/core/conformance` against a new adapter; it is the contract.
+
+`@authtempo/core/testing` also exports `ROUTES`, every route that core can
+serve, each with the config that turns it on. A core test proves that the
+router serves exactly that list when every feature is on.

@@ -1,0 +1,74 @@
+---
+title: Workers on D1
+description: Run authtempo in a Cloudflare Worker on a D1 database, and sign in with a magic link.
+type: tutorial
+sources:
+  - packages/core/README.md "@authtempo/core"
+  - packages/adapter-d1/README.md "Migrations"
+  - packages/adapter-d1/README.md "Limiter"
+  - packages/core/README.md "Sweep"
+  - examples/worker-d1/wrangler.jsonc
+sidebar:
+  order: 2
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../../examples/worker-d1/wrangler.jsonc?raw";
+import worker from "../../../../../../../examples/worker-d1/src/index.ts?raw";
+import test from "../../../../../../../examples/worker-d1/test/sign-in.test.ts?raw";
+
+**For:** a developer who wants sign-in in a Cloudflare Worker with a D1 database.
+
+**What it does:** you make a Worker that serves the authtempo routes under `/auth`. A test signs a person in with a magic link on a local D1 database.
+
+## Before you start
+
+- Node 22.18 or newer, and pnpm 12.8.1.
+- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so your app lives in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.
+- A Cloudflare account, for the deploy at the end. A magic link runs on Workers Free. A password needs Workers Paid.
+
+## Steps
+
+1. Copy the folder `examples/worker-d1` of the repo to `examples/my-app`.
+2. In `examples/my-app/package.json`, change `name` to `my-app`.
+3. Run `pnpm install` at the root of the repo.
+4. Read `wrangler.jsonc`. It binds the D1 database as `DB` and turns Node.js compatibility off.
+
+<Code code={config} lang="jsonc" title="examples/my-app/wrangler.jsonc" />
+
+5. Read `src/index.ts`. It mounts `auth.handle` under `/auth`, serves `/me`, and runs the sweep on a cron trigger.
+
+<Code code={worker} lang="ts" title="examples/my-app/src/index.ts" />
+
+6. Run the test. It applies the migrations to a local D1 database and signs a person in.
+
+```sh
+pnpm turbo run test --filter=my-app
+```
+
+<Code code={test} lang="ts" title="examples/my-app/test/sign-in.test.ts" />
+
+7. Create the real database with `pnpm --filter my-app exec wrangler d1 create my-app`.
+8. Copy the `database_id` that the command prints into `wrangler.jsonc`.
+9. Apply the migrations to the real database.
+
+```sh
+pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
+```
+
+10. Replace the body of `mail.send` in `src/index.ts` with a call to your mail provider.
+11. Set `BASE_URL` in `wrangler.jsonc` to the origin of your Worker.
+12. Store a secret of 32 characters or more with `pnpm --filter my-app exec wrangler secret put AUTH_SECRET`.
+13. Deploy the Worker with `pnpm --filter my-app exec wrangler deploy`.
+
+:::caution
+Warning: a new `AUTH_SECRET` makes every live email code fail and locks every user out of the second factor. Do not change it without the steps on [Secrets](/docs/operations/secrets/).
+:::
+
+The test passes, and the Worker answers `/auth/magic-link/request`. After step 13 a person signs in with a mailed link, and `/me` answers the address.
+
+## Next
+
+- [Your first sign-in from a web app](/docs/start/first-sign-in/)
+- [Sign in with a magic link](/docs/guides/magic-link/)
+- [Delete expired rows](/docs/guides/sweep/)

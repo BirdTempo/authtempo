@@ -1,0 +1,59 @@
+---
+title: Mint a JWT for your other services
+description: Give a signed-in person a short session JWT, and verify it on another server against the key set.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.12
+  - packages/core/README.md "JWT minting"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/jwt.ts?raw";
+import verify from "../../../../../samples/guides/jwt-verify.ts?raw";
+import test from "../../../../../samples/guides/jwt.test.ts?raw";
+
+**For:** a developer whose other server cannot call `auth.session`, but must know the signed-in user.
+
+**What it does:** core signs a JWT about the session user. The other server checks it against the public keys at `/auth/jwks`.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- A JWT library on the other server. This page uses [`jose`](https://github.com/panva/jose).
+
+## Steps
+
+1. Set `jwtMint.audience` to the URL of the other server. The default is `baseURL`.
+2. Set `jwtMint.ttlMinutes` short. A sign-out does not end a token.
+3. Add your own claims with `jwtMint.claims`. Core sets the reserved claims itself.
+
+<Code code={config} lang="ts" title="The JWT config" />
+
+4. In the app, call `client.jwt.token()`.
+   - Send the token with each request to the other server.
+5. On the other server, check the signature, `iss`, `aud`, `exp`, and the header `typ: "JWT"`.
+
+<Code code={verify} lang="ts" title="The check of the other server" />
+
+<Code code={test} lang="ts" title="Mint and verify as a test" />
+
+## How it behaves
+
+- The claims are `iss` (`baseURL` plus `basePath`), `sub`, `aud`, `iat`, `exp`, `sid`, `email`, `email_verified`, `name`, and `org`.
+- The key is EdDSA (Ed25519) by default, or ES256. Core writes the first key at the first use and seals its private half under `secret`.
+- `api.jwt.rotate()` makes a new signing key. The old key verifies for 24 hours and signs nothing.
+- `GET /auth/jwks` answers the public keys with `cache-control: public, max-age=300`.
+- The same key signs OAuth access tokens, with `typ: "at+jwt"`. A server that skips the `typ` check can take one kind for the other.
+- Core refuses a `jwtMint.audience` entry that is also an `oauth.resources` entry.
+- Where a sign-out must end access at once, check the `sid` claim with `api.jwt.sessionLive({ sid })`.
+
+## If it fails
+
+- [`unauthorized`](/docs/reference/errors/#unauthorized): `GET /auth/token` needs a session. An API token and a JWT get 401.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): `jwtMint.claims` threw, or answered a value that is not an object.
+
+## Next
+
+- [Key rotation](/docs/operations/key-rotation/)
+- [Be the OAuth and OIDC provider for MCP clients](/docs/guides/oauth-provider/)
+- [Sessions, API tokens, and JWTs](/docs/concepts/credentials/)

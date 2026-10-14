@@ -234,6 +234,8 @@ function derInteger(bytes: Uint8Array): Bytes {
   return concat(new Uint8Array([0x02, v.length]), v);
 }
 
+/** Every route that core can serve (plan 11a), for the docs checks and an app's own route tests. */
+export { ROUTES, type RouteEntry, type RouteFeature } from "../http/route-list.js";
 /**
  * A software authenticator app for tests (plan 9f): the code that an app
  * shows for a base32 secret at a time. It is a test tool, as the passkey

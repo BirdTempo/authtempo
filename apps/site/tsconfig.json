@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    // The checks run as .ts files under Node's type stripping, which needs the
+    // .ts extension in each relative import.
+    "allowImportingTsExtensions": true,
+    // TypeScript 7 loads no @types package unless "types" names it. The checks read node:fs.
+    "types": ["node"]
+  },
+  // src/ holds Astro files and the content config, which import Astro's virtual
+  // modules; astro build checks them. tsc checks the samples, the checks, and the tests.
+  "include": ["samples", "scripts", "test"]
+}

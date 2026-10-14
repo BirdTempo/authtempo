@@ -1,0 +1,56 @@
+---
+title: Run the app on another origin
+description: Serve the API on one origin and the browser app on another, with credentialed CORS and the right cookie.
+type: how-to
+sources:
+  - packages/core/README.md "Apps on another origin"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/split-origins.ts?raw";
+import test from "../../../../../samples/guides/split-origins.test.ts?raw";
+
+**For:** a developer whose browser app and API live on two origins.
+
+**What it does:** the router answers the app's preflight, marks each answer for the app with credentialed CORS, and lands every sign-in on the app.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- The exact origin of the app, such as `https://app.example.net`, with no path and no trailing slash. It goes in `trustedOrigins` of [Top level](/docs/reference/config/#top-level).
+
+## Steps
+
+1. Set `appURL` to the origin of the app.
+2. Add the same origin to `trustedOrigins`. Core refuses an `appURL` that is not `baseURL` or a trusted origin.
+3. For an app on another site, set `cookie: { sameSite: "None" }`.
+4. For an app on a sibling subdomain of the API, keep the default, `Lax`.
+
+<Code code={config} lang="ts" title="The config of two origins" />
+
+5. In the app, make the client with the default `credentials: "include"`, so that the browser sends the cookie.
+
+<Code code={test} lang="ts" title="The CORS answers as a test" />
+
+## How it behaves
+
+- A trusted origin gets a 204 answer to its preflight. Any other origin gets 403.
+- A POST with an `Origin` header that is not trusted answers 403 before any handler runs.
+- A POST with no `Origin` header is a client that is not a browser, and passes.
+- With `SameSite=None`, any site can make the browser send the cookie. The Origin rule is what refuses such a request.
+- A `next` under `basePath` stays on `baseURL`. Every other `next` lands on `appURL`.
+- The cookie names are `tempo_session` and `tempo_session_oauth`. A host on a sibling subdomain can set a cookie of the same name, so keep the API on its own registrable domain.
+
+## If it fails
+
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the `Origin` header is not `baseURL` and not in `trustedOrigins`.
+- The client answers `network` when the browser blocks an answer for an origin that is not trusted.
+- `client.session()` answers `null` on another site when the cookie is `Lax`. Set `SameSite=None`.
+
+## Next
+
+- [Your first sign-in from a web app](/docs/start/first-sign-in/)
+- [Cookies](/docs/reference/cookies/)
+- [The threat model](/docs/concepts/threat-model/)

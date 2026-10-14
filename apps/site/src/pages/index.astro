@@ -1,0 +1,29 @@
+---
+// The placeholder landing page (plan 11a). Plan 11b replaces this file and the
+// site theme, and never the docs tree. The page makes no claim that a test
+// does not hold: the example tests of plan 11a run authtempo on Workers, on
+// Node, and on Bun. It has no data-pagefind-body, so the search skips it.
+// The style is global: a scoped style adds a class to each element, and the
+// build layout test reads the landing link as plain HTML.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>authtempo</title>
+    <style is:global>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 4rem 1rem; color: #1b1f24; background: #ffffff; }
+      main { max-width: 40rem; margin: 0 auto; }
+      @media (prefers-color-scheme: dark) { body { color: #e6e8eb; background: #14171a; } a { color: #8ab4f8; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>authtempo</h1>
+      <p>Your app owns its authentication. It runs on Cloudflare Workers, on Node, and on Bun.</p>
+      <p><a href="/docs/">Read the docs</a></p>
+    </main>
+  </body>
+</html>

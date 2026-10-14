@@ -1,0 +1,66 @@
+---
+title: Replace the default pages
+description: Replace a page that core serves, such as the magic link confirm page, with the app's own markup.
+type: how-to
+sources:
+  - packages/core/README.md "Routes under"
+  - packages/core/README.md "Handoff for native and desktop apps"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 15
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 10"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import page from "../../../../../samples/guides/pages.ts?raw";
+import test from "../../../../../samples/guides/pages.test.ts?raw";
+
+**For:** an app developer who wants core's pages in the look of the app.
+
+**What it does:** a page function of the config answers the markup. Core sets the headers and serves the page.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- The default page of the same kind, to copy its form fields. Core exports each default, as the [Functions](/docs/reference/api/#functions) table lists.
+
+## Steps
+
+1. Pick the page in the table below.
+   - Read its default to see the form fields.
+2. Write a function that takes the page input and answers the markup.
+3. Escape every value of the input in the markup.
+4. Keep the form of the default: the same `method`, `action`, and field names.
+5. Set the config key of the table to your function.
+
+<Code code={page} lang="ts" title="A confirm page of the app" />
+
+<Code code={test} lang="ts" title="The page as a test" />
+
+## The pages
+
+| Config key | Default | The page |
+| --- | --- | --- |
+| `magicLink.confirmPage` | `defaultConfirmPage` | The page of a magic link, with one button that posts the token. |
+| `handoff.signInPage` | `defaultSignInPage` | The sign-in page of the handoff and of the OAuth authorize step. |
+| `handoff.confirmPage` | `defaultHandoffConfirmPage` | The page that names the account and the app before the code is minted. |
+| `password.resetPage` | `defaultResetPage` | The form of a reset link. |
+| `totp.challengePage` | `defaultTotpPage` | The form of a second factor challenge. |
+| `oauth.consentPage` | `defaultConsentPage` | The consent page of the OAuth provider. |
+
+## How it behaves
+
+- Core sets `cache-control: no-store`, `referrer-policy: strict-origin`, `x-robots-tag: noindex`, and a content security policy.
+- The policy permits inline style, no script, and a form post to this origin only. A page that needs script needs its own route in the app.
+- The sign-in page is the one page with a script: the passkey ceremony, under a nonce. A custom sign-in page must put the nonce on its script tag.
+- A custom sign-in page must show `methods.providers`, or the buttons of GitHub, LinkedIn, and the list providers do not show.
+- The verify page of a password sign-up has no config key. Core serves `defaultPasswordVerifyPage`.
+
+## If it fails
+
+- A page with a script shows no error, and the browser does not run the script. Move the script to a route of the app.
+- A form with other field names posts nothing that core reads, and the flow answers [`invalid_token`](/docs/reference/errors/#invalid_token).
+
+## Next
+
+- [Sign in with a magic link](/docs/guides/magic-link/)
+- [Sign in from a native or desktop app](/docs/guides/handoff/)
+- [The API reference](/docs/reference/api/)

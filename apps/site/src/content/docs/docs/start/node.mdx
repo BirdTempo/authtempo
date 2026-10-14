@@ -1,0 +1,73 @@
+---
+title: Node
+description: Run authtempo in a Node HTTP server on Postgres, and sign in with a magic link.
+type: tutorial
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 1
+  - packages/core/README.md "Limits in version 1"
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 8"
+sidebar:
+  order: 4
+---
+
+import { Code } from "@astrojs/starlight/components";
+import app from "../../../../../../../examples/node/src/app.ts?raw";
+import server from "../../../../../../../examples/node/src/server-node.ts?raw";
+import main from "../../../../../../../examples/node/src/main.ts?raw";
+import e2e from "../../../../../../../examples/node/test/e2e.ts?raw";
+
+**For:** a developer who wants sign-in in a Node server with a Postgres database.
+
+**What it does:** you make a Node HTTP server that serves the authtempo routes under `/auth`. A script signs a person in with a magic link through the real server.
+
+## Before you start
+
+- Node 22.18 or newer, which runs a `.ts` file with its type stripping. This repo uses Node 26.10.0.
+- pnpm 12.8.1 and Docker.
+- A clone of the authtempo repo. Your app lives in its pnpm workspace, as [Choose your stack](/docs/start/) tells.
+
+## Steps
+
+1. Copy the folder `examples/node` of the repo to `examples/my-app`.
+2. In `examples/my-app/package.json`, change `name` to `my-app`.
+3. Run `pnpm install` at the root of the repo.
+4. Start the local Postgres with `docker compose up -d` at the root of the repo.
+5. Read `src/app.ts`. It builds the auth instance and routes `/auth/` and `/me`.
+
+<Code code={app} lang="ts" title="examples/my-app/src/app.ts" />
+
+6. Read `src/server-node.ts`. It turns each Node request into a fetch `Request`, and sets the client IP from the socket.
+
+<Code code={server} lang="ts" title="examples/my-app/src/server-node.ts" />
+
+7. Read `src/main.ts`. It reads the settings from the environment, applies the migrations, and starts the server.
+
+<Code code={main} lang="ts" title="examples/my-app/src/main.ts" />
+
+8. Run the test. It signs a person in under Node, then under Bun, and prints one line for each runtime.
+
+```sh
+pnpm turbo run test --filter=my-app
+```
+
+<Code code={e2e} lang="ts" title="examples/my-app/test/e2e.ts" />
+
+9. Find the line `node-e2e: PASS` in the output.
+10. Replace the body of `mail.send` in `src/app.ts` with a call to your mail provider.
+11. At the root of the repo, start the server with the settings of your deploy.
+
+```sh
+DATABASE_URL="postgres://USER:PASSWORD@HOST:5432/DATABASE" AUTH_SECRET="<32 characters or more>" BASE_URL="https://api.example.com" HOST=0.0.0.0 PORT=3000 pnpm --filter my-app exec node src/main.ts
+```
+
+:::caution
+Warning: behind a proxy, the socket address is the address of the proxy. Then every caller shares one per-IP limit. Set the header in `server-node.ts` from the header that your proxy sets.
+:::
+
+The test prints `node-e2e: PASS`, and the server answers `/auth/magic-link/request`. After step 11 a person signs in with a mailed link, and `/me` answers the address.
+
+## Next
+
+- [Your first sign-in from a web app](/docs/start/first-sign-in/)
+- [Bun](/docs/start/bun/)
+- [Set up a shared limiter](/docs/guides/limiter/)

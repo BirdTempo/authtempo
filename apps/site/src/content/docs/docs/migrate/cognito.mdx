@@ -1,0 +1,96 @@
+---
+title: From Amazon Cognito
+description: Move the users of Amazon Cognito into authtempo, check each password against Cognito once, and change the app's auth calls.
+type: how-to
+sources:
+  - packages/import/README.md "Cognito"
+  - packages/legacy-hashes/README.md "Cognito"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17.4
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+sidebar:
+  order: 8
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/migrate/cognito.ts?raw";
+import test from "../../../../../samples/migrate/cognito.test.ts?raw";
+
+**For:** an operator and a developer who move an app from Amazon Cognito to authtempo.
+
+**What it does:** you import the users of a Cognito user pool. Cognito exports no hash, so core asks Cognito once, at each user's first password sign-in, and then keeps its own hash.
+
+## Before you start
+
+- An API with authtempo. Do a [getting started tutorial](/docs/start/) first.
+- The AWS CLI, with read access to the user pool.
+- An app client of the pool that lists `ALLOW_USER_PASSWORD_AUTH` in its auth flows. `password.legacyVerify` of [Passwords](/docs/reference/config/#passwords) calls it.
+- A pool that accepts the address as a user name or as an alias. `password.legacyVerify` of [Passwords](/docs/reference/config/#passwords) sends the address.
+- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+
+## Steps
+
+1. Export the users, and keep the whole output with its `Users` array.
+
+```sh
+aws cognito-idp list-users --user-pool-id "$POOL" --output json > users.json
+```
+
+2. Set `password.legacyVerify` in the API with the region and the app client of the pool.
+
+<Code code={config} lang="ts" title="The API with the check against Cognito" />
+
+3. Pass `clientSecret` too, when the app client has a secret.
+4. On Workers, pass `waitUntil`, so the failure line outlives the response.
+5. Run the import as a dry run.
+
+```sh
+pnpm exec authtempo-import cognito --users users.json --legacy-verify --postgres "$DATABASE_URL" --dry-run
+```
+
+6. Run the same command without `--dry-run`.
+7. Sign in once with a known user. Sign in once more with a user whose Cognito address has capital letters.
+8. Change each auth call of the app with the table below.
+9. Do the steps of [The cutover](/docs/migrate/cutover/).
+10. Remove `legacyVerify` from the API when the migration ends.
+
+The test below imports one Cognito user against a fake Cognito.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
+## The calls
+
+| Amplify | authtempo |
+| --- | --- |
+| `signIn({ username, password })` | `client.password.signIn({ email, password })` |
+| `signUp({ username, password })` | `client.password.signUp({ email, password })` |
+| `signInWithRedirect({ provider: "Google" })` | Send the browser to `/auth/social/google/start?next=/` on the API. |
+| `resetPassword({ username })` | `client.password.requestReset({ email })` |
+| `confirmResetPassword(input)` | `client.password.reset({ token, password })`, with the token of the reset link |
+| `signOut()` | `client.signOut()` |
+| `getCurrentUser()`, `fetchAuthSession()` | `client.session()` |
+| The ID token of `fetchAuthSession()` | `client.jwt.token()` |
+
+## How it behaves
+
+- Only a `CONFIRMED` user gets the marker. Every other status skips the user, and the reason names the status.
+- Only the built-in providers `Google` and `SignInWithApple` map to an identity.
+- Core calls Cognito only for a user whose password row holds the marker. A right answer writes core's own hash over it.
+- Every failed password sign-in answers no earlier than `timeoutMs`. So the response time does not show an address that is not yet migrated.
+- A claim of the address deletes the marker, and a reset overwrites it.
+- Each Cognito challenge answers false, the second factor and `NEW_PASSWORD_REQUIRED` among them. Such a user resets the password.
+
+:::caution
+Warning: a wrong region, app client, or auth flow fails every imported user. Sign in once with a known user before the cutover.
+:::
+
+## If it fails
+
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials) for every user: the app client does not allow `USER_PASSWORD_AUTH`, or the pool does not take the address as a user name. The log line names the Cognito error.
+- The command exits 1 with `legacy-verify` refusals: the run has no `--legacy-verify`.
+- The command stops at start: `users.json` holds a bare array. Save the whole `list-users` output.
+
+## Next
+
+- [The cutover](/docs/migrate/cutover/)
+- [Observability](/docs/operations/observability/)
+- [Import CLI](/docs/reference/import-cli/)

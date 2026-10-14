@@ -1,0 +1,47 @@
+---
+title: Cookies
+description: Every cookie that core sets, with its attributes, path, life, and the flow that sets it.
+type: reference
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.1
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 15
+  - packages/core/src/http/cookies.ts
+---
+
+**For:** a developer who writes the cookie text of a privacy page, or checks why a browser drops a cookie.
+
+**What it does:** this page lists the three cookies of core. Each is `HttpOnly` and `Secure`, and holds no data but a token.
+
+## Before you start
+
+- Read [Run the app on another origin](/docs/guides/split-origins/) for the choice of `SameSite`.
+
+## The cookies
+
+| Name | Path | SameSite | Life | Set by |
+| --- | --- | --- | --- | --- |
+| `tempo_session` | `/` | `cookie.sameSite`, `Lax` by default | `session.ttlDays` | Every sign-in in a browser |
+| `tempo_session_oauth` | `<basePath>/social` | `None` | 10 minutes | The social start |
+| `tempo_totp_trust` | `<basePath>/` | `cookie.sameSite` | `totp.trustDays` | A second factor verify with `trustDevice` |
+
+The cookie names `tempo_session` and `tempo_totp_trust` keep the old product name tempo-auth for compatibility. A change needs a migration of every open session.
+
+- `cookieName` renames the session cookie. The binding cookie is the session cookie name plus `_oauth`.
+- `totp.trustCookieName` renames the trust cookie.
+- A sign-out clears the cookie. After a reset or a claim, the next `GET /session` clears it.
+
+## The rules
+
+- The session cookie holds a `ts_` token. The binding cookie holds the binding token of one social flow. The trust cookie holds a `td_` token.
+- After a sliding refresh, an app route that calls `auth.session` must send `auth.sessionCookie(request, resolved)`. Otherwise the browser drops the cookie at its old `Max-Age`.
+- The binding cookie is `SameSite=None`, because Apple posts its callback from its own site, and a browser sends no `Lax` cookie on that post.
+- One binding cookie lives in each browser. A second social start replaces it, and the first flow then answers `invalid_token`.
+- Each cookie is a plain host cookie. A host on a sibling subdomain can set a cookie of the same name for the parent domain. Keep the API on its own registrable domain.
+- A native app passes `credentials: "omit"`. Core reads the cookie before the bearer header, so a stray cookie replaces the bearer session.
+
+## Next
+
+- [Tokens and prefixes](/docs/reference/tokens/)
+- [Sign in with Google and Apple](/docs/guides/social/)
+- [The threat model](/docs/concepts/threat-model/)

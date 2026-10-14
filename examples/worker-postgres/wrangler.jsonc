@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "my-app",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  // postgres.js opens a TCP socket through Node.js APIs, so this Worker needs
+  // nodejs_compat. It is on by default from the 2026-08-04 compatibility date.
+  // It stays explicit so that a copy of the D1 config's no_nodejs_compat does
+  // not break the driver. Core itself uses none (spec 4).
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    // The origin of this Worker. Change it to your own origin before a deploy.
+    "BASE_URL": "https://example.test"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      // Replace this with the id that `wrangler hyperdrive create` prints.
+      "id": "00000000000000000000000000000000",
+      // `wrangler dev` connects here instead: the Postgres of the repo's docker compose.
+      "localConnectionString": "postgres://tempo:tempo@localhost:5439/tempo_auth"
+    }
+  ],
+  // The sweep deletes expired links, codes, and sessions. Without a trigger
+  // they stay in Postgres forever.
+  "triggers": { "crons": ["17 * * * *"] }
+  // AUTH_SECRET is a secret: `wrangler secret put AUTH_SECRET`.
+}

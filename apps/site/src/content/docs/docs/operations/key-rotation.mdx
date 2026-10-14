@@ -1,0 +1,67 @@
+---
+title: Key rotation
+description: Rotate the signing key of the JWTs, the Apple key, and the client secrets of the providers, with no outage.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.12
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 15
+  - packages/core/README.md "JWT minting"
+sidebar:
+  order: 3
+---
+
+import { Code } from "@astrojs/starlight/components";
+import rotate from "../../../../../samples/operations/key-rotation.ts?raw";
+import test from "../../../../../samples/operations/key-rotation.test.ts?raw";
+
+**For:** an operator who must change a key of an API with authtempo on a schedule, or after a leak.
+
+**What it does:** this guide rotates each key that authtempo uses, and says what each rotation ends.
+
+## Before you start
+
+- A deployed API. Read [Deploy](/docs/operations/deploy/) first.
+- For the signing key, `jwtMint` on. It is on by default. [JWT minting](/docs/reference/config/#jwt-minting) lists its keys.
+
+## Steps
+
+1. Call `auth.api.jwt.rotate()` from a scheduled handler, such as once a month.
+
+<Code code={rotate} lang="ts" title="The rotation of the signing key" />
+
+2. After a leak of a private key, call the rotation at once. Then wait 24 hours, and run the sweep.
+3. For Apple, make a new key in the Apple developer portal.
+4. Set the new key in `social.apple.privateKey`, and its id in `social.apple.keyId`. Deploy.
+5. Revoke the old key in the Apple developer portal.
+6. For Google, GitHub, LinkedIn, and each list provider, make a second client secret at the provider.
+7. Set the new value in the provider's `clientSecret`, and deploy.
+8. Delete the old client secret at the provider.
+
+The test below rotates the key and checks the key set.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
+## How it behaves
+
+- A rotation retires the signing key and writes a new one. The retired key verifies for 24 hours and signs nothing.
+- `GET /auth/jwks` lists the signing key first, then at most 100 keys retired less than 24 hours ago.
+- A server that verifies session JWTs reads the key set again for a new `kid`. With a cache of the key set, the cache must be shorter than 24 hours.
+- The sweep deletes a key 24 hours after it retired.
+- Core signs the Apple client secret again at each token exchange, with a life of five minutes. No stored Apple secret expires.
+- The app `secret` is not a key that rotates. [Secrets](/docs/operations/secrets/) tells what a change of it breaks.
+
+:::caution
+Warning: a leaked private key still verifies for 24 hours after the rotation. Keep `jwtMint.ttlMinutes` short, and tell each server that checks the tokens to refuse its `kid`.
+:::
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed) at an Apple sign-in: the key id and the private key do not match.
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed) at another provider: the client secret is wrong or deleted.
+- A JWT check fails on another server: the server keeps the old key set past 24 hours.
+
+## Next
+
+- [Mint a JWT for your other services](/docs/guides/jwt/)
+- [Secrets](/docs/operations/secrets/)
+- [Tokens and prefixes](/docs/reference/tokens/)

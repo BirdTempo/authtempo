@@ -2,6 +2,8 @@ node_modules
 dist
 .wrangler
 .turbo
+# Astro writes its generated types here on each build (plan 11a).
+.astro
 coverage
 .omc/
 .superpowers/

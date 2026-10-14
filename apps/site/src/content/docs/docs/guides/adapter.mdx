@@ -1,0 +1,57 @@
+---
+title: Write a storage adapter
+description: Write an adapter of the storage port for another database, and prove it with the conformance suite.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 6
+  - packages/core/README.md "The storage port"
+  - packages/adapter-d1/README.md "Transactions"
+  - packages/adapter-postgres/README.md "Transactions"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import test from "../../../../../samples/guides/adapter-conformance.test.ts?raw";
+
+**For:** a developer who wants authtempo on a database that has no adapter yet.
+
+**What it does:** you write the six methods of the storage port, and core's conformance suite proves the adapter.
+
+## Before you start
+
+- Read [The storage port](/docs/concepts/storage-port/).
+- A way to open a fresh, empty database for each test. [The contract](/docs/concepts/storage-port/#the-contract) runs on it.
+
+## Steps
+
+1. Write an object with `create`, `findOne`, `findMany`, `update`, `delete`, and `transaction`, of the type `StorageAdapter`.
+2. Read the models and fields from `schema` of `@authtempo/core`.
+   - Map each model to a table and each field to a column.
+3. Write one migration for each schema version.
+   - Store the version in the table `ta_meta`.
+4. Refuse to start when the database reports an older version than `SCHEMA_VERSION`.
+   - For that refusal, throw `StorageError` with `schema_mismatch`.
+5. Throw `StorageError` with `unique_violation` when a unique key refuses a write.
+6. Run `runAdapterConformance` from `@authtempo/core/conformance` on the adapter.
+
+<Code code={test} lang="ts" title="The conformance suite on an adapter" />
+
+## The rules
+
+- Clauses join with AND only. The operators are `eq`, `ne`, `in`, `lt`, `lte`, `gt`, and `gte`. There is no join.
+- `update` and `delete` take a `where` and answer the count of rows. An empty `where` on them is an error.
+- An empty `in` list matches nothing. Two null values never conflict on a unique key.
+- `sort` takes one key or a list of keys, each with its own direction.
+- Reads inside a transaction see the writes of the transaction.
+- A nested transaction rolls back its own writes only.
+- The field types are string, boolean, integer, date, and json. `eq` on a date matches to the millisecond.
+
+## If it fails
+
+- The suite names the rule that failed. Fix the adapter, never the suite.
+- A `unique_violation` caught inside a transaction aborts the transaction on Postgres. Catch it outside.
+
+## Next
+
+- [The storage port](/docs/concepts/storage-port/)
+- [The race rules](/docs/concepts/races/)
+- [Schema and migrations](/docs/reference/schema/)
