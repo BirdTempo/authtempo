@@ -17,12 +17,14 @@ import { hookGuard } from "./hooks.js";
 import { checkUserPassword } from "./password.js";
 import {
   addMethod,
+  type ChallengeMethod,
   challengeMethods,
   challengeOrigin,
   disableSecondFactor,
   FactorRaceError,
   factorRow,
   later,
+  liveTrust,
   NoBackupCodesError,
   newBackupCodes,
   removeMethod,
@@ -35,7 +37,7 @@ import {
   type TwoFactorPending,
   writeChallenge,
 } from "./second-factor.js";
-import { acceptEmailCode, acceptPasskey } from "./second-factor-methods.js";
+import { acceptEmailCode, acceptPasskey, liveChallenge } from "./second-factor-methods.js";
 import {
   endedList,
   openSession,
@@ -285,6 +287,20 @@ export async function setupTotp(
 }
 
 /**
+ * Thrown inside the TOTP enable's transaction when the setup made backup
+ * codes, but another method turned on since (plan 12c). The factor keeps its
+ * own list, so the setup's codes would never pass. The throw undoes the
+ * confirm; the caller answers `totp_not_enabled`, and a new setup answers no
+ * codes.
+ */
+class StaleSetupCodesError extends Error {
+  constructor() {
+    super("authtempo: the setup's backup codes no longer apply");
+    this.name = "StaleSetupCodesError";
+  }
+}
+
+/**
  * Confirms the setup with a code of the window (plan 9f) and turns the TOTP
  * method on (plan 12c). As the first method, the factor row takes the totp
  * row's id and the setup's codes, so their hashes stay valid, and every
@@ -340,6 +356,7 @@ export async function enableTotp(
         now,
         ended,
       );
+      if (!added.first && row.backupCodes.length > 0) throw new StaleSetupCodesError();
       return ok({ first: added.first });
     });
   } catch (err) {
@@ -347,6 +364,10 @@ export async function enableTotp(
     // and that method went off since. The confirm is undone; a new setup
     // makes the codes.
     if (err instanceof NoBackupCodesError) return fail("totp_not_enabled");
+    // The setup's codes were shown, but another method turned on since and
+    // the factor keeps its list. The confirm is undone; a new setup answers
+    // no codes, and the person keeps the codes of the first method.
+    if (err instanceof StaleSetupCodesError) return fail("totp_not_enabled");
     // A parallel first enable of another method won the unique `userId`, or
     // the row changed under every round. Caught here, outside: inside,
     // Postgres has already aborted the transaction. The person retries.
@@ -512,6 +533,13 @@ export interface TwoFactorVerify {
   emailCode?: string | undefined;
   /** A WebAuthn assertion over the options of `POST /second-factor/passkey/options` for this challenge (plan 12c). */
   passkey?: unknown;
+  /**
+   * The clear `td_` token of the page's trusted-device button (plan 12c): a
+   * live trust row of the challenge's user passes with no code. A social
+   * sign-in from Apple arrives by a cross-site form post with no `Lax`
+   * cookie, so the device's trust is read here, on a same-site post.
+   */
+  trustToken?: string | undefined;
   /** True: write a trusted device and answer its token. */
   trustDevice?: boolean | undefined;
   ip: string | null;
@@ -522,7 +550,8 @@ type Proof =
   | { method: "totp"; value: string }
   | { method: "backup"; value: string }
   | { method: "email"; value: string }
-  | { method: "passkey"; value: unknown };
+  | { method: "passkey"; value: unknown }
+  | { method: "trusted"; value: string };
 
 /** The one proof of a verify, or null for none or for more than one. */
 function proofOf(input: TwoFactorVerify): Proof | null {
@@ -531,6 +560,7 @@ function proofOf(input: TwoFactorVerify): Proof | null {
   if (input.backupCode !== undefined) proofs.push({ method: "backup", value: input.backupCode });
   if (input.emailCode !== undefined) proofs.push({ method: "email", value: input.emailCode });
   if (input.passkey !== undefined) proofs.push({ method: "passkey", value: input.passkey });
+  if (input.trustToken !== undefined) proofs.push({ method: "trusted", value: input.trustToken });
   return proofs.length === 1 ? (proofs[0] ?? null) : null;
 }
 
@@ -663,7 +693,10 @@ export async function verifyTwoFactor(
   // The methods of this challenge, read from the current row (plan 12c): a
   // method that went off after the challenge no longer passes, and an email
   // code never passes after a mailbox proof.
-  if (!challengeMethods(config, factor, challengeOrigin(challenge.data)).includes(proof.method))
+  if (
+    proof.method !== "trusted" &&
+    !challengeMethods(config, factor, challengeOrigin(challenge.data)).includes(proof.method)
+  )
     return fail("invalid_body");
   // The bounds per user over all challenges (15 minutes and 24 hours), shared
   // with the enable, the disable, and the new backup codes. A capped challenge
@@ -671,7 +704,11 @@ export async function verifyTwoFactor(
   // guesses. After the live check: an unknown, spent, or expired challenge
   // costs the user nothing. A passkey assertion is no guess: it counts on the
   // challenge only (plan 12c).
-  if (proof.method !== "passkey" && !(await codeCheckAllowed(config, challenge.identifier)))
+  if (
+    proof.method !== "passkey" &&
+    proof.method !== "trusted" &&
+    !(await codeCheckAllowed(config, challenge.identifier))
+  )
     return fail("rate_limited");
   const miss = async (): Promise<Result<TwoFactorSession>> =>
     fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
@@ -690,6 +727,11 @@ export async function verifyTwoFactor(
     backupCodesLeft = left;
   } else if (proof.method === "email") {
     if (!(await acceptEmailCode(config, challenge, proof.value))) return miss();
+  } else if (proof.method === "trusted") {
+    // A trust token is 32 random bytes, no guess: a miss counts nothing and
+    // answers `invalid_token`, as for a challenge that the page cannot pass.
+    if (!(await liveTrust(config.storage, challenge.identifier, proof.value, now)))
+      return fail("invalid_token");
   } else if (!(await acceptPasskey(config, challenge, proof.value))) return miss();
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: challenge.identifier },
@@ -750,4 +792,34 @@ export async function verifyTwoFactor(
   // After the commit, as every flow does (plan 9d).
   if (opened.ok) await sessionOpened(config, opened.value.session, opened.value.user, via);
   return opened;
+}
+
+/** What the challenge page shows (plan 12c). */
+export interface ChallengeView {
+  methods: ChallengeMethod[];
+  /** A live trust row of the challenge's user matches the request's trust cookie. */
+  trusted: boolean;
+  /** The challenge holds an email code. */
+  emailSent: boolean;
+}
+
+/**
+ * The reads of the challenge page's GET (plan 12c): the challenge, the factor
+ * row, and the trust row. It writes nothing, so a GET changes nothing. An
+ * unknown, spent, or expired challenge answers `invalid_token`.
+ */
+export async function challengeView(
+  config: ResolvedConfig,
+  input: { challenge: string; trustToken: string | undefined },
+): Promise<Result<ChallengeView>> {
+  if (!config.totp) return fail("not_found");
+  const now = config.clock.now();
+  const live = await liveChallenge(config, input.challenge, now);
+  if (!live.ok) return live;
+  const { row, factor } = live.value;
+  return ok({
+    methods: challengeMethods(config, factor, challengeOrigin(row.data)),
+    trusted: (await liveTrust(config.storage, row.identifier, input.trustToken, now)) !== null,
+    emailSent: typeof (row.data as { emailCodeHash?: unknown } | null)?.emailCodeHash === "string",
+  });
 }

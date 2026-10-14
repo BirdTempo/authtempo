@@ -98,6 +98,7 @@ export {
 } from "./engine/tokens.js";
 export type {
   ChallengeMethod,
+  ChallengeView,
   TotpSetup,
   TotpSetupInput,
   TotpStatus,

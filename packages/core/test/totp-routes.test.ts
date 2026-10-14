@@ -533,3 +533,93 @@ describe("the gated sign-ins on the routes (plan 12c)", () => {
     expect(cookieNamed(cookie, "tempo_session")).toMatch(/^tempo_session=ts_/);
   });
 });
+
+describe("the challenge page (plan 12c)", () => {
+  it("answers the error URL for a well-formed challenge that does not exist", async () => {
+    const h = pwHandle({ hash: FAST });
+    const unknown = `tf_${"a".repeat(43)}`;
+    const res = await h.auth.handle(get(`/auth/totp/challenge?challenge=${unknown}`));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+  });
+
+  it("shows the trusted-device button to a device with the trust cookie, and the button opens the session with no code", async () => {
+    const h = pwHandle({ hash: FAST });
+    const f = await enrolled(h, await verifiedUser(h));
+    const verify = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: await challenge(h),
+        code: await f.code(),
+        trustDevice: true,
+      }),
+    );
+    const trust = pair(cookieNamed(verify, "tempo_totp_trust") ?? "");
+    // A challenge as a social sign-in from Apple leaves it: the form post carried no Lax cookie.
+    const c = await challenge(h, { next: "/inbox" });
+    const page = await (
+      await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}`, { cookie: trust }))
+    ).text();
+    expect(page).toContain("Continue on this trusted device");
+    const plain = await (await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}`))).text();
+    expect(plain).not.toContain("Continue on this trusted device");
+    // A well-formed token with no row is no trust: the page reads the row, not the cookie's presence.
+    const forged = await (
+      await h.auth.handle(
+        get(`/auth/totp/challenge?challenge=${c}`, {
+          cookie: `tempo_totp_trust=td_${"a".repeat(43)}`,
+        }),
+      )
+    ).text();
+    expect(forged).not.toContain("Continue on this trusted device");
+    // The post reads the row too: a forged token opens no session, and the challenge still lives.
+    const forgedPost = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&action=trusted`, {
+        cookie: `tempo_totp_trust=td_${"a".repeat(43)}`,
+      }),
+    );
+    expect(forgedPost.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    const done = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&action=trusted`, { cookie: trust }),
+    );
+    expect(done.status).toBe(302);
+    expect(done.headers.get("location")).toBe(`${BASE_URL}/inbox`);
+    expect(cookieNamed(done, "tempo_session")).not.toBeNull();
+    const none = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${await challenge(h)}&action=trusted`),
+    );
+    expect(none.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+  });
+
+  it("sends an email code from the page, shows its form, and a wrong email code returns to it", async () => {
+    const h = pwHandle({ hash: FAST });
+    const cookie = await verifiedUser(h);
+    await enrolled(h, cookie);
+    const on = await h.auth.handle(
+      post("/auth/second-factor/email/enable", { password: PW }, { cookie }),
+    );
+    expect(on.status).toBe(200);
+    const c = await challenge(h, { next: "/inbox" });
+    const sent = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&action=send-email`),
+    );
+    expect(sent.headers.get("location")).toBe(
+      `${BASE_URL}/auth/totp/challenge?challenge=${c}&method=email`,
+    );
+    const page = await (
+      await h.auth.handle(get(`/auth/totp/challenge?challenge=${c}&method=email`))
+    ).text();
+    expect(page).toContain('name="emailCode"');
+    const code = /\b(\d{6})\b/.exec(h.mails.at(-1)?.text ?? "")?.[1] ?? "";
+    const wrongCode = code === "000000" ? "111111" : "000000";
+    const wrong = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&emailCode=${wrongCode}`),
+    );
+    expect(wrong.headers.get("location")).toBe(
+      `${BASE_URL}/auth/totp/challenge?challenge=${c}&method=email&error=invalid_code`,
+    );
+    const done = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&emailCode=${code}`),
+    );
+    expect(done.headers.get("location")).toBe(`${BASE_URL}/inbox`);
+  });
+});

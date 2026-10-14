@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { sendSecondFactorEmail } from "../../engine/second-factor-methods.js";
 import {
   publicSession,
   type ResolvedSession,
@@ -7,6 +8,7 @@ import {
   sessionFromRequest,
 } from "../../engine/sessions.js";
 import {
+  challengeView,
   disableTotpWithCode,
   enableTotp,
   regenerateBackupCodesWithCode,
@@ -18,7 +20,7 @@ import {
   verifyTwoFactor,
 } from "../../engine/totp.js";
 import { readBody } from "../body.js";
-import { clearTrustCookie, trustCookie } from "../cookies.js";
+import { clearTrustCookie, readCookie, trustCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
@@ -37,12 +39,18 @@ const verifyBody = z.object({
   passkey: z.unknown().optional(),
   trustDevice: z.boolean().optional(),
 });
-/** The challenge page's form: the checkbox posts `trustDevice=1` when checked and nothing else. */
+/**
+ * The challenge page's forms: the checkbox posts `trustDevice=1` when checked
+ * and nothing else. `action` (plan 12c) is the send of an email code or the
+ * trusted-device button.
+ */
 const pageBody = z.object({
   challenge: z.string().max(64),
   code: z.string().max(16).optional(),
   backupCode: z.string().max(64).optional(),
+  emailCode: z.string().max(16).optional(),
   trustDevice: z.literal("1").optional(),
+  action: z.enum(["send-email", "trusted"]).optional(),
 });
 
 /**
@@ -192,19 +200,43 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       },
     },
     {
-      // No storage read and no cookie: the page only shows the form.
+      // Reads only (plan 12c): the challenge, the factor row, and the trust
+      // row, to show the methods and the trusted-device button. No write and
+      // no cookie.
       method: "GET",
       path: "/totp/challenge",
       async handler(ctx) {
         const challenge = ctx.url.searchParams.get("challenge") ?? "";
         if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed("invalid_token");
+        const view = await challengeView(config, {
+          challenge,
+          trustToken: readCookie(ctx.request, totp.trustCookieName) ?? undefined,
+        });
+        if (!view.ok) return failed(view.code);
+        const asked = ctx.url.searchParams.get("method");
+        const wanted =
+          ctx.url.searchParams.get("backup") === "1"
+            ? "backup"
+            : asked === "email" || asked === "totp"
+              ? asked
+              : null;
+        // The first method of the list that a page with no script can serve.
+        const served = (["totp", "email", "backup"] as const).filter((m) =>
+          view.value.methods.includes(m),
+        );
+        const method =
+          wanted && served.includes(wanted) ? wanted : (served[0] ?? ("backup" as const));
         const html = totp.challengePage({
           action: challengePath,
           challenge,
           appName: config.appName,
-          backup: ctx.url.searchParams.get("backup") === "1",
+          backup: method === "backup",
           trustDays: totp.trustDays,
           error: ctx.url.searchParams.get("error") === "invalid_code" ? "invalid_code" : null,
+          methods: view.value.methods,
+          method,
+          trusted: view.value.trusted,
+          emailSent: view.value.emailSent,
         });
         return new Response(html, {
           status: 200,
@@ -218,11 +250,21 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readBody(ctx.request, pageBody);
         if (!body.ok) return failed("invalid_token");
-        const { challenge, code, backupCode } = body.value;
+        const { challenge, code, backupCode, emailCode, action } = body.value;
+        const page = `${config.baseURL}${challengePath}?challenge=${encodeURIComponent(challenge)}`;
+        if (action === "send-email") {
+          const sent = await sendSecondFactorEmail(config, { challenge });
+          return sent.ok ? redirect(`${page}&method=email`) : failed(sent.code);
+        }
         const r = await verifyTwoFactor(config, {
           challenge,
           code,
           backupCode,
+          emailCode,
+          // The button sends the trust cookie on this same-site post (plan 12c).
+          ...(action === "trusted"
+            ? { trustToken: readCookie(ctx.request, totp.trustCookieName) ?? "" }
+            : {}),
           trustDevice: body.value.trustDevice === "1",
           ip: ctx.ip,
         });
@@ -230,7 +272,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         // The challenge still lives after a wrong code: send the person back to the form.
         if (r.code === "invalid_code")
           return redirect(
-            `${config.baseURL}${challengePath}?challenge=${encodeURIComponent(challenge)}${backupCode !== undefined ? "&backup=1" : ""}&error=invalid_code`,
+            `${page}${backupCode !== undefined ? "&backup=1" : emailCode !== undefined ? "&method=email" : ""}&error=invalid_code`,
           );
         return failed(r.code);
       },

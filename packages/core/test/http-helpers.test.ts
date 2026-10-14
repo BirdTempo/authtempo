@@ -572,6 +572,10 @@ describe("the TOTP challenge page (plan 9f)", () => {
     backup: false,
     trustDays: 30,
     error: null,
+    methods: ["totp", "backup"] as const,
+    method: "totp" as const,
+    trusted: false,
+    emailSent: false,
   };
 
   it("escapes every value, offers the backup link, and shows the error only when set", () => {
@@ -584,9 +588,41 @@ describe("the TOTP challenge page (plan 9f)", () => {
     );
     expect(html).not.toContain("not correct");
     expect(html).not.toContain("<b>");
-    const shown = defaultTotpPage({ ...input, backup: true, error: "invalid_code" });
+    const shown = defaultTotpPage({
+      ...input,
+      backup: true,
+      method: "backup",
+      error: "invalid_code",
+    });
     expect(shown).toContain("The code is not correct. Try again.");
     expect(shown).toContain('name="backupCode"');
     expect(shown).toContain("Use a code from your authenticator app");
+  });
+
+  it("offers the email method with a send button, the code form after a send, and the trusted-device button (plan 12c)", () => {
+    const email = defaultTotpPage({
+      ...input,
+      methods: ["totp", "email", "backup"],
+      method: "email",
+    });
+    expect(email).toContain('<input type="hidden" name="action" value="send-email">');
+    expect(email).toContain("Send a code to my email");
+    expect(email).not.toContain('name="emailCode"');
+    const sent = defaultTotpPage({
+      ...input,
+      methods: ["totp", "email", "backup"],
+      method: "email",
+      emailSent: true,
+    });
+    expect(sent).toContain('name="emailCode"');
+    expect(sent).toContain("Send a new code");
+    const trusted = defaultTotpPage({ ...input, trusted: true });
+    expect(trusted).toContain('<input type="hidden" name="action" value="trusted">');
+    expect(trusted).toContain("Continue on this trusted device");
+    const totp = defaultTotpPage({ ...input, methods: ["totp", "email", "backup"] });
+    expect(totp).toContain("&amp;method=email");
+    expect(totp).not.toContain("trusted device</button>");
+    const passkey = defaultTotpPage({ ...input, methods: ["passkey", "backup"], method: "backup" });
+    expect(passkey).toContain("A passkey works in the app's own sign-in page.");
   });
 });
