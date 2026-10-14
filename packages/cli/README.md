@@ -102,7 +102,8 @@ compatibility package (`migrations/d1/`, or `migrations/d1-before-1.7/` with
 `--before-1.7`) into the app's `migrations_dir` under the app's next
 number, then applies. A file whose text the folder holds is not copied
 again. The copied files hold Better Auth's default table and column names.
-An app with other names writes 0001 from `storage.migrationSql()` and 0006
+An app with other names writes 0001 from `storage.migrationSql()` (or
+`storage.migrationSql("before-1.7")` for tables from before 1.7) and 0006
 from `compatMigration0006Sql("sqlite", storage.names)`. The shipped files
 fail on its tables with `no such table`. Without `--remote`, the run is on
 the local database of `wrangler dev`. wrangler records each applied file in its table

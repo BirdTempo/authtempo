@@ -10,10 +10,10 @@ import { createD1Adapter } from "../src/index.js";
 
 const AT = new Date("2026-10-14T00:00:00.000Z");
 
-/** One row of each keyed model, as a version 8 database holds it: no secretVersion. */
 /** The four models that hold a sealed value or a keyed hash: each row has secretVersion. */
 type KeyedModel = Extract<ModelName, "totp" | "verification" | "jwk" | "secondFactor">;
 
+/** One row of each keyed model, as a version 8 database holds it: no secretVersion. */
 const ROWS: Array<{ model: KeyedModel; row: Record<string, unknown> }> = [
   {
     model: "totp",
