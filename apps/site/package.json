@@ -14,6 +14,8 @@
   "dependencies": {
     "@authtempo/adapter-d1": "workspace:*",
     "@authtempo/adapter-postgres": "workspace:*",
+    "@authtempo/breach-check": "workspace:*",
+    "@authtempo/captcha-turnstile": "workspace:*",
     "@authtempo/client": "workspace:*",
     "@authtempo/compat-better-auth": "workspace:*",
     "@authtempo/core": "workspace:*",

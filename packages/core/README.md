@@ -39,7 +39,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
-| POST | `/password/sign-up` | `{ email, password, name? }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `password_policy`, `password_breached`; 409 `email_taken`, `email_taken_unverified`; 429 `rate_limited`; 503 `breach_check_unavailable`. The user is unverified until the mail link is confirmed |
+| POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`; 403 `sign_up_closed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`. The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
@@ -1117,6 +1117,12 @@ consequence of a skipped step.
 
 ## Limits in version 1
 
+- A uniform sign-up of a new address writes rows, and one of a known
+  address does not. The time of the answer can differ by that work.
+- The PBKDF2 cost stays at 100000 iterations until a measurement on a
+  deployed Worker proves a higher count (`examples/pbkdf2-probe`).
+- The captcha token passes once. After a refused answer the person solves
+  the widget again.
 - The default limiter counts in memory. On Workers every isolate has its
   own count, so the real limit is the limit times the isolate count. Pass
   a shared `limiter` for a real limit. The D1 adapter ships `createD1Limiter`

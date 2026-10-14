@@ -51,10 +51,10 @@ sidebar:
 - The memory limiter counts per isolate. On Workers the real limit is the limit times the isolate count, so it is for tests only.
 - The default `clientIp` reads `cf-connecting-ip`. Only Cloudflare sets it, so off Workers a caller can set it.
 - A request with no client IP counts against one shared IP budget.
-- Keep the API on its own registrable domain. A sibling subdomain can set a cookie with the same name for the parent domain.
+- Keep the API on its own registrable domain. A sibling subdomain cannot set the `__Host-` session cookie, but it can set the trust cookie for the parent domain.
 
 :::caution
-Warning: a new `secret` locks every user with the second factor out of it. Do not change it without the steps on [Secrets](/docs/operations/secrets/).
+Warning: a new `secret` that replaces the old value locks every user with the second factor out of it. Add it as a new version with the steps on [Secrets](/docs/operations/secrets/).
 :::
 
 ## If it fails

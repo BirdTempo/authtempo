@@ -67,7 +67,7 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 - No per-account lockout exists. [The threat model](/docs/concepts/threat-model/) gives the odds.
 
 :::caution
-Warning: a new `secret` opens no sealed factor secret and matches no backup code. Turn the factor off for each user before you change `secret`.
+Warning: a change of the app secret that skips a step of [Secrets](/docs/operations/secrets/) locks users out of the factor. Keep each old version until `api.secrets.status` counts no row under it.
 :::
 
 :::caution

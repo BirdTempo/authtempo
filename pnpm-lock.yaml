@@ -187,6 +187,12 @@ importers:
       '@authtempo/adapter-postgres':
         specifier: workspace:*
         version: link:../../packages/adapter-postgres
+      '@authtempo/breach-check':
+        specifier: workspace:*
+        version: link:../../packages/breach-check
+      '@authtempo/captcha-turnstile':
+        specifier: workspace:*
+        version: link:../../packages/captcha-turnstile
       '@authtempo/client':
         specifier: workspace:*
         version: link:../../packages/client
@@ -279,6 +285,21 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+
+  examples/pbkdf2-probe:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20261007.1
+        version: 5.20261007.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1))
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
 
   examples/worker:
     dependencies:

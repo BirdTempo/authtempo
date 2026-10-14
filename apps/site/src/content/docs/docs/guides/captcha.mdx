@@ -1,0 +1,58 @@
+---
+title: Add a captcha
+description: Put a captcha on the sign-up and the request flows, with Cloudflare Turnstile or your own adapter.
+type: how-to
+sources:
+  - packages/core/README.md "Captcha"
+  - packages/captcha-turnstile/README.md
+  - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 10"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/captcha.ts?raw";
+import test from "../../../../../samples/guides/captcha.test.ts?raw";
+
+**For:** an app developer whose sign-up or mail flows get traffic from bots.
+
+**What it does:** core asks for a captcha token on the flows that send mail or write rows, after their per-IP limit.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- A Cloudflare account with a Turnstile widget, for its site key and its secret key.
+
+## Steps
+
+1. Add `@authtempo/captcha-turnstile` to the API.
+2. Store the secret key in the secret store of the API.
+3. Set `captcha.port` to `createTurnstileCaptcha({ secretKey, siteKey })`.
+4. Set `captcha.flows` when the default four flows are not the ones you want.
+5. In your own page, pass the widget's token as `captchaToken` to the client call. The client sends it in the header `x-captcha-response`.
+6. In a server route that calls `auth.api` for a browser, pass the browser's token as `captchaToken`.
+
+<Code code={config} lang="ts" title="The captcha config" />
+
+<Code code={test} lang="ts" title="The captcha as a test" />
+
+## How it behaves
+
+- The default flows are the sign-up, the magic link request, the email code request, and the reset requests. The password sign-in is opt-in.
+- Each flow checks its per-IP [limit](/docs/reference/limits/) first. A request over that limit costs no call to the captcha.
+- The captcha runs before the per-email limits, the policy, and the breach check. A request with no token spends none of them.
+- The captcha runs before the flow reads a user, so its answer is the same for every address.
+- A call to `auth.api` with no `captchaToken` skips the check. A server route that proxies a browser must pass the browser's token, or the check does not run.
+- Core's own sign-in page shows the widget when the port gives a site key. With `handoff` or `oauth` and a gated flow on that page, `createAuth` refuses a port with no page.
+- A token passes once. After a refused answer, the person solves the widget again.
+- When the captcha gives no answer, the flow goes on and writes one log line. `onUnavailable: "refuse"` answers 503 instead.
+- The Turnstile package has one live test. It runs only with `AUTHTEMPO_LIVE_TURNSTILE=1`, so a normal test run sends no call.
+
+## If it fails
+
+- [`captcha_required`](/docs/reference/errors/#captcha_required): the request has no token. Send the widget's token.
+- [`captcha_failed`](/docs/reference/errors/#captcha_failed): the captcha refused the token, or the token is longer than 2048 characters.
+- [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable): the captcha gave no answer, and `onUnavailable` is `"refuse"`.
+
+## Next
+
+- [Check passwords against breaches](/docs/guides/breach-check/)
+- [Set up a shared limiter](/docs/guides/limiter/)

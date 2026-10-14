@@ -1,0 +1,55 @@
+---
+title: Check passwords against breaches
+description: Refuse a password that a known breach exposed, with the HIBP range API or your own function.
+type: how-to
+sources:
+  - packages/core/README.md "Passwords"
+  - packages/breach-check/README.md
+  - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 11"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/breach-check.ts?raw";
+import test from "../../../../../samples/guides/breach-check.test.ts?raw";
+
+**For:** an app developer who wants to refuse a password that a breach exposed.
+
+**What it does:** core sends 5 characters of the password's SHA-1 to the range API, and refuses a password that the answer lists.
+
+## Before you start
+
+- A working password sign-in from [Sign in with a password](/docs/guides/password/).
+
+## Steps
+
+1. Add `@authtempo/breach-check` to the API.
+2. Set `password.breachCheck` to `createBreachCheck()`.
+3. Set `timeoutMs` when 2 seconds is too short for your network. It takes 500 to 10000.
+
+<Code code={config} lang="ts" title="The breach check config" />
+
+<Code code={test} lang="ts" title="The breach check as a test" />
+
+## How it behaves
+
+- Only the first 5 characters of the SHA-1 leave the server. The range API answers every suffix that starts with them.
+- Each request asks for padding. A line with a count of 0 is padding, and it never refuses a password.
+- The policy runs first. A password that the policy refuses costs no call.
+- The check fails closed. A late answer, a network error, a status other than 200, or a body over 512 KB refuses the password.
+- A 200 answer with no range line refuses the password too. An empty body or the HTML page of a proxy is such an answer.
+- On 2026-10-15, real range answers held 76 to 105 KB. The cap of 512 KB holds about five times the largest.
+- A reset link stays usable after that refusal. The person tries again with the same link.
+- A reset by email code spends its code on each refused password. After an outage, the person asks for a new code.
+- Your own function can answer `"unavailable"` too. It sets its own deadline, because core sets none.
+- The limit of each password route bounds the calls. The [limits](/docs/reference/limits/) page lists them.
+- The package has one live test. It runs only with `AUTHTEMPO_LIVE_HIBP=1`, so a normal test run sends no call.
+
+## If it fails
+
+- [`password_breached`](/docs/reference/errors/#password_breached): the range API lists the password. Ask for another one.
+- [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable): the range API gave no usable answer in time. Try again in a few minutes.
+
+## Next
+
+- [Add a captcha](/docs/guides/captcha/)
+- [Sign in with a password](/docs/guides/password/)

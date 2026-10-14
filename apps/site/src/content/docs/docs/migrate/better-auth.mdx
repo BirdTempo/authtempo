@@ -98,7 +98,7 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 - A Better Auth path that the app calls with its own `fetch` answers 404. Call the client method instead.
 
 :::caution
-Warning: a new `secret` locks every user with the second factor out of it. Keep the `secret` that the app has.
+Warning: a `secret` other than the app's value locks every user with the second factor out of it. Keep the `secret` that the app has. Change it later with the steps on [Secrets](/docs/operations/secrets/).
 :::
 
 ## If it fails
