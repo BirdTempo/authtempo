@@ -1030,6 +1030,10 @@ export function runAdapterConformance(
           (r) => r.id,
         ),
       ).toEqual(["s1"]);
+      // The filter above also matches the column default 1, so read the value back.
+      expect(
+        (await db.findOne("secondFactor", [{ field: "id", op: "eq", value: "s1" }]))?.secretVersion,
+      ).toBe(2);
     });
   });
 }

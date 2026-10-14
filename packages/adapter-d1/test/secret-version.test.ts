@@ -11,7 +11,10 @@ import { createD1Adapter } from "../src/index.js";
 const AT = new Date("2026-10-14T00:00:00.000Z");
 
 /** One row of each keyed model, as a version 8 database holds it: no secretVersion. */
-const ROWS: Array<{ model: ModelName; row: Record<string, unknown> }> = [
+/** The four models that hold a sealed value or a keyed hash: each row has secretVersion. */
+type KeyedModel = Extract<ModelName, "totp" | "verification" | "jwk" | "secondFactor">;
+
+const ROWS: Array<{ model: KeyedModel; row: Record<string, unknown> }> = [
   {
     model: "totp",
     row: {
@@ -85,16 +88,14 @@ async function insertOld(
 }
 
 it("a row written before the migration reads secretVersion 1 after 0009 (plan 12b)", async () => {
-  const at8 = env.TEST_MIGRATIONS.findIndex((m) => m.name.startsWith("0009_"));
-  expect(at8).toBe(8);
-  await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS.slice(0, at8));
+  const i0009 = env.TEST_MIGRATIONS.findIndex((m) => m.name.startsWith("0009_"));
+  expect(i0009).toBe(8);
+  await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS.slice(0, i0009));
   for (const { model, row } of ROWS) await insertOld(env.STAGED, model, row);
   await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
   const db = createD1Adapter(env.STAGED);
   for (const { model, row } of ROWS) {
     const read = await db.findOne(model, [{ field: "id", op: "eq", value: row.id }]);
-    // A read of one model of the union: name the one field that every keyed row has.
-    const secretVersion = (read as { secretVersion?: unknown } | null)?.secretVersion;
-    expect({ model, secretVersion }).toEqual({ model, secretVersion: 1 });
+    expect({ model, secretVersion: read?.secretVersion }).toEqual({ model, secretVersion: 1 });
   }
 });

@@ -12,7 +12,10 @@ import { freshSchema } from "./db.js";
 const AT = new Date("2026-10-14T00:00:00.000Z");
 
 /** One row of each keyed model, as a version 8 database holds it: no secretVersion. */
-const ROWS: Array<{ model: ModelName; row: Record<string, unknown> }> = [
+/** The four models that hold a sealed value or a keyed hash: each row has secretVersion. */
+type KeyedModel = Extract<ModelName, "totp" | "verification" | "jwk" | "secondFactor">;
+
+const ROWS: Array<{ model: KeyedModel; row: Record<string, unknown> }> = [
   {
     model: "totp",
     row: {
@@ -86,9 +89,9 @@ it("a row written before the migration reads secretVersion 1 after 0009 (plan 12
     await sql.unsafe(
       "CREATE TABLE ta_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
     );
-    const at8 = MIGRATIONS.findIndex((m) => m.name === "0009_schema_v9");
-    expect(at8).toBe(8);
-    for (const m of MIGRATIONS.slice(0, at8)) {
+    const i0009 = MIGRATIONS.findIndex((m) => m.name === "0009_schema_v9");
+    expect(i0009).toBe(8);
+    for (const m of MIGRATIONS.slice(0, i0009)) {
       await sql.unsafe(m.sql);
       await sql.unsafe("INSERT INTO ta_migrations (name) VALUES ($1)", [m.name]);
     }
@@ -97,9 +100,7 @@ it("a row written before the migration reads secretVersion 1 after 0009 (plan 12
     const db = createPostgresAdapter(sql);
     for (const { model, row } of ROWS) {
       const read = await db.findOne(model, [{ field: "id", op: "eq", value: row.id }]);
-      // A read of one model of the union: name the one field that every keyed row has.
-      const secretVersion = (read as { secretVersion?: unknown } | null)?.secretVersion;
-      expect({ model, secretVersion }).toEqual({ model, secretVersion: 1 });
+      expect({ model, secretVersion: read?.secretVersion }).toEqual({ model, secretVersion: 1 });
     }
   } finally {
     await close();
