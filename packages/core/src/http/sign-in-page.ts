@@ -199,6 +199,7 @@ ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
           if (code === "email_taken" || code === "email_taken_unverified") fail("An account with this address exists. Sign in instead.");
           else if (code === "password_policy") fail("The password is too short, too long, has a control character, or equals your email address.");
           else if (code === "password_breached") fail("This password is in a known data breach. Choose another one.");
+          else if (code === "breach_check_unavailable") fail("The password check is not available now. Try again in a few minutes.");
           else if (code === "captcha_required" || code === "captcha_failed") fail("Complete the check, then reload the page if it does not pass.");
           else fail("The request was not accepted.");
         }, function () { fail("The request was not accepted."); });

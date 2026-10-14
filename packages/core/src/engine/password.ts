@@ -161,18 +161,22 @@ type Resolved = NonNullable<ResolvedConfig["password"]>;
 
 /**
  * The policy, then the breach check. `email` must be normalized: the
- * policy compares the password with it. A breach check that throws fails
- * closed: the route answers 500.
+ * policy compares the password with it. The check fails closed: an
+ * `"unavailable"` answer refuses with `breach_check_unavailable` (plan 12b),
+ * and a throw answers 500. The sign-up and both resets run it before any
+ * read of a user, so the refusal is the same for a known and an unknown address.
  */
 async function screen(
   pw: Resolved,
   password: string,
   email: string,
-): Promise<"password_policy" | "password_breached" | null> {
+): Promise<"password_policy" | "password_breached" | "breach_check_unavailable" | null> {
   const policy = passwordPolicyError(password, email, pw.minLength);
   if (policy) return policy;
-  if (pw.breachCheck && (await pw.breachCheck(password))) return "password_breached";
-  return null;
+  if (!pw.breachCheck) return null;
+  const answer = await pw.breachCheck(password);
+  if (answer === "unavailable") return "breach_check_unavailable";
+  return answer === true ? "password_breached" : null;
 }
 
 interface Created {

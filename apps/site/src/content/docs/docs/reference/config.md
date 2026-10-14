@@ -158,7 +158,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | --- | --- | --- | --- |
 | `password.hash` | `PasswordHashSeam` | `createPbkdf2PasswordHash()` | PBKDF2-HMAC-SHA256, 100000 iterations. |
 | `password.minLength` | number | 8 | An integer from 8 to 128, in code points. |
-| `password.breachCheck` | async function of the password | none | True refuses the password with `password_breached`. |
+| `password.breachCheck` | async function of the password | none | `true` refuses the password with `password_breached`. `"unavailable"` refuses it with 503 `breach_check_unavailable`: the check fails closed. A throw answers 500. `@authtempo/breach-check` answers it. |
 | `password.resetTtlMinutes` | number | 15 | An integer from 1 to 1440. |
 | `password.resetPage` | function of `ResetPageInput` | `defaultResetPage` | Answers the markup of the reset form. |
 | `password.legacyVerify` | `LegacyVerifyConfig` | none | The old system's check, for users with `LEGACY_VERIFY_HASH`. |

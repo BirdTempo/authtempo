@@ -39,19 +39,19 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
-| POST | `/password/sign-up` | `{ email, password, name? }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `password_policy`, `password_breached`; 409 `email_taken`, `email_taken_unverified`; 429 `rate_limited`. The user is unverified until the mail link is confirmed |
+| POST | `/password/sign-up` | `{ email, password, name? }` | `{ token, user, session }` with the cookie; 400 `invalid_body`, `password_policy`, `password_breached`; 409 `email_taken`, `email_taken_unverified`; 429 `rate_limited`; 503 `breach_check_unavailable`. The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
 | POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link of the address stops working |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
-| POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy` or `password_breached`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`. A reset that answers the challenge still sets the password and ends every session |
-| POST | `/password/change` | session, `{ currentPassword?, newPassword }` | `{ ok: true }`; 400 `invalid_body`, `password_policy`, `password_breached`; 401 without a session; 401 `invalid_credentials` for a missing or wrong current password; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited` |
+| POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy`, `password_breached`, or `breach_check_unavailable`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`, 503 `breach_check_unavailable`. A reset that answers the challenge still sets the password and ends every session |
+| POST | `/password/change` | session, `{ currentPassword?, newPassword }` | `{ ok: true }`; 400 `invalid_body`, `password_policy`, `password_breached`; 401 without a session; 401 `invalid_credentials` for a missing or wrong current password; 403 `email_unverified`; 409 `conflict`; 429 `rate_limited`; 503 `breach_check_unavailable` |
 | POST | `/otp/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a sign-in code |
 | POST | `/otp/verify` | `{ email, code, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c); 400 `invalid_body`, `invalid_code` (a wrong, expired, spent, or unknown code), `too_many_attempts` (the code took `maxAttempts` wrong guesses: request a new one); 429 `rate_limited` |
 | POST | `/otp/reset/request` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. Mails a reset code. Only with a `password` config |
-| POST | `/otp/reset` | `{ email, code, password, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie and the password set (plan 12c); 400 `invalid_body`, `invalid_code`, `too_many_attempts`, `password_policy` and `password_breached` (both spend the code); 429 `rate_limited`. Only with a `password` config |
+| POST | `/otp/reset` | `{ email, code, password, trustDevice? }` | `{ token, user, session }` with the cookie, or, for a user with the second factor on, `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie and the password set (plan 12c); 400 `invalid_body`, `invalid_code`, `too_many_attempts`, `password_policy` and `password_breached` (both spend the code); 429 `rate_limited`; 503 `breach_check_unavailable` (it spends the code too). Only with a `password` config |
 | GET | `/handoff/start` | `?challenge=&redirect=` | 200 the sign-in page, or 302 to the confirm page when the browser already has a session; 400 `invalid_body`; 429 `rate_limited`. Only with a `handoff` config |
 | GET | `/handoff/continue` | `?h=` | 200 the confirm page with a session, the sign-in page without one; 302 to `/?auth_error=<code>` for a spent or unknown id |
 | POST | `/handoff/continue` | form `h`, Origin = baseURL | 302 to `<redirect>?code=`; 403 from any other origin; the sign-in page without a session |
@@ -345,7 +345,7 @@ optional.
 | --- | --- | --- |
 | `hash` | `createPbkdf2PasswordHash()` | The hash seam. It has `hash`, `verify`, and `dummy`. |
 | `minLength` | 8 | The lower bound, 8 to 128. Counted in code points. |
-| `breachCheck` | none | `(plain) => Promise<boolean>`. True refuses the password with `password_breached`. |
+| `breachCheck` | none | `(plain) => Promise<boolean \| "unavailable">`. True refuses with `password_breached`. `"unavailable"` refuses with 503 `breach_check_unavailable`: the check fails closed. `@authtempo/breach-check` answers it. |
 | `resetTtlMinutes` | 15 | The life of a reset link, 1 to 1440. |
 | `resetPage` | `defaultResetPage` | The HTML of the reset page. |
 | `requireVerified` | `false` | True refuses the password sign-in of an unverified address. |
@@ -413,6 +413,20 @@ row and one mail that points to the sign-in, and a claim race or a refusal
 by `signUp: "invited"` gets no row and no mail. The hash runs before the
 transaction on every path, but the transaction of a new address writes
 more than the read of a known one, so core does not claim 6.3.8 in full.
+
+`breachCheck` (plan 12b, ASVS 5.0.0 6.2.12). The check fails closed, and
+core holds no list of breached passwords. An answer of `true` refuses the
+password with 400 `password_breached`. An answer of `"unavailable"`
+refuses it with 503 `breach_check_unavailable`: the person tries again
+later. A throw of the function answers 500, because it is a fault of the
+app's function, not an outage. The sign-up, the reset by link, the reset
+by code, and the change run the check. The sign-up and both resets run it
+before any read of a user, so a known and an unknown address get the same
+answer. A refused reset link stays usable. A refused reset code is spent,
+so after an outage the person asks for a new code. In the sign-up, the
+check runs after `password-sign-up:ip` and before `password-sign-up:email`
+and the captcha. `@authtempo/breach-check` answers the port with the HIBP
+Pwned Passwords range API.
 
 A reset of a user with the second factor on opens no session (plan 12c).
 It sets the password and ends every session, as before. Then it writes a

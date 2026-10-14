@@ -240,6 +240,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset). |
 
+<h3 id="breach_check_unavailable"><code>breach_check_unavailable</code> 503</h3>
+
+- **Meaning:** `password.breachCheck` answered `"unavailable"`, so core refused the password. The check fails closed.
+- **Do:** Try again in a few minutes. A reset link stays usable. A reset code is spent, so ask for a new code.
+
+| Routes |
+| --- |
+| The routes of [`password_breached`](#password_breached). |
+
 <h3 id="email_taken"><code>email_taken</code> 409</h3>
 
 - **Meaning:** A verified account, or an account with a password, holds the address.

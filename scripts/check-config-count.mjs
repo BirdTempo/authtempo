@@ -11,7 +11,7 @@ import { execFileSync } from "node:child_process";
 // packages/captcha-turnstile (16, Task 10), packages/breach-check (17,
 // Task 11), and examples/pbkdf2-probe (18, Task 13). Raise this number when a
 // package adds a vitest config.
-const MINIMUM = 16;
+const MINIMUM = 17;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

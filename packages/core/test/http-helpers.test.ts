@@ -510,6 +510,7 @@ describe("sign-in page", () => {
     // Every code the handler names is a real core code, so a renamed code fails here.
     const codes = [...handler.matchAll(/code === "([a-z_]+)"/g)].map((m) => m[1]);
     expect(codes.sort()).toEqual([
+      "breach_check_unavailable",
       "captcha_failed",
       "captcha_required",
       "email_taken",

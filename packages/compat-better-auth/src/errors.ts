@@ -78,6 +78,11 @@ export const BETTER_AUTH_CODES = {
   captcha_required: "MISSING_RESPONSE",
   captcha_failed: "VERIFICATION_FAILED",
   captcha_unavailable: "UNKNOWN_ERROR",
+  // Plan 12b, the breach check. The name is authtempo's own. Better Auth
+  // 1.7.2's haveIBeenPwned plugin has one code, PASSWORD_COMPROMISED
+  // (dist/plugins/haveibeenpwned/index.mjs:9, read 2026-10-15). When the
+  // range API gives no answer, it answers 500 with no code (:20, :27).
+  breach_check_unavailable: "BREACH_CHECK_UNAVAILABLE",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

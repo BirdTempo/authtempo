@@ -275,8 +275,14 @@ export interface PasswordConfig {
   hash?: PasswordHashSeam;
   /** 8 to 128. Default 8. */
   minLength?: number;
-  /** True when the password is in a known breach. Default: no check. */
-  breachCheck?: (plain: string) => Promise<boolean>;
+  /**
+   * True when the password is in a known breach: `password_breached`.
+   * `"unavailable"` when the check got no answer: the password is refused
+   * with 503 `breach_check_unavailable`, so the check fails closed (plan 12b).
+   * A throw answers 500: it is a fault of the function, not an outage.
+   * Default: no check. `@authtempo/breach-check` answers this port.
+   */
+  breachCheck?: (plain: string) => Promise<boolean | "unavailable">;
   /** 1 to 1440. Default 15. */
   resetTtlMinutes?: number;
   /** The HTML of the reset page. The default is `defaultResetPage`. */
@@ -570,7 +576,7 @@ export interface ResolvedConfig {
   password: {
     hash: PasswordHashSeam;
     minLength: number;
-    breachCheck: ((plain: string) => Promise<boolean>) | null;
+    breachCheck: ((plain: string) => Promise<boolean | "unavailable">) | null;
     resetTtlMinutes: number;
     resetPage: (input: ResetPageInput) => string;
     legacyVerify: Required<LegacyVerifyConfig> | null;

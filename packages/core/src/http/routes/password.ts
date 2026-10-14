@@ -69,7 +69,7 @@ const changeBody = z.object({
 });
 
 /** The refusals the reset page shows. The link is still valid after each. */
-const PAGE_ERRORS = new Set(["password_policy", "password_breached"]);
+const PAGE_ERRORS = new Set(["password_policy", "password_breached", "breach_check_unavailable"]);
 
 /** No route without a `password` config, so the router answers 404. */
 export function passwordRoutes(config: ResolvedConfig): Route[] {
@@ -197,7 +197,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         const raw = ctx.url.searchParams.get("error");
         const error =
           raw !== null && PAGE_ERRORS.has(raw)
-            ? (raw as "password_policy" | "password_breached")
+            ? (raw as "password_policy" | "password_breached" | "breach_check_unavailable")
             : null;
         return page(
           pw.resetPage({
