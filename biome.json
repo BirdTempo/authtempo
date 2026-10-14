@@ -4,6 +4,14 @@
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
   "linter": { "enabled": true, "rules": { "recommended": true } },
   "files": {
-    "includes": ["**", "!**/dist", "!**/node_modules", "!**/.wrangler", "!**/proof/results"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.wrangler",
+      "!**/proof/results",
+      "!**/.next",
+      "!**/next-env.d.ts"
+    ]
   }
 }

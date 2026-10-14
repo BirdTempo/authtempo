@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  // next/server's declarations name node's async_hooks, so the fixture loads the Node types.
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["."]
+}

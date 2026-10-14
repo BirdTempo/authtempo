@@ -1,0 +1,28 @@
+{
+  "name": "authtempo-example-next",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev -p 3000",
+    "next:build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run && NEXT_TELEMETRY_DISABLED=1 next build && node proof/next-start.mjs"
+  },
+  "dependencies": {
+    "@authtempo/client": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@authtempo/next": "workspace:*",
+    "@authtempo/react": "workspace:*",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
