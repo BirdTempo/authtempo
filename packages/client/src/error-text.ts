@@ -92,8 +92,44 @@ const SDK_TEXT: Readonly<Record<SdkCode, string>> = {
     "The browser came back to an address that this sign-in did not start. Start the sign-in again.",
 };
 
-/** Every text, by table. The site check reads all three. */
+/** Every English text, by table. The site check reads all three. */
 export const ERROR_TEXT = { core: CORE_TEXT, oauth: OAUTH_TEXT, sdk: SDK_TEXT } as const;
+
+/**
+ * The languages of the error texts (owner's addition of 2026-10-14). The owner
+ * picks the list; English is the first. A language added here fails the
+ * compile until ERROR_TEXTS has its table with every code.
+ */
+export const LOCALES = ["en"] as const;
+export type Locale = (typeof LOCALES)[number];
+
+export interface ErrorTexts {
+  core: Readonly<Record<ErrorCode, string>>;
+  oauth: Readonly<Record<OAuthErrorCode, string>>;
+  sdk: Readonly<Record<SdkCode, string>>;
+}
+
+/** The texts of each language. The docs link of a code is the same in every language. */
+export const ERROR_TEXTS: Readonly<Record<Locale, ErrorTexts>> = { en: ERROR_TEXT };
+
+/**
+ * The entry of `list` for a language tag: the exact tag, then its first part
+ * (`en-GB` gives `en`), else English. Not a package export: the test runs it
+ * over a list of two languages, because `LOCALES` holds one today.
+ */
+export function pickLocale<L extends string>(
+  tag: string | null | undefined,
+  list: readonly L[],
+): L | "en" {
+  const t = (tag ?? "").toLowerCase();
+  const first = t.split("-")[0] ?? "";
+  return list.find((l) => l === t) ?? list.find((l) => l === first) ?? "en";
+}
+
+/** The locale of a language tag, such as `navigator.language`, else English. */
+export function resolveLocale(tag: string | null | undefined): Locale {
+  return pickLocale(tag, LOCALES);
+}
 
 const isSdk = (code: string): code is SdkCode => Object.hasOwn(SDK_TEXT, code);
 
@@ -107,12 +143,22 @@ export function errorAnchor(code: string, table: ErrorTable): string {
   return table === "core" ? code : `oauth-${code}`;
 }
 
-/** The sentence for a code: a core code, an SDK code, or with `"oauth"` a code of the OAuth client. */
-export function errorText(code: ErrorCode | SdkCode): string;
-export function errorText(code: OAuthClientCode, table: "oauth"): string;
-export function errorText(code: ClientCode | OAuthClientCode, table: ErrorTable = "core"): string {
-  if (isSdk(code)) return SDK_TEXT[code];
-  return table === "oauth" ? OAUTH_TEXT[code as OAuthErrorCode] : CORE_TEXT[code as ErrorCode];
+/**
+ * The sentence for a code in a locale (default English): a core code, an SDK
+ * code, or with `"oauth"` first a code of the OAuth client.
+ */
+export function errorText(code: ErrorCode | SdkCode, locale?: Locale): string;
+export function errorText(code: OAuthClientCode, table: "oauth", locale?: Locale): string;
+export function errorText(
+  code: ClientCode | OAuthClientCode,
+  second?: ErrorTable | Locale,
+  third?: Locale,
+): string {
+  const table: ErrorTable = second === "oauth" ? "oauth" : "core";
+  const locale = (second === "oauth" || second === "core" ? third : second) ?? "en";
+  const texts = ERROR_TEXTS[locale];
+  if (isSdk(code)) return texts.sdk[code];
+  return table === "oauth" ? texts.oauth[code as OAuthErrorCode] : texts.core[code as ErrorCode];
 }
 
 /**

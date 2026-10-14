@@ -21,10 +21,15 @@ export {
 export {
   DOCS_ORIGIN,
   ERROR_TEXT,
+  ERROR_TEXTS,
   type ErrorTable,
+  type ErrorTexts,
   errorAnchor,
   errorDocsURL,
   errorText,
+  LOCALES,
+  type Locale,
+  resolveLocale,
   type SdkCode,
 } from "./error-text.js";
 export { readRedirectError } from "./redirect-error.js";

@@ -138,6 +138,8 @@ For passkey autofill, start the autofill when the page loads, before a passkey b
 
 `errorText(code)` answers one sentence for a code, for an app to show to a person. `errorDocsURL(code)` answers the docs page of the code: its anchor on [Error codes](/docs/reference/errors/), or the [Results](#results) section for `network`, `unexpected`, and `cancelled`. `redirect_mismatch` links to the [failure codes of the handoff](/docs/reference/handoff/#failure-codes). Pass `"oauth"` as the second argument for a code of the OAuth client, because `invalid_token` and `rate_limited` are in both tables. `ERROR_TEXT` holds every text, by table.
 
+`errorText(code, locale)` answers the text in a language of `LOCALES`; English (`"en"`) is the default and, today, the only one. `resolveLocale(navigator.language)` picks the locale of a language tag, else English. The docs link of a code is the same in every language.
+
 ## Exports
 
 | Export | What it is |
@@ -158,6 +160,9 @@ For passkey autofill, start the autofill when the page loads, before a passkey b
 | `SESSION_CHANNEL` | The name of the `BroadcastChannel`, `authtempo-session`. |
 | `errorText` | One sentence for a code. |
 | `errorDocsURL` | The docs link of a code. |
+| `ERROR_TEXTS` | Every error text, by language and table. |
+| `LOCALES` | The languages of the error texts: `["en"]`. |
+| `resolveLocale` | The locale of a language tag, else English. |
 | `errorAnchor` | The anchor of a code on the errors page. |
 | `ERROR_TEXT` | Every error text, by table. |
 | `DOCS_ORIGIN` | The origin of the docs, `https://authtempo.com`. |
@@ -166,7 +171,7 @@ The types of the package:
 
 | Area | Types |
 | --- | --- |
-| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore` |
+| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
 | Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 

@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   DOCS_ORIGIN,
   ERROR_TEXT,
+  ERROR_TEXTS,
   errorAnchor,
   errorDocsURL,
   errorText,
+  LOCALES,
+  pickLocale,
+  resolveLocale,
 } from "../src/error-text.js";
 
 describe("error texts and docs links (plan 11d)", () => {
@@ -49,5 +53,43 @@ describe("error texts and docs links (plan 11d)", () => {
   it("writes each text as one or two sentences that end with a period", () => {
     for (const table of [ERROR_TEXT.core, ERROR_TEXT.oauth, ERROR_TEXT.sdk])
       for (const text of Object.values(table)) expect(text).toMatch(/^[A-Z].*\.$/);
+  });
+  it("has a table for each locale, with a text for every code of both core tables and of an SDK", () => {
+    expect(LOCALES).toEqual(["en"]);
+    expect(ERROR_TEXTS.en).toBe(ERROR_TEXT);
+    for (const locale of LOCALES) {
+      const t = ERROR_TEXTS[locale];
+      expect(Object.keys(t.core).sort()).toEqual(Object.keys(ERRORS).sort());
+      expect(Object.keys(t.oauth).sort()).toEqual(Object.keys(OAUTH_ERRORS).sort());
+      expect(Object.keys(t.sdk).sort()).toEqual(Object.keys(ERROR_TEXT.sdk).sort());
+      for (const table of [t.core, t.oauth, t.sdk])
+        for (const text of Object.values(table)) expect(text.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("answers the text of a locale, with the table first for an OAuth code", () => {
+    expect(errorText("invalid_token", "en")).toBe(ERROR_TEXTS.en.core.invalid_token);
+    expect(errorText("invalid_token", "oauth", "en")).toBe(ERROR_TEXTS.en.oauth.invalid_token);
+    expect(errorText("invalid_token", "oauth")).toBe(ERROR_TEXTS.en.oauth.invalid_token);
+    expect(errorText("network", "en")).toBe(ERROR_TEXTS.en.sdk.network);
+  });
+
+  it("resolves a language tag to a locale of the list, else to English", () => {
+    expect(resolveLocale("en")).toBe("en");
+    expect(resolveLocale("EN-gb")).toBe("en");
+    expect(resolveLocale("fr-FR")).toBe("en");
+    expect(resolveLocale("")).toBe("en");
+    expect(resolveLocale(undefined)).toBe("en");
+  });
+
+  it("matches a tag over a list of two languages: the exact tag, then its first part, else English", () => {
+    // The public list holds English only, so the rule runs here over a list of two.
+    const list = ["en", "fr", "pt-br"] as const;
+    expect(pickLocale("fr", list)).toBe("fr");
+    expect(pickLocale("FR-ca", list)).toBe("fr");
+    expect(pickLocale("pt-BR", list)).toBe("pt-br");
+    expect(pickLocale("pt-PT", list)).toBe("en");
+    expect(pickLocale("de", list)).toBe("en");
+    expect(pickLocale(null, list)).toBe("en");
   });
 });
