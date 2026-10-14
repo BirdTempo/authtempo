@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import type { ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
@@ -457,7 +458,7 @@ export async function passwordSignIn(
   // gets a challenge in place of the session. The gate keeps the guard below
   // for its challenge, so a reset, a change, or a claim since the check
   // refuses it.
-  const gated = await twoFactorGate(
+  const gate = await twoFactorGate(
     config,
     {
       user,
@@ -470,9 +471,9 @@ export async function passwordSignIn(
     },
     now,
   );
-  if (gated) {
-    if (!gated.ok) await legacyFloor(pw, started);
-    return gated;
+  if ("challenge" in gate) {
+    if (!gate.challenge.ok) await legacyFloor(pw, started);
+    return gate.challenge;
   }
   const signedIn = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<PasswordSession>> => {
@@ -509,7 +510,11 @@ export async function passwordSignIn(
   );
   // After the commit, never inside: the floor must not hold a Postgres connection.
   if (!signedIn.ok) await legacyFloor(pw, started);
-  else await sessionOpened(config, signedIn.value.session, signedIn.value.user, "password");
+  else {
+    // The trust row that skipped the gate, after the commit, as the other gates do.
+    await touchTrust(config, gate.trustId, now);
+    await sessionOpened(config, signedIn.value.session, signedIn.value.user, "password");
+  }
   return signedIn;
 }
 
@@ -800,6 +805,11 @@ export async function runReset(
         applyReset(config, input, proof, consume, hash, now, ended, trust),
       );
     } catch (err) {
+      // Caught outside the transaction, so its deletes are undone.
+      if (err instanceof ResetRefusedError) {
+        reset = fail(err.code);
+        break;
+      }
       // Two resets for one address raced: the loser's user, email
       // identity, or password create failed on a unique key. Caught here,
       // outside: inside, Postgres has already aborted the transaction, and
@@ -874,6 +884,13 @@ interface ResetEnded {
   reset: SessionRow[] | undefined;
 }
 
+/** The consume of a reset refused: a throw, so the transaction undoes the older-row deletes. */
+class ResetRefusedError extends Error {
+  constructor(readonly code: ErrorCode) {
+    super(code);
+  }
+}
+
 function applyReset(
   config: ResolvedConfig,
   input: { ip: string | null; userAgent: string | null; trustDevice?: string | undefined },
@@ -916,11 +933,11 @@ function applyReset(
       ]);
     // Two POSTs of one proof race here, and only one wins. The caller read
     // the row live with this `now`, so a refusal here means that a parallel
-    // reset or password change spent or deleted it. That winner deletes every
-    // pending reset row of the address too, so the deletes above remove no
-    // row that the winner leaves.
+    // flow spent or deleted it: a reset, a password change, a newer code
+    // request, or a wrong guess at the cap. The last two delete no reset
+    // link. So a refusal throws, and the deletes above are undone.
     const consumed = await consume(tx);
-    if (!consumed.ok) return consumed;
+    if (!consumed.ok) throw new ResetRefusedError(consumed.code);
     const email = consumed.value.identifier;
     const next = safeNext((consumed.value.data as { next?: unknown } | null)?.next);
     const found = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
@@ -1061,6 +1078,9 @@ async function setPassword(
   return created.id;
 }
 
+/** A change whose password row changed since its verify: a throw, so the transaction undoes its deletes. */
+class ChangeRaceError extends Error {}
+
 export interface PasswordChange {
   session: ResolvedSession;
   currentPassword?: string | undefined;
@@ -1105,9 +1125,26 @@ export async function changePassword(
       // `applyReset`: the sign-in re-check matches the row by id and hash.
       // Do not read `password.updatedAt` as the change time: the sign-in
       // re-check writes it too.
+      // The lock order of `applyReset`: the pending reset rows of the
+      // address in id order, then the password row. So a change that races
+      // a reset waits on it and forms no cycle on Postgres.
+      const pending = (
+        await tx.findMany("verification", [
+          { field: "purpose", op: "in", value: RESET_PURPOSES },
+          { field: "identifier", op: "eq", value: user.email },
+          { field: "consumedAt", op: "eq", value: null },
+        ])
+      )
+        .map((v) => v.id)
+        .sort();
+      for (const id of pending)
+        await tx.delete("verification", [
+          { field: "id", op: "eq", value: id },
+          { field: "consumedAt", op: "eq", value: null },
+        ]);
       if (row) {
         // Conditional on the hash this call verified, so two changes do not
-        // both win. It is the first write: zero rows refuses with no change.
+        // both win. Zero rows throws, so the deletes above are undone.
         const n = await tx.update(
           "password",
           [
@@ -1116,7 +1153,7 @@ export async function changePassword(
           ],
           { hash, updatedAt: now },
         );
-        if (n === 0) return fail("conflict");
+        if (n === 0) throw new ChangeRaceError();
       } else {
         await tx.create("password", {
           id: newId(now),
@@ -1150,6 +1187,7 @@ export async function changePassword(
       return ok({ ok: true });
     });
   } catch (err) {
+    if (err instanceof ChangeRaceError) return fail("conflict");
     // A concurrent first password (a reset) won the unique key. Caught
     // here, outside: inside, Postgres has already aborted the transaction.
     if (err instanceof StorageError && err.code === "unique_violation" && err.model === "password")

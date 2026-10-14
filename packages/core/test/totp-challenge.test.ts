@@ -8,6 +8,7 @@ import {
   verifyPassword,
 } from "../src/engine/password.js";
 import { challengeMethods, challengeOrigin, writeChallenge } from "../src/engine/second-factor.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { setupTotp, type TwoFactorVerify, verifyTwoFactor } from "../src/engine/totp.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { SecondFactorRow } from "../src/schema.js";
@@ -505,7 +506,7 @@ describe("the trusted device (plan 9f)", () => {
     expect(await auth.storage.findMany("trustedDevice", [])).toEqual([before]);
   });
 
-  it("deletes an expired trusted device and asks for the factor", async () => {
+  it("asks for the factor for an expired trusted device, and the sweep deletes its row (plan 12c final review, m3)", async () => {
     const auth = totpAuth({ totp: { trustDays: 1 } });
     const { secret } = await enrolled(auth);
     const r = await verify(auth, {
@@ -517,6 +518,10 @@ describe("the trusted device (plan 9f)", () => {
     auth.clock.advance(86_400_000);
     const s = await signIn(auth, { trustDevice: r.value.trustDevice.token });
     expect(s.ok && "twoFactor" in s.value).toBe(true);
+    // The trust read writes nothing. The sweep deletes a row after its expiry.
+    expect(await auth.storage.findMany("trustedDevice", [])).toHaveLength(1);
+    auth.clock.advance(1);
+    expect((await sweepExpired(auth.config)).trustedDevices).toBe(1);
     expect(await auth.storage.findMany("trustedDevice", [])).toEqual([]);
   });
 });

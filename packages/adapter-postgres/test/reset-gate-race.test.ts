@@ -16,6 +16,8 @@ const PASSWORD = "correct horse battery";
 const ROUNDS = 5;
 // The passkey races need more rounds: a bad order needs both transactions inside one window.
 const PASSKEY_ROUNDS = 20;
+// The change against a reset: the plan 12c final review met a 500 in the first round of 30.
+const CHANGE_ROUNDS = 30;
 
 let db: Awaited<ReturnType<typeof freshDatabase>>;
 beforeEach(async () => {
@@ -160,6 +162,37 @@ describe("the reset gate on Postgres (plan 12c)", () => {
       // The newer reset deletes every older challenge before it writes its own.
       expect(await liveChallenges(u.userId)).toBe(1);
       expect(await sessions(u.userId)).toBe(0);
+    }
+  });
+
+  it("a password change against a reset never answers 500 and leaves one winner", async () => {
+    const r = race();
+    const email = "change@example.com";
+    await user(r, email);
+    let current = PASSWORD;
+    for (let round = 0; round < CHANGE_ROUNDS; round++) {
+      // A new session each round: a winning reset ends every session of the user.
+      const signIn = await r.post("/password/sign-in", { email, password: current });
+      expect(signIn.status).toBe(200);
+      const cookie =
+        signIn.headers
+          .getSetCookie()
+          .find((c) => c.startsWith("tempo_session="))
+          ?.split(";")[0] ?? "";
+      await r.post("/password/reset/request", { email });
+      const token = r.lastToken(email);
+      const byReset = `a reset long password ${round}`;
+      const byChange = `a changed long password ${round}`;
+      const [reset, change] = await Promise.all([
+        r.post("/password/reset", { token, password: byReset }),
+        r.post("/password/change", { currentPassword: current, newPassword: byChange }, cookie),
+      ]);
+      // A 500 is a thrown storage error, such as a deadlock. The loser answers
+      // 400 (the change deleted the link) or 409 (the reset changed the hash).
+      const statuses = [reset.status, change.status];
+      expect(statuses).not.toContain(500);
+      expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+      current = reset.status === 200 ? byReset : byChange;
     }
   });
 

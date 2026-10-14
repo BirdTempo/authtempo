@@ -254,6 +254,49 @@ describe("a passkey as a second-factor method (plan 12c)", () => {
     expect(v.ok).toBe(true);
   });
 
+  it("a passkey verify passes after the user's code budget is spent", async () => {
+    const auth = totpAuth({ passkey: RP });
+    const { session, soft } = await withPasskey(auth);
+    const on = await enablePasskeyMethod(auth.config, {
+      session,
+      password: PASSWORD,
+      response: await signInAssertion(auth, soft),
+    });
+    if (!on.ok) throw new Error(on.code);
+    const first = await passwordSignIn(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!first.ok || !("twoFactor" in first.value)) throw new Error("no challenge");
+    // Spend the per-user code budget of 15 minutes: a code check now answers rate_limited.
+    const key = `totp-code:user:${session.user.id}`;
+    let spent = 0;
+    while (spent < 100 && (await auth.config.limiter.allow(key, { seconds: 900, max: 10 })))
+      spent++;
+    expect(spent).toBeLessThan(100);
+    expect(
+      await verifyTwoFactor(auth.config, {
+        challenge: first.value.twoFactor.challenge,
+        backupCode: on.value.backupCodes[0] ?? "",
+        ip: null,
+      }),
+    ).toMatchObject({ ok: false, code: "rate_limited" });
+    // A passkey assertion is no guess: it counts on the challenge only (spec 8.14 item 2).
+    const options = await passkeyChallengeOptions(auth.config, {
+      challenge: first.value.twoFactor.challenge,
+      ip: null,
+    });
+    if (!options.ok) throw new Error(options.code);
+    const v = await verifyTwoFactor(auth.config, {
+      challenge: first.value.twoFactor.challenge,
+      passkey: await soft.authenticate(options.value.challenge),
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+  });
+
   it("refuses at one challenge an assertion of another challenge's options, and counts it on the challenge", async () => {
     const auth = totpAuth({ passkey: RP });
     const { session, soft } = await withPasskey(auth);

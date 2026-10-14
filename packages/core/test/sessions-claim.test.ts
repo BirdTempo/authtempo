@@ -1178,6 +1178,10 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
   it("leaves one user when two resets for an address with no user race (plan 8, reset unique_violation retry)", async () => {
     const auth = makeAuth({ password: { hash: FAST } });
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    // A new millisecond, so the second link's id sorts after the first. The
+    // loser deletes the older pending rows first (plan 12c, Task 12), so the
+    // winner takes the newer link and the loser the older one.
+    auth.clock.advance(1);
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     const [first, second] = auth.mail.map((m) => tokenFromMail(m.text));
     const inner = auth.storage;
@@ -1192,7 +1196,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
         if (m === "user" && !missed) {
           missed = true;
           winner = await resetPassword(d1Like(auth.config), {
-            token: first ?? "",
+            token: second ?? "",
             password: "winner password",
             ip: null,
             userAgent: null,
@@ -1208,7 +1212,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     });
     const loser = await resetPassword(
       { ...auth.config, storage: wrap(inner) },
-      { token: second ?? "", password: "loser password", ip: null, userAgent: null },
+      { token: first ?? "", password: "loser password", ip: null, userAgent: null },
     );
     expect(missed).toBe(true);
     const won = winner as Awaited<ReturnType<typeof resetPassword>> | null;

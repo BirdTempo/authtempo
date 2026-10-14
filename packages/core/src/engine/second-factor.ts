@@ -149,7 +149,10 @@ export async function replaceBackupCodes(
   return fail("conflict");
 }
 
-/** A challenge is a session in waiting, as a handoff code is: a flow that ends the user's sessions or changes the factor deletes the user's challenges. */
+/**
+ * A challenge is a session in waiting, as a handoff code is. So a flow that
+ * ends the user's sessions or changes the factor deletes the user's challenges.
+ */
 export async function deleteTwoFactorChallenges(tx: StorageAdapter, userId: string): Promise<void> {
   await tx.delete("verification", [
     { field: "purpose", op: "eq", value: "two-factor" },

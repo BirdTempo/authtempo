@@ -32,9 +32,9 @@ import {
   SETUP_PER_USER,
   spendBackupCode,
   TRUST_PREFIX,
-  TRUST_TOKEN_RE,
   TWO_FACTOR_TOKEN_RE,
   type TwoFactorPending,
+  touchTrust,
   writeChallenge,
 } from "./second-factor.js";
 import { acceptEmailCode, acceptPasskey, liveChallenge } from "./second-factor-methods.js";
@@ -574,40 +574,14 @@ export interface TwoFactorSession {
 }
 
 /**
- * True for a live trusted device of this user: then it moves `lastSeenAt`.
- * A token of another user's device is no skip and changes nothing. An
- * expired row is deleted.
- */
-async function trusted(
-  config: ResolvedConfig,
-  userId: string,
-  token: string | undefined,
-  now: Date,
-): Promise<boolean> {
-  if (token === undefined || !TRUST_TOKEN_RE.test(token)) return false;
-  const row = await config.storage.findOne("trustedDevice", [
-    { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
-  ]);
-  if (!row || row.userId !== userId) return false;
-  if (row.expiresAt.getTime() <= now.getTime()) {
-    await config.storage.delete("trustedDevice", [{ field: "id", op: "eq", value: row.id }]);
-    return false;
-  }
-  await config.storage.update("trustedDevice", [{ field: "id", op: "eq", value: row.id }], {
-    lastSeenAt: now,
-    updatedAt: later(now, row.updatedAt),
-  });
-  return true;
-}
-
-/**
  * The gate of the password sign-in (owner decision 1b), after the password
- * is proved. Null: no gate (no factor config, no factor on, or a trusted
- * device), so the sign-in opens its session. Else a challenge in place of
- * the session. The challenge is a session in waiting, so it keeps the
- * sign-in's guard: the conditional update on the proved hash runs after the
- * create, and zero rows (a reset, a change, or a claim since the check)
- * deletes the challenge and refuses.
+ * is proved. `trustId`: no gate (no factor config, no factor on, or a live
+ * trust row of this user, read by `liveTrust`), so the sign-in opens its
+ * session and then moves the row's `lastSeenAt` with `touchTrust`. Else a
+ * challenge in place of the session. The challenge is a session in waiting,
+ * so it keeps the sign-in's guard: the conditional update on the proved hash
+ * runs after the create, and zero rows (a reset, a change, or a claim since
+ * the check) deletes the challenge and refuses.
  */
 export async function twoFactorGate(
   config: ResolvedConfig,
@@ -621,41 +595,45 @@ export async function twoFactorGate(
     trustDevice: string | undefined;
   },
   now: Date,
-): Promise<Result<TwoFactorPending> | null> {
-  if (!config.totp) return null;
+): Promise<{ challenge: Result<TwoFactorPending> } | { trustId: string | null }> {
+  if (!config.totp) return { trustId: null };
   const { user } = input;
   const row = await factorRow(config.storage, user.id);
-  if (!row) return null;
-  if (await trusted(config, user.id, input.trustDevice, now)) return null;
-  return config.storage.transaction(async (tx): Promise<Result<TwoFactorPending>> => {
-    const { id, pending } = await writeChallenge(
-      config,
-      tx,
-      row,
-      {
-        userId: user.id,
-        via: "password",
-        from: "sign-in",
-        ip: input.ip,
-        userAgent: input.userAgent,
-        next: input.next,
-      },
-      now,
-    );
-    const n = await tx.update(
-      "password",
-      [
-        { field: "id", op: "eq", value: input.passwordId },
-        { field: "hash", op: "eq", value: input.proved },
-      ],
-      { updatedAt: now },
-    );
-    if (n === 0) {
-      await tx.delete("verification", [{ field: "id", op: "eq", value: id }]);
-      return fail("invalid_credentials");
-    }
-    return ok(pending);
-  });
+  if (!row) return { trustId: null };
+  const trustId = await liveTrust(config.storage, user.id, input.trustDevice, now);
+  if (trustId) return { trustId };
+  const challenge = await config.storage.transaction(
+    async (tx): Promise<Result<TwoFactorPending>> => {
+      const { id, pending } = await writeChallenge(
+        config,
+        tx,
+        row,
+        {
+          userId: user.id,
+          via: "password",
+          from: "sign-in",
+          ip: input.ip,
+          userAgent: input.userAgent,
+          next: input.next,
+        },
+        now,
+      );
+      const n = await tx.update(
+        "password",
+        [
+          { field: "id", op: "eq", value: input.passwordId },
+          { field: "hash", op: "eq", value: input.proved },
+        ],
+        { updatedAt: now },
+      );
+      if (n === 0) {
+        await tx.delete("verification", [{ field: "id", op: "eq", value: id }]);
+        return fail("invalid_credentials");
+      }
+      return ok(pending);
+    },
+  );
+  return { challenge };
 }
 
 /**
@@ -712,6 +690,8 @@ export async function verifyTwoFactor(
     return fail("rate_limited");
   const miss = async (): Promise<Result<TwoFactorSession>> =>
     fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
+  // The trust row of the trusted button, for its `lastSeenAt` after the commit.
+  let trustId: string | null = null;
   let backupCodesLeft = factor.backupCodes.length;
   if (proof.method === "totp") {
     const row = await enabledRow(config.storage, challenge.identifier);
@@ -730,8 +710,8 @@ export async function verifyTwoFactor(
   } else if (proof.method === "trusted") {
     // A trust token is 32 random bytes, no guess: a miss counts nothing and
     // answers `invalid_token`, as for a challenge that the page cannot pass.
-    if (!(await liveTrust(config.storage, challenge.identifier, proof.value, now)))
-      return fail("invalid_token");
+    trustId = await liveTrust(config.storage, challenge.identifier, proof.value, now);
+    if (!trustId) return fail("invalid_token");
   } else if (!(await acceptPasskey(config, challenge, proof.value))) return miss();
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: challenge.identifier },
@@ -790,7 +770,10 @@ export async function verifyTwoFactor(
     }),
   );
   // After the commit, as every flow does (plan 9d).
-  if (opened.ok) await sessionOpened(config, opened.value.session, opened.value.user, via);
+  if (opened.ok) {
+    await touchTrust(config, trustId, now);
+    await sessionOpened(config, opened.value.session, opened.value.user, via);
+  }
   return opened;
 }
 

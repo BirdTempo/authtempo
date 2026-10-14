@@ -15,6 +15,7 @@ import {
   resetPassword,
 } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
 import { FAST, sessionOnly, signUpAndVerify } from "./password-helpers.js";
 
@@ -263,6 +264,40 @@ describe("reset by code (plan 9e)", () => {
     ]);
     expect([a.ok, b.ok].sort()).toEqual([false, true]);
     expect(await auth.storage.findMany("password", [])).toHaveLength(1);
+  });
+
+  it("keeps the older reset link usable when a newer code request spends the code of a code reset (plan 12c final review, m1)", async () => {
+    const auth = resetAuth();
+    await signUpAndVerify(auth, EMAIL, OLD);
+    await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+    const link = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    // A new millisecond, so the code row's id sorts after the link's: the
+    // code reset deletes the link as an older pending row before its consume.
+    auth.clock.advance(1);
+    const code = await requestReset(auth);
+    // The code check passes. Then, before the reset's transaction, a newer
+    // code request spends the code, so the consume refuses. That request
+    // deletes no reset link.
+    let spent = false;
+    const storage: StorageAdapter = {
+      ...auth.storage,
+      transaction: async (fn) => {
+        if (!spent) {
+          spent = true;
+          await requestReset(auth);
+        }
+        return auth.storage.transaction(fn);
+      },
+    };
+    expect(
+      await resetPasswordWithOtp(
+        { ...auth.config, storage },
+        { email: EMAIL, code, password: NEW, ip: null, userAgent: null },
+      ),
+    ).toMatchObject({ ok: false, code: "invalid_code" });
+    expect(spent).toBe(true);
+    // The refusal undid the delete of the older link, so the link still resets.
+    expect((await linkReset(auth, link)).ok).toBe(true);
   });
 
   it("undoes the spend on a session hook refusal, so the code stays usable, as a refused reset link does", async () => {

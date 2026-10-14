@@ -590,6 +590,27 @@ describe("the challenge page (plan 12c)", () => {
     expect(none.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
   });
 
+  it("moves lastSeenAt of the trust row when the trusted button opens the session (plan 12c final review, ruling e)", async () => {
+    const h = pwHandle({ hash: FAST });
+    const f = await enrolled(h, await verifiedUser(h));
+    const verify = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: await challenge(h),
+        code: await f.code(),
+        trustDevice: true,
+      }),
+    );
+    const trust = pair(cookieNamed(verify, "tempo_totp_trust") ?? "");
+    const c = await challenge(h);
+    h.clock.advance(60_000);
+    const done = await h.auth.handle(
+      form("/auth/totp/challenge", `challenge=${c}&action=trusted`, { cookie: trust }),
+    );
+    expect(cookieNamed(done, "tempo_session")).not.toBeNull();
+    const rows = await h.storage.findMany("trustedDevice", []);
+    expect(rows.map((r) => r.lastSeenAt)).toEqual([h.clock.now()]);
+  });
+
   it("sends an email code from the page, shows its form, and a wrong email code returns to it", async () => {
     const h = pwHandle({ hash: FAST });
     const cookie = await verifiedUser(h);

@@ -114,8 +114,8 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   const apiTokens = await storage.delete("apiToken", [
     { field: "expiresAt", op: "lt", value: now },
   ]);
-  // A trusted device goes on its own only when a sign-in presents its token
-  // after the expiry. A device that never signs in again stays without this.
+  // No flow deletes an expired trusted device: each trust read refuses it
+  // (`liveTrust`), and only this sweep deletes it.
   const trustedDevices = await storage.delete("trustedDevice", [
     { field: "expiresAt", op: "lt", value: now },
   ]);
