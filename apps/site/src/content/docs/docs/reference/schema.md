@@ -65,6 +65,37 @@ pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
 - It is safe on every deploy, also from two replicas at once. Each migration takes an advisory lock and reads the applied names again.
 - `MIGRATIONS` exposes the SQL text for review.
 
+## The deploy window of version 8
+
+Warning: a Worker at version 7 still runs between `0008_schema_v8` and the deploy. Its second-factor writes do not reach `ta_second_factor`.
+
+1. Apply `0008_schema_v8`.
+2. Deploy core at version 8 at once.
+3. Run the three checks below immediately after the deploy.
+   - Run them before core at version 8 spends a backup code.
+4. Fix each user that a check lists, as the list below the commands tells.
+
+On D1:
+
+```sh
+pnpm --filter my-app exec wrangler d1 execute my-app --remote --command "SELECT t.user_id FROM ta_totp t WHERE t.enabled_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ta_second_factor s WHERE s.user_id = t.user_id)"
+pnpm --filter my-app exec wrangler d1 execute my-app --remote --command "SELECT s.user_id FROM ta_second_factor s WHERE EXISTS (SELECT 1 FROM json_each(s.methods) WHERE json_each.value = 'totp') AND NOT EXISTS (SELECT 1 FROM ta_totp t WHERE t.user_id = s.user_id AND t.enabled_at IS NOT NULL)"
+pnpm --filter my-app exec wrangler d1 execute my-app --remote --command "SELECT s.user_id FROM ta_second_factor s JOIN ta_totp t ON t.id = s.id WHERE s.backup_codes_version = 1 AND t.backup_codes <> s.backup_codes"
+```
+
+On Postgres:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT t.user_id FROM ta_totp t WHERE t.enabled_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ta_second_factor s WHERE s.user_id = t.user_id)"
+psql "$DATABASE_URL" -c "SELECT s.user_id FROM ta_second_factor s WHERE s.methods ? 'totp' AND NOT EXISTS (SELECT 1 FROM ta_totp t WHERE t.user_id = s.user_id AND t.enabled_at IS NOT NULL)"
+psql "$DATABASE_URL" -c "SELECT s.user_id FROM ta_second_factor s JOIN ta_totp t ON t.id = s.id WHERE s.backup_codes_version = 1 AND t.backup_codes <> s.backup_codes"
+```
+
+- **The first check** lists a TOTP enable in the window: the user has no factor row. Copy the `ta_totp` row with the same id, as `0008_schema_v8` does.
+- **The second check** lists a disable in the window: the factor lists `totp` with no enabled `ta_totp` row. Run `api.totp.disable({ userId })`.
+- **The third check** lists backup codes spent or replaced in the window. Copy `ta_totp.backup_codes` into the factor row.
+- The compatibility migration `0005_compat_schema_v8` has the same window and the same checks.
+
 ## The Better Auth tables
 
 The compatibility package keeps the tables of Better Auth 1.7. It adds columns to them, and some tables of core beside them.

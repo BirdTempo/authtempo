@@ -52,6 +52,8 @@ import test from "../../../../../samples/guides/pages.test.ts?raw";
 - The policy permits inline style, no script, and a form post to this origin only. A page that needs script needs its own route in the app.
 - The sign-in page is the one page with a script: the passkey ceremony, under a nonce. A custom sign-in page must put the nonce on its script tag.
 - A custom sign-in page must show `methods.providers`, or the buttons of GitHub, LinkedIn, and the list providers do not show.
+- A custom challenge page must read `methods`, `method`, `trusted`, and `emailSent` of `TotpChallengePageInput`. Without them the page shows no email form and no trusted-device button, and a person who signs in with Apple must type a code.
+- A challenge whose only method is a passkey needs a page with a script. The default page then shows the backup code form, which passes only while a code is left.
 - The verify page of a password sign-up has no config key. Core serves `defaultPasswordVerifyPage`.
 
 ## If it fails

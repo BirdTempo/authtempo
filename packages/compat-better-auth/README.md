@@ -231,7 +231,10 @@ sign-in through the handler. Since plan 12c a reset by code of a user with the
 factor on answers `{ success: true }` with no cookie, and the next sign-in asks
 for the factor: Better Auth's own shape. On a trusted device the reset opens
 the session, as the sign-in does. A reset link goes to core's page, which then
-shows core's challenge page.
+shows core's challenge page. The client's
+`resetPassword({ newPassword, token })` answers `{ status: true }` for a gated
+reset and leaves core's challenge live for 5 minutes; only the holder of the
+reset link can reach it.
 
 An invitation has two ids. The mail id (`data.id` in `sendInvitationEmail`)
 accepts the invitation, and the row id (from `api.createInvitation`) cancels it.

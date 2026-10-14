@@ -60,6 +60,22 @@ Version 7 (plan 9g, 2026-10-13) adds `ta_jwk` (the signing keys, unique on `slot
 
 Version 8 (plan 12c, 2026-10-14) adds `ta_second_factor`, one row per user with the second factor on (unique on the user), with the method list and the backup codes. It copies each enabled `ta_totp` row into it with the same id, so every stored backup code stays valid; `ta_totp.backup_codes` is unread from version 8 on. Apply `0008_schema_v8` before you deploy a core at version 8; the adapter refuses a database at version 7.
 
+Warning: a Worker at version 7 still runs between the migration and the deploy. Its second-factor writes do not reach `ta_second_factor`. Deploy core at version 8 at once after `0008_schema_v8`. Then run the three checks below immediately after the deploy. Each check lists the users that need a fix.
+
+```sql
+-- 1. Enabled in the window: no factor row. Copy the ta_totp row with the same id, as 0008 does.
+SELECT t.user_id FROM ta_totp t
+WHERE t.enabled_at IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM ta_second_factor s WHERE s.user_id = t.user_id);
+-- 2. Disabled in the window: the factor lists totp with no enabled totp row. Run api.totp.disable({ userId }).
+SELECT s.user_id FROM ta_second_factor s
+WHERE s.methods ? 'totp'
+  AND NOT EXISTS (SELECT 1 FROM ta_totp t WHERE t.user_id = s.user_id AND t.enabled_at IS NOT NULL);
+-- 3. Codes spent or replaced in the window (run before core 8 spends a code): copy t.backup_codes into s.
+SELECT s.user_id FROM ta_second_factor s JOIN ta_totp t ON t.id = s.id
+WHERE s.backup_codes_version = 1 AND t.backup_codes <> s.backup_codes;
+```
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.
