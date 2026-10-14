@@ -55,7 +55,7 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 
 5. Wrap the handler in place of `hooks`. Core has no request hooks.
 6. On Postgres, call `betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate()` once per deploy, before the first request.
-7. On D1, copy the four compat files into the app's `migrations_dir`, in order, each with the app's next number.
+7. On D1, copy each compat file of the table below into the app's `migrations_dir`, in order, with the next number.
 8. Take the files from `migrations/d1/` for Better Auth 1.7 tables, or from `migrations/d1-before-1.7/` for older tables.
 9. Apply them with `pnpm --filter my-app exec wrangler d1 migrations apply <database> --remote`.
 10. Register the new callback URL at each social provider before the cutover.
@@ -72,6 +72,7 @@ The test below runs the sample against a database in memory. It also shows the e
 | `0002_compat_schema_v5.sql` | Moves the version to 5. It changes no table. |
 | `0003_compat_schema_v6.sql` | Adds `ta_totp` and `ta_trusted_device`. |
 | `0004_compat_schema_v7.sql` | Adds `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, and `ta_oauth_token`. |
+| `0005_compat_schema_v8.sql` | Adds `ta_second_factor`, copies each enabled `ta_totp` row, and deletes each setup that no enable confirmed. |
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 

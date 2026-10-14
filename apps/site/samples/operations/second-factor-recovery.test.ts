@@ -34,7 +34,8 @@ describe("second factor recovery", () => {
     });
     expect("twoFactor" in ((await gated.json()) as object)).toBe(true);
 
-    expect(await recoverSecondFactor(auth, h.storage, EMAIL)).toBe("off");
+    // The operator types the address as the person gives it: case and spaces do not matter.
+    expect(await recoverSecondFactor(auth, h.storage, " ADA@example.com ")).toBe("off");
     const open = await call(auth, "POST", "/auth/password/sign-in", {
       email: EMAIL,
       password: PASSWORD,

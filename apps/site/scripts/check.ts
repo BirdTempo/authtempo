@@ -85,13 +85,14 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
       ),
   },
   {
-    // One source for the version of core and the compat migrations (plan 12c).
+    // One source for the version of core and the compat migrations, on the schema page and the Better Auth guide (plan 12c).
     name: "check-schema",
     run: () =>
       checkSchema(
         distPageOrEmpty("/docs/reference/schema/"),
         SCHEMA_VERSION,
         COMPAT_MIGRATION_NAMES,
+        distPageOrEmpty("/docs/migrate/better-auth/"),
       ),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },

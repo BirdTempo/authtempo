@@ -1,4 +1,4 @@
-import type { Auth, StorageAdapter } from "@authtempo/core";
+import { type Auth, normalizeEmail, type StorageAdapter } from "@authtempo/core";
 
 /**
  * Turns every second factor method of one user off. Call it only after a
@@ -12,8 +12,11 @@ export async function recoverSecondFactor(
   storage: StorageAdapter,
   email: string,
 ): Promise<"off" | "was_off" | "no_user"> {
+  // Core stores each address trimmed and in lower case: read it the same way.
+  const address = normalizeEmail(email);
+  if (!address) return "no_user";
   // The app holds the storage adapter that it gave to `createAuth`.
-  const user = await storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  const user = await storage.findOne("user", [{ field: "email", op: "eq", value: address }]);
   if (!user) return "no_user";
   // `api.totp` is absent with `totp: false` or with no `password`: no factor exists.
   if (!auth.api.totp) return "was_off";

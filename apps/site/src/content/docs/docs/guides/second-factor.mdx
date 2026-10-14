@@ -27,7 +27,7 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 ## Steps
 
 1. Keep `totp` on. It is on by default when `password` is set. `totp: false` turns it off.
-2. Set `totp.issuer` to the name that the authenticator app shows. A colon in the issuer is refused.
+2. Set `totp.issuer` to the name that the authenticator app shows. `createAuth` refuses a colon in the issuer.
 
 <Code code={config} lang="ts" title="The second factor config" />
 
@@ -50,8 +50,8 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 
 ## How it behaves
 
-- Five methods answer a challenge with no cookie for a user with the factor on.
-- They are the password, the magic link, the email code, social, and the reset.
+- Five routes answer a challenge with no cookie for a user with the factor on.
+- They are the password sign-in, the magic link, the email code sign-in, social, and the reset.
 - A reset still sets the new password and ends every session. Then the person passes the challenge.
 - A passkey sign-in has no gate. A passkey is a factor of its own.
 - `totp.gate.magicLink`, `totp.gate.emailOtp`, and `totp.gate.social` turn one gate off. Each is on by default.
@@ -76,14 +76,14 @@ Warning: a reset does not turn the factor off. A person who lost every method ne
 
 ## If it fails
 
-- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the password of an enable is wrong. No row is written.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the password of an enable is wrong. Core writes no row.
 - [`email_unverified`](/docs/reference/errors/#email_unverified): the user must prove the address first.
 - [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, or it passed once already.
-- [`invalid_body`](/docs/reference/errors/#invalid_body): the verify used a method that the challenge does not offer.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): a verify, a send, or the passkey options used a method that the challenge does not offer.
 - [`passkey_failed`](/docs/reference/errors/#passkey_failed): the assertion is not by a passkey of the user.
 - [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): the challenge took its fifth wrong code. Sign in again.
 - [`invalid_token`](/docs/reference/errors/#invalid_token): the challenge is unknown, spent, or older than 5 minutes.
-- [`totp_enabled`](/docs/reference/errors/#totp_enabled) and [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): TOTP is already on, or the method is off.
+- [`totp_enabled`](/docs/reference/errors/#totp_enabled) and [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): TOTP is already on, or the method is off, or the TOTP setup is older than 15 minutes: set up again.
 - [`second_factor_last_method`](/docs/reference/errors/#second_factor_last_method): the passkey is the last passkey of the user, and the passkey method is on.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the code checks or of the sends is full.
 - [`conflict`](/docs/reference/errors/#conflict): two writes to the factor ran at the same time. Retry.

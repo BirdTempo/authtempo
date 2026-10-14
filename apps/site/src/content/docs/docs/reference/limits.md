@@ -46,7 +46,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify and reset |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
-| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of the passkey and the email enable, and of the method disable: three callers, one budget |
+| `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |
 | `totp-verify:ip:<ip>` | 15 minutes | 30 | Second factor challenge |
 | `second-factor-passkey:ip:<ip>` | 15 minutes | 30 | The passkey options of a second factor challenge |
 | `second-factor-email:user:<userId>` | 15 minutes | 5 | Second factor email code send |

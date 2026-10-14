@@ -72,8 +72,8 @@ These routes exist in every deployment.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | A form or JSON `token` |
-| Answer | A form: 302 to `appURL` plus `next`, with the cookie. JSON: `{ user, session }` with the cookie |
+| Input | A form or JSON `token`, and JSON `trustDevice?`, the `td_` token of a trusted device. A browser sends the trust cookie |
+| Answer | A form: 302 to `appURL` plus `next`, with the cookie. JSON: `{ user, session }` with the cookie. For a user with the second factor on, no cookie: a form gets a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge), and JSON gets `{ twoFactor: { challenge, expiresAt, methods } }` |
 | Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Social sign-in
@@ -94,8 +94,8 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Field | Value |
 | --- | --- |
 | Needs | The binding cookie |
-| Input | `?code&state`, or `?error` from the provider |
-| Answer | 302 to `appURL` plus `next`, with the session cookie. A failure redirects to `/?auth_error=<code>` |
+| Input | `?code&state`, or `?error` from the provider. The browser sends the trust cookie of a trusted device |
+| Answer | 302 to `appURL` plus `next`, with the session cookie. For a user with the second factor on, a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge) with no session cookie. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-social-apple-callback"><code>POST /social/apple/callback</code></h3>
@@ -104,7 +104,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | --- | --- |
 | Needs | The binding cookie; the Origin check is skipped |
 | Input | A form `code`, `state`, and `user?` from Apple |
-| Answer | The same as the GET callback |
+| Answer | The same as the GET callback. A cross-site post carries no trust cookie, so a user with the second factor on goes to the challenge page, which offers the trusted device |
 | Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Passkeys
@@ -184,7 +184,7 @@ These routes exist when the config sets `password`.
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ email, password, trustDevice?, next? }` |
-| Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt } }` with no cookie |
+| Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie for a user with the second factor on |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="get-password-verify"><code>GET /password/verify</code></h3>
@@ -237,8 +237,8 @@ These routes exist when the config sets `password`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | A form or JSON `token` and `password` |
-| Answer | A form: 302 to `next` with the cookie, or back to the form. JSON: `{ token, user, session }` with the cookie |
+| Input | A form or JSON `token` and `password`, and JSON `trustDevice?` |
+| Answer | A form: 302 to `next` with the cookie, or back to the form. JSON: `{ token, user, session }` with the cookie. For a user with the second factor on, the reset still sets the password and ends every session, then answers no cookie: a form gets a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge), and JSON gets `{ twoFactor: { challenge, expiresAt, methods } }` |
 | Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-password-change"><code>POST /password/change</code></h3>
@@ -260,7 +260,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | --- | --- |
 | Needs | A session and a verified address |
 | Input | JSON `{ password }` |
-| Answer | `{ secret, uri, backupCodes }`, each answered once |
+| Answer | `{ secret, uri, backupCodes }`, each answered once. `backupCodes` is empty when another method is on, because the factor keeps its list |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-totp-enable"><code>POST /totp/enable</code></h3>
@@ -269,8 +269,8 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | --- | --- |
 | Needs | A session and a verified address |
 | Input | JSON `{ code }` |
-| Answer | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; every other session ends |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Answer | `{ enabled, enabledAt, backupCodesLeft, trustedDevices, methods, backupCodesVersion }`, as `GET /totp`. As the first method, it ends every other session. `totp_not_enabled` means no setup, a setup older than 15 minutes, or a setup whose codes another method made stale: set up again |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-totp-disable"><code>POST /totp/disable</code></h3>
 
@@ -278,8 +278,8 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | --- | --- |
 | Needs | A session |
 | Input | JSON `{ code }`, a current code or a backup code |
-| Answer | `{ ok: true }`, and the trust cookie is cleared |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Answer | `{ ok: true }`, and the trust cookie is cleared. It turns the TOTP method off. With no method left, the factor is off |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-totp-backup-codes"><code>POST /totp/backup-codes</code></h3>
 
@@ -296,7 +296,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | --- | --- |
 | Needs | A session |
 | Input | None |
-| Answer | `{ enabled, enabledAt, backupCodesLeft, trustedDevices }`; never the secret |
+| Answer | `{ enabled, enabledAt, backupCodesLeft, trustedDevices, methods, backupCodesVersion }`; never the secret. `enabled` is true when any method is on. `backupCodesVersion` is 1 for the codes of plan 9f, 2 for the codes of 23 characters, and `null` with the factor off |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-totp-devices-revoke"><code>POST /totp/devices/revoke</code></h3>
@@ -315,7 +315,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | Nothing |
 | Input | JSON `{ challenge }` with one of `code`, `backupCode`, `emailCode`, or `passkey`, and `trustDevice?`. `passkey` is an assertion over the options of [`POST /second-factor/passkey/options`](/docs/reference/routes/#post-second-factor-passkey-options). |
 | Answer | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="get-totp-challenge"><code>GET /totp/challenge</code></h3>
 
@@ -323,7 +323,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | --- | --- |
 | Needs | Nothing |
 | Input | `?challenge=` |
-| Answer | 200, the challenge form; no side effect |
+| Answer | 200, the form of the challenge's methods, with a trusted-device button when the browser sends a live trust cookie of the user. It reads rows and writes none. A malformed or dead challenge redirects to `/?auth_error=invalid_token` |
 | Errors | [`invalid_token`](/docs/reference/errors/#invalid_token) |
 
 <h3 id="post-totp-challenge"><code>POST /totp/challenge</code></h3>
@@ -331,9 +331,9 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | A form `challenge`, `code` or `backupCode`, and `trustDevice=1` |
-| Answer | 302 to `next` with the cookies; back to the form on a wrong code |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
+| Input | A form `challenge`, and `code`, `backupCode`, or `emailCode` with `trustDevice=1`; or `action=send-email`; or `action=trusted` |
+| Answer | 302 to `next` with the cookies. Back to the form on a wrong code and after a send. `action=trusted` passes with the trust cookie alone |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`conflict`](/docs/reference/errors/#conflict), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-second-factor-passkey-enable"><code>POST /second-factor/passkey/enable</code></h3>
 
@@ -398,8 +398,8 @@ These routes exist unless the config sets `emailOtp: false`. The two reset route
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ email, code }` |
-| Answer | `{ token, user, session }` with the cookie |
+| Input | JSON `{ email, code, trustDevice? }` |
+| Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie for a user with the second factor on |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-otp-reset-request"><code>POST /otp/reset/request</code></h3>
@@ -416,8 +416,8 @@ These routes exist unless the config sets `emailOtp: false`. The two reset route
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ email, code, password }` |
-| Answer | `{ token, user, session }` with the cookie |
+| Input | JSON `{ email, code, password, trustDevice? }` |
+| Answer | `{ token, user, session }` with the cookie. For a user with the second factor on, the reset sets the password and answers `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Handoff

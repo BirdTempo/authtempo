@@ -49,8 +49,8 @@ The test below turns the factor off and signs in with the password alone.
 - The disable deletes the TOTP secret, the factor row, the backup codes, the trusted devices, and the live challenges, in one transaction.
 - The disable keeps the sessions of the user. A person who lost the factor has no session to end.
 - Core has no delayed self-recovery. A recovery always passes through an operator.
-- Plan 12f adds operator tools for this step.
-- Migration `0008_schema_v8` deletes each TOTP setup that no enable confirmed. A person who began a setup before the deploy gets `totp_not_enabled` at the enable after it. That person sets up again: the factor is not lost.
+- A later release adds operator tools for this step.
+- Migration `0008_schema_v8` deletes each TOTP setup that no enable confirmed. A person who began a setup before the deploy gets `totp_not_enabled` at the enable after it. That person sets up again. This case is not a lost factor.
 
 ## If it fails
 
