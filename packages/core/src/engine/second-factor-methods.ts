@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
@@ -219,7 +220,7 @@ export async function passkeyChallengeOptions(
   if (!config.totp || !config.passkey) return fail("not_found");
   if (
     !(await config.limiter.allow(
-      `second-factor-passkey:ip:${input.ip ?? "unknown"}`,
+      `second-factor-passkey:ip:${ipKey(input.ip)}`,
       PASSKEY_OPTIONS_PER_IP,
     ))
   )

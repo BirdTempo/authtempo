@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import {
   constantTimeEqual,
   randomToken,
@@ -87,7 +88,7 @@ export async function startHandoff(
   if (!config.handoff) return fail("not_found");
   if (!CHALLENGE_RE.test(input.challenge)) return fail("invalid_body");
   if (!redirectAllowed(config, input.redirect)) return fail("invalid_body");
-  if (!(await config.limiter.allow(`handoff-start:ip:${input.ip ?? "unknown"}`, START_LIMIT))) {
+  if (!(await config.limiter.allow(`handoff-start:ip:${ipKey(input.ip)}`, START_LIMIT))) {
     return fail("rate_limited");
   }
   const now = config.clock.now();
@@ -240,7 +241,7 @@ export async function redeemHandoff(
   input: { code: string; verifier: string; ip: string | null; userAgent: string | null },
 ): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
   if (!config.handoff) return fail("not_found");
-  if (!(await config.limiter.allow(`handoff-redeem:ip:${input.ip ?? "unknown"}`, REDEEM_LIMIT))) {
+  if (!(await config.limiter.allow(`handoff-redeem:ip:${ipKey(input.ip)}`, REDEEM_LIMIT))) {
     return fail("rate_limited");
   }
   if (!CODE_RE.test(input.code)) return fail("invalid_token");

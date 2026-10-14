@@ -452,6 +452,9 @@ The limits, in the same limiter as the other routes:
 | `password-resend:email:<email>` | 3 per 15 minutes |
 | `password-change:user:<userId>` | 10 per 15 minutes |
 
+`<ip>` is an IPv4 address, the IPv4 form of a mapped IPv6 address, or the
+`/64` prefix of another IPv6 address (`ipKey`). One `/64` shares each count.
+
 The `password:email` limit is a trade-off: 10 wrong tries from anyone stop
 password sign-in for that address for 15 minutes. The magic link still
 works for the owner. Without the limit, a guess run on one account from

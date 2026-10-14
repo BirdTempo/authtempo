@@ -2,6 +2,7 @@ import { checkCaptcha } from "../captcha.js";
 import type { MailMessage, ResolvedConfig } from "../config.js";
 import type { ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -198,7 +199,7 @@ export async function passwordSignUp(
 ): Promise<Result<PasswordSignUpResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
-  if (!(await config.limiter.allow(`password-sign-up:ip:${input.ip ?? "unknown"}`, SIGN_UP_PER_IP)))
+  if (!(await config.limiter.allow(`password-sign-up:ip:${ipKey(input.ip)}`, SIGN_UP_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(config, "password-sign-up", input.captchaToken, input.ip);
@@ -529,7 +530,7 @@ export async function resendPasswordVerification(
   // Before any limit key: both keys trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`password-resend:ip:${input.ip ?? "unknown"}`, RESEND_PER_IP)))
+  if (!(await config.limiter.allow(`password-resend:ip:${ipKey(input.ip)}`, RESEND_PER_IP)))
     return fail("rate_limited");
   // The email limit counts before the reads, so an unknown address spends
   // the same budget as a known one.
@@ -593,7 +594,7 @@ export async function passwordSignIn(
 ): Promise<Result<PasswordSignInResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
-  if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
+  if (!(await config.limiter.allow(`password:ip:${ipKey(input.ip)}`, SIGN_IN_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(config, "password-sign-in", input.captchaToken, input.ip);
@@ -901,7 +902,7 @@ export async function requestPasswordReset(
   // Before any limit key and before the row: both trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`password-reset:ip:${input.ip ?? "unknown"}`, RESET_PER_IP)))
+  if (!(await config.limiter.allow(`password-reset:ip:${ipKey(input.ip)}`, RESET_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(
@@ -981,12 +982,7 @@ export async function resetPassword(
   // Before any read, the breach call, and the hash: each POST costs one
   // breach call and one hash at full cost. The limiter is the owned one,
   // so a refusal holds whatever a supplier does.
-  if (
-    !(await config.limiter.allow(
-      `password-reset-post:ip:${input.ip ?? "unknown"}`,
-      RESET_POST_PER_IP,
-    ))
-  )
+  if (!(await config.limiter.allow(`password-reset-post:ip:${ipKey(input.ip)}`, RESET_POST_PER_IP)))
     return fail("rate_limited");
   const valueHash = await sha256Hex(input.token);
   const now = config.clock.now();
@@ -1451,7 +1447,7 @@ export async function verifyPassword(
   input: PasswordReauth,
 ): Promise<Result<{ verified: true }>> {
   if (!config.password) return fail("not_found");
-  if (!(await config.limiter.allow(`password:ip:${input.ip ?? "unknown"}`, SIGN_IN_PER_IP)))
+  if (!(await config.limiter.allow(`password:ip:${ipKey(input.ip)}`, SIGN_IN_PER_IP)))
     return fail("rate_limited");
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },

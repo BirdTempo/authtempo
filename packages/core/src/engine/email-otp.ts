@@ -1,5 +1,6 @@
 import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
@@ -96,7 +97,7 @@ async function requestCode(
   // Before any limit key and before the row: both trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`otp:ip:${input.ip ?? "unknown"}`, REQUEST_PER_IP)))
+  if (!(await config.limiter.allow(`otp:ip:${ipKey(input.ip)}`, REQUEST_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   // The reset code is a reset request.
@@ -171,7 +172,7 @@ async function verifyGate(
   config: ResolvedConfig,
   input: { email: string; ip: string | null },
 ): Promise<Result<string | null>> {
-  if (!(await config.limiter.allow(`otp-verify:ip:${input.ip ?? "unknown"}`, VERIFY_PER_IP)))
+  if (!(await config.limiter.allow(`otp-verify:ip:${ipKey(input.ip)}`, VERIFY_PER_IP)))
     return fail("rate_limited");
   const email = normalizeEmail(input.email);
   if (

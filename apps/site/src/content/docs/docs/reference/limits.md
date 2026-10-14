@@ -61,6 +61,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |
 
+`<ip>` is the client IP of an IPv4 address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. Core exports `ipKey`, so an app's own limiter can key the same way.
+
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.

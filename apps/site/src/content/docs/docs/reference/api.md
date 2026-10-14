@@ -69,6 +69,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `defaultEmailOtpMail`, `defaultResetOtpMail`, `defaultSecondFactorMail` | The default mails of the email codes. `defaultSecondFactorMail` is the mail of a second-factor email code. |
 | `defaultExistingAccountMail` | The default mail to a known address at a uniform sign-up. `password.existingAccountMail` replaces it. |
 | `limiterKey` | Joins a key, the seconds, and the maximum into the stored key of the owned limiters. |
+| `ipKey` | The IP part of a per-IP limiter key: the IPv4 form of an IPv4-mapped address, the `/64` of another IPv6 address, `unknown` for no IP. |
 | `normalizeEmail`, `normalizeSlug` | The address rule and the slug rule of core. |
 | `validOrganizationName`, `validUserName` | The name rules of core. |
 | `rankOf` | The rank of a role string in a rank table. |

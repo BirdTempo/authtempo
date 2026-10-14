@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import {
   constantTimeEqual,
   randomBase64Url,
@@ -95,7 +96,7 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
 }
 
 const limited = async (config: ResolvedConfig, ip: string | null) =>
-  !(await config.limiter.allow(`oauth-token:ip:${ip ?? "unknown"}`, TOKEN_PER_IP));
+  !(await config.limiter.allow(`oauth-token:ip:${ipKey(ip)}`, TOKEN_PER_IP));
 
 /** The user, while it exists and its address is verified. */
 async function liveUser(config: ResolvedConfig, userId: string): Promise<UserRow | null> {

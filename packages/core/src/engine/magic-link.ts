@@ -1,6 +1,7 @@
 import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -44,7 +45,7 @@ export async function requestMagicLink(
 ): Promise<Result<{ sent: true }>> {
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`magic-link:ip:${input.ip ?? "unknown"}`, PER_IP)))
+  if (!(await config.limiter.allow(`magic-link:ip:${ipKey(input.ip)}`, PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(config, "magic-link-request", input.captchaToken, input.ip);

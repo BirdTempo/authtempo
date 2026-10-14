@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { openSealed, seal } from "../primitives/aead.js";
 import { appErrorName } from "../primitives/app-error.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
@@ -723,7 +724,7 @@ export async function verifyTwoFactor(
 ): Promise<Result<TwoFactorSession>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  if (!(await config.limiter.allow(`totp-verify:ip:${input.ip ?? "unknown"}`, VERIFY_PER_IP)))
+  if (!(await config.limiter.allow(`totp-verify:ip:${ipKey(input.ip)}`, VERIFY_PER_IP)))
     return fail("rate_limited");
   if (!TWO_FACTOR_TOKEN_RE.test(input.challenge)) return fail("invalid_token");
   const proof = proofOf(input);

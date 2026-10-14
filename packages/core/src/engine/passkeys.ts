@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { fromBase64Url, randomBase64Url, sha256Hex, toBase64Url } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -210,7 +211,7 @@ export async function passkeyAuthenticationOptions(
   input: { ip: string | null },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
-  if (!(await config.limiter.allow(`passkey-options:ip:${input.ip ?? "unknown"}`, OPTIONS_LIMIT))) {
+  if (!(await config.limiter.allow(`passkey-options:ip:${ipKey(input.ip)}`, OPTIONS_LIMIT))) {
     return fail("rate_limited");
   }
   const { bytes } = await issueChallenge(config, SIGN_IN, "authentication");
@@ -283,7 +284,7 @@ export async function verifyPasskeyAuthentication(
   input: { response: unknown; ip: string | null; userAgent: string | null },
 ): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
   if (!config.passkey) return fail("not_found");
-  if (!(await config.limiter.allow(`passkey-verify:ip:${input.ip ?? "unknown"}`, VERIFY_LIMIT))) {
+  if (!(await config.limiter.allow(`passkey-verify:ip:${ipKey(input.ip)}`, VERIFY_LIMIT))) {
     return fail("rate_limited");
   }
   const challenge = challengeFromResponse(input.response);

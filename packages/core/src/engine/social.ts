@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { appErrorName } from "../primitives/app-error.js";
 import {
   constantTimeEqual,
@@ -107,7 +108,7 @@ export async function startSocial(
 ): Promise<Result<SocialStarted>> {
   const entry = findProvider(config, input.provider);
   if (!entry) return fail("not_found");
-  if (!(await config.limiter.allow(`social-start:ip:${input.ip ?? "unknown"}`, START_LIMIT))) {
+  if (!(await config.limiter.allow(`social-start:ip:${ipKey(input.ip)}`, START_LIMIT))) {
     return fail("rate_limited");
   }
   // After the limit, so the limit bounds the discovery reads.
