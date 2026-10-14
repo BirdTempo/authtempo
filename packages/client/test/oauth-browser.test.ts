@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createClient } from "../src/client.js";
-import { browserPendingStore, createOAuthClient, registerOAuthClient } from "../src/oauth/index.js";
+import {
+  browserPendingStore,
+  createOAuthClient,
+  PENDING_TTL_MS,
+  registerOAuthClient,
+} from "../src/oauth/index.js";
 import { BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.js";
 
 const ISSUER = `${BASE_URL}/auth`;
@@ -14,6 +19,10 @@ function memoryStorage() {
     getItem: (k: string) => m.get(k) ?? null,
     setItem: (k: string, v: string) => void m.set(k, v),
     removeItem: (k: string) => void m.delete(k),
+    key: (i: number) => [...m.keys()][i] ?? null,
+    get length() {
+      return m.size;
+    },
     keys: () => [...m.keys()],
   };
 }
@@ -84,5 +93,20 @@ describe("the OAuth client in a browser on its own origin (plan 11d, Task 3)", (
     const answer = answers.at(-1);
     expect(answer?.headers.get("access-control-allow-origin")).toBe(SPA);
     expect(answer?.headers.get("access-control-allow-credentials")).toBeNull();
+  });
+
+  it("removes the abandoned sign-ins older than 10 minutes from sessionStorage at each start", async () => {
+    const storage = memoryStorage();
+    storage.setItem("other-app:key", "kept");
+    const store = browserPendingStore(storage);
+    const base = { issuer: ISSUER, clientId: "cl_a", verifier: "v" };
+    await store.put({ ...base, state: "old", createdAt: 0 });
+    await store.put({ ...base, state: "young", createdAt: PENDING_TTL_MS });
+    await store.put({ ...base, state: "new", createdAt: PENDING_TTL_MS + 1 });
+    expect(storage.keys().sort()).toEqual([
+      "authtempo-oauth:new",
+      "authtempo-oauth:young",
+      "other-app:key",
+    ]);
   });
 });

@@ -11,7 +11,9 @@ function isOAuthCode(code: unknown): code is OAuthErrorCode {
  * credentials, a CORS-safelisted request that a browser sends with no
  * preflight (plan 11d). It never throws for an answer: a rejected fetch is
  * `network`, an unreadable body is `unexpected`, and an `OAUTH_ERRORS` code
- * passes through with its status.
+ * passes through with its status. `read` checks a 2xx body at run time and
+ * answers null for a wrong shape, which is `unexpected` with the status. With
+ * `bodyless`, a 2xx passes with no body read (RFC 7009 sends none).
  */
 export async function oauthRequest<T>(
   doFetch: typeof fetch,
@@ -21,7 +23,9 @@ export async function oauthRequest<T>(
     form?: Readonly<Record<string, string>> | undefined;
     json?: unknown;
     bearer?: string | undefined;
+    bodyless?: boolean | undefined;
   },
+  read: (body: unknown) => T | null,
 ): Promise<OAuthResult<T>> {
   const headers: Record<string, string> = { accept: "application/json" };
   let body: string | undefined;
@@ -44,15 +48,21 @@ export async function oauthRequest<T>(
   } catch {
     return { ok: false, code: "network", status: 0 };
   }
+  const wrong = { ok: false, code: "unexpected", status: res.status } as const;
+  if (res.ok && input.bodyless) {
+    const value = read(undefined);
+    return value === null ? wrong : { ok: true, value };
+  }
   let parsed: unknown;
   try {
     parsed = await res.json();
   } catch {
-    return { ok: false, code: "unexpected", status: res.status };
+    return wrong;
   }
-  if (res.ok) return { ok: true, value: parsed as T };
+  if (res.ok) {
+    const value = read(parsed);
+    return value === null ? wrong : { ok: true, value };
+  }
   const code = (parsed as { error?: unknown } | null)?.error;
-  return isOAuthCode(code)
-    ? { ok: false, code, status: res.status }
-    : { ok: false, code: "unexpected", status: res.status };
+  return isOAuthCode(code) ? { ok: false, code, status: res.status } : wrong;
 }

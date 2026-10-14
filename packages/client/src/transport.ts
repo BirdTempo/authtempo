@@ -47,6 +47,8 @@ export type RawCall = <T>(
   body?: unknown,
   query?: Query,
   headers?: Readonly<Record<string, string>>,
+  /** The bearer token of this call, already read. Absent: the call reads `options.token`. */
+  token?: string | null,
 ) => Promise<ClientResult<T>>;
 
 function isKnownCode(code: unknown): code is keyof typeof ERRORS {
@@ -57,7 +59,7 @@ function isKnownCode(code: unknown): code is keyof typeof ERRORS {
  * The query string with `encodeURIComponent`, so a space is `%20` as before
  * plan 11d. `URLSearchParams` would write `+`.
  */
-function searchOf(query: Query | undefined): string {
+export function searchOf(query: Query | undefined): string {
   if (!query) return "";
   const pairs = Object.entries(query).map(
     ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`,
@@ -87,11 +89,13 @@ export function createRawTransport(options: TransportOptions): RawCall {
     body?: unknown,
     query?: Query,
     headers?: Readonly<Record<string, string>>,
+    given?: string | null,
   ): Promise<ClientResult<T>> => {
     const sent: Record<string, string> = { accept: "application/json" };
     if (body !== undefined) sent["content-type"] = "application/json";
     if (headers) Object.assign(sent, headers);
-    const token = options.token ? await options.token() : null;
+    // A caller that already read the token passes it, so one call reads the store once.
+    const token = given !== undefined ? given : options.token ? await options.token() : null;
     if (token) sent.authorization = `Bearer ${token}`;
     let res: Response;
     try {

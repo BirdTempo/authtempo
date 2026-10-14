@@ -1,5 +1,6 @@
 import { OAUTH_ERRORS, type OAuthErrorCode } from "@authtempo/core/errors";
 import type { OAuthResult } from "../result.js";
+import { searchOf } from "../transport.js";
 import { oauthURL } from "./calls.js";
 import { memoryPendingStore, PENDING_TTL_MS, type PendingStore } from "./pending.js";
 import { base64Url, makePkce, type PkceCrypto, webCrypto } from "./pkce.js";
@@ -55,14 +56,56 @@ export interface OAuthClient {
 
 interface TokenAnswer {
   access_token: string;
-  token_type: string;
   expires_in: number;
-  scope: string;
-  refresh_token?: string;
-  id_token?: string;
+  scope: string | undefined;
+  refresh_token: string | undefined;
+  id_token: string | undefined;
 }
 
-/** The issuer: an absolute http or https URL with no query, fragment, or trailing slash. Throws otherwise. */
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+const optionalString = (v: unknown): v is string | undefined =>
+  v === undefined || typeof v === "string";
+
+/**
+ * The token answer, checked at run time (RFC 6749 section 5.1): a non-empty
+ * `access_token`, a `token_type` of Bearer in any case, a positive finite
+ * `expires_in`, and string `scope`, `refresh_token`, and `id_token` when
+ * present. Null for any other shape, which the caller answers as `unexpected`.
+ */
+function tokenAnswer(v: unknown): TokenAnswer | null {
+  if (!isObject(v)) return null;
+  const { access_token, token_type, expires_in, scope, refresh_token, id_token } = v;
+  if (typeof access_token !== "string" || access_token === "") return null;
+  if (typeof token_type !== "string" || token_type.toLowerCase() !== "bearer") return null;
+  if (typeof expires_in !== "number" || !Number.isFinite(expires_in) || expires_in <= 0)
+    return null;
+  if (!optionalString(scope) || !optionalString(refresh_token) || !optionalString(id_token))
+    return null;
+  return { access_token, expires_in, scope, refresh_token, id_token };
+}
+
+/** The register answer: a non-empty `client_id` and `redirect_uris` of strings. */
+function registerAnswer(v: unknown): { clientId: string; redirectUris: string[] } | null {
+  if (!isObject(v)) return null;
+  const { client_id, redirect_uris } = v;
+  if (typeof client_id !== "string" || client_id === "") return null;
+  if (!Array.isArray(redirect_uris) || !redirect_uris.every((u) => typeof u === "string"))
+    return null;
+  return { clientId: client_id, redirectUris: redirect_uris };
+}
+
+/** The userinfo answer: a plain object with a string `sub` (OIDC Core 5.3.2). */
+function userinfoAnswer(v: unknown): Record<string, unknown> | null {
+  return isObject(v) && typeof v.sub === "string" ? v : null;
+}
+
+/**
+ * The issuer: an absolute http or https URL with no user info, query,
+ * fragment, or trailing slash. Throws otherwise. http is accepted for any
+ * host, as core accepts an http `baseURL`; use it for a loopback host in
+ * development only.
+ */
 function checkedIssuer(issuer: string): string {
   let u: URL;
   try {
@@ -72,6 +115,7 @@ function checkedIssuer(issuer: string): string {
   }
   if ((u.protocol !== "https:" && u.protocol !== "http:") || u.search || u.hash)
     throw new Error("authtempo oauth: issuer must be an http or https URL with no query");
+  if (u.username || u.password) throw new Error("authtempo oauth: issuer must have no user info");
   return issuer.replace(/\/$/, "");
 }
 
@@ -89,20 +133,26 @@ export function createOAuthClient(options: OAuthClientOptions): OAuthClient {
   const c = options.crypto ?? webCrypto();
   const pending = options.pending ?? memoryPendingStore();
   const now = () => (options.clock ?? { now: () => new Date() }).now().getTime();
-  const tokens = (a: TokenAnswer): OAuthTokens => ({
+  /** `asked`: the scopes of the request. RFC 6749 section 5.1: an answer with no `scope` grants them. */
+  const tokens = (a: TokenAnswer, asked: readonly string[]): OAuthTokens => ({
     accessToken: a.access_token,
     tokenType: "Bearer",
     expiresAt: new Date(now() + a.expires_in * 1000),
-    scopes: a.scope.split(" ").filter((s) => s.length > 0),
+    scopes: a.scope === undefined ? [...asked] : a.scope.split(" ").filter((s) => s.length > 0),
     refreshToken: a.refresh_token ?? null,
     idToken: a.id_token ?? null,
   });
-  const tokenCall = async (form: Record<string, string>): Promise<OAuthResult<OAuthTokens>> => {
-    const r = await oauthRequest<TokenAnswer>(doFetch, oauthURL(issuer, "oauthClient.token"), {
-      method: "POST",
-      form,
-    });
-    return r.ok ? { ok: true, value: tokens(r.value) } : r;
+  const tokenCall = async (
+    form: Record<string, string>,
+    asked: readonly string[],
+  ): Promise<OAuthResult<OAuthTokens>> => {
+    const r = await oauthRequest(
+      doFetch,
+      oauthURL(issuer, "oauthClient.token"),
+      { method: "POST", form },
+      tokenAnswer,
+    );
+    return r.ok ? { ok: true, value: tokens(r.value, asked) } : r;
   };
   const mismatch = { ok: false, code: "redirect_mismatch", status: 0 } as const;
   return {
@@ -110,8 +160,15 @@ export function createOAuthClient(options: OAuthClientOptions): OAuthClient {
       try {
         const { verifier, challenge } = await makePkce(c);
         const state = base64Url(c.randomBytes(32));
-        await pending.put({ state, verifier, createdAt: now() });
-        const query = new URLSearchParams({
+        await pending.put({
+          state,
+          verifier,
+          issuer,
+          clientId: options.clientId,
+          createdAt: now(),
+        });
+        // searchOf writes a space as %20, as every other URL of the client.
+        const query = searchOf({
           response_type: "code",
           client_id: options.clientId,
           redirect_uri: options.redirectUri,
@@ -121,7 +178,7 @@ export function createOAuthClient(options: OAuthClientOptions): OAuthClient {
           resource: options.resource,
           state,
         });
-        return { ok: true, value: `${oauthURL(issuer, "oauthClient.authorize")}?${query}` };
+        return { ok: true, value: `${oauthURL(issuer, "oauthClient.authorize")}${query}` };
       } catch {
         // The crypto seam or the pending store threw.
         return { ok: false, code: "unexpected", status: 0 };
@@ -141,41 +198,54 @@ export function createOAuthClient(options: OAuthClientOptions): OAuthClient {
         return { ok: false, code: "unexpected", status: 0 };
       }
       if (!p || now() - p.createdAt > PENDING_TTL_MS) return mismatch;
+      // Another client on a shared store started this sign-in (RFC 9207 section 2.4).
+      if (p.issuer !== issuer || p.clientId !== options.clientId) return mismatch;
       if (error !== undefined)
         return Object.hasOwn(OAUTH_ERRORS, error)
           ? { ok: false, code: error as OAuthErrorCode, status: 0 }
           : { ok: false, code: "unexpected", status: 0 };
       if (!code) return { ok: false, code: "unexpected", status: 0 };
-      return tokenCall({
-        grant_type: "authorization_code",
-        code,
-        code_verifier: p.verifier,
-        client_id: options.clientId,
-        redirect_uri: options.redirectUri,
-        resource: options.resource,
-      });
+      return tokenCall(
+        {
+          grant_type: "authorization_code",
+          code,
+          code_verifier: p.verifier,
+          client_id: options.clientId,
+          redirect_uri: options.redirectUri,
+          resource: options.resource,
+        },
+        options.scopes,
+      );
     },
     refresh(refreshToken, input = {}) {
-      return tokenCall({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        client_id: options.clientId,
-        resource: options.resource,
-        ...(input.scopes !== undefined ? { scope: input.scopes.join(" ") } : {}),
-      });
+      // An empty list sends no scope, so the grant keeps its scopes.
+      const narrow = input.scopes !== undefined && input.scopes.length > 0 ? input.scopes : null;
+      return tokenCall(
+        {
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: options.clientId,
+          resource: options.resource,
+          ...(narrow ? { scope: narrow.join(" ") } : {}),
+        },
+        narrow ?? options.scopes,
+      );
     },
     async revoke(token) {
-      const r = await oauthRequest<unknown>(doFetch, oauthURL(issuer, "oauthClient.revoke"), {
-        method: "POST",
-        form: { token, client_id: options.clientId },
-      });
-      return r.ok ? { ok: true, value: { revoked: true } } : r;
+      // RFC 7009 section 2.2: any 2xx is a revoke, with or without a body.
+      return oauthRequest(
+        doFetch,
+        oauthURL(issuer, "oauthClient.revoke"),
+        { method: "POST", form: { token, client_id: options.clientId }, bodyless: true },
+        () => ({ revoked: true }) as const,
+      );
     },
     userinfo(accessToken) {
-      return oauthRequest<Record<string, unknown>>(
+      return oauthRequest(
         doFetch,
         oauthURL(issuer, "oauthClient.userinfo"),
         { method: "GET", bearer: accessToken },
+        userinfoAnswer,
       );
     },
   };
@@ -193,15 +263,13 @@ export async function registerOAuthClient(input: {
   fetch?: typeof fetch | undefined;
 }): Promise<OAuthResult<{ clientId: string; redirectUris: string[] }>> {
   const issuer = checkedIssuer(input.issuer);
-  const r = await oauthRequest<{ client_id: string; redirect_uris: string[] }>(
+  return oauthRequest(
     input.fetch ?? globalThis.fetch,
     oauthURL(issuer, "oauthClient.register"),
     {
       method: "POST",
       json: { client_name: input.clientName, redirect_uris: [...input.redirectUris] },
     },
+    registerAnswer,
   );
-  return r.ok
-    ? { ok: true, value: { clientId: r.value.client_id, redirectUris: r.value.redirect_uris } }
-    : r;
 }
