@@ -413,6 +413,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@authtempo/adapter-d1':
+        specifier: workspace:*
+        version: link:../adapter-d1
       '@authtempo/adapter-postgres':
         specifier: workspace:*
         version: link:../adapter-postgres

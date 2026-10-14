@@ -7,6 +7,7 @@ export const MIGRATE_HELP: HelpText = {
     "Apply the migrations of the installed adapter. The command reads the schema version first, and stops on a newer database.",
   usage: [
     "authtempo migrate --target postgres [--url-env <NAME> | --url-file <path>] [--tables core|compat] [--dry-run]",
+    "authtempo migrate --target d1 [--database <name>] [--remote] [--tables core|compat] [--dry-run]",
   ],
   examples: [
     {
@@ -14,12 +15,12 @@ export const MIGRATE_HELP: HelpText = {
       says: "Apply the Postgres migrations. The connection string is in DATABASE_URL.",
     },
     {
-      line: "authtempo migrate --target postgres --dry-run",
-      says: "List the migrations that a run applies, and apply nothing.",
+      line: "authtempo migrate --target d1 --database my-app --remote",
+      says: "Apply the D1 migrations to the database on Cloudflare, through the wrangler of the project.",
     },
   ],
   flags: [
-    { flag: "--target <postgres>", says: "The kind of database. It has no default." },
+    { flag: "--target <d1|postgres>", says: "The kind of database. It has no default." },
     {
       flag: "--tables <core|compat>",
       says: "Core's tables, or the Better Auth 1.7 tables of the compatibility package. The default is core.",
@@ -31,6 +32,22 @@ export const MIGRATE_HELP: HelpText = {
     {
       flag: "--url-file <path>",
       says: "Postgres: the file that holds the connection string. A dash reads stdin.",
+    },
+    {
+      flag: "--database <name>",
+      says: "D1: the database_name in the wrangler config. A project with one D1 database needs no name.",
+    },
+    {
+      flag: "--config <path>",
+      says: "D1: the wrangler config of the project. The default is wrangler.jsonc or wrangler.json in this folder.",
+    },
+    {
+      flag: "--remote",
+      says: "D1: apply to the database on Cloudflare. The default is the local database of wrangler dev.",
+    },
+    {
+      flag: "--before-1.7",
+      says: "D1 with --tables compat: copy the files for tables from before Better Auth 1.7.",
     },
     { flag: "-n, --dry-run", says: "List the migrations that a run applies, and apply nothing." },
     ...COMMON_FLAGS,

@@ -52,6 +52,25 @@ this CLI's schema version. `--tables compat` runs the migrations of
 `@authtempo/compat-better-auth` on the Better Auth 1.7 tables; that package
 refuses a schema with core's own `ta_meta` and `ta_limit`.
 
+```bash
+authtempo migrate --target d1 --database my-app --remote
+```
+
+On D1 the command runs the project's own wrangler from
+`node_modules/.bin`; the CLI ships none. It reads `wrangler.jsonc` (or
+`wrangler.json`, or `--config`) in the current folder and takes the one D1
+database, or the one that `--database` names. With `--tables core` (the
+default), the binding's `migrations_dir` must hold every file of
+`@authtempo/adapter-d1` with the same text: another folder stops the run
+and names both folders, because wrangler would apply the wrong files and
+report success. With `--tables compat`, the command copies each file of the
+compatibility package (`migrations/d1/`, or `migrations/d1-before-1.7/` with
+`--before-1.7`) into the app's `migrations_dir` under the app's next
+number, then applies. A file whose text the folder holds is not copied
+again. Without `--remote`, the run is on the local database of
+`wrangler dev`. wrangler records each applied file in its table
+`d1_migrations` (`migrations_table`).
+
 ## import
 
 ```bash

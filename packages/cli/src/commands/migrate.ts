@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
@@ -5,6 +6,17 @@ import { Stop, UsageError } from "../errors.js";
 import { MIGRATE_HELP } from "../help/migrate.js";
 import type { MigrateJson } from "../json.js";
 import { type Ctx, describeUrl, printJson, sayer } from "../output.js";
+import {
+  adapterD1Dir,
+  applyD1,
+  compatD1Dir,
+  type D1Target,
+  findWranglerConfig,
+  readD1Applied,
+  readD1Project,
+  readD1Version,
+  wranglerOf,
+} from "../seams/d1.js";
 import { CORE_MIGRATIONS, compatMigrationNames, openPostgres } from "../seams/postgres.js";
 import { readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
@@ -15,6 +27,10 @@ const OPTIONS = {
   tables: { type: "string" },
   "url-env": { type: "string" },
   "url-file": { type: "string" },
+  database: { type: "string" },
+  config: { type: "string" },
+  remote: { type: "boolean" },
+  "before-1.7": { type: "boolean" },
   "dry-run": { type: "boolean", short: "n" },
 } as const;
 
@@ -82,8 +98,94 @@ async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<
   }
 }
 
+/**
+ * The core target on D1: the binding's migrations_dir must hold every file
+ * of the adapter with the same text. Another folder would make wrangler
+ * apply the wrong files and report success (spec 19).
+ */
+function checkAdapterFiles(ctx: Ctx, dir: string): void {
+  const source = adapterD1Dir();
+  const want = ctx
+    .listDir(source)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  const missing = want.filter((f) => {
+    const path = join(dir, f);
+    return !ctx.exists(path) || ctx.readFile(path) !== ctx.readFile(join(source, f));
+  });
+  if (missing.length > 0)
+    throw new Stop(
+      `migrations_dir ${dir} lacks the adapter's files ${missing.join(", ")} of ${source}; point migrations_dir at node_modules/@authtempo/adapter-d1/migrations`,
+    );
+}
+
+/**
+ * The compat target on D1 (spec 16, the D1 step of the compat README): each
+ * compat file goes into the app's migrations_dir under the app's next
+ * number. A file whose text the folder holds already is the same migration,
+ * so a second run copies nothing. A dry run names the copies and writes none.
+ */
+function copyCompat(ctx: Ctx, dir: string, before17: boolean, dryRun: boolean): string[] {
+  if (!ctx.exists(dir))
+    throw new Stop(
+      `migrations_dir ${dir} does not exist; with --tables compat it holds the Better Auth table migration of the app`,
+    );
+  const source = compatD1Dir(before17);
+  const present = ctx
+    .listDir(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  const texts = new Set(present.map((f) => ctx.readFile(join(dir, f))));
+  let next = present.reduce((n, f) => Math.max(n, Number(/^(\d+)_/.exec(f)?.[1] ?? "0")), 0);
+  const copied: string[] = [];
+  for (const f of ctx
+    .listDir(source)
+    .filter((x) => x.endsWith(".sql"))
+    .sort()) {
+    const text = ctx.readFile(join(source, f));
+    if (texts.has(text)) continue;
+    next += 1;
+    const name = `${String(next).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`;
+    if (!dryRun) ctx.writeNew(join(dir, name), text);
+    copied.push(name.slice(0, -".sql".length));
+  }
+  return copied;
+}
+
+async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
+  const project = readD1Project(ctx, findWranglerConfig(ctx, v.config), v.database);
+  if (!ctx.exists(wranglerOf(project.cwd)))
+    throw new Stop(
+      `no wrangler in ${join(project.cwd, "node_modules")}: install the packages of the project first`,
+    );
+  const t: D1Target = { ...project, remote: v.remote === true };
+  if (plan.tables === "core") checkAdapterFiles(ctx, project.migrationsDir);
+  plan.note(`reading the ${t.remote ? "remote" : "local"} D1 database ${t.database}`);
+  const before = await readD1Version(ctx, t);
+  gate(before);
+  // After the gate: the copy is the first write of a compat run.
+  const copied =
+    plan.tables === "compat"
+      ? copyCompat(ctx, project.migrationsDir, v["before-1.7"] === true, plan.dryRun)
+      : [];
+  const done = new Set(await readD1Applied(ctx, t));
+  const files = ctx
+    .listDir(project.migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => f.slice(0, -".sql".length));
+  const pending = [...new Set([...files, ...copied])].filter((n) => !done.has(n)).sort();
+  if (plan.dryRun) return { before, after: before, pending, applied: [], copied };
+  plan.note(
+    `running wrangler d1 migrations apply ${t.database} ${t.remote ? "--remote" : "--local"}`,
+  );
+  await applyD1(ctx, t);
+  const after = await readD1Version(ctx, t);
+  const now = new Set(await readD1Applied(ctx, t));
+  return { before, after, pending, applied: pending.filter((n) => now.has(n)), copied };
+}
+
 /** The targets of `--target`. */
-const TARGETS = { postgres: migratePostgres } as const;
+const TARGETS = { d1: migrateD1, postgres: migratePostgres } as const;
 type TargetName = keyof typeof TARGETS;
 
 /** `authtempo migrate --target <...>` (spec 19): the version gate, the list, the apply, and the gate again. */
@@ -99,6 +201,15 @@ export const migrateCommand: Command = {
     if (target === undefined)
       throw new UsageError(`name a target: --target ${names.join(" or --target ")}`);
     const tables = oneOf("tables", values.tables, ["core", "compat"] as const) ?? "core";
+    if (target === "postgres")
+      for (const flag of ["database", "config", "remote", "before-1.7"] as const)
+        if (values[flag] !== undefined) throw new UsageError(`--${flag} applies to --target d1`);
+    if (target === "d1")
+      for (const flag of ["url-env", "url-file"] as const)
+        if (values[flag] !== undefined)
+          throw new UsageError(`--${flag} applies to --target postgres`);
+    if (values["before-1.7"] === true && tables !== "compat")
+      throw new UsageError("--before-1.7 applies to --tables compat");
     const dryRun = values["dry-run"] === true;
     const json = values.json === true;
     const say = sayer(ctx, json);
@@ -111,7 +222,7 @@ export const migrateCommand: Command = {
     for (const name of dryRun ? run.pending : run.applied)
       say(`${dryRun ? "would apply" : "applied"} ${name}`);
     say(`version before: ${run.before ?? "none"}; version after: ${run.after ?? "none"}`);
-    // The gate again: a run that ends below this CLI's version did not do its work.
+    // The gate again: a run that ends away from this CLI's version did not do its work.
     if (!dryRun && run.after !== SCHEMA_VERSION)
       throw new Stop(
         `the database is at version ${run.after ?? "none"} after the run; this CLI expects version ${SCHEMA_VERSION}`,

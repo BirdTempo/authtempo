@@ -26,6 +26,7 @@
     "test": "vitest run && node proof/pack-files.mjs"
   },
   "dependencies": {
+    "@authtempo/adapter-d1": "workspace:*",
     "@authtempo/adapter-postgres": "workspace:*",
     "@authtempo/compat-better-auth": "workspace:*",
     "@authtempo/core": "workspace:*",
