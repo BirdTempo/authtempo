@@ -128,6 +128,14 @@ export const nodeImportIo: CliIo = {
   writeFile: writePrivate,
   async openStorage(url, betterAuth) {
     const pg = openPostgres(url, 2);
+    // A failed connection or sign-in stops here, as `storage: <code> at <host>`
+    // (storageFailure in import-core), and not inside the import with the driver's text.
+    try {
+      await pg.ping();
+    } catch (e) {
+      await pg.close();
+      throw e;
+    }
     return { storage: betterAuth ? pg.compatStorage() : pg.coreStorage(), close: () => pg.close() };
   },
 };

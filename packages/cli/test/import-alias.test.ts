@@ -13,11 +13,13 @@ import { FIRESCRYPT } from "../../import/test/readers/all.js";
 import {
   type CliIo,
   exitCode,
+  nodeImportIo,
   runCli,
   scrubbedIo,
   USAGE,
   writePrivate,
 } from "../src/commands/import-alias.js";
+import { ADMIN_URL } from "./support/pg.js";
 
 /** Every format: the tests below that do not test --formats pass all five. */
 const ALL = LEGACY_FORMATS.join(",");
@@ -350,6 +352,23 @@ describe("authtempo-import", () => {
       );
       for (const line of [...t.out, ...t.err]) expect(line).not.toContain("s3cret-canary");
     }
+  });
+
+  it("pings in the real openStorage: a failed sign-in prints the SQLSTATE and the host, never the user", async () => {
+    const url = ADMIN_URL.replace(/\/\/[^@]+@/, "//no_such_user_canary:wrong-pass-canary@");
+    const argv = [
+      ...BASE.filter((a) => a !== "--postgres" && a !== "postgres://x"),
+      "--postgres",
+      url,
+    ];
+    const t = io(FILES);
+    const real: CliIo = { ...t.value, openStorage: nodeImportIo.openStorage };
+    expect(await runCli(argv, scrubbedIo(argv, real))).toBe(2);
+    const host = new URL(url);
+    expect(t.err).toEqual([
+      `stopped: storage: 28P01 at ${host.hostname}:${host.port}${host.pathname}; nothing was written`,
+    ]);
+    for (const line of [...t.out, ...t.err]) expect(line).not.toContain("canary");
   });
 
   it("refuses firebase with no --firebase-rounds: exit 2, the usage text, no file read", async () => {
