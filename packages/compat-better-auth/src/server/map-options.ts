@@ -259,7 +259,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           backupCodes:
             tf.options.backupCodeOptions?.amount ?? BETTER_AUTH_DEFAULTS.twoFactorBackupCodes,
           // Absent: core's 23 characters (113.9 bits, ASVS 5.0 6.5.2, plan 12c).
-          // check-options refuses 8 to 22, so a set value is 23 to 32.
+          // check-options refuses every value outside 23 to 32, so a set value is in range.
           ...(tf.options.backupCodeOptions?.length !== undefined
             ? { backupCodeLength: tf.options.backupCodeOptions.length }
             : {}),

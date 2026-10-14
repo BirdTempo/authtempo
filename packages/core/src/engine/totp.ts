@@ -373,6 +373,9 @@ export async function disableTotp(
   input: { userId: string },
 ): Promise<Result<{ ok: true }>> {
   if (!config.totp) return fail("not_found");
+  // Read first: with the factor off the answer is `totp_not_enabled` and
+  // nothing is written, so a setup in progress stays.
+  if (!(await factorRow(config.storage, input.userId))) return fail("totp_not_enabled");
   if ((await disableSecondFactor(config, input.userId)) === 0) return fail("totp_not_enabled");
   return ok({ ok: true });
 }

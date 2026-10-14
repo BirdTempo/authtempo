@@ -64,4 +64,28 @@ describe("postgres migration runner", () => {
       await db.close();
     }
   });
+
+  it("deletes each unconfirmed totp setup at 0008 and keeps the enabled row (plan 12c)", async () => {
+    const db = await freshSchema();
+    try {
+      await db.a.unsafe(
+        "CREATE TABLE ta_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
+      );
+      for (const m of MIGRATIONS.slice(0, 7)) {
+        await db.a.unsafe(m.sql);
+        await db.a.unsafe("INSERT INTO ta_migrations (name) VALUES ($1)", [m.name]);
+      }
+      const at = new Date("2026-10-14T00:00:00.000Z");
+      await db.a.unsafe(
+        `INSERT INTO ta_totp (id, created_at, updated_at, user_id, secret, enabled_at, last_step, backup_codes)
+         VALUES ('f1', $1, $1, 'u1', 'sealed', $1, 5, '["h1"]'::jsonb),
+                ('f2', $1, $1, 'u2', 'sealed', NULL, 0, '["h2"]'::jsonb)`,
+        [at],
+      );
+      expect(await applyPostgresMigrations(db.a)).toEqual(["0008_schema_v8"]);
+      expect(await db.a.unsafe("SELECT id FROM ta_totp ORDER BY id")).toEqual([{ id: "f1" }]);
+    } finally {
+      await db.close();
+    }
+  });
 });

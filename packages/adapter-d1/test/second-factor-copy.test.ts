@@ -39,6 +39,19 @@ beforeEach(async () => {
   );
 });
 
+it("deletes each unconfirmed totp setup at 0008 and keeps the enabled row (plan 12c)", async () => {
+  const db = createD1Adapter(env.DB);
+  await db.create("totp", totpRow("f1", "u1", at, ["h1"]));
+  await db.create("totp", totpRow("f2", "u2", null, ["h2"]));
+  // The data statements of 0008 as the file ships them: the copy and the delete.
+  const m = env.TEST_MIGRATIONS.find((x) => x.name.startsWith("0008_"));
+  for (const q of m?.queries ?? [])
+    if (/^(INSERT|DELETE)\b/.test(q.replace(/^\s*--.*$/gm, "").trim()))
+      await env.DB.prepare(q).run();
+  expect((await db.findMany("totp", [])).map((r) => r.id)).toEqual(["f1"]);
+  expect((await db.findMany("secondFactor", [])).map((r) => r.id)).toEqual(["f1"]);
+});
+
 it("copies each enabled totp row with the same id and version 1, and skips an unconfirmed setup (plan 12c)", async () => {
   const db = createD1Adapter(env.DB);
   await db.create("totp", totpRow("f1", "u1", at, ["h1", "h2"]));

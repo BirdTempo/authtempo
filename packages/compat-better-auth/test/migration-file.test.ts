@@ -275,6 +275,8 @@ describe("migration 0005 (plan 12c)", () => {
        VALUES ('f1', 1, 2, 'u1', 'sealed', 3, 5, '["h1"]'), ('f2', 1, 2, 'u2', 'sealed', NULL, 0, '["h2"]')`,
     );
     db.exec(shipped0005);
+    // The unconfirmed setup f2 holds codes of plan 9f: 0005 deletes it.
+    expect(db.prepare("SELECT id FROM ta_totp").all()).toEqual([{ id: "f1" }]);
     expect(taTables(db)).toContain("ta_second_factor");
     const cols = (
       db.prepare(`PRAGMA table_info(${TABLES.secondFactor})`).all() as { name: string }[]

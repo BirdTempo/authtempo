@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { disableTotp, regenerateBackupCodesWithCode, totpStatus } from "../src/engine/totp.js";
+import {
+  disableTotp,
+  regenerateBackupCodesWithCode,
+  setupTotp,
+  totpStatus,
+} from "../src/engine/totp.js";
 import { hmacSha256Hex } from "../src/primitives/crypto.js";
 import { normalizeBackupCode } from "../src/primitives/totp.js";
-import { enrolled, totpAuth } from "./totp-helpers.js";
+import { enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 /** A backup code of 23 characters of core's alphabet, shown as 5-5-5-4-4. */
 const GROUPED =
@@ -97,5 +102,17 @@ describe("the factor row (plan 12c)", () => {
         { field: "purpose", op: "eq", value: "two-factor" },
       ]),
     ).toEqual([]);
+  });
+
+  it("keeps a setup that is not confirmed when the in-process disable finds the factor off, and writes nothing", async () => {
+    const auth = totpAuth();
+    const { user } = await verifiedSession(auth);
+    const setup = await setupTotp(auth.config, { userId: user.id, password: PASSWORD });
+    if (!setup.ok) throw new Error(setup.code);
+    const [before] = await auth.storage.findMany("totp", []);
+    expect(await disableTotp(auth.config, { userId: user.id })).toMatchObject({
+      code: "totp_not_enabled",
+    });
+    expect(await auth.storage.findMany("totp", [])).toEqual([before]);
   });
 });
