@@ -63,6 +63,18 @@ describe("checkTerms", () => {
     ).toEqual(['docs/a.md:6: "log in" is forbidden; write "sign in"']);
   });
 
+  it("refuses a forbidden term in a raw <h3> heading and in an aside title", () => {
+    const r = checkTerms([
+      glossary,
+      body('<h3 id="x">Log in <code>login</code></h3>\n\n:::caution[Set up MFA]\nText.\n:::'),
+    ]);
+    // The <code> span holds "login" too; it is code, so only "Log in" fails.
+    expect(r.failures).toEqual([
+      'docs/a.md:4: "Log in" is forbidden; write "sign in"',
+      'docs/a.md:6: "MFA" is forbidden; write "second factor"',
+    ]);
+  });
+
   it("refuses a forbidden term in the frontmatter title and description", () => {
     const page = {
       path: "docs/a.md",

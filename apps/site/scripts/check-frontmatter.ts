@@ -6,6 +6,63 @@ export const TYPES = ["tutorial", "how-to", "reference", "explanation"] as const
 /** The page template of spec 18, in this order. A how-to guide also has "## If it fails". */
 const TEMPLATE = ["**For:**", "**What it does:**", "## Before you start", "## Next"] as const;
 
+/** Spec 18.3: the "Next" part holds one to three links. */
+export const NEXT_MIN = 1;
+export const NEXT_MAX = 3;
+
+/**
+ * Spec 18.3 gives each "Before you start" item a link. An item that names a
+ * tool or an account is exempt (the dated line of 2026-10-14 in spec 18): the
+ * reader installs the tool or opens the account at its supplier, and a link
+ * to a supplier page breaks the day the supplier moves it. An item is exempt
+ * when it starts with one of these prefixes, and the report lists each one.
+ */
+export const NO_LINK_PREFIXES = [
+  "Node ",
+  "pnpm ",
+  "Bun ",
+  "Docker",
+  "The AWS CLI",
+  "The Firebase CLI",
+  "A Cloudflare account",
+  "Workers Paid",
+] as const;
+
+/** A markdown link, or a raw HTML anchor with an href. */
+const LINK = /\[[^\]]*\]\([^)\s]+\)|<a\s[^>]*href=/g;
+
+function linksIn(text: string): number {
+  return text.match(LINK)?.length ?? 0;
+}
+
+/** The lines of the `## <heading>` part, up to the next `## ` heading. */
+function partLines(lines: readonly string[], heading: string): string[] | null {
+  const at = lines.indexOf(heading);
+  if (at < 0) return null;
+  const end = lines.findIndex((l, i) => i > at && l.startsWith("## "));
+  return lines.slice(at + 1, end < 0 ? lines.length : end);
+}
+
+/** The list items of a part. A line that is not a new item continues the item before it. */
+function listItems(part: readonly string[]): string[] {
+  const items: string[] = [];
+  for (const line of part) {
+    if (line === "") continue;
+    const m = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
+    if (m) items.push(m[1] ?? "");
+    else if (items.length > 0) items[items.length - 1] = `${items.at(-1)} ${line}`;
+    else items.push(line);
+  }
+  return items;
+}
+
+/** True when the item starts with a prefix as a whole word ("Docker" is not "Dockerfile"). */
+function isExempt(item: string): boolean {
+  return NO_LINK_PREFIXES.some(
+    (p) => item.startsWith(p) && (p.endsWith(" ") || !/^[A-Za-z0-9]/.test(item.slice(p.length))),
+  );
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -20,7 +77,8 @@ function endsHere(line: string, text: string): boolean {
  * one source; every source names a repo file that exists and, when it names a
  * section, a heading that the file has; and the body holds the template parts.
  * A source is `<repo path>`, `<repo path> <section number>`, or
- * `<repo path> "<heading text>"`.
+ * `<repo path> "<heading text>"`. Spec 18.3: "Next" holds one to three links,
+ * and each "Before you start" item has a link or names a tool or an account.
  */
 export function checkFrontmatter(
   pages: readonly Page[],
@@ -28,8 +86,9 @@ export function checkFrontmatter(
 ): CheckReport {
   const r: CheckReport = {
     name: "check-frontmatter",
-    counts: { pages: pages.length, sources: 0 },
+    counts: { pages: pages.length, sources: 0, prerequisites: 0, exempt: 0 },
     failures: [],
+    exempt: [],
   };
   for (const p of pages) {
     const fm = parseFrontmatter(p.source);
@@ -80,6 +139,24 @@ export function checkFrontmatter(
         prev = Math.max(prev, at);
       }
     }
+    const before = partLines(lines, "## Before you start");
+    for (const item of before ? listItems(before) : []) {
+      r.counts.prerequisites = (r.counts.prerequisites ?? 0) + 1;
+      if (linksIn(item) > 0) continue;
+      if (isExempt(item)) {
+        r.counts.exempt = (r.counts.exempt ?? 0) + 1;
+        r.exempt?.push(`${p.path}: ${item}`);
+      } else
+        r.failures.push(
+          `${p.path}: the Before you start item "${item}" has no link and names no tool or account`,
+        );
+    }
+    const next = partLines(lines, "## Next");
+    if (next) {
+      const n = linksIn(next.join("\n"));
+      if (n < NEXT_MIN || n > NEXT_MAX)
+        r.failures.push(`${p.path}: Next holds ${n} links (${NEXT_MIN} to ${NEXT_MAX})`);
+    }
   }
-  return requireCounts(r, ["pages", "sources"]);
+  return requireCounts(r, ["pages", "sources", "prerequisites"]);
 }

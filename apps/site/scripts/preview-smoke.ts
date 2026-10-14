@@ -43,7 +43,9 @@ dev.stderr.on("data", (chunk: Buffer) => {
   stderrTail = (stderrTail + chunk.toString()).split("\n").slice(-15).join("\n");
 });
 let exited: string | null = null;
-dev.on("exit", (code, signal) => {
+// "close" fires after the stderr pipe ends, so the tail holds the last lines
+// of wrangler. "exit" can fire first, and the message then lacks the cause.
+dev.on("close", (code, signal) => {
   exited = `wrangler dev exited (code ${code}, signal ${signal}): ${stderrTail.trim()}`;
 });
 
@@ -54,10 +56,13 @@ function killGroup(): void {
     // The group is already gone.
   }
 }
+// The shell convention: 128 plus the signal number, so a caller sees which
+// signal ended the run (SIGINT 2 gives 130, SIGTERM 15 gives 143).
+const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143 } as const;
 for (const sig of ["SIGINT", "SIGTERM"] as const)
   process.on(sig, () => {
     killGroup();
-    process.exit(130);
+    process.exit(SIGNAL_EXIT[sig]);
   });
 
 async function ready(): Promise<void> {

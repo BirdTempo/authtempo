@@ -4,6 +4,11 @@ export interface CheckReport {
   /** What the check read, by kind: pages, links, samples, codes. */
   counts: Record<string, number>;
   failures: string[];
+  /**
+   * What the check let pass by a rule and not by a match, one line each, so a
+   * reader can see every exemption. The runner prints them after the summary.
+   */
+  exempt?: string[];
 }
 
 /**

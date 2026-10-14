@@ -62,12 +62,25 @@ export function checkTerms(pages: readonly Page[]): CheckReport {
     if (!fm) continue;
     const sourceLines = p.source.split("\n");
     const units: { text: string; line: number }[] = proseUnits(fm.body, fm.bodyLine);
-    // Headings and table rows hold prose that proseUnits skips as markup.
+    // Headings, table rows, raw <h3> headings, and aside titles hold prose
+    // that proseUnits skips as markup. A <code> span of a raw heading is code,
+    // as a backtick span is, so it is removed with the tags.
     let fence = false;
     fm.body.split("\n").forEach((raw, i) => {
       const t = raw.trim();
+      const line = fm.bodyLine + i;
       if (/^(```|~~~)/.test(t)) fence = !fence;
-      else if (!fence && /^(#|\|)/.test(t)) units.push({ text: t, line: fm.bodyLine + i });
+      else if (fence) return;
+      else if (/^(#|\|)/.test(t)) units.push({ text: t, line });
+      else if (/^<h3[\s>]/.test(t))
+        units.push({
+          text: t.replace(/<code>[\s\S]*?<\/code>/g, " ").replace(/<[^>]+>/g, " "),
+          line,
+        });
+      else {
+        const aside = /^:::[a-z]+\[(.*)\]/.exec(t);
+        if (aside) units.push({ text: aside[1] ?? "", line });
+      }
     });
     for (const key of ["title", "description"] as const) {
       const text = fm.fields[key];

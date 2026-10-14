@@ -73,6 +73,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
 
 const reports = CHECKS.map((c) => c.run());
 for (const r of reports) console.log(summaryLine(r));
+for (const r of reports) for (const e of r.exempt ?? []) console.log(`  exempt ${r.name}: ${e}`);
 const failed = reports.filter((r) => r.failures.length > 0);
 for (const r of failed) for (const f of r.failures) console.error(`${r.name}: ${f}`);
 console.log(`site checks: ${reports.length - failed.length} of ${reports.length} passed`);

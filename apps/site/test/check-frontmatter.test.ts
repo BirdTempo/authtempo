@@ -7,7 +7,7 @@ const repo: Record<string, string> = {
 };
 const read = (p: string) => repo[p] ?? null;
 const TEMPLATE =
-  "**For:** a developer.\n\n**What it does:** it works.\n\n## Before you start\n\n- A thing.\n\n## Next\n\n- [Home](/docs/)\n";
+  "**For:** a developer.\n\n**What it does:** it works.\n\n## Before you start\n\n- A [thing](/docs/).\n\n## Next\n\n- [Home](/docs/)\n";
 const HOW_TO = TEMPLATE.replace("## Next", "## If it fails\n\n- Nothing.\n\n## Next");
 function page(frontmatter: string, body = TEMPLATE) {
   return { path: "docs/x.md", source: `---\n${frontmatter}\n---\n${body}` };
@@ -19,7 +19,7 @@ describe("checkFrontmatter", () => {
   it("passes a page with the four fields, sources that exist, and the template", () => {
     const r = checkFrontmatter([page(GOOD)], read);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ pages: 1, sources: 2 });
+    expect(r.counts).toEqual({ pages: 1, sources: 2, prerequisites: 1, exempt: 0 });
   });
 
   it("refuses a page with no type, and a type outside the four", () => {
@@ -72,15 +72,45 @@ describe("checkFrontmatter", () => {
 
   it("refuses template parts out of order", () => {
     const swapped = TEMPLATE.replace(
-      "## Before you start\n\n- A thing.\n\n## Next\n\n- [Home](/docs/)\n",
-      "## Next\n\n- [Home](/docs/)\n\n## Before you start\n\n- A thing.\n",
+      "## Before you start\n\n- A [thing](/docs/).\n\n## Next\n\n- [Home](/docs/)\n",
+      "## Next\n\n- [Home](/docs/)\n\n## Before you start\n\n- A [thing](/docs/).\n",
     );
     expect(checkFrontmatter([page(GOOD, swapped)], read).failures).toEqual([
       "docs/x.md: the template part ## Next is out of order",
     ]);
   });
 
+  it("refuses a Next part with no link or with more than three (spec 18.3)", () => {
+    const next = (items: string) =>
+      checkFrontmatter([page(GOOD, TEMPLATE.replace("- [Home](/docs/)\n", items))], read).failures;
+    expect(next("- Nothing.\n")).toEqual(["docs/x.md: Next holds 0 links (1 to 3)"]);
+    const four = "- [A](/docs/a/)\n- [B](/docs/b/)\n- [C](/docs/c/)\n- [D](/docs/d/)\n";
+    expect(next(four)).toEqual(["docs/x.md: Next holds 4 links (1 to 3)"]);
+    expect(next("- [A](/docs/a/)\n- [B](/docs/b/)\n- [C](/docs/c/)\n")).toEqual([]);
+  });
+
+  it("refuses a Before you start item with no link, unless it names a tool or an account", () => {
+    const prereq = (items: string) =>
+      checkFrontmatter([page(GOOD, TEMPLATE.replace("- A [thing](/docs/).\n", items))], read);
+    expect(prereq("- A database.\n").failures).toEqual([
+      'docs/x.md: the Before you start item "A database." has no link and names no tool or account',
+    ]);
+    const tools = prereq("- Node 22.18 or newer.\n- A Cloudflare account.\n");
+    expect(tools.failures).toEqual([]);
+    expect(tools.counts.exempt).toBe(2);
+    expect(tools.exempt).toEqual([
+      "docs/x.md: Node 22.18 or newer.",
+      "docs/x.md: A Cloudflare account.",
+    ]);
+    expect(prereq("- Dockerfile of the app.\n").failures).toHaveLength(1);
+    expect(prereq("- A database,\n  as [Schema](/docs/schema/) tells.\n").failures).toEqual([]);
+  });
+
   it("fails when it reads no page", () => {
-    expect(checkFrontmatter([], read).failures).toEqual(["read 0 pages", "read 0 sources"]);
+    expect(checkFrontmatter([], read).failures).toEqual([
+      "read 0 pages",
+      "read 0 sources",
+      "read 0 prerequisites",
+    ]);
   });
 });
