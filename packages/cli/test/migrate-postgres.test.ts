@@ -1,0 +1,156 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { MIGRATE_JSON_KEYS } from "../src/json.js";
+import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
+import { freshDatabase } from "./support/pg.js";
+
+const CORE = [
+  "0001_schema_v1",
+  "0002_schema_v2",
+  "0003_schema_v3",
+  "0004_schema_v4",
+  "0005_schema_v5",
+  "0006_schema_v6",
+  "0007_schema_v7",
+];
+const COMPAT = [
+  "0001_compat_better_auth",
+  "0002_compat_schema_v5",
+  "0003_compat_schema_v6",
+  "0004_compat_schema_v7",
+];
+
+let db: Awaited<ReturnType<typeof freshDatabase>>;
+beforeAll(() => {
+  assertFreshBuild();
+});
+beforeEach(async () => {
+  db = await freshDatabase();
+});
+afterEach(async () => {
+  await db.drop();
+});
+
+const migrate = (extra: string[], url = db.url) =>
+  runBin(["migrate", "--target", "postgres", "--url-env", "TEST_DB_URL", ...extra], {
+    env: { TEST_DB_URL: url },
+  });
+
+describe("authtempo migrate --target postgres (spec 19)", () => {
+  it("applies 0001 to 0007 on a fresh database, prints each, and moves the version from none to 7", () => {
+    const r = migrate([]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(linesOf(r.stdout)).toEqual([
+      ...CORE.map((n) => `applied ${n}`),
+      "version before: none; version after: 7",
+    ]);
+    expect(linesOf(r.stderr)[0]).toMatch(/^connecting to \S+:\d+\/cli_/);
+  });
+
+  it("applies nothing on a second run", () => {
+    expect(migrate([]).status).toBe(0);
+    const r = migrate([]);
+    expect(r.status).toBe(0);
+    expect(linesOf(r.stdout)).toEqual(["version before: 7; version after: 7"]);
+  });
+
+  it("lists the pending migrations on --dry-run and writes nothing", async () => {
+    const r = migrate(["--dry-run"]);
+    expect(r.status).toBe(0);
+    expect(linesOf(r.stdout)).toEqual([
+      ...CORE.map((n) => `would apply ${n}`),
+      "version before: none; version after: none",
+    ]);
+    const reg = await db.sql<
+      { t: string | null }[]
+    >`SELECT to_regclass('ta_migrations')::text AS t`;
+    expect(reg[0]?.t).toBeNull();
+  });
+
+  it("stops before any write on a database at version 8, written by a migration fixture", async () => {
+    await applyPostgresMigrations(db.sql);
+    await db.sql.unsafe(readFileSync(join(PKG, "test/fixtures/postgres/0008_future.sql"), "utf8"));
+    const r = migrate([]);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(linesOf(r.stderr).at(-1)).toBe(
+      "stopped: the database is at version 8; this CLI knows version 7; use a newer CLI",
+    );
+    const count = await db.sql<{ n: string }[]>`SELECT count(*)::text AS n FROM ta_migrations`;
+    expect(count[0]?.n).toBe("8");
+  });
+
+  it("prints one JSON document of the run with --json", () => {
+    const r = migrate(["--json"]);
+    expect(r.status).toBe(0);
+    expect(linesOf(r.stdout)).toHaveLength(1);
+    const doc = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(Object.keys(doc).sort()).toEqual(Object.keys(MIGRATE_JSON_KEYS).sort());
+    expect(doc).toEqual({
+      target: "postgres",
+      tables: "core",
+      dryRun: false,
+      before: null,
+      after: 7,
+      pending: CORE,
+      applied: CORE,
+      copied: [],
+    });
+    expect(linesOf(r.stderr)).toContain("version before: none; version after: 7");
+  });
+
+  it("applies the compat migrations on a Better Auth schema with --tables compat, then lists none", async () => {
+    await db.sql.unsafe(
+      readFileSync(
+        join(PKG, "../compat-better-auth/test/fixtures/better-auth-1.7.2.postgres.sql"),
+        "utf8",
+      ),
+    );
+    const r = migrate(["--tables", "compat"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(linesOf(r.stdout)).toEqual([
+      ...COMPAT.map((n) => `applied ${n}`),
+      "version before: none; version after: 7",
+    ]);
+    const dry = migrate(["--tables", "compat", "--dry-run"]);
+    expect(linesOf(dry.stdout)).toEqual(["version before: 7; version after: 7"]);
+  });
+
+  it("stops with the compatibility package's own error on a schema with core's tables", async () => {
+    await applyPostgresMigrations(db.sql);
+    const r = migrate(["--tables", "compat"]);
+    expect(r.status).toBe(2);
+    expect(linesOf(r.stderr).at(-1)).toMatch(/^stopped: .*already exists/);
+  });
+
+  it("stops with exit 2 on a refused connection, and no output holds the password", () => {
+    const r = migrate([], "postgres://app:s3cret-canary@127.0.0.1:1/none");
+    expect(r.status).toBe(2);
+    expect(linesOf(r.stderr).at(-1)).toMatch(/^stopped: /);
+    expect(r.stdout + r.stderr).not.toContain("s3cret-canary");
+  });
+
+  it("reads the connection string from --url-file and from stdin", () => {
+    const dir = join(PKG, ".scaffold");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `url-${crypto.randomUUID()}.txt`);
+    writeFileSync(file, `${db.url}\n`, { mode: 0o600 });
+    const fromFile = runBin(["migrate", "--target", "postgres", "--url-file", file, "--dry-run"]);
+    expect(fromFile.status, fromFile.stderr).toBe(0);
+    const fromStdin = runBin(["migrate", "--target", "postgres", "--url-file", "-", "--dry-run"], {
+      input: db.url,
+    });
+    expect(fromStdin.status, fromStdin.stderr).toBe(0);
+  });
+
+  it("names the near target of a typo, and needs a target", () => {
+    const typo = runBin(["migrate", "--target", "postgress"]);
+    expect(typo.status).toBe(2);
+    expect(linesOf(typo.stderr)[0]).toContain("Did you mean postgres?");
+    const none = runBin(["migrate"]);
+    expect(none.status).toBe(2);
+    expect(linesOf(none.stderr)[0]).toMatch(/^name a target: --target /);
+  });
+});

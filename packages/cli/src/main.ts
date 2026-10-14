@@ -2,6 +2,7 @@ import { nearest } from "./args.js";
 import type { Command } from "./command.js";
 import { importCommand } from "./commands/import.js";
 import { keysCommand } from "./commands/keys.js";
+import { migrateCommand } from "./commands/migrate.js";
 import { UsageError } from "./errors.js";
 import { ROOT_HELP } from "./help/authtempo.js";
 import { type HelpText, renderHelp, shortHelp } from "./help/types.js";
@@ -12,6 +13,7 @@ import { CLI_VERSION, SCHEMA_VERSION } from "./version.js";
 
 /** The command table (spec 19), in the order of the root help. */
 export const COMMANDS: Readonly<Record<string, Command>> = {
+  migrate: migrateCommand,
   import: importCommand,
   keys: keysCommand,
 };

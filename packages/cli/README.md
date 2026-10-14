@@ -37,6 +37,21 @@ release, install it with `pnpm add -D @authtempo/cli`, or run it with
   flag gets "Did you mean", and the command does not run.
 - The CLI writes no color and no terminal control.
 
+## migrate
+
+```bash
+authtempo migrate --target postgres --url-env DATABASE_URL
+```
+
+Every run reads the schema version first: the row `schema_version` of
+`ta_meta`. A database newer than this CLI's core stops the run with exit 2
+before any write. `--dry-run` lists the migrations that the database lacks.
+A run applies them through `applyPostgresMigrations` (its advisory lock
+keeps two runs at once safe), reads the version again, and exits 0 only at
+this CLI's schema version. `--tables compat` runs the migrations of
+`@authtempo/compat-better-auth` on the Better Auth 1.7 tables; that package
+refuses a schema with core's own `ta_meta` and `ta_limit`.
+
 ## import
 
 ```bash

@@ -1,0 +1,48 @@
+import { COMMON_FLAGS, type HelpText } from "./types.js";
+
+export const MIGRATE_HELP: HelpText = {
+  command: "migrate",
+  page: "migrate",
+  purpose:
+    "Apply the migrations of the installed adapter. The command reads the schema version first, and stops on a newer database.",
+  usage: [
+    "authtempo migrate --target postgres [--url-env <NAME> | --url-file <path>] [--tables core|compat] [--dry-run]",
+  ],
+  examples: [
+    {
+      line: "authtempo migrate --target postgres --url-env DATABASE_URL",
+      says: "Apply the Postgres migrations. The connection string is in DATABASE_URL.",
+    },
+    {
+      line: "authtempo migrate --target postgres --dry-run",
+      says: "List the migrations that a run applies, and apply nothing.",
+    },
+  ],
+  flags: [
+    { flag: "--target <postgres>", says: "The kind of database. It has no default." },
+    {
+      flag: "--tables <core|compat>",
+      says: "Core's tables, or the Better Auth 1.7 tables of the compatibility package. The default is core.",
+    },
+    {
+      flag: "--url-env <NAME>",
+      says: "Postgres: the variable that holds the connection string. The default is DATABASE_URL.",
+    },
+    {
+      flag: "--url-file <path>",
+      says: "Postgres: the file that holds the connection string. A dash reads stdin.",
+    },
+    { flag: "-n, --dry-run", says: "List the migrations that a run applies, and apply nothing." },
+    ...COMMON_FLAGS,
+  ],
+  exits: [
+    {
+      code: 0,
+      says: "The database is at the schema version of this CLI, or the dry run listed the migrations.",
+    },
+    {
+      code: 2,
+      says: "A usage error, a newer database, a database that does not answer, or a migration that failed.",
+    },
+  ],
+};

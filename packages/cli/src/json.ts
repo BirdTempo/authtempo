@@ -31,3 +31,25 @@ export const IMPORT_JSON_KEYS = {
   stopped: true,
   bundle: true,
 } as const satisfies Record<keyof ImportJson, true>;
+
+/** `authtempo migrate --json`: the run of one target. `pending` is what the database lacked before the run. */
+export interface MigrateJson {
+  target: string;
+  tables: "core" | "compat";
+  dryRun: boolean;
+  before: number | null;
+  after: number | null;
+  pending: string[];
+  applied: string[];
+  copied: string[];
+}
+export const MIGRATE_JSON_KEYS = {
+  target: true,
+  tables: true,
+  dryRun: true,
+  before: true,
+  after: true,
+  pending: true,
+  applied: true,
+  copied: true,
+} as const satisfies Record<keyof MigrateJson, true>;
