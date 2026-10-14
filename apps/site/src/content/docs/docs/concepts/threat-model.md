@@ -49,6 +49,7 @@ sources:
 - **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how.
 - **Trusted origins.** A POST with an `Origin` header outside `trustedOrigins` answers 403. A `next` path must start with `/` and not `//`.
 - **Fetch Metadata.** A page of another site cannot post a form to core: the browser's `Sec-Fetch-Site` header must say the post came from the API's own origin.
+- **No provider redirect.** Core follows no redirect on a provider call. A provider endpoint cannot steer a request to an internal address.
 - **No secrets in logs.** A log line holds an event name and ids. It never holds a token, a code, a cookie, an address, or an error message.
 
 ## The odds

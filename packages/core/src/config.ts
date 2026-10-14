@@ -56,6 +56,7 @@ import {
   PROVIDER_NAME_RE,
   RESERVED_PROVIDER_NAMES,
 } from "./social/provider.js";
+import { providerFetch } from "./social/provider-fetch.js";
 import type { StorageAdapter } from "./storage/port.js";
 
 export interface MailMessage {
@@ -689,7 +690,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   const clock = input.clock ?? systemClock;
   const providers = socialProviders(input.social);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
-  const fetchFn = input.social?.fetch ?? globalThis.fetch.bind(globalThis);
+  // Every provider call goes through providerFetch: no redirect is followed
+  // (plan 12b). The jose seam gets the same fetch, so the JWKS read has the
+  // rule twice: jose's own and ours.
+  const fetchFn = providerFetch(input.social?.fetch ?? globalThis.fetch.bind(globalThis));
   let passkey: ResolvedConfig["passkey"] = null;
   if (input.passkey) {
     requireFields("passkey", input.passkey, ["rpID", "rpName"]);

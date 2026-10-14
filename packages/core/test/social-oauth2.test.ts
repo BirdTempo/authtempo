@@ -172,7 +172,7 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect(userSignal?.aborted).toBe(true);
   });
 
-  it("passes the method, the headers, and the body of a userinfo fetch through and adds only the signal", async () => {
+  it("passes the method, the headers, and the body of a userinfo fetch through and adds only the signal and redirect manual (plan 12b)", async () => {
     const inits: (RequestInit | undefined)[] = [];
     const fetchFn: typeof fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -199,7 +199,12 @@ describe("an oauth2 provider (plan 9c)", () => {
     expect((await complete(auth, await started(auth))).ok).toBe(true);
     expect(inits).toHaveLength(1);
     const { signal, ...rest } = inits[0] ?? {};
-    expect(rest).toEqual({ method: "POST", headers: { "x-a": "1" }, body: "b" });
+    expect(rest).toEqual({
+      method: "POST",
+      headers: { "x-a": "1" },
+      body: "b",
+      redirect: "manual",
+    });
     expect(signal).toBeInstanceOf(AbortSignal);
   });
 

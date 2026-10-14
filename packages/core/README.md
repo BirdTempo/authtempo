@@ -984,9 +984,11 @@ Without a trigger, expired rows stay in the database.
   in the same per-isolate limiter as the magic link. An `oidc` entry reads
   its discovery document after this limit.
 - Every call to a provider (the token exchange, the user info step, the
-  discovery read, and the JWKS read) stops after 10 s, follows no
-  redirect, and answers `oauth_failed` on a 3xx. An app's `userinfo` gets a
-  fetch with the same rule, also when it asks to follow.
+  discovery read, and the JWKS read) follows no redirect, and answers
+  `oauth_failed` on a 3xx. An app's `userinfo` gets a fetch with the same
+  rule, also when it asks to follow. A call that does not answer in time
+  answers `oauth_failed`: the JWKS read stops after 5 s, the jose default,
+  and every other call stops after 10 s.
 - The confirm page has no script, so a double click on its button sends
   two posts. The first consumes the token and sets the cookie. If the
   browser drops the first answer, the second answers `invalid_token`, and
