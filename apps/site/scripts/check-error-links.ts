@@ -1,4 +1,4 @@
-import { DOCS_ORIGIN, ERROR_TEXT, type ErrorTable, errorDocsURL } from "@authtempo/client";
+import { DOCS_ORIGIN, ERROR_TEXT, type ErrorTable, errorDocsURL, LOCALES } from "@authtempo/client";
 import { TEXT_MAX } from "./check-sentences.ts";
 import { FORBIDDEN_TERMS } from "./check-terms.ts";
 import { idsOf } from "./lib/html.ts";
@@ -43,12 +43,20 @@ export function errorLinks(): ErrorLink[] {
 export function checkErrorLinks(
   links: readonly ErrorLink[],
   read: (urlPath: string) => string,
+  locales: readonly string[] = LOCALES,
 ): CheckReport {
   const r: CheckReport = {
     name: "check-error-links",
     counts: { links: links.length, anchors: 0, texts: 0 },
     failures: [],
   };
+  // The glossary and the sentence rules below are English rules, and the links read ERROR_TEXT,
+  // the English table. The plan that adds a language loops this check over its table.
+  for (const l of locales)
+    if (l !== "en")
+      r.failures.push(
+        `locale "${l}": the glossary and the sentence rules of this check are for English; loop the check over its table`,
+      );
   for (const l of links) {
     const name = `${l.table} code ${l.code}`;
     if (!l.url.startsWith(`${DOCS_ORIGIN}/`))

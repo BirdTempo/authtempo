@@ -8,6 +8,7 @@ import {
   errorDocsURL,
   errorText,
   LOCALES,
+  type Locale,
   pickLocale,
   resolveLocale,
 } from "../src/error-text.js";
@@ -82,14 +83,24 @@ describe("error texts and docs links (plan 11d)", () => {
     expect(resolveLocale(undefined)).toBe("en");
   });
 
-  it("matches a tag over a list of two languages: the exact tag, then its first part, else English", () => {
-    // The public list holds English only, so the rule runs here over a list of two.
+  it("matches a tag over a list of three languages: the exact tag, then its first part, else English", () => {
+    // The public list holds English only, so the rule runs here over a list of three.
     const list = ["en", "fr", "pt-br"] as const;
     expect(pickLocale("fr", list)).toBe("fr");
     expect(pickLocale("FR-ca", list)).toBe("fr");
+    expect(pickLocale("fr_FR", list)).toBe("fr");
     expect(pickLocale("pt-BR", list)).toBe("pt-br");
     expect(pickLocale("pt-PT", list)).toBe("en");
     expect(pickLocale("de", list)).toBe("en");
     expect(pickLocale(null, list)).toBe("en");
+  });
+  it("answers English, never a throw, for a locale outside LOCALES", () => {
+    // A JavaScript caller, or a stored value, can pass a tag that the type refuses.
+    expect(errorText("invalid_token", "en-US" as unknown as Locale)).toBe(
+      ERROR_TEXT.core.invalid_token,
+    );
+    expect(errorText("invalid_token", "oauth", "de" as unknown as Locale)).toBe(
+      ERROR_TEXT.oauth.invalid_token,
+    );
   });
 });

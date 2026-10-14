@@ -122,7 +122,8 @@ export function pickLocale<L extends string>(
   list: readonly L[],
 ): L | "en" {
   const t = (tag ?? "").toLowerCase();
-  const first = t.split("-")[0] ?? "";
+  // A tag may use "_", as `fr_FR` of a system setting does.
+  const first = t.split(/[-_]/)[0] ?? "";
   return list.find((l) => l === t) ?? list.find((l) => l === first) ?? "en";
 }
 
@@ -156,7 +157,8 @@ export function errorText(
 ): string {
   const table: ErrorTable = second === "oauth" ? "oauth" : "core";
   const locale = (second === "oauth" || second === "core" ? third : second) ?? "en";
-  const texts = ERROR_TEXTS[locale];
+  // A locale outside LOCALES (a JavaScript caller, a stored value) answers English, never a throw.
+  const texts = ERROR_TEXTS[resolveLocale(locale)];
   if (isSdk(code)) return texts.sdk[code];
   return table === "oauth" ? texts.oauth[code as OAuthErrorCode] : texts.core[code as ErrorCode];
 }

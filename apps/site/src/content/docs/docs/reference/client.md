@@ -138,7 +138,7 @@ For passkey autofill, start the autofill when the page loads, before a passkey b
 
 `errorText(code)` answers one sentence for a code, for an app to show to a person. `errorDocsURL(code)` answers the docs page of the code: its anchor on [Error codes](/docs/reference/errors/), or the [Results](#results) section for `network`, `unexpected`, and `cancelled`. `redirect_mismatch` links to the [failure codes of the handoff](/docs/reference/handoff/#failure-codes). Pass `"oauth"` as the second argument for a code of the OAuth client, because `invalid_token` and `rate_limited` are in both tables. `ERROR_TEXT` holds every text, by table.
 
-`errorText(code, locale)` answers the text in a language of `LOCALES`; English (`"en"`) is the default and, today, the only one. `resolveLocale(navigator.language)` picks the locale of a language tag, else English. The docs link of a code is the same in every language.
+`errorText(code, locale)` answers the text in a language of `LOCALES`. English (`"en"`) is the default and the only language of the list. For a code of the OAuth client, the locale is the third argument: `errorText(code, "oauth", locale)`. `resolveLocale(navigator.language)` picks the locale of a language tag, else English. The docs link of a code is the same in every language.
 
 ## Exports
 

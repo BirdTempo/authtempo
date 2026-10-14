@@ -77,4 +77,13 @@ describe("checkErrorLinks", () => {
       "read 0 texts",
     ]);
   });
+  it("fails for each locale other than English, whose texts no rule of this check reads", () => {
+    const good = [
+      link("invalid_token", "https://authtempo.com/docs/reference/errors/#invalid_token"),
+    ];
+    expect(checkErrorLinks(good, read, ["en"]).failures).toEqual([]);
+    expect(checkErrorLinks(good, read, ["en", "fr"]).failures).toEqual([
+      'locale "fr": the glossary and the sentence rules of this check are for English; loop the check over its table',
+    ]);
+  });
 });
