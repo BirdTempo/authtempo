@@ -80,7 +80,8 @@ it("turns the factor on, gates the password sign-in, and opens the session with 
   const email = "totp-a@example.com";
   const f = await enrolled(email);
   const row = await env.DB.prepare(
-    "SELECT t.secret, t.enabled_at, t.last_step, t.backup_codes FROM ta_totp t JOIN ta_user u ON u.id = t.user_id WHERE u.email = ?",
+    // Since plan 12c the backup codes live on the factor row, not on ta_totp.
+    "SELECT t.secret, t.enabled_at, t.last_step, f.backup_codes FROM ta_totp t JOIN ta_user u ON u.id = t.user_id JOIN ta_second_factor f ON f.user_id = u.id WHERE u.email = ?",
   )
     .bind(email)
     .first<{
