@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { ConfigError, resolveConfig } from "../src/config.js";
+import { type AuthConfig, ConfigError, resolveConfig } from "../src/config.js";
 import { createSession, renewedSessionCookie, resolveSession } from "../src/engine/sessions.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { TEST_SECRET } from "../src/testing/soft-authenticator.js";
 
 const DAY = 86_400_000;
 
-function world(session: Record<string, unknown>) {
+type SessionInput = NonNullable<AuthConfig["session"]>;
+
+function world(session: SessionInput) {
   let now = new Date("2026-10-14T00:00:00.000Z");
   const storage = createMemoryAdapter();
   const ended: string[] = [];
-  const make = (s: Record<string, unknown>) =>
-    resolveConfig({
+  const make = (s: SessionInput) => {
+    const input: AuthConfig = {
       baseURL: "https://api.example.com",
       secret: TEST_SECRET,
       trustedOrigins: [],
@@ -21,12 +23,14 @@ function world(session: Record<string, unknown>) {
       session: s,
       hooks: {
         session: {
-          afterEnd: ({ reason }: { reason: string }) => {
+          afterEnd: ({ reason }) => {
             ended.push(reason);
           },
         },
       },
-    } as never);
+    };
+    return resolveConfig(input);
+  };
   const advance = (ms: number) => {
     now = new Date(now.getTime() + ms);
   };
@@ -49,11 +53,13 @@ async function user(storage: ReturnType<typeof createMemoryAdapter>) {
 describe("session.absoluteDays (plan 12b, ASVS 5.0.0 7.3.2)", () => {
   it("is off by default and refuses a value outside 1 to 365 and an unknown session key", () => {
     expect(world({}).config.session.absoluteDays).toBeNull();
-    for (const absoluteDays of [0, 366, 1.5, "3"])
+    // A string and an unknown key are what a JavaScript caller can pass, so
+    // these two values leave the type on purpose.
+    for (const absoluteDays of [0, 366, 1.5, "3" as unknown as number])
       expect(() => world({ absoluteDays })).toThrow(
         new ConfigError("session.absoluteDays must be an integer from 1 to 365"),
       );
-    expect(() => world({ idleDays: 3 })).toThrow(
+    expect(() => world({ idleDays: 3 } as SessionInput)).toThrow(
       new ConfigError(
         "session.idleDays is not an option; core has ttlDays, slidingRefreshDays, and absoluteDays",
       ),

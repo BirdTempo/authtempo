@@ -21,11 +21,18 @@ const DAY_MS = 86_400_000;
  */
 export function sessionExpiry(config: ResolvedConfig, createdAt: Date, now: Date): Date {
   const sliding = now.getTime() + config.session.ttlDays * DAY_MS;
-  const cap =
-    config.session.absoluteDays === null
-      ? Number.POSITIVE_INFINITY
-      : createdAt.getTime() + config.session.absoluteDays * DAY_MS;
-  return new Date(Math.min(sliding, cap));
+  return new Date(Math.min(sliding, sessionCapMs(config, createdAt)));
+}
+
+/**
+ * The time in ms at which a session ends whatever its expiresAt:
+ * `createdAt + absoluteDays`, or Infinity when `absoluteDays` is off
+ * (plan 12b). The one copy of the cap rule.
+ */
+export function sessionCapMs(config: ResolvedConfig, createdAt: Date): number {
+  return config.session.absoluteDays === null
+    ? Number.POSITIVE_INFINITY
+    : createdAt.getTime() + config.session.absoluteDays * DAY_MS;
 }
 
 /** The `Max-Age` of the cookie of a new session: its life, in whole seconds (plan 12b). */
@@ -280,9 +287,7 @@ export async function resolveSession(
   if (!session) return null;
   // The absolute cap ends a session whose expiresAt is later: a row written
   // before `absoluteDays` was set (plan 12b).
-  const capped =
-    config.session.absoluteDays !== null &&
-    session.createdAt.getTime() + config.session.absoluteDays * DAY_MS <= now.getTime();
+  const capped = sessionCapMs(config, session.createdAt) <= now.getTime();
   if (capped || session.expiresAt.getTime() <= now.getTime()) {
     const n = await config.storage.delete("session", [
       { field: "id", op: "eq", value: session.id },
@@ -341,11 +346,22 @@ export function readSessionToken(
   config: Pick<ResolvedConfig, "cookieName"> & { legacyCookieName?: string | null },
   request: Pick<Request, "headers">,
 ): string | null {
+  return sessionCookieToken(config, request) ?? readBearer(request);
+}
+
+/**
+ * The session token of the cookie: `cookieName`, then `legacyCookieName` for
+ * one release (plan 12b), or null. The one copy of the cookie read:
+ * `readSessionToken` and `callerFromRequest` both call it.
+ */
+export function sessionCookieToken(
+  config: Pick<ResolvedConfig, "cookieName"> & { legacyCookieName?: string | null },
+  request: Pick<Request, "headers">,
+): string | null {
   const cookie = readCookie(request, config.cookieName);
   if (cookie) return cookie;
   const legacy = config.legacyCookieName ? readCookie(request, config.legacyCookieName) : null;
-  if (legacy) return legacy;
-  return readBearer(request);
+  return legacy || null;
 }
 
 /** The live session row of `token`, with no write: no refresh, no delete (plan 12b, the cookie move). */
@@ -360,11 +376,7 @@ export async function peekSession(
   if (!row) return null;
   // Live as `resolveSession` reads it: before expiresAt and before the absolute cap.
   const now = config.clock.now().getTime();
-  const cap =
-    config.session.absoluteDays === null
-      ? Number.POSITIVE_INFINITY
-      : row.createdAt.getTime() + config.session.absoluteDays * DAY_MS;
-  return row.expiresAt.getTime() > now && cap > now ? row : null;
+  return row.expiresAt.getTime() > now && sessionCapMs(config, row.createdAt) > now ? row : null;
 }
 
 /** The caller's session from the cookie or the bearer header, or null. */

@@ -28,9 +28,17 @@ sources:
 The `__Host-` prefix makes a browser refuse the session cookie unless it is `Secure`, has `Path=/`, and has no `Domain`. A host on a sibling subdomain cannot set it. The names keep the old product name tempo-auth for compatibility.
 
 - `cookieName` renames the session cookie. The binding cookie is that name with no `__Host-` or `__Secure-` prefix, plus `__Secure-` in front and `_oauth` at the end.
-- The old session cookie `tempo_session`: for one release, a request that carries it and no `__Host-tempo_session` stays signed in. The answer sets `__Host-tempo_session` with the same token and clears `tempo_session`. Only the default name gets this move.
+- The old session cookie `tempo_session`: for one release, a request that carries it and no `__Host-tempo_session` stays signed in. The answer sets `__Host-tempo_session` with the same token and clears `tempo_session`. Only the default name gets this move. `auth.handle`, `auth.session`, and `auth.caller` read the old cookie. Only `auth.handle` moves it.
+- The Better Auth shim keeps the cookie name `tempo_session` in this release, and gets no move.
 - `totp.trustCookieName` renames the trust cookie.
 - A sign-out clears the cookie. A sign-out with the old cookie clears both names. After a reset or a claim, the next `GET /session` clears it.
+
+## Deploy note
+
+The move lasts one release. Row 12j removes it in the next release.
+
+- A browser that calls no core route in this release keeps only `tempo_session`. A call to an app route that reads `auth.session` or `auth.caller` keeps it signed in, but sets no new cookie. After the next release, that browser is signed out.
+- A social sign-in that is open during the deploy fails once with `invalid_token`. Core no longer reads the old binding cookie `tempo_session_oauth`, and the binding cookie lives 10 minutes. Start the sign-in again.
 
 ## The rules
 

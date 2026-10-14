@@ -1,5 +1,4 @@
 import type { ResolvedConfig } from "../config.js";
-import { readCookie } from "../http/cookies.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { JWS_RE } from "../primitives/jwk.js";
@@ -8,7 +7,12 @@ import { fail, ok, type Result } from "../result.js";
 import type { ApiTokenRow, UserRow } from "../schema.js";
 import { type OAuthAccess, requestResource, resolveAccessToken } from "./oauth-token.js";
 import { membership } from "./organizations.js";
-import { type ResolvedSession, readBearer, resolveSession } from "./sessions.js";
+import {
+  type ResolvedSession,
+  readBearer,
+  resolveSession,
+  sessionCookieToken,
+} from "./sessions.js";
 
 export const API_TOKEN_PREFIX = "tk_";
 const API_TOKEN_RE = /^tk_[A-Za-z0-9_-]{43}$/;
@@ -214,7 +218,9 @@ export async function revokeApiToken(
 
 /**
  * The cookie first, then the bearer header, as `readSessionToken` reads
- * them: a present cookie wins and the header is not read. A cookie resolves
+ * them: both call `sessionCookieToken`, so the cookie is `cookieName`, then
+ * the old `legacyCookieName` for one release (plan 12b). A present cookie
+ * wins and the header is not read. A cookie resolves
  * as a session only. A `tk_` value counts only in the bearer header: a
  * browser sends a cookie on a cross-site request, and a script never has
  * one. A JWT bearer is an OAuth access token (plan 9g).
@@ -223,7 +229,7 @@ export async function callerFromRequest(
   config: ResolvedConfig,
   request: Request,
 ): Promise<Caller | null> {
-  const cookie = readCookie(request, config.cookieName);
+  const cookie = sessionCookieToken(config, request);
   if (cookie) {
     const s = await resolveSession(config, cookie);
     return s ? { kind: "session", ...s } : null;

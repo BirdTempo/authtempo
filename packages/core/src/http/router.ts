@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
-import { peekSession } from "../engine/sessions.js";
+import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { json } from "./json.js";
 
@@ -82,7 +82,10 @@ async function moveLegacyCookie(
   if (!sets.some((c) => c.startsWith(`${config.cookieName}=`))) {
     const row = await peekSession(config, old);
     if (row) {
-      const seconds = Math.floor((row.expiresAt.getTime() - config.clock.now().getTime()) / 1000);
+      // The earlier of expiresAt and the cap: a row from before absoluteDays
+      // was set can hold an expiresAt past the cap.
+      const end = Math.min(row.expiresAt.getTime(), sessionCapMs(config, row.createdAt));
+      const seconds = Math.floor((end - config.clock.now().getTime()) / 1000);
       res.headers.append(
         "set-cookie",
         sessionCookie(config.cookieName, old, Math.max(0, seconds), config.cookie.sameSite),

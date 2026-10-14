@@ -74,6 +74,23 @@ describe("the session cookie name (plan 12b)", () => {
     expect((await auth.session(get("/session", `tempo_session=${s.token}`)))?.user.id).toBe("u1");
   });
 
+  it("lets auth.caller read the old cookie, so an app route keeps the session for one release", async () => {
+    const { auth, config } = setup();
+    await config.storage.create("user", {
+      id: "u3",
+      email: "c@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      createdAt: new Date("2026-10-14T00:00:00.000Z"),
+      updatedAt: new Date("2026-10-14T00:00:00.000Z"),
+    });
+    const s = await createSession(config, { userId: "u3", ip: null, userAgent: null });
+    const caller = await auth.caller(get("/x", `tempo_session=${s.token}`));
+    expect(caller?.kind).toBe("session");
+    expect(caller?.kind === "session" ? caller.user.id : null).toBe("u3");
+  });
+
   it("clears a dead old cookie and sets no new one", async () => {
     const { auth } = setup();
     const res = await auth.handle(get("/session", `tempo_session=ts_${"a".repeat(43)}`));
@@ -98,6 +115,22 @@ describe("the session cookie name (plan 12b)", () => {
     expect(res.headers.getSetCookie()).toEqual([
       "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
     ]);
+  });
+
+  it("gives the moved cookie a Max-Age that never passes the absolute cap", async () => {
+    const storage = createMemoryAdapter();
+    const { config } = setup({ storage });
+    const s = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    // One day later, with a cap of ten days: expiresAt is 29 days out, the cap 9.
+    const { auth } = setup({
+      storage,
+      session: { absoluteDays: 10 },
+      clock: { now: () => new Date("2026-10-15T00:00:00.000Z") },
+    });
+    const res = await auth.handle(get("/no-such-route", `tempo_session=${s.token}`));
+    expect(res.headers.getSetCookie()[0]).toBe(
+      `__Host-tempo_session=${s.token}; Path=/; Max-Age=${9 * 86_400}; HttpOnly; Secure; SameSite=Lax`,
+    );
   });
 
   it("signs out a browser that holds the old cookie and clears both names", async () => {
