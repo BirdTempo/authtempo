@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MIGRATE_JSON_KEYS } from "../src/json.js";
 import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
-import { D1_MODULES, d1Project } from "./support/d1-project.js";
+import { D1_MODULES, d1Project, removeScaffolds } from "./support/d1-project.js";
 
 const ADAPTER = join(D1_MODULES, "@authtempo/adapter-d1/migrations");
 const ADAPTER_FILES = readdirSync(ADAPTER)
@@ -26,30 +26,36 @@ const migrate = (dir: string, extra: string[] = []) =>
  * reads. wrangler prints `[{ results, success, meta }]` on stdout.
  */
 function readLocal(dir: string, sql: string): Record<string, unknown>[] {
-  const r = spawnSync(
-    join(D1_MODULES, ".bin/wrangler"),
-    ["d1", "execute", "cli-d1", "--local", "--json", "--command", sql],
-    {
-      cwd: dir,
-      encoding: "utf8",
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: process.env.HOME ?? "",
-        TMPDIR: process.env.TMPDIR ?? "/tmp",
-        CI: "1",
-        WRANGLER_SEND_METRICS: "false",
-        NO_COLOR: "1",
-      },
-      timeout: 120_000,
-    },
-  );
-  expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+  const r = wranglerLocal(dir, ["d1", "execute", "cli-d1", "--local", "--json", "--command", sql]);
   const parsed = JSON.parse(r.stdout) as { results: Record<string, unknown>[] }[];
   return parsed[0]?.results ?? [];
 }
 
+/** The pinned wrangler on the local D1 of a project, with no CLI in between. It must exit 0. */
+function wranglerLocal(dir: string, args: string[]): { stdout: string } {
+  const r = spawnSync(join(D1_MODULES, ".bin/wrangler"), args, {
+    cwd: dir,
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      TMPDIR: process.env.TMPDIR ?? "/tmp",
+      CI: "1",
+      WRANGLER_SEND_METRICS: "false",
+      NO_COLOR: "1",
+    },
+    timeout: 120_000,
+  });
+  expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+  return { stdout: r.stdout };
+}
+
 beforeAll(() => {
   assertFreshBuild();
+});
+
+afterAll(() => {
+  removeScaffolds();
 });
 
 // Each run calls the project's wrangler four or five times on its local D1.
@@ -191,7 +197,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     // The fake answers each SELECT as wrangler 4.148.0 answers on a new database with --json.
     const fake = [
       "#!/bin/sh",
-      'printf \'%s\\n\' "$*" >> "$(dirname "$0")/../../wrangler-calls.log"',
+      'printf \'CI=%s %s\\n\' "$CI" "$*" >> "$(dirname "$0")/../../wrangler-calls.log"',
       'if [ "$2" = "execute" ]; then echo \'{"error":{"text":"no such table: ta_meta: SQLITE_ERROR"}}\'; exit 1; fi',
       "exit 0",
       "",
@@ -207,12 +213,62 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     expect(r.status).toBe(2);
     expect(linesOf(r.stderr)).toContain("running wrangler d1 migrations apply cli-d1 --remote");
     const tail = `--remote --config ${join(p.dir, "wrangler.jsonc")}`;
+    // CI=1 on each call: wrangler then takes the default answer of the apply confirmation.
+    // The applied list comes first: the version check needs its count.
+    const applied = `CI=1 d1 execute cli-d1 --json --command SELECT name FROM d1_migrations ORDER BY id ${tail}`;
+    const version = `CI=1 d1 execute cli-d1 --json --command SELECT value FROM ta_meta WHERE key = 'schema_version' ${tail}`;
     expect(linesOf(readFileSync(join(p.dir, "wrangler-calls.log"), "utf8"))).toEqual([
-      `d1 execute cli-d1 --json --command SELECT value FROM ta_meta WHERE key = 'schema_version' ${tail}`,
-      `d1 execute cli-d1 --json --command SELECT name FROM d1_migrations ORDER BY id ${tail}`,
-      `d1 migrations apply cli-d1 ${tail}`,
-      `d1 execute cli-d1 --json --command SELECT value FROM ta_meta WHERE key = 'schema_version' ${tail}`,
-      `d1 execute cli-d1 --json --command SELECT name FROM d1_migrations ORDER BY id ${tail}`,
+      applied,
+      version,
+      `CI=1 d1 migrations apply cli-d1 ${tail}`,
+      applied,
+      version,
     ]);
+  });
+
+  it("stops before any write on a schema_version that is not a number, and on a missing row over applied files", () => {
+    const p = d1Project();
+    const first = migrate(p.dir);
+    expect(first.status, first.stderr).toBe(0);
+    readLocal(p.dir, "UPDATE ta_meta SET value = '9x' WHERE key = 'schema_version'");
+    for (const extra of [["--dry-run"], []]) {
+      const r = migrate(p.dir, extra);
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(linesOf(r.stderr).at(-1)).toBe(
+        'stopped: ta_meta holds schema_version "9x", which is not a version number; nothing was written',
+      );
+    }
+    readLocal(p.dir, "DELETE FROM ta_meta WHERE key = 'schema_version'");
+    const missing = migrate(p.dir);
+    expect(missing.status).toBe(2);
+    expect(missing.stdout).toBe("");
+    expect(linesOf(missing.stderr).at(-1)).toBe(
+      `stopped: ta_meta has no schema_version, but d1_migrations holds ${CORE.length} applied migration(s); nothing was written`,
+    );
+  });
+
+  it("runs the compat copy over the app's own applied migration, which sets no schema_version", () => {
+    const p = d1Project({
+      migrationsDir: "migrations",
+      files: { "migrations/0001_better_auth.sql": BA_SQLITE },
+    });
+    // The app applied its Better Auth tables before: d1_migrations holds one row, and ta_meta does not exist.
+    wranglerLocal(p.dir, ["d1", "migrations", "apply", "cli-d1", "--local"]);
+    const r = migrate(p.dir, ["--tables", "compat"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(linesOf(r.stdout).at(-1)).toBe("version before: none; version after: 7");
+  });
+
+  it("shows the usage line of each target on a usage error", () => {
+    const p = d1Project({ modules: false });
+    const r = migrate(p.dir, ["--url-env", "DATABASE_URL"]);
+    expect(r.status).toBe(2);
+    const usage = linesOf(r.stderr).filter((l) => l.startsWith("Usage: "));
+    expect(usage).toHaveLength(2);
+    expect(usage[0]).toContain("--target postgres");
+    expect(usage[1]).toContain("--target d1");
+    expect(usage[1]).toContain("--config <path>");
+    expect(usage[1]).toContain("--before-1.7");
   });
 });

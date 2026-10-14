@@ -84,7 +84,10 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
   } catch (e) {
     if (e instanceof UsageError) {
       ctx.err(e.message);
-      for (const line of shortHelp(command.help)) ctx.err(line);
+      // Every usage line of the command: migrate has one line for each target.
+      const [first, ...tail] = shortHelp(command.help);
+      const usage = command.help.usage.map((u) => `Usage: ${u}`);
+      for (const line of [...(usage.length > 0 ? usage : [first ?? ""]), ...tail]) ctx.err(line);
       return 2;
     }
     ctx.err(`stopped: ${e instanceof Error ? e.message : String(e)}`);

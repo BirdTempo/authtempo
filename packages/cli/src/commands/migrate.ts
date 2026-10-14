@@ -14,7 +14,7 @@ import {
   findWranglerConfig,
   readD1Applied,
   readD1Project,
-  readD1Version,
+  readD1VersionText,
   wranglerOf,
 } from "../seams/d1.js";
 import { CORE_MIGRATIONS, compatMigrationNames, openPostgres } from "../seams/postgres.js";
@@ -70,16 +70,22 @@ export function gate(version: number | null): void {
 }
 
 /**
- * The Postgres version as the gate can read it (spec 19, item 8). A
- * `schema_version` that is not a whole number, or a missing row over applied
- * migrations, is a database that this CLI cannot place. The run stops before
- * any write, as it stops on a newer database: the runner never takes its lock.
+ * The version as the gate can read it, one rule for both targets (spec 19,
+ * item 8). A `schema_version` that is not a whole number, or a missing row
+ * over applied migrations, is a database that this CLI cannot place. The run
+ * stops before any write, as it stops on a newer database. `table` is the
+ * table of applied migrations: `ta_migrations` on Postgres, wrangler's
+ * `migrations_table` on D1.
  */
-export function readableVersion(raw: string | null, appliedCount: number): number | null {
+export function readableVersion(
+  raw: string | null,
+  appliedCount: number,
+  table = "ta_migrations",
+): number | null {
   if (raw === null) {
     if (appliedCount > 0)
       throw new Stop(
-        `ta_meta has no schema_version, but ta_migrations holds ${appliedCount} applied migration(s); nothing was written`,
+        `ta_meta has no schema_version, but ${table} holds ${appliedCount} applied migration(s); nothing was written`,
       );
     return null;
   }
@@ -179,6 +185,44 @@ function copyCompat(ctx: Ctx, dir: string, before17: boolean, dryRun: boolean): 
   return copied;
 }
 
+/** The name of a migration file without its number and `.sql`: `0003_schema_v3.sql` gives `schema_v3`. */
+const stem = (name: string) => name.replace(/\.sql$/, "").replace(/^\d+_/, "");
+
+/**
+ * The count of applied D1 migrations that are ours: a file of the adapter or
+ * of the compatibility package, by its name without the number. The app's
+ * own migrations (such as its Better Auth tables before a compat run) set no
+ * schema_version, so they do not count for the rule of a missing row.
+ */
+function ownAppliedCount(ctx: Ctx, applied: readonly string[]): number {
+  const ours = new Set(
+    [adapterD1Dir(), compatD1Dir(false), compatD1Dir(true)].flatMap((dir) =>
+      ctx
+        .listDir(dir)
+        .filter((f) => f.endsWith(".sql"))
+        .map(stem),
+    ),
+  );
+  return applied.filter((n) => ours.has(stem(n))).length;
+}
+
+/**
+ * The schema version of the D1 database through `readableVersion`, the rule
+ * of both targets. It reads wrangler's table of applied migrations first,
+ * for the count of the missing-row rule.
+ */
+async function readD1Version(
+  ctx: Ctx,
+  t: D1Target,
+): Promise<{ version: number | null; applied: string[] }> {
+  const applied = await readD1Applied(ctx, t);
+  const raw = await readD1VersionText(ctx, t);
+  return {
+    version: readableVersion(raw, ownAppliedCount(ctx, applied), t.migrationsTable),
+    applied,
+  };
+}
+
 async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
   const project = readD1Project(ctx, findWranglerConfig(ctx, v.config), v.database);
   if (!ctx.exists(wranglerOf(project.cwd)))
@@ -188,14 +232,14 @@ async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<Migrat
   const t: D1Target = { ...project, remote: v.remote === true };
   if (plan.tables === "core") checkAdapterFiles(ctx, project.migrationsDir);
   plan.note(`reading the ${t.remote ? "remote" : "local"} D1 database ${t.database}`);
-  const before = await readD1Version(ctx, t);
+  const { version: before, applied: appliedBefore } = await readD1Version(ctx, t);
   gate(before);
   // After the gate: the copy is the first write of a compat run.
   const copied =
     plan.tables === "compat"
       ? copyCompat(ctx, project.migrationsDir, v["before-1.7"] === true, plan.dryRun)
       : [];
-  const done = new Set(await readD1Applied(ctx, t));
+  const done = new Set(appliedBefore);
   const files = ctx
     .listDir(project.migrationsDir)
     .filter((f) => f.endsWith(".sql"))
@@ -206,8 +250,8 @@ async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<Migrat
     `running wrangler d1 migrations apply ${t.database} ${t.remote ? "--remote" : "--local"}`,
   );
   await applyD1(ctx, t);
-  const after = await readD1Version(ctx, t);
-  const now = new Set(await readD1Applied(ctx, t));
+  const { version: after, applied: appliedAfter } = await readD1Version(ctx, t);
+  const now = new Set(appliedAfter);
   return { before, after, pending, applied: pending.filter((n) => now.has(n)), copied };
 }
 

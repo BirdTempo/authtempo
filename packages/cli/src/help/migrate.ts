@@ -7,7 +7,7 @@ export const MIGRATE_HELP: HelpText = {
     "Apply the migrations of the installed adapter. The command reads the schema version first, and stops on a newer database.",
   usage: [
     "authtempo migrate --target postgres [--url-env <NAME> | --url-file <path>] [--tables core|compat] [--dry-run]",
-    "authtempo migrate --target d1 [--database <name>] [--remote] [--tables core|compat] [--dry-run]",
+    "authtempo migrate --target d1 [--database <name>] [--config <path>] [--remote] [--tables core|compat [--before-1.7]] [--dry-run]",
   ],
   examples: [
     {
@@ -43,7 +43,7 @@ export const MIGRATE_HELP: HelpText = {
     },
     {
       flag: "--remote",
-      says: "D1: apply to the database on Cloudflare. The default is the local database of wrangler dev.",
+      says: "D1: apply to the database on Cloudflare. Local is the default: without --remote, the run is on the local database of wrangler dev.",
     },
     {
       flag: "--before-1.7",

@@ -5,6 +5,15 @@ import { PKG, REPO } from "./bin.js";
 /** The node_modules of the D1 example (11a Task 6): wrangler 4.148.0 and @authtempo/adapter-d1. */
 export const D1_MODULES = join(REPO, "examples/worker-d1/node_modules");
 
+/** The folders that d1Project made with a random name. */
+const made = new Set<string>();
+
+/** Deletes each random-name folder of d1Project. A folder with a fixed `name` stays for a person to read. */
+export function removeScaffolds(): void {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  made.clear();
+}
+
 /**
  * A Worker project for `authtempo migrate --target d1` inside the workspace
  * (plan 11c): wrangler.jsonc with one or two D1 databases, a small Worker
@@ -23,6 +32,7 @@ export function d1Project(
   const dir = join(PKG, ".scaffold", o.name ?? `d1-${crypto.randomUUID().slice(0, 8)}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
+  if (o.name === undefined) made.add(dir);
   const db = (binding: string, name: string) => ({
     binding,
     database_name: name,

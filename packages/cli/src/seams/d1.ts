@@ -143,15 +143,20 @@ async function select(
 
 const NO_TABLE = /no such table/i;
 
-/** `ta_meta.schema_version` of the D1 database, or null when the table or the row is missing. */
-export async function readD1Version(ctx: Ctx, t: D1Target): Promise<number | null> {
+/**
+ * The text of `ta_meta.schema_version` in the D1 database, or null when the
+ * table or the row is missing. The command reads it through
+ * `readableVersion`, the one rule of both targets: this seam converts no
+ * number, so a value such as `9x` never becomes NaN here.
+ */
+export async function readD1VersionText(ctx: Ctx, t: D1Target): Promise<string | null> {
   const r = await select(ctx, t, "SELECT value FROM ta_meta WHERE key = 'schema_version'");
   if ("failure" in r) {
     if (NO_TABLE.test(r.failure)) return null;
     throw new Stop(`wrangler d1 execute: ${firstError(r.failure)}`);
   }
   const v = r.rows[0]?.value;
-  return v === undefined || v === null ? null : Number(v);
+  return v === undefined || v === null ? null : String(v);
 }
 
 /** The migrations that wrangler applied, by name without `.sql`. */
