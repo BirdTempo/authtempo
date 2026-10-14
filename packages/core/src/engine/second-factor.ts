@@ -1,5 +1,7 @@
 import type { ResolvedConfig, ResolvedTotp } from "../config.js";
-import { constantTimeEqual, hmacSha256Hex } from "../primitives/crypto.js";
+import { safeNext } from "../http/safe-next.js";
+import { constantTimeEqual, hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
+import { newId } from "../primitives/ids.js";
 import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primitives/totp.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow } from "../schema.js";
@@ -284,5 +286,178 @@ export function disableSecondFactor(config: ResolvedConfig, userId: string): Pro
     await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: userId }]);
     await deleteTwoFactorChallenges(tx, userId);
     return n;
+  });
+}
+
+export const TWO_FACTOR_PREFIX = "tf_";
+export const TWO_FACTOR_TOKEN_RE = /^tf_[A-Za-z0-9_-]{43}$/;
+export const TRUST_PREFIX = "td_";
+export const TRUST_TOKEN_RE = /^td_[A-Za-z0-9_-]{43}$/;
+/**
+ * A challenge lives 5 minutes (spec 8.11). An email code of the challenge
+ * lives with it, below the 10 minutes of ASVS 5.0 6.5.5 for an out-of-band code.
+ */
+export const CHALLENGE_TTL_MS = 300_000;
+
+/** A method that a challenge offers: a method of the row, or a backup code. */
+export type ChallengeMethod = SecondFactorMethod | "backup";
+
+/**
+ * The order of preference (spec 8.14): a passkey resists phishing, a TOTP
+ * code needs no mail, an email code needs a mail, and a backup code is the
+ * last resort. The challenge page shows the first method it can serve.
+ */
+const PREFERENCE: readonly ChallengeMethod[] = ["passkey", "totp", "email", "backup"];
+
+/** The first factors that a challenge can follow (plan 12c). Each is a `SessionVia`. */
+export type GatedVia = "password" | "magic_link" | "email_otp" | "social";
+const GATED_VIA: ReadonlySet<string> = new Set(["password", "magic_link", "email_otp", "social"]);
+
+/** How the person proved the first factor: the session's `via`, and `reset` for a password reset. */
+export interface ChallengeOrigin {
+  via: GatedVia;
+  from: "sign-in" | "reset";
+}
+
+/** The answer of a flow whose user has the factor on: no session yet (plan 9f; `methods` since plan 12c). */
+export interface TwoFactorPending {
+  twoFactor: { challenge: string; expiresAt: Date; methods: ChallengeMethod[] };
+}
+
+/**
+ * The origin that a challenge row holds. A row of plan 9f holds
+ * `via: "password"` and no `from`, so it reads as a password sign-in. Any
+ * other `via` reads as `password`: the narrowest list is not the default.
+ */
+export function challengeOrigin(data: unknown): ChallengeOrigin {
+  const d = data as { via?: unknown; from?: unknown } | null;
+  const via = typeof d?.via === "string" && GATED_VIA.has(d.via) ? (d.via as GatedVia) : "password";
+  return { via, from: d?.from === "reset" ? "reset" : "sign-in" };
+}
+
+/**
+ * The methods that pass for a challenge, in the order of preference. The
+ * verify reads the list again from the current row, so a method that goes
+ * off after the challenge no longer passes.
+ */
+export function challengeMethods(
+  config: ResolvedConfig,
+  row: SecondFactorRow,
+  origin: ChallengeOrigin,
+): ChallengeMethod[] {
+  const on = new Set<ChallengeMethod>(row.methods);
+  // An email code proves the mailbox. It counts as the second factor after a
+  // password sign-in only (owner decision 4 of 2026-10-14): a reset, a magic
+  // link, and an email code sign-in prove the mailbox already, and a social
+  // provider account often holds the mailbox.
+  if (origin.via !== "password" || origin.from !== "sign-in") on.delete("email");
+  // A passkey ceremony needs the passkey config: the relying party and its origins.
+  if (!config.passkey) on.delete("passkey");
+  if (row.backupCodes.length > 0) on.add("backup");
+  return PREFERENCE.filter((m) => on.has(m));
+}
+
+export interface ChallengeInput extends ChallengeOrigin {
+  userId: string;
+  ip: string | null;
+  userAgent: string | null;
+  next: string | undefined;
+}
+
+/**
+ * Writes a challenge in place of a session on `storage`, the flow's
+ * transaction, and answers it with its methods. The row is a `two-factor`
+ * verification row (spec 8.11 item 4). Its `data` holds the origin, so the
+ * verify opens the session with the same `via`, and the IP, the user agent,
+ * and `next` of the first factor.
+ */
+export async function writeChallenge(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  row: SecondFactorRow,
+  input: ChallengeInput,
+  now: Date,
+): Promise<{ id: string; pending: TwoFactorPending }> {
+  const challenge = randomToken(TWO_FACTOR_PREFIX);
+  const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS);
+  const id = newId(now);
+  await storage.create("verification", {
+    id,
+    purpose: "two-factor",
+    identifier: input.userId,
+    valueHash: await sha256Hex(challenge),
+    expiresAt,
+    consumedAt: null,
+    data: {
+      via: input.via,
+      from: input.from,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      next: safeNext(input.next),
+      attempts: 0,
+    },
+    createdAt: now,
+    updatedAt: now,
+  });
+  return {
+    id,
+    pending: { twoFactor: { challenge, expiresAt, methods: challengeMethods(config, row, input) } },
+  };
+}
+
+/** The gate's reads: no gate, maybe with a trust row to touch after the commit, or the factor row. */
+export type GateRead =
+  | { gated: false; trustId: string | null }
+  | { gated: true; row: SecondFactorRow };
+
+/**
+ * The id of a live trust row of this user for the clear `td_` token, or null.
+ * A row of another user and an expired row are no trust. A read only: the
+ * sweep deletes an expired row (`SweepResult.trustedDevices`).
+ */
+export async function liveTrust(
+  storage: StorageAdapter,
+  userId: string,
+  token: string | undefined,
+  now: Date,
+): Promise<string | null> {
+  if (token === undefined || !TRUST_TOKEN_RE.test(token)) return null;
+  const t = await storage.findOne("trustedDevice", [
+    { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
+  ]);
+  return t && t.userId === userId && t.expiresAt.getTime() > now.getTime() ? t.id : null;
+}
+
+/**
+ * The gate's reads, with no write (plan 12c): the factor row and a live trust
+ * row of the same user, on `storage`. The reset and the gated sign-ins read
+ * here inside their transaction, before the session hook, which runs before
+ * the first write (plan 9d). They write `lastSeenAt` after the commit with
+ * `touchTrust`. No `totp` config: no gate.
+ */
+export async function gateRead(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  userId: string,
+  trustToken: string | undefined,
+  now: Date,
+): Promise<GateRead> {
+  if (!config.totp) return { gated: false, trustId: null };
+  const row = await factorRow(storage, userId);
+  if (!row) return { gated: false, trustId: null };
+  const trustId = await liveTrust(storage, userId, trustToken, now);
+  return trustId ? { gated: false, trustId } : { gated: true, row };
+}
+
+/** Moves `lastSeenAt` of the trust row that skipped a gate, after the flow's commit. */
+export async function touchTrust(
+  config: ResolvedConfig,
+  trustId: string | null,
+  now: Date,
+): Promise<void> {
+  if (!trustId) return;
+  await config.storage.update("trustedDevice", [{ field: "id", op: "eq", value: trustId }], {
+    lastSeenAt: now,
+    updatedAt: now,
   });
 }

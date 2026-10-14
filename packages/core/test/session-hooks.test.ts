@@ -402,8 +402,11 @@ describe("session create hooks (plan 9d)", () => {
     expect(read("handoff.ts")).toContain('via: "handoff"');
     expect(read("email-otp.ts")).toContain('via: "email_otp"');
     expect(read("password.ts").split('via: "password"')).toHaveLength(5);
-    // The challenge's data and the verify's openSession (plan 9f).
-    expect(read("totp.ts").split('via: "password"')).toHaveLength(3);
+    // The password gate's challenge input (plan 9f). The verify opens the
+    // session with the challenge's via, not a fixed one (plan 12c).
+    expect(read("totp.ts").split('via: "password"')).toHaveLength(2);
+    expect(read("totp.ts")).toContain("openSession(config, { user, ip, userAgent, via }, tx)");
+    expect(read("totp.ts").match(/sessionOpened\([^;]*?\bvia,?\s*\)/g)).toHaveLength(1);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
     const opened = (file: string, via: string) =>
       read(file).match(new RegExp(`sessionOpened\\([^;]*?"${via}",?\\s*\\)`, "g"))?.length ?? 0;
@@ -422,7 +425,7 @@ describe("session create hooks (plan 9d)", () => {
       handoff: 1,
       password: 4,
       emailOtp: 1,
-      totp: 1,
+      totp: 0,
     });
   });
 });

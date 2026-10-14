@@ -22,7 +22,7 @@ import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage } from "../password-pages.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
-import { sessionCookieFor, signedInResponse } from "../session-answer.js";
+import { sessionCookieFor, signedInResponse, twoFactorJson } from "../session-answer.js";
 
 const signUpBody = z.object({
   email: z.string().max(320),
@@ -114,13 +114,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
-        if ("twoFactor" in r.value)
-          return json({
-            twoFactor: {
-              challenge: r.value.twoFactor.challenge,
-              expiresAt: r.value.twoFactor.expiresAt.toISOString(),
-            },
-          });
+        if ("twoFactor" in r.value) return twoFactorJson(r.value);
         return signedIn(r.value);
       },
     },

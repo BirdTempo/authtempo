@@ -17,6 +17,7 @@ import { hookGuard } from "./hooks.js";
 import { checkUserPassword } from "./password.js";
 import {
   addMethod,
+  challengeOrigin,
   disableSecondFactor,
   FactorRaceError,
   factorRow,
@@ -25,6 +26,11 @@ import {
   removeMethod,
   replaceBackupCodes,
   spendBackupCode,
+  TRUST_PREFIX,
+  TRUST_TOKEN_RE,
+  TWO_FACTOR_TOKEN_RE,
+  type TwoFactorPending,
+  writeChallenge,
 } from "./second-factor.js";
 import {
   endedList,
@@ -35,7 +41,15 @@ import {
 } from "./sessions.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
-export { deleteTwoFactorChallenges } from "./second-factor.js";
+export type { ChallengeMethod, TwoFactorPending } from "./second-factor.js";
+export {
+  CHALLENGE_TTL_MS,
+  deleteTwoFactorChallenges,
+  TRUST_PREFIX,
+  TRUST_TOKEN_RE,
+  TWO_FACTOR_PREFIX,
+  TWO_FACTOR_TOKEN_RE,
+} from "./second-factor.js";
 
 /**
  * The TOTP second factor (plan 9f, spec 8.11). One `totp` row per user
@@ -476,23 +490,13 @@ export async function revokeTrustedDevices(
   return ok({ ok: true });
 }
 
-export const TWO_FACTOR_PREFIX = "tf_";
-export const TWO_FACTOR_TOKEN_RE = /^tf_[A-Za-z0-9_-]{43}$/;
-export const TRUST_PREFIX = "td_";
-export const TRUST_TOKEN_RE = /^td_[A-Za-z0-9_-]{43}$/;
-/** A challenge lives 5 minutes and takes 5 wrong codes (spec 8.11). */
-export const CHALLENGE_TTL_MS = 300_000;
+/** A challenge takes 5 wrong codes (spec 8.11). Its lifetime is `CHALLENGE_TTL_MS`. */
 export const CHALLENGE_MAX_ATTEMPTS = 5;
 // Per 15 minutes. The challenge cap bounds the guesses per challenge, the
 // sign-in's email limit bounds the challenges per address, and
 // `CODE_PER_USER` and `CODE_PER_USER_DAY` bound the guesses per user over
 // all challenges.
 const VERIFY_PER_IP = { seconds: 900, max: 30 };
-
-/** The sign-in's answer for a user with the factor on: no session yet. */
-export interface TwoFactorPending {
-  twoFactor: { challenge: string; expiresAt: Date };
-}
 
 export interface TwoFactorVerify {
   challenge: string;
@@ -564,30 +568,24 @@ export async function twoFactorGate(
 ): Promise<Result<TwoFactorPending> | null> {
   if (!config.totp) return null;
   const { user } = input;
-  if (!(await factorRow(config.storage, user.id))) return null;
+  const row = await factorRow(config.storage, user.id);
+  if (!row) return null;
   if (await trusted(config, user.id, input.trustDevice, now)) return null;
-  const challenge = randomToken(TWO_FACTOR_PREFIX);
-  const valueHash = await sha256Hex(challenge);
-  const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS);
-  const id = newId(now);
   return config.storage.transaction(async (tx): Promise<Result<TwoFactorPending>> => {
-    await tx.create("verification", {
-      id,
-      purpose: "two-factor",
-      identifier: user.id,
-      valueHash,
-      expiresAt,
-      consumedAt: null,
-      data: {
+    const { id, pending } = await writeChallenge(
+      config,
+      tx,
+      row,
+      {
+        userId: user.id,
         via: "password",
+        from: "sign-in",
         ip: input.ip,
         userAgent: input.userAgent,
-        next: safeNext(input.next),
-        attempts: 0,
+        next: input.next,
       },
-      createdAt: now,
-      updatedAt: now,
-    });
+      now,
+    );
     const n = await tx.update(
       "password",
       [
@@ -600,7 +598,7 @@ export async function twoFactorGate(
       await tx.delete("verification", [{ field: "id", op: "eq", value: id }]);
       return fail("invalid_credentials");
     }
-    return ok({ twoFactor: { challenge, expiresAt } });
+    return ok(pending);
   });
 }
 
@@ -663,6 +661,9 @@ export async function verifyTwoFactor(
   ]);
   if (!user) return fail("invalid_token");
   const data = challenge.data as { ip?: unknown; userAgent?: unknown; next?: unknown } | null;
+  // The first factor of the challenge: the session keeps its `via` (plan 12c).
+  // A row of plan 9f holds `password`.
+  const { via } = challengeOrigin(challenge.data);
   const ip = typeof data?.ip === "string" ? data.ip : null;
   const userAgent = typeof data?.userAgent === "string" ? data.userAgent : null;
   const next = safeNext(data?.next);
@@ -676,7 +677,7 @@ export async function verifyTwoFactor(
   const trustHash = trust ? await sha256Hex(trust.token) : null;
   const opened = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<TwoFactorSession>> => {
-      const s = await openSession(config, { user, ip, userAgent, via: "password" }, tx);
+      const s = await openSession(config, { user, ip, userAgent, via }, tx);
       if (trust && trustHash)
         await tx.create("trustedDevice", {
           id: trust.id,
@@ -712,6 +713,6 @@ export async function verifyTwoFactor(
     }),
   );
   // After the commit, as every flow does (plan 9d).
-  if (opened.ok) await sessionOpened(config, opened.value.session, opened.value.user, "password");
+  if (opened.ok) await sessionOpened(config, opened.value.session, opened.value.user, via);
   return opened;
 }

@@ -91,6 +91,7 @@ export {
   type ResolvedApiToken,
 } from "./engine/tokens.js";
 export type {
+  ChallengeMethod,
   TotpSetup,
   TotpSetupInput,
   TotpStatus,

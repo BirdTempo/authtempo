@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import type { TwoFactorPending } from "../engine/second-factor.js";
 import { publicSession } from "../engine/sessions.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { sessionCookie } from "./cookies.js";
@@ -28,4 +29,24 @@ export function signedInResponse(
     200,
     { "set-cookie": sessionCookieFor(config, v.token) },
   );
+}
+
+/**
+ * A challenge in place of a session, as JSON and with no cookie (plan 9f;
+ * `methods` since plan 12c): the password sign-in, the reset, and the gated
+ * sign-ins answer it, and the client calls `totp.verify` with the challenge.
+ */
+export function twoFactorJson(p: TwoFactorPending): Response {
+  return json({
+    twoFactor: {
+      challenge: p.twoFactor.challenge,
+      expiresAt: p.twoFactor.expiresAt.toISOString(),
+      methods: p.twoFactor.methods,
+    },
+  });
+}
+
+/** The challenge page of a browser flow (plan 12c), on `baseURL`, as the password sign-in's form flow uses. */
+export function challengePageUrl(config: ResolvedConfig, challenge: string): string {
+  return `${config.baseURL}${config.basePath}/totp/challenge?challenge=${encodeURIComponent(challenge)}`;
 }

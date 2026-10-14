@@ -7,10 +7,12 @@ import {
   resetPassword,
   verifyPassword,
 } from "../src/engine/password.js";
+import { challengeMethods, challengeOrigin, writeChallenge } from "../src/engine/second-factor.js";
 import { setupTotp, type TwoFactorVerify, verifyTwoFactor } from "../src/engine/totp.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import type { SecondFactorRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { tokenFromMail } from "./helpers.js";
+import { makeAuth, tokenFromMail } from "./helpers.js";
 import {
   type Auth,
   codeNow,
@@ -95,6 +97,18 @@ describe("the gate (plan 9f)", () => {
     ]);
   });
 
+  it("answers the methods of the challenge in the order of preference: totp, then backup (plan 12c)", async () => {
+    const auth = totpAuth();
+    await enrolled(auth);
+    const r = await signIn(auth);
+    if (!r.ok || !("twoFactor" in r.value)) throw new Error("no challenge");
+    expect(r.value.twoFactor.methods).toEqual(["totp", "backup"]);
+    const [row] = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "two-factor" },
+    ]);
+    expect(row?.data).toMatchObject({ via: "password", from: "sign-in" });
+  });
+
   it("opens a session at once for a user with an unconfirmed setup, and with totp: false", async () => {
     const auth = totpAuth();
     // A setup with no enable: the state a person leaves who never typed the first code.
@@ -124,6 +138,111 @@ describe("the gate (plan 9f)", () => {
         { field: "purpose", op: "eq", value: "two-factor" },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("the methods of a challenge (plan 12c)", () => {
+  const at = new Date("2026-10-14T00:00:00.000Z");
+  const row: SecondFactorRow = {
+    id: "s1",
+    userId: "u1",
+    enabledAt: at,
+    methods: ["email", "totp", "passkey"],
+    backupCodes: ["h1"],
+    backupCodesVersion: 2,
+    createdAt: at,
+    updatedAt: at,
+  };
+  const withPasskey = makeAuth({
+    password: {},
+    passkey: { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] },
+  }).config;
+
+  it("lists every method in the order passkey, totp, email, backup after a password sign-in", () => {
+    expect(challengeMethods(withPasskey, row, { via: "password", from: "sign-in" })).toEqual([
+      "passkey",
+      "totp",
+      "email",
+      "backup",
+    ]);
+  });
+
+  it("lists no email method after a mailbox proof, after social, or after a reset (owner decision 4)", () => {
+    for (const via of ["magic_link", "email_otp", "social"] as const)
+      expect(challengeMethods(withPasskey, row, { via, from: "sign-in" })).toEqual([
+        "passkey",
+        "totp",
+        "backup",
+      ]);
+    expect(challengeMethods(withPasskey, row, { via: "password", from: "reset" })).toEqual([
+      "passkey",
+      "totp",
+      "backup",
+    ]);
+  });
+
+  it("lists no passkey without the passkey config, and no backup with no codes left", () => {
+    const noPasskey = makeAuth({ password: {} }).config;
+    expect(
+      challengeMethods(
+        noPasskey,
+        { ...row, backupCodes: [] },
+        { via: "password", from: "sign-in" },
+      ),
+    ).toEqual(["totp", "email"]);
+  });
+
+  it("reads the origin of a plan 9f row as a password sign-in, and an unknown via as password", () => {
+    expect(challengeOrigin({ via: "password", ip: null })).toEqual({
+      via: "password",
+      from: "sign-in",
+    });
+    expect(challengeOrigin(null)).toEqual({ via: "password", from: "sign-in" });
+    expect(challengeOrigin({ via: "handoff", from: "reset" })).toEqual({
+      via: "password",
+      from: "reset",
+    });
+    expect(challengeOrigin({ via: "social" })).toEqual({ via: "social", from: "sign-in" });
+  });
+
+  it("opens the session with the challenge's via, and session.afterCreate sees it", async () => {
+    const vias: string[] = [];
+    const auth = totpAuth({
+      hooks: {
+        session: {
+          afterCreate: (e) => {
+            vias.push(e.via);
+          },
+        },
+      },
+    });
+    const { user, secret } = await enrolled(auth);
+    const factor = await auth.storage.findOne("secondFactor", [
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    if (!factor) throw new Error("no factor row");
+    const now = auth.clock.now();
+    const { pending } = await writeChallenge(
+      auth.config,
+      auth.storage,
+      factor,
+      {
+        userId: user.id,
+        via: "magic_link",
+        from: "sign-in",
+        ip: "3.3.3.3",
+        userAgent: "A",
+        next: "/x",
+      },
+      now,
+    );
+    vias.length = 0;
+    const v = await verify(auth, {
+      challenge: pending.twoFactor.challenge,
+      code: await codeNow(auth, secret),
+    });
+    expect(v).toMatchObject({ ok: true, value: { next: "/x" } });
+    expect(vias).toEqual(["magic_link"]);
   });
 });
 

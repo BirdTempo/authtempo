@@ -151,7 +151,10 @@ describe("the TOTP routes (plan 9f)", () => {
     );
     expect(signIn.status).toBe(200);
     expect(signIn.headers.get("set-cookie")).toBeNull();
-    const body = (await signIn.json()) as { twoFactor: { challenge: string; expiresAt: string } };
+    const body = (await signIn.json()) as {
+      twoFactor: { challenge: string; expiresAt: string; methods: string[] };
+    };
+    expect(body.twoFactor.methods).toEqual(["totp", "backup"]);
     expect(body.twoFactor.expiresAt).toBe(
       new Date(h.clock.now().getTime() + 300_000).toISOString(),
     );
