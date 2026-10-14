@@ -1,5 +1,6 @@
 import { createPostgresAdapter, createPostgresLimiter } from "@authtempo/adapter-postgres";
 import { type Auth, createAuth, type MailPort } from "@authtempo/core";
+import { createVerifier } from "@authtempo/verify";
 import type { Sql } from "postgres";
 
 export interface AppOptions {
@@ -50,6 +51,18 @@ export function createApp(options: AppOptions): {
     // Workers any caller can send it, so read the header the server sets.
     clientIp: (request) => request.headers.get(CLIENT_IP_HEADER),
   });
+  // A route that a server which is not the auth app would serve (plan 11d). Here the
+  // auth app is this process, so the verifier reads the key set and the live check
+  // through the handler; another server passes no fetch and reads them over HTTP.
+  const verifier = createVerifier({
+    issuer: `${options.baseURL}/auth`,
+    audience: options.baseURL,
+    // A sign-out ends access at once: one live check per request.
+    checkSessionEnd: true,
+    // Bun's type of fetch adds `preconnect`, which a handler has no use for: hence the cast.
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+      auth.handle(new Request(input, init))) as typeof fetch,
+  });
   return {
     auth,
     async fetch(request) {
@@ -63,6 +76,13 @@ export function createApp(options: AppOptions): {
         const renewed = auth.sessionCookie(request, s);
         if (renewed) res.headers.append("set-cookie", renewed);
         return res;
+      }
+      if (url.pathname === "/files") {
+        const r = await verifier.verifyRequest(request);
+        // The auth app did not answer: try again later, not "sign in again".
+        if (!r.ok) return Response.json({ error: r.code }, { status: 503 });
+        if (r.value?.kind !== "session-jwt") return verifier.unauthorized();
+        return Response.json({ owner: r.value.email });
       }
       return new Response("not found", { status: 404 });
     },

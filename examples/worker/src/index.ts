@@ -1,6 +1,7 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
 import { type Auth, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
 import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
+import { createVerifier, type Verifier } from "@authtempo/verify";
 import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 import { exampleHooks } from "./hooks.js";
@@ -110,6 +111,20 @@ function getAuth(env: Env): Auth {
   return auth;
 }
 
+let verifier: Verifier | null = null;
+
+// The verifier of a server that is not the auth app (plan 11d). This Worker is the
+// auth app too, so the verifier reads the key set and the live check through its handler.
+function getVerifier(env: Env): Verifier {
+  verifier ??= createVerifier({
+    issuer: `${env.BASE_URL}/auth`,
+    audience: env.BASE_URL,
+    checkSessionEnd: true,
+    fetch: (input, init) => getAuth(env).handle(new Request(input, init)),
+  });
+  return verifier;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -137,6 +152,14 @@ export default {
       const renewed = c.kind === "session" ? a.sessionCookie(request, c) : null;
       if (renewed) res.headers.set("set-cookie", renewed);
       return res;
+    }
+    // A session JWT route (plan 11d): what another Worker of the app would serve.
+    if (url.pathname === "/notes") {
+      const v = getVerifier(env);
+      const r = await v.verifyRequest(request);
+      if (!r.ok) return Response.json({ error: r.code }, { status: 503 });
+      if (r.value?.kind !== "session-jwt") return v.unauthorized();
+      return Response.json({ owner: r.value.email });
     }
     // An MCP resource (plan 9g): an OAuth access token for this resource only. A session
     // or an API token is refused here, and a token for another resource is null at `caller`.

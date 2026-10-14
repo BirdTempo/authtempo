@@ -63,6 +63,22 @@ try {
     email?: string;
   };
   expectThat(me.email === "ada@example.com", `/me answered ${JSON.stringify(me)}`);
+  // A server that is not the auth app verifies a session JWT (plan 11d): /files.
+  const minted = (await (await fetch(`${BASE}/auth/token`, { headers: { cookie } })).json()) as {
+    token?: string;
+  };
+  expectThat(typeof minted.token === "string", "GET /auth/token gave no token");
+  const files = await fetch(`${BASE}/files`, {
+    headers: { authorization: `Bearer ${minted.token ?? ""}` },
+  });
+  // A 404 answers text, not JSON: the check below then names the status.
+  const owner = (await files.json().catch(() => ({}))) as { owner?: string };
+  expectThat(
+    files.status === 200 && owner.owner === "ada@example.com",
+    `/files answered ${files.status}`,
+  );
+  const anonymous = await fetch(`${BASE}/files`);
+  expectThat(anonymous.status === 401, `/files with no token answered ${anonymous.status}`);
 } catch (e) {
   failures.push(
     `${e instanceof Error ? e.message : String(e)}; is Postgres up (docker compose up -d)?`,
@@ -73,7 +89,7 @@ try {
   await admin.unsafe(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`).catch(() => {});
   await admin.end({ timeout: 5 });
 }
-const pass = failures.length === 0 && checks === 4;
+const pass = failures.length === 0 && checks === 7;
 console.log(
   `${runtime}-e2e: ${pass ? "PASS" : "FAIL"} version=${version} checks=${checks} failures=${failures.length}`,
 );

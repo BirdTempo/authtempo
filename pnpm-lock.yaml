@@ -269,6 +269,9 @@ importers:
       '@authtempo/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@authtempo/verify':
+        specifier: workspace:*
+        version: link:../../packages/verify
       postgres:
         specifier: 3.4.9
         version: 3.4.9
@@ -327,6 +330,9 @@ importers:
       '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../../packages/legacy-hashes
+      '@authtempo/verify':
+        specifier: workspace:*
+        version: link:../../packages/verify
     devDependencies:
       '@authtempo/cli':
         specifier: workspace:*
@@ -356,6 +362,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
+      '@authtempo/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
         version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)))
