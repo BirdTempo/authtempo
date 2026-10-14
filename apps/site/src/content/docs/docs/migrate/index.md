@@ -49,7 +49,7 @@ sidebar:
 ## If it fails
 
 - The compatibility package throws one `BetterAuthCompatError` at start. Its list names every refused option.
-- `authtempo-import` exits 1 when a person must look at a record, and 2 on a usage error. [Import CLI](/docs/reference/import-cli/) lists each case.
+- `authtempo import` exits 1 when a person must look at a record, and 2 on a usage error. [Import CLI](/docs/reference/import-cli/) lists each case.
 
 ## Next
 

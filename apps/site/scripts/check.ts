@@ -3,19 +3,22 @@
 // than the change. Each check prints one summary line. The run fails when one
 // check fails, and the last line counts the checks that passed.
 import { existsSync } from "node:fs";
+import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { ERRORS, OAUTH_ERRORS } from "@authtempo/core";
 import { ROUTES } from "@authtempo/core/testing";
+import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
 import { checkErrors } from "./check-errors.ts";
 import { checkExports, readExports } from "./check-exports.ts";
 import { checkFences } from "./check-fences.ts";
-import { checkFrontmatter } from "./check-frontmatter.ts";
+import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
+import { cliHelpPages, helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
 import {
   distFiles,
@@ -31,8 +34,9 @@ import { type CheckReport, summaryLine } from "./lib/report.ts";
 export const CHECKS: { name: string; run: () => CheckReport }[] = [
   { name: "check-links", run: () => checkLinks(distPages(), distFiles()) },
   { name: "check-frontmatter", run: () => checkFrontmatter(docsPages(), readRepoFile) },
-  { name: "check-terms", run: () => checkTerms(docsPages()) },
-  { name: "check-sentences", run: () => checkSentences(docsPages()) },
+  // The help texts of the CLI keep the same terms and sentence limits as the pages (plan 11c).
+  { name: "check-terms", run: () => checkTerms([...docsPages(), ...cliHelpPages()]) },
+  { name: "check-sentences", run: () => checkSentences([...docsPages(), ...cliHelpPages()]) },
   { name: "check-fences", run: () => checkFences(docsPages(), sampleFiles(), existsSync) },
   {
     name: "check-errors",
@@ -65,6 +69,17 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
           "packages/client/src/index.ts",
         ),
         "client",
+      ),
+  },
+  {
+    name: "check-cli",
+    run: () =>
+      checkCli(
+        distFiles(),
+        distPageOrEmpty("/docs/reference/cli/check/"),
+        helpRuns(),
+        ALL_CHECK_CODES,
+        (url) => docsPages().find((p) => pageUrl(p.path) === url)?.source ?? null,
       ),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },

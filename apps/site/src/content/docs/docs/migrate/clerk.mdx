@@ -23,7 +23,7 @@ import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
 - An API with authtempo and `password` set. Do a [getting started tutorial](/docs/start/) first.
 - The user export CSV of the Clerk dashboard, from Settings and User exports. It holds the password digests. [The command](/docs/reference/import-cli/#the-command) reads it.
 - A secret key of Clerk, for `GET /v1/users`. [The command](/docs/reference/import-cli/#the-command) reads the users that it fetches.
-- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+- `@authtempo/cli` and `@authtempo/legacy-hashes` in the app's workspace. [authtempo import](/docs/reference/cli/import/) is a command of the first.
 
 ## Steps
 
@@ -50,7 +50,7 @@ jq -s 'add // []' pages.ndjson > users.json
 5. Run the import as a dry run, and read the report.
 
 ```sh
-pnpm exec authtempo-import clerk --csv export.csv --users users.json --organizations organizations.json --formats bcrypt --postgres "$DATABASE_URL" --dry-run
+pnpm exec authtempo import clerk --csv export.csv --users users.json --organizations organizations.json --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run
 ```
 
 6. Run the same command without `--dry-run`.

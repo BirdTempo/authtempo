@@ -45,7 +45,8 @@ The `@authtempo` packages are private and at version `0.0.0`. They are not on a 
 | `@authtempo/handoff` | The sign-in of a native or desktop app through the system browser. |
 | `@authtempo/compat-better-auth` | Runs an app written for Better Auth 1.7 on authtempo, on its own tables. |
 | `@authtempo/legacy-hashes` | Verifies the password hashes of other systems and rewrites them as PBKDF2. |
-| `@authtempo/import` | The `authtempo-import` command, which moves users from another provider. |
+| `@authtempo/import` | The import engine, which moves users from another provider. The command `authtempo import` runs it. |
+| `@authtempo/cli` | The `authtempo` command: `init`, `migrate`, `import`, `check`, and `keys rotate`. [The CLI](/docs/reference/cli/) lists each. |
 
 ## What each stack costs
 

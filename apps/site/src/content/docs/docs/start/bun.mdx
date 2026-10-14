@@ -23,6 +23,8 @@ import server from "../../../../../../../examples/node/src/server-bun.ts?raw";
 
 ## Steps
 
+The command `authtempo init my-app --stack bun` writes the Node app with `bun src/main.ts` as its start script. [authtempo init](/docs/reference/cli/init/) tells how.
+
 1. Read `src/server-bun.ts`. It serves the same handler with `Bun.serve`, and sets the client IP from Bun's own call.
 
 <Code code={server} lang="ts" title="examples/my-app/src/server-bun.ts" />

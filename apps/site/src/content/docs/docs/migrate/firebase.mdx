@@ -23,7 +23,7 @@ import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
 - An API with authtempo and `password` set. Do a [getting started tutorial](/docs/start/) first.
 - The Firebase CLI, signed in to the project.
 - The password hash parameters of the project, from the console: Authentication, Users, "Password hash parameters". [The command](/docs/reference/import-cli/#the-command) takes `rounds` and `mem_cost` as options.
-- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+- `@authtempo/cli` and `@authtempo/legacy-hashes` in the app's workspace. [authtempo import](/docs/reference/cli/import/) is a command of the first.
 
 ## Steps
 
@@ -37,7 +37,7 @@ import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
 5. Run the import as a dry run, with `rounds` and `mem_cost` of the project.
 
 ```sh
-pnpm exec authtempo-import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --postgres "$DATABASE_URL" --dry-run
+pnpm exec authtempo import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --target postgres --url-env DATABASE_URL --dry-run
 ```
 
 6. Run the same command without `--dry-run`.

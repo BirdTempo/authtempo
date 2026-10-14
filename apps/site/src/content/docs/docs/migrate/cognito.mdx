@@ -25,7 +25,7 @@ import test from "../../../../../samples/migrate/cognito.test.ts?raw";
 - The AWS CLI, with read access to the user pool.
 - An app client of the pool that lists `ALLOW_USER_PASSWORD_AUTH` in its auth flows. `password.legacyVerify` of [Passwords](/docs/reference/config/#passwords) calls it.
 - A pool that accepts the address as a user name or as an alias. `password.legacyVerify` of [Passwords](/docs/reference/config/#passwords) sends the address.
-- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+- `@authtempo/cli` and `@authtempo/legacy-hashes` in the app's workspace. [authtempo import](/docs/reference/cli/import/) is a command of the first.
 
 ## Steps
 
@@ -44,7 +44,7 @@ aws cognito-idp list-users --user-pool-id "$POOL" --output json > users.json
 5. Run the import as a dry run.
 
 ```sh
-pnpm exec authtempo-import cognito --users users.json --legacy-verify --postgres "$DATABASE_URL" --dry-run
+pnpm exec authtempo import cognito --users users.json --legacy-verify --target postgres --url-env DATABASE_URL --dry-run
 ```
 
 6. Run the same command without `--dry-run`.

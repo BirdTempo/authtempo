@@ -29,6 +29,8 @@ import test from "../../../../../samples/operations/key-rotation.test.ts?raw";
 
 <Code code={rotate} lang="ts" title="The rotation of the signing key" />
 
+Core can also rotate on a timer: set `jwtMint.rotateEvery` to a number of days. An operator can rotate from a shell with `authtempo keys rotate`, through the operator route. [authtempo keys rotate](/docs/reference/cli/keys/) tells how.
+
 2. After a leak of a private key, call the rotation at once. Then wait 24 hours, and run the sweep.
 3. For Apple, make a new key in the Apple developer portal.
 4. Set the new key in `social.apple.privateKey`, and its id in `social.apple.keyId`. Deploy.
@@ -44,6 +46,7 @@ The test below rotates the key and checks the key set.
 ## How it behaves
 
 - A rotation retires the signing key and writes a new one. The retired key verifies for 24 hours and signs nothing.
+- With `jwtMint.rotateEvery`, the first signature with a key of that many days makes the new key. A read of the key set never rotates.
 - `GET /auth/jwks` lists the signing key first, then at most 100 keys retired less than 24 hours ago.
 - A server that verifies session JWTs reads the key set again for a new `kid`. With a cache of the key set, the cache must be shorter than 24 hours.
 - The sweep deletes a key 24 hours after it retired.

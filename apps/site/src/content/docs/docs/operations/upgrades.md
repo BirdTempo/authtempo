@@ -27,14 +27,19 @@ sidebar:
 3. On D1, apply the migrations of the adapter to the real database.
 
 ```sh
-pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
+authtempo migrate --target d1 --database my-app --remote
 ```
 
-4. On Postgres, call `applyPostgresMigrations(sql)` once per deploy, before the first request.
-5. With the compatibility package on D1, copy each new compat file into the app's `migrations_dir`.
-6. Give each copied file the next number of the app, and apply it.
-7. With the compatibility package on Postgres, call `migrate()` of the storage once per deploy.
-8. Deploy the new code.
+4. On Postgres, apply them once per deploy, before the first request.
+
+```sh
+authtempo migrate --target postgres --url-env DATABASE_URL
+```
+
+5. With the compatibility package, add `--tables compat` to the command of step 3 or step 4.
+6. On D1, that command copies each new compat file under the next number of the app.
+7. Deploy the new code.
+8. Run `authtempo check` with the base URL of the API.
 9. Sign in once by each method that the API serves.
 
 ## How it behaves

@@ -21,7 +21,7 @@ import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
 
 - An API with authtempo. Set `password` when the old app has a password column of its own. Do a [getting started tutorial](/docs/start/) first.
 - The Auth.js tables on Postgres, with the Prisma names `User`, `Account`, and `Authenticator`. [The command](/docs/reference/import-cli/#the-command) reads their export.
-- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+- `@authtempo/cli` and `@authtempo/legacy-hashes` in the app's workspace. [authtempo import](/docs/reference/cli/import/) is a command of the first.
 
 ## Steps
 
@@ -41,7 +41,7 @@ import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
 6. Run the import as a dry run. Add `--same-passkey-rp-id` only when the new API keeps the old relying party id.
 
 ```sh
-pnpm exec authtempo-import authjs --tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --postgres "$DATABASE_URL" --dry-run
+pnpm exec authtempo import authjs --authjs-tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --target postgres --url-env DATABASE_URL --dry-run
 ```
 
 7. Run the same command without `--dry-run`.

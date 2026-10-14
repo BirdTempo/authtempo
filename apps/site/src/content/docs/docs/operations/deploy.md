@@ -33,6 +33,7 @@ sidebar:
 8. Off Workers, pass `clientIp`, and read only the header that your server or proxy sets.
 9. Deploy.
 10. Sign in once by each method that the API serves.
+11. Run `authtempo check` with the base URL of the API. Each check must pass, or skip for a feature that is off.
 
 ## The Workers settings
 
@@ -62,6 +63,7 @@ Warning: a new `secret` locks every user with the second factor out of it. Do no
 - [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the app's origin is not in `trustedOrigins`.
 - [`rate_limited`](/docs/reference/errors/#rate_limited) for every caller: the host gives no client IP, so all callers share one budget.
 - A sign-in request answers 500: the mail port throws.
+- `authtempo check` names a code. [authtempo check](/docs/reference/cli/check/) gives the fix of each code.
 
 ## Next
 

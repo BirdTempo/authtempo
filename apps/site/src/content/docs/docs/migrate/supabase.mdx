@@ -24,7 +24,7 @@ import test from "../../../../../samples/migrate/legacy-hash.test.ts?raw";
 
 - An API with authtempo and `password` set. Do a [getting started tutorial](/docs/start/) first.
 - Access to the Supabase database with `psql`. The Admin API returns no hash. [The command](/docs/reference/import-cli/#the-command) reads the export.
-- `@authtempo/import` and `@authtempo/legacy-hashes` in the app's workspace. The [import CLI](/docs/reference/import-cli/) is the command of the first.
+- `@authtempo/cli` and `@authtempo/legacy-hashes` in the app's workspace. [authtempo import](/docs/reference/cli/import/) is a command of the first.
 
 ## Steps
 
@@ -42,7 +42,7 @@ psql "$SUPABASE_DB_URL" -c "\copy (select provider, provider_id, user_id from au
 3. Run the import as a dry run, and read the report.
 
 ```sh
-pnpm exec authtempo-import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --postgres "$DATABASE_URL" --dry-run
+pnpm exec authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --target postgres --url-env DATABASE_URL --dry-run
 ```
 
 4. Run the same command without `--dry-run`.
