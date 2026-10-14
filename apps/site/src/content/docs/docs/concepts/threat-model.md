@@ -50,13 +50,13 @@ sources:
 - **A uniform sign-up.** By default a password sign-up answers `{ sent: true }` for every address. A known address gets a mail, not a second account.
 - **The sign-up rule.** `signUp: false` or `"invited"` stops strangers from making accounts. Under `"invited"`, a person must prove the address before a session opens.
 - **A captcha.** An app can put a captcha on the flows that send mail or write rows. It runs after the per-IP limit and before the per-email limits.
-- **A breach check that fails closed.** An app can refuse a password that a breach exposed. When the check gives no answer, core refuses the password with 503.
+- **A breach check that fails closed.** An app can refuse a password that a breach exposed. When the check gives no answer, core refuses the password with 503. A throw of the app's own function answers 500.
 - **Limits.** Every flow that starts a mail or accepts a guess has a limit per IP, and most have a limit per address. The verify routes of a link, the social callbacks, and the token resolve have no limit, because each checks a token of 32 random bytes. A per-IP limit counts an IPv6 address by its `/64`. [Limits](/docs/reference/limits/) lists each key.
 - **Bounded guesses.** An email code admits 5 guesses, and an address gets at most 20 codes a day. A second-factor challenge admits 5 guesses, and an account at most 30 a day.
 - **Single use.** A magic link, a code, a challenge, and an OAuth code are spent in one conditional update. Two uses race for one row, and one wins.
 - **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how.
 - **Trusted origins.** A POST with an `Origin` header outside `trustedOrigins` answers 403. A `next` path must start with `/` and not `//`.
-- **A `__Host-` session cookie.** The session cookie is `__Host-tempo_session`. A host on a sibling subdomain cannot set it.
+- **A `__Host-` session cookie.** By default the session cookie is `__Host-tempo_session`. A host on a sibling subdomain cannot set it.
 - **An absolute session lifetime.** With `session.absoluteDays`, a session ends that many days after it opened, whatever its refresh.
 - **Fetch Metadata.** A page of another site cannot post a form to core: the browser's `Sec-Fetch-Site` header must say the post came from the API's own origin.
 - **No provider redirect.** Core follows no redirect on a provider call. A provider endpoint cannot steer a request to an internal address.

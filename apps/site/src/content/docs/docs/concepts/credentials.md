@@ -33,7 +33,7 @@ sources:
 
 A session is a row. Its token is the person's key to the API. A browser sends it in the `HttpOnly` cookie, and a native app sends it as the bearer. Core stores its SHA-256 only.
 
-The cookie is `__Host-tempo_session`. A session can have an absolute lifetime, `session.absoluteDays`, after which the person signs in again. [Cookies](/docs/reference/cookies/) lists each cookie.
+By default the cookie is `__Host-tempo_session`. A session can have an absolute lifetime, `session.absoluteDays`, after which the person signs in again. [Cookies](/docs/reference/cookies/) lists each cookie.
 
 Every core route that needs a person calls `auth.session`, which reads sessions only. So an API token, a JWT, and an access token cannot create a token, change a password, or touch passkeys or organizations.
 

@@ -40,7 +40,7 @@ import test from "../../../../../samples/guides/breach-check.test.ts?raw";
 - On 2026-10-15, real range answers held 76 to 105 KB. The cap of 512 KB holds about five times the largest.
 - A reset link stays usable after that refusal. The person tries again with the same link.
 - A reset by email code spends its code on each refused password. After an outage, the person asks for a new code.
-- Your own function can answer `"unavailable"` too. It sets its own deadline, because core sets none.
+- Your own function can answer `"unavailable"` too. It sets its own deadline, because core sets none. A throw answers 500.
 - The limit of each password route bounds the calls. The [limits](/docs/reference/limits/) page lists them.
 - The package has one live test. It runs only with `AUTHTEMPO_LIVE_HIBP=1`, so a normal test run sends no call.
 

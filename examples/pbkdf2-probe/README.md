@@ -52,8 +52,6 @@ of CPU per request, so a derive of 100000 iterations does not finish there.
    URL=<the workers.dev URL of step 3>
    ```
 
-   `printf` sends no newline. With `echo`, the stored key can end in a newline, and every call answers 403.
-
 5. Check the key rule. This call must answer 403:
 
    ```sh

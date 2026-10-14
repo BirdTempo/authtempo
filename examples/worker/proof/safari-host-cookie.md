@@ -39,7 +39,19 @@ Expected: the cookie is set, and the session answers.
 
 Add this sentence to `apps/site/src/content/docs/docs/reference/cookies.md`:
 "Safari keeps no `Secure` cookie from `http://localhost`. On Safari, run
-development over https: `wrangler dev --local-protocol https`."
+development over https, and set the base URL to the https origin."
+
+To check that fallback, repeat the steps with https. Use `https://` in
+steps 4, 5, and 8:
+
+```sh
+pnpm exec wrangler dev --local-protocol https --var BASE_URL:https://localhost:8787 --var TEST_MODE:1 --var AUTH_SECRET:$(openssl rand -hex 32)
+```
+
+The base URL must be the https origin. With an http base URL, the mail link
+is http, and the https origin is not trusted. The confirm post then answers
+403. wrangler serves a self-signed certificate. Make Safari trust it before
+step 6, or Safari does not open the page.
 
 A `cookieName` with no prefix does not help. Core sets `Secure` on every
 cookie, whatever its name.

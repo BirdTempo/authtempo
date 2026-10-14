@@ -46,19 +46,26 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 
 1. Make a new secret of 32 random bytes with `openssl rand -base64 32`.
 2. Store it as a second secret, for example `AUTH_SECRET_V2`. Keep `AUTH_SECRET` as it is.
-3. Set `secrets` to version 1 with the old value first, then version 2 with the new value. Deploy to every instance.
+3. Replace `secret` with `secrets`, and read the old value as version 1. Put version 1 first, then version 2. Deploy to every instance.
+
+   On Workers the key reads `secrets: [{ version: 1, value: env.AUTH_SECRET }, { version: 2, value: env.AUTH_SECRET_V2 }]`. On Node and Bun, read `process.env` in the same way.
+
+   Remove the key `secret`. While it stays, core adds it back as version 1, and step 10 cannot remove that version.
 
    Every instance now knows version 2, and version 1 stays current. Nothing is written under version 2 yet. If you skip this step, an instance on the old config cannot open a value of version 2. Its users then fail the second factor, and its signing key retires at each signature.
 
-4. Set `secrets` to version 2 first, then version 1. Deploy to every instance. Each new value is now written under version 2.
+4. Put version 2 first in `secrets`, then version 1. Deploy to every instance. Each new value is now written under version 2.
 5. In the API's process, run `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true.
 6. Pass the `next` of each answer as `after` to the next call. Stop when `next` is `null`. That is one pass.
-7. When an answer of the pass has `skipped` or `failed` above 0, wait 15 minutes. Then run a new pass from step 5, with no `after`.
+7. Run a new pass from step 5, with no `after`, while the last answer has `more: true`. Wait 15 minutes first when `skipped` or `failed` was above 0.
 
-   Stop when the last answer of a pass has `more: false`. A row that fails on every pass keeps `more` true: read the second warning below.
+   After 3 passes with the same `failed` count, stop and read the second warning below. Such a row fails on every pass.
+
 8. Wait for the life of the live email codes: `emailOtp.ttlMinutes`, 10 minutes by default.
-9. Run `auth.api.secrets.status()`. Read the entry of version 1.
-10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, and `backupCodes` are 0. Deploy. Then delete `AUTH_SECRET` from the secret store.
+9. Run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9.
+10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, and `backupCodes` are 0. Make sure that the config has no key `secret`. Deploy.
+
+   On Node and Bun, restart each process: it reads the environment only at start. Then delete `AUTH_SECRET` from the secret store.
 
    When `backupCodes` stays above 0, read the first warning below before you remove the version.
 

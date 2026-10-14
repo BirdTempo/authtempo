@@ -41,7 +41,7 @@ import test from "../../../../../samples/guides/captcha.test.ts?raw";
 - The captcha runs before the per-email limits, the policy, and the breach check. A request with no token spends none of them.
 - The captcha runs before the flow reads a user, so its answer is the same for every address.
 - A call to `auth.api` with no `captchaToken` skips the check. A server route that proxies a browser must pass the browser's token, or the check does not run.
-- Core's own sign-in page shows the widget when the port gives a site key. With `handoff` or `oauth` and a gated flow on that page, `createAuth` refuses a port with no page.
+- Core's own sign-in page shows the widget when the port gives a site key. With `handoff` or `oauth` and a gated flow on that page, `createAuth` refuses a port with no page, unless `handoff.signInPage` is set.
 - A token passes once. After a refused answer, the person solves the widget again.
 - When the captcha gives no answer, the flow goes on and writes one log line. `onUnavailable: "refuse"` answers 503 instead.
 - The Turnstile package has one live test. It runs only with `AUTHTEMPO_LIVE_TURNSTILE=1`, so a normal test run sends no call.
