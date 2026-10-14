@@ -86,7 +86,7 @@ Warning: do not give a format in `--formats` that the seam does not verify. The 
 
 ## If it fails
 
-- The command exits 1: a person must look at a refused hash, a refused record, a conflict, or a `partial` record. [Import CLI](/docs/reference/import-cli/) lists each.
+- The command exits 1: a person must look at a refused hash, a refused record, a conflict, or a `partial` record. [The exit status](/docs/reference/cli/import/#the-exit-status) lists each.
 - The command stops before any read: a column of the select is missing from the CSV header.
 - [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the hash format is not in the seam's `formats`, or the password is wrong.
 

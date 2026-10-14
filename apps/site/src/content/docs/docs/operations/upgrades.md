@@ -26,11 +26,15 @@ sidebar:
 2. Update the `@authtempo` packages of the app to the same version. Keep one version of core in the app.
 3. On D1, apply the migrations of the adapter to the real database.
 
+The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+
 ```sh
 authtempo migrate --target d1 --database my-app --remote
 ```
 
 4. On Postgres, apply them once per deploy, before the first request.
+
+The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
 
 ```sh
 authtempo migrate --target postgres --url-env DATABASE_URL

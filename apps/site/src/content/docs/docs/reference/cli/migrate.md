@@ -22,6 +22,8 @@ sidebar:
 
 ## The command
 
+The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+
 ```sh
 authtempo migrate --target postgres --url-env DATABASE_URL
 authtempo migrate --target d1 --database my-app --remote
@@ -33,8 +35,8 @@ authtempo migrate --target d1 --database my-app --remote
 | `--target d1` | Applies the D1 migrations through the wrangler of the project. |
 | `--tables core` | Core's tables. This is the default. |
 | `--tables compat` | The Better Auth 1.7 tables of `@authtempo/compat-better-auth`. |
-| `--url-env <NAME>` | Postgres: the variable of the connection string. The default is `DATABASE_URL`. |
-| `--url-file <path>` | Postgres: the file of the connection string. `-` is stdin. |
+| `--url-env <NAME>` | Postgres: the variable of the connection string. The default is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--url-file <path>` | Postgres: the file of the connection string. `-` is stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--database <name>` | D1: the `database_name` in the wrangler config. One D1 database needs no name. |
 | `--config <path>` | D1: the wrangler config. The default is `wrangler.jsonc` or `wrangler.json` in the current folder. |
 | `--remote` | D1: the database on Cloudflare. The default is the local database of `wrangler dev`. |

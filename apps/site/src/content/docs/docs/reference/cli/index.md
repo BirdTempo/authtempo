@@ -18,7 +18,19 @@ sidebar:
 ## Before you start
 
 - Node 22.18 or newer.
-- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet. In the clone, `pnpm install` links the binary for every package of the workspace. [Choose your stack](/docs/start/) tells why.
+- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so the command runs only from the repo. [Choose your stack](/docs/start/) tells why.
+
+## Run it from this repo
+
+The root of the repo has no `authtempo` binary. The example Worker depends on `@authtempo/cli`, so pnpm links the binary there. Build the CLI first, and then run a command through the example Worker, or with `node`.
+
+```sh
+pnpm turbo run build --filter=@authtempo/cli
+pnpm --filter authtempo-example-worker exec authtempo --help
+node packages/cli/dist/bin/authtempo.js --help
+```
+
+An app that `authtempo init` writes does not depend on `@authtempo/cli`. Run each command for that app from the repo, in one of these two forms.
 
 ## The commands
 

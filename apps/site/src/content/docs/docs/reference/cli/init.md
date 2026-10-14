@@ -21,6 +21,8 @@ sidebar:
 
 ## The command
 
+The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+
 ```sh
 authtempo init my-app --stack workers-d1
 ```

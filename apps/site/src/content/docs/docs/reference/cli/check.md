@@ -22,6 +22,8 @@ sidebar:
 
 ## The command
 
+The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+
 ```sh
 authtempo check https://api.example.com
 authtempo check https://api.example.com --target postgres --url-env DATABASE_URL --strict
@@ -34,7 +36,7 @@ authtempo check https://api.example.com --target postgres --url-env DATABASE_URL
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--strict` | Counts each skipped check as a failure. |
 | `--target postgres`, `--target d1` | Reads the schema version of the database. Without it, the schema check skips. |
-| `--url-env <NAME>`, `--url-file <path>` | Postgres: the connection string, by the rule of the CLI. |
+| `--url-env <NAME>`, `--url-file <path>` | Postgres: the connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--database <name>`, `--config <path>`, `--remote` | D1: the database of the wrangler config, as for `authtempo migrate`. |
 | `--json` | Prints `{ base, checks, warnings, summary }`. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |

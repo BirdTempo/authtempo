@@ -17,7 +17,7 @@ sidebar:
 
 ## Before you start
 
-- Know the auth system that the app uses now, and its version. The [import CLI](/docs/reference/import-cli/) lists the sources.
+- Know the auth system that the app uses now, and its version. [authtempo import](/docs/reference/cli/import/) lists the sources.
 - Know whether the app must keep its code, or may change its auth calls. [Better Auth compatibility](/docs/reference/compat-better-auth/) keeps the code of a Better Auth app.
 - Read [The cutover](/docs/migrate/cutover/) once before you choose. Every path ends there.
 
@@ -49,7 +49,7 @@ sidebar:
 ## If it fails
 
 - The compatibility package throws one `BetterAuthCompatError` at start. Its list names every refused option.
-- `authtempo import` exits 1 when a person must look at a record, and 2 on a usage error. [Import CLI](/docs/reference/import-cli/) lists each case.
+- `authtempo import` exits 1 when a person must look at a record, and 2 on a usage error. [The exit status](/docs/reference/cli/import/#the-exit-status) lists each case.
 
 ## Next
 

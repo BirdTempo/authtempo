@@ -72,6 +72,13 @@ function compareExits(
   for (const code of page.keys())
     if (!help.some((h) => h.code === code))
       failures.push(`${label}: the exit table lists exit ${code}, which the help lacks`);
+  // The order counts too: a reader reads the codes from 0 up, as the help prints them.
+  const pageOrder = rows.map((r) => r[0] ?? "").filter((c) => help.some((h) => h.code === c));
+  const helpOrder = help.map((h) => h.code).filter((c) => page.has(c));
+  if (pageOrder.join(",") !== helpOrder.join(","))
+    failures.push(
+      `${label}: the exit table lists the codes ${pageOrder.join(", ")}; the help lists ${helpOrder.join(", ")}`,
+    );
   return failures;
 }
 

@@ -23,6 +23,8 @@ sidebar:
 
 ## The command
 
+The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+
 ```sh
 authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run
 ```
@@ -34,7 +36,7 @@ authtempo import supabase --users users.csv --identities identities.csv --format
 | `--target d1-bundle` | Writes a bundle for the import Worker on D1 to the file of `--out`, and stops. |
 | `--tables core` | Postgres: core's tables. This is the default. |
 | `--tables compat` | Postgres: the Better Auth 1.7 tables of the compatibility package. |
-| `--url-env <NAME>`, `--url-file <path>` | The connection string. The default variable is `DATABASE_URL`. |
+| `--url-env <NAME>`, `--url-file <path>` | The connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--out <file>` | `d1-bundle`: the file of the bundle, with mode 0600. |
 | `--users <file>` | The users file of `supabase`, `clerk`, `auth0`, `firebase`, or `cognito`. |
 | `--identities <file>` | `supabase`: the identities CSV. |
@@ -48,7 +50,7 @@ authtempo import supabase --users users.csv --identities identities.csv --format
 | `--firebase-mem-cost <n>` | `firebase`: the `mem_cost` of the hash config of the project. |
 | `--password-column <name>` | `authjs`: the password column of the `User` table. |
 | `--same-passkey-rp-id` | `authjs`: the new app keeps the relying party id, so the passkeys move. |
-| `--formats <list>` | Required, with no default. The `formats` list of the app's `createLegacyPasswordHash`, or `none`. Only `cognito` may leave it out. |
+| `--formats <list>` | Required, except on `cognito`. The `formats` list of the app's `createLegacyPasswordHash`, or `none`. |
 | `--legacy-verify` | The app sets `password.legacyVerify`. A `cognito` import needs it. |
 | `--on-email-taken skip` | Skips a record whose address is taken. This is the default. |
 | `--on-email-taken fail` | Stops the run at the first taken address. |

@@ -19,7 +19,7 @@ sidebar:
 
 - Do the guide of your source system: [Choose a migration path](/docs/migrate/).
 - Deploy the API with authtempo, with every migration applied. [Upgrades](/docs/operations/upgrades/) tells how.
-- Plan a time of low traffic. Every person signs in again once after the cutover. The [import CLI](/docs/reference/import-cli/) tells why: no session moves from any source.
+- Plan a time of low traffic. Every person signs in again once after the cutover. [authtempo import](/docs/reference/cli/import/) tells why: no session moves from any source.
 
 ## Steps
 

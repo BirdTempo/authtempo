@@ -21,6 +21,8 @@ sidebar:
 
 ## The command
 
+The packages are not on a registry yet. In this repo, run each command below as `pnpm --filter authtempo-example-worker exec authtempo …`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+
 ```sh
 authtempo keys rotate https://api.example.com --yes
 ```
@@ -28,8 +30,8 @@ authtempo keys rotate https://api.example.com --yes
 | Flag | What it does |
 | --- | --- |
 | `<base url>` | The origin of the API, with no path. |
-| `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. |
-| `--token-file <path>` | The file of the operator secret. `-` is stdin. |
+| `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--token-file <path>` | The file of the operator secret. `-` is stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--yes` | Rotates with no question. A run with no terminal needs it. |

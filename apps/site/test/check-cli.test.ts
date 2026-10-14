@@ -140,6 +140,17 @@ describe("checkCli (plan 11c)", () => {
     ]);
   });
 
+  it("refuses an exit table with the help's codes in another order", () => {
+    const page = CHECK_SOURCE.replace(
+      "| 0 | No check failed. |\n| 1 | A check failed. |",
+      "| 1 | A check failed. |\n| 0 | No check failed. |",
+    );
+    const r = checkCli(FILES, PAGE, [CHECK], ["no_mount"], () => page);
+    expect(r.failures).toEqual([
+      "/docs/reference/cli/check/: the exit table lists the codes 1, 0, 2; the help lists 0, 1, 2",
+    ]);
+  });
+
   it("refuses a page with no flag table or no exit table, and a help run that failed", () => {
     const r = checkCli(
       FILES,
