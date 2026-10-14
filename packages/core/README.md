@@ -692,8 +692,9 @@ return res;
 | `signUp` | `"open"` | `"open"`, `"invited"` (needs `organizations`), or `false`. A refused new user gets 403 `sign_up_closed`. |
 
 The rule runs at each create of a user: the password sign-up, the password
-reset, the magic link, the email code, and social. An existing user signs in
-as before. A magic link or code request still answers `{ sent: true }`. Its
+reset, the magic link, the email code, and social. The importer and the
+operator's own storage writes are not under the rule. An existing user signs
+in as before. A magic link or code request still answers `{ sent: true }`. Its
 verify answers `sign_up_closed`, and only the owner of the mailbox sees that.
 A refused reset keeps its link usable.
 
