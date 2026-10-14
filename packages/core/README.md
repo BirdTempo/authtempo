@@ -683,10 +683,29 @@ return res;
   a token from the list.
 - In process: `auth.api.tokens.create`, `list`, `revoke`, and `current`.
 
+## The sign-up rule
+
+`signUp` sets who may become a user.
+
+| Key | Default | Rule |
+| --- | --- | --- |
+| `signUp` | `"open"` | `"open"`, `"invited"` (needs `organizations`), or `false`. A refused new user gets 403 `sign_up_closed`. |
+
+The rule runs at each create of a user: the password sign-up, the password
+reset, the magic link, the email code, and social. With `false`, an existing
+user signs in as before. The password sign-up answers `sign_up_closed` before
+it reads a user, so the answer is the same for every address. A magic link
+or code request still answers `{ sent: true }`. Its verify answers
+`sign_up_closed`, and only the owner of the mailbox sees that. A refused
+reset keeps its link usable.
+
 ## Organizations
 
 Set `organizations: {}` to turn the feature on. Without it, the organization
 routes and the `api` functions answer 404 `not_found`.
+
+With `signUp: "invited"`, only an address with a pending invitation becomes a
+user. The invitee signs in by any method, and the accept follows.
 
 **Ranks.** A role name maps to a rank. The default table is `viewer` 1,
 `member` 2, `admin` 3, `owner` 4. A member may hold more than one role,
