@@ -31,6 +31,8 @@ sources:
 | `fetch` | `globalThis.fetch` | The fetch of every call. |
 | `webauthn` | `browserWebAuthn()` | The passkey seam, of the type `BrowserWebAuthn`. |
 
+`createTransport(options)` answers a `Call` for a route of your own app's code. Its path is a `RoutePath` of `@authtempo/core/routes`, so a path that core does not serve fails the compile. A query goes in the fourth argument, never in the path. More request headers go in the fifth argument.
+
 ## Results
 
 Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A failure is a `ClientFailure`: `{ ok: false, code, status }`.
@@ -120,12 +122,13 @@ The password, email code, and second factor operations answer `not_found` when t
 | `base64UrlEncode`, `base64UrlDecode` | The base64url codec of the conversions. |
 | `WebAuthnCancelled` | The error that the seam throws for a dismissed prompt. The client answers `cancelled` for it. |
 | `ERRORS` | The error table of core. |
+| `CLIENT_CALLS` | The table of every route that the client calls, with each operation, method, and path. The client takes each path from it. |
 
 The types of the package:
 
 | Area | Types |
 | --- | --- |
-| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `ErrorCode`, `Call`, `TransportOptions` |
+| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON` |
 | Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON` |
 

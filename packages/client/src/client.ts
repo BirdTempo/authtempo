@@ -10,8 +10,9 @@ import type {
   PublicSession,
 } from "@authtempo/core";
 import { ERRORS } from "@authtempo/core/errors";
+import { type ClientOperation, callOf } from "./calls.js";
 import { type ClientResult, fail, ok } from "./result.js";
-import { createTransport, type TransportOptions } from "./transport.js";
+import { createRawTransport, type Query, type TransportOptions } from "./transport.js";
 import { type BrowserWebAuthn, browserWebAuthn, WebAuthnCancelled } from "./webauthn.js";
 
 export type PasskeySummaryJSON = Omit<PasskeySummary, "createdAt"> & { createdAt: string };
@@ -358,7 +359,17 @@ function captchaHeader(token: string | undefined): Record<string, string> | unde
 }
 
 export function createClient(options: ClientOptions): Client {
-  const call = createTransport(options);
+  const call = createRawTransport(options);
+  /** One operation of `CLIENT_CALLS`: its method and path come from the table (plan 11d). */
+  const send = <T>(
+    operation: ClientOperation,
+    body?: unknown,
+    query?: Query,
+    headers?: Readonly<Record<string, string>>,
+  ) => {
+    const c = callOf(operation);
+    return call<T>(c.method, c.path, body, query, headers);
+  };
   const webauthn = options.webauthn ?? browserWebAuthn();
   /** Runs one ceremony; a dismissed prompt is `cancelled`, any other throw is `unexpected`. */
   async function ceremony<T>(run: () => Promise<T>): Promise<ClientResult<T>> {
@@ -370,118 +381,120 @@ export function createClient(options: ClientOptions): Client {
   }
   return {
     async session() {
-      const r = await call<PublicSession>("GET", "/session");
+      const r = await send<PublicSession>("session");
       if (!r.ok && r.code === "unauthorized") return ok(null);
       return r;
     },
     // The empty object makes the content type JSON and the body harmless to read; the router's POST Origin rule still applies.
-    signOut: () => call<{ ok: true }>("POST", "/sign-out", {}),
+    signOut: () => send<{ ok: true }>("signOut", {}),
     magicLink: {
       request: ({ captchaToken, ...rest }) =>
-        call<{ sent: true }>("POST", "/magic-link/request", rest, captchaHeader(captchaToken)),
+        send<{ sent: true }>("magicLink.request", rest, undefined, captchaHeader(captchaToken)),
       verify: ({ token, trustDevice }) =>
-        call<PublicSession | TwoFactorChallengeJSON>("POST", "/magic-link/verify", {
+        send<PublicSession | TwoFactorChallengeJSON>("magicLink.verify", {
           token,
           ...(trustDevice !== undefined ? { trustDevice } : {}),
         }),
     },
     handoff: {
-      redeem: (input) => call<{ token: string } & PublicSession>("POST", "/handoff/redeem", input),
+      redeem: (input) => send<{ token: string } & PublicSession>("handoff.redeem", input),
     },
     passkey: {
       async register(input = {}) {
-        const options = await call<PublicKeyCredentialCreationOptionsJSON>(
-          "POST",
-          "/passkey/register/options",
+        const options = await send<PublicKeyCredentialCreationOptionsJSON>(
+          "passkey.register.options",
           {},
         );
         if (!options.ok) return options;
         const response = await ceremony(() => webauthn.create(options.value));
         if (!response.ok) return response;
-        const r = await call<{ passkey: PasskeySummaryJSON }>("POST", "/passkey/register/verify", {
+        const r = await send<{ passkey: PasskeySummaryJSON }>("passkey.register.verify", {
           response: response.value,
           ...(input.name !== undefined ? { name: input.name } : {}),
         });
         return r.ok ? ok(r.value.passkey) : r;
       },
       async signIn() {
-        const options = await call<PublicKeyCredentialRequestOptionsJSON>(
-          "POST",
-          "/passkey/authenticate/options",
+        const options = await send<PublicKeyCredentialRequestOptionsJSON>(
+          "passkey.signIn.options",
           {},
         );
         if (!options.ok) return options;
         const response = await ceremony(() => webauthn.get(options.value));
         if (!response.ok) return response;
-        return call<PublicSession>("POST", "/passkey/authenticate/verify", {
+        return send<PublicSession>("passkey.signIn.verify", {
           response: response.value,
         });
       },
     },
     passkeys: {
       async list() {
-        const r = await call<{ passkeys: PasskeySummaryJSON[] }>("GET", "/passkeys");
+        const r = await send<{ passkeys: PasskeySummaryJSON[] }>("passkeys.list");
         return r.ok ? ok(r.value.passkeys) : r;
       },
-      delete: (input) => call<{ ok: true }>("POST", "/passkeys/delete", input),
+      delete: (input) => send<{ ok: true }>("passkeys.delete", input),
     },
     password: {
       signUp: ({ name, captchaToken, ...rest }) =>
-        call<
+        send<
           | ({ token: string } & PublicSession)
           | { user: PublicSession["user"]; verifyRequired: true }
           | { sent: true }
         >(
-          "POST",
-          "/password/sign-up",
+          "password.signUp",
           { ...rest, ...(name !== undefined ? { name } : {}) },
+          undefined,
           captchaHeader(captchaToken),
         ),
       signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
-        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
-          "POST",
-          "/password/sign-in",
+        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
+          "password.signIn",
           {
             ...rest,
             ...(trustDevice !== undefined ? { trustDevice } : {}),
             ...(next !== undefined ? { next } : {}),
           },
+          undefined,
           captchaHeader(captchaToken),
         ),
-      resendVerification: (input) => call<{ sent: true }>("POST", "/password/verify/resend", input),
-      verifyEmail: (input) => call<{ verified: true }>("POST", "/password/verify", input),
+      resendVerification: (input) => send<{ sent: true }>("password.resendVerification", input),
+      verifyEmail: (input) => send<{ verified: true }>("password.verifyEmail", input),
       requestReset: ({ next, captchaToken, ...rest }) =>
-        call<{ sent: true }>(
-          "POST",
-          "/password/reset/request",
+        send<{ sent: true }>(
+          "password.requestReset",
           { ...rest, ...(next !== undefined ? { next } : {}) },
+          undefined,
           captchaHeader(captchaToken),
         ),
       reset: ({ trustDevice, ...rest }) =>
-        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
-          "POST",
-          "/password/reset",
-          { ...rest, ...(trustDevice !== undefined ? { trustDevice } : {}) },
-        ),
+        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("password.reset", {
+          ...rest,
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
       change: ({ currentPassword, newPassword }) =>
-        call<{ ok: true }>("POST", "/password/change", {
+        send<{ ok: true }>("password.change", {
           ...(currentPassword !== undefined ? { currentPassword } : {}),
           newPassword,
         }),
     },
     emailOtp: {
       request: ({ email, captchaToken }) =>
-        call<{ sent: true }>("POST", "/otp/request", { email }, captchaHeader(captchaToken)),
+        send<{ sent: true }>("emailOtp.request", { email }, undefined, captchaHeader(captchaToken)),
       verify: ({ email, code, trustDevice }) =>
-        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("POST", "/otp/verify", {
+        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.verify", {
           email,
           code,
           ...(trustDevice !== undefined ? { trustDevice } : {}),
         }),
       requestReset: ({ email, captchaToken }) =>
-        call<{ sent: true }>("POST", "/otp/reset/request", { email }, captchaHeader(captchaToken)),
+        send<{ sent: true }>(
+          "emailOtp.requestReset",
+          { email },
+          undefined,
+          captchaHeader(captchaToken),
+        ),
       reset: ({ email, code, password, trustDevice }) =>
-        call<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("POST", "/otp/reset", {
+        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.reset", {
           email,
           code,
           password,
@@ -490,19 +503,18 @@ export function createClient(options: ClientOptions): Client {
     },
     organizations: {
       create: ({ metadata, ...rest }) =>
-        call<{ organization: OrganizationJSON; member: MemberJSON }>(
-          "POST",
-          "/organizations/create",
-          { ...rest, ...(metadata !== undefined ? { metadata } : {}) },
-        ),
+        send<{ organization: OrganizationJSON; member: MemberJSON }>("organizations.create", {
+          ...rest,
+          ...(metadata !== undefined ? { metadata } : {}),
+        }),
       async list() {
-        const r = await call<{
+        const r = await send<{
           organizations: { organization: OrganizationJSON; role: string }[];
-        }>("GET", "/organizations");
+        }>("organizations.list");
         return r.ok ? ok(r.value.organizations) : r;
       },
       async update({ metadata, name, slug, organizationId }) {
-        const r = await call<{ organization: OrganizationJSON }>("POST", "/organizations/update", {
+        const r = await send<{ organization: OrganizationJSON }>("organizations.update", {
           organizationId,
           ...(name !== undefined ? { name } : {}),
           ...(slug !== undefined ? { slug } : {}),
@@ -510,132 +522,120 @@ export function createClient(options: ClientOptions): Client {
         });
         return r.ok ? ok(r.value.organization) : r;
       },
-      delete: (input) => call<{ ok: true }>("POST", "/organizations/delete", input),
+      delete: (input) => send<{ ok: true }>("organizations.delete", input),
       members: {
         async list(input) {
-          const r = await call<{ members: MemberJSON[] }>(
-            "GET",
-            `/organizations/members?organizationId=${encodeURIComponent(input.organizationId)}`,
-          );
+          const r = await send<{ members: MemberJSON[] }>("organizations.members.list", undefined, {
+            organizationId: input.organizationId,
+          });
           return r.ok ? ok(r.value.members) : r;
         },
         async add(input) {
-          const r = await call<{ member: MemberJSON }>("POST", "/organizations/members/add", input);
+          const r = await send<{ member: MemberJSON }>("organizations.members.add", input);
           return r.ok ? ok(r.value.member) : r;
         },
         async role(input) {
-          const r = await call<{ member: MemberJSON }>(
-            "POST",
-            "/organizations/members/role",
-            input,
-          );
+          const r = await send<{ member: MemberJSON }>("organizations.members.role", input);
           return r.ok ? ok(r.value.member) : r;
         },
-        remove: (input) => call<{ ok: true }>("POST", "/organizations/members/remove", input),
+        remove: (input) => send<{ ok: true }>("organizations.members.remove", input),
       },
       invitations: {
         async invite(input) {
-          const r = await call<{ invitation: InvitationJSON }>(
-            "POST",
-            "/organizations/invite",
+          const r = await send<{ invitation: InvitationJSON }>(
+            "organizations.invitations.invite",
             input,
           );
           return r.ok ? ok(r.value.invitation) : r;
         },
         async list(input) {
-          const r = await call<{ invitations: InvitationJSON[] }>(
-            "GET",
-            `/organizations/invitations?organizationId=${encodeURIComponent(input.organizationId)}`,
+          const r = await send<{ invitations: InvitationJSON[] }>(
+            "organizations.invitations.list",
+            undefined,
+            { organizationId: input.organizationId },
           );
           return r.ok ? ok(r.value.invitations) : r;
         },
-        revoke: (input) => call<{ ok: true }>("POST", "/organizations/invitations/revoke", input),
+        revoke: (input) => send<{ ok: true }>("organizations.invitations.revoke", input),
         accept: (input) =>
-          call<{ organization: OrganizationJSON; member: MemberJSON }>(
-            "POST",
-            "/organizations/invitations/accept",
+          send<{ organization: OrganizationJSON; member: MemberJSON }>(
+            "organizations.invitations.accept",
             input,
           ),
-        decline: (input) => call<{ ok: true }>("POST", "/organizations/invitations/decline", input),
+        decline: (input) => send<{ ok: true }>("organizations.invitations.decline", input),
       },
-      setActive: (input) => call<PublicSession>("POST", "/organizations/active", input),
+      setActive: (input) => send<PublicSession>("organizations.setActive", input),
     },
     tokens: {
       create: ({ expiresInDays, organizationId, ...rest }) =>
-        call<{ token: string; apiToken: ApiTokenSummaryJSON }>("POST", "/tokens", {
+        send<{ token: string; apiToken: ApiTokenSummaryJSON }>("tokens.create", {
           ...rest,
           ...(expiresInDays !== undefined ? { expiresInDays } : {}),
           ...(organizationId !== undefined ? { organizationId } : {}),
         }),
       async list() {
-        const r = await call<{ tokens: ApiTokenSummaryJSON[] }>("GET", "/tokens");
+        const r = await send<{ tokens: ApiTokenSummaryJSON[] }>("tokens.list");
         return r.ok ? ok(r.value.tokens) : r;
       },
-      revoke: (input) => call<{ ok: true }>("POST", "/tokens/revoke", input),
+      revoke: (input) => send<{ ok: true }>("tokens.revoke", input),
       current: () =>
-        call<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>(
-          "GET",
-          "/tokens/current",
-        ),
+        send<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>("tokens.current"),
     },
     jwt: {
-      token: () => call<{ token: string }>("GET", "/token"),
+      token: () => send<{ token: string }>("jwt.token"),
     },
     oauth: {
       async grants() {
-        const r = await call<{ grants: OAuthGrantJSON[] }>("GET", "/oauth/grants");
+        const r = await send<{ grants: OAuthGrantJSON[] }>("oauth.grants");
         return r.ok ? ok(r.value.grants) : r;
       },
-      revoke: (input) =>
-        call<{ ok: true }>("POST", "/oauth/grants/revoke", { clientId: input.clientId }),
+      revoke: (input) => send<{ ok: true }>("oauth.revoke", { clientId: input.clientId }),
     },
     totp: {
       setup: (input) =>
-        call<{ secret: string; uri: string; backupCodes: string[] }>("POST", "/totp/setup", {
+        send<{ secret: string; uri: string; backupCodes: string[] }>("totp.setup", {
           password: input.password,
         }),
-      enable: (input) => call<TotpStatusJSON>("POST", "/totp/enable", input),
+      enable: (input) => send<TotpStatusJSON>("totp.enable", input),
       verify: ({ code, backupCode, emailCode, trustDevice, ...rest }) =>
-        call<TwoFactorSessionJSON>("POST", "/totp/verify", {
+        send<TwoFactorSessionJSON>("totp.verify", {
           ...rest,
           ...(code !== undefined ? { code } : {}),
           ...(backupCode !== undefined ? { backupCode } : {}),
           ...(emailCode !== undefined ? { emailCode } : {}),
           ...(trustDevice !== undefined ? { trustDevice } : {}),
         }),
-      disable: (input) => call<{ ok: true }>("POST", "/totp/disable", input),
+      disable: (input) => send<{ ok: true }>("totp.disable", input),
       regenerateBackupCodes: (input) =>
-        call<{ backupCodes: string[] }>("POST", "/totp/backup-codes", input),
-      status: () => call<TotpStatusJSON>("GET", "/totp"),
-      revokeTrustedDevices: () => call<{ ok: true }>("POST", "/totp/devices/revoke", {}),
+        send<{ backupCodes: string[] }>("totp.regenerateBackupCodes", input),
+      status: () => send<TotpStatusJSON>("totp.status"),
+      revokeTrustedDevices: () => send<{ ok: true }>("totp.revokeTrustedDevices", {}),
     },
     secondFactor: {
       passkey: {
         async enable({ password }) {
           // The enable's proof is a sign-in assertion by a passkey of this user (plan 12c).
-          const options = await call<PublicKeyCredentialRequestOptionsJSON>(
-            "POST",
-            "/passkey/authenticate/options",
+          const options = await send<PublicKeyCredentialRequestOptionsJSON>(
+            "secondFactor.passkey.enable.options",
             {},
           );
           if (!options.ok) return options;
           const response = await ceremony(() => webauthn.get(options.value));
           if (!response.ok) return response;
-          return call<SecondFactorEnableJSON>("POST", "/second-factor/passkey/enable", {
+          return send<SecondFactorEnableJSON>("secondFactor.passkey.enable.verify", {
             password,
             response: response.value,
           });
         },
         async verify({ challenge, trustDevice }) {
-          const options = await call<PublicKeyCredentialRequestOptionsJSON>(
-            "POST",
-            "/second-factor/passkey/options",
+          const options = await send<PublicKeyCredentialRequestOptionsJSON>(
+            "secondFactor.passkey.verify.options",
             { challenge },
           );
           if (!options.ok) return options;
           const response = await ceremony(() => webauthn.get(options.value));
           if (!response.ok) return response;
-          return call<TwoFactorSessionJSON>("POST", "/totp/verify", {
+          return send<TwoFactorSessionJSON>("secondFactor.passkey.verify.verify", {
             challenge,
             passkey: response.value,
             ...(trustDevice !== undefined ? { trustDevice } : {}),
@@ -644,16 +644,14 @@ export function createClient(options: ClientOptions): Client {
       },
       email: {
         enable: ({ password }) =>
-          call<SecondFactorEnableJSON>("POST", "/second-factor/email/enable", { password }),
-        send: ({ challenge }) =>
-          call<{ sent: true }>("POST", "/second-factor/email/send", { challenge }),
+          send<SecondFactorEnableJSON>("secondFactor.email.enable", { password }),
+        send: ({ challenge }) => send<{ sent: true }>("secondFactor.email.send", { challenge }),
       },
       disable: ({ method, password }) =>
-        call<{ ok: true; methods: ("totp" | "passkey" | "email")[] }>(
-          "POST",
-          "/second-factor/disable",
-          { method, password },
-        ),
+        send<{ ok: true; methods: ("totp" | "passkey" | "email")[] }>("secondFactor.disable", {
+          method,
+          password,
+        }),
     },
     errors: ERRORS,
   };

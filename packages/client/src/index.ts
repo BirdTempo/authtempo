@@ -1,4 +1,5 @@
 export { ERRORS, type ErrorCode } from "@authtempo/core/errors";
+export { CLIENT_CALLS, type ClientCall, type ClientOperation } from "./calls.js";
 export {
   type ApiTokenSummaryJSON,
   type ChallengeMethodJSON,
@@ -16,7 +17,7 @@ export {
   type TwoFactorSessionJSON,
 } from "./client.js";
 export type { ClientCode, ClientFailure, ClientResult } from "./result.js";
-export { type Call, createTransport, type TransportOptions } from "./transport.js";
+export { type Call, createTransport, type Query, type TransportOptions } from "./transport.js";
 export {
   type BrowserWebAuthn,
   base64UrlDecode,

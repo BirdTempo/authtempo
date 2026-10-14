@@ -1,4 +1,5 @@
 import { ERRORS } from "@authtempo/core/errors";
+import type { RouteMethod, RoutePath } from "@authtempo/core/routes";
 import { type ClientResult, fail, failWith, ok } from "./result.js";
 
 export interface TransportOptions {
@@ -14,12 +15,38 @@ export interface TransportOptions {
   credentials?: RequestCredentials | undefined;
 }
 
-/** `extra`: more request headers, for example the captcha token of plan 12b. */
-export type Call = <T>(
-  method: "GET" | "POST",
+/** A query, sent apart from the path: a path is a `RoutePath` and holds no `?`. */
+export type Query = Readonly<Record<string, string>>;
+
+/**
+ * One call to a route of core (plan 11d). The path is a `RoutePath` of the
+ * method, so a path that core does not serve fails the compile. `headers`:
+ * more request headers, for example the captcha token of plan 12b.
+ */
+export interface Call {
+  <T>(
+    method: "GET",
+    path: RoutePath<"GET">,
+    body?: undefined,
+    query?: Query,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<ClientResult<T>>;
+  <T>(
+    method: "POST",
+    path: RoutePath<"POST">,
+    body?: unknown,
+    query?: Query,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<ClientResult<T>>;
+}
+
+/** The call with an untyped path: the client's own calls take their path from `CLIENT_CALLS`, whose type is checked. */
+export type RawCall = <T>(
+  method: RouteMethod,
   path: string,
   body?: unknown,
-  extra?: Record<string, string>,
+  query?: Query,
+  headers?: Readonly<Record<string, string>>,
 ) => Promise<ClientResult<T>>;
 
 function isKnownCode(code: unknown): code is keyof typeof ERRORS {
@@ -27,21 +54,34 @@ function isKnownCode(code: unknown): code is keyof typeof ERRORS {
 }
 
 /**
+ * The query string with `encodeURIComponent`, so a space is `%20` as before
+ * plan 11d. `URLSearchParams` would write `+`.
+ */
+function searchOf(query: Query | undefined): string {
+  if (!query) return "";
+  const pairs = Object.entries(query).map(
+    ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`,
+  );
+  return pairs.length > 0 ? `?${pairs.join("&")}` : "";
+}
+
+/**
  * One function behind every operation. It never throws for an answer: a
  * rejected fetch is `network`, an unreadable body is `unexpected`, and a
  * known error code passes through with its status.
  */
-export function createTransport(options: TransportOptions): Call {
+export function createRawTransport(options: TransportOptions): RawCall {
   // A trailing slash on baseURL would build `//auth/session`, which the router answers with 404.
   const baseURL = options.baseURL.replace(/\/$/, "");
   const basePath = options.basePath ?? "/auth";
   const doFetch = options.fetch ?? globalThis.fetch;
   const credentials = options.credentials ?? "include";
   return async <T>(
-    method: "GET" | "POST",
+    method: RouteMethod,
     path: string,
     body?: unknown,
-    extra?: Record<string, string>,
+    query?: Query,
+    extra?: Readonly<Record<string, string>>,
   ): Promise<ClientResult<T>> => {
     const headers: Record<string, string> = { accept: "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
@@ -50,7 +90,7 @@ export function createTransport(options: TransportOptions): Call {
     if (token) headers.authorization = `Bearer ${token}`;
     let res: Response;
     try {
-      res = await doFetch(`${baseURL}${basePath}${path}`, {
+      res = await doFetch(`${baseURL}${basePath}${path}${searchOf(query)}`, {
         method,
         headers,
         credentials,
@@ -75,4 +115,9 @@ export function createTransport(options: TransportOptions): Call {
       ? failWith(code, res.status, answer.message)
       : fail(code, res.status);
   };
+}
+
+/** The typed call for an app's own route call. */
+export function createTransport(options: TransportOptions): Call {
+  return createRawTransport(options) as Call;
 }

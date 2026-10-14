@@ -63,18 +63,22 @@ describe("createTransport", () => {
       ),
     ).toEqual({ ok: false, code: "hook_refused", status: 403, message: "Choose another name." });
     const missing = answering(404, `{"error":"not_found"}`);
-    expect(await createTransport({ baseURL: BASE, fetch: missing.fetch })("GET", "/x")).toEqual({
+    expect(
+      await createTransport({ baseURL: BASE, fetch: missing.fetch })("GET", "/session"),
+    ).toEqual({
       ok: false,
       code: "not_found",
       status: 404,
     });
     // A message on another code is dropped (parked Minor 2).
     const other = answering(404, `{"error":"not_found","message":"from a proxy"}`);
-    expect(await createTransport({ baseURL: BASE, fetch: other.fetch })("GET", "/x")).toEqual({
-      ok: false,
-      code: "not_found",
-      status: 404,
-    });
+    expect(await createTransport({ baseURL: BASE, fetch: other.fetch })("GET", "/session")).toEqual(
+      {
+        ok: false,
+        code: "not_found",
+        status: 404,
+      },
+    );
   });
 
   it("maps an unknown code, a non-JSON body, and an error status with a JSON body to unexpected", async () => {
@@ -118,5 +122,20 @@ describe("createTransport", () => {
     await call("GET", "/session");
     expect(f.calls[0]?.url).toBe(`${BASE}/api/auth/session`);
     expect(f.calls[0]?.headers.get("content-type")).toBeNull();
+  });
+
+  it("refuses a path that core does not serve, at compile time (plan 11d)", async () => {
+    const f = answering(200, `{}`);
+    const call = createTransport({ baseURL: BASE, fetch: f.fetch });
+    // @ts-expect-error "/sesion" is not a RoutePath.
+    await call("GET", "/sesion");
+    // @ts-expect-error A POST route is not a GET path.
+    await call("GET", "/sign-out");
+    await call("POST", "/sign-out", {});
+    expect(f.calls.map((r) => new URL(r.url).pathname)).toEqual([
+      "/auth/sesion",
+      "/auth/sign-out",
+      "/auth/sign-out",
+    ]);
   });
 });

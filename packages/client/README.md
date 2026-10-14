@@ -49,6 +49,15 @@ on `baseURL` is removed.
 - When a bearer app gets `null` from `session()`, the token is dead.
   Clear it from the store.
 
+## The route table
+
+`CLIENT_CALLS` lists every route that the client calls: the operation,
+the method, and the path. The client takes each path from it. Its type
+holds each path to `ROUTES` of `@authtempo/core/routes`, so a path that
+core does not serve fails the compile. `createTransport` gives the same
+typed call to your own code. A query goes in the fourth argument, and
+more request headers go in the fifth.
+
 ## Operations
 
 | Operation | Route | Answer type |
