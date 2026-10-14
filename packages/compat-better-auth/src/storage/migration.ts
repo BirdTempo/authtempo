@@ -444,6 +444,19 @@ export function compatMigrationSql(
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * The names of the compat migrations, in order (plan 11c). Each name is the
+ * file name, without `.sql`, under `migrations/d1/` and
+ * `migrations/d1-before-1.7/`, and the name that the Postgres runner below
+ * reports. The CLI reads this list; a test of the CLI holds it to the files.
+ */
+export const COMPAT_MIGRATION_NAMES: readonly string[] = [
+  MIGRATION_NAME,
+  MIGRATION_0002_NAME,
+  MIGRATION_0003_NAME,
+  MIGRATION_0004_NAME,
+];
+
 /** One fixed advisory lock key for every compat migration run. */
 const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migrations'))";
 

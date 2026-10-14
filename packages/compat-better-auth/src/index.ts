@@ -21,6 +21,10 @@ export {
   type PostgresSchemaStorage,
   type PostgresSchemaStorageOptions,
 } from "./storage/index.js";
-export { applyBetterAuthCompatMigrations, compatMigrationSql } from "./storage/migration.js";
+export {
+  applyBetterAuthCompatMigrations,
+  COMPAT_MIGRATION_NAMES,
+  compatMigrationSql,
+} from "./storage/migration.js";
 export { type NamingOptions, resolveNames } from "./storage/names.js";
 export type * from "./types.js";

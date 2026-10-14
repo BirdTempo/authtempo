@@ -1,12 +1,9 @@
-import { readdirSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
 import {
   applyPostgresMigrations,
   createPostgresAdapter,
   MIGRATIONS,
 } from "@authtempo/adapter-postgres";
-import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
+import { betterAuthSchemaStorage, COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import type { StorageAdapter } from "@authtempo/core";
 import { META_TABLE, SCHEMA_VERSION_KEY } from "@authtempo/core/sql";
 import postgres, { type Sql } from "postgres";
@@ -21,20 +18,12 @@ const MIGRATIONS_TABLE = "ta_migrations";
 /** The names of core's Postgres migrations, in order, from the adapter that this CLI bundles. */
 export const CORE_MIGRATIONS: readonly string[] = MIGRATIONS.map((m) => m.name);
 
-const resolver = createRequire(import.meta.url);
-
 /**
- * The names of the compat migrations, from the files that the compatibility
- * package ships in `migrations/d1/`. Its Postgres migrations carry the same
- * names, so one list serves both dialects.
+ * The names of the compat migrations, in order, from the compatibility
+ * package that this CLI bundles. Its Postgres runner and its `migrations/d1/`
+ * files carry the same names, so one list serves both dialects.
  */
-export function compatMigrationNames(): string[] {
-  const dir = join(dirname(resolver.resolve("@authtempo/compat-better-auth")), "../migrations/d1");
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-    .map((f) => f.slice(0, -".sql".length));
-}
+export const compatMigrationNames = (): string[] => [...COMPAT_MIGRATION_NAMES];
 
 const isUndefinedTable = (e: unknown) => (e as { code?: unknown } | null)?.code === UNDEFINED_TABLE;
 
@@ -60,6 +49,8 @@ async function readMeta(sql: Sql, key: string): Promise<string | null> {
 export interface PostgresSeam {
   /** `ta_meta.schema_version` (the row with key `schema_version`), or null when it is missing. */
   schemaVersion(): Promise<number | null>;
+  /** The raw text of `ta_meta.schema_version`, or null when it is missing. The version gate reads it. */
+  schemaVersionText(): Promise<string | null>;
   /** The mapping version of the compatibility package, 0 when it is missing. */
   compatVersion(): Promise<number>;
   /** The names in `ta_migrations`, or none when the table is missing. */
@@ -88,6 +79,7 @@ export function openPostgres(url: string, max: number): PostgresSeam {
       const v = await readMeta(sql, SCHEMA_VERSION_KEY);
       return v === null ? null : Number(v);
     },
+    schemaVersionText: () => readMeta(sql, SCHEMA_VERSION_KEY),
     async compatVersion() {
       return Number((await readMeta(sql, COMPAT_META_KEY)) ?? "0");
     },

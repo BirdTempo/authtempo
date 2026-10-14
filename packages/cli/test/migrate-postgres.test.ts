@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
+import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MIGRATE_JSON_KEYS } from "../src/json.js";
 import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
@@ -82,6 +83,29 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
     expect(count[0]?.n).toBe("8");
   });
 
+  it("stops before any write on a schema_version it cannot read, and names the raw value", async () => {
+    await applyPostgresMigrations(db.sql);
+    await db.sql`UPDATE ta_meta SET value = 'seven' WHERE key = 'schema_version'`;
+    const word = migrate([]);
+    expect(word.status).toBe(2);
+    expect(word.stdout).toBe("");
+    expect(linesOf(word.stderr).at(-1)).toBe(
+      'stopped: ta_meta holds schema_version "seven", which is not a version number; nothing was written',
+    );
+    await db.sql`DELETE FROM ta_meta WHERE key = 'schema_version'`;
+    const missing = migrate([]);
+    expect(missing.status).toBe(2);
+    expect(missing.stdout).toBe("");
+    expect(linesOf(missing.stderr).at(-1)).toBe(
+      "stopped: ta_meta has no schema_version, but ta_migrations holds 7 applied migration(s); nothing was written",
+    );
+    expect(linesOf(missing.stderr)).not.toContain("applying 0 migration(s)");
+    const rows = await db.sql<
+      { n: string }[]
+    >`SELECT count(*)::text AS n FROM ta_meta WHERE key = 'schema_version'`;
+    expect(rows[0]?.n).toBe("0");
+  });
+
   it("prints one JSON document of the run with --json", () => {
     const r = migrate(["--json"]);
     expect(r.status).toBe(0);
@@ -128,7 +152,7 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
   it("stops with exit 2 on a refused connection, and no output holds the password", () => {
     const r = migrate([], "postgres://app:s3cret-canary@127.0.0.1:1/none");
     expect(r.status).toBe(2);
-    expect(linesOf(r.stderr).at(-1)).toMatch(/^stopped: /);
+    expect(linesOf(r.stderr).at(-1)).toMatch(/^stopped: storage: .+; nothing was written$/);
     expect(r.stdout + r.stderr).not.toContain("s3cret-canary");
   });
 
@@ -137,8 +161,13 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `url-${crypto.randomUUID()}.txt`);
     writeFileSync(file, `${db.url}\n`, { mode: 0o600 });
-    const fromFile = runBin(["migrate", "--target", "postgres", "--url-file", file, "--dry-run"]);
-    expect(fromFile.status, fromFile.stderr).toBe(0);
+    try {
+      const fromFile = runBin(["migrate", "--target", "postgres", "--url-file", file, "--dry-run"]);
+      expect(fromFile.status, fromFile.stderr).toBe(0);
+    } finally {
+      // The file holds the test connection string: no test leaves it behind.
+      rmSync(file, { force: true });
+    }
     const fromStdin = runBin(["migrate", "--target", "postgres", "--url-file", "-", "--dry-run"], {
       input: db.url,
     });
@@ -152,5 +181,16 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
     const none = runBin(["migrate"]);
     expect(none.status).toBe(2);
     expect(linesOf(none.stderr)[0]).toMatch(/^name a target: --target /);
+  });
+
+  it("reads the compat migration names from the compatibility package, the same as its files", () => {
+    expect([...COMPAT_MIGRATION_NAMES]).toEqual(COMPAT);
+    for (const dir of ["d1", "d1-before-1.7"]) {
+      const files = readdirSync(join(PKG, "../compat-better-auth/migrations", dir))
+        .filter((f) => f.endsWith(".sql"))
+        .sort()
+        .map((f) => f.slice(0, -".sql".length));
+      expect(files, dir).toEqual([...COMPAT_MIGRATION_NAMES]);
+    }
   });
 });

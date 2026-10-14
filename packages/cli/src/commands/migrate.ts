@@ -69,6 +69,27 @@ export function gate(version: number | null): void {
     );
 }
 
+/**
+ * The Postgres version as the gate can read it (spec 19, item 8). A
+ * `schema_version` that is not a whole number, or a missing row over applied
+ * migrations, is a database that this CLI cannot place. The run stops before
+ * any write, as it stops on a newer database: the runner never takes its lock.
+ */
+export function readableVersion(raw: string | null, appliedCount: number): number | null {
+  if (raw === null) {
+    if (appliedCount > 0)
+      throw new Stop(
+        `ta_meta has no schema_version, but ta_migrations holds ${appliedCount} applied migration(s); nothing was written`,
+      );
+    return null;
+  }
+  if (!/^\d+$/.test(raw))
+    throw new Stop(
+      `ta_meta holds schema_version ${JSON.stringify(raw)}, which is not a version number; nothing was written`,
+    );
+  return Number(raw);
+}
+
 async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
   const url = readSecret(ctx, {
     envFlag: "url-env",
@@ -82,9 +103,15 @@ async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<
   // One connection: the migrations run one at a time, each in its own transaction.
   const pg = openPostgres(url, 1);
   try {
-    const before = await pg.schemaVersion();
-    gate(before);
+    // A refused connection stops here, as "storage: ...; nothing was written", the same as import.
+    try {
+      await pg.ping();
+    } catch (e) {
+      throw new Stop(`storage: ${e instanceof Error ? e.message : String(e)}; nothing was written`);
+    }
     const done = new Set(await pg.appliedCore());
+    const before = readableVersion(await pg.schemaVersionText(), done.size);
+    gate(before);
     const pending =
       plan.tables === "core"
         ? CORE_MIGRATIONS.filter((n) => !done.has(n))
