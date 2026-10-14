@@ -154,9 +154,15 @@ async function resealSecret(
   if (row.secretVersion === keyring.current) return false;
   // An unconfirmed setup keys its backup codes under the row's version too.
   // A reseal would move the secret and leave the codes, and the enable then
-  // copies the codes with the wrong version. The setup lives 15 minutes, so
-  // it stays under its version until the enable or a new setup.
-  if (row.enabledAt === null && row.backupCodes.length > 0) return false;
+  // copies the codes with the wrong version. So a live setup stays under its
+  // version until the enable or a new setup (at most 15 minutes).
+  const setupCodes = row.enabledAt === null && row.backupCodes.length > 0;
+  const live = row.createdAt.getTime() + SETUP_TTL_MS > config.clock.now().getTime();
+  if (setupCodes && live) return false;
+  // An expired setup stays until its user runs a new setup. Without a
+  // reseal, the rewrap never ends. Only the enable reads its codes, and the
+  // enable refuses an expired setup, so the reseal clears them. A new setup
+  // writes new codes in place.
   try {
     const sealed = await seal(currentSecret(keyring), SEAL_INFO, plain, row.userId);
     const n = await config.storage.update(
@@ -165,7 +171,11 @@ async function resealSecret(
         { field: "id", op: "eq", value: row.id },
         { field: "secret", op: "eq", value: row.secret },
       ],
-      { secret: sealed, secretVersion: keyring.current },
+      {
+        secret: sealed,
+        secretVersion: keyring.current,
+        ...(setupCodes ? { backupCodes: [] } : {}),
+      },
     );
     return n === 1;
   } catch (e) {

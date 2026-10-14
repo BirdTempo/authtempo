@@ -381,6 +381,29 @@ describe("secret versions on read and write (plan 12b)", () => {
     expect(moved?.secretVersion).toBe(2);
   });
 
+  it("reseals an expired setup with backup codes at a rewrap and clears its codes", async () => {
+    const w = world();
+    await seedToday(w.storage, w.clock.now());
+    await w.storage.update("totp", [{ field: "id", op: "eq", value: FIXTURE.TOTP_ROW }], {
+      enabledAt: null,
+    });
+    // The setup lives 15 minutes from `createdAt`: at that moment it is expired.
+    w.clock.advance(15 * 60_000);
+    const setup = await w.storage.findOne("totp", [
+      { field: "id", op: "eq", value: FIXTURE.TOTP_ROW },
+    ]);
+    if (!setup) throw new Error("no totp row");
+    expect(await rewrapTotpRow(w.config(PHASE_2), setup)).toBe(true);
+    const moved = await w.storage.findOne("totp", [
+      { field: "id", op: "eq", value: FIXTURE.TOTP_ROW },
+    ]);
+    expect({ secretVersion: moved?.secretVersion, backupCodes: moved?.backupCodes }).toEqual({
+      secretVersion: 2,
+      backupCodes: [],
+    });
+    expect(moved?.secret).not.toBe(FIXTURE.totpSecret);
+  });
+
   it("keys the email code of a challenge under the version that its send writes", async () => {
     const w = world();
     await seedToday(w.storage, w.clock.now());
