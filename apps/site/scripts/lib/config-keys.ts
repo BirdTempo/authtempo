@@ -60,6 +60,7 @@ export const CONFIG_KEYS = {
     webauthn: true,
     handoff: true,
     organizations: true,
+    signUp: true,
     password: true,
     emailOtp: true,
     totp: true,

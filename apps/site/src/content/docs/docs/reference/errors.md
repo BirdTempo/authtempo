@@ -213,6 +213,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup). |
 
+<h3 id="sign_up_closed"><code>sign_up_closed</code> 403</h3>
+
+- **Meaning:** `signUp` is `false`, or it is `"invited"` and the address has no pending invitation. No user was created.
+- **Do:** Tell the person that this app takes no new accounts, or that an invitation is needed.
+
+| Routes |
+| --- |
+| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback). The social callbacks redirect with `?auth_error=sign_up_closed`. |
+
 <h3 id="password_policy"><code>password_policy</code> 400</h3>
 
 - **Meaning:** The password is too short, too long, holds a control character, or equals the address.

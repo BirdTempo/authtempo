@@ -61,6 +61,9 @@ export const BETTER_AUTH_CODES = {
   totp_not_enabled: "TOTP_NOT_ENABLED",
   // Plan 12c. Better Auth has no passkey second factor, so the name is authtempo's own.
   second_factor_last_method: "SECOND_FACTOR_LAST_METHOD",
+  // Plan 12b, the sign-up rule. The name is authtempo's own: Better Auth 1.7.2
+  // was not read for a code of a closed sign-up.
+  sign_up_closed: "SIGN_UP_CLOSED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

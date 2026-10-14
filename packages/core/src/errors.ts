@@ -45,6 +45,8 @@ export const ERRORS = {
   // plan 12c: the last passkey of a user whose passkey is a second-factor
   // method stays; the person turns the method off first.
   second_factor_last_method: 409,
+  // plan 12b: the sign-up rule refused a new user
+  sign_up_closed: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

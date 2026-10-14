@@ -46,6 +46,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `webauthn` | `WebAuthnSeam` | @simplewebauthn/server 14.0.3 | The WebAuthn ceremonies. Tests inject a fake. |
 | `handoff` | object | off | The handoff is on when it is set. |
 | `organizations` | object or `false` | off | `{}` turns organizations on with the defaults. |
+| `signUp` | `"open"` \| `"invited"` \| `false` | `"open"` | Who may become a user. `"invited"` needs `organizations` and a pending invitation of the address. `false` lets nobody new in. |
 | `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
 | `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |

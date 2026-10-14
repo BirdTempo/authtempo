@@ -9,7 +9,7 @@ import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
 import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
-import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
+import { findOrCreateUserByEmail, normalizeEmail, signUpGuard } from "./users.js";
 import { attemptsOf, countAttempt, MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
@@ -298,7 +298,7 @@ export async function verifyEmailOtp(
         now,
         (tx) => steps.write(tx),
         ended,
-        steps.before,
+        signUpGuard(config, steps.before),
       ),
     ),
   );

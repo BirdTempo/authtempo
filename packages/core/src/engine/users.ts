@@ -1,7 +1,9 @@
+import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { stopWith } from "./hooks.js";
 import { endSessions } from "./sessions.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
@@ -104,8 +106,14 @@ export type AfterResolve<T> = (tx: StorageAdapter, user: UserRow, created: boole
  * with the user as the resolution will leave it: the sign-in's session hook
  * (plan 9d, fix round 2). On D1 a throw after a write runs an undo that is
  * not exact (see `insertSignUp` in password.ts), so the hook goes first.
+ * `created` is true when the transaction is about to create that user (plan
+ * 12b, the sign-up rule). A throw undoes the transaction.
  */
-export type BeforeResolveWrite = (tx: StorageAdapter, user: UserRow) => Promise<void>;
+export type BeforeResolveWrite = (
+  tx: StorageAdapter,
+  user: UserRow,
+  created: boolean,
+) => Promise<void>;
 
 /**
  * Thrown inside a transaction when a claim verified the user after this
@@ -256,7 +264,7 @@ async function resolveInTransaction(
       ? existing
       : { ...existing, emailVerified: true, updatedAt: now };
     // Before the identity repair and the claim: the D1 undo (`BeforeResolveWrite`).
-    if (before) await before(tx, resolved);
+    if (before) await before(tx, resolved, false);
     // An isolate that died between the user create and the identity
     // create left a user with no email identity. Repair it here. A
     // concurrent repair fails unique_violation, which the caller catches
@@ -277,7 +285,7 @@ async function resolveInTransaction(
     updatedAt: now,
   };
   // Before the user create: the D1 undo (`BeforeResolveWrite`).
-  if (before) await before(tx, minted);
+  if (before) await before(tx, minted, true);
   const user = await tx.create("user", minted);
   await tx.create("identity", {
     id: newId(now),
@@ -289,6 +297,44 @@ async function resolveInTransaction(
     updatedAt: now,
   });
   return { user, created: true };
+}
+
+/**
+ * The sign-up rule at a create (plan 12b): stops the flow with
+ * `sign_up_closed` unless `signUp` lets `email` become a user. It reads the
+ * invitation in the create's transaction, so an invitation revoked before
+ * the commit refuses it.
+ */
+export async function mayCreateUser(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  email: string,
+): Promise<void> {
+  if (config.signUp === "open") return;
+  if (config.signUp === "invited") {
+    const [pending] = await tx.findMany(
+      "invitation",
+      [
+        { field: "email", op: "eq", value: email },
+        { field: "acceptedAt", op: "eq", value: null },
+        { field: "expiresAt", op: "gt", value: config.clock.now() },
+      ],
+      { limit: 1 },
+    );
+    if (pending) return;
+  }
+  stopWith("sign_up_closed");
+}
+
+/** A `BeforeResolveWrite` that applies the sign-up rule to a created user, then runs `before`. */
+export function signUpGuard(
+  config: ResolvedConfig,
+  before?: BeforeResolveWrite,
+): BeforeResolveWrite {
+  return async (tx, user, created) => {
+    if (created) await mayCreateUser(config, tx, user.email);
+    if (before) await before(tx, user, created);
+  };
 }
 
 /** The `email` identity means "this address signs in by magic link". It exists once the address is proved. */

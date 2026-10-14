@@ -7,7 +7,7 @@ import type { UserRow } from "../schema.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
-import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
+import { findOrCreateUserByEmail, normalizeEmail, signUpGuard } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
 export const MAGIC_LINK_PREFIX = "ml_";
@@ -116,7 +116,7 @@ export async function verifyMagicLink(
         now,
         (tx) => steps.write(tx),
         ended,
-        steps.before,
+        signUpGuard(config, steps.before),
       ),
     ),
   );

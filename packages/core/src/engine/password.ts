@@ -25,6 +25,7 @@ import { deleteTwoFactorChallenges, type TwoFactorPending, twoFactorGate } from 
 import {
   claimEmail,
   ensureEmailIdentity,
+  mayCreateUser,
   normalizeEmail,
   userStillUnverified,
   validUserName,
@@ -164,6 +165,8 @@ export async function passwordSignUp(
   // Before the policy and before any read: the policy and the lookups trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return fail("invalid_body");
+  // Before any read of a user: the answer is the same for every address (plan 12b).
+  if (config.signUp === false) return fail("sign_up_closed");
   const name = input.name;
   if (name !== undefined && !validUserName(name)) return fail("invalid_body");
   const refused = await screen(pw, input.password, email);
@@ -220,6 +223,9 @@ function insertSignUp(
   now: Date,
 ): Promise<Result<Created>> {
   return config.storage.transaction(async (tx): Promise<Result<Created>> => {
+    // "invited": before the existence read, so a known address with no
+    // invitation gets the same answer as a new one (plan 12b).
+    if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
     const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: row.email }]);
     if (existing) {
       if (existing.emailVerified) return fail("email_taken");
@@ -1006,6 +1012,10 @@ function applyReset(
     let minted: UserRow | null = null;
     let user: UserRow;
     if (!found) {
+      // The sign-up rule (plan 12b): a read, after the consume and before
+      // the session hook, so a refused user never reaches the hook. The stop
+      // undoes the consume, so the link stays usable.
+      await mayCreateUser(config, tx, email);
       minted = {
         id: newId(now),
         email,

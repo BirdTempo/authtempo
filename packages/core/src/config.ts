@@ -202,6 +202,13 @@ export interface AuthConfig {
   /** Off when absent or `false`. `{}` turns it on with the defaults. */
   organizations?: OrganizationsConfig | false;
   /**
+   * Who may become a user (plan 12b). `"open"` (default): anyone who proves
+   * an address or signs up. `"invited"`: only an address with a pending
+   * invitation; needs `organizations`. `false`: nobody new; existing users
+   * sign in as before. A refusal answers 403 `sign_up_closed`.
+   */
+  signUp?: "open" | "invited" | false;
+  /**
    * Password sign-in is on when set. `{}` turns it on with the defaults.
    * Absent: no password route, no form on the sign-in page, no
    * `api.password`.
@@ -535,6 +542,7 @@ export interface ResolvedConfig {
     invitationLinkBuilder: (token: string, organization: { slug: string; name: string }) => string;
     limits: ResolvedLimits;
   } | null;
+  signUp: "open" | "invited" | false;
   password: {
     hash: PasswordHashSeam;
     minLength: number;
@@ -793,6 +801,11 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       requireVerified,
     };
   }
+  const signUp = input.signUp ?? "open";
+  if (signUp !== "open" && signUp !== "invited" && signUp !== false)
+    throw new ConfigError('signUp must be "open", "invited", or false');
+  if (signUp === "invited" && !organizations)
+    throw new ConfigError("signUp invited needs organizations: an invitation is the only way in");
   // One source for the session cookie name: the trust cookie check of `totp` reads it too.
   const cookieName = input.cookieName ?? DEFAULT_SESSION_COOKIE;
   const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
@@ -826,6 +839,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
     handoff,
     organizations,
+    signUp,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
