@@ -37,6 +37,24 @@ release, install it with `pnpm add -D @authtempo/cli`, or run it with
   flag gets "Did you mean", and the command does not run.
 - The CLI writes no color and no terminal control.
 
+## init
+
+```bash
+authtempo init my-app --stack workers-d1
+```
+
+The stacks are `workers-d1`, `workers-postgres`, `node`, and `bun`. The
+files are those of the example apps of the docs (`examples/worker-d1`,
+`examples/worker-postgres`, `examples/node`), with five declared rewrites
+only: the name `my-app`, the exact version of each `@authtempo` package,
+the scaffold's own copy of `tsconfig.base.json`, the D1 test script
+without the repo's bundle proof, and the Bun start script `bun src/main.ts`.
+Each stack adds a `README.md`, a `.gitignore`, and `.dev.vars.example` or
+`.env.example`, which lists each secret with no value. `init` runs no
+install and writes no secret. A folder that holds any of its files stops
+the run, and nothing is written. Until the packages are on a registry, a
+scaffold installs only inside this workspace.
+
 ## migrate
 
 ```bash

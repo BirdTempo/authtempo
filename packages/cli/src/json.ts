@@ -53,3 +53,17 @@ export const MIGRATE_JSON_KEYS = {
   applied: true,
   copied: true,
 } as const satisfies Record<keyof MigrateJson, true>;
+
+/** `authtempo init --json`: the stack, the folder, each file written, and the next steps. */
+export interface InitJson {
+  stack: string;
+  dir: string;
+  files: string[];
+  next: string[];
+}
+export const INIT_JSON_KEYS = {
+  stack: true,
+  dir: true,
+  files: true,
+  next: true,
+} as const satisfies Record<keyof InitJson, true>;

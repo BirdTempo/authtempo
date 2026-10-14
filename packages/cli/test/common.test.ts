@@ -15,7 +15,7 @@ const helpFlags = (flags: readonly { flag: string }[]) =>
   flags.flatMap((f) => [...f.flag.matchAll(/--([a-z0-9.-]+)/g)].map((m) => m[1] ?? ""));
 
 /** The command table in the order of the root help. Each task of plan 11c adds its command. */
-const NAMES = ["migrate", "import", "keys"];
+const NAMES = ["init", "migrate", "import", "keys"];
 
 describe("the common rules (spec 19)", () => {
   it("has the commands of the tasks so far, and one help text for each", () => {

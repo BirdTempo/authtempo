@@ -2,6 +2,6 @@
   "$schema": "https://turbo.build/schema.json",
   "extends": ["//"],
   "tasks": {
-    "test": { "dependsOn": ["^build", "build"] }
+    "test": { "dependsOn": ["^build", "build", "authtempo-example-node#test"] }
   }
 }

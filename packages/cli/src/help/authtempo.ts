@@ -12,7 +12,11 @@ export const ROOT_HELP: HelpText = {
   ],
   examples: [
     // Only commands of the table: the common test holds each example's command to it.
-    // Tasks 7 and 8 of plan 11c add the examples of init and check.
+    // Task 8 of plan 11c adds the example of check.
+    {
+      line: "authtempo init my-app --stack workers-d1",
+      says: "Write a new app on Cloudflare Workers and D1 into the folder my-app.",
+    },
     {
       line: "authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --dry-run",
       says: "Print the report of a Supabase import, and write nothing.",
