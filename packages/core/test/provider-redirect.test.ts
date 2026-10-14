@@ -68,6 +68,18 @@ describe("providerFetch (plan 12b)", () => {
     const ok = recording(() => Response.json({ a: 1 }));
     expect((await providerFetch(ok.fetchFn)("https://p.example/x")).status).toBe(200);
   });
+
+  it("refuses an opaqueredirect answer, the status 0 of a browser-like runtime", async () => {
+    const r = recording(() => {
+      const res = new Response(null, { status: 200 });
+      Object.defineProperty(res, "type", { value: "opaqueredirect" });
+      Object.defineProperty(res, "status", { value: 0 });
+      return res;
+    });
+    const err = await providerFetch(r.fetchFn)("https://p.example/x").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProviderRedirectError);
+    expect((err as ProviderRedirectError).status).toBe(0);
+  });
 });
 
 describe("every provider call carries redirect manual and fails on a redirect (plan 12b)", () => {
@@ -82,7 +94,7 @@ describe("every provider call carries redirect manual and fails on a redirect (p
   });
 
   it("the GitHub user call", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = recording((url) => (url.endsWith("/access_token") ? token() : steer()));
     const result = await flow(
       authWith({ github: { clientId: "g", clientSecret: "s" }, fetch: r.fetchFn }),
@@ -91,11 +103,12 @@ describe("every provider call carries redirect manual and fails on a redirect (p
     expect(result).toMatchObject({ ok: false, code: "oauth_failed" });
     expect(r.seen.map((s) => s.redirect)).toEqual(["manual", "manual"]);
     expect(r.seen[1]?.url).toBe("https://api.github.com/user");
+    expect(log.mock.calls.some((c) => c.includes("ProviderRedirectError"))).toBe(true);
     vi.restoreAllMocks();
   });
 
   it("the GitHub emails call", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = recording((url) =>
       url.endsWith("/access_token")
         ? token()
@@ -113,11 +126,12 @@ describe("every provider call carries redirect manual and fails on a redirect (p
       ["https://api.github.com/user", "manual"],
       ["https://api.github.com/user/emails", "manual"],
     ]);
+    expect(log.mock.calls.some((c) => c.includes("ProviderRedirectError"))).toBe(true);
     vi.restoreAllMocks();
   });
 
   it("the LinkedIn user info call", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = recording((url) => (url.includes("/accessToken") ? token() : steer()));
     const result = await flow(
       authWith({ linkedin: { clientId: "l", clientSecret: "s" }, fetch: r.fetchFn }),
@@ -125,11 +139,12 @@ describe("every provider call carries redirect manual and fails on a redirect (p
     );
     expect(result).toMatchObject({ ok: false, code: "oauth_failed" });
     expect(r.seen[1]).toEqual({ url: "https://api.linkedin.com/v2/userinfo", redirect: "manual" });
+    expect(log.mock.calls.some((c) => c.includes("ProviderRedirectError"))).toBe(true);
     vi.restoreAllMocks();
   });
 
   it("an app's userinfo, also when the app asks to follow", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = recording((url) => (url.endsWith("/token") ? token() : steer()));
     const result = await flow(
       authWith({
@@ -157,11 +172,12 @@ describe("every provider call carries redirect manual and fails on a redirect (p
     );
     expect(result).toMatchObject({ ok: false, code: "oauth_failed" });
     expect(r.seen[1]).toEqual({ url: "https://acme.example/me", redirect: "manual" });
+    expect(log.mock.calls.some((c) => c.includes("ProviderRedirectError"))).toBe(true);
     vi.restoreAllMocks();
   });
 
   it("the OIDC discovery read", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = recording(steer);
     const auth = authWith({
       oidc: [
@@ -182,6 +198,7 @@ describe("every provider call carries redirect manual and fails on a redirect (p
     expect(r.seen).toEqual([
       { url: "https://idp.example/.well-known/openid-configuration", redirect: "manual" },
     ]);
+    expect(log.mock.calls.some((c) => c.includes("ProviderRedirectError"))).toBe(true);
     vi.restoreAllMocks();
   });
 

@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, customFetch, importPKCS8, jwtVerify, SignJWT } from "jose";
+import { PROVIDER_TIMEOUT_MS } from "../social/provider.js";
 
 export interface VerifyIdTokenInput {
   token: string;
@@ -38,7 +39,12 @@ export function createJoseJwtSeam(fetchFn: typeof fetch): JwtSeam {
   const jwks = (url: string) => {
     let set = sets.get(url);
     if (!set) {
-      set = createRemoteJWKSet(new URL(url), { [customFetch]: fetchFn });
+      // Core owns the deadline of the JWKS read, as of every provider call
+      // (plan 12b). Without it, jose stops the read after its own 5 s default.
+      set = createRemoteJWKSet(new URL(url), {
+        [customFetch]: fetchFn,
+        timeoutDuration: PROVIDER_TIMEOUT_MS,
+      });
       sets.set(url, set);
     }
     return set;

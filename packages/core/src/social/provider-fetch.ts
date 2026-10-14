@@ -2,7 +2,7 @@
  * A provider answered a redirect (plan 12b). Core follows no redirect on a
  * server-side call to a provider: a provider endpoint must not steer the
  * request to an internal address. The flow answers `oauth_failed`, and the
- * log names this error and the status, never a URL.
+ * log names this error, never a URL.
  */
 export class ProviderRedirectError extends Error {
   readonly status: number;
