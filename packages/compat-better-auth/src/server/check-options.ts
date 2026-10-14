@@ -350,8 +350,19 @@ const plugins: Rule = (v, p, out) => {
   }
 };
 
+/**
+ * Better Auth 1.7.2's per-provider sign-up keys (@better-auth/core
+ * dist/oauth2/oauth-provider.d.mts lines 238 and 242, read 2026-10-15).
+ * disableSignUp votes in core's one sign-up rule (signUpVotes, plan 12b).
+ * Core has no sign-up that the caller asks for, so disableImplicitSignUp is
+ * refused.
+ */
+const PROVIDER_SIGN_UP: Record<string, Rule> = {
+  disableSignUp: boolean,
+  disableImplicitSignUp: refused("core's signUp rule covers every method; see disableSignUp"),
+};
 /** google, github, and linkedin: core's presets take the id and the secret only. */
-const idAndSecretShape = object({ clientId: string, clientSecret: string });
+const idAndSecretShape = object({ clientId: string, clientSecret: string, ...PROVIDER_SIGN_UP });
 /** Core refuses a missing or empty id or secret at createAuth; refuse it here with the option's path. */
 const idAndSecret: Rule = (v, p, out) => {
   idAndSecretShape(v, p, out);
@@ -369,6 +380,7 @@ const apple = object({
   teamId: string,
   keyId: string,
   privateKey: string,
+  ...PROVIDER_SIGN_UP,
   clientSecret: refused(
     "core signs the Apple client secret itself from teamId, keyId, and privateKey",
   ),
@@ -394,7 +406,7 @@ const TOP: Record<string, Rule> = {
         refuse(
           out,
           `${p}[${i}].version`,
-          "core reads a row from before plan 12b as version 1; renumber from 1",
+          "core reads a row from before schema version 9 as version 1; renumber from 1",
         );
     });
   },
@@ -448,14 +460,8 @@ const TOP: Record<string, Rule> = {
     ),
     // Plan 12b Task 15: maps to core's password.requireVerified.
     requireEmailVerification: boolean,
-    // Better Auth's false answers { token: null, user } and still lets an
-    // unverified user sign in (dist/api/routes/sign-up.mjs lines 163 and 164,
-    // read 2026-10-15). Core opens no session at sign-up only while
-    // requireVerified is on, and then refuses that sign-in.
-    autoSignIn: only(
-      true,
-      "core opens a session at sign-up unless requireEmailVerification is true; set that for Better Auth's { token: null, user }",
-    ),
+    // checkOptions refuses false without requireEmailVerification: true (plan 12b).
+    autoSignIn: boolean,
     // Plan 12b: the one sign-up rule of core; checkOptions refuses a mix of methods.
     disableSignUp: boolean,
     revokeSessionsOnPasswordReset: only(true, "core ends every session on a reset"),
@@ -568,22 +574,37 @@ export function pluginOf<I extends CompatPlugin["id"]>(
 }
 
 /**
- * The disableSignUp of each configured method that creates a user (plan 12b).
- * `checkOptions` refuses a mixed list, and `mapOptions` maps a list of only
- * true to core's `signUp: false`: one list for both.
+ * The disableSignUp of each configured method that creates a user (plan 12b),
+ * by its option path. `checkOptions` refuses a mixed list, and `mapOptions`
+ * maps a list of only true to core's `signUp: false`: one list for both.
  */
-export function signUpVotes(options: BetterAuthOptions): boolean[] {
-  const votes: boolean[] = [];
+export function signUpVotes(options: BetterAuthOptions): { path: string; closed: boolean }[] {
+  const votes: { path: string; closed: boolean }[] = [];
   if (options.emailAndPassword?.enabled === true)
-    votes.push(options.emailAndPassword.disableSignUp === true);
+    votes.push({
+      path: "emailAndPassword",
+      closed: options.emailAndPassword.disableSignUp === true,
+    });
   const magic = pluginOf(options, "magic-link");
-  if (magic) votes.push(magic.options.disableSignUp === true);
+  if (magic)
+    votes.push({ path: "plugins[magic-link]", closed: magic.options.disableSignUp === true });
   const otp = pluginOf(options, "email-otp");
-  if (otp) votes.push(otp.options.disableSignUp === true);
+  if (otp) votes.push({ path: "plugins[email-otp]", closed: otp.options.disableSignUp === true });
   const social = options.socialProviders;
   if (typeof social === "object" && social !== null)
-    for (const p of Object.values(social)) if (p !== undefined) votes.push(false);
+    for (const [name, p] of Object.entries(social))
+      if (p !== undefined)
+        votes.push({
+          path: `socialProviders.${name}`,
+          closed: (p as { disableSignUp?: unknown } | null)?.disableSignUp === true,
+        });
   return votes;
+}
+
+/** True when every method that creates a user sets disableSignUp: core's signUp false. */
+export function signUpClosed(options: BetterAuthOptions): boolean {
+  const votes = signUpVotes(options);
+  return votes.length > 0 && votes.every((v) => v.closed);
 }
 
 /** The app schemes of trustedOrigins, which core's handoff redirects to. Core's isAppScheme is the one copy of the rule. */
@@ -603,20 +624,35 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
   if (options.secret === undefined && options.secrets === undefined)
     refuse(out, "secret", "required");
   // Plan 12b: with secret and secrets, version 1 is the value of secret.
+  // Core holds the same rule (config.ts resolveSecrets); this copy names the
+  // entry's path, where core's error names no entry.
   if (typeof options.secret === "string" && Array.isArray(options.secrets))
     options.secrets.forEach((e, i) => {
       if (e?.version === 1 && e.value !== options.secret)
         refuse(out, `secrets[${i}].value`, "version 1 must be the value of secret");
     });
+  // Better Auth 1.7.2's autoSignIn: false answers { token: null, user } and
+  // still lets an unverified user sign in. With requireEmailVerification it
+  // acts as that key alone (dist/api/routes/sign-up.mjs lines 163 and 164,
+  // read 2026-10-15), which the map keeps as core's requireVerified. Core
+  // opens no session at sign-up only while requireVerified is on (plan 12b).
+  const ep = options.emailAndPassword;
+  if (ep?.autoSignIn === false && ep.requireEmailVerification !== true)
+    refuse(
+      out,
+      "emailAndPassword.autoSignIn",
+      "core opens a session at sign-up unless requireEmailVerification is true; with it, an unverified sign-in is refused, as Better Auth does",
+    );
   // Plan 12b: core's signUp covers every method that creates a user. Each
-  // configured method votes; a social provider votes false, because Better
-  // Auth's per-provider disableSignUp is refused by the provider's shape.
+  // configured method and social provider votes with its disableSignUp.
   const votes = signUpVotes(options);
-  if (votes.some(Boolean) && !votes.every(Boolean))
+  const closed = votes.filter((v) => v.closed).map((v) => v.path);
+  const open = votes.filter((v) => !v.closed).map((v) => v.path);
+  if (closed.length > 0 && open.length > 0)
     refuse(
       out,
       "disableSignUp",
-      "core's signUp rule covers every method; set disableSignUp on every method or on none",
+      `core's signUp rule covers every method; set disableSignUp on every method or on none (true: ${closed.join(", ")}; not true: ${open.join(", ")})`,
     );
   if (typeof options.baseURL === "string") {
     let path = "";

@@ -273,22 +273,35 @@ These rules come from plan 12b.
   bad entry, and the error names it as `config: <reason>`.
 - The shim does not read the `BETTER_AUTH_SECRETS` environment variable: it
   maps options only. Pass the list as `secrets`.
-- `emailAndPassword.autoSignIn: false` is refused: core opens a session at
-  sign-up unless `requireEmailVerification` is true. Set that for Better
-  Auth's `{ token: null, user }`.
-- The sign-up answer is Better Auth's: a session for a new address, and
-  `USER_ALREADY_EXISTS` for a taken one. The shim sets core's
+- Core refuses a weak secret at start, where Better Auth only warns. Each
+  value needs 32 characters or more. The current value (`secrets[0]`, or
+  `secret` without `secrets`) also needs an estimated 100 bits of entropy.
+  Make a new one with `openssl rand -base64 32`. An older version needs only
+  the 32 characters, so an old secret of that length can stay as version 1
+  behind a new current value.
+- `emailAndPassword.autoSignIn: false` alone is refused: core opens a session
+  at sign-up unless `requireEmailVerification` is true. With
+  `requireEmailVerification: true` it is accepted, because Better Auth then
+  acts as with that key alone: no session at sign-up, and an unverified
+  sign-in is refused.
+- The sign-up answer is Better Auth's: a session for a new address unless
+  `requireEmailVerification` is true, and `USER_ALREADY_EXISTS` for a taken
+  one. The shim sets core's
   `password.uniformSignUp: false`, because core's uniform answer has no user
   for Better Auth's `{ token, user }`. So a caller can learn that an address
   has an account, as with Better Auth. Use core's `createAuth` for the
   uniform answer.
-- `disableSignUp` is accepted on `emailAndPassword`, `magicLink`, and
-  `emailOTP`. Core has one sign-up rule for every method. `true` on every
-  configured method that creates a user, with no social provider, maps to
-  core's `signUp: false`. `true` on some methods and not on others is refused
-  at `disableSignUp`: set it on every method or on none. A configured social
-  provider counts as `false`, because the provider's shape refuses Better
-  Auth's per-provider `disableSignUp`.
+- A sign-up of a new address writes rows and sends the verify mail. A taken
+  address does neither, so the answer time can show that the address has an
+  account, as in Better Auth.
+- `disableSignUp` is accepted on `emailAndPassword`, `magicLink`, `emailOTP`,
+  and each social provider. Core has one sign-up rule for every method.
+  `true` on every configured method and provider that creates a user maps to
+  core's `signUp: false`. `true` on some and not on others is refused at
+  `disableSignUp`, and the reason names both groups: set it on every method
+  or on none. A provider without the key counts as open.
+- A provider's `disableImplicitSignUp` is refused: core has no sign-up that
+  the caller asks for, so its one `signUp` rule covers every method.
 - With `signUp: false`, `api.signUpEmail` throws
   `EMAIL_PASSWORD_SIGN_UP_DISABLED` with 400, Better Auth's code and status.
   The client's `signUp.email` answers the same code with core's status, 403.

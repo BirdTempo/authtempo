@@ -89,8 +89,9 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 - A reset ends every session, where Better Auth kept the others.
 - `requireEmailVerification: true` maps to `password.requireVerified`. An unverified sign-in answers `EMAIL_NOT_VERIFIED` and gets a new verify link, also when `sendOnSignIn` is absent.
 - `secrets: [{ version, value }]` maps to core's `secrets`. Version 0 is refused: renumber from 1. With `secret`, version 1 must be the value of `secret`. The shim does not read `BETTER_AUTH_SECRETS`.
-- `autoSignIn: false` is refused. The sign-up answer stays Better Auth's: a session, and `USER_ALREADY_EXISTS` for a taken address.
-- `disableSignUp` maps to core's `signUp: false` only when every method that creates a user sets it and no social provider is configured. A mix is refused at start.
+- `autoSignIn: false` is refused unless `requireEmailVerification` is true. The sign-up answer stays Better Auth's: a session unless `requireEmailVerification` is true, and `USER_ALREADY_EXISTS` for a taken address.
+- Core refuses a secret under 32 characters, and a current secret under an estimated 100 bits of entropy, at start. Better Auth only warns.
+- `disableSignUp` maps to core's `signUp: false` only when every method and social provider that creates a user sets it. A mix is refused at start. A provider's `disableImplicitSignUp` is refused.
 - Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The callback URL at each provider is `<baseURL><basePath>/social/<provider>/callback`, not `/api/auth/callback/<provider>`.
 - The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.

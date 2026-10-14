@@ -76,7 +76,7 @@ describe("the shim and plan 12b", () => {
 
   it("refuses version 0 and a version 1 that is not secret, with the path", () => {
     expect(refusalsOf({ secret: TEST_SECRET, secrets: [{ version: 0, value: S2 }] })).toContain(
-      "- secrets[0].version: core reads a row from before plan 12b as version 1; renumber from 1",
+      "- secrets[0].version: core reads a row from before schema version 9 as version 1; renumber from 1",
     );
     expect(refusalsOf({ secret: TEST_SECRET, secrets: [{ version: 1, value: S2 }] })).toContain(
       "- secrets[0].value: version 1 must be the value of secret",
@@ -130,21 +130,35 @@ describe("the shim and plan 12b", () => {
     expect(r.token).toMatch(/^ts_/);
   });
 
-  it("refuses autoSignIn false with its reason, and maps requireEmailVerification (Task 15)", () => {
-    const text = refusalsOf({
+  it("refuses autoSignIn false alone, and accepts it with requireEmailVerification (Task 15)", () => {
+    const alone = refusalsOf({
       secret: TEST_SECRET,
-      emailAndPassword: {
-        enabled: true,
-        sendResetPassword: send,
-        autoSignIn: false,
-        requireEmailVerification: true,
-      },
+      emailAndPassword: { enabled: true, sendResetPassword: send, autoSignIn: false },
       emailVerification: { sendVerificationEmail: send },
     });
-    expect(text).toContain(
-      "- emailAndPassword.autoSignIn: core opens a session at sign-up unless requireEmailVerification is true; set that for Better Auth's { token: null, user }",
+    expect(alone).toContain(
+      "- emailAndPassword.autoSignIn: core opens a session at sign-up unless requireEmailVerification is true; with it, an unverified sign-in is refused, as Better Auth does",
     );
-    expect(text).not.toContain("requireEmailVerification:");
+    // Better Auth 1.7.2 treats the pair as requireEmailVerification alone
+    // (dist/api/routes/sign-up.mjs lines 163 and 164), which the map keeps.
+    const pair = {
+      ...passwordOptions({ autoSignIn: false, requireEmailVerification: true }),
+    };
+    expect(refusalsOf(pair as never)).toBe("no refusal");
+    expect(mapOptions(pair).config.password?.requireVerified).toBe(true);
+    expect(refusalsOf({ secret: TEST_SECRET, emailAndPassword: { autoSignIn: "no" } })).toContain(
+      "- emailAndPassword.autoSignIn: expected a boolean",
+    );
+  });
+
+  it("answers { token: null, user } for autoSignIn false with requireEmailVerification", async () => {
+    const auth = betterAuth(passwordOptions({ autoSignIn: false, requireEmailVerification: true }));
+    const r = await auth.api.signUpEmail({
+      body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+      headers: new Headers(),
+    });
+    expect(r.token).toBeNull();
+    expect(r.user.email).toBe("a@example.com");
   });
 
   it("maps disableSignUp on every method to signUp false, and refuses a mix", () => {
@@ -154,15 +168,39 @@ describe("the shim and plan 12b", () => {
     expect(
       mapOptions({ baseURL: BASE, secret: TEST_SECRET, database: memoryDatabase() }).config.signUp,
     ).toBeUndefined();
+    // Better Auth 1.7.2's per-provider disableSignUp votes too: every method and provider closed.
+    const closed = {
+      ...passwordOptions({ disableSignUp: true }),
+      socialProviders: {
+        google: { clientId: "g", clientSecret: "s", disableSignUp: true },
+        apple: { clientId: "a", teamId: "T", keyId: "K", privateKey: "P", disableSignUp: true },
+      },
+    };
+    expect(refusalsOf(closed as never)).not.toContain("disableSignUp");
+    expect(mapOptions(closed).config.signUp).toBe(false);
+    // A provider without the key is open, so the set is a mix.
     expect(
       refusalsOf({
         secret: TEST_SECRET,
         emailAndPassword: { enabled: true, sendResetPassword: send, disableSignUp: true },
         emailVerification: { sendVerificationEmail: send },
-        socialProviders: { google: { clientId: "g", clientSecret: "s" } },
+        socialProviders: {
+          google: { clientId: "g", clientSecret: "s", disableSignUp: true },
+          github: { clientId: "h", clientSecret: "s" },
+        },
       }),
     ).toContain(
-      "- disableSignUp: core's signUp rule covers every method; set disableSignUp on every method or on none",
+      "- disableSignUp: core's signUp rule covers every method; set disableSignUp on every method or on none (true: emailAndPassword, socialProviders.google; not true: socialProviders.github)",
+    );
+    expect(
+      refusalsOf({
+        secret: TEST_SECRET,
+        socialProviders: {
+          google: { clientId: "g", clientSecret: "s", disableImplicitSignUp: true },
+        },
+      }),
+    ).toContain(
+      "- socialProviders.google.disableImplicitSignUp: core's signUp rule covers every method; see disableSignUp",
     );
   });
 

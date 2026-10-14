@@ -343,6 +343,15 @@ export interface ForeignPlugin {
 export type BetterAuthPlugin = CompatPlugin | ForeignPlugin;
 
 /**
+ * Better Auth 1.7.2's per-provider `disableSignUp`, which votes in core's one
+ * sign-up rule (plan 12b). `disableImplicitSignUp` is refused, so it is not
+ * here and fails the compile in a literal.
+ */
+export interface ProviderSignUp {
+  disableSignUp?: boolean;
+}
+
+/**
  * Better Auth 1.7's option object, with the keys authtempo maps. Since plan
  * 9b no option type has an index signature, so a refused key in an object
  * literal of a plugin's options, or of an object that `satisfies` this type,
@@ -384,18 +393,18 @@ export interface BetterAuthOptions {
     expiresIn?: number;
   };
   socialProviders?: {
-    google?: { clientId: string; clientSecret: string };
+    google?: { clientId: string; clientSecret: string } & ProviderSignUp;
     apple?: {
       clientId: string;
       teamId?: string;
       keyId?: string;
       privateKey?: string;
       clientSecret?: string;
-    };
+    } & ProviderSignUp;
     /** Core's GitHub preset (plan 9c). */
-    github?: { clientId: string; clientSecret: string };
+    github?: { clientId: string; clientSecret: string } & ProviderSignUp;
     /** Core's LinkedIn preset (plan 9c). */
-    linkedin?: { clientId: string; clientSecret: string };
+    linkedin?: { clientId: string; clientSecret: string } & ProviderSignUp;
   };
   session?: {
     expiresIn?: number;

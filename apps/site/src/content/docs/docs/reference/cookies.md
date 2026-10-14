@@ -37,7 +37,8 @@ The `__Host-` prefix makes a browser refuse the session cookie unless it is `Sec
 
 The move lasts one release. Row 12j removes it in the next release.
 
-- A browser that calls no core route in this release keeps only `tempo_session`. A call to an app route that reads `auth.session` or `auth.caller` keeps it signed in, but sets no new cookie. After the next release, that browser is signed out.
+- A browser that calls no core route in this release keeps only `tempo_session`. A call to an app route that reads `auth.session`, `auth.caller`, or the shim's `api.getSession` keeps it signed in, but sets no new cookie. After the next release, that browser is signed out.
+- Core sets every cookie with `Secure`, whatever its name. A browser keeps no `Secure` cookie that a plain http page sets, except on `localhost`. So a staging or LAN host on plain http keeps no session, before and after this release. The `__Host-` prefix adds no new failure there. `cookieName` does not change this: core accepts any name, and sets `Secure` on each. Serve that host over https.
 - A social sign-in that is open during the deploy fails once with `invalid_token`. Core no longer reads the old binding cookie `tempo_session_oauth`, and the binding cookie lives 10 minutes. Start the sign-in again.
 
 ## The rules

@@ -11,7 +11,7 @@ import {
   type CompatDatabase,
   type CompatPlugin,
 } from "../types.js";
-import { appSchemes, pluginOf, signUpVotes } from "./check-options.js";
+import { appSchemes, pluginOf, signUpClosed } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
 import { compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
@@ -213,9 +213,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     ...(options.secrets !== undefined ? { secrets: [...options.secrets] } : {}),
     // Plan 12b: disableSignUp on every method that creates a user is core's
     // signUp false. checkOptions refuses a mix, so no other list reaches here.
-    ...(signUpVotes(options).length > 0 && signUpVotes(options).every(Boolean)
-      ? { signUp: false as const }
-      : {}),
+    ...(signUpClosed(options) ? { signUp: false as const } : {}),
     trustedOrigins: Array.isArray(options.trustedOrigins) ? [...options.trustedOrigins] : [],
     ...(options.appName !== undefined ? { appName: options.appName } : {}),
     ...(options.authtempo?.appURL !== undefined ? { appURL: options.authtempo.appURL } : {}),
