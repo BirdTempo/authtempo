@@ -326,12 +326,15 @@ export interface TwoFactorPending {
 
 /**
  * The origin that a challenge row holds. A row of plan 9f holds
- * `via: "password"` and no `from`, so it reads as a password sign-in. Any
- * other `via` reads as `password`: the narrowest list is not the default.
+ * `via: "password"` and no `from`, so it reads as a password sign-in. An
+ * unknown `via` reads as `magic_link`, the narrowest list. Only the engine
+ * writes the row, so an unknown `via` is a damaged row, and it gets no
+ * email method.
  */
 export function challengeOrigin(data: unknown): ChallengeOrigin {
   const d = data as { via?: unknown; from?: unknown } | null;
-  const via = typeof d?.via === "string" && GATED_VIA.has(d.via) ? (d.via as GatedVia) : "password";
+  const via =
+    typeof d?.via === "string" && GATED_VIA.has(d.via) ? (d.via as GatedVia) : "magic_link";
   return { via, from: d?.from === "reset" ? "reset" : "sign-in" };
 }
 

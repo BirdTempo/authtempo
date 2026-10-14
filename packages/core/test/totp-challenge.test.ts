@@ -192,14 +192,14 @@ describe("the methods of a challenge (plan 12c)", () => {
     ).toEqual(["totp", "email"]);
   });
 
-  it("reads the origin of a plan 9f row as a password sign-in, and an unknown via as password", () => {
+  it("reads the origin of a plan 9f row as a password sign-in, and an unknown via as magic_link", () => {
     expect(challengeOrigin({ via: "password", ip: null })).toEqual({
       via: "password",
       from: "sign-in",
     });
-    expect(challengeOrigin(null)).toEqual({ via: "password", from: "sign-in" });
+    expect(challengeOrigin(null)).toEqual({ via: "magic_link", from: "sign-in" });
     expect(challengeOrigin({ via: "handoff", from: "reset" })).toEqual({
-      via: "password",
+      via: "magic_link",
       from: "reset",
     });
     expect(challengeOrigin({ via: "social" })).toEqual({ via: "social", from: "sign-in" });
@@ -207,9 +207,13 @@ describe("the methods of a challenge (plan 12c)", () => {
 
   it("opens the session with the challenge's via, and session.afterCreate sees it", async () => {
     const vias: string[] = [];
+    const before: string[] = [];
     const auth = totpAuth({
       hooks: {
         session: {
+          beforeCreate: (e) => {
+            before.push(e.via);
+          },
           afterCreate: (e) => {
             vias.push(e.via);
           },
@@ -237,12 +241,14 @@ describe("the methods of a challenge (plan 12c)", () => {
       now,
     );
     vias.length = 0;
+    before.length = 0;
     const v = await verify(auth, {
       challenge: pending.twoFactor.challenge,
       code: await codeNow(auth, secret),
     });
     expect(v).toMatchObject({ ok: true, value: { next: "/x" } });
     expect(vias).toEqual(["magic_link"]);
+    expect(before).toEqual(["magic_link"]);
   });
 });
 

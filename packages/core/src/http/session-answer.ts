@@ -46,7 +46,7 @@ export function twoFactorJson(p: TwoFactorPending): Response {
   });
 }
 
-/** The challenge page of a browser flow (plan 12c), on `baseURL`, as the password sign-in's form flow uses. */
+/** The challenge page of a browser flow (plan 12c), on `baseURL`, as the challenge page's own redirect builds it (`routes/totp.ts`). */
 export function challengePageUrl(config: ResolvedConfig, challenge: string): string {
   return `${config.baseURL}${config.basePath}/totp/challenge?challenge=${encodeURIComponent(challenge)}`;
 }
