@@ -39,6 +39,7 @@ it("signs in by an email code on D1: the row holds a keyed hash, a wrong code co
   expect(JSON.parse((await codeRow(email, "email-otp"))?.data ?? "{}")).toEqual({ attempts: 1 });
   const v = await client.emailOtp.verify({ email, code });
   if (!v.ok) throw new Error(v.code);
+  if ("twoFactor" in v.value) throw new Error("no session: a second-factor challenge");
   expect(v.value.user).toMatchObject({ email, emailVerified: true });
   const me = await SELF.fetch(`${BASE}/me`, {
     headers: { authorization: `Bearer ${v.value.token}` },
@@ -106,6 +107,7 @@ it("resets a password by an email code on D1: a weak password spends the code, a
     password: "a new long password",
   });
   if (!r.ok) throw new Error(r.code);
+  if ("twoFactor" in r.value) throw new Error("no session: a second-factor challenge");
   expect(r.value.user).toMatchObject({ email, emailVerified: true });
   const old = await SELF.fetch(`${BASE}/me`, { headers: { authorization: `Bearer ${oldToken}` } });
   expect(old.status).toBe(401);

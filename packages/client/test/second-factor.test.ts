@@ -64,6 +64,29 @@ describe("the second factor through the client (plan 12c)", () => {
     expect(v.ok && v.value.token.startsWith("ts_")).toBe(true);
   });
 
+  it("passes a gated reset with the trust token of an earlier verify", async () => {
+    const server = makeServer({ password: { hash: FAST } });
+    const { fetch, browser } = await verifiedBrowser(server);
+    const code = await totpOn(server, browser);
+    const native = createClient({ baseURL: BASE_URL, fetch, credentials: "omit" });
+    const first = await native.password.signIn({ email: EMAIL, password: PW });
+    if (!first.ok || !("twoFactor" in first.value)) throw new Error("no challenge");
+    const v = await native.totp.verify({
+      challenge: first.value.twoFactor.challenge,
+      code: await code(),
+      trustDevice: true,
+    });
+    if (!v.ok || v.value.trustDevice === null) throw new Error("no trust token");
+    await native.password.requestReset({ email: EMAIL });
+    const r = await native.password.reset({
+      token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
+      password: "a brand new long password",
+      trustDevice: v.value.trustDevice.token,
+    });
+    if (!r.ok || "twoFactor" in r.value) throw new Error("the reset answered no session");
+    expect(r.value.token.startsWith("ts_")).toBe(true);
+  });
+
   it("answers a gated magic link with the challenge", async () => {
     const server = makeServer({ password: { hash: FAST } });
     const { browser } = await verifiedBrowser(server);
