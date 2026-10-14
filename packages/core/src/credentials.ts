@@ -1,7 +1,7 @@
 /**
  * The credential facts for an SDK (plan 11d, spec 20): the token prefixes,
- * the JWT `typ` values, the cookie names, the bearer and cookie rule, the
- * compact JWS check on Web Crypto, and the resource rule. A resource server
+ * the JWT `typ` values, the cookie names and their rule, the bearer and
+ * cookie rule, the compact JWS check on Web Crypto, and the resource rules. A resource server
  * verifies with this code, so no supplier holds the check.
  */
 export {
@@ -14,6 +14,7 @@ export {
   SESSION_JWT_TYPE,
   SESSION_TOKEN_PREFIX,
   type SessionCookieNames,
+  sessionCookieNames,
 } from "./primitives/credentials.js";
 export {
   type DecodedJws,
@@ -23,4 +24,4 @@ export {
   type PublicJwk,
   verifyJws,
 } from "./primitives/jwk.js";
-export { resourceOf } from "./primitives/resource.js";
+export { isResourceUrl, resourceOf } from "./primitives/resource.js";

@@ -5,6 +5,7 @@ import {
   API_TOKEN_PREFIX,
   DEFAULT_COOKIE_NAME,
   decodeJws,
+  isResourceUrl,
   JWS_RE,
   LEGACY_COOKIE_NAME,
   readBearer,
@@ -12,6 +13,7 @@ import {
   resourceOf,
   SESSION_JWT_TYPE,
   SESSION_TOKEN_PREFIX,
+  sessionCookieNames,
   verifyJws,
 } from "../src/credentials.js";
 import { mintSessionJwt, publicKeySet } from "../src/engine/jwt.js";
@@ -32,7 +34,8 @@ interface PackageFs {
 const FS_MODULE = "node:fs";
 
 // Compile-time checks. tsc fails on an unused @ts-expect-error, so the two
-// marked lines fail the typecheck when RoutePath widens to string.
+// marked lines fail the typecheck when RoutePath widens to string, and the
+// two plain lines fail when RoutePath narrows to never.
 const sessionPath: RoutePath<"GET"> = "/session";
 const signOutPath: RoutePath<"POST"> = "/sign-out";
 // @ts-expect-error A path that ROUTES does not hold is not a RoutePath.
@@ -133,6 +136,25 @@ describe("the SDK entries of core (plan 11d)", () => {
     expect(readSessionToken({ cookieName: DEFAULT_COOKIE_NAME }, legacy)).toBe("ts_bearer");
   });
 
+  it("names the old cookie for the default name only", () => {
+    const names = { cookieName: DEFAULT_COOKIE_NAME, legacyCookieName: LEGACY_COOKIE_NAME };
+    expect(sessionCookieNames()).toEqual(names);
+    expect(sessionCookieNames(undefined)).toEqual(names);
+    expect(sessionCookieNames(DEFAULT_COOKIE_NAME)).toEqual(names);
+    expect(sessionCookieNames("app_session")).toEqual({
+      cookieName: "app_session",
+      legacyCookieName: null,
+    });
+    // The config resolves the two names with this one rule.
+    const h = makeAuth();
+    expect([h.config.cookieName, h.config.legacyCookieName]).toEqual([
+      DEFAULT_COOKIE_NAME,
+      LEGACY_COOKIE_NAME,
+    ]);
+    const custom = makeAuth({ cookieName: "app_session" });
+    expect(custom.config.legacyCookieName).toBeNull();
+  });
+
   it("finds the resource that a URL falls under, the longest path first", () => {
     const resources = [
       "https://api.example.com/mcp",
@@ -147,5 +169,20 @@ describe("the SDK entries of core (plan 11d)", () => {
     expect(resourceOf(resources, "https://files.example.com/a/b")).toBe(resources[2]);
     expect(resourceOf(resources, "https://other.example.com/mcp")).toBeNull();
     expect(resourceOf(resources, "not a url")).toBeNull();
+  });
+
+  it("skips a malformed resource, so a caller with no check gets null and no throw", () => {
+    expect(isResourceUrl("https://api.example.com/mcp")).toBe(true);
+    for (const bad of [
+      "not a url",
+      "ftp://api.example.com",
+      "https://a.example.com/?q=1",
+      "https://a.example.com/#x",
+      7,
+    ])
+      expect(isResourceUrl(bad)).toBe(false);
+    const resources = ["not a url", "https://api.example.com/?q=1", "https://api.example.com/mcp"];
+    expect(resourceOf(resources, "https://api.example.com/mcp/tools")).toBe(resources[2]);
+    expect(resourceOf(["not a url"], "https://api.example.com/mcp")).toBeNull();
   });
 });

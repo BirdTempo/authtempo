@@ -18,7 +18,8 @@ import {
 // Moved to primitives/credentials.ts (plan 11d); still exported here.
 export { API_TOKEN_PREFIX };
 
-const API_TOKEN_RE = /^tk_[A-Za-z0-9_-]{43}$/;
+// Built from the prefix, so the pattern and the prefix cannot drift (the prefix has no regex character).
+const API_TOKEN_RE = new RegExp(`^${API_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
 const HINT_LENGTH = 8;
 const DAY_MS = 86_400_000;
 const NAME_MAX = 80;

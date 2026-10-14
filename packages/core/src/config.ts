@@ -27,7 +27,7 @@ import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
-import { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
 import {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -38,6 +38,7 @@ import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.j
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
+import { sessionCookieNames } from "./primitives/credentials.js";
 import type { JwsAlg } from "./primitives/jwk.js";
 import {
   createKeyring,
@@ -48,6 +49,7 @@ import {
   SECRET_VERSION_MAX,
   type SecretVersion,
 } from "./primitives/keyring.js";
+import { isResourceUrl } from "./primitives/resource.js";
 import { hasControlChar } from "./primitives/text.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
@@ -845,8 +847,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError('signUp must be "open", "invited", or false');
   if (signUp === "invited" && !organizations)
     throw new ConfigError("signUp invited needs organizations: an invitation is the only way in");
-  // One source for the session cookie name: the trust cookie check of `totp` reads it too.
-  const cookieName = input.cookieName ?? DEFAULT_SESSION_COOKIE;
+  // One source for the session cookie names: the trust cookie check of `totp` reads them too.
+  const { cookieName, legacyCookieName } = sessionCookieNames(input.cookieName);
   const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
   return {
     basePath,
@@ -862,7 +864,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     clientIp: input.clientIp ?? workersClientIp,
     clock,
     cookieName,
-    legacyCookieName: cookieName === DEFAULT_SESSION_COOKIE ? LEGACY_SESSION_COOKIE : null,
+    legacyCookieName,
     session: resolveSessionConfig(input.session),
     magicLink: {
       ttlMinutes: input.magicLink?.ttlMinutes ?? 15,
@@ -1313,21 +1315,6 @@ const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
   refreshTtlDays: true,
   codeTtlMinutes: true,
 };
-
-function isResourceUrl(value: unknown): boolean {
-  if (typeof value !== "string" || value.length > 2048 || value.includes("#")) return false;
-  try {
-    const u = new URL(value);
-    return (
-      (u.protocol === "https:" || u.protocol === "http:") &&
-      u.search === "" &&
-      u.username === "" &&
-      u.password === ""
-    );
-  } catch {
-    return false;
-  }
-}
 
 function integerIn(path: string, value: number, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max)

@@ -49,7 +49,8 @@ export function sessionMaxAgeSeconds(config: ResolvedConfig): number {
   const days = Math.min(config.session.ttlDays, config.session.absoluteDays ?? Infinity);
   return Math.floor((days * DAY_MS) / 1000);
 }
-const TOKEN_RE = /^ts_[A-Za-z0-9_-]{43}$/;
+// Built from the prefix, so the pattern and the prefix cannot drift (the prefix has no regex character).
+const TOKEN_RE = new RegExp(`^${SESSION_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
 
 export interface SessionInput {
   userId: string;

@@ -38,6 +38,22 @@ export interface SessionCookieNames {
   legacyCookieName?: string | null;
 }
 
+/**
+ * The session cookie names of a `cookieName` setting: the old name is read
+ * only when the name is the default (plan 12b). The one copy of this rule:
+ * the config and every SDK call it (plan 11d).
+ */
+export function sessionCookieNames(cookieName?: string): {
+  cookieName: string;
+  legacyCookieName: string | null;
+} {
+  const name = cookieName ?? DEFAULT_COOKIE_NAME;
+  return {
+    cookieName: name,
+    legacyCookieName: name === DEFAULT_COOKIE_NAME ? LEGACY_COOKIE_NAME : null,
+  };
+}
+
 /** The value of `Authorization: Bearer <value>`, or null. The one copy of the bearer rule. */
 export function readBearer(request: Pick<Request, "headers">): string | null {
   const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");
@@ -48,8 +64,8 @@ export function readBearer(request: Pick<Request, "headers">): string | null {
  * The cookie wins over the bearer header, so a web page cannot be overridden by a stray header.
  * Public from `@authtempo/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
  * the session token with this function, so the cookie and bearer rule has one copy. It reads
- * only `cookieName`, `legacyCookieName`, and the headers, so the shim passes `{ cookieName }`
- * and `{ headers }`. Since plan 12b it also reads the old cookie name when the config names
+ * only `cookieName`, `legacyCookieName`, and the headers, so the shim passes
+ * `{ cookieName, legacyCookieName }` and `{ headers }`. Since plan 12b it also reads the old cookie name when the config names
  * one (`legacyCookieName`), for one release.
  */
 export function readSessionToken(
