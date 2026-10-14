@@ -82,15 +82,15 @@ more request headers go in the fifth.
 | --- | --- | --- |
 | `client.session()` | `GET /session` | `ClientResult<PublicSession \| null>`. A 401 gives `null`, not a failure. |
 | `client.signOut()` | `POST /sign-out` | `ClientResult<{ ok: true }>` |
-| `client.readRedirectError(url)` | none | The `ErrorCode` of `?auth_error=<code>`, `unexpected` for a code that core's table lacks, or `null` |
+| `client.readRedirectError(url)` | none | The code of `?auth_error=<code>`: an `ErrorCode` or an `OAuthErrorCode`, because core's OAuth sign-in route sends a code of `OAUTH_ERRORS`. `unexpected` for a code that neither table has, or `null` |
 | `client.social.startURL({ provider, next? })` | `GET /social/:provider/start` (built, not fetched) | `ClientResult<string>`; `invalid_body` with status 0 for a name that core refuses |
-| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `ClientResult<{ url }>` |
-| `client.signIn.password({ email, password, trustDevice?, next? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `ClientResult<PasswordSignIn>` |
+| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `ClientResult<{ url }>`; `unexpected` with status 0 when the default `navigate` finds no `location` |
+| `client.signIn.password({ email, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `ClientResult<PasswordSignIn>`. The second factor step has `methods`, and `verify` takes `{ code }`, `{ backupCode }`, or `{ emailCode }`. For the passkey method, call `secondFactor.passkey.verify` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `ClientResult<{ sent: true }>` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `ClientResult<PublicSession \| TwoFactorChallengeJSON>` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `ClientResult<PasskeySummaryJSON>` |
 | `client.passkey.signIn({ autofill? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing |
-| `client.passkey.abort()` | none | Ends a waiting autofill sign-in, which answers `cancelled` |
+| `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `ClientResult<PasskeySummaryJSON[]>` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `ClientResult<{ ok: true }>` |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `ClientResult<{ token } & PublicSession>` |
@@ -202,6 +202,20 @@ without `oauth`.
 `revoke` deletes the consent and every refresh token of the client, and
 answers `{ ok: true }` also when the client had none. An access token that
 the client holds lives on to its `exp`, at most `oauth.accessTtlMinutes`.
+
+## The OAuth client
+
+`@authtempo/client/oauth` signs a third-party app in to an authtempo OAuth provider. The app can be a native app, a CLI with a loopback redirect, or the server side of a web app. A single-page app on its own registered origin can use it too.
+
+1. Register the app once with `registerOAuthClient({ issuer, clientName, redirectUris })`, or have the owner register it. Keep the `clientId`.
+2. `createOAuthClient({ issuer, clientId, redirectUri, resource, scopes })`. A single-page app passes `pending: browserPendingStore()`.
+3. Open the URL of `authorizeURL()`. The person signs in and allows the app.
+4. Pass the URL that the redirect brings back to `handleRedirect(url)`. It checks `state` and `iss`, then answers the tokens.
+5. `refresh(refreshToken)` answers new tokens. `revoke(refreshToken)` ends the grant.
+
+Every answer is an `OAuthResult`: `{ ok: true, value }` or `{ ok: false, code, status }`, where `code` is an `OAuthClientCode`. A `state` or an `iss` that no sign-in of this client started answers `redirect_mismatch`.
+
+A single-page app on another origin needs that origin in a redirect URI of its client. The token request is a form post with no other header, so the browser sends no preflight. The register, revoke, and userinfo endpoints have no CORS for another origin.
 
 ## Organizations
 

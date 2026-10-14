@@ -46,6 +46,10 @@ failure. `signIn()` is single flight. A second call while one runs gets
 the result of the first call, and the opener runs once. `startUrl(challenge)` returns the start URL for apps that open
 the browser themselves.
 
+PKCE and the parser of the returned URL live in `@authtempo/client/oauth`
+(plan 11d). This package re-exports `makePkce`, `webCrypto`, `base64Url`,
+`parseReturnedUrl`, and the type `HandoffCrypto` for one release.
+
 ## The opener contract
 
 An opener has one method: `open(url, redirect)`.

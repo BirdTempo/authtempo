@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./oauth": {
+      "types": "./dist/oauth/index.d.ts",
+      "default": "./dist/oauth/index.js"
     }
   },
   "files": [
