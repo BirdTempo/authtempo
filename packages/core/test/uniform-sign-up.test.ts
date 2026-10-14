@@ -228,8 +228,12 @@ describe("the uniform sign-up (plan 12b)", () => {
     await seedUser(storage, "ada@example.com", true);
     const known = await signUp(auth, "ada@example.com");
     const fresh = await signUp(auth, "new@example.com");
-    expect(await known.json()).toEqual({ sent: true });
-    expect(await fresh.json()).toEqual({ sent: true });
+    // The status, the headers (no cookie), and the body, not only the body (Task 9 review L2).
+    const knownBytes = await bytes(known);
+    expect(knownBytes).toEqual(await bytes(fresh));
+    expect(knownBytes.status).toBe(200);
+    expect(knownBytes.body).toBe(JSON.stringify({ sent: true }));
+    expect(known.headers.getSetCookie()).toEqual([]);
     expect(mail.map((m) => m.to)).toEqual(["ada@example.com", "new@example.com"]);
   });
 

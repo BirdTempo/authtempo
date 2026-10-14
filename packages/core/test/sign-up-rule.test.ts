@@ -208,6 +208,33 @@ describe("the sign-up rule (plan 12b)", () => {
     expect(v.ok && v.value.signedIn !== null).toBe(true);
   });
 
+  it("refuses the password sign-in of an unproved invited address until the verify link (Task 9 review M1)", async () => {
+    for (const uniformSignUp of [true, false]) {
+      const h = pwHandle({ hash: FAST, uniformSignUp }, { signUp: "invited", organizations: {} });
+      await invite(h as never, NEW, DAY);
+      const creds = { email: NEW, password: "correct horse battery" };
+      expect((await h.auth.handle(post("/auth/password/sign-up", creds))).status).toBe(200);
+      // A stranger who knows the invited address signs up with a password of their own.
+      const early = await h.auth.handle(post("/auth/password/sign-in", creds));
+      expect({ status: early.status, body: await early.json() }).toEqual({
+        status: 403,
+        body: { error: "email_unverified" },
+      });
+      expect(early.headers.get("set-cookie")).toBeNull();
+      expect(await h.storage.findMany("session", [])).toHaveLength(0);
+      // The owner of the address opens the link, and then the sign-in opens a session.
+      const v = await verifyPasswordEmail(h.config, {
+        token: h.mails.at(-1)?.token ?? "",
+        ip: null,
+        userAgent: null,
+      });
+      expect(v.ok).toBe(true);
+      const late = await h.auth.handle(post("/auth/password/sign-in", creds));
+      expect(late.status).toBe(200);
+      expect(late.headers.get("set-cookie")).toMatch(/__Host-tempo_session=ts_/);
+    }
+  });
+
   it("refuses a social create under invited when the provider address is unverified", async () => {
     const unproved = await viaSocial("invited", NEW, { verified: false, invited: true });
     expect(unproved.r).toMatchObject({ ok: false, code: "sign_up_closed" });

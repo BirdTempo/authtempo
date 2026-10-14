@@ -396,12 +396,14 @@ opens no session and no challenge, so only a person who knows the password
 learns that the address is unverified. A new verify link goes out first. It
 counts on `password-resend:email:<email>`, the key of the resend route, so
 at most 3 links go per 15 minutes. Over the limit, no mail goes, and the
-answer stays `email_unverified`. The other pending links of the address go
-first, so one link at a time is live. With `uniformSignUp: false`, a
-sign-up with the key on writes the user and the password, mails the link,
-and opens no session: it answers 200 `{ user, verifyRequired: true }` with
-no cookie, and the session hooks do not run. The verify link signs the
-person in.
+answer stays `email_unverified`. Under `signUp: "invited"` the sign-in does
+the same check, whatever `requireVerified` says: a stranger who signs up at
+an invited address cannot sign in before the address is proved. The other
+pending links of the address go first, so one link at a time is live.
+With `uniformSignUp: false`, a sign-up with the key on writes the user and
+the password, mails the link, and opens no session: it answers 200
+`{ user, verifyRequired: true }` with no cookie, and the session hooks do
+not run. The verify link signs the person in.
 
 `uniformSignUp` (plan 12b, ASVS 5.0.0 6.3.8). Every sign-up that passes the
 body check, the policy, and the breach check answers 200 `{ sent: true }`
