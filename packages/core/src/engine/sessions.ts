@@ -157,32 +157,6 @@ export async function prepareSession(
   return { input: await patchedInput(config, storage, draft, patch) };
 }
 
-/**
- * The two steps of a sign-in whose user resolution writes before the
- * session: the magic link and the social sign-in (plan 9d, fix round 2).
- * The resolver calls `before` with the user as the flow will leave it, before
- * its first write; the flow's `after` calls `write`. A retry calls `before`
- * again, and the newer answer wins.
- */
-export function sessionSteps(
-  config: ResolvedConfig,
-  open: Omit<SessionOpen, "user">,
-): {
-  before(tx: StorageAdapter, user: UserRow): Promise<void>;
-  write(tx: StorageAdapter): Promise<{ token: string; session: SessionRow }>;
-} {
-  let prepared: PreparedSession | null = null;
-  return {
-    async before(tx, user) {
-      prepared = await prepareSession(config, { ...open, user }, tx);
-    },
-    write(tx) {
-      if (!prepared) throw new Error("authtempo: the session hook step did not run");
-      return writeSession(config, prepared, tx);
-    },
-  };
-}
-
 /** The write step of `openSession`: the session row of a `prepareSession` answer. */
 export function writeSession(
   config: ResolvedConfig,

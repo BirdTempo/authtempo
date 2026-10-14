@@ -500,14 +500,15 @@ export interface SignInChallenge extends TwoFactorPending {
 }
 
 /**
- * The two steps of a gated sign-in (plan 12c): `sessionSteps` of plan 9d
+ * The two steps of a gated sign-in (plan 12c): the session steps of plan 9d,
  * with the gate. `before` runs in the resolution's transaction with the user
  * as the resolution leaves it, before its first write. It reads the gate;
  * with no challenge it runs the session hook. `write` writes the session or
  * the challenge, inside the same transaction, so the challenge commits with
  * the claim and the identity link. A claimant and a minted user have no
- * factor row, so they always get a session. A retry calls `before` again, and
- * the newer reads win. `gate: false` (the method's key is off) skips the reads.
+ * factor row, so they always get a session. A retry calls `before` again,
+ * and the newer reads win. `gate: false` (the method's key is off) skips the
+ * reads.
  */
 export function gatedSteps(
   config: ResolvedConfig,

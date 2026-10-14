@@ -481,4 +481,55 @@ describe("the gated sign-ins on the routes (plan 12c)", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
     expect(((await res.json()) as { twoFactor?: unknown }).twoFactor).toBeDefined();
   });
+
+  /** A trusted device through the routes: the `name=value` of the trust cookie and the clear token of the body. */
+  async function trusted(h: Handle): Promise<{ cookie: string; token: string }> {
+    const f = await enrolled(h, await verifiedUser(h));
+    const verify = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: await challenge(h),
+        code: await f.code(),
+        trustDevice: true,
+      }),
+    );
+    const trust = cookieNamed(verify, "tempo_totp_trust");
+    const body = (await verify.json()) as { trustDevice?: { token: string } };
+    if (!trust || !body.trustDevice) throw new Error("no trust token");
+    return { cookie: pair(trust), token: body.trustDevice.token };
+  }
+
+  it("opens the magic link session on a trusted device: the form with the trust cookie, JSON with the body token", async () => {
+    const h = pwHandle({ hash: FAST });
+    const t = await trusted(h);
+    const res = await h.auth.handle(
+      form("/auth/magic-link/verify", `token=${await magicToken(h)}`, { cookie: t.cookie }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${BASE_URL}/inbox`);
+    expect(cookieNamed(res, "tempo_session")).toMatch(/^tempo_session=ts_/);
+    const json = await h.auth.handle(
+      post("/auth/magic-link/verify", { token: await magicToken(h), trustDevice: t.token }),
+    );
+    expect(json.status).toBe(200);
+    expect(cookieNamed(json, "tempo_session")).toMatch(/^tempo_session=ts_/);
+  });
+
+  it("opens the email code session on a trusted device: the body token, and the trust cookie", async () => {
+    const h = pwHandle({ hash: FAST });
+    const t = await trusted(h);
+    const codeOf = async () => {
+      await h.auth.handle(post("/auth/otp/request", { email: EMAIL }));
+      return /\b(\d{6})\b/.exec(h.mails.at(-1)?.text ?? "")?.[1] ?? "";
+    };
+    const body = await h.auth.handle(
+      post("/auth/otp/verify", { email: EMAIL, code: await codeOf(), trustDevice: t.token }),
+    );
+    expect(body.status).toBe(200);
+    expect(cookieNamed(body, "tempo_session")).toMatch(/^tempo_session=ts_/);
+    const cookie = await h.auth.handle(
+      post("/auth/otp/verify", { email: EMAIL, code: await codeOf() }, { cookie: t.cookie }),
+    );
+    expect(cookie.status).toBe(200);
+    expect(cookieNamed(cookie, "tempo_session")).toMatch(/^tempo_session=ts_/);
+  });
 });
