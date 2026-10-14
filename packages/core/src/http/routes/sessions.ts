@@ -38,9 +38,20 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const token = readSessionToken(config, ctx.request);
         if (token) await destroySession(config, token);
-        return json({ ok: true }, 200, {
+        const res = json({ ok: true }, 200, {
           "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite),
         });
+        // The cookie move (plan 12b): with both names, the router keeps the
+        // old cookie, and `token` is the new one. End the old token's session
+        // too, and clear the old name, or the next request signs in again
+        // under it. A sibling subdomain can set `tempo_session` too.
+        const legacy = config.legacyCookieName;
+        const old = legacy === null ? null : readCookie(ctx.request, legacy);
+        if (legacy !== null && old !== null) {
+          if (old !== token) await destroySession(config, old);
+          res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
+        }
+        return res;
       },
     },
   ];

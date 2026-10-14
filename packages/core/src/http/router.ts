@@ -1,3 +1,4 @@
+import { CAPTCHA_HEADER } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
@@ -94,7 +95,9 @@ async function moveLegacyCookie(
       );
     }
   }
-  res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
+  // Sign-out clears the old name itself; one clear is enough.
+  if (!sets.some((c) => c.startsWith(`${legacy}=`)))
+    res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
   return res;
 }
 
@@ -130,8 +133,8 @@ export function createRouter(
           status: 204,
           headers: {
             "access-control-allow-methods": "GET, POST",
-            // x-captcha-response: the captcha token of plan 12b, from a trusted app origin.
-            "access-control-allow-headers": "content-type, authorization, x-captcha-response",
+            // CAPTCHA_HEADER: the captcha token of plan 12b, from a trusted app origin.
+            "access-control-allow-headers": `content-type, authorization, ${CAPTCHA_HEADER}`,
             "access-control-max-age": "600",
           },
         }),

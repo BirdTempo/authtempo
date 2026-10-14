@@ -150,6 +150,46 @@ describe("the session cookie name (plan 12b)", () => {
     expect(await resolveSession(config, s.token)).toBeNull();
   });
 
+  it("signs out both sessions when the two names hold different tokens", async () => {
+    const { auth, config } = setup();
+    for (const id of ["u1", "u2"])
+      await config.storage.create("user", {
+        id,
+        email: `${id}@example.com`,
+        emailVerified: true,
+        name: null,
+        image: null,
+        createdAt: new Date("2026-10-14T00:00:00.000Z"),
+        updatedAt: new Date("2026-10-14T00:00:00.000Z"),
+      });
+    const fresh = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    // An old session of the same browser, or one a sibling subdomain planted.
+    const old = await createSession(config, { userId: "u2", ip: null, userAgent: null });
+    // Both live before the sign-out, so the checks after it can fail.
+    expect(await resolveSession(config, fresh.token)).not.toBeNull();
+    expect(await resolveSession(config, old.token)).not.toBeNull();
+    const res = await auth.handle(
+      new Request(`${BASE}/auth/sign-out`, {
+        method: "POST",
+        headers: {
+          cookie: `__Host-tempo_session=${fresh.token}; tempo_session=${old.token}`,
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie()).toEqual([
+      "__Host-tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+      "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+    ]);
+    expect(await resolveSession(config, fresh.token)).toBeNull();
+    expect(await resolveSession(config, old.token)).toBeNull();
+    // The next request with the old cookie alone signs in as nobody.
+    const next = await auth.handle(get("/session", `tempo_session=${old.token}`));
+    expect(next.status).toBe(401);
+  });
+
   it("reads no old cookie for an app that names its own cookie", async () => {
     const { auth, config } = setup({ cookieName: "sid" });
     expect(config.legacyCookieName).toBeNull();
