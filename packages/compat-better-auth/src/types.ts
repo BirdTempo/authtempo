@@ -476,6 +476,17 @@ export type RequiresVerification<O extends BetterAuthOptions> =
       : true
     : false;
 
+/**
+ * The token type of `signUpEmail` by the flag. An indexed access, not a
+ * conditional type, so that TypeScript measures `RV` as covariant: an
+ * instance with `RV` false (token `string`) is assignable to the wide
+ * `BetterAuthInstance` with `RV` true (token `string | null`), plan 12b Task 15.
+ */
+interface SignUpTokenOf {
+  false: string;
+  true: string | null;
+}
+
 export interface CompatServerApi<TF extends boolean = false, RV extends boolean = false> {
   /** `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f). */
   getSession(input: {
@@ -488,7 +499,7 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
   signUpEmail(input: {
     body: { email: string; password: string; name: string; image?: string; callbackURL?: string };
     headers?: Headers;
-  }): Promise<{ token: RV extends true ? string | null : string; user: User }>;
+  }): Promise<{ token: SignUpTokenOf[`${RV}`]; user: User }>;
   /** `callbackURL` and `rememberMe: false` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
   signInEmail(input: {
     body: { email: string; password: string; callbackURL?: string; rememberMe?: boolean };

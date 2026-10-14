@@ -111,3 +111,16 @@ export async function requireVerifiedOffCalls() {
   const token: string = up.token;
   return token;
 }
+// The worker example's pattern (examples/worker/src/compat.ts): an instance of
+// literal options, stored in and returned as the wide BetterAuthInstance.
+let cached: BetterAuthInstance | null = null;
+export function wideReturn(): BetterAuthInstance {
+  if (cached) return cached;
+  cached = betterAuth({
+    ...consumeri,
+    emailAndPassword: { enabled: true, minPasswordLength: 12 },
+  });
+  return cached;
+}
+export const wideFromVerified: BetterAuthInstance = rv;
+export const wideFromOff: BetterAuthInstance = rvOff;
