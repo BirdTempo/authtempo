@@ -10,9 +10,9 @@ import { execFileSync } from "node:child_process";
 // packages/cli/vitest.config.ts (15, Task 3). Plan 12b adds
 // packages/captcha-turnstile (16, Task 10), packages/breach-check (17,
 // Task 11), and examples/pbkdf2-probe (18, Task 13). Plan 11d adds
-// packages/verify (19, Task 9). Raise this number when a package adds a
-// vitest config.
-const MINIMUM = 19;
+// packages/verify (19, Task 9), then packages/react and examples/react (21,
+// Task 10). Raise this number when a package adds a vitest config.
+const MINIMUM = 21;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",
