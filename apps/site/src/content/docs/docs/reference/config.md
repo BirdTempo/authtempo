@@ -202,7 +202,7 @@ Another key of `oauth` is refused.
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `oauth.resources` | string list | required | 1 to 20 distinct absolute `http` or `https` URLs with no query, fragment, or credentials. |
-| `oauth.scopes` | map of scope to text | none | A scope is 1 to 64 printable ASCII characters with no space, quote, or backslash. Its text is 1 to 200 characters. |
+| `oauth.scopes` | map of scope to text | the built-in scopes `openid`, `profile`, `email`, and `offline_access` | A built-in name is refused. A scope is 1 to 64 printable ASCII characters with no space, quote, or backslash. Its text is 1 to 200 characters. |
 | `oauth.registration` | object | `{ dynamic: true, cimd: true }` | See the two registration keys. |
 | `oauth.fetch` | fetch | none | Required while `registration.cimd` is on. It must refuse private addresses. |
 | `oauth.consentPage` | function of `ConsentPageInput` | `defaultConsentPage` | Answers the markup of the consent page. |

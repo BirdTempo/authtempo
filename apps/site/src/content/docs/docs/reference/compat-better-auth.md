@@ -66,7 +66,7 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 | Better Auth default | On authtempo |
 | --- | --- |
 | The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Off Workers, set `advanced.ipAddress.ipAddressHeaders`. |
-| An absolute `callbackURL` on any trusted origin | Only the origin of `tempoAuth.appURL` keeps its path. Any other answers 403. |
+| An absolute `callbackURL` on any trusted origin | Only the origin of `authtempo.appURL` keeps its path. Any other answers 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour | It lives as long as the magic link. |
 | `trustedOrigins` takes a function and wildcards | Each entry is an exact origin or an app scheme. |

@@ -28,6 +28,7 @@ authtempo-import <provider> --users <file> --formats <the seam's list> --postgre
 | `<provider>` | `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, or `cognito`. Name exactly one. |
 | The input files | `--users`, `--hashes`, `--organizations`, and the other file options of the source. The guide of each source names them. |
 | `--formats` | Required, with no default. The `formats` list of the app's `createLegacyPasswordHash`, joined by commas, or `none`. Only `cognito` may leave it out. |
+| `--legacy-verify` | States that the app sets `password.legacyVerify`. `cognito` needs it. |
 | `--dry-run` | Prints the report of a real run, and writes nothing. |
 | `--postgres <url>` | Writes core's tables on Postgres. |
 | `--postgres <url> --better-auth` | Writes the Better Auth 1.7 tables of an app on the compatibility package. |

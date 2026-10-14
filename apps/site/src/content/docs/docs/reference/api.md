@@ -32,7 +32,7 @@ sources:
 
 ## The in-process api
 
-Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code }`. No call checks the `Origin` header, so a server route that calls one must check its own caller.
+Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, status }`. A failed `Result` of `hook_refused` also carries `message`. No call checks the `Origin` header, so a server route that calls one must check its own caller.
 
 | Group | Calls |
 | --- | --- |

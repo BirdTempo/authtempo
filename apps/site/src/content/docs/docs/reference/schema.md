@@ -19,15 +19,15 @@ sources:
 
 ## The versions
 
-| Version | Migration | Tables it adds | Plan |
-| --- | --- | --- | --- |
-| 1 | `0001_schema_v1` | `ta_meta`, `ta_user`, `ta_identity`, `ta_session`, `ta_verification`, `ta_passkey` | 2 |
-| 2 | `0002_schema_v2` | `ta_organization`, `ta_member`, `ta_invitation` | 6 |
-| 3 | `0003_schema_v3` | `ta_limit`, and an index on the active organization of a session | 6b |
-| 4 | `0004_schema_v4` | `ta_password` | 8 |
-| 5 | `0005_schema_v5` | `ta_api_token` | 8b |
-| 6 | `0006_schema_v6` | `ta_totp`, `ta_trusted_device` | 9f |
-| 7 | `0007_schema_v7` | `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, `ta_oauth_token` | 9g |
+| Version | Migration | Tables it adds |
+| --- | --- | --- |
+| 1 | `0001_schema_v1` | `ta_meta`, `ta_user`, `ta_identity`, `ta_session`, `ta_verification`, `ta_passkey` |
+| 2 | `0002_schema_v2` | `ta_organization`, `ta_member`, `ta_invitation` |
+| 3 | `0003_schema_v3` | `ta_limit`, and an index on the active organization of a session |
+| 4 | `0004_schema_v4` | `ta_password` |
+| 5 | `0005_schema_v5` | `ta_api_token` |
+| 6 | `0006_schema_v6` | `ta_totp`, `ta_trusted_device` |
+| 7 | `0007_schema_v7` | `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, `ta_oauth_token` |
 
 `SCHEMA_VERSION` of `@authtempo/core` is 7.
 

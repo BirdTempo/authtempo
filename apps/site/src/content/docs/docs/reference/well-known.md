@@ -26,6 +26,7 @@ The issuer is `baseURL` plus `basePath`, such as `https://api.example.com/auth`.
 | `/.well-known/oauth-authorization-server` | The same document | A form that some clients read |
 | `/.well-known/openid-configuration` and `/.well-known/openid-configuration<basePath>` | The same document | OpenID Connect Discovery 1.0 |
 | `/.well-known/oauth-protected-resource<resource path>` | The metadata of one `oauth.resources` entry | RFC 9728 |
+| `/.well-known/oauth-protected-resource` | The metadata of the first `oauth.resources` entry on the origin | A form that some clients read |
 
 - The routes `GET /.well-known/oauth-authorization-server` and `GET /.well-known/openid-configuration` under `basePath` answer the same document, for clients that read it under the issuer.
 - A resource with the path `/mcp` has its document at `/.well-known/oauth-protected-resource/mcp`.

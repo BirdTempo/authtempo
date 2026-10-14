@@ -29,7 +29,7 @@ The cookie names `tempo_session` and `tempo_totp_trust` keep the old product nam
 
 - `cookieName` renames the session cookie. The binding cookie is the session cookie name plus `_oauth`.
 - `totp.trustCookieName` renames the trust cookie.
-- A sign-out, a reset, and a claim clear the session cookie with `Max-Age=0`.
+- A sign-out clears the cookie. After a reset or a claim, the next `GET /session` clears it.
 
 ## The rules
 

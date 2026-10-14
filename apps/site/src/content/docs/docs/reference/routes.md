@@ -74,7 +74,7 @@ These routes exist in every deployment.
 | Needs | Nothing |
 | Input | A form or JSON `token` |
 | Answer | A form: 302 to `appURL` plus `next`, with the cookie. JSON: `{ user, session }` with the cookie |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Social sign-in
 
@@ -96,7 +96,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Needs | The binding cookie |
 | Input | `?code&state`, or `?error` from the provider |
 | Answer | 302 to `appURL` plus `next`, with the session cookie. A failure redirects to `/?auth_error=<code>` |
-| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-social-apple-callback"><code>POST /social/apple/callback</code></h3>
 
@@ -105,7 +105,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Needs | The binding cookie; the Origin check is skipped |
 | Input | A form `code`, `state`, and `user?` from Apple |
 | Answer | The same as the GET callback |
-| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Passkeys
 
@@ -145,7 +145,7 @@ These routes exist when the config sets `passkey`.
 | Needs | Nothing |
 | Input | JSON `{ response }` |
 | Answer | `{ user, session }` with the session cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="get-passkeys"><code>GET /passkeys</code></h3>
 
@@ -176,7 +176,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | JSON `{ email, password, name? }` |
 | Answer | `{ token, user, session }` with the cookie. The address stays unverified until the mailed link |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-password-sign-in"><code>POST /password/sign-in</code></h3>
 
@@ -185,7 +185,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | JSON `{ email, password, trustDevice?, next? }` |
 | Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt } }` with no cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="get-password-verify"><code>GET /password/verify</code></h3>
 
@@ -203,7 +203,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | A form or JSON `token` |
 | Answer | A form: 302 to `appURL` with the cookie. JSON: `{ verified: true }`, with the cookie when the address was unverified |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-password-verify-resend"><code>POST /password/verify/resend</code></h3>
 
@@ -239,7 +239,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | A form or JSON `token` and `password` |
 | Answer | A form: 302 to `next` with the cookie, or back to the form. JSON: `{ token, user, session }` with the cookie |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-password-change"><code>POST /password/change</code></h3>
 
@@ -315,7 +315,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | Nothing |
 | Input | JSON `{ challenge, code }` or `{ challenge, backupCode }`, and `trustDevice?` |
 | Answer | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="get-totp-challenge"><code>GET /totp/challenge</code></h3>
 
@@ -333,7 +333,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | Nothing |
 | Input | A form `challenge`, `code` or `backupCode`, and `trustDevice=1` |
 | Answer | 302 to `next` with the cookies; back to the form on a wrong code |
-| Errors | [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Email codes
 
@@ -355,7 +355,7 @@ These routes exist unless the config sets `emailOtp: false`. The two reset route
 | Needs | Nothing |
 | Input | JSON `{ email, code }` |
 | Answer | `{ token, user, session }` with the cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 <h3 id="post-otp-reset-request"><code>POST /otp/reset/request</code></h3>
 
@@ -373,7 +373,7 @@ These routes exist unless the config sets `emailOtp: false`. The two reset route
 | Needs | Nothing |
 | Input | JSON `{ email, code, password }` |
 | Answer | `{ token, user, session }` with the cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Handoff
 
@@ -413,11 +413,11 @@ These routes exist when the config sets `handoff`.
 | Needs | Nothing |
 | Input | JSON `{ code, verifier }` |
 | Answer | `{ token, user, session }` as a bearer answer, with no cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`not_found`](/docs/reference/errors/#not_found) |
 
 ## Organizations
 
-These routes exist when the config sets `organizations`. Every write also answers the hook codes and the limit codes.
+These routes exist when the config sets `organizations`. A write that runs an organization hook also answers the hook codes. The Errors row of each route names its codes.
 
 <h3 id="post-organizations-create"><code>POST /organizations/create</code></h3>
 
@@ -453,7 +453,7 @@ These routes exist when the config sets `organizations`. Every write also answer
 | Needs | A session; rank `owner` |
 | Input | JSON `{ organizationId }` |
 | Answer | `{ ok: true }` |
-| Errors | [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="get-organizations-members"><code>GET /organizations/members</code></h3>
 
@@ -525,7 +525,7 @@ These routes exist when the config sets `organizations`. Every write also answer
 | Needs | A session and the invited, verified address |
 | Input | JSON `{ token }` |
 | Answer | `{ organization, member }` |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`email_unverified`](/docs/reference/errors/#email_unverified), [`already_member`](/docs/reference/errors/#already_member), [`member_limit`](/docs/reference/errors/#member_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`email_unverified`](/docs/reference/errors/#email_unverified), [`already_member`](/docs/reference/errors/#already_member), [`member_limit`](/docs/reference/errors/#member_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="post-organizations-invitations-decline"><code>POST /organizations/invitations/decline</code></h3>
 
@@ -534,7 +534,7 @@ These routes exist when the config sets `organizations`. Every write also answer
 | Needs | Nothing: the token is the credential |
 | Input | JSON `{ token }` |
 | Answer | `{ ok: true }` |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired) |
 
 <h3 id="post-organizations-active"><code>POST /organizations/active</code></h3>
 
@@ -543,7 +543,7 @@ These routes exist when the config sets `organizations`. Every write also answer
 | Needs | A session; a membership |
 | Input | JSON `{ organizationId }`, a string or `null` |
 | Answer | `{ user, session }` with `session.activeOrganizationId` |
-| Errors | [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 ## API tokens
 
