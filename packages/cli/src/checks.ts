@@ -39,7 +39,13 @@ export const CHECK_CODES = {
   mount: { fail: ["mount_missing", "mount_wrong_answer"], warn: [], skip: [] },
   origin_rule: { fail: ["origin_not_enforced"], warn: [], skip: ["no_mount"] },
   cookie: {
-    fail: ["cookie_missing", "cookie_not_httponly", "cookie_not_secure", "cookie_path_not_root"],
+    fail: [
+      "cookie_missing",
+      "cookie_not_httponly",
+      "cookie_not_secure",
+      "cookie_path_not_root",
+      "cookie_no_samesite",
+    ],
     warn: ["cookie_samesite_none"],
     skip: ["no_mount"],
   },
@@ -50,6 +56,7 @@ export const CHECK_CODES = {
       "jwks_private_part",
       "jwks_bad_key",
       "jwks_no_cache_control",
+      "jwks_cache_not_public",
     ],
     warn: [],
     skip: ["no_mount", "jwt_mint_off"],
@@ -107,6 +114,28 @@ async function jsonOf(res: Response): Promise<Record<string, unknown> | null> {
   } catch {
     return null;
   }
+}
+
+/** The SameSite values of a cookie (RFC 6265bis). A cookie with none of them gets the browser's default. */
+const SAME_SITE = ["lax", "strict", "none"] as const;
+
+/**
+ * A cache-control that lets a verifier and a shared cache hold the key set:
+ * `public` and a `max-age` above 0, as core sends (`public, max-age=300`,
+ * packages/core/src/http/routes/jwt.ts). A ruling of the review of plan 11c
+ * Task 8: `no-store`, `private`, or `max-age=0` makes each verifier fetch
+ * the keys on each token.
+ */
+function sharedCache(value: string): boolean {
+  const parts = value.split(",").map((p) => p.trim().toLowerCase());
+  const maxAge = parts.find((p) => p.startsWith("max-age="))?.slice("max-age=".length);
+  return (
+    parts.includes("public") &&
+    !parts.includes("no-store") &&
+    maxAge !== undefined &&
+    /^\d+$/.test(maxAge) &&
+    Number(maxAge) > 0
+  );
 }
 
 /** A public signing key as core serves it: a kid, EdDSA or ES256, and use sig. */
@@ -210,12 +239,24 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
         add("cookie", "fail", "cookie_not_secure", `the cookie ${name} has no Secure`);
       else if (!attrs.includes("path=/"))
         add("cookie", "fail", "cookie_path_not_root", `the cookie ${name} has no Path=/`);
+      else if (!SAME_SITE.some((v) => attrs.includes(`samesite=${v}`)))
+        add(
+          "cookie",
+          "fail",
+          "cookie_no_samesite",
+          `the cookie ${name} has no SameSite of Lax, Strict, or None; core sets SameSite`,
+        );
       else {
         if (attrs.includes("samesite=none"))
           warnings.push(
             `cookie_samesite_none: the cookie ${name} is SameSite=None; keep it only for an app on another site`,
           );
-        add("cookie", "pass", null, `the cookie ${name} is HttpOnly, Secure, and Path=/`);
+        add(
+          "cookie",
+          "pass",
+          null,
+          `the cookie ${name} is HttpOnly, Secure, Path=/, and has SameSite`,
+        );
       }
     }
 
@@ -247,6 +288,13 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
         );
       else if (!cache)
         add("jwks", "fail", "jwks_no_cache_control", "the key set has no cache-control");
+      else if (!sharedCache(cache))
+        add(
+          "jwks",
+          "fail",
+          "jwks_cache_not_public",
+          `the key set has cache-control: ${cache}; core sends public, max-age=300, so each verifier can hold the keys`,
+        );
       else
         add(
           "jwks",

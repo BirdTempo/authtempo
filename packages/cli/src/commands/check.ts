@@ -8,11 +8,11 @@ import { CHECK_HELP } from "../help/check.js";
 import type { CheckJson } from "../json.js";
 import { baseOf, basePathOf, timeoutOf } from "../net.js";
 import { describeUrl, printJson } from "../output.js";
-import { findWranglerConfig, readD1Project, readD1VersionText, wranglerOf } from "../seams/d1.js";
+import { readableVersion, readD1Version } from "../schema-version.js";
+import { findWranglerConfig, readD1Project, wranglerOf } from "../seams/d1.js";
 import { openPostgres } from "../seams/postgres.js";
 import { readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
-import { readableVersion } from "./migrate.js";
 
 const OPTIONS = {
   ...COMMON_OPTIONS,
@@ -45,7 +45,8 @@ export const checkCommand: Command = {
       Object.keys(OPTIONS),
     );
     if (positionals.length > 1) throw new UsageError(`unexpected argument ${positionals[1]}`);
-    const base = baseOf(positionals[0]);
+    // check sends no secret: a remote http base is the failure base_not_https, not a usage error.
+    const base = baseOf(positionals[0], { allowHttp: true });
     const basePath = basePathOf(v["base-path"]);
     const timeoutMs = timeoutOf(v.timeout);
     const target = oneOf("target", v.target, ["d1", "postgres"] as const);
@@ -69,8 +70,10 @@ export const checkCommand: Command = {
         ctx.err(`connecting to ${describeUrl(url)}`);
         const pg = openPostgres(url, 1);
         try {
-          // The rule of migrate (readableVersion): a version that is no whole number stops the run.
-          return readableVersion(await pg.schemaVersionText(), 0);
+          // The rule of migrate: a version that is no whole number, or no version row over
+          // applied migrations, stops the run (exit 2), because this CLI cannot place the database.
+          const applied = await pg.appliedCore();
+          return readableVersion(await pg.schemaVersionText(), applied.length);
         } finally {
           await pg.close();
         }
@@ -84,7 +87,7 @@ export const checkCommand: Command = {
       const t = { ...project, remote: v.remote === true };
       readSchema = async () => {
         ctx.err(`reading the ${t.remote ? "remote" : "local"} D1 database ${t.database}`);
-        return readableVersion(await readD1VersionText(ctx, t), 0, t.migrationsTable);
+        return (await readD1Version(ctx, t)).version;
       };
     }
     ctx.err(`reading ${base}${basePath} and ${base}/.well-known/`);

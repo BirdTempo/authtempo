@@ -54,9 +54,12 @@ export function isLocalHost(hostname: string): boolean {
  * The base URL of a deployment: an https origin with no path, query, or
  * credentials. http is for a host of this machine only (review of plan 11c
  * Task 3): a command sends a secret to this origin, and plain http to another
- * host shows the secret to every network on the way.
+ * host shows the secret to every network on the way. `allowHttp` is for
+ * `check` only (review of plan 11c Task 8): it sends no secret, and it
+ * reports a remote http base as the failure `base_not_https` (exit 1), so a
+ * person sees the fault as a check result and not as a usage error.
  */
-export function baseOf(value: string | undefined): string {
+export function baseOf(value: string | undefined, o: { allowHttp?: boolean } = {}): string {
   if (value === undefined)
     throw new UsageError("name the base URL of the deployment, such as https://api.example.com");
   let u: URL;
@@ -74,7 +77,7 @@ export function baseOf(value: string | undefined): string {
     u.password !== ""
   )
     throw new UsageError(`${value} must be an http or https origin with no path`);
-  if (u.protocol === "http:" && !isLocalHost(u.hostname))
+  if (u.protocol === "http:" && !isLocalHost(u.hostname) && o.allowHttp !== true)
     throw new UsageError(
       `${value} must use https: http is for localhost, 127.0.0.1, or [::1] only`,
     );

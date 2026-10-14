@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertFreshBuild, linesOf, runBin } from "./support/bin.js";
-import { OPERATOR_SECRET, startExampleWorker } from "./support/example-worker.js";
+import { OPERATOR_SECRET, START_LIMIT_MS, startExampleWorker } from "./support/example-worker.js";
 
 // The binary against `wrangler dev` of examples/worker (plan 11c): the real
 // network path that the Workers-pool test of the example cannot run.
@@ -8,7 +8,7 @@ let worker: Awaited<ReturnType<typeof startExampleWorker>> | null = null;
 beforeAll(async () => {
   assertFreshBuild();
   worker = await startExampleWorker(8797);
-}, 180_000);
+}, START_LIMIT_MS + 30_000);
 afterAll(async () => {
   await worker?.stop();
 });

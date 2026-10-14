@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ALL_CHECK_CODES,
@@ -8,7 +9,10 @@ import {
 } from "../src/checks.js";
 import { CHECK_JSON_KEYS } from "../src/json.js";
 import { main } from "../src/main.js";
-import { fakeIo } from "./support/fake-io.js";
+import { adapterD1Dir } from "../src/seams/d1.js";
+import { SCHEMA_VERSION } from "../src/version.js";
+import { type FakeIo, fakeIo } from "./support/fake-io.js";
+import { freshDatabase } from "./support/pg.js";
 
 const BASE = "https://api.example.com";
 const COOKIE = "tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
@@ -29,8 +33,8 @@ const signOut =
     new Headers(init.headers).has("origin")
       ? Response.json({ error: "origin_not_trusted" }, { status: 403 })
       : signedOut(cookie);
-const keySet = (keys: unknown[], cache = true) =>
-  Response.json({ keys }, { headers: cache ? { "cache-control": "public, max-age=300" } : {} });
+const keySet = (keys: unknown[], cache: string | null = "public, max-age=300") =>
+  Response.json({ keys }, { headers: cache === null ? {} : { "cache-control": cache } });
 const KEY = { kty: "OKP", crv: "Ed25519", x: "AAAA", kid: "K1", alg: "EdDSA", use: "sig" };
 const doc =
   (issuer = `${BASE}/auth`, jwks = `${BASE}/auth/jwks`) =>
@@ -66,6 +70,14 @@ async function check(args: string[], routes = healthy(), base = BASE) {
     io.stdout.length === 1 ? observe(JSON.parse(io.stdout[0] ?? "") as CheckReport) : null;
   return { code, io, report };
 }
+/** check reads public documents only (spec 19): no request of a run carries a credential. */
+function expectNoCredential(io: FakeIo): void {
+  expect(io.requests.length).toBeGreaterThan(0);
+  for (const r of io.requests) {
+    expect(r.headers.has("cookie"), r.url).toBe(false);
+    expect(r.headers.has("authorization"), r.url).toBe(false);
+  }
+}
 const result = (r: CheckReport | null, id: CheckId) => r?.checks.find((c) => c.id === id);
 
 describe("authtempo check (spec 19)", () => {
@@ -84,6 +96,11 @@ describe("authtempo check (spec 19)", () => {
     ]);
     expect(io.stdout.at(-1)).toBe("checks: 7 run, 6 pass, 0 fail, 1 skip");
     expect(io.stderr[0]).toBe(`reading ${BASE}/auth and ${BASE}/.well-known/`);
+  });
+
+  it("sends no cookie and no authorization header", async () => {
+    const { io } = await check([]);
+    expectNoCredential(io);
   });
 
   it("prints one JSON document with --json", async () => {
@@ -139,6 +156,12 @@ describe("authtempo check (spec 19)", () => {
         "cookie_path_not_root",
       ],
       [
+        "no SameSite",
+        (r) => r.set("POST /auth/sign-out", signOut(COOKIE.replace("; SameSite=Lax", ""))),
+        "cookie",
+        "cookie_no_samesite",
+      ],
+      [
         "a key set of 500",
         (r) => r.set("GET /auth/jwks", () => Response.json({ error: "internal" }, { status: 500 })),
         "jwks",
@@ -159,9 +182,27 @@ describe("authtempo check (spec 19)", () => {
       ],
       [
         "no cache-control",
-        (r) => r.set("GET /auth/jwks", () => keySet([KEY], false)),
+        (r) => r.set("GET /auth/jwks", () => keySet([KEY], null)),
         "jwks",
         "jwks_no_cache_control",
+      ],
+      [
+        "cache-control no-store",
+        (r) => r.set("GET /auth/jwks", () => keySet([KEY], "no-store")),
+        "jwks",
+        "jwks_cache_not_public",
+      ],
+      [
+        "cache-control public, max-age=0",
+        (r) => r.set("GET /auth/jwks", () => keySet([KEY], "public, max-age=0")),
+        "jwks",
+        "jwks_cache_not_public",
+      ],
+      [
+        "cache-control max-age=300 with no public",
+        (r) => r.set("GET /auth/jwks", () => keySet([KEY], "max-age=300")),
+        "jwks",
+        "jwks_cache_not_public",
       ],
       [
         "one document only",
@@ -247,24 +288,12 @@ describe("authtempo check (spec 19)", () => {
     expect(r.io.stderr).toContain(`warning: ${r.report?.warnings[0]}`);
   });
 
-  it("fails an http base off this machine, and passes http on this machine", async () => {
-    // The command refuses http to another host as a usage error (net.ts, review of plan 11c
-    // Task 3), so the https check of runChecks serves a caller that gives the base itself.
+  it("fails an http base off this machine with exit 1, and passes http on this machine", async () => {
+    // check sends no secret, so a remote http base is a failed check, not a usage error
+    // (review of plan 11c Task 8). keys rotate keeps the refusal: test/keys.test.ts.
     const cli = await check([], healthy(), "http://api.example.com");
-    expect(cli.code).toBe(2);
-    expect(cli.io.stderr[0]).toBe(
-      "http://api.example.com must use https: http is for localhost, 127.0.0.1, or [::1] only",
-    );
-    const r = observe(
-      await runChecks({
-        base: "http://api.example.com",
-        basePath: "/auth",
-        fetch: deployment(healthy()),
-        timeoutMs: 1000,
-        schemaVersion: 7,
-      }),
-    );
-    expect(result(r, "https")).toMatchObject({ status: "fail", code: "base_not_https" });
+    expect(cli.code).toBe(1);
+    expect(result(cli.report, "https")).toMatchObject({ status: "fail", code: "base_not_https" });
     expect(
       result((await check([], healthy(), "http://127.0.0.1:8787")).report, "https")?.status,
     ).toBe("pass");
@@ -312,6 +341,85 @@ describe("authtempo check (spec 19)", () => {
     const io = fakeIo({ fetch: deployment(healthy()) });
     expect(await main(["check", BASE, "--url-env", "DATABASE_URL"], io)).toBe(2);
     expect(io.stderr[0]).toBe("--url-env needs --target postgres");
+  });
+
+  it("reads the schema version of Postgres with --target postgres", async () => {
+    const db = await freshDatabase();
+    try {
+      const run = async (cmd: string[]) => {
+        const io = fakeIo({ env: { DATABASE_URL: db.url }, fetch: deployment(healthy()) });
+        const code = await main(cmd, io);
+        return { code, io };
+      };
+      const empty = await run(["check", BASE, "--target", "postgres", "--json"]);
+      expect(empty.code).toBe(1);
+      const emptyReport = observe(JSON.parse(empty.io.stdout[0] ?? "") as CheckReport);
+      expect(result(emptyReport, "schema_version")).toMatchObject({
+        status: "fail",
+        code: "schema_missing",
+      });
+      expectNoCredential(empty.io);
+      expect(empty.io.stdout.join("\n")).not.toContain(db.url);
+
+      expect((await run(["migrate", "--target", "postgres"])).code).toBe(0);
+      const current = await run(["check", BASE, "--target", "postgres"]);
+      expect(current.code).toBe(0);
+      expect(current.io.stdout.at(-1)).toBe("checks: 7 run, 7 pass, 0 fail, 0 skip");
+
+      // Applied migrations with no version row: migrate stops on it, so check stops the same way.
+      await db.sql`DELETE FROM ta_meta WHERE key = 'schema_version'`;
+      const lost = await run(["check", BASE, "--target", "postgres"]);
+      expect(lost.code).toBe(2);
+      expect(lost.io.stdout).toEqual([]);
+      expect(lost.io.stderr.at(-1)).toMatch(
+        /^stopped: ta_meta has no schema_version, but ta_migrations holds \d+ applied migration\(s\)/,
+      );
+    } finally {
+      await db.drop();
+    }
+  });
+
+  it("reads the schema version of D1 with --target d1, through the project's wrangler", async () => {
+    // A fake wrangler: `d1 execute --json` answers the rows of each SELECT, as wrangler 4.148.0 prints them.
+    const own = readdirSync(adapterD1Dir()).filter((f) => f.endsWith(".sql"));
+    const d1 = (version: string | null) => {
+      const files: Record<string, string> = {
+        "/work/wrangler.jsonc": JSON.stringify({
+          d1_databases: [{ binding: "DB", database_name: "cli-d1" }],
+        }),
+        "/work/node_modules/.bin/wrangler": "",
+      };
+      for (const f of own) files[`${adapterD1Dir()}/${f}`] = "";
+      const io = fakeIo({
+        files,
+        fetch: deployment(healthy()),
+        run: async (_command, args) => {
+          const sql = args[args.indexOf("--command") + 1] ?? "";
+          const rows = sql.includes("d1_migrations")
+            ? own.map((name) => ({ name }))
+            : version === null
+              ? []
+              : [{ value: version }];
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ results: rows, success: true }]),
+            stderr: "",
+          };
+        },
+      });
+      return io;
+    };
+    const current = d1(String(SCHEMA_VERSION));
+    expect(await main(["check", BASE, "--target", "d1"], current)).toBe(0);
+    expect(current.stdout.at(-1)).toBe("checks: 7 run, 7 pass, 0 fail, 0 skip");
+    expect(current.stderr).toContain("reading the local D1 database cli-d1");
+    expectNoCredential(current);
+
+    const lost = d1(null);
+    expect(await main(["check", BASE, "--target", "d1"], lost)).toBe(2);
+    expect(lost.stderr.at(-1)).toBe(
+      `stopped: ta_meta has no schema_version, but d1_migrations holds ${own.length} applied migration(s); nothing was written`,
+    );
   });
 
   afterAll(() => {

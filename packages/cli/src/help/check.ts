@@ -50,7 +50,10 @@ export const CHECK_HELP: HelpText = {
   ],
   exits: [
     { code: 0, says: "No check failed. A warning or a skip is no failure." },
-    { code: 1, says: "A check failed. Each failure names its code." },
-    { code: 2, says: "A usage error, or a host or a database that gives no answer." },
+    { code: 1, says: "A check failed. A person must look." },
+    {
+      code: 2,
+      says: "A usage error, a host or a database that gives no answer, or a schema version that this CLI cannot read.",
+    },
   ],
 };
