@@ -220,7 +220,7 @@ Another key of `operator` is refused.
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `operator.secretHash` | string | required | The SHA-256 of the operator secret as 64 lowercase hex characters. Core stores no secret. |
+| `operator.secretHash` | string | required | The SHA-256 of the operator secret as 64 lowercase hex characters. Core stores no secret. The secret must be 32 to 512 visible ASCII characters, and any other secret answers 401 with no reason. |
 
 ## Hooks
 

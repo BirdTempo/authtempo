@@ -496,9 +496,10 @@ const signedIn = await client.emailOtp.verify({ email, code }); // { token, user
   stores no secret. Core hashes the presented secret and compares the
   digests in constant time. Make the secret from 32 random bytes or more
   (`openssl rand -base64 32`), and hash it with
-  `printf '%s' "$SECRET" | shasum -a 256`. The secret is not an API token:
-  no user owns it. `authtempo keys rotate` calls the route. Core refuses
-  `operator` with `jwtMint: false`.
+  `printf '%s' "$SECRET" | shasum -a 256`. The secret must be 32 to 512
+  visible ASCII characters, and any other secret answers 401 with no reason.
+  The secret is not an API token: no user owns it. `authtempo keys rotate`
+  calls the route. Core refuses `operator` with `jwtMint: false`.
 - Two live versions: during a gradual deployment, two versions of the app with different secrets, or with different `jwtMint.alg` values, retire each other's key at each mint. The JWKS then grows by one key per mint for 24 hours (core lists the signing key and at most 100 retired keys, the last retired first), and a mint can throw after three tries (`authtempo: no signing key after three tries`). Finish the deployment: when one version serves every request, one key signs again.
 - The token: header `{ alg, kid, typ: "JWT" }`; claims `iss` (`baseURL + basePath`), `sub` (the user id), `aud` (`jwtMint.audience`, default `baseURL`), `iat`, `exp` (`jwtMint.ttlMinutes`, 1 to 60, default 15), `sid` (the session id), `email`, `email_verified`, `name`, and `org` (the active organization id or null). `jwtMint.claims(user, session)` adds names and sets none of these, nor `nbf` or `jti`.
 - A resource server verifies the signature against `<basePath>/jwks`, `iss`, `aud`, `exp`, and the header `typ`: `JWT` for a session JWT, `at+jwt` for an OAuth access token (with jose, `jwtVerify(token, jwks, { issuer, audience, typ: "JWT" })`). One key signs both kinds with one issuer, so a server that skips `typ` can take one kind for the other. It keeps the key set in a cache. The token is a bearer for its life: a sign-out does not end it. Keep `ttlMinutes` short, and where a sign-out must end access at once, check the `sid` claim with `api.jwt.sessionLive({ sid })`: true while the session exists and is not expired.

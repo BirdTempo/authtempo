@@ -82,6 +82,22 @@ describe("the operator route (plan 11c)", () => {
     expect(await kids(h)).toEqual([kid]);
   });
 
+  it("makes one new key for two calls at once: both answer the same kid, and the JWKS lists two keys", async () => {
+    const h = await operatorHandle();
+    const before = await kids(h);
+    const [a, b] = await Promise.all([
+      h.auth.handle(rotate(`Operator ${SECRET}`)),
+      h.auth.handle(rotate(`Operator ${SECRET}`)),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const [ka, kb] = [
+      ((await a.json()) as { kid: string }).kid,
+      ((await b.json()) as { kid: string }).kid,
+    ];
+    expect(ka).toBe(kb);
+    expect(await kids(h)).toEqual([ka, before[0]]);
+  });
+
   it("takes the scheme in any case (RFC 9110 section 11.1)", async () => {
     const h = await operatorHandle();
     expect((await h.auth.handle(rotate(`operator ${SECRET}`))).status).toBe(200);

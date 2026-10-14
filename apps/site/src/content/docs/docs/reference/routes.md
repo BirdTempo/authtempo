@@ -615,7 +615,7 @@ This route exists when the config sets `operator`.
 
 | Field | Value |
 | --- | --- |
-| Needs | `Authorization: Operator <secret>`, the secret whose SHA-256 is `operator.secretHash` |
+| Needs | `Authorization: Operator <secret>`, the secret whose SHA-256 is `operator.secretHash`. The secret must be 32 to 512 visible ASCII characters, and any other secret answers 401 with no reason. |
 | Input | None |
 | Answer | `{ kid }`, the id of the new signing key. The old key verifies for 24 hours and signs nothing |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
