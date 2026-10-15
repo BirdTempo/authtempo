@@ -42,11 +42,12 @@ dependency.
 - Both routers remove one `/` at the end: `/account/` runs the route
   `/account`. radix3 runs a child route `/account/:id` for `/account//`, with
   an empty id.
-- So the entry asks `protect` with the path as matched, with each `/` at the
-  end removed (`/` stays `/`), and with both forms in lower case. It also asks
-  with the lower-case forms with each escape in upper case. A path needs a
-  session when the rule holds for any form. A rule `p === "/account"`
-  protects `/ACCOUNT`, `/account/`, `/account//`, and `/ACCOUNT/`.
+- So the entry asks `protect` with the path as matched. It also asks with each
+  `/` at the end removed (`/` stays `/`), and with both forms in lower case. It
+  also asks with the lower-case forms with each escape in upper case. A path
+  needs a session when the rule holds for any form. A rule
+  `p === "/account"` protects `/ACCOUNT`, `/account/`, `/account//`, and
+  `/ACCOUNT/`.
 - Warning: a rule with an upper-case letter does not protect a page in
   another case. `p.startsWith("/myAccount")` holds for neither `/MYACCOUNT`
   nor `/myaccount`, and Solid Router runs the page `/myAccount` for both.
