@@ -1,0 +1,62 @@
+---
+title: Use authtempo with NestJS
+description: Serve the routes of authtempo from a NestJS app on Express, protect a page, and protect a route with a guard that verifies the caller.
+type: how-to
+sources:
+  - examples/nestjs/src/app.ts
+  - examples/nestjs/test/app.test.ts
+  - packages/express/README.md
+  - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import app from "../../../../../../../examples/nestjs/src/app.ts?raw";
+import test from "../../../../../../../examples/nestjs/test/app.test.ts?raw";
+
+**For:** a developer of a NestJS 12 app on the Express adapter.
+
+**What it does:** the app serves the routes of authtempo under `/auth` through the Express package, `@authtempo/express`. A person with no session goes to the sign-in page, and a guard verifies the caller of a route with [the verify package](/docs/reference/verify/).
+
+## Before you start
+
+- Node 22.18 or newer.
+- A working setup from a [getting started tutorial](/docs/start/).
+
+## Steps
+
+1. Add the packages: `pnpm --filter my-app add @authtempo/core @authtempo/express @authtempo/verify`.
+2. Mount core after `NestFactory.create`: `app.use("/auth", authHandler(getAuth))`.
+3. Protect paths: `app.use(authSession({ auth: getAuth, protect, signInPath: "/sign-in" }))`.
+4. Read the session in a route with `getSession(res)`, and take `res` with `@Res({ passthrough: true })`.
+5. Make a guard that calls `verifier.verifyRequest(toWebRequest(req))`.
+6. Throw `UnauthorizedException` for a `null` value, and `ServiceUnavailableException` for a failure.
+7. Put the guard on a route with `@UseGuards(new CallerGuard(getVerifier))`.
+
+<Code code={app} lang="ts" title="src/app.ts" />
+
+<Code code={test} lang="ts" title="The sign-in and the rules as a test" />
+
+## How it behaves
+
+- Nest 12 runs on Express 5, so the middleware of the Express package is the gate.
+- The rule gets the raw path as Express matched it. Express does not decode it, so `/%61ccount` matches no route and gets a 404.
+- Express matches without case, and with an optional trailing slash. The middleware tests those forms too, so `/ACCOUNT` and `/account/` get the redirect.
+- An exact rule covers one route only. For a route with a parameter, use `p === "/account" || p.startsWith("/account/")`.
+- The router does not decode `/%61uth/session` to a path of core. The rule gets `/%61uth/session`, no page matches, and the answer is a 404.
+- The origin of the redirect comes from the Host header, never from a request line in absolute form.
+- A Host that does not parse gets the origin of `baseURL`, so the app answers no 500.
+- Each Set-Cookie line of core passes unchanged.
+- Nest parses JSON and form bodies before the routes of core. The Express package writes the parsed body again for core.
+- The guard is an instance, so Nest needs no `emitDecoratorMetadata` for it.
+- Nest needs the legacy decorators: `experimentalDecorators` in the tsconfig, and `oxc.decorator.legacy` in the vitest config.
+- The verifier reads the Authorization header only, never the session cookie.
+
+## If it fails
+
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the page posts from an origin that is not `baseURL`.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): no valid bearer at the guarded route.
+
+## Next
+
+- [Mount authtempo on any other stack](/docs/guides/other-stacks/)
+- [The verify package](/docs/reference/verify/)

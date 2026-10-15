@@ -1,0 +1,61 @@
+---
+title: Use authtempo with Elysia
+description: Serve the routes of authtempo from an Elysia app, protect a page, and verify the caller of a route.
+type: how-to
+sources:
+  - examples/elysia/src/app.ts
+  - examples/elysia/test/app.test.ts
+  - examples/elysia/test/bun.test.ts
+  - packages/core/src/bindings.ts
+  - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import app from "../../../../../../../examples/elysia/src/app.ts?raw";
+import test from "../../../../../../../examples/elysia/test/app.test.ts?raw";
+
+**For:** a developer of an Elysia app on Bun.
+
+**What it does:** the app serves the routes of authtempo under `/auth`, and sends a person with no session to the sign-in page. It also verifies the caller of a route. No package of Elysia is needed: Elysia takes the web request.
+
+## Before you start
+
+- Bun 1.4 or newer.
+- A working setup from a [getting started tutorial](/docs/start/).
+
+## Steps
+
+1. Add the packages: `pnpm --filter my-app add @authtempo/core @authtempo/verify elysia`.
+2. Mount core: `.all("/auth/*", ({ request }) => auth.handle(request))`.
+3. In a `resolve` hook, call `readGate` of `@authtempo/core/bindings` with the `path` of the context.
+4. In `onBeforeHandle`, answer `gate.redirect` when it is not null. No page code runs then.
+5. Read `gate.session` in a page. The hook sends the renewed cookie after the sliding refresh.
+6. For a route that a script calls, check the caller with [the verify package](/docs/reference/verify/).
+
+<Code code={app} lang="ts" title="src/app.ts" />
+
+<Code code={test} lang="ts" title="The sign-in and the rules as a test" />
+
+## How it behaves
+
+- The rule gets the `path` of the context: the raw path as Elysia's router matched it.
+- Elysia does not decode the path, and compares with case. So `/%61ccount` and `/ACCOUNT` match no route and get a 404.
+- Elysia runs `/account` for `/account/`, because `strictPath` is off by default. So the rule also tests the path with its trailing slashes cut.
+- An exact rule covers one route only. For a route with a parameter, use `p === "/account" || p.startsWith("/account/")`.
+- The router does not decode `/%61uth/session` to a path of core, so no page and no route of core runs. It gets a 404.
+- Bun builds `request.url` from the Host header, not from a request line in absolute form.
+- A Host that does not parse gives a path only. Then `withOrigin` uses the origin of `BASE_URL`, so the app answers no 500.
+- A route of core returns the answer of core, so each Set-Cookie line passes unchanged.
+- The hooks name no body, so Elysia reads no body. Core reads the body as it came.
+- The verifier reads the Authorization header only, never the session cookie. An API token costs one call to the auth app per request.
+- The tests run the app on Node through `app.handle`, and on Bun 1.4.3 with raw request lines.
+
+## If it fails
+
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the page posts from an origin that is not `BASE_URL`.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): no session, or no valid bearer at `/files`.
+
+## Next
+
+- [Mount authtempo on any other stack](/docs/guides/other-stacks/)
+- [The verify package](/docs/reference/verify/)

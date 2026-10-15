@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // node: the Bun test starts Bun with node:child_process and sends raw request lines.
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["src", "test"]
+}

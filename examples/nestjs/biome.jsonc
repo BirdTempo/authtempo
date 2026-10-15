@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/@biomejs/biome/configuration_schema.json",
+  "root": false,
+  "extends": "//",
+  "javascript": {
+    "parser": {
+      // Nest's @Req() and @Res() are parameter decorators of the legacy proposal.
+      // Without this option, Biome refuses to parse src/app.ts (plan 11d2 Task 14).
+      "unsafeParameterDecoratorsEnabled": true
+    }
+  }
+}

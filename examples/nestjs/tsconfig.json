@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // Nest needs the legacy decorators. The example passes the guard as an
+  // instance, so it needs no emitDecoratorMetadata.
+  "compilerOptions": { "noEmit": true, "types": ["node"], "experimentalDecorators": true },
+  "include": ["src", "test"]
+}
