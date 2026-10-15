@@ -36,14 +36,17 @@ On the server of Nuxt:
   `/account/[id]` matches), and slashes are not merged. A non-ASCII route
   reaches the rule decoded: write `p === "/café"`, not `"/caf%C3%A9"`. h3
   decodes `%3F` and `%23` into the path, so h3's text for `/account%3F` is
-  `/account?`, while Nuxt's page router cuts it at the first `?` and renders
-  the page of `/account`. The page router does not cut at `#`: `/secret/x%23y`
-  renders `/secret/[id]` with the id `x#y`. The middleware runs `protect` on
-  the full text, then on the text cut at the first `?`, then, as an extra
-  form, on the text cut at the first `#`; each form once, in that order. A
-  path needs a session when the rule holds for any form, so an exact rule
-  `p === "/account"` also guards `/account%3F`. An extra form only adds a
-  redirect.
+  `/account?`. Nuxt's page router reads another path: it cuts the text at the
+  first `?` (not at `#`: `/secret/x%23y` renders `/secret/[id]` with the id
+  `x#y`), treats `\` as `/`, resolves `.` and `..`, and matches with or
+  without a trailing `/`. So `/account/`, `/account/.`, and `/account%3F` all
+  render the page of `/account`. The middleware runs `protect` on four forms,
+  each once, in this order: the h3 text; the text cut at the first `?`; the
+  page path (cut at `?`, `\` as `/`, `.` and `..` resolved, no trailing `/`,
+  still decoded, so `/café/` gives `/café`); and, as an extra form, the text
+  cut at the first `#`. A path needs a session when the rule holds for any
+  form, so an exact rule `p === "/account"` guards every path that renders
+  that page. An extra form only adds a redirect.
 - Vue Router compares a path in any case by default. Set
   `router: { options: { sensitive: true } }` in `nuxt.config.ts`, as the
   example does, or compare in lower case in `protect`. Prefer a prefix rule:

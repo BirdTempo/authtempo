@@ -205,6 +205,32 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
     expect(pageRuns()).toBe(0);
   });
 
+  // Nuxt's page router resolves "." and matches with or without a trailing "/"
+  // (vue-router strict: false), so it renders /account for each of these.
+  it.each([
+    "/account/",
+    "/account/?x",
+    "/%61ccount/",
+    "/account/.",
+    "/account/%2e",
+    "/acc%6Funt/./",
+  ])(
+    "needs a session for %s under an exact rule, as the page router renders /account",
+    async (target) => {
+      const { app, pageRuns } = makeApp({}, (p) => p === "/account");
+      const res = await rawGet(app, target);
+      expect(res.status).toBe(307);
+      expect(pageRuns()).toBe(0);
+    },
+  );
+
+  it("keeps the page path decoded: an exact rule /café guards /café/", async () => {
+    const { app, pageRuns } = makeApp({}, (p) => p === "/café");
+    const res = await rawGet(app, "/caf%C3%A9/");
+    expect(res.status).toBe(307);
+    expect(pageRuns()).toBe(0);
+  });
+
   // h3 decodes "/%61uth/..." to a path of core. Core judges the escaped
   // request as a page (core round 10), so the gate reads the session once and
   // the rule decides; the request never reaches a page.

@@ -119,15 +119,38 @@ function pageURL(origin: string, target: string): string {
 }
 
 /**
+ * The path that Nuxt's page router renders for the h3 text: cut at the first
+ * "?", each backslash as "/", "." and ".." segments resolved, and no trailing
+ * "/" (the root stays "/"). vue-router matches with or without a trailing "/"
+ * (strict: false), and Nuxt's renderer parses the path as a URL, which
+ * resolves "." (review 2026-10-15, M5). It works on the decoded text, not
+ * through a URL parse, so no letter is encoded again: "/café/" gives "/café".
+ */
+function pagePath(text: string): string {
+  const q = text.indexOf("?");
+  const path = (q === -1 ? text : text.slice(0, q)).replace(/\\/g, "/");
+  const out: string[] = [];
+  for (const segment of path.split("/").slice(1)) {
+    if (segment === ".") continue;
+    if (segment === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  return `/${out.join("/")}`.replace(/\/+$/, "") || "/";
+}
+
+/**
  * Two routers read one request. h3's handlers match the decoded text, where
  * "%3F" and "%23" became "?" and "#": "/account%3F" is "/account?". Nuxt's
  * page router cuts that text at the first "?" (not at "#": "/secret/x%23y"
- * renders the page "/secret/[id]" with id "x#y", reviewed 2026-10-15) and
- * renders the page of "/account". So the rule runs on the full text, then on
- * the text cut at the first "?". A third form, the text cut at the first "#",
- * is extra: an OR of forms only adds a redirect, never removes one. A path
- * needs a session when the rule holds for any form, so an exact rule fails
- * closed. The rule sees the forms in that order, each only once.
+ * renders the page "/secret/[id]" with id "x#y", reviewed 2026-10-15), and it
+ * renders the page of pagePath. So the rule runs on four forms, in this order:
+ * the full text; the text cut at the first "?"; the page path; and, as an
+ * extra form, the text cut at the first "#". An extra form only adds a
+ * redirect, never removes one. A path needs a session when the rule holds for
+ * any form, so an exact rule fails closed. The rule sees each form only once.
  */
 function bothForms(
   protect: ((pathname: string) => boolean) | undefined,
@@ -135,11 +158,15 @@ function bothForms(
   if (!protect) return undefined;
   return (pathname) => {
     const forms = [pathname];
-    for (const mark of ["?", "#"]) {
-      const at = pathname.indexOf(mark);
-      const cut = at === -1 ? pathname : pathname.slice(0, at);
-      if (!forms.includes(cut)) forms.push(cut);
-    }
+    const add = (form: string) => {
+      if (!forms.includes(form)) forms.push(form);
+    };
+    const query = pathname.indexOf("?");
+    add(query === -1 ? pathname : pathname.slice(0, query));
+    const page = pagePath(pathname);
+    add(page);
+    const hash = pathname.indexOf("#");
+    add(hash === -1 ? pathname : pathname.slice(0, hash));
     return forms.some((form) => protect(form));
   };
 }
