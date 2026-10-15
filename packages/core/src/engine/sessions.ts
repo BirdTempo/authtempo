@@ -283,10 +283,24 @@ export async function sessionsEnded(
  * deleted on the way out. After `slidingRefreshDays` the expiry moves
  * forward by a full ttl.
  */
+/**
+ * How a session read runs. `refresh: false` is a read with no write: it
+ * applies the expiry and the absolute cap, but it neither slides the expiry
+ * nor deletes an ended row (plan 11d Task 11 review, J1). A server render
+ * reads with it, so the sliding refresh stays for the browser's own read of
+ * `GET /session`, the one answer that sends the renewed cookie.
+ */
+export interface SessionReadOptions {
+  /** Default true: slide the expiry and delete an ended row, as every route does. */
+  refresh?: boolean | undefined;
+}
+
 export async function resolveSession(
   config: ResolvedConfig,
   token: string,
+  options: SessionReadOptions = {},
 ): Promise<ResolvedSession | null> {
+  const write = options.refresh !== false;
   if (!TOKEN_RE.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const now = config.clock.now();
@@ -298,6 +312,7 @@ export async function resolveSession(
   // before `absoluteDays` was set (plan 12b).
   const capped = sessionCapMs(config, session.createdAt) <= now.getTime();
   if (capped || session.expiresAt.getTime() <= now.getTime()) {
+    if (!write) return null;
     const n = await config.storage.delete("session", [
       { field: "id", op: "eq", value: session.id },
     ]);
@@ -310,7 +325,7 @@ export async function resolveSession(
   ]);
   if (!user) return null;
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
-  if (sinceSeen >= config.session.slidingRefreshDays * DAY_MS) {
+  if (write && sinceSeen >= config.session.slidingRefreshDays * DAY_MS) {
     const expiresAt = sessionExpiry(config, session.createdAt, now);
     await config.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
       expiresAt,
@@ -356,9 +371,10 @@ export async function peekSession(
 export async function sessionFromRequest(
   config: ResolvedConfig,
   request: Request,
+  options: SessionReadOptions = {},
 ): Promise<ResolvedSession | null> {
   const token = readSessionToken(config, request);
-  return token ? resolveSession(config, token) : null;
+  return token ? resolveSession(config, token, options) : null;
 }
 
 /**

@@ -378,8 +378,13 @@ export interface AuthApi {
 export interface Auth {
   /** Serves the auth routes under `basePath`. Mount it for any request whose path starts with `basePath`. */
   handle(request: Request): Promise<Response>;
-  /** The caller's session from the cookie or the bearer header, or null. */
-  session(request: Request): Promise<ResolvedSession | null>;
+  /**
+   * The caller's session from the cookie or the bearer header, or null.
+   * With `{ refresh: false }` it is a read with no write: no sliding refresh
+   * and no delete of an ended row. A server render that cannot set a cookie
+   * reads this way, so the browser's `GET /session` still gets the renewed cookie.
+   */
+  session(request: Request, options?: { refresh?: boolean }): Promise<ResolvedSession | null>;
   /**
    * The caller as a session, an API token, or an OAuth access token (plan
    * 9g), or null. Use it in a route that a script or an OAuth client may
@@ -414,7 +419,7 @@ export function createAuth(input: AuthConfig): Auth {
   const handle = createRouter(config, coreRoutes(config));
   return {
     handle,
-    session: (request) => sessionFromRequest(config, request),
+    session: (request, options) => sessionFromRequest(config, request, options),
     caller: (request) => callerFromRequest(config, request),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     wellKnown: createWellKnownHandler(config),

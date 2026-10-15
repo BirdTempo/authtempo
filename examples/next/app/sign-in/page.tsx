@@ -14,6 +14,8 @@ function SignIn() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The prerendered page and the first paint wait for the session read.
+  if (session.isPending) return <p>Loading</p>;
   if (session.data) return <p>Signed in as {session.data.user.email}</p>;
   if (sent) return <p>Open the link in the mail.</p>;
   return (

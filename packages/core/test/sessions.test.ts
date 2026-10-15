@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createSession,
   destroySession,
@@ -106,6 +106,40 @@ describe("sessions engine", () => {
     const late = await resolveSession(config, token);
     expect(late?.session.expiresAt.getTime()).toBe(clock.now().getTime() + 30 * DAY);
     expect(late?.session.lastSeenAt.getTime()).toBe(clock.now().getTime());
+  });
+
+  it("reads with no write when refresh is false, and the next normal read still slides", async () => {
+    const { config, storage, clock, seedUser } = makeAuth();
+    const user = await seedUser("a@example.com");
+    const { token, session } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    clock.advance(8 * DAY);
+    const update = vi.spyOn(storage, "update");
+    const remove = vi.spyOn(storage, "delete");
+    const peek = await resolveSession(config, token, { refresh: false });
+    expect(peek?.user.email).toBe("a@example.com");
+    expect(peek?.refreshed).toBe(false);
+    expect(peek?.session.expiresAt.getTime()).toBe(session.expiresAt.getTime());
+    expect(update).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    // A server render reads first; the browser's own read must still get the refresh.
+    const normal = await resolveSession(config, token);
+    expect(normal?.refreshed).toBe(true);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers null for an expired or capped session when refresh is false, and keeps the row", async () => {
+    const { config, storage, clock, seedUser } = makeAuth();
+    const user = await seedUser("a@example.com");
+    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    clock.advance(31 * DAY);
+    const remove = vi.spyOn(storage, "delete");
+    expect(await resolveSession(config, token, { refresh: false })).toBeNull();
+    expect(remove).not.toHaveBeenCalled();
+    expect(await storage.findMany("session", [])).toHaveLength(1);
   });
 
   it("returns null when the user row is gone", async () => {

@@ -1,5 +1,10 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { readSessionToken, sessionCookieNames } from "@authtempo/core/credentials";
+import {
+  readBearer,
+  readSessionToken,
+  SESSION_TOKEN_PREFIX,
+  sessionCookieNames,
+} from "@authtempo/core/credentials";
 
 /**
  * The Next.js binding of authtempo (plan 11d, spec 20), for the App Router of
@@ -30,27 +35,37 @@ export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
 
 /**
  * The session of a server component, a server action, or a route handler:
- * `await authSession(getAuth, await headers())`. It renews no cookie: a server
- * component cannot set one. The browser gets the renewed cookie at its next
- * call to a route under `/auth`, such as the session store's read.
+ * `await authSession(getAuth, await headers())`. It is a read with no write
+ * (`refresh: false`): a server component cannot set a cookie, so this read
+ * leaves the sliding refresh in the row for the browser's own read of
+ * `/auth/session`, the one answer that sends the renewed cookie. A server read
+ * that took the refresh would drop it, and the cookie would end at its first
+ * Max-Age (plan 11d Task 11 review, J1).
  */
 export async function authSession(
   auth: AuthSource<Pick<Auth, "session">>,
   headers: Headers,
 ): Promise<ResolvedSession | null> {
   // Core reads the cookie and the bearer header only; the URL is not read.
-  return resolve(auth).session(new Request("https://next.invalid/", { headers }));
+  return resolve(auth).session(new Request("https://next.invalid/", { headers }), {
+    refresh: false,
+  });
 }
 
 export interface AuthProxyOptions {
   /** True for a path that needs a session, such as `(p) => p.startsWith("/account")`. */
   protect(pathname: string): boolean;
-  /** The app's sign-in page. The proxy adds `?next=<path and query>`. */
+  /**
+   * The app's sign-in page. The proxy adds `next`: the path and query of the
+   * request, as one encoded value. The query goes too, so keep secrets out of
+   * the query of a protected URL.
+   */
   signInPath: string;
   /**
    * With the auth instance, the proxy asks core for the session: one storage
-   * read per protected request. Without it, the proxy checks only that the
-   * session cookie is present, and the page checks the session.
+   * read per protected request, with no write. Without it, the proxy checks
+   * only that a session cookie, or a bearer with core's session token prefix,
+   * is present, and the page checks the session.
    */
   auth?: AuthSource<Pick<Auth, "session">> | undefined;
   /**
@@ -71,15 +86,25 @@ export function authProxy(
 ): (request: Request) => Promise<Response | undefined> {
   // The one copy of the cookie name rule (plan 12b): core's own helper.
   const names = sessionCookieNames(options.cookieName);
+  const live = async (request: Request): Promise<boolean> => {
+    // With the auth instance core decides, with no write, so the browser keeps the refresh.
+    if (options.auth)
+      return (await resolve(options.auth).session(request, { refresh: false })) !== null;
+    // Without it: a session cookie, or a bearer that is a session token. An API
+    // token or any other bearer is no session here.
+    const headers = new Headers(request.headers);
+    headers.delete("authorization");
+    if (readSessionToken(names, { headers }) !== null) return true;
+    return readBearer(request)?.startsWith(SESSION_TOKEN_PREFIX) ?? false;
+  };
   return async (request) => {
     const url = new URL(request.url);
     if (!options.protect(url.pathname)) return undefined;
-    const present = readSessionToken(names, request) !== null;
-    const live =
-      present && (options.auth ? (await resolve(options.auth).session(request)) !== null : true);
-    if (live) return undefined;
+    if (await live(request)) return undefined;
     const target = new URL(options.signInPath, url);
-    target.searchParams.set("next", `${url.pathname}${url.search}`);
-    return Response.redirect(target, 307);
+    // One leading slash: "//host/x" would be a link to another origin on the sign-in page.
+    const next = `${url.pathname.replace(/^\/+/, "/")}${url.search}`;
+    const query = `${target.search ? `${target.search}&` : "?"}next=${encodeURIComponent(next)}`;
+    return Response.redirect(`${target.origin}${target.pathname}${query}`, 307);
   };
 }

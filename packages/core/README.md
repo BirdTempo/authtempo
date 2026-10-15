@@ -729,6 +729,9 @@ if (renewed) res.headers.set("set-cookie", renewed);
 return res;
 ```
 
+- `auth.session(request, { refresh: false })` is a read with no write: no
+  sliding refresh and no delete of an ended row. A server render reads this
+  way, so the browser's own `GET /auth/session` still gets the renewed cookie.
 - `auth.session(request)` resolves sessions only. Every route that calls
   it, core's and the app's, answers 401 to a `tk_` bearer. Core's own
   routes call it, except `GET /tokens/current`. So a token cannot create a

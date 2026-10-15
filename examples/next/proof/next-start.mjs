@@ -1,5 +1,6 @@
 // The Next.js example under the real server (plan 11d): `next start` of the
-// build, three checks over HTTP, and one summary line. The test script runs it
+// build, seven checks over HTTP (three signed out, four through a sign-in),
+// and one summary line. The test script runs it
 // after `next build`. Port 8793: the Node example uses 8791 and 8792.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,8 @@ const server = spawn("pnpm", ["exec", "next", "start", "-p", String(PORT), "-H",
     NEXT_TELEMETRY_DISABLED: "1",
     BASE_URL: BASE,
     AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+    // The mail sink of lib/auth.ts and the route app/proof/mail: on for this proof only.
+    AUTHTEMPO_PROOF_MAIL: "1",
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -50,12 +53,41 @@ try {
   );
   const home = await (await fetch(`${BASE}/`)).text();
   expectThat(home.includes("Sign in"), "the home page has no sign-in link");
+
+  // Sign in over HTTP, then the server components read the session from the cookie.
+  const post = (path, body) =>
+    fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify(body),
+    });
+  const requested = await post("/auth/magic-link/request", { email: "ada@example.com" });
+  expectThat(requested.ok, `POST /auth/magic-link/request answered ${requested.status}`);
+  // The token stays in this process: it is never printed.
+  const mailed = (await (await fetch(`${BASE}/proof/mail`)).json()).text ?? "";
+  const token = /token=([A-Za-z0-9_-]+)/.exec(mailed)?.[1] ?? "";
+  const verified = await post("/auth/magic-link/verify", { token });
+  const cookie = (verified.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+  expectThat(
+    verified.ok && cookie.includes("=ts_"),
+    `POST /auth/magic-link/verify answered ${verified.status}`,
+  );
+  // React puts a comment between two text parts; the reader sees one line.
+  const text = async (res) => (await res.text()).replaceAll("<!-- -->", "");
+  const signedHome = await text(await fetch(`${BASE}/`, { headers: { cookie } }));
+  expectThat(signedHome.includes("Signed in as ada@example.com"), "the home page shows no session");
+  const signedAccount = await fetch(`${BASE}/account`, { headers: { cookie }, redirect: "manual" });
+  const accountText = await text(signedAccount);
+  expectThat(
+    signedAccount.status === 200 && accountText.includes("Your account: ada@example.com"),
+    `GET /account with the cookie answered ${signedAccount.status} with no account line`,
+  );
 } catch (e) {
   failures.push(e instanceof Error ? e.message : String(e));
 } finally {
   server.kill("SIGTERM");
 }
-const pass = failures.length === 0 && checks === 3;
+const pass = failures.length === 0 && checks === 7;
 console.log(`next-e2e: ${pass ? "PASS" : "FAIL"} checks=${checks} failures=${failures.length}`);
 for (const f of failures) console.error(`next-e2e: ${f}`);
 if (!pass) {

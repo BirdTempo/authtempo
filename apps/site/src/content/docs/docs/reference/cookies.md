@@ -7,6 +7,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 15
   - packages/core/src/http/cookies.ts
+  - packages/core/src/engine/sessions.ts
 ---
 
 **For:** a developer who writes the cookie text of a privacy page, or checks why a browser drops a cookie.
@@ -45,6 +46,7 @@ The move lasts one release. Row 12j removes it in the next release.
 
 - The session cookie holds a `ts_` token. The binding cookie holds the binding token of one social flow. The trust cookie holds a `td_` token.
 - After a sliding refresh, an app route that calls `auth.session` must send `auth.sessionCookie(request, resolved)`. Otherwise the browser drops the cookie at its old `Max-Age`.
+- A reader that cannot set a cookie, such as a server render, calls `auth.session(request, { refresh: false })`. That read does not slide the expiry and writes nothing, so the browser's own `GET /auth/session` still gets the renewed cookie.
 - The binding cookie is `SameSite=None`, because Apple posts its callback from its own site, and a browser sends no `Lax` cookie on that post.
 - One binding cookie lives in each browser. A second social start replaces it, and the first flow then answers `invalid_token`.
 - The session cookie is a `__Host-` cookie. The trust cookie is a plain host cookie on the auth path. A host on a sibling subdomain can set a cookie of that name for the parent domain.
