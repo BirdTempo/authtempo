@@ -193,6 +193,36 @@ describe("@authtempo/react-router (plan 11d2)", () => {
     }
   });
 
+  // A route with no caseSensitive (React Router's default) matches without
+  // case, so the binding folds case for the rule. `next` keeps the request's case.
+  it("folds case for protect, on the decoded text, and keeps the case in next", async () => {
+    const { auth, args } = setup();
+    const rule = (p: string) => p === "/account" || p === "/caf%C3%A9" || p === "/%CF%83";
+    const middleware = authMiddleware({ auth, protect: rule, signInPath: "/sign-in" });
+    // The request path, and the path in URL form that `next` keeps.
+    const cases: [string, string][] = [
+      ["/ACCOUNT", "/ACCOUNT"],
+      ["/%41ccount", "/Account"],
+      ["/CAF%C3%89", "/CAF%C3%89"],
+      ["/%CF%82", "/%CF%82"],
+    ];
+    for (const [path, kept] of cases) {
+      for (const raw of [path, `${path}.data?_routes=page`]) {
+        const a = { ...args(new Request(`${BASE}${raw}`)), url: new URL(`${BASE}${path}`) };
+        let ran = false;
+        const res = (await middleware(a, async () => {
+          ran = true;
+          return new Response("page");
+        })) as Response;
+        expect(ran, raw).toBe(false);
+        expect(res.status, raw).toBe(307);
+        expect(res.headers.get("location"), raw).toBe(
+          `${BASE}/sign-in?next=${encodeURIComponent(kept)}`,
+        );
+      }
+    }
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, args, middleware, advance } = setup();
     const cookie = await signIn();

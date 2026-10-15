@@ -77,6 +77,38 @@ function routedPath(url: URL): string {
 }
 
 /**
+ * React Router matches a route without case unless the route sets
+ * caseSensitive (the RegExp flag "i" of compilePath, router/utils.js of 8.4.0,
+ * read 2026-10-15). The binding fails closed: a path needs a session when the
+ * rule holds for the path or for its folded form. The fold works on the
+ * decoded text, because "%c3%89" is still the escape of "É". It folds with
+ * toUpperCase, then toLowerCase: the flag "i" compares upper-case forms, so a
+ * plain toLowerCase misses "ς" against a route "σ". Each other difference of
+ * this fold only protects more paths. `next` keeps the case of the request.
+ */
+function foldCase(
+  protect: ((pathname: string) => boolean) | undefined,
+): ((pathname: string) => boolean) | undefined {
+  if (!protect) return undefined;
+  return (pathname) => {
+    if (protect(pathname)) return true;
+    let text = pathname;
+    try {
+      // decodeURI keeps "%2F", "%3F", and "%23" as escapes, so no segment changes.
+      text = decodeURI(pathname);
+    } catch {
+      // A bad escape: fold the URL form as it is.
+    }
+    // Back to URL form, with upper-case escape hex as the gate gives it.
+    const folded = new URL(`http://x${text.toUpperCase().toLowerCase()}`).pathname.replace(
+      /%[0-9a-f]{2}/g,
+      (hex) => hex.toUpperCase(),
+    );
+    return protect(folded);
+  };
+}
+
+/**
  * The middleware of the root route: `export const middleware = [authMiddleware({ auth: getAuth })];`.
  * It sets `sessionContext`, answers the redirect of a protected path (the
  * pipeline returns a Response of a middleware at once), and adds the renewed
@@ -85,10 +117,11 @@ function routedPath(url: URL): string {
  */
 export function authMiddleware(options: RouterAuthOptions): MiddlewareFunction {
   checkGateOptions(options);
+  const protect = foldCase(options.protect);
   return async ({ request, url, context }, next) => {
     // The gate judges the routed path and reads the cookie from the request.
     const gate = await readGate(
-      { ...options, auth: resolve(options.auth) },
+      { ...options, auth: resolve(options.auth), protect },
       request,
       routedPath(url),
     );

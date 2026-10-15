@@ -19,8 +19,9 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
   a path in the encoded form, or use a rule on a prefix. The gate of
   `@authtempo/core/bindings` gives this form to every binding.
 - React Router matches a path without case by default, so "/ACCOUNT" runs the
-  page of "/account". Set `caseSensitive: true` on each protected route, or
-  compare the path in lower case in `protect`.
+  page of "/account". The binding folds case for `protect`: a path needs a
+  session when the rule holds for the path or for its lower-case form. Still
+  set `caseSensitive: true` on each protected route, so "/ACCOUNT" gets a 404.
 - The middleware reads no session for a route of core, and adds the renewed
   cookie to the page's answer after the sliding refresh.
 - A function given to both `authRouteModule` and `authMiddleware` runs twice

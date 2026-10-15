@@ -3,6 +3,7 @@ import {
   createStaticHandler,
   matchRoutes,
   type Path,
+  type RouteObject,
   RouterContextProvider,
   type StaticHandlerContext,
 } from "react-router";
@@ -29,7 +30,17 @@ function normalizePath(request: Request): Path {
   return { pathname, search: search ? `?${search}` : "", hash: "" };
 }
 
-function makeApp() {
+/** Every route as createRoutes gives it, with caseSensitive removed: an app that forgot it. */
+function withoutCaseSensitive(routes: RouteObject[]): RouteObject[] {
+  return routes.map((route) => {
+    const { caseSensitive: _, ...rest } = route;
+    return (
+      route.children ? { ...rest, children: withoutCaseSensitive(route.children) } : rest
+    ) as RouteObject;
+  });
+}
+
+function makeApp(options: { caseSensitive?: boolean } = {}) {
   const sent: MailMessage[] = [];
   const loads: string[] = [];
   const auth = createAppAuth({
@@ -41,11 +52,12 @@ function makeApp() {
       },
     },
   });
+  const routes = createRoutes(
+    () => auth,
+    (id) => loads.push(id),
+  );
   const handler = createStaticHandler(
-    createRoutes(
-      () => auth,
-      (id) => loads.push(id),
-    ),
+    options.caseSensitive === false ? withoutCaseSensitive(routes) : routes,
   );
   /**
    * What createRequestHandler of react-router 8.4.0 does (server-runtime/server.js,
@@ -144,6 +156,24 @@ describe("the React Router example (plan 11d2)", () => {
     for (const path of ["/ACCOUNT", "/Account", "/%41ccount", "/ACCOUNT.data?_routes=account"]) {
       const res = await serve(new Request(`${BASE}${path}`));
       expect(res.status, path).toBe(404);
+    }
+    expect(loads).toEqual([]);
+  });
+
+  // With no caseSensitive, React Router runs the page of "/account" for
+  // "/ACCOUNT". The binding folds case, so the person still gets the redirect.
+  it("sends another case to the sign-in page when a route has no caseSensitive", async () => {
+    const { loads, serve } = makeApp({ caseSensitive: false });
+    const cases: [string, string][] = [
+      ["/ACCOUNT", "%2FACCOUNT"],
+      ["/%41ccount", "%2FAccount"],
+      ["/ACCOUNT.data?_routes=account", "%2FACCOUNT"],
+      ["/%41ccount.data?_routes=account", "%2FAccount"],
+    ];
+    for (const [path, next] of cases) {
+      const res = await serve(new Request(`${BASE}${path}`));
+      expect(res.status, path).toBe(307);
+      expect(res.headers.get("location"), path).toBe(`${BASE}/sign-in?next=${next}`);
     }
     expect(loads).toEqual([]);
   });
