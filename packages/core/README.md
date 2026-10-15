@@ -918,7 +918,7 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 
 | Method | Path | Body or query | Answer |
 | --- | --- | --- | --- |
-| POST | `/reauth` | session, `{ password, code? }` | `{ freshUntil }`; 400 `invalid_body` (no proof, an unknown field, or no `code` while the second factor is on), `invalid_code`; 401, `invalid_credentials`; 429 `rate_limited` |
+| POST | `/reauth` | session, `{ password, code? }`. With the email method or the passkey method only, `code` is a backup code | `{ freshUntil }`; 400 `invalid_body` (no proof, an unknown field, or no `code` while the second factor is on), `invalid_code`; 401, `invalid_credentials`; 404 `not_found` (no `password` config); 429 `rate_limited` |
 | POST | `/reauth` | session, `{ emailCode, code? }` or `{ passkey }` | the other two proofs of `/reauth`; a passkey is two factors and takes no `code`. Two first proofs, or `code` beside a passkey, answer 400 `invalid_body`; 400 `passkey_failed` (a passkey of another user), `invalid_token` (a spent challenge) |
 | POST | `/reauth/email` | session | `{ sent: true }`: a code to the user's address; 404 with `emailOtp: false`; 429 `rate_limited` |
 | POST | `/reauth/passkey/options` | session | the request options for `navigator.credentials.get`, with the user's passkeys; 404 without `passkey`; 429 `rate_limited` |

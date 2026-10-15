@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../src/config.js";
 import { isFresh, requireFresh } from "../src/engine/fresh.js";
+import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { passwordSignIn } from "../src/engine/password.js";
 import { reauthenticate } from "../src/engine/reauth.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
-import { post } from "./helpers.js";
+import { makeAuth, post, tokenFromMail } from "./helpers.js";
 import { sessionOnly } from "./password-helpers.js";
 import {
   type Auth,
@@ -161,6 +162,33 @@ describe("POST /reauth with the password (plan 12a)", () => {
     expect(
       await reauthenticate(auth.config, { session: old, proof: { password: PASSWORD }, ip: null }),
     ).toMatchObject({ ok: false, code: "unauthorized" });
+  });
+
+  it("answers unauthorized for a session that expired before the write", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    auth.clock.advance(s.session.expiresAt.getTime() - auth.clock.now().getTime());
+    expect(
+      await reauthenticate(auth.config, { session: s, proof: { password: PASSWORD }, ip: null }),
+    ).toMatchObject({ ok: false, code: "unauthorized" });
+  });
+
+  it("answers not_found with no password config, and the limit counts no try", async () => {
+    const auth = makeAuth();
+    await requestMagicLink(auth.config, { email: EMAIL, ip: null });
+    const link = await verifyMagicLink(auth.config, {
+      token: tokenFromMail(auth.mail[0]?.text ?? ""),
+      ip: null,
+      userAgent: null,
+    });
+    if (!link.ok || !("token" in link.value)) throw new Error("the link opened no session");
+    const s = await resolveSession(auth.config, link.value.token);
+    if (!s) throw new Error("the session ended");
+    // 11 tries: one more than REAUTH_PER_USER allows.
+    for (let i = 0; i < 11; i++)
+      expect(
+        await reauthenticate(auth.config, { session: s, proof: { password: PASSWORD }, ip: null }),
+      ).toMatchObject({ ok: false, code: "not_found" });
   });
 
   it("serves the route: a session answers freshUntil, a token or nothing answers 401, an unknown field 400", async () => {

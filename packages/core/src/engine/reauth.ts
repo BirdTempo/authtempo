@@ -99,6 +99,10 @@ export async function reauthenticate(
   input: ReauthInput,
 ): Promise<Result<{ freshUntil: Date }>> {
   const { user, session } = input.session;
+  // A deployment with no password config refuses the password proof before
+  // the limit counts a try. The answer is the same for every user, so it
+  // tells nothing about one account.
+  if ("password" in input.proof && !config.password) return fail("not_found");
   if (!(await config.limiter.allow(`reauth:user:${user.id}`, REAUTH_PER_USER)))
     return fail("rate_limited");
   const proof = input.proof;

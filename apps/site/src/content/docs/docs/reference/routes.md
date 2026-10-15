@@ -54,7 +54,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Field | Value |
 | --- | --- |
 | Needs | A session |
-| Input | JSON with one first proof: `{ password, code? }`, `{ emailCode, code? }`, or `{ passkey }`. `code` is an authenticator code or a backup code, required after a password or an email code while the second factor is on |
+| Input | JSON with one first proof: `{ password, code? }`, `{ emailCode, code? }`, or `{ passkey }`. `code` is an authenticator code or a backup code, required after a password or an email code while the second factor is on. With the email method or the passkey method only, `code` is a backup code |
 | Answer | `{ freshUntil }`, an ISO date. The session token and the expiry stay the same |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`invalid_token`](/docs/reference/errors/#invalid_token), [`not_found`](/docs/reference/errors/#not_found) |
 
