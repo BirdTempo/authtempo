@@ -93,12 +93,18 @@ export function withSetCookie(response: Response, cookie: string | null): Respon
   }
 }
 
-/** The URL the gate judges: the routed one when the binding gives it, else the raw one. */
+/**
+ * The URL the gate judges: the origin of `request.url`, with the path and the
+ * query of the routed URL when the binding gives it. The fragment goes.
+ */
 function routedURL(request: Request, url: URL | string | undefined): URL {
-  if (url === undefined) return new URL(request.url);
-  if (typeof url !== "string") return url;
-  // A path joins the origin of the request, so "//x" stays a path and does not name a host.
-  return url.startsWith("/") ? new URL(`${new URL(request.url).origin}${url}`) : new URL(url);
+  const raw = new URL(request.url);
+  if (url === undefined) return raw;
+  const path = typeof url === "string" ? url : `${url.pathname}${url.search}`;
+  // A path with no leading "/" gets one, so no request can throw here.
+  const slash = path.startsWith("/") ? "" : "/";
+  // Only the path and the query count: the redirect never leaves the origin of the request.
+  return new URL(`${raw.origin}${slash}${path}`);
 }
 
 /**
@@ -114,6 +120,11 @@ function routedURL(request: Request, url: URL | string | undefined): URL {
  * router that matches the raw path. A router that decodes "/%61ccount" to
  * "/account", or matches "/ACCOUNT" as "/account", needs `url`, or a protected
  * page renders with no session (plan 11d2 path probe).
+ *
+ * Pass a path with a leading "/" (and the query), or a URL object. The gate
+ * takes only the path and the query of it, on the origin of `request.url`, so
+ * the redirect stays on that origin. "//x" stays a path. A string with no
+ * leading "/" gets one: "account" is judged as "/account", and "" as "/".
  */
 export async function readGate(
   options: GateOptions,

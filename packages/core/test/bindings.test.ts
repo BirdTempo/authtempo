@@ -208,6 +208,25 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(reads).toBe(3);
   });
 
+  it("takes only the path and the query of the routed URL, on the origin of the request", async () => {
+    const { auth } = setup();
+    const options = { auth, protect: () => true, signInPath: "/sign-in" };
+    const where = async (url: URL | string) =>
+      (await readGate(options, page("/raw"), url)).redirect?.headers.get("location");
+    // A string with no leading "/" gets one, so no request throws.
+    const seen: string[] = [];
+    const recording = { ...options, protect: (p: string) => seen.push(p) < 0 };
+    await readGate(recording, page("/raw"), "account");
+    await readGate(recording, page("/raw"), "");
+    expect(seen).toEqual(["/account", "/"]);
+    // The origin of a routed URL object is not read: the redirect stays on the app.
+    expect(await where(new URL("https://evil.example/x"))).toBe(`${BASE}/sign-in?next=%2Fx`);
+    // The fragment goes; the query stays.
+    expect(await where(new URL(`${BASE}/x?a=1#frag`))).toBe(`${BASE}/sign-in?next=%2Fx%3Fa%3D1`);
+    // An absolute string is a path too, on the origin of the request.
+    expect((await where("https://evil.example/x"))?.startsWith(`${BASE}/sign-in?next=`)).toBe(true);
+  });
+
   it("reads no session when the routed URL is under the base path", async () => {
     const { auth, signIn } = setup();
     const cookie = await signIn();
