@@ -17,7 +17,7 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
   or "..". So "/%61ccount" reaches the rule as "/account". Write a rule in
   decoded text: "/café", "/σ".
 - A rule must hold for every path that the route matches. Use a prefix rule
-  for a splat or a parameter, and name each form of an optional segment:
+  for a splat or a parameter. Name each form of an optional segment:
   ":lang?/account" renders for "/en/account", which a rule on "/account" does
   not name. A data request "/account/...data" reaches a splat route
   "account/*" as "/account/..", and an exact rule misses it.
@@ -28,10 +28,10 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
   set `caseSensitive: true` on each protected route, so "/ACCOUNT" gets a 404.
 - React Router ignores trailing slashes on every route that is not a splat, so
   "/account/" renders "/account". The rule gets the path as matched, its
-  lower-case form, both forms with trailing slashes removed, and the matched
-  path in the case of the route's own text ("/myaccount" on the route
-  "myAccount" gives "/myAccount"). A path needs a session when the rule holds
-  for any of them. Write a rule in the route's own text.
+  lower-case form, and both forms with trailing slashes removed. It also gets
+  the matched path in the case of the route's own text: "/myaccount" on the
+  route "myAccount" gives "/myAccount". A path needs a session when the rule
+  holds for any of them. Write a rule in the route's own text.
 - A parameter value or a splat value keeps the case of the request: the route
   has no text for it. A rule on "/en/myAccount" for ":lang/myAccount" misses
   "/EN/MYACCOUNT". Compare such segments in lower case in the rule.
@@ -41,3 +41,12 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
   for a request to core, so make it return one instance per environment.
 - React Router runs the loader of a resource route for an OPTIONS request,
   so core answers a cross-origin preflight to its routes.
+- The sign-in redirect goes to the origin of `request.url`, as the React
+  Router server builds it. The binding never reads the host of an
+  absolute-form request target. `@react-router/node` builds the URL in
+  `createRequest` of `@remix-run/node-fetch-server` 0.14.2 (read 2026-10-15).
+  It takes the `host` option, then the forwarded host under `trustProxy`, then
+  `:authority`, then the Host header, then localhost. `@react-router/express`
+  8.4.0 takes `req.protocol` and `req.hostname`. Each adapter adds the request
+  target after that host, so an absolute-form target cannot set the origin.
+  Set the `host` option, or trust a forwarded host only behind your own proxy.

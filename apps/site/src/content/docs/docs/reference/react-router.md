@@ -65,6 +65,7 @@ sidebar:
 - After the sliding refresh, the page's answer carries the renewed session cookie.
 - A function given to both `authRouteModule` and `authMiddleware` runs twice for a request to core. Make it return one instance per environment.
 - React Router runs the loader of a resource route for an OPTIONS request. So core answers a cross-origin preflight to its routes.
+- The sign-in redirect goes to the origin of `request.url`, as the React Router server builds it. The binding never reads the host of an absolute-form request target. `@react-router/node` builds the URL in `createRequest` of `@remix-run/node-fetch-server` 0.14.2 (read 2026-10-15). It takes the `host` option, then the forwarded host under `trustProxy`, then `:authority`, then the Host header, then localhost. `@react-router/express` 8.4.0 takes `req.protocol` and `req.hostname`. Each adapter adds the request target after that host, so an absolute-form target cannot set the origin. Set the `host` option, or trust a forwarded host only behind your own proxy.
 
 ## Next
 
