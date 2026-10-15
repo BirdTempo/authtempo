@@ -1,0 +1,152 @@
+import type { Auth, ResolvedSession } from "@authtempo/core";
+import { checkGateOptions, type GateAuth, readGate, withSetCookie } from "@authtempo/core/bindings";
+
+/**
+ * The TanStack Start binding of authtempo (plan 11d2), for React and for
+ * Solid. It imports nothing of TanStack: every shape it fits is a web Request
+ * and Response. The app wraps `authRequestServer` in its own createMiddleware.
+ */
+
+/** The auth instance, or a function that makes it at the first request (so `vite build` reads no secret). */
+export type AuthSource<A> = A | (() => A);
+
+function resolve<A extends object>(source: AuthSource<A>): A {
+  return typeof source === "function" ? (source as () => A)() : source;
+}
+
+export type RouteHandler = (ctx: { request: Request }) => Promise<Response>;
+
+/**
+ * The server handlers of the splat route `src/routes/auth.$.ts`:
+ * `export const Route = createFileRoute("/auth/$")({ server: { handlers: authRouteHandlers(getAuth) } });`.
+ */
+export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
+  GET: RouteHandler;
+  POST: RouteHandler;
+  OPTIONS: RouteHandler;
+} {
+  const handle: RouteHandler = ({ request }) => resolve(auth).handle(request);
+  return { GET: handle, POST: handle, OPTIONS: handle };
+}
+
+/** The context that the middleware gives to the next step. */
+export interface SessionContext {
+  session: ResolvedSession | null;
+}
+
+export type RequestServer = <R extends { response: Response }>(args: {
+  request: Request;
+  /**
+   * The path that TanStack Start gives a request middleware: the path of the
+   * request decoded once and parsed again as a URL (`getNormalizedURL` of
+   * @tanstack/router-core 1.171.37). Without it, the path of `request.url`.
+   */
+  pathname?: string | undefined;
+  next(options: { context: SessionContext }): R | Promise<R>;
+}) => Promise<R | Response>;
+
+export interface StartAuthOptions {
+  auth: AuthSource<GateAuth>;
+  /**
+   * True for a path that needs a session. Needs `signInPath`. It gets the
+   * path as the router of TanStack matches it: decoded once, with no "/" at
+   * the end. The binding folds case (see the README).
+   */
+  protect?: ((pathname: string) => boolean) | undefined;
+  /** The sign-in page. The middleware adds `?next=<path and query>`. */
+  signInPath?: string | undefined;
+  /** The base path of core's routes. Default: the base path of the auth object, then "/auth". */
+  basePath?: string | undefined;
+}
+
+/** The characters that the router escapes again after it decodes (`sanitizePathSegment`). */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the router escapes these control characters again; the class copies its own.
+const PATH_UNSAFE = /[\x00-\x1f\x7f"<>`{}]/g;
+
+/** One part of the path, decoded as the router decodes it (`decodeSegment`). */
+function decodePart(part: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURI(part);
+  } catch {
+    // A bad escape: the router decodes each good escape alone and keeps the rest.
+    decoded = part.replaceAll(/%[0-9A-F]{2}/gi, (code) => {
+      try {
+        return decodeURI(code);
+      } catch {
+        return code;
+      }
+    });
+  }
+  return decoded.replace(
+    PATH_UNSAFE,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`,
+  );
+}
+
+/**
+ * The path that the router of TanStack Start matches. The steps are the ones
+ * of @tanstack/router-core 1.171.37 (read 2026-10-15): `parseLocation` of
+ * router.js decodes the middleware's path with `decodePath` of utils.js, which
+ * keeps "%25" and "%5C" escaped and decodes the rest with decodeURI; then
+ * `getMatchedRoutes` removes each "/" at the end (`trimPathRight` of path.js).
+ * So "/%61ccount" and "/account/" both run the route "/account". The case
+ * stays as it came: see authRequestServer.
+ */
+function routedPath(pathname: string): string {
+  let path = pathname;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the router decodes a path with a control character too; the class copies its own.
+  if (/[%\\\x00-\x1f\x7f]/.test(path)) {
+    let out = "";
+    let cursor = 0;
+    for (const match of path.matchAll(/%25|%5C/gi)) {
+      out += decodePart(path.slice(cursor, match.index)) + match[0];
+      cursor = match.index + match[0].length;
+    }
+    path = out + decodePart(path.slice(cursor));
+  }
+  return path.length > 1 && path.endsWith("/") ? path.replace(/\/+$/, "") : path;
+}
+
+/**
+ * The server function of a request middleware:
+ * `createMiddleware({ type: "request" }).server(authRequestServer({ auth: getAuth }))`.
+ * It gives `{ session }` to the context, answers the redirect of a protected
+ * path, and adds the renewed cookie to the page's answer.
+ */
+export function authRequestServer(options: StartAuthOptions): RequestServer {
+  checkGateOptions(options);
+  const { protect } = options;
+  return async ({ request, pathname, next }) => {
+    const url = new URL(request.url);
+    // The page URL: the path that TanStack gives the middleware, a URL path
+    // that the router decodes to the routed path. It is the `next` of the
+    // redirect. The decoded path is not: "/%2561ccount" decodes to
+    // "/%61ccount", which a browser opens as "/account".
+    // The setter keeps "//x" a path: a parse of the text would read a host.
+    const page = new URL(url);
+    page.pathname = pathname ?? url.pathname;
+    const path = routedPath(page.pathname);
+    // The router of TanStack matches without case by default (caseSensitive:
+    // false), and a route can set its own case rule. The binding cannot read
+    // either, so it fails closed: the rule sees the path and the path in lower
+    // case. `next` keeps the case of the request.
+    const gateOptions = {
+      ...options,
+      auth: resolve(options.auth),
+      protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
+    };
+    // The gate judges the routed path, reads the cookie from the request, and
+    // takes `next` from the page URL. The rule never sees the query.
+    const gate = await readGate(gateOptions, request, path, page);
+    if (gate.redirect) return gate.redirect;
+    const result = await next({ context: { session: gate.session } });
+    return { ...result, response: withSetCookie(result.response, gate.cookie) };
+  };
+}
+
+/** The session of a route handler's or a server function's context, or null. */
+export function getSession(context: unknown): ResolvedSession | null {
+  if (typeof context !== "object" || context === null) return null;
+  return (context as Partial<SessionContext>).session ?? null;
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@authtempo/tanstack-start",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p typetest/tsconfig.json && tsc -p tsconfig.test.json",
+    "test": "vitest run && node ../../scripts/check-no-node.mjs src"
+  },
+  "dependencies": {
+    "@authtempo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@tanstack/react-start": "1.169.1",
+    "@tanstack/solid-start": "1.169.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "solid-js": "1.9.17",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3"
+  }
+}

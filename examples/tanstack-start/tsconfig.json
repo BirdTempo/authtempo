@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // tsc checks the auth file and the start file. The route files need the
+  // route tree that `vite build` writes, so the build checks them.
+  "compilerOptions": { "noEmit": true, "jsx": "react-jsx", "types": ["node"] },
+  "include": ["src/lib", "src/start.ts"]
+}
