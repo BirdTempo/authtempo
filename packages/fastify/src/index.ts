@@ -218,8 +218,10 @@ export function authSession(options: FastifySessionOptions): onRequestAsyncHookH
     const gateRequest = new Request(urlOf(request, auth.baseURL), {
       headers: headersOf(request),
     });
-    // The gate judges the matched path as it is (readGate's third argument, core 218476d).
-    const gate = await readGate(gateOptions, gateRequest, `${path}${search}`);
+    // The gate judges the matched path as it is: the object form (core 94bf48b)
+    // has no split at "?" and no drop of "#". find-my-way keeps "%3F" and "%23"
+    // escaped, so the path holds neither; the object form does not rely on it.
+    const gate = await readGate(gateOptions, gateRequest, { pathname: path, search });
     const location = gate.redirect?.headers.get("location");
     if (location) return reply.redirect(location, 307);
     request.authSession = gate.session;

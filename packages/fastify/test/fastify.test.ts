@@ -300,6 +300,21 @@ describe("@authtempo/fastify (plan 11d2)", () => {
 
   // A next of "/\evil.example" would send the person to evil.example from an
   // app's own sign-in page: a browser reads "/\" as "//".
+  // find-my-way keeps "%3F" and "%23" escaped in the path it matches; only a
+  // param value decodes them ("a?b"). So the rule gets "/account/a%3Fb".
+  it("gives the rule %3F and %23 as the router keeps them", async () => {
+    const { app, runs, seen } = await makeApp();
+    for (const [url, matched] of [
+      ["/account/a%3Fb", "/account/a%3Fb"],
+      ["/account/a%23b", "/account/a%23b"],
+    ]) {
+      const res = await app.inject({ method: "GET", url: url ?? "" });
+      expect(res.statusCode).toBe(307);
+      expect(seen.at(-1)).toBe(matched);
+    }
+    expect(runs.pages).toBe(0);
+  });
+
   it("keeps an escaped backslash escaped in next", async () => {
     const { app } = await makeApp({ all: true });
     const res = await app.inject({ method: "GET", url: "/%5Cevil.example" });
