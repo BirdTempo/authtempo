@@ -1,5 +1,6 @@
 import type { Auth } from "./create-auth.js";
 import type { ResolvedSession } from "./engine/sessions.js";
+import { safeNext } from "./http/safe-next.js";
 
 /**
  * The one gate of every server binding (plan 11d2): Hono, Express, Fastify,
@@ -15,6 +16,8 @@ export const DEFAULT_BASE_PATH = "/auth";
  */
 export type GateAuth = Pick<Auth, "handle" | "session" | "sessionCookie"> & {
   readonly basePath?: string | undefined;
+  /** `auth.baseURL`: the origin a binding uses when the Host header does not parse. */
+  readonly baseURL?: string | undefined;
 };
 
 export interface GateOptions {
@@ -77,9 +80,20 @@ export function signInRedirect(url: URL, signInPath: string): Response {
 function redirectTo(base: URL | string, pathname: string, search: string, signInPath: string) {
   const target = new URL(signInPath, base);
   // One leading slash: "//host/x" would be a link to another origin on the sign-in page.
-  const next = `${pathname.replace(/^\/+/, "/")}${search}`;
-  const query = `${target.search ? `${target.search}&` : "?"}next=${encodeURIComponent(next)}`;
+  const joined = `${pathname.replace(/^\/+/, "/")}${search}`;
+  // The rule of core's own flows: no backslash, no control character, no second origin, else "/".
+  const next = safeNext(joined);
+  const query = `${target.search ? `${target.search}&` : "?"}next=${encodeNext(next)}`;
   return Response.redirect(`${target.origin}${target.pathname}${query}`, 307);
+}
+
+/** A lone surrogate makes encodeURIComponent throw: the gate then answers next "/", not a 500. */
+function encodeNext(next: string): string {
+  try {
+    return encodeURIComponent(next);
+  } catch {
+    return "%2F";
+  }
 }
 
 /**

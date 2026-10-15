@@ -309,6 +309,35 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     );
   });
 
+  it("gives no next that names another origin, from any source of next", async () => {
+    const { auth } = setup();
+    const seen: string[] = [];
+    const options = {
+      auth,
+      protect: (p: string) => seen.push(p) > 0,
+      signInPath: "/sign-in",
+    };
+    const at = async (raw: string, routed?: URL | string, returnTo?: URL) =>
+      (await readGate(options, page(raw), routed, returnTo)).redirect?.headers.get("location");
+    // Through a URL, a backslash is "/" and a tab goes: the one-slash rule then holds.
+    expect(await at("/\\evil.example/a")).toBe(`${BASE}/sign-in?next=%2Fevil.example%2Fa`);
+    expect(await at("/raw", new URL(`${BASE}/\t/evil.example`))).toBe(
+      `${BASE}/sign-in?next=%2Fevil.example`,
+    );
+    // The raw path returns as itself; one router decode gives the routed path.
+    expect(await at("/%5Cevil.example", "/\\evil.example")).toBe(
+      `${BASE}/sign-in?next=${encodeURIComponent("/%5Cevil.example")}`,
+    );
+    expect(seen.at(-1)).toBe("/\\evil.example");
+    // A JavaScript binding with no types can pass any object with pathname and
+    // search. The safeNext rule of core's own flows then answers "/".
+    const loose = (pathname: string) => ({ pathname, search: "" }) as unknown as URL;
+    expect(await at("/raw", "/a", loose("/\\evil.example/a"))).toBe(`${BASE}/sign-in?next=%2F`);
+    expect(await at("/raw", "/a", loose("/\t/evil.example"))).toBe(`${BASE}/sign-in?next=%2F`);
+    // A lone surrogate makes encodeURIComponent throw: the gate answers next "/", not a throw.
+    expect(await at("/raw", "/a", loose("/a\uD800b"))).toBe(`${BASE}/sign-in?next=%2F`);
+  });
+
   it("exposes the baseURL of the config, for a binding whose Host header does not parse", () => {
     const { auth } = setup();
     expect(auth.baseURL).toBe(BASE);
