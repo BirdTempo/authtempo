@@ -2,6 +2,8 @@
 
 The React Router binding of authtempo, for the server middleware of React
 Router 8. It takes `react-router` 8.4.0 or newer in 8 as a peer dependency.
+React Router 8.4 needs Node 22.22 or newer (its engines field, read
+2026-10-15). The binding adds no floor of its own.
 
 1. Mount core: `app/routes/auth.$.ts` holds
    `export const { loader, action } = authRouteModule(getAuth);`.

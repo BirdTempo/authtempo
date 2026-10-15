@@ -60,8 +60,13 @@ export interface RouterAuthOptions {
  */
 export function authMiddleware(options: RouterAuthOptions): MiddlewareFunction {
   checkGateOptions(options);
-  return async ({ request, context }, next) => {
-    const gate = await readGate({ ...options, auth: resolve(options.auth) }, request);
+  return async ({ request, url, context }, next) => {
+    // The routed URL, not request.url: a client navigation sends
+    // "/page.data?_routes=...", and React Router normalizes only `url`
+    // (server-runtime/urls.js and router.js of 8.4.0, read 2026-10-15). The gate
+    // reads only the headers, so the copy takes no body.
+    const page = new Request(url, { headers: request.headers });
+    const gate = await readGate({ ...options, auth: resolve(options.auth) }, page);
     if (gate.redirect) return gate.redirect;
     context.set(sessionContext, gate.session);
     // On the server, next() answers the Response of the page. A route's

@@ -148,6 +148,29 @@ describe("@authtempo/react-router (plan 11d2)", () => {
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
   });
 
+  // A client navigation of a framework app sends "/account.data?_routes=...".
+  // React Router gives the middleware the raw request and the routed `url`.
+  it("gates the routed URL of a data request, not the raw URL", async () => {
+    const { auth, args } = setup();
+    const exact = authMiddleware({
+      auth,
+      protect: (p) => p === "/account",
+      signInPath: "/sign-in",
+    });
+    const a = {
+      ...args(new Request(`${BASE}/account.data?_routes=account&tab=2`)),
+      url: new URL(`${BASE}/account?tab=2`),
+    };
+    let ran = false;
+    const res = (await exact(a, async () => {
+      ran = true;
+      return new Response("page");
+    })) as Response;
+    expect(ran).toBe(false);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, args, middleware, advance } = setup();
     const cookie = await signIn();

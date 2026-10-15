@@ -8,7 +8,11 @@ import type { RouteObject } from "react-router";
  * a route module: `app/root.tsx` exports `middleware`, and `app/routes/auth.$.ts`
  * exports `loader` and `action` of authRouteModule.
  */
-export function createRoutes(getAuth: () => Auth): RouteObject[] {
+export function createRoutes(
+  getAuth: () => Auth,
+  // Called at each run of a page loader, with the route id: for a log, or for a test.
+  onLoad: (routeId: string) => void = () => {},
+): RouteObject[] {
   const auth = authRouteModule(getAuth);
   return [
     {
@@ -29,7 +33,10 @@ export function createRoutes(getAuth: () => Auth): RouteObject[] {
         {
           id: "account",
           path: "account",
-          loader: ({ context }) => ({ email: getSession(context)?.user.email ?? null }),
+          loader: ({ context }) => {
+            onLoad("account");
+            return { email: getSession(context)?.user.email ?? null };
+          },
         },
       ],
     },
