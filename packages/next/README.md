@@ -16,8 +16,10 @@ dependency.
 - `authSession` is a read with no write. A server component cannot set a
   cookie, so the read leaves the sliding refresh for the browser. The browser
   gets the renewed cookie from its own read of `/auth/session`, such as the
-  read of the session store of `@authtempo/react`. An app with no such read
-  calls `/auth/session` from the page.
+  read of the session store of `@authtempo/react`. Put that read in the
+  layout, so every page renews the cookie: `examples/next` does it in
+  `app/providers.tsx`. An app with no such read calls `/auth/session` from
+  the page.
 - Without `auth`, `authProxy` checks only that a session cookie is present,
   or a bearer that starts with core's session token prefix. It does not check
   that the session is live: the page checks the session with `authSession`.

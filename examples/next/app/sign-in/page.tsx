@@ -1,16 +1,24 @@
 "use client";
-import { createClient, errorText } from "@authtempo/client";
-import { AuthProvider, useClient, useSession } from "@authtempo/react";
+import { ERRORS, type ErrorCode, errorText, type OAuthClientCode } from "@authtempo/client";
+import { type AuthErrorCode, useAuthError, useClient, useSession } from "@authtempo/react";
 import { useState } from "react";
 
-// The API is this app's own origin: core is mounted under /auth.
-const client = createClient({
-  baseURL: typeof location === "undefined" ? "http://localhost:3000" : location.origin,
-});
+/**
+ * The text of a redirect error. A code of core's table takes the core text;
+ * any other code is an OAuth code or `unexpected`, which the OAuth table answers.
+ */
+function redirectText(code: NonNullable<AuthErrorCode>): string {
+  return Object.hasOwn(ERRORS, code)
+    ? errorText(code as ErrorCode)
+    : errorText(code as OAuthClientCode, "oauth");
+}
 
-function SignIn() {
+/** The sign-in page. The client and the session come from the Providers of the layout. */
+export default function SignIn() {
   const c = useClient();
   const session = useSession();
+  // `?auth_error=<code>` of a social sign-in that came back with a failure, read once.
+  const authError = useAuthError();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -28,6 +36,7 @@ function SignIn() {
         else setFailure(errorText(r.code));
       }}
     >
+      {authError && <p role="alert">{redirectText(authError)}</p>}
       {failure && <p role="alert">{failure}</p>}
       <label>
         Email
@@ -35,13 +44,5 @@ function SignIn() {
       </label>
       <button type="submit">Send a sign-in link</button>
     </form>
-  );
-}
-
-export default function Page() {
-  return (
-    <AuthProvider client={client}>
-      <SignIn />
-    </AuthProvider>
   );
 }
