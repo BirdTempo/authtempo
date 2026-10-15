@@ -62,10 +62,14 @@ function urlOf(req: ExpressRequest, auth: BaseURLSource): string {
  * The forms of a path that `protect` tests. Express matches without case by
  * default, on the app and on each Router, and the hex digits of an escape
  * too: the path, its lower case, and its lower case with upper-case hex.
+ * Express routes with strict routing off by default, so "/account" also
+ * matches "/account/": each form also goes with its trailing slashes removed.
+ * All of them go, so the rule fails closed. "/" stays "/".
  */
 function caseForms(path: string): string[] {
   const lower = path.toLowerCase();
-  return [path, lower, lower.replace(/%[0-9a-f]{2}/g, (m) => m.toUpperCase())];
+  const forms = [path, lower, lower.replace(/%[0-9a-f]{2}/g, (m) => m.toUpperCase())];
+  return forms.flatMap((form) => [form, form.replace(/\/+$/, "") || "/"]);
 }
 
 function headersOf(req: ExpressRequest): Headers {

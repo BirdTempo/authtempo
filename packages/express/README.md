@@ -21,6 +21,12 @@ takes `express` 5.3.0 or newer in 5 as a peer dependency.
   upper-case escape hex. It protects the path when `protect` is true for any
   form. Also set `app.set("case sensitive routing", true)`, so "/ACCOUNT" gets
   a 404.
+- Express routes with strict routing off by default, so `/account` also
+  matches `/account/`. The binding also tests each form with its trailing
+  slashes removed.
+- An exact rule does not cover a route with a parameter, such as
+  `/account{/:tab}`: `/account/%2F` runs it with `tab` "/". Use a prefix rule
+  for it: `p === "/account" || p.startsWith("/account/")`.
 - Write a rule for a non-ASCII path in the escaped form, such as
   `p.startsWith("/caf%C3%A9")`. Node answers 400 to a raw UTF-8 request line
   before Express runs.

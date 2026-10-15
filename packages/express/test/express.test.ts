@@ -391,6 +391,43 @@ describe("@authtempo/express (plan 11d2)", () => {
     }
   });
 
+  // Express routes with strict routing off by default: app.get("/account") also
+  // matches "/account/". An exact rule must protect that path too.
+  it("protects a trailing-slash path under an exact rule", async () => {
+    let base = "";
+    let auth: ReturnType<typeof createAuth> | null = null;
+    const getAuth = () =>
+      (auth ??= createAuth({
+        baseURL: base,
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [base],
+        storage: createMemoryAdapter(),
+        mail: { send: async () => {} },
+      }));
+    const pages: string[] = [];
+    const app = express();
+    app.use("/auth", authHandler(getAuth));
+    app.use(
+      authSession({ auth: getAuth, protect: (p) => p === "/account", signInPath: "/sign-in" }),
+    );
+    app.get("/account", (req, res) => {
+      pages.push(req.originalUrl);
+      res.send("page");
+    });
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((r) => server.once("listening", () => r()));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      for (const path of ["/account/", "/ACCOUNT/"]) {
+        const res = await fetch(`${base}${path}`, { redirect: "manual" });
+        expect(res.status).toBe(307);
+      }
+      expect(pages).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
   it("does not decode an escape in the path, as Express's router does not", async () => {
     const { base, runs } = await serve(undefined, { caseSensitive: true });
     // The router matches the raw path, so "/%61ccount" is no route: 404, and no page runs.
