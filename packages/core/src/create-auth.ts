@@ -382,6 +382,13 @@ export interface Auth {
    * framework bindings reads it, so an app names its base path once (plan 11d2).
    */
   readonly basePath: string;
+  /**
+   * The resolved `baseURL` of the config: an origin with no path. A binding
+   * that builds the request URL from the Host header uses
+   * `new URL(auth.baseURL).origin` when that header does not parse, so a bad
+   * Host answers no 500 of the binding's own (plan 11d2).
+   */
+  readonly baseURL: string;
   /** Serves the auth routes under `basePath`. Mount it for any request whose path starts with `basePath`. */
   handle(request: Request): Promise<Response>;
   /**
@@ -425,6 +432,7 @@ export function createAuth(input: AuthConfig): Auth {
   const handle = createRouter(config, coreRoutes(config));
   return {
     basePath: config.basePath,
+    baseURL: config.baseURL,
     handle,
     session: (request, options) => sessionFromRequest(config, request, options),
     caller: (request) => callerFromRequest(config, request),

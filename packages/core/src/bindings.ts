@@ -125,20 +125,39 @@ function judge(request: Request, url: URL | string | undefined): Judged {
   return { origin: raw.origin, pathname: `${slash}${path}`, search };
 }
 
+/** The path and the query of `next`: of `returnTo`, else of a routed URL object, else of the request. */
+function back(request: Request, routed: URL | string | undefined, returnTo: URL | undefined): URL {
+  if (returnTo !== undefined) return returnTo;
+  if (typeof routed === "object") return routed;
+  return new URL(request.url);
+}
+
+function redirectBack(origin: string, page: URL, signInPath: string): Response {
+  return redirectTo(origin, page.pathname, page.search, signInPath);
+}
+
 /**
  * The session of a page request, the redirect of a protected path, and the
  * renewed cookie. A path of core reads nothing: `auth.handle` reads and renews
  * the session itself.
  *
- * `url` is the path that the framework's router matched, with the query: a
+ * `routed` is the path that the framework's router matched, with the query: a
  * string, or a URL object that the framework parsed. The gate uses its path
- * for the base path check, the `protect` rule, and the `next` of the
- * redirect. The cookie and the bearer still come from `request`, and the
- * origin of the redirect from `request.url`. Without `url` the gate judges the
+ * for the base path check and the `protect` rule. The cookie and the bearer
+ * still come from `request`, and the origin of the redirect from
+ * `request.url`. Without `routed` the gate judges the
  * raw `request.url`, which is right only for a router that matches the raw
  * path. A router that decodes "/%61ccount" to "/account", or matches
- * "/ACCOUNT" as "/account", needs `url`, or a protected page renders with no
- * session (plan 11d2 path probe).
+ * "/ACCOUNT" as "/account", needs `routed`, or a protected page renders with
+ * no session (plan 11d2 path probe).
+ *
+ * `returnTo` is the page URL, for a request whose URL is not the page URL,
+ * such as SvelteKit's "/account/__data.json" or React Router's "/account.data".
+ * The judged path and the return URL are two values: a decoded text is not a
+ * safe `next`, because "/%2561ccount" decodes to "/%61ccount", which a browser
+ * then opens as "/account". `next` is the path and the query of `returnTo`
+ * when given, else of a routed URL object, else of `request.url`. It never
+ * comes from a routed string.
  *
  * `protect` gets the path exactly as the router matched it. The gate does not
  * change it: no resolution of "." or "..", no decoding, no encoding, no merge
@@ -150,17 +169,18 @@ function judge(request: Request, url: URL | string | undefined): Judged {
 export async function readGate(
   options: GateOptions,
   request: Request,
-  url?: URL | string,
+  routed?: URL | string,
+  returnTo?: URL,
 ): Promise<Gate> {
-  const routed = judge(request, url);
+  const judged = judge(request, routed);
   // One source for the base path: core's own, unless a proxy moved core's routes.
   const basePath = options.basePath ?? options.auth.basePath ?? DEFAULT_BASE_PATH;
-  if (isAuthPath(routed.pathname, basePath)) return { session: null, redirect: null, cookie: null };
+  if (isAuthPath(judged.pathname, basePath)) return { session: null, redirect: null, cookie: null };
   const session = await options.auth.session(request);
-  if (!session && options.signInPath && options.protect?.(routed.pathname))
+  if (!session && options.signInPath && options.protect?.(judged.pathname))
     return {
       session,
-      redirect: redirectTo(routed.origin, routed.pathname, routed.search, options.signInPath),
+      redirect: redirectBack(judged.origin, back(request, routed, returnTo), options.signInPath),
       cookie: null,
     };
   return {

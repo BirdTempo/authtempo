@@ -197,9 +197,11 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(g.session).toBeNull();
     expect(g.redirect?.status).toBe(307);
     expect(g.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
-    // A string path takes the origin of the request, with its query.
+    // A routed string is judged; next comes from the request URL, not from the string.
     const s = await readGate(options, page("/%61ccount?tab=2"), "/account?tab=2");
-    expect(s.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
+    expect(s.redirect?.headers.get("location")).toBe(
+      `${BASE}/sign-in?next=${encodeURIComponent("/%61ccount?tab=2")}`,
+    );
     // "//x" stays a path, not a host.
     const seen: string[] = [];
     const recording = { ...options, protect: (p: string) => seen.push(p) < 0 };
@@ -257,9 +259,8 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     // The gate reads the session once to know that there is none.
     expect(reads).toBe(1);
     expect(g.redirect?.status).toBe(307);
-    expect(g.redirect?.headers.get("location")).toBe(
-      `${BASE}/sign-in?next=${encodeURIComponent(routed)}`,
-    );
+    // next comes from the request URL: a routed string is never a next.
+    expect(g.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fraw`);
   });
 
   it("gives the rule the path that the framework gave, with the query in next", async () => {
@@ -276,16 +277,41 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     // A string is not encoded again; a URL object keeps the pathname the framework parsed.
     const fromString = await readGate(options, page("/raw"), "/café");
     const fromURL = await readGate(options, page("/raw"), new URL(`${BASE}/caf%C3%A9`));
-    expect(fromString.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%C3%A9`);
+    // next of a string comes from the request; of a URL object, from the object.
+    expect(fromString.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fraw`);
     expect(fromURL.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
-    // The query splits at the first "?" and stays in next; the fragment goes.
-    const q = await readGate(options, page("/raw"), "/account?tab=2&x=?#frag");
+    // The query splits at the first "?", so the rule gets "/account"; the fragment goes.
+    const q = await readGate(options, page("/account?tab=2&x=?"), "/account?tab=2&x=?#frag");
     expect(q.redirect?.headers.get("location")).toBe(
       `${BASE}/sign-in?next=${encodeURIComponent("/account?tab=2&x=?")}`,
     );
     // "//account" stays "//account", with no merge of slashes.
     await readGate(options, page("/raw"), "//account");
     expect(seen).toEqual(["/café", "/caf%C3%A9", "/account", "//account"]);
+  });
+
+  it("takes next from returnTo, else from a routed URL object, else from the request", async () => {
+    const { auth } = setup();
+    const options = { auth, protect: () => true, signInPath: "/sign-in" };
+    const at = async (raw: string, routed?: URL | string, returnTo?: URL) =>
+      (await readGate(options, page(raw), routed, returnTo)).redirect?.headers.get("location");
+    // A data request: the router judged "/account", the person returns to the page.
+    expect(await at("/account.data", "/account", new URL(`${BASE}/account?tab=2`))).toBe(
+      `${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`,
+    );
+    // A routed string and no returnTo: the raw request path, not the decoded text.
+    expect(await at("/%2561ccount", "/%61ccount")).toBe(
+      `${BASE}/sign-in?next=${encodeURIComponent("/%2561ccount")}`,
+    );
+    // A routed URL object and no returnTo: the object.
+    expect(await at("/raw", new URL(`${BASE}/account?x=1`))).toBe(
+      `${BASE}/sign-in?next=%2Faccount%3Fx%3D1`,
+    );
+  });
+
+  it("exposes the baseURL of the config, for a binding whose Host header does not parse", () => {
+    const { auth } = setup();
+    expect(auth.baseURL).toBe(BASE);
   });
 
   it("reads no session when the routed URL is under the base path", async () => {
