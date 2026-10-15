@@ -13,16 +13,19 @@ afterEach(() => {
 /** An Express app on a port of the test. The auth instance is made after the port is known. */
 async function serve(
   parser?: "json" | "form",
-  opts: { sessionFirst?: boolean; pref?: boolean } = {},
+  opts: { sessionFirst?: boolean; pref?: boolean; caseSensitive?: boolean } = {},
 ) {
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
+  const runs = { account: 0 };
   let auth: Auth | null = null;
   const getAuth = (): Auth => {
     if (!auth) throw new Error("no auth yet");
     return auth;
   };
   const app = express();
+  // Express routes without case by default: "/ACCOUNT" would reach the /account route.
+  if (opts.caseSensitive) app.set("case sensitive routing", true);
   if (parser === "json") app.use(express.json());
   if (parser === "form") app.use(express.urlencoded({ extended: false }));
   const mountSession = () =>
@@ -46,6 +49,7 @@ async function serve(
     res.send(getSession(res)?.user.email ?? "signed out");
   });
   app.get("/account", (_req, res) => {
+    runs.account++;
     res.send(`account of ${getSession(res)?.user.email}`);
   });
   const server = app.listen(0, "127.0.0.1");
@@ -96,6 +100,7 @@ async function serve(
   return {
     base,
     counter,
+    runs,
     signIn,
     lines: () => lastLines,
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
@@ -139,6 +144,25 @@ describe("@authtempo/express (plan 11d2)", () => {
     // The count works: a page request reads the session once.
     await fetch(`${base}/`);
     expect(counter.reads - before).toBe(1);
+  });
+
+  it("runs no page for /ACCOUNT with no session, in an app with case sensitive routing", async () => {
+    const { base, runs } = await serve(undefined, { caseSensitive: true });
+    for (const path of ["/ACCOUNT", "/Account"]) {
+      const res = await fetch(`${base}${path}`, { redirect: "manual" });
+      expect([404, 307]).toContain(res.status);
+    }
+    expect(runs.account).toBe(0);
+    // The exact path still goes to the sign-in page.
+    expect((await fetch(`${base}/account`, { redirect: "manual" })).status).toBe(307);
+  });
+
+  it("does not decode an escape in the path, as Express's router does not", async () => {
+    const { base, runs } = await serve(undefined, { caseSensitive: true });
+    // The router matches the raw path, so "/%61ccount" is no route: 404, and no page runs.
+    const res = await fetch(`${base}/%61ccount`, { redirect: "manual" });
+    expect(res.status).toBe(404);
+    expect(runs.account).toBe(0);
   });
 
   it("reads a body that express.json() parsed", async () => {

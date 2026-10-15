@@ -26,6 +26,9 @@ export function createApp(env: AppEnv): Express {
     return auth;
   };
   const app = express();
+  // Express routes without case by default, so "/ACCOUNT" would run the /account
+  // page. The protect rule is exact, so the router must compare case too.
+  app.set("case sensitive routing", true);
   // A body parser may run first: the binding writes the parsed body again for core.
   app.use(express.json());
   // Every route of core under /auth, the default basePath.

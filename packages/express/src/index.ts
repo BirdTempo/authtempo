@@ -103,7 +103,13 @@ export function authSession(options: ExpressSessionOptions): RequestHandler {
   return async (req, res, next) => {
     // The gate reads the URL and the headers only: no body.
     const request = new Request(urlOf(req), { headers: headersOf(req) });
-    const gate = await readGate({ ...options, auth: resolve(options.auth) }, request);
+    // The routed text: Express's router matches the raw path of originalUrl, with no
+    // decode, and without case unless the app sets "case sensitive routing".
+    const gate = await readGate(
+      { ...options, auth: resolve(options.auth) },
+      request,
+      req.originalUrl,
+    );
     const location = gate.redirect?.headers.get("location");
     if (location) {
       res.redirect(307, location);
