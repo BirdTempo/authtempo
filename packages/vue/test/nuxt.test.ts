@@ -44,6 +44,7 @@ function makeApp(
   router.get("/account", page);
   router.get("/account/:id", page);
   router.get("/café", page);
+  router.get("/secret/:id", page);
   // A catch-all page, as Nuxt's renderer "/**" is: it must never get a path of core.
   router.get("/**", page);
   app.use(router.handler);
@@ -204,18 +205,38 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
     expect(pageRuns()).toBe(0);
   });
 
-  // h3 decodes "/%61uth/..." to a path of core. The gate reads no session for
-  // it, and the request goes on to core's route, never to a page.
-  it.each(["/%61uth/session", "/%61uth/x"])(
-    "sends %s to core and runs no page, with a catch-all page",
-    async (target) => {
-      const { app, counter, pageRuns } = makeApp({}, () => true);
-      const res = await rawGet(app, target);
-      expect([401, 404]).toContain(res.status);
-      expect(counter.reads).toBe(0);
-      expect(pageRuns()).toBe(0);
-    },
-  );
+  // h3 decodes "/%61uth/..." to a path of core. Core judges the escaped
+  // request as a page (core round 10), so the gate reads the session once and
+  // the rule decides; the request never reaches a page.
+  it.each([
+    ["/%61uth/session", "/auth/session"],
+    ["/%61uth/x", "/auth/x"],
+  ])("runs no page for %s, with a catch-all page", async (target, text) => {
+    const seen: string[] = [];
+    const { app, counter, pageRuns } = makeApp({}, (p) => {
+      seen.push(p);
+      return true;
+    });
+    const res = await rawGet(app, target);
+    expect([307, 401, 404]).toContain(res.status);
+    expect(counter.reads).toBe(1);
+    expect(seen).toEqual([text]);
+    expect(pageRuns()).toBe(0);
+  });
+
+  it("cuts at the first ? for the page router: an exact rule guards /account%3Fz", async () => {
+    const { fetch, pageRuns } = makeApp({}, (p) => p === "/account");
+    const res = await fetch(new Request(`${API}/account%3Fz`));
+    expect(res.status).toBe(307);
+    expect(pageRuns()).toBe(0);
+  });
+
+  it("cuts at the first # as an extra form: an exact rule guards /secret/x%23y", async () => {
+    const { fetch, pageRuns } = makeApp({}, (p) => p === "/secret/x");
+    const res = await fetch(new Request(`${API}/secret/x%23y`));
+    expect(res.status).toBe(307);
+    expect(pageRuns()).toBe(0);
+  });
 
   it("gives a non-ASCII path to the rule decoded, as h3 routes it", async () => {
     const seen: string[] = [];

@@ -121,19 +121,26 @@ function pageURL(origin: string, target: string): string {
 /**
  * Two routers read one request. h3's handlers match the decoded text, where
  * "%3F" and "%23" became "?" and "#": "/account%3F" is "/account?". Nuxt's
- * page router reads that text as a URL, so it matches the text cut at the
- * first "?" or "#" and renders the page of "/account". A path needs a session
- * when the rule holds for either form, so an exact rule fails closed. The rule
- * sees the full form first; it sees the cut form only when the two differ.
+ * page router cuts that text at the first "?" (not at "#": "/secret/x%23y"
+ * renders the page "/secret/[id]" with id "x#y", reviewed 2026-10-15) and
+ * renders the page of "/account". So the rule runs on the full text, then on
+ * the text cut at the first "?". A third form, the text cut at the first "#",
+ * is extra: an OR of forms only adds a redirect, never removes one. A path
+ * needs a session when the rule holds for any form, so an exact rule fails
+ * closed. The rule sees the forms in that order, each only once.
  */
 function bothForms(
   protect: ((pathname: string) => boolean) | undefined,
 ): ((pathname: string) => boolean) | undefined {
   if (!protect) return undefined;
   return (pathname) => {
-    if (protect(pathname)) return true;
-    const cut = pathname.search(/[?#]/);
-    return cut !== -1 && protect(pathname.slice(0, cut));
+    const forms = [pathname];
+    for (const mark of ["?", "#"]) {
+      const at = pathname.indexOf(mark);
+      const cut = at === -1 ? pathname : pathname.slice(0, at);
+      if (!forms.includes(cut)) forms.push(cut);
+    }
+    return forms.some((form) => protect(form));
   };
 }
 
