@@ -1,6 +1,7 @@
 import { CAPTCHA_HEADER } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
+import { appErrorName } from "../primitives/app-error.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { json } from "./json.js";
 
@@ -192,7 +193,8 @@ export function createRouter(
         "authtempo: unhandled error",
         "OPTIONS",
         route.path,
-        e instanceof Error ? e.name : typeof e,
+        // The app sets the name, so it can hold a code or a token (plan 9c).
+        appErrorName(e),
       );
       return json({ error: "internal" }, 500);
     }
@@ -234,7 +236,8 @@ export function createRouter(
         "authtempo: unhandled error",
         route.method,
         route.path,
-        e instanceof Error ? e.name : typeof e,
+        // The app sets the name, so it can hold a code or a token (plan 9c).
+        appErrorName(e),
       );
       return json({ error: "internal" }, 500);
     }

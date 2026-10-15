@@ -919,7 +919,7 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | Method | Path | Body or query | Answer |
 | --- | --- | --- | --- |
 | POST | `/reauth` | session, `{ password, code? }`. With the email method or the passkey method only, `code` is a backup code. See the rule below the table | `{ freshUntil }`; 400 `invalid_body` (no proof, an unknown field, or no `code` while the second factor is on), `invalid_code`; 401, `invalid_credentials`; 404 `not_found` (no `password` config); 429 `rate_limited` |
-| POST | `/reauth` | session, `{ emailCode, code? }` or `{ passkey }` | the other two proofs of `/reauth`; a passkey is two factors and takes no `code`. Two first proofs, or `code` beside a passkey, answer 400 `invalid_body`; 400 `passkey_failed` (a passkey of another user), `invalid_token` (a spent challenge); 404 `not_found` (no `emailOtp`, or no `passkey` config), and the limit counts no try |
+| POST | `/reauth` | session, `{ emailCode, code? }` or `{ passkey }` | the other two proofs of `/reauth`; a passkey is two factors and takes no `code`. Two first proofs, or `code` beside a passkey, answer 400 `invalid_body`; 400 `passkey_failed` (a passkey of another user), `invalid_token` (a spent challenge), `token_expired` (an old passkey challenge), `too_many_attempts` (an email code that its cap spent); 404 `not_found` (no `emailOtp`, or no `passkey` config), and the limit counts no try |
 | POST | `/reauth/email` | session | `{ sent: true }`: a code to the user's address; 404 with `emailOtp: false`; 429 `rate_limited` |
 | POST | `/reauth/passkey/options` | session | the request options for `navigator.credentials.get`, with the user's passkeys; 404 without `passkey`; 429 `rate_limited` |
 
@@ -927,7 +927,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 
 | Limit | Window | Count | Route |
 | --- | --- | --- | --- |
-| `reauth:user:<userId>` | 15 minutes | 10 | `POST /reauth`, right or wrong. Its own key: a guess here costs the owner's sign-in nothing |
+| `reauth:user:<userId>` | 15 minutes | 10 | `POST /reauth`, right or wrong. Its own key: a guessed password costs the owner's sign-in nothing. A wrong email code also counts on `otp-verify:ip` and `otp-verify:email`, the keys of the email code sign-in |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | `POST /reauth/email`, then `otp:email` and `otp:email-day` of the address, shared with every mailed code |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
 

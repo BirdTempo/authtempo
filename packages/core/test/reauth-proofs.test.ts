@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../src/config.js";
 import { defaultAccountMail } from "../src/engine/account-mail.js";
-import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
+import { requestEmailOtp, verifyEmailOtp, verifyGate } from "../src/engine/email-otp.js";
 import { requireFresh } from "../src/engine/fresh.js";
 import {
   passkeyAuthenticationOptions,
@@ -22,6 +22,7 @@ import { FAST } from "./password-helpers.js";
 import { type Auth, EMAIL, enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 const DAY = 86_400_000;
+const MIN = 60_000;
 const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
 
 async function stale(auth: Auth, token: string) {
@@ -138,6 +139,50 @@ describe("the re-authentication by an email code (plan 12a)", () => {
     ).toMatchObject({ ok: false, code: "invalid_body" });
   });
 
+  it("counts the code mails of one user on its own key, apart from the address keys", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    // The address window opens 14 minutes before the user window, so it ends first.
+    expect((await requestEmailOtp(auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+    auth.clock.advance(14 * MIN);
+    for (let i = 0; i < 2; i++)
+      expect((await requestReauthCode(auth.config, { session: s })).ok).toBe(true);
+    auth.clock.advance(2 * MIN);
+    expect((await requestReauthCode(auth.config, { session: s })).ok).toBe(true);
+    expect(await requestReauthCode(auth.config, { session: s })).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
+    expect((await requestEmailOtp(auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+  });
+
+  it("makes one session fresh when two sessions send one code at once", async () => {
+    const auth = totpAuth();
+    const a = await verifiedSession(auth);
+    const b = await verifiedSession(auth);
+    await requestReauthCode(auth.config, { session: a });
+    const proof = { emailCode: codeOf(auth) };
+    const answers = await Promise.all([
+      reauthenticate(auth.config, { session: a, proof, ip: null }),
+      reauthenticate(auth.config, { session: b, proof, ip: null }),
+    ]);
+    expect(answers.filter((r) => r.ok)).toHaveLength(1);
+  });
+
+  it("reads the IP of the proof for the verify limit of an email code", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    for (let i = 0; i < 30; i++)
+      await verifyGate(auth.config, { email: `x${i}@example.com`, ip: "7.7.7.7" });
+    expect((await requestReauthCode(auth.config, { session: s })).ok).toBe(true);
+    const proof = { emailCode: codeOf(auth) };
+    expect(await reauthenticate(auth.config, { session: s, proof, ip: "7.7.7.7" })).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
+    expect((await reauthenticate(auth.config, { session: s, proof, ip: "8.8.8.8" })).ok).toBe(true);
+  });
+
   it("answers not_found for the request and the proof with emailOtp off", async () => {
     const auth = totpAuth({ emailOtp: false });
     const s = await verifiedSession(auth);
@@ -159,6 +204,14 @@ describe("the order of the feature check and the limit (plan 12a)", () => {
       expect(
         await reauthenticate(auth.config, { session: s, proof: { emailCode: "123456" }, ip: null }),
       ).toMatchObject({ ok: false, code: "not_found" });
+  });
+
+  it("answers not_found, not invalid_body, for an email code with emailOtp off and no factor code", async () => {
+    const auth = totpAuth({ emailOtp: false });
+    const { session } = await enrolled(auth);
+    expect(
+      await reauthenticate(auth.config, { session, proof: { emailCode: "123456" }, ip: null }),
+    ).toMatchObject({ ok: false, code: "not_found" });
   });
 
   it("answers not_found for a passkey with no passkey config, and the limit counts no try", async () => {
@@ -317,6 +370,15 @@ describe("the second factor with each proof (plan 12a, Task 2 review M1 and L2)"
 });
 
 describe("the account config (plan 12a)", () => {
+  it("builds the code mail with account.mail", async () => {
+    const auth = totpAuth({
+      account: { mail: (input) => ({ ...defaultAccountMail(input), subject: "app subject" }) },
+    });
+    const s = await verifiedSession(auth);
+    expect((await requestReauthCode(auth.config, { session: s })).ok).toBe(true);
+    expect(auth.mail.at(-1)?.subject).toBe("app subject");
+  });
+
   it("refuses an unknown account key and a mail that is no function", () => {
     expect(() => totpAuth({ account: { mail: defaultAccountMail, notices: {} } as never })).toThrow(
       new ConfigError("account.notices is not an option; core has mail"),

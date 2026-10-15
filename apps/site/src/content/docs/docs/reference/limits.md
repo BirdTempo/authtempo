@@ -43,8 +43,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `otp:ip:<ip>` | 15 minutes | 20 | Email code request, both purposes |
 | `otp:email:<email>` | 15 minutes | 3 | Email code request, both purposes, and the re-authentication code |
 | `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes, and the re-authentication code |
-| `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify and reset |
-| `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify and reset |
+| `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify, reset, and re-authentication code |
+| `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify, reset, and re-authentication code |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
 | `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |
