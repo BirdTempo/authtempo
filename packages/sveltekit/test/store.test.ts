@@ -1,4 +1,4 @@
-import { createClient } from "@authtempo/client";
+import { type Client, createClient } from "@authtempo/client";
 import { createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import { derived, get } from "svelte/store";
 import { describe, expect, it, vi } from "vitest";
@@ -8,7 +8,8 @@ import { authError, sessionStore } from "../src/store.js";
 const API = "https://api.example.com";
 const APP = "https://app.example.com";
 
-function setup() {
+/** `gate` holds every read of core until it settles. */
+function setup(gate: Promise<void> = Promise.resolve()) {
   const mail: MailMessage[] = [];
   const auth = createAuth({
     baseURL: API,
@@ -23,6 +24,7 @@ function setup() {
   });
   let cookie = "";
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    await gate;
     const req = new Request(input, init);
     const headers = new Headers(req.headers);
     headers.set("origin", APP);
@@ -70,6 +72,51 @@ describe("@authtempo/sveltekit/store (plan 11d2)", () => {
     stop();
     await client.store.refetch();
     expect(runs).toBe(before);
+  });
+
+  it("stops listening at an unsubscribe while a session read runs", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    // The first read waits until the test lets it go, so the unsubscribe falls inside it.
+    const { client: base } = setup(gate);
+    let live = 0;
+    const client: Client = {
+      ...base,
+      store: {
+        ...base.store,
+        subscribe(listener) {
+          live++;
+          const stop = base.store.subscribe(listener);
+          return () => {
+            live--;
+            stop();
+          };
+        },
+      },
+    };
+    const seen: boolean[] = [];
+    const stop = sessionStore(client).subscribe((s) => seen.push(s.isPending));
+    expect(seen).toEqual([true]);
+    stop();
+    expect(live).toBe(0);
+    release();
+    await vi.waitFor(() => expect(base.store.get().isPending).toBe(false));
+    expect(seen).toEqual([true]);
+  });
+
+  it("gives the refetch of the client store, and a refetch reads the session again", async () => {
+    const { client, token } = setup();
+    const session = sessionStore(client);
+    expect(session.refetch).toBe(client.store.refetch);
+    const stop = session.subscribe(() => {});
+    await vi.waitFor(() => expect(get(session).isPending).toBe(false));
+    await client.magicLink.request({ email: "ada@example.com" });
+    await client.magicLink.verify({ token: token() });
+    await session.refetch();
+    expect(get(session).data?.user.email).toBe("ada@example.com");
+    stop();
   });
 
   it("reads the redirect error of a URL", () => {
