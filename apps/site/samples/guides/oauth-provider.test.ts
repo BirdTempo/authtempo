@@ -85,7 +85,17 @@ describe("be the OAuth and OIDC provider for MCP clients", () => {
   it("answers 401 with the resource metadata to a request with no access token", async () => {
     const res = await mcpRoute(createProviderAuth(harness()), new Request(`${API}/mcp`));
     expect(res.status).toBe(401);
-    expect(res.headers.get("www-authenticate")).toContain("oauth-protected-resource/mcp");
+    expect(res.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"',
+    );
+    // A bearer that the route refuses adds error="invalid_token" (RFC 6750 section 3.1).
+    const refused = await mcpRoute(
+      createProviderAuth(harness()),
+      new Request(`${API}/mcp`, { headers: { authorization: "Bearer ts_not_a_token" } }),
+    );
+    expect(refused.headers.get("www-authenticate")).toBe(
+      'Bearer error="invalid_token", resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"',
+    );
   });
 
   it("lets a token with the tools scope call the route, and answers 403 to a token without it", async () => {

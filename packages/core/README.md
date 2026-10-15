@@ -654,6 +654,9 @@ The limits are per isolate under the memory limiter: on Workers each isolate cou
 `oauth` (plan 9g) makes core the authorization server for agents and MCP clients. It is off by default. With `oauth` set, `oauth.resources` must name 1 to 20 resources, and core refuses the config with `jwtMint: false`.
 
 ```ts
+import { readBearer } from "@authtempo/core/credentials";
+import { insufficientScopeResponse, unauthorizedResponse } from "@authtempo/verify";
+
 const auth = createAuth({
   // ...
   oauth: {
@@ -671,21 +674,19 @@ export default {
     if (url.pathname.startsWith("/.well-known/")) return auth.wellKnown(request);
     if (url.pathname.startsWith("/auth/")) return auth.handle(request);
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
-      const metadata = 'resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"';
+      const resource = "https://api.example.com/mcp";
       const c = await auth.caller(request);
+      // @authtempo/verify writes the challenge of RFC 6750 and RFC 9728, with the
+      // scope that MCP 2026-07-28 asks for in the 401 and the 403.
       if (c?.kind !== "oauth")
-        return Response.json({ error: "unauthorized" }, {
-          status: 401,
-          headers: { "www-authenticate": `Bearer ${metadata}` },
+        return unauthorizedResponse({
+          resource,
+          scope: "mcp:tools",
+          invalidToken: readBearer(request) !== null,
         });
       // Check the scope of each tool: a token with only openid must not call it.
       if (!c.scopes.includes("mcp:tools"))
-        return Response.json({ error: "insufficient_scope" }, {
-          status: 403,
-          headers: {
-            "www-authenticate": `Bearer error="insufficient_scope", scope="mcp:tools", ${metadata}`,
-          },
-        });
+        return insufficientScopeResponse({ resource, scope: "mcp:tools" });
       // c.user, c.clientId, c.scopes, c.resource
     }
     return new Response("not found", { status: 404 });

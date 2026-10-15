@@ -1,7 +1,13 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
 import { type Auth, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
+import { readBearer } from "@authtempo/core/credentials";
 import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
-import { createVerifier, type Verifier } from "@authtempo/verify";
+import {
+  createVerifier,
+  insufficientScopeResponse,
+  unauthorizedResponse,
+  type Verifier,
+} from "@authtempo/verify";
 import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 import { exampleHooks } from "./hooks.js";
@@ -168,25 +174,19 @@ export default {
     // An MCP resource (plan 9g): an OAuth access token for this resource only. A session
     // or an API token is refused here, and a token for another resource is null at `caller`.
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
-      const metadata = `resource_metadata="${env.BASE_URL}/.well-known/oauth-protected-resource/mcp"`;
+      const resource = `${env.BASE_URL}/mcp`;
       const c = await a.caller(request);
+      // MCP 2026-07-28: the 401 names the scope of the tools, so a client asks for it.
       if (c?.kind !== "oauth")
-        return Response.json(
-          { error: "unauthorized" },
-          { status: 401, headers: { "www-authenticate": `Bearer ${metadata}` } },
-        );
+        return unauthorizedResponse({
+          resource,
+          scope: "mcp:tools",
+          invalidToken: readBearer(request) !== null,
+        });
       // The tools need the scope mcp:tools. Without this check a token with only
       // openid calls them, and every app that copies this example inherits that.
       if (!c.scopes.includes("mcp:tools"))
-        return Response.json(
-          { error: "insufficient_scope" },
-          {
-            status: 403,
-            headers: {
-              "www-authenticate": `Bearer error="insufficient_scope", scope="mcp:tools", ${metadata}`,
-            },
-          },
-        );
+        return insufficientScopeResponse({ resource, scope: "mcp:tools" });
       return Response.json({ sub: c.user.id, clientId: c.clientId, scopes: c.scopes });
     }
     // TEST_MODE only (plan 9c): the fake provider's authorize step, which the browser visits.

@@ -21,7 +21,8 @@
     "@authtempo/core": "workspace:*",
     "@authtempo/handoff": "workspace:*",
     "@authtempo/import": "workspace:*",
-    "@authtempo/legacy-hashes": "workspace:*"
+    "@authtempo/legacy-hashes": "workspace:*",
+    "@authtempo/verify": "workspace:*"
   },
   "devDependencies": {
     "@astrojs/markdown-remark": "7.3.2",

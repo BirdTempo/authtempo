@@ -182,8 +182,9 @@ it("serves a fake MCP client end to end on D1: discovery, register, authorize, e
   expect((await SELF.fetch(`${BASE}/me`, { headers: bearer })).status).toBe(401);
   const anonymous = await SELF.fetch(`${BASE}/mcp`);
   expect(anonymous.status).toBe(401);
+  // MCP 2026-07-28: the 401 names the scope that the route needs.
   expect(anonymous.headers.get("www-authenticate")).toBe(
-    `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp"`,
+    `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"`,
   );
 
   // The rotation and the reuse detection run as D1 conditional updates.
@@ -211,14 +212,17 @@ it("answers 401 at /mcp to a session cookie, a tk_ token, and a token of another
   const { token: apiToken } = (await created.json()) as { token: string };
   const other = await connect("mcp-d@example.com", "mcp:tools", OTHER_RESOURCE);
   const metadata = `resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp"`;
-  for (const headers of [
-    { cookie: c.cookie },
-    { authorization: `Bearer ${apiToken}` },
-    { authorization: `Bearer ${other.tokens.access_token}` },
-  ]) {
+  // A cookie is no bearer: no error code. A bearer that the route refuses: invalid_token.
+  for (const [headers, error] of [
+    [{ cookie: c.cookie }, ""],
+    [{ authorization: `Bearer ${apiToken}` }, 'error="invalid_token", '],
+    [{ authorization: `Bearer ${other.tokens.access_token}` }, 'error="invalid_token", '],
+  ] as const) {
     const res = await SELF.fetch(`${BASE}/mcp/tools`, { headers });
     expect(res.status).toBe(401);
-    expect(res.headers.get("www-authenticate")).toBe(`Bearer ${metadata}`);
+    expect(res.headers.get("www-authenticate")).toBe(
+      `Bearer ${error}${metadata}, scope="mcp:tools"`,
+    );
   }
   // The token is for this resource, but its scope is openid alone.
   const narrow = await SELF.fetch(`${BASE}/mcp/tools`, {

@@ -211,6 +211,9 @@ importers:
       '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../../packages/legacy-hashes
+      '@authtempo/verify':
+        specifier: workspace:*
+        version: link:../../packages/verify
     devDependencies:
       '@astrojs/markdown-remark':
         specifier: 7.3.2
