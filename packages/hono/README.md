@@ -18,5 +18,7 @@ and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
   non-ASCII route reaches the rule decoded, as `/café`. Write the rule for
   that form, not for `/caf%C3%A9`. The gate of `@authtempo/core/bindings`
   judges the path as the binding gives it.
+  An exact rule covers one route only. For a route with a wildcard, use
+  `p === "/account" || p.startsWith("/account/")`.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every
   server binding.
