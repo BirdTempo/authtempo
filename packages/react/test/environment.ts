@@ -6,7 +6,9 @@ import { builtinEnvironments, type Environment } from "vitest/runtime";
  * and fetch on the global. happy-dom's Response drops Set-Cookie, as a browser
  * does, so core in process could not set its session cookie. Core and the
  * test's fetch run on the server side, so they keep the runtime's classes.
- * packages/vue, packages/solid, examples/solid, and packages/sdk-conformance use it too: a change here changes each of their suites.
+ * Other suites use this file too: packages/vue, packages/solid,
+ * packages/sveltekit, packages/sdk-conformance, examples/react, examples/next,
+ * and examples/solid. A change here changes each of their suites.
  */
 const KEEP = [
   "Request",
