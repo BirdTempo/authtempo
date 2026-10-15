@@ -176,6 +176,25 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     expect(pageRuns()).toBe(0);
   });
 
+  // The query of next comes from event.url, and "%3F" stays escaped, as Kit
+  // keeps it: "/account%3F" is not "/account". In real Kit that path gets a
+  // 404; the stub page answers 200, and the test pins what protect gets.
+  it("keeps the query of the routed URL in next", async () => {
+    const { run, pageRuns } = setup({}, (p) => p === "/account");
+    const page = await run(new Request(`${BASE}/account?tab=keys`));
+    const data = await run(
+      new Request(`${BASE}/account/__data.json?tab=keys&x-sveltekit-invalidated=01`),
+      new URL(`${BASE}/account?tab=keys`),
+    );
+    const decoded = await run(new Request(`${BASE}/account%3F`));
+    expect(pageRuns()).toBe(1);
+    expect(decoded.res.status).toBe(200);
+    for (const { res } of [page, data]) {
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3Dkeys`);
+    }
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, run, advance } = setup();
     const cookie = await signIn();
