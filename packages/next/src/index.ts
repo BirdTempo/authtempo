@@ -1,4 +1,5 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
+import { signInRedirect } from "@authtempo/core/bindings";
 import {
   readBearer,
   readSessionToken,
@@ -101,10 +102,7 @@ export function authProxy(
     const url = new URL(request.url);
     if (!options.protect(url.pathname)) return undefined;
     if (await live(request)) return undefined;
-    const target = new URL(options.signInPath, url);
-    // One leading slash: "//host/x" would be a link to another origin on the sign-in page.
-    const next = `${url.pathname.replace(/^\/+/, "/")}${url.search}`;
-    const query = `${target.search ? `${target.search}&` : "?"}next=${encodeURIComponent(next)}`;
-    return Response.redirect(`${target.origin}${target.pathname}${query}`, 307);
+    // The redirect rule of every binding, with the one-leading-slash guard of next.
+    return signInRedirect(url, options.signInPath);
   };
 }

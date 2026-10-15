@@ -39,6 +39,10 @@
     "./credentials": {
       "types": "./dist/credentials.d.ts",
       "default": "./dist/credentials.js"
+    },
+    "./bindings": {
+      "types": "./dist/bindings.d.ts",
+      "default": "./dist/bindings.js"
     }
   },
   "files": [

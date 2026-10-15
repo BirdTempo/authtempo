@@ -145,6 +145,10 @@ Two entries hold the facts that an SDK reads, so each fact has one copy (plan 11
 
 `@authtempo/core/testing` still exports `ROUTES` for an app's own route tests.
 
+### `@authtempo/core/bindings`
+
+The gate of the framework bindings (plan 11d2): `readGate` reads the session of a page request, answers the sign-in redirect of a protected path, and gives the renewed cookie. A path of core reads nothing. `signInRedirect` puts the path and the query of the request in `next`, with one leading slash, so `next` cannot name another origin. `withSetCookie` adds the cookie to the page's answer. A binding calls `checkGateOptions` at construction: `protect` needs `signInPath`.
+
 ## Apps on another origin
 
 Set `appURL` to the app's origin and list it in `trustedOrigins`. Every
