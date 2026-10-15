@@ -161,6 +161,8 @@ The gate reads the base path from `auth.basePath`, the resolved `basePath` of th
 
 The base path check trusts the router: a path under the base path reads no session and gets no redirect, because core answers it. So a binding mounts core for every method under the base path. A binding that mounts core for some methods only lets a catch-all page under the base path run with no gate, and the check is then no control. The `basePath` option of the gate is for a proxy that mounts core under another prefix.
 
+The gate skips the session read and the `protect` rule only when the raw path of `request.url` and the routed path are both under the base path. When only one of them is, the gate judges the request as a page. A binding sends a request to `auth.handle` by the raw path of `request.url`, which is the path that core's router reads. A binding that sends a request to core when only the decoded path is under the base path gets a 404 from core, not a page.
+
 ## Apps on another origin
 
 Set `appURL` to the app's origin and list it in `trustedOrigins`. Every

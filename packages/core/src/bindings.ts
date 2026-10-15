@@ -214,7 +214,11 @@ export async function readGate(
   const judged = judge(request, routed);
   // One source for the base path: core's own, unless a proxy moved core's routes.
   const basePath = options.basePath ?? options.auth.basePath ?? DEFAULT_BASE_PATH;
-  if (isAuthPath(judged.pathname, basePath)) return { session: null, redirect: null, cookie: null };
+  // Both forms: the raw path that core's router reads, and the path that the app's router matched.
+  const rawCore = isAuthPath(new URL(request.url).pathname, basePath);
+  const core = rawCore && isAuthPath(judged.pathname, basePath);
+  // When only one form is a path of core, the gate judges a page: a session read is the worst case.
+  if (core) return { session: null, redirect: null, cookie: null };
   const session = await options.auth.session(request);
   if (!session && options.signInPath && options.protect?.(judged.pathname))
     return {

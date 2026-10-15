@@ -370,7 +370,7 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(auth.baseURL).toBe(BASE);
   });
 
-  it("reads no session when the routed URL is under the base path", async () => {
+  it("reads no session when the raw path and the routed path are both under the base path", async () => {
     const { auth, signIn } = setup();
     const cookie = await signIn();
     let reads = 0;
@@ -383,12 +383,42 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     };
     const g = await readGate(
       { auth: counting },
-      page("/%61uth/session", cookie),
+      page("/auth/session", cookie),
       new URL(`${BASE}/auth/session`),
     );
     expect(g).toEqual({ session: null, redirect: null, cookie: null });
     expect(reads).toBe(0);
   });
+
+  // Core's router reads the raw path; the app's router matched the routed one.
+  // When only one form is a path of core, the request is a page to the gate.
+  it.each([
+    ["/%61uth/x", "a routed string", "/auth/x", () => true],
+    ["/%61uth/x", "a routed URL object", new URL(`${BASE}/auth/x`), () => true],
+    ["/%61uth/x", "a RoutedPath", { pathname: "/auth/x" }, () => true],
+    ["/auth/x", "a routed string", "/account", (p: string) => p === "/account"],
+    ["/auth/x", "a RoutedPath", { pathname: "/account" }, (p: string) => p === "/account"],
+  ] as const)(
+    "judges raw %s with %s as a page, because only one form is a path of core",
+    async (raw, _form, routed, protect) => {
+      const { auth } = setup();
+      let reads = 0;
+      const counting = {
+        ...auth,
+        session: async (r: Request) => {
+          reads++;
+          return auth.session(r);
+        },
+      };
+      const g = await readGate(
+        { auth: counting, protect, signInPath: "/sign-in" },
+        page(raw),
+        routed,
+      );
+      expect(reads).toBe(1);
+      expect(g.redirect?.status).toBe(307);
+    },
+  );
 
   it("judges the raw request URL with two arguments, as before", async () => {
     const { auth } = setup();
