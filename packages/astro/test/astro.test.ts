@@ -6,7 +6,8 @@ import { authMiddleware, authRoute } from "../src/index.js";
 const BASE = "https://app.example.com";
 const DAY = 24 * 60 * 60 * 1000;
 
-function setup() {
+function setup(core: { basePath?: string } = {}) {
+  const prefix = core.basePath ?? "/auth";
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
   const auth: Auth = createAuth({
@@ -20,7 +21,15 @@ function setup() {
       },
     },
     clock: { now: () => now },
+    ...core,
   });
+  // The real session call of core, with a count of the calls of the gate.
+  const counter = { reads: 0 };
+  const session = auth.session.bind(auth);
+  auth.session = (request, options) => {
+    counter.reads++;
+    return session(request, options);
+  };
   const route = authRoute(auth);
   /**
    * The two fields of APIContext that the binding reads. The real pipeline of
@@ -32,7 +41,7 @@ function setup() {
     const post = (path: string, body: unknown) =>
       route(
         context(
-          new Request(`${BASE}/auth${path}`, {
+          new Request(`${BASE}${prefix}${path}`, {
             method: "POST",
             headers: { "content-type": "application/json", origin: BASE },
             body: JSON.stringify(body),
@@ -42,7 +51,8 @@ function setup() {
     await post("/magic-link/request", { email: "ada@example.com" });
     const token = /token=([A-Za-z0-9_-]+)/.exec(mail.at(-1)?.text ?? "")?.[1] ?? "";
     const res = await post("/magic-link/verify", { token });
-    return (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    const line = res.headers.getSetCookie().find((l) => l.startsWith("__Host-tempo_session="));
+    return (line ?? "").split(";")[0] ?? "";
   }
   const middleware = authMiddleware({
     auth,
@@ -51,6 +61,9 @@ function setup() {
   });
   return {
     auth,
+    prefix,
+    counter,
+    route,
     context,
     signIn,
     middleware,
@@ -62,6 +75,40 @@ describe("@authtempo/astro (plan 11d2)", () => {
   it("serves the routes of core from one endpoint", async () => {
     const { signIn } = setup();
     expect((await signIn()).startsWith("__Host-tempo_session=ts_")).toBe(true);
+  });
+
+  // In Astro the middleware runs for the endpoint of core too. A read of the
+  // session there would add a renewed cookie after core's clear line of a
+  // sign-out, and the browser would keep the cookie.
+  async function signOutAfterRefresh(core: { basePath?: string }) {
+    const { prefix, counter, route, context, signIn, middleware, advance } = setup(core);
+    const cookie = await signIn();
+    advance(8 * DAY);
+    const before = counter.reads;
+    const ctx = context(
+      new Request(`${BASE}${prefix}/sign-out`, {
+        method: "POST",
+        headers: { cookie, origin: BASE },
+      }),
+    );
+    const res = (await middleware(ctx, async () => route(ctx))) as Response;
+    expect(res.status).toBe(200);
+    expect(counter.reads - before).toBe(0);
+    const lines = res.headers.getSetCookie();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.startsWith("__Host-tempo_session=;")).toBe(true);
+    expect(lines[0]).toContain("Max-Age=0");
+    // The count works: a page request reads the session once.
+    await middleware(context(new Request(`${BASE}/`)), async () => new Response("page"));
+    expect(counter.reads - before).toBe(1);
+  }
+
+  it("reads no session for a path of core", async () => {
+    await signOutAfterRefresh({});
+  });
+
+  it("reads no session for a path of core on the base path of the auth object", async () => {
+    await signOutAfterRefresh({ basePath: "/api/auth" });
   });
 
   it("puts the session in locals, and runs the page", async () => {
