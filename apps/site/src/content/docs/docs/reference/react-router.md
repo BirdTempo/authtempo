@@ -45,7 +45,7 @@ sidebar:
 - React Router matches a path without case by default, so "/ACCOUNT" runs the page of "/account".
 - React Router ignores trailing slashes on every route that is not a splat, so "/account/" renders "/account".
 - So the rule gets more than one form. These are the path as matched, its lower-case form, and both forms with trailing slashes removed.
-- The last form is the matched path in the case of the route's own text. For example, "/myaccount" on the route "myAccount" gives "/myAccount".
+- A fifth form is the matched path in the case of the route's own text. For example, "/myaccount" on the route "myAccount" gives "/myAccount".
 - A path needs a session when the rule holds for any form. Write a rule in the route's own text.
 - Still set `caseSensitive: true` on each protected route, so "/ACCOUNT" gets a 404.
 - A parameter value or a splat value keeps the case of the request, because the route has no text for it.
@@ -60,7 +60,8 @@ sidebar:
 - The package takes `react-router` 8.4.0 or a later 8 release as a peer dependency.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
-- Core matches its routes on the raw path. A path that the router decodes to a path of core, such as "/%61uth/x", gets a 404 from core, not a page.
+- Core matches its routes on the raw path. A path that the router decodes to a path of core, such as "/%61uth/x", never runs a page.
+- When the rule holds for the decoded path and there is no session, the answer is the sign-in redirect. Else core answers 404.
 - After the sliding refresh, the page's answer carries the renewed session cookie.
 - A function given to both `authRouteModule` and `authMiddleware` runs twice for a request to core. Make it return one instance per environment.
 - React Router runs the loader of a resource route for an OPTIONS request. So core answers a cross-origin preflight to its routes.

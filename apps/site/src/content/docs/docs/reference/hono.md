@@ -50,7 +50,8 @@ sidebar:
 - A function given to both `authSession` and `authHandler` runs twice for a request to core. Make it return one instance per environment.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
-- Core matches its routes on the raw path. A path that Hono decodes to a path of core, such as `/%61uth/x`, gets a 404 from core, not a page.
+- Core matches its routes on the raw path. A path that Hono decodes to a path of core, such as `/%61uth/x`, never runs a page.
+- When the rule holds for the decoded path and there is no session, the answer is the sign-in redirect. Else core answers 404.
 - After the sliding refresh, the answer carries the renewed session cookie.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every server package.
 

@@ -93,7 +93,8 @@ On the server of Nuxt:
 - The session middleware reads the URL and the headers only, never the body.
 - The session middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
-- Core matches its routes on the raw path. A path that h3 decodes to a path of core, such as `/%61uth/x`, gets a 404 from core, not a page.
+- Core matches its routes on the raw path. A path that h3 decodes to a path of core, such as `/%61uth/x`, never runs a page.
+- When the rule holds for the decoded path and there is no session, the answer is the sign-in redirect. Else core answers 404.
 - On Node, the origin of the redirect comes from the protocol of h3 and the Host header. It never comes from a request line in absolute form.
 - A Host that does not parse as one host falls back to the origin of `auth.baseURL`, so no request answers 500.
 - A web handler, such as a Worker preset, keeps the URL of the request, and the origin comes from that URL.

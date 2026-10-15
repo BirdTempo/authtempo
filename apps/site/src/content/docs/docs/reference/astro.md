@@ -49,7 +49,8 @@ sidebar:
 - `getAuth` is a function that makes the auth instance at the first request, so `astro build` reads no secret.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
-- Core matches its routes on the raw path. A path that Astro decodes to a path of core, such as `/%61uth/x`, gets a 404 from core, not a page.
+- Core matches its routes on the raw path. A path that Astro decodes to a path of core, such as `/%61uth/x`, never runs a page.
+- When the rule holds for the decoded path and there is no session, the answer is the sign-in redirect. Else core answers 404.
 - After the sliding refresh, the page's answer carries the renewed session cookie.
 - Set `security.allowedDomains` to the host of your app. Without it, Astro gives each request the origin `localhost`.
 - Then the sign-in redirect goes to `localhost`, and Astro refuses a form post from your app.

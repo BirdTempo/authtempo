@@ -20,7 +20,7 @@ sidebar:
 
 ## Steps
 
-1. Mount core: `src/routes/auth.$.ts` holds the file route `/auth/$`, with `server: { handlers: authRouteHandlers(getAuth) }`.
+1. Mount core: `src/routes/auth.$.ts` holds `export const Route = createFileRoute("/auth/$")({ server: { handlers: authRouteHandlers(getAuth) } });`.
 2. Read the session: `src/start.ts` adds `createMiddleware({ type: "request" }).server(authRequestServer({ auth: getAuth }))` to `requestMiddleware`.
 3. Read the session in a handler: `getSession(context)`.
 4. Protect paths: `authRequestServer({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
@@ -60,7 +60,8 @@ sidebar:
 - These settings are happy-dom, the browser build of `solid-js`, and an inline transform of `solid-js` and `@tanstack`. The example app is React.
 - The middleware reads no session for a route of core. Core reads and renews the session itself, and every `Set-Cookie` line of core passes unchanged.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
-- Core matches its routes on the raw path. A path that the router decodes to a path of core, such as "/%61uth/x", gets a 404 from core, not a page.
+- Core matches its routes on the raw path. A path that the router decodes to a path of core, such as "/%61uth/x", never runs a page.
+- When the rule holds for the decoded path and there is no session, the answer is the sign-in redirect. Else core answers 404.
 - After the sliding refresh, the page's answer carries the renewed session cookie.
 - The origin of the redirect comes from the Host header, with the protocol of the request, not from the request line.
 - The Node server of TanStack Start builds the URL of an absolute-form line, such as "GET http://evil.example/account", from that line. The binding does not use it.

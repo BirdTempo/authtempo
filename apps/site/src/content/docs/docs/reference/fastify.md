@@ -49,7 +49,7 @@ sidebar:
 - They are also the path with the last slash cut (`ignoreTrailingSlash`), and the path cut at the first `;` (`useSemicolonDelimiter`).
 - The hook also folds case: the rule runs on each form in lower case. find-my-way compares with `toLowerCase` when `caseSensitive` is false.
 - find-my-way compares the hex digits of a kept escape as text, so `/q%3fx` and `/q%3Fx` reach the same route.
-- So the hook also runs the rule with each escape in upper case. The upper-case step does not change the text after `%25`.
+- So the hook also runs the rule with each escape in upper case. The step does not change the text after `%25`, so write that text in lower case.
 - Write the rule in lower case, with each kept escape in upper case: `%3F`, `%2F`.
 - A path needs a session when the rule holds for one form. Prefer a prefix rule: a route with a parameter or a wildcard also matches paths under the prefix.
 
@@ -60,11 +60,12 @@ sidebar:
 - The field is `request.authSession`, because `@fastify/session` owns `request.session`.
 - The hook reads no session for a route of core. Core reads and renews the session itself.
 - The hook skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
-- Core matches its routes on the raw path. A path that Fastify decodes to a path of core, such as `/%61uth/x`, gets a 404 from core, not a page.
+- Core matches its routes on the raw path. A path that Fastify decodes to a path of core, such as `/%61uth/x`, never runs a page.
+- When the rule holds for the decoded path and there is no session, the answer is the sign-in redirect. Else core answers 404.
 - After the sliding refresh, the answer carries the renewed session cookie.
 - Each `Set-Cookie` line of core is added to the answer. A line that an earlier hook set stays.
 - The `next` value of the redirect is the path and the query of the request, as a URL reads them.
-- One decode by the router gives back the page that the person asked for. So `/account/a%2Fb` returns to `/account/a%2Fb`.
+- One decode by the router gives back the page that the person asked for. So `/account/a%2Fb` returns to `/account/a%2Fb`, and an escaped backslash stays escaped.
 - The origin of the redirect comes from the Host header. A request line in absolute form, such as `GET http://host/path`, gives its path only.
 - A Host header that does not parse falls back to the origin of core's `baseURL`. So no request gets a 500 of the binding's own.
 - `authRoutes` makes its route at registration. With a function in `auth`, the route is under "/auth" unless you set `basePath`.
