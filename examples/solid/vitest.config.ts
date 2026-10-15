@@ -4,9 +4,9 @@ import { defineConfig } from "vitest/config";
 // of @authtempo/solid is for an app that installs it from npm: there it is in
 // node_modules, and an external package that imports solid-js loads the server
 // build through Node. In this repo the workspace link resolves outside
-// node_modules, so vite transforms it with no setting (Task 8 probe 9). The DOM
-// is the environment of packages/react, which keeps the runtime's fetch
-// classes (plan 11d).
+// node_modules, so vite transforms it with no setting, and the example test
+// passes without the inline. The DOM is the environment of packages/react,
+// which keeps the runtime's fetch classes (plan 11d).
 export default defineConfig({
   resolve: { conditions: ["browser", "development"] },
   test: {

@@ -9,6 +9,7 @@ import {
   onCleanup,
   useContext,
 } from "solid-js";
+import { isServer } from "solid-js/web";
 
 /**
  * The Solid binding of authtempo (plan 11d2). It puts `client.store` into a
@@ -44,10 +45,14 @@ export interface UseSession {
 
 /**
  * The session, read at the first use and after each change. The subscription
- * ends with the owner of the component.
+ * ends with the owner of the component. A server render never subscribes, as
+ * in `@authtempo/react`: a subscription there starts a read with no cookie of
+ * the person, and a later render shows its answer to every person. The server
+ * render shows the store's state as it is, so the first render of the browser matches it.
  */
 export function useSession(): UseSession {
   const { store } = useClient();
+  if (isServer) return { session: () => store.get(), refetch: store.refetch };
   const [state, setState] = createSignal(store.get());
   // The setter takes a function, so the state object is never read as an updater.
   const stop = store.subscribe(() => setState(() => store.get()));
