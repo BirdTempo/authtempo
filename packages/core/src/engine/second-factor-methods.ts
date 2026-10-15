@@ -15,6 +15,7 @@ import {
 } from "./passkeys.js";
 import { checkUserPassword } from "./password.js";
 import {
+  type AddedMethod,
   addMethod,
   challengeMethods,
   challengeOrigin,
@@ -105,7 +106,7 @@ export async function enableMethod(
   const id = newId(now);
   const { codes, hashes } = await newBackupCodes(config, totp, id);
   const ended = endedList(config);
-  let added: { first: boolean; row: SecondFactorRow };
+  let added: AddedMethod;
   try {
     added = await config.storage.transaction(async (tx) => {
       const a = await addMethod(
@@ -145,13 +146,15 @@ export async function enableMethod(
   }
   if (added.first) await sessionsEnded(config, ended, "two_factor");
   // After the commit (plan 12a). The one enable of the passkey and the email
-  // method, so each enable sends one notice.
-  await sendNotice(config, {
-    event: "factor_enabled",
-    email: session.user.email,
-    ip: null,
-    userAgent: null,
-  });
+  // method, so each enable sends one notice. A method that was on already
+  // changed nothing, so it sends none.
+  if (added.changed)
+    await sendNotice(config, {
+      event: "factor_enabled",
+      email: session.user.email,
+      ip: null,
+      userAgent: null,
+    });
   return ok({ methods: added.row.methods, backupCodes: added.first ? codes : [] });
 }
 

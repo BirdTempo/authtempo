@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { appErrorName } from "../src/primitives/app-error.js";
 import { systemClock } from "../src/primitives/clock.js";
 import {
   constantTimeEqual,
@@ -117,5 +118,25 @@ describe("randomDigits (plan 9e)", () => {
     // 250, 255, and 251 are drawn again. 3, 14, 249, 0, 129, then 3 again (the
     // buffer of 12 bytes wraps the list) give 3, 4, 9, 0, 9, 3.
     expect(randomDigits(6)).toBe("349093");
+  });
+});
+
+describe("appErrorName (plan 9c; plan 12a review L1)", () => {
+  it("answers a plain class name, Error for any other name, and the type of a non-Error", () => {
+    expect(appErrorName(new RangeError("x"))).toBe("RangeError");
+    const named = new Error("x");
+    named.name = "Token ts_abc";
+    expect(appErrorName(named)).toBe("Error");
+    expect(appErrorName("text")).toBe("string");
+  });
+
+  it("answers Error when the name getter throws, and does not throw", () => {
+    const e = new Error("x");
+    Object.defineProperty(e, "name", {
+      get() {
+        throw new TypeError("getter ada@example.com");
+      },
+    });
+    expect(appErrorName(e)).toBe("Error");
   });
 });

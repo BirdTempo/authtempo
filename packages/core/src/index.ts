@@ -160,7 +160,7 @@ export {
 } from "./http/password-pages.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 export { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
-export { ipKey } from "./limiter/ip-key.js";
+export { ipKey, isIpLiteral } from "./limiter/ip-key.js";
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
 export { type Clock, systemClock } from "./primitives/clock.js";

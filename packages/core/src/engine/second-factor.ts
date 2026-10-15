@@ -197,6 +197,8 @@ export class NoBackupCodesError extends Error {
 export interface AddedMethod {
   /** True when this call wrote the row: the first method. */
   first: boolean;
+  /** False when the method was on already and nothing was written (plan 12a: no notice then). */
+  changed: boolean;
   row: SecondFactorRow;
 }
 
@@ -252,12 +254,13 @@ export async function addMethod(
     );
     await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: input.userId }]);
     await deleteTwoFactorChallenges(tx, input.userId);
-    return { first: true, row };
+    return { first: true, changed: true, row };
   }
   for (let round = 0; round < ROUNDS; round++) {
     // A parallel disable of the last method deleted the row: the person retries.
     if (!current) throw new FactorRaceError();
-    if (current.methods.includes(input.method)) return { first: false, row: current };
+    if (current.methods.includes(input.method))
+      return { first: false, changed: false, row: current };
     const methods = [...current.methods, input.method];
     const updatedAt = later(now, current.updatedAt);
     const n = await tx.update(
@@ -268,7 +271,7 @@ export async function addMethod(
       ],
       { methods, updatedAt },
     );
-    if (n === 1) return { first: false, row: { ...current, methods, updatedAt } };
+    if (n === 1) return { first: false, changed: true, row: { ...current, methods, updatedAt } };
     current = await factorRow(tx, input.userId);
   }
   throw new FactorRaceError();

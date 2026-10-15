@@ -75,6 +75,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `defaultExistingAccountMail` | The default mail to a known address at a uniform sign-up. `password.existingAccountMail` replaces it. |
 | `limiterKey` | Joins a key, the seconds, and the maximum into the stored key of the owned limiters. |
 | `ipKey` | The IP part of a per-IP limiter key: the IPv4 form of an IPv4-mapped address, the `/64` of another IPv6 address, `unknown` for no IP. |
+| `isIpLiteral` | True for a bare IPv4 or IPv6 literal. The notice mail prints an IP only in this form. |
 | `normalizeEmail`, `normalizeSlug` | The address rule and the slug rule of core. |
 | `validOrganizationName`, `validUserName` | The name rules of core. |
 | `validImageUrl` | The image rule of core: an `https:` URL of at most 2048 characters, with no credentials and no control character. |

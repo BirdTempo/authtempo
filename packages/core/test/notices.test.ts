@@ -30,6 +30,7 @@ import { resolveSession } from "../src/engine/sessions.js";
 import { disableTotp, disableTotpWithCode } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { post, tokenFromMail } from "./helpers.js";
 import {
@@ -675,5 +676,291 @@ describe("defaultNoticeMail (plan 12a)", () => {
     }).text;
     expect(text).not.toContain("Secret/9");
     expect(text).not.toMatch(/https?:|token=|\b\d{6}\b/);
+  });
+});
+
+/**
+ * The engine's own store and mail port, wrapped in place (plan 12a review M2).
+ * The store counts open transactions and can fail the next commit: the
+ * callback runs, then a throw rolls it back. The port records the depth at
+ * each send.
+ */
+function tracked() {
+  const st = { depth: 0, failCommit: false };
+  const sent: { m: MailMessage; depth: number }[] = [];
+  const auth = totpAuth({ passkey: RP });
+  const store = auth.config.storage as StorageAdapter;
+  const origTx = store.transaction.bind(store);
+  (store as { transaction: StorageAdapter["transaction"] }).transaction = (async <R>(
+    fn: (tx: StorageAdapter) => Promise<R>,
+  ) => {
+    st.depth++;
+    try {
+      return await origTx(async (tx) => {
+        const r = await fn(tx);
+        if (st.failCommit) throw new Error("probe: the commit failed");
+        return r;
+      });
+    } finally {
+      st.depth--;
+    }
+  }) as StorageAdapter["transaction"];
+  const port = auth.config.mail as { send: (m: MailMessage) => Promise<void> };
+  const orig = port.send;
+  port.send = async (m) => {
+    sent.push({ m, depth: st.depth });
+    await orig(m);
+  };
+  const mail = () => sent.map((x) => x.m);
+  const noticesSent = () => sent.filter((x) => x.m.subject === SUBJECT);
+  return { auth, st, mail, noticesSent };
+}
+
+type Tracked = ReturnType<typeof tracked>;
+/** Each path: `run` builds the state and answers `act`, the change. */
+const PATHS: {
+  name: string;
+  run: (t: Tracked) => Promise<{ act: () => Promise<{ ok: boolean }> }>;
+}[] = [
+  {
+    name: "password change",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      return {
+        act: () =>
+          changePassword(auth.config, { session: s, currentPassword: PASSWORD, newPassword: NEW }),
+      };
+    },
+  },
+  {
+    name: "reset link",
+    run: async ({ auth, mail }) => {
+      await verifiedSession(auth);
+      await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
+      const token = tokenFromMail(
+        mail().findLast((m) => m.subject.startsWith("Reset"))?.text ?? "",
+      );
+      return {
+        act: () =>
+          resetPassword(auth.config, {
+            token,
+            password: "a reset long password",
+            ip: null,
+            userAgent: null,
+          }),
+      };
+    },
+  },
+  {
+    name: "reset code",
+    run: async ({ auth, mail }) => {
+      await verifiedSession(auth);
+      await requestResetOtp(auth.config, { email: EMAIL, ip: null });
+      const code = /\b(\d{6})\b/.exec(mail().at(-1)?.text ?? "")?.[1] ?? "";
+      return {
+        act: () =>
+          resetPasswordWithOtp(auth.config, {
+            email: EMAIL,
+            code,
+            password: "a reset long password",
+            ip: null,
+            userAgent: null,
+          }),
+      };
+    },
+  },
+  {
+    name: "passkey remove",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      const { id } = await addPasskey(auth, s);
+      return { act: () => deletePasskey(auth.config, { user: s.user, id }) };
+    },
+  },
+  {
+    name: "TOTP disable with a code",
+    run: async ({ auth }) => {
+      const { user, secret } = await enrolled(auth);
+      const code = await codeNow(auth, secret);
+      return { act: () => disableTotpWithCode(auth.config, { user, code }) };
+    },
+  },
+  {
+    name: "TOTP disable in process",
+    run: async ({ auth }) => {
+      const { user } = await enrolled(auth);
+      return { act: () => disableTotp(auth.config, { userId: user.id }) };
+    },
+  },
+  {
+    name: "email method enable",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      return { act: () => enableEmailMethod(auth.config, { session: s, password: PASSWORD }) };
+    },
+  },
+  {
+    name: "email method disable",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      await enableEmailMethod(auth.config, { session: s, password: PASSWORD });
+      return {
+        act: () =>
+          disableMethod(auth.config, { user: s.user, method: "email", password: PASSWORD }),
+      };
+    },
+  },
+  {
+    name: "passkey method enable",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      const { soft } = await addPasskey(auth, s);
+      const response = await signInAssertion(auth, soft);
+      return {
+        act: () => enablePasskeyMethod(auth.config, { session: s, password: PASSWORD, response }),
+      };
+    },
+  },
+];
+
+describe("the notice goes after the commit (plan 12a review M1, M2)", () => {
+  it("sends every notice outside a transaction, on every path", async () => {
+    const t = tracked();
+    const s = await enrolled(t.auth);
+    await addPasskey(t.auth, s.session);
+    for (const p of PATHS) {
+      const u = tracked();
+      const { act } = await p.run(u);
+      const before = u.noticesSent().length;
+      expect((await act()).ok, p.name).toBe(true);
+      expect(u.noticesSent().slice(before), p.name).toHaveLength(1);
+      expect(
+        u.noticesSent().every((n) => n.depth === 0),
+        p.name,
+      ).toBe(true);
+    }
+    // The TOTP enable and the passkey add.
+    expect(t.noticesSent().map((n) => n.depth)).toEqual([0, 0]);
+  });
+
+  for (const p of PATHS)
+    it(`sends no notice when the commit fails: ${p.name}`, async () => {
+      const u = tracked();
+      const { act } = await p.run(u);
+      const before = u.noticesSent().length;
+      u.st.failCommit = true;
+      const r = await act().then(
+        (x) => ({ answered: x }),
+        (e: unknown) => ({ threw: String(e) }),
+      );
+      u.st.failCommit = false;
+      expect(r, p.name).toEqual({ threw: "Error: probe: the commit failed" });
+      expect(u.noticesSent().length, p.name).toBe(before);
+    });
+
+  it("sends no notice for an enable of a method that is already on", async () => {
+    const u = tracked();
+    const s = await verifiedSession(u.auth);
+    expect((await enableEmailMethod(u.auth.config, { session: s, password: PASSWORD })).ok).toBe(
+      true,
+    );
+    const again = await enableEmailMethod(u.auth.config, { session: s, password: PASSWORD });
+    expect(again).toEqual({ ok: true, value: { methods: ["email"], backupCodes: [] } });
+    const { soft } = await addPasskey(u.auth, s);
+    for (let i = 0; i < 2; i++)
+      expect(
+        (
+          await enablePasskeyMethod(u.auth.config, {
+            session: s,
+            password: PASSWORD,
+            response: await signInAssertion(u.auth, soft),
+          })
+        ).ok,
+      ).toBe(true);
+    expect(u.noticesSent().map((n) => n.m.text.split("\n")[0])).toEqual([
+      "A second factor was turned on for your account.",
+      "A passkey was added to your account.",
+      "A second factor was turned on for your account.",
+    ]);
+  });
+
+  it("sends no passkey_removed for the refused delete of the last passkey of the passkey method", async () => {
+    const u = tracked();
+    const s = await verifiedSession(u.auth);
+    const { soft, id } = await addPasskey(u.auth, s);
+    await enablePasskeyMethod(u.auth.config, {
+      session: s,
+      password: PASSWORD,
+      response: await signInAssertion(u.auth, soft),
+    });
+    const before = u.noticesSent().length;
+    const r = await deletePasskey(u.auth.config, { user: s.user, id });
+    expect(r).toMatchObject({ ok: false, code: "second_factor_last_method" });
+    expect(u.noticesSent().length).toBe(before);
+  });
+});
+
+describe("the notice and app data (plan 12a review L1, L2)", () => {
+  it("keeps the change and logs Error when the builder's error has a name getter that throws", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = totpAuth({
+      account: {
+        notices: {
+          mail: (i) => {
+            const e = new Error("no template");
+            Object.defineProperty(e, "name", {
+              get() {
+                throw new TypeError(`getter ${i.email}`);
+              },
+            });
+            throw e;
+          },
+        },
+      },
+    });
+    expect(await change(auth)).toEqual({ ok: true, value: { ok: true } });
+    expect(log.mock.calls).toEqual([
+      ["authtempo: notice mail failed", "password_changed", "Error"],
+    ]);
+  });
+
+  it("prints only an IP literal; a crafted client IP header gives the line of an unknown IP", async () => {
+    const { auth, since } = recorded();
+    const s = await verifiedSession(auth);
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const crafted = "203.0.113.9 (your own laptop; no action is needed)";
+    const res = await handle(
+      post(
+        "/auth/password/change",
+        { currentPassword: PASSWORD, newPassword: NEW },
+        { authorization: `Bearer ${s.token}`, "cf-connecting-ip": crafted },
+      ),
+    );
+    expect(res.status).toBe(200);
+    // The builder gets the value as read; the default text leaves it out.
+    expect(since(0)).toEqual([["password_changed", EMAIL, crafted, null]]);
+    expect(sentNotices(auth.mail)).toEqual([[EMAIL, "Your password was changed.", null]]);
+  });
+
+  it.each([
+    ["192.0.2.1", true],
+    ["2001:db8::1", true],
+    ["::ffff:192.0.2.1", true],
+    ["192.0.2.1 hi", false],
+    ["256.0.0.1", false],
+    ["fe80::1%eth0", false],
+    ["[2001:db8::1]", false],
+    ["unknown", false],
+  ])("the default text prints the IP %s: %s", (ip, printed) => {
+    const text = defaultNoticeMail({
+      event: "password_changed",
+      email: "a@example.com",
+      appName: "Example",
+      at: new Date("2026-03-04T05:06:07.000Z"),
+      ip,
+      userAgent: null,
+    }).text;
+    expect(text.includes(`IP address: ${ip}.`)).toBe(printed);
+    expect(text.includes("IP address:")).toBe(printed);
   });
 });

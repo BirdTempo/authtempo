@@ -1,6 +1,7 @@
 import {
   type AuthConfig,
   defaultSignInPage,
+  isIpLiteral,
   type LimiterPort,
   type SignInPageInput,
 } from "@authtempo/core";
@@ -91,26 +92,6 @@ export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
       NO_IP_KEY.test(key) ? Promise.resolve(true) : limiter.allow(key, window),
     ...(sweep ? { sweep } : {}),
   };
-}
-
-const IPV4_PART = "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
-const IPV4 = new RegExp(`^${IPV4_PART}(\\.${IPV4_PART}){3}$`);
-
-/**
- * True for an IPv4 or IPv6 literal. A listed header may carry any text the
- * caller sends; the value becomes part of a limiter key, so `unknown` would
- * match the skip key above and a long string would grow the key set
- * (review M-6). The URL parser checks the IPv6 form.
- */
-export function isIpLiteral(value: string): boolean {
-  if (IPV4.test(value)) return true;
-  if (!value.includes(":") || !/^[0-9a-fA-F:.]+$/.test(value)) return false;
-  try {
-    new URL(`http://[${value}]/`);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** The default reads `cf-connecting-ip`, as core does. Better Auth's own default (`x-forwarded-for`) is not copied: any caller sets it. */

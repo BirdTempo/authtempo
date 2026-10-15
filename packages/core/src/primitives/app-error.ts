@@ -8,5 +8,12 @@ const ERROR_CLASS_RE = /^[A-Za-z]+Error$/;
  */
 export function appErrorName(e: unknown): string {
   if (!(e instanceof Error)) return typeof e;
-  return ERROR_CLASS_RE.test(e.name) ? e.name : "Error";
+  // App code can define a `name` getter that throws. The read must not
+  // escape the caller's catch, so a throw here logs as `Error`.
+  try {
+    const name: unknown = e.name;
+    return typeof name === "string" && ERROR_CLASS_RE.test(name) ? name : "Error";
+  } catch {
+    return "Error";
+  }
 }

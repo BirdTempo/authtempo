@@ -28,6 +28,26 @@ export function ipKey(ip: string | null): string {
   return `${[a, b, c, d].map((x) => x.toString(16)).join(":")}::/64`;
 }
 
+const IPV4_PART = "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const IPV4_LITERAL = new RegExp(`^${IPV4_PART}(\\.${IPV4_PART}){3}$`);
+
+/**
+ * True for a bare IPv4 or IPv6 literal (plan 12a review L2). A client IP
+ * header can carry any text the caller sends. The notice mail prints an IP
+ * only in this form. The compat shim reads its listed headers by this rule
+ * (review M-6). The URL parser checks the IPv6 form.
+ */
+export function isIpLiteral(value: string): boolean {
+  if (IPV4_LITERAL.test(value)) return true;
+  if (!value.includes(":") || !/^[0-9a-fA-F:.]+$/.test(value)) return false;
+  try {
+    new URL(`http://[${value}]/`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const HEX_GROUP = /^[0-9a-f]{1,4}$/;
 

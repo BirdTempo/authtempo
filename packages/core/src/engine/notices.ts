@@ -1,4 +1,5 @@
 import type { MailMessage, ResolvedConfig } from "../config.js";
+import { isIpLiteral } from "../limiter/ip-key.js";
 import { appErrorName } from "../primitives/app-error.js";
 
 /**
@@ -55,7 +56,9 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
   if (input.newEmail !== undefined) lines.push(`The new address is ${input.newEmail}.`);
   if (input.provider !== undefined) lines.push(`The provider is ${input.provider}.`);
   lines.push(`Time: ${input.at.toISOString()}.`);
-  if (input.ip !== null) lines.push(`IP address: ${input.ip}.`);
+  // Only an IP literal: on a host with no `clientIp` of its own, the caller
+  // writes the header, and its text must not reach the owner's notice.
+  if (input.ip !== null && isIpLiteral(input.ip)) lines.push(`IP address: ${input.ip}.`);
   // A person who lost the mailbox or the account cannot reset through it.
   // So these two notices name the support path (owner decision 2).
   if (input.event === "email_changed" || input.event === "account_deleted")
