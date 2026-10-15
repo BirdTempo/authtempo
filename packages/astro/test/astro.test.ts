@@ -279,8 +279,8 @@ describe("@authtempo/astro (plan 11d2)", () => {
       const res = (await all(ctx, astro)) as Response;
       expect([307, 401, 404]).toContain(res.status);
       expect(runs).toBe(0);
-      // When the gate asks the rule, the rule gets Astro's routed text only.
-      expect(seen.every((p) => p === routed)).toBe(true);
+      // The rule gets Astro's matched path, once (core round 10, 3aa2d84).
+      expect(seen).toEqual([routed]);
     });
   }
 
