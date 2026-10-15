@@ -18,9 +18,10 @@ import { execFileSync } from "node:child_process";
 // config), then packages/sveltekit (30, Task 5; the example has no vitest
 // config), then packages/react-router and examples/react-router (32,
 // Task 6), then packages/vue (33, Task 7; the Nuxt example has no vitest
-// config), then packages/solid and examples/solid (35, Task 8). Raise this
-// number when a package adds a vitest config.
-const MINIMUM = 35;
+// config), then packages/solid and examples/solid (35, Task 8), then
+// packages/fastify and examples/fastify (37, Task 9). Raise this number when
+// a package adds a vitest config.
+const MINIMUM = 37;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // Fastify runs on Node: the binding writes a Buffer.
+  "compilerOptions": { "rootDir": "src", "outDir": "dist", "types": ["node"] },
+  "include": ["src"]
+}
