@@ -53,6 +53,7 @@ sidebar:
 - Core matches its routes on the raw path. A path that Hono decodes to a path of core, such as `/%61uth/x`, never runs a page.
 - When the rule holds for the decoded path and there is no session, the answer is the sign-in redirect. Else core answers 404.
 - After the sliding refresh, the answer carries the renewed session cookie.
+- The redirect takes its origin from the Host header, with the protocol of the request URL. When the Host header is missing or is not one host, the redirect takes the origin of `auth.baseURL`. The origin never comes from the request target.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every server package.
 
 ## Next
