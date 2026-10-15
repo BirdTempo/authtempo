@@ -27,6 +27,10 @@ function resolve<A extends object>(source: AuthSource<A>): A {
  * gives its path only, so the origin of a URL of the binding is always the
  * app's. "//account" stays a path, not a host. A target that is not a path,
  * such as "*", is judged as "/", and the router matches no route for it.
+ * No test sends a line such as "GET http://evil.example\account/7" or
+ * "GET http:/account": Node refuses these request lines with 400 before Express
+ * runs, and parseurl keeps the binding and the router on one text, so such a
+ * test guards no promise (review-11d2-task3, l7).
  */
 function pathOf(req: ExpressRequest): string {
   const path = parseurl.original(req)?.path ?? "/";
