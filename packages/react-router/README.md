@@ -12,8 +12,12 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
    loader reads `getSession(context)`.
 3. Protect paths: `authMiddleware({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
-- `protect` gets the path that React Router matched: without ".data", and with
-  each segment decoded once, so "/%61ccount" reaches the rule as "/account".
+- `protect` gets the path that React Router matched, without ".data", in URL
+  form. An escaped letter such as `%61` is decoded where React Router decodes
+  it, so "/%61ccount" reaches the rule as "/account". A space or a non-ASCII
+  letter is encoded again: `/caf%C3%A9`, `/my%20account`. Write a rule for such
+  a path in the encoded form, or use a rule on a prefix. The gate of
+  `@authtempo/core/bindings` gives this form to every binding.
 - React Router matches a path without case by default, so "/ACCOUNT" runs the
   page of "/account". Set `caseSensitive: true` on each protected route, or
   compare the path in lower case in `protect`.
