@@ -72,6 +72,25 @@ function routedPath(url: URL): string {
 }
 
 /**
+ * The rule, asked with each form of the path that a router of Solid Start
+ * runs as the same route. A path needs a session when the rule holds for any
+ * form. radix3 matches an API route with case, and Solid Router matches a page
+ * without case (each static part in lower case): the entry cannot know which
+ * one serves a path, so it asks the lower-case form too. radix3 removes one
+ * "/" at the end, so "/account//" runs a child route "/account/:id" with an
+ * empty id: the entry asks the form with each "/" at the end removed too.
+ * "/" stays "/". The rule sees the path as matched first.
+ */
+function failClosed(protect: (pathname: string) => boolean): (pathname: string) => boolean {
+  return (p) => {
+    const trimmed = p.replace(/\/+$/, "") || "/";
+    const forms = new Set([p, trimmed, p.toLowerCase(), trimmed.toLowerCase()]);
+    for (const form of forms) if (protect(form)) return true;
+    return false;
+  };
+}
+
+/**
  * The app's own origin: the protocol of the request and its Host header, when
  * the header parses as that one host. On Node the URL of the request (srvx
  * 0.12.8) takes the host of an absolute-form line "GET http://evil.example/x",
@@ -113,16 +132,7 @@ export function authOnRequest(
     // The gate takes the origin of the redirect from the request it reads.
     const gateRequest =
       url.origin === origin ? request : new Request(page, { headers: request.headers });
-    // radix3 matches an API route with case. Solid Router matches a page
-    // without case: it compares each static part in lower case. The entry
-    // cannot know which one serves a path, so it fails closed: the rule sees
-    // the path as matched, then the path in lower case when that differs.
-    const fold = (p: string) => p.toLowerCase();
-    const gateOptions = {
-      ...options,
-      auth,
-      protect: protect && ((p: string) => protect(p) || (fold(p) !== p && protect(fold(p)))),
-    };
+    const gateOptions = { ...options, auth, protect: protect && failClosed(protect) };
     const gate = await readGate(gateOptions, gateRequest, routedPath(url), page);
     if (gate.redirect) return gate.redirect;
     (event.locals as { session?: ResolvedSession | null }).session = gate.session;

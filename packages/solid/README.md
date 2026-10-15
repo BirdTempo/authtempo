@@ -29,9 +29,14 @@ dependency.
 - An API route matches with case (radix3 1.1.2): `/MYACCOUNT` runs no route
   `/myAccount`, and answers 404. A page matches without case (Solid Router
   1.0.0 compares each static part in lower case): `/ACCOUNT` runs the page
-  `/account`. The entry asks `protect` with the path as matched, then with
-  the path in lower case when that differs. A path needs a session when
-  either holds, so a rule for `/account` protects `/ACCOUNT`.
+  `/account`.
+- Both routers remove one `/` at the end: `/account/` runs the route
+  `/account`. radix3 runs a child route `/account/:id` for `/account//`, with
+  an empty id.
+- So the entry asks `protect` with the path as matched, with each `/` at the
+  end removed (`/` stays `/`), and with both forms in lower case. A path needs
+  a session when the rule holds for any form: a rule `p === "/account"`
+  protects `/ACCOUNT`, `/account/`, `/account//`, and `/ACCOUNT/`.
 - Warning: a rule with an upper-case letter does not protect a page in
   another case. `p.startsWith("/myAccount")` holds for neither `/MYACCOUNT`
   nor `/myaccount`, and Solid Router runs the page `/myAccount` for both.

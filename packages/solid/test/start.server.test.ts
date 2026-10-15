@@ -299,6 +299,49 @@ describe("@authtempo/solid/start (plan 11d2)", () => {
     expect(seen).toEqual([]);
   });
 
+  // radix3 removes one "/" at the end, so "/account//" reaches the child
+  // route "/account/:id" with an empty id. Solid Router removes one "/" at
+  // the end too. The rule also gets the path with every "/" at the end removed.
+  it("gives an exact rule the path with each slash at the end removed", async () => {
+    const seen: string[] = [];
+    const { fetch, runs } = setup(
+      {},
+      {
+        protect: (p) => {
+          seen.push(p);
+          return p === "/account";
+        },
+      },
+    );
+    const cases = [
+      ["/account/", "%2Faccount%2F"],
+      ["/account//", "%2Faccount%2F%2F"],
+      ["/ACCOUNT/", "%2FACCOUNT%2F"],
+      ["/ACCOUNT//", "%2FACCOUNT%2F%2F"],
+    ] as const;
+    for (const [path, next] of cases) {
+      const out = await fetch(new Request(`${BASE}${path}`));
+      expect(out.status, path).toBe(307);
+      expect(out.headers.get("location")).toBe(`${BASE}/sign-in?next=${next}`);
+    }
+    expect(count(runs)).toBe(0);
+    expect(seen).toEqual([
+      "/account",
+      "/account/",
+      "/account",
+      "/ACCOUNT",
+      "/account",
+      "/ACCOUNT/",
+      "/ACCOUNT",
+      "/account/",
+      "/account",
+    ]);
+    // "/" stays "/".
+    seen.length = 0;
+    await fetch(new Request(`${BASE}/`));
+    expect(seen).toEqual(["/"]);
+  });
+
   // radix3 compares the case of an API route: "/MYACCOUNT" runs no route
   // "/myAccount". A rule in mixed case holds for the path that runs it.
   it("compares the case of an API route, as radix3 does", async () => {
