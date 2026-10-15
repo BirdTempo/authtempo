@@ -149,6 +149,11 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
     reason: "the soft authenticator and the test helpers",
   },
   {
+    pkg: "@authtempo/core",
+    entry: "./bindings",
+    reason: "the gate of the server bindings; each binding page names it (plan 11d2)",
+  },
+  {
     pkg: "@authtempo/client",
     entry: "./conformance",
     reason: "the error-shape suite, for an SDK's own tests; it imports vitest at run time",
