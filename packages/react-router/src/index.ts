@@ -111,14 +111,12 @@ export function authMiddleware(options: RouterAuthOptions): MiddlewareFunction {
   checkGateOptions(options);
   const protect = foldCase(options.protect);
   return async ({ request, url, context }, next) => {
-    const path = routedPath(request);
-    // The gate splits a routed string at "?" and drops a "#" fragment, and the
-    // decoded path can hold both as text. So the gate gets them escaped, for
-    // its base path check only, and the rule gets the exact decoded text.
+    // The object form: the gate judges the decoded path as given, and a decoded
+    // "?" or "#" stays text of the path, as the router matched it.
     const gate = await readGate(
-      { ...options, auth: resolve(options.auth), protect: protect && (() => protect(path)) },
+      { ...options, auth: resolve(options.auth), protect },
       request,
-      path.replace(/[?#]/g, encodeURIComponent),
+      { pathname: routedPath(request), search: url.search },
       // next: the page URL without ".data" and "_routes", in URL form. Not the
       // decoded path: "/%2561ccount" decodes to "/%61ccount", which a browser
       // would open as "/account".

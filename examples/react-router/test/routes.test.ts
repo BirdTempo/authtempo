@@ -1,4 +1,5 @@
 import type { MailMessage } from "@authtempo/core";
+import { authMiddleware, authRouteModule } from "@authtempo/react-router";
 import {
   createStaticHandler,
   matchRoutes,
@@ -40,7 +41,9 @@ function withoutCaseSensitive(routes: RouteObject[]): RouteObject[] {
   });
 }
 
-function makeApp(options: { caseSensitive?: boolean } = {}) {
+type RouteSet = typeof createRoutes;
+
+function makeApp(options: { caseSensitive?: boolean; routes?: RouteSet } = {}) {
   const sent: MailMessage[] = [];
   const loads: string[] = [];
   const auth = createAppAuth({
@@ -52,7 +55,7 @@ function makeApp(options: { caseSensitive?: boolean } = {}) {
       },
     },
   });
-  const routes = createRoutes(
+  const routes = (options.routes ?? createRoutes)(
     () => auth,
     (id) => loads.push(id),
   );
@@ -203,6 +206,52 @@ describe("the React Router example (plan 11d2)", () => {
     const data = (await res.json()) as { "account-rest": { path: string } };
     expect(data["account-rest"].path).toBe("..");
     expect(loads).toEqual(["account-rest"]);
+  });
+
+  /**
+   * The SvelteKit review's P1 shape: a splat route at the root and a rule on
+   * every path but "/". React Router decodes "/%61uth/session" to "/auth/session"
+   * and ranks the static "auth/*" over "*", so core answers it, never a page.
+   */
+  const rootSplat: RouteSet = (getAuth, onLoad = () => {}) => {
+    const core = authRouteModule(getAuth);
+    return [
+      {
+        id: "root",
+        path: "/",
+        middleware: [
+          authMiddleware({ auth: getAuth, protect: (p) => p !== "/", signInPath: "/sign-in" }),
+        ],
+        children: [
+          { id: "auth", path: "auth/*", loader: core.loader, action: core.action },
+          {
+            id: "page",
+            path: "*",
+            loader: () => {
+              onLoad("page");
+              return { page: true };
+            },
+          },
+        ],
+      },
+    ];
+  };
+
+  it("sends an escaped path of core to core, not to a root splat page", async () => {
+    const { loads, serve } = makeApp({ routes: rootSplat });
+    for (const path of ["/%61uth/session", "/%61uth/x", "/%61uth/session.data?_routes=auth"]) {
+      const res = await serve(new Request(`${BASE}${path}`));
+      // Core judges the raw path, so it answers 404 for an escaped form.
+      expect([401, 404], `${path}: ${res.status}`).toContain(res.status);
+    }
+    // "/AUTH/session" goes to the auth route without case, and core answers 404
+    // for it. The gate compares the base path with case, so the rule holds and
+    // the person gets the sign-in redirect: no page and no route of core runs.
+    const upper = await serve(new Request(`${BASE}/%41UTH/session`));
+    expect(upper.status).toBe(307);
+    expect(loads).toEqual([]);
+    // The splat page runs behind the rule: "/other" needs a session.
+    expect((await serve(new Request(`${BASE}/other`))).status).toBe(307);
   });
 
   // React Router 8.4.0 runs the loader of a resource route for OPTIONS

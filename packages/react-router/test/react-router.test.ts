@@ -237,9 +237,9 @@ describe("@authtempo/react-router (plan 11d2)", () => {
   });
 
   // React Router matches a decoded "?" or "#" as text of the path. The rule
-  // gets the whole text: the gate would cut a routed string at either one.
+  // gets the whole text through the gate: a routed string would be cut at either one.
   it("gives protect a decoded question mark and hash as text of the path", async () => {
-    const { seen, run } = probe((p) => p.startsWith("/a?/secret"));
+    const { seen, run } = probe((p) => p.startsWith("/a"));
     const { ran, location } = await run("/a%3F/secret%23x");
     expect(seen[0]).toBe("/a?/secret#x");
     expect(ran).toBe(false);
