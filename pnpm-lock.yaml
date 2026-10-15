@@ -211,6 +211,12 @@ importers:
       '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../../packages/legacy-hashes
+      '@authtempo/next':
+        specifier: workspace:*
+        version: link:../../packages/next
+      '@authtempo/react':
+        specifier: workspace:*
+        version: link:../../packages/react
       '@authtempo/verify':
         specifier: workspace:*
         version: link:../../packages/verify

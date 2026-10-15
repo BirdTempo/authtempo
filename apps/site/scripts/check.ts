@@ -23,6 +23,7 @@ import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
 import { cliHelpPages, helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
+import { EXPORT_ENTRIES } from "./lib/entries.ts";
 import {
   distFiles,
   distPageOrEmpty,
@@ -57,27 +58,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     name: "check-config",
     run: () => checkConfig(distPageOrEmpty("/docs/reference/config/"), configKeyPaths()),
   },
-  {
-    name: "check-exports-core",
+  // One export check per SDK entry (plan 11d): each export is a code span on its page.
+  ...EXPORT_ENTRIES.map((e) => ({
+    name: `check-exports-${e.label}`,
     run: () =>
       checkExports(
-        distPageOrEmpty("/docs/reference/api/"),
-        readExports(readRepoFile("packages/core/src/index.ts") ?? "", "packages/core/src/index.ts"),
-        "core",
+        distPageOrEmpty(e.page),
+        readExports(readRepoFile(e.source) ?? "", e.source),
+        e.label,
       ),
-  },
-  {
-    name: "check-exports-client",
-    run: () =>
-      checkExports(
-        distPageOrEmpty("/docs/reference/client/"),
-        readExports(
-          readRepoFile("packages/client/src/index.ts") ?? "",
-          "packages/client/src/index.ts",
-        ),
-        "client",
-      ),
-  },
+  })),
   {
     name: "check-cli",
     run: () =>

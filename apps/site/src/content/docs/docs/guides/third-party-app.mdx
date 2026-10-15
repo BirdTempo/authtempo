@@ -1,0 +1,51 @@
+---
+title: Sign in from a third-party app
+description: Sign a person in to an authtempo OAuth provider from a CLI, a native app, or a server, with PKCE.
+type: how-to
+sources:
+  - packages/client/README.md "The OAuth client"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
+  - docs/superpowers/plans/2026-10-14-11d-sdks.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import app from "../../../../../samples/guides/third-party-app.ts?raw";
+import test from "../../../../../samples/guides/third-party-app.test.ts?raw";
+
+**For:** a developer of a CLI, a native app, or a server that acts for a person at an authtempo provider.
+
+**What it does:** the app gets an access token for one resource and a refresh token, with PKCE and a check of `state` and `iss`.
+
+## Before you start
+
+- A provider with `oauth.resources`. [Be the OAuth and OIDC provider for MCP clients](/docs/guides/oauth-provider/) sets it.
+
+## Steps
+
+1. Register the app once with `registerOAuthClient`. Keep the client id.
+2. Make the OAuth client with the issuer, the client id, the redirect URI, the resource, and the scopes.
+3. Open the URL of `authorizeURL()` in the system browser.
+4. Take the URL that the redirect brings back, and pass it to `handleRedirect(url)`.
+5. Keep the refresh token in a safe store. Call `refresh` when the access token expires.
+
+<Code code={app} lang="ts" title="The OAuth client of a CLI" />
+
+<Code code={test} lang="ts" title="The sign-in as a test" />
+
+## How it behaves
+
+- A CLI takes the redirect on `127.0.0.1` with any port.
+- A single-page app on its own registered origin can finish the sign-in in the browser. Pass `browserPendingStore()` as `pending`.
+- The token endpoint counts on `oauth-token:ip:<ip>`, 60 per 15 minutes ([Limits](/docs/reference/limits/)).
+
+## If it fails
+
+- `redirect_mismatch`: the `state` or the `iss` of the redirect does not match a sign-in of this client. Start again.
+- [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant): the code or the refresh token is spent or expired. Start again.
+- [`access_denied`](/docs/reference/errors/#oauth-access_denied): the person did not allow the app.
+- [`invalid_client`](/docs/reference/errors/#oauth-invalid_client): the provider does not know the client id.
+
+## Next
+
+- [The OAuth client entry](/docs/reference/client-oauth/)
+- [Verify a caller on another server](/docs/guides/verify-caller/)

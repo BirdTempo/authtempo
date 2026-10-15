@@ -6,11 +6,15 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
   - packages/core/src/create-auth.ts
   - packages/core/src/index.ts
+  - packages/core/src/routes.ts
+  - packages/core/src/credentials.ts
+  - packages/core/src/operator-secret.ts
+  - docs/superpowers/plans/2026-10-14-11d-sdks.md
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.
 
-**What it does:** this page lists the members of the auth object and every export of the core entry. The export check holds this page to `packages/core/src/index.ts`.
+**What it does:** this page lists the members of the auth object and every export of the core entry. The export check holds this page to `packages/core/src/index.ts`. Three more export checks hold it to the route, credential, and operator secret entries.
 
 ## Before you start
 
@@ -137,6 +141,42 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | `@authtempo/core/limiter-conformance` | The suite of every limiter. |
 | `@authtempo/core/sql` | The SQL helpers that both adapters share. |
 | `@authtempo/core/testing` | `SoftAuthenticator`, `totpCode`, `base32Decode`, `ROUTES`, the route list, and `TEST_SECRET`, the app secret of the tests. |
+| `@authtempo/core/routes` | The route facts of an SDK. The next part lists them. |
+| `@authtempo/core/credentials` | The credential facts of an SDK. The part after it lists them. |
+| `@authtempo/core/operator-secret` | `OPERATOR_SECRET`, the form of the operator secret, and `isOperatorSecret`, its test. The CLI reads them, not an app. |
+
+## The route entry
+
+An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which also holds the soft authenticator.
+
+| Export | What it is |
+| --- | --- |
+| `ROUTES` | Every route that core can serve, with literal types. [Routes](/docs/reference/routes/) holds each route. |
+| `RouteEntry` | One row of `ROUTES`: `method`, `path`, and `feature`. |
+| `RouteFeature` | The config part that turns a route on. |
+| `RouteMethod` | `GET` or `POST`. |
+| `RouteLiteral` | One row of `ROUTES` with its literal method and path. |
+| `RoutePath` | A path that `ROUTES` holds for a method. An SDK types its paths with it, so a path that core does not serve fails the compile. |
+| `PROVIDER_NAME_RE` | The name rule of `:provider`. |
+| `AUTH_ERROR_PARAM` | The query parameter of a browser flow failure, `auth_error`. |
+
+## The credential entry
+
+`@authtempo/core/credentials` holds the facts of each credential that core issues. The engine and every SDK read them here. The entry pulls no engine module into a bundle.
+
+| Export | What it is |
+| --- | --- |
+| `SESSION_TOKEN_PREFIX`, `API_TOKEN_PREFIX` | `ts_` and `tk_`, the prefixes of a session token and of an API token. |
+| `SESSION_JWT_TYPE`, `ACCESS_TOKEN_TYPE` | `JWT` and `at+jwt`, the header `typ` of a session JWT and of an OAuth access token. |
+| `DEFAULT_COOKIE_NAME` | `__Host-tempo_session`, the session cookie name when the config sets no `cookieName`. |
+| `LEGACY_COOKIE_NAME` | The session cookie name before plan 12b. Core reads it for one release when `cookieName` is the default. |
+| `sessionCookieNames` | Answers the `SessionCookieNames` of a `cookieName` setting. The old name is read only with the default name. |
+| `readSessionToken` | The session token of a request: the cookie, then the bearer header. |
+| `readBearer` | The value of `Authorization: Bearer <value>`, or null. |
+| `JWS_RE`, `decodeJws`, `DecodedJws` | The shape of a compact JWS, and its parts with no check. |
+| `verifyJws`, `PublicJwk`, `JwsAlg` | The signature check on Web Crypto, for EdDSA and ES256. The header must name the alg and the kid of the key. |
+| `JWKS_RETIRED_MAX` | The retired keys that the key set lists at most. |
+| `isResourceUrl`, `resourceOf` | The rule of an `oauth.resources` entry, and the entry that a request URL falls under. |
 
 ## Next
 

@@ -1,0 +1,50 @@
+---
+title: Show the session in React
+description: Show the signed-in person in a React app, and sign in by email code, with @authtempo/react.
+type: how-to
+sources:
+  - packages/react/README.md
+  - examples/react/src/App.tsx
+  - docs/superpowers/plans/2026-10-14-11d-sdks.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import app from "../../../../../../../examples/react/src/App.tsx?raw";
+import main from "../../../../../../../examples/react/src/main.tsx?raw";
+
+**For:** a developer of a React app on another origin than the API.
+
+**What it does:** the page shows the session, and updates it after each sign-in and sign-out with no code of its own.
+
+## Before you start
+
+- An API that lists the app's origin in `trustedOrigins`. [Run the app on another origin](/docs/guides/split-origins/) gives the steps.
+
+## Steps
+
+1. Add the packages to the app: `pnpm --filter my-app add @authtempo/client @authtempo/react`.
+2. Make one client with the origin of the API, outside the render.
+3. Put `AuthProvider` with the client at the root of the app.
+4. Read the session with `useSession()` in any component.
+5. Show the text of an error code with `errorText(code)`.
+
+<Code code={main} lang="tsx" title="The root of the app" />
+
+<Code code={app} lang="tsx" title="The sign-in and the session" />
+
+## How it behaves
+
+- The store reads the session at the first mount, after each sign-in and sign-out, when another tab changes it, and when the page becomes visible.
+- `useAuthError()` reads `?auth_error=` once, so the page shows the failure of a provider sign-in.
+- A server render shows the pending state.
+
+## If it fails
+
+- `network`: the browser blocked the answer. The origin of the app is not in `trustedOrigins` ([Results](/docs/reference/client/#results)).
+- [`invalid_code`](/docs/reference/errors/#invalid_code): the email code is wrong or expired.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many codes for one address.
+
+## Next
+
+- [The React package](/docs/reference/react/)
+- [Sign in with an email code](/docs/guides/email-code/)

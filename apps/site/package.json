@@ -22,6 +22,8 @@
     "@authtempo/handoff": "workspace:*",
     "@authtempo/import": "workspace:*",
     "@authtempo/legacy-hashes": "workspace:*",
+    "@authtempo/next": "workspace:*",
+    "@authtempo/react": "workspace:*",
     "@authtempo/verify": "workspace:*"
   },
   "devDependencies": {

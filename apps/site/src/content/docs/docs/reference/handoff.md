@@ -7,6 +7,9 @@ sources:
   - packages/handoff/README.md "The opener contract"
   - packages/handoff/README.md "Electron"
   - packages/handoff/README.md "Failure codes"
+  - packages/handoff/README.md "The native client"
+  - packages/handoff/src/index.ts
+  - docs/superpowers/plans/2026-10-14-11d-sdks.md
 ---
 
 **For:** a developer of an Expo app or an Electron app who signs in through the system browser.
@@ -54,7 +57,7 @@ The returned URL must sit on the configured `redirect`, byte for byte. Otherwise
 
 ## Expo
 
-`@authtempo/handoff/expo` exports `expoOpener(WebBrowser)` and `expoCrypto(Crypto)`.
+`@authtempo/handoff/expo` exports `expoOpener(WebBrowser)`, `expoCrypto(Crypto)`, and `expoTokenStore(SecureStore)`.
 
 - Add the app scheme to the `scheme` entry of `app.json`. Without it, the system does not return the code to the app.
 - `expoOpener` passes `preferEphemeralSession: false`. An ephemeral session keeps no cookies, so the binding cookie of a social sign-in dies, and the flow answers `invalid_token`.
@@ -73,6 +76,37 @@ The returned URL must sit on the configured `redirect`, byte for byte. Otherwise
 - The token stays in the main process. A renderer asks the main process to make requests.
 
 The path of Windows and Linux is not proven. The macOS proof ran on 2026-10-09 with Electron 44.7.0.
+
+## The native client
+
+`createNativeClient(options)` answers a `NativeClient`: a client of the app with `credentials: "omit"` and the stored token as the bearer. The type of the options is `NativeClientOptions`: `baseURL`, `basePath`, `handoff`, `store`, `fetch`, and `webauthn`.
+
+- `signInWithBrowser()` runs the handoff, writes the token to the store, and reads the session.
+- `session()` clears the token when it answers `null`.
+- A session end clears the token only when the store still holds the token that the request sent. A newer token stays.
+- `signOut()` clears the token when the server ended the session or did not know it.
+- A store that throws answers `unexpected`. Nothing throws for an answer.
+- A password sign-in, an email code verify, and a second factor verify answer a token that the native client does not keep. Write it with `store.set`.
+
+A `TokenStore` has `get`, `set`, and `clear`. On Electron, `createTokenStore` answers a `TokenStore`.
+
+`expoTokenStore(SecureStore)` keeps the token through `expo-secure-store`, whose part it calls is `SecureStoreLike`.
+
+- A key holds letters, digits, `.`, `-`, and `_` only. The default is `authtempo.session`.
+- A read that throws, as a locked keychain does, answers `null` and keeps the entry.
+- `secureStoreOptions`, a `SecureStoreOptionsLike`, goes to each call of `expo-secure-store`.
+
+## Exports
+
+| Entry | Exports |
+| --- | --- |
+| `@authtempo/handoff` | `createHandoff`, `Handoff`, `HandoffOptions`, `HandoffOpener`, `HandoffResult`, `HandoffSession`, `HandoffFailure`, `HandoffCode`, `makePkce`, `webCrypto`, `base64Url`, `HandoffCrypto`, `parseReturnedUrl`, `Returned`, `HANDOFF_CALLS`, `createNativeClient`, `NativeClient`, `NativeClientOptions`, `TokenStore` |
+| `@authtempo/handoff/expo` | `expoOpener`, `ExpoWebBrowserLike`, `expoCrypto`, `ExpoCryptoLike`, `expoTokenStore`, `SecureStoreLike`, `SecureStoreOptionsLike`, `TokenStore` |
+| `@authtempo/handoff/electron` | `electronOpener`, `ElectronOpener`, `ElectronShellLike`, `ElectronAppLike`, `createTokenStore`, `TokenStore`, `TokenStoreError`, `TokenCipher`, `CipherOptions`, `safeStorageCipher`, `SafeStorageLike`, `asyncSafeStorageCipher`, `AsyncSafeStorageLike` |
+
+`HANDOFF_CALLS` is the table of the route that the handoff builds a URL for: `GET /handoff/start`, which the system browser opens. The redeem is the call `handoff.redeem` of the client.
+
+`makePkce`, `webCrypto`, `base64Url`, `parseReturnedUrl`, and `Returned` live in [the OAuth client entry](/docs/reference/client-oauth/). `HandoffCrypto` is its `PkceCrypto`. This package re-exports them for one release.
 
 ## Failure codes
 

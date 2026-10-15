@@ -1,0 +1,55 @@
+---
+title: Verify a caller on another server
+description: Know the person of each request on a server that is not the auth app, from a session JWT or an API token.
+type: how-to
+sources:
+  - packages/verify/README.md "Verify a request"
+  - packages/verify/README.md "The rules"
+  - docs/superpowers/plans/2026-10-14-11d-sdks.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import server from "../../../../../samples/guides/verify-caller.ts?raw";
+import test from "../../../../../samples/guides/verify-caller.test.ts?raw";
+
+**For:** a developer of a second server, such as a files service, that must know who calls it.
+
+**What it does:** the second server checks the credential of each request with `@authtempo/verify`. A session JWT verifies with no call to the auth app.
+
+## Before you start
+
+- An auth app that mints session JWTs. [Mint a JWT for your other services](/docs/guides/jwt/) sets `jwtMint.audience`.
+- Node 22.18 or newer, Bun, or a Cloudflare Worker for the second server.
+
+## Steps
+
+1. Add the package to the second server: `pnpm --filter my-app add @authtempo/verify`.
+2. Make one verifier with the `issuer` and the `audience` of the second server.
+3. Add `api-token` to `accept` when scripts call the server with an API token.
+4. Set `checkSessionEnd: true` when a sign-out must end access at once.
+5. In each request, call `verifier.verifyRequest(request)`.
+   - A `rate_limited` failure means that the live check is over its limit. Answer 429.
+   - Any other failure means that the auth app did not answer. Answer 503.
+   - A `null` value means no valid credential. Answer `verifier.unauthorized()`.
+
+<Code code={server} lang="ts" title="The second server" />
+
+<Code code={test} lang="ts" title="The second server as a test" />
+
+## How it behaves
+
+- The verifier reads the bearer header only, never the session cookie.
+- The key set lives for the `max-age` of its answer, 300 seconds from core. An unknown key reads it again at most once per 30 seconds.
+- An API token costs one call to the auth app per request, unless `cache.apiTokenSeconds` keeps the answer.
+- The live check counts on `token-live:session:<sessionId>`, 120 per minute ([Limits](/docs/reference/limits/)).
+
+## If it fails
+
+- A `null` value for a good token: the `audience` of the verifier is not a `jwtMint.audience` entry. Or the clock of the server is wrong.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): the live check of one session passed 120 per minute.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the live route refused the bearer. The verifier answers `null` for it.
+
+## Next
+
+- [The verify package](/docs/reference/verify/)
+- [Sessions, API tokens, and JWTs](/docs/concepts/credentials/)

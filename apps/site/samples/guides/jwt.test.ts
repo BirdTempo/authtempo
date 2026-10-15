@@ -1,9 +1,11 @@
 import { createAuth } from "@authtempo/core";
-import { createLocalJWKSet, type JSONWebKeySet } from "jose";
 import { describe, expect, it } from "vitest";
 import { call, harness, signIn } from "../support/harness.ts";
 import { createJwtAuth } from "./jwt.ts";
-import { verifySessionJwt } from "./jwt-verify.ts";
+import { createJwtVerifier } from "./jwt-verify.ts";
+
+const files = (token: string) =>
+  new Request("https://files.example.com/doc", { headers: { authorization: `Bearer ${token}` } });
 
 describe("mint a JWT for your other services", () => {
   it("mints a session JWT that another server verifies against the key set", async () => {
@@ -12,14 +14,13 @@ describe("mint a JWT for your other services", () => {
     const ada = await signIn(auth, h, "ada@example.com");
     const { token } = (await (
       await call(auth, "GET", "/auth/token", undefined, { cookie: ada })
-    ).json()) as {
-      token: string;
-    };
-    const keys = (await (await call(auth, "GET", "/auth/jwks")).json()) as JSONWebKeySet;
-    const payload = await verifySessionJwt(token, createLocalJWKSet(keys));
-    expect(payload.email).toBe("ada@example.com");
-    expect(payload.plan).toBe("free");
-    expect(typeof payload.sid).toBe("string");
+    ).json()) as { token: string };
+    const verifier = createJwtVerifier((input, init) => auth.handle(new Request(input, init)));
+    const r = await verifier.verifyRequest(files(token));
+    if (!r.ok || r.value?.kind !== "session-jwt") throw new Error("no caller");
+    expect(r.value.email).toBe("ada@example.com");
+    expect(r.value.claims.plan).toBe("free");
+    expect(typeof r.value.sessionId).toBe("string");
   });
 
   it("refuses a token for another audience", async () => {
@@ -35,13 +36,8 @@ describe("mint a JWT for your other services", () => {
     const ada = await signIn(auth, h, "ada@example.com");
     const { token } = (await (
       await call(auth, "GET", "/auth/token", undefined, { cookie: ada })
-    ).json()) as {
-      token: string;
-    };
-    const keys = (await (await call(auth, "GET", "/auth/jwks")).json()) as JSONWebKeySet;
-    await expect(verifySessionJwt(token, createLocalJWKSet(keys))).rejects.toMatchObject({
-      code: "ERR_JWT_CLAIM_VALIDATION_FAILED",
-      claim: "aud",
-    });
+    ).json()) as { token: string };
+    const verifier = createJwtVerifier((input, init) => auth.handle(new Request(input, init)));
+    expect(await verifier.verifyRequest(files(token))).toEqual({ ok: true, value: null });
   });
 });

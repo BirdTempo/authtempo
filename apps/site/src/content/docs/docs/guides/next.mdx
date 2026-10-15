@@ -1,0 +1,58 @@
+---
+title: Mount authtempo in Next.js
+description: Serve the routes of authtempo from a Next.js app, read the session in a server component, and protect paths.
+type: how-to
+sources:
+  - packages/next/src/index.ts
+  - examples/next/proxy.ts
+  - docs/superpowers/plans/2026-10-14-11d-sdks.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import auth from "../../../../../../../examples/next/lib/auth.ts?raw";
+import route from "../../../../../../../examples/next/app/auth/[...path]/route.ts?raw";
+import page from "../../../../../../../examples/next/app/page.tsx?raw";
+import proxy from "../../../../../../../examples/next/proxy.ts?raw";
+
+**For:** a developer of a Next.js 16 app on the App Router.
+
+**What it does:** the app serves the routes of authtempo under `/auth`, and reads the session in a server component. A person with no session goes to the sign-in page.
+
+## Before you start
+
+- Node 22.18 or newer.
+- A storage adapter for production. [Getting started](/docs/start/) shows D1 and Postgres.
+
+## Steps
+
+1. Add the packages: `pnpm --filter my-app add @authtempo/core @authtempo/next`.
+2. Make the auth instance in a function, so `next build` reads no secret.
+3. Mount the routes in `app/auth/[...path]/route.ts`.
+4. Read the session with `authSession` in a server component.
+5. Protect paths with `authProxy` in `proxy.ts`.
+6. Set `BASE_URL` and `AUTH_SECRET` in the environment of the server.
+
+<Code code={auth} lang="ts" title="lib/auth.ts" />
+
+<Code code={route} lang="ts" title="app/auth/[...path]/route.ts" />
+
+<Code code={page} lang="tsx" title="app/page.tsx" />
+
+<Code code={proxy} lang="ts" title="proxy.ts" />
+
+## How it behaves
+
+- A server component cannot set a cookie. The browser gets a renewed cookie at its next call to a route under `/auth`.
+- Without `auth`, the proxy checks only that the session cookie is present. The page checks the session.
+- The session cookie is `__Host-tempo_session` by default. Set `cookieName` on the proxy when the config of core sets another name.
+- Next 16 renamed middleware to proxy. A file named `middleware.ts` gets a warning from Next.
+
+## If it fails
+
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the page posts from an origin that is not `BASE_URL`.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): no session. The proxy sends the person to the sign-in page.
+
+## Next
+
+- [The Next.js package](/docs/reference/next/)
+- [Show the session in React](/docs/guides/react-session/)

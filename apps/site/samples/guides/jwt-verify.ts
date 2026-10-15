@@ -1,17 +1,14 @@
-import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose";
-
-/** The key set of the API. jose keeps the keys in a cache and reads them again for a new kid. */
-const JWKS = createRemoteJWKSet(new URL("https://api.example.com/auth/jwks"));
+import { createVerifier, type VerifierOptions } from "@authtempo/verify";
 
 /**
- * The check of the other server. `typ: "JWT"` refuses an OAuth access token,
- * which the same key signs with `typ: "at+jwt"`.
+ * The check of the other server, with @authtempo/verify. It reads the key set
+ * of the API, keeps it for its max-age, and checks the signature, iss, aud,
+ * exp, and the header typ "JWT", which refuses an OAuth access token.
  */
-export async function verifySessionJwt(token: string, jwks: JWTVerifyGetKey = JWKS) {
-  const { payload } = await jwtVerify(token, jwks, {
+export function createJwtVerifier(fetch?: VerifierOptions["fetch"]) {
+  return createVerifier({
     issuer: "https://api.example.com/auth",
     audience: "https://files.example.com",
-    typ: "JWT",
+    ...(fetch ? { fetch } : {}),
   });
-  return payload;
 }
