@@ -108,7 +108,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Field | Value |
 | --- | --- |
 | Needs | A session of a verified user. No fresh rule |
-| Input | JSON `{ name?, image? }`. `name`: 1 to 200 characters with no control character, no format character, and no lone surrogate, or null. A bidi control and a zero-width character are format characters. `image`: an `https://` URL with a host, of at most 2048 characters, or null. The image has no `@` and no `%` in its authority. It holds no whitespace, no control or format character, no backslash, and none of `"<>{}\|^` or a backtick. Any other field is refused, the address too |
+| Input | JSON `{ name?, image? }`. `name`: 1 to 200 characters with no control character, no line or paragraph separator, no format character, and no lone surrogate, or null. A bidi control and a zero-width space are format characters. The zero-width non-joiner and joiner pass. `image`: an `https://` URL with a host, of at most 2048 characters, or null. The image has no `@` and no `%` in its authority. It holds no whitespace, no control or format character, no backslash, and none of `"<>{}\|^` or a backtick. Any other field is refused, the address too |
 | Answer | `{ user }`: the `id`, `email`, `emailVerified`, `name`, and `image` of the stored row. Only the given fields change |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 

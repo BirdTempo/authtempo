@@ -419,6 +419,11 @@ describe("validUserName (exported for the importer, plan 9b)", () => {
     ["an emoji of one code point", "Ada 🚀"],
     ["an emoji with a skin tone", "Ada 👍🏽"],
     ["a no-break space", "Ada\u00a0Lovelace"],
+    // The lead's ruling: Persian names and joined emoji carry these two format characters.
+    ["a Persian name with a zero-width non-joiner", "مهسا\u200cسادات"],
+    ["a zero-width non-joiner", "A\u200cda"],
+    ["a zero-width joiner", "A\u200dda"],
+    ["an emoji joined by a zero-width joiner", "Ada 👩\u200d💻"],
   ])("takes a name with %s", (_, name) => {
     expect(validUserName(name)).toBe(true);
   });
@@ -433,16 +438,14 @@ describe("validUserName (exported for the importer, plan 9b)", () => {
     ["a pop directional isolate", "Ada\u2069"],
     ["an Arabic letter mark", "Ada\u061c"],
     ["a zero-width space", "A\u200bda"],
-    ["a zero-width non-joiner", "A\u200cda"],
-    ["a zero-width joiner", "A\u200dda"],
     ["a word joiner", "A\u2060da"],
     ["a byte order mark", "\ufeffAda"],
     ["a soft hyphen", "A\u00adda"],
     ["a tag character", "Ada\u{e0041}"],
     ["a lone high surrogate", "Ada\ud800"],
     ["a lone low surrogate", "Ada\udc00"],
-    // A joined emoji holds a zero-width joiner, a format character: the rule refuses it.
-    ["an emoji joined by a zero-width joiner", "Ada 👩\u200d💻"],
+    ["a line separator", "Ada\u2028x"],
+    ["a paragraph separator", "Ada\u2029x"],
   ])("refuses a name with %s", (_, name) => {
     expect(validUserName(name)).toBe(false);
   });

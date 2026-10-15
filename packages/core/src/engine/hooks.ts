@@ -211,7 +211,8 @@ export interface UserPatch {
 /**
  * What `user.beforeCreate` may change (plan 12a): `name` and `image`, each a
  * string or null, under the profile rules. A name passes `validUserName`:
- * 1 to 200 code units with no control, format, or lone surrogate character.
+ * 1 to 200 code units with no control, format (except U+200C and U+200D),
+ * line separator, paragraph separator, or lone surrogate character.
  * An image passes `validImageUrl`: an `https://`
  * URL with a host, of at most 2048 characters, with no credentials. Any
  * other key or value answers `hook_failed`.

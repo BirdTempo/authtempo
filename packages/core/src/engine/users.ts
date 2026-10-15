@@ -12,11 +12,13 @@ const USER_NAME_MAX = 200;
 /**
  * The characters that a user name must not hold (plan 12a Task 7, review L4).
  * Other people see the name, for example in a member list. A control
- * character (C0, DEL, C1) can break a line or a header. A format character,
- * such as a bidi override or a zero-width character, can make one name read
- * as another. A lone surrogate is not text.
+ * character (C0, DEL, C1) or a line or paragraph separator can break a line
+ * or a header. A format character, such as a bidi override or a zero-width
+ * space, can make one name read as another. A lone surrogate is not text.
+ * The zero-width non-joiner (U+200C) and joiner (U+200D) pass: Persian names
+ * and joined emoji carry them (the lead's ruling, 2026-10-15).
  */
-const NAME_REFUSED = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const NAME_REFUSED = /[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]|(?![\u200c\u200d])\p{Cf}/u;
 
 /**
  * The user name rule: a string of 1 to 200 UTF-16 code units, with no
