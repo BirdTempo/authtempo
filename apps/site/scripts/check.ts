@@ -13,6 +13,7 @@ import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
 import { checkErrorLinks, errorLinks } from "./check-error-links.ts";
 import { checkErrors } from "./check-errors.ts";
 import { checkExports, readExports } from "./check-exports.ts";
+import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
 import { checkFences } from "./check-fences.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkLinks } from "./check-links.ts";
@@ -42,6 +43,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   { name: "check-terms", run: () => checkTerms([...docsPages(), ...cliHelpPages()]) },
   { name: "check-sentences", run: () => checkSentences([...docsPages(), ...cliHelpPages()]) },
   { name: "check-fences", run: () => checkFences(docsPages(), sampleFiles(), existsSync) },
+  // The FAQ answers the questions of the migration guides, and each guide has an
+  // entry that links it, so a new guide fails here until the FAQ covers it (plan 11d2).
+  {
+    name: "check-faq",
+    run: () =>
+      checkFaq(
+        docsPages().find((p) => p.path === FAQ_PAGE)?.source ?? "",
+        migrationGuides(docsPages()),
+      ),
+  },
   {
     name: "check-errors",
     run: () => checkErrors(distPageOrEmpty("/docs/reference/errors/"), ERRORS, OAUTH_ERRORS),
