@@ -21,4 +21,9 @@ On the server of Nuxt:
 
 - The subscription of `useSession` ends with the component's scope.
 - The session middleware reads the URL and the headers only, never the body.
+- The session middleware gives `protect` the path decoded once, as Vue Router
+  reads it. Vue Router matches a path in any case by default: set
+  `router: { options: { sensitive: true } }` in `nuxt.config.ts`, or compare in
+  lower case in `protect`. Prefer a prefix rule: the router also renders
+  `/account/` for `/account`.
 - The session middleware reads no session for a route of core: core reads and renews it itself.

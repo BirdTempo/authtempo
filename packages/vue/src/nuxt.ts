@@ -48,6 +48,23 @@ export interface NuxtAuthOptions {
 }
 
 /**
+ * The URL that the page router reads. Vue Router decodes the path once before
+ * it matches ("/%61ccount" renders the page of "/account", vue-router 5.4.0,
+ * probed 2026-10-15), so the gate reads the decoded path too: a protect rule
+ * then sees the path of the page that runs. decodeURI keeps an escaped "/".
+ * A path with a bad escape stays as it came.
+ */
+function routedURL(raw: string | URL): URL {
+  const url = new URL(raw);
+  try {
+    url.pathname = decodeURI(url.pathname);
+  } catch {
+    // A bad escape: no router decodes it, so the raw path is the routed path.
+  }
+  return url;
+}
+
+/**
  * The server middleware of `server/middleware/session.ts`:
  * `export default authSessionHandler({ auth: getAuth });`. It reads the URL
  * and the headers only, never the body that a later handler needs. A request
@@ -58,7 +75,8 @@ export function authSessionHandler(options: NuxtAuthOptions): EventHandler {
   return defineEventHandler(async (event) => {
     // A web handler (toWebHandler, a Worker preset) keeps the request's URL in
     // event.web; on Node, getRequestURL builds it from the Host header.
-    const request = new Request(event.web?.url ?? getRequestURL(event), { headers: event.headers });
+    const url = routedURL(event.web?.url ?? getRequestURL(event));
+    const request = new Request(url, { headers: event.headers });
     const gate = await readGate({ ...options, auth: resolve(options.auth) }, request);
     // A middleware that answers ends the request; one that answers nothing lets it go on.
     if (gate.redirect) return gate.redirect;

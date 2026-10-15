@@ -114,6 +114,14 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
     expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Faccount`);
   });
 
+  it("reads the decoded path, as the page router reads it", async () => {
+    // Vue Router renders the page of /account for /%61ccount: the gate must protect it too.
+    const { fetch } = makeApp();
+    const res = await fetch(new Request(`${API}/%61ccount`));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Faccount`);
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { fetch, signIn, advance } = makeApp();
     const cookie = await signIn();
