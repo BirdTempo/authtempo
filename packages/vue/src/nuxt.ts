@@ -4,7 +4,7 @@ import {
   appendResponseHeader,
   defineEventHandler,
   type EventHandler,
-  getRequestURL,
+  getRequestProtocol,
   type H3Event,
   toWebRequest,
 } from "h3";
@@ -47,25 +47,65 @@ export interface NuxtAuthOptions {
   basePath?: string | undefined;
 }
 
+/** The raw request target: the path and the query as the request line wrote them. */
+function rawTarget(event: H3Event): string {
+  return event.node.req.originalUrl ?? event.node.req.url ?? "/";
+}
+
 /**
- * The URL that h3 routes and the Nuxt renderer reads. h3 1.15.11 decodes the
- * path once with decodeURIComponent and keeps "%2F" and "%25" (_decodePath and
- * ufo's decodePath, read 2026-10-15), so "/%61ccount" and "/account%3F" both
- * render the page of "/account". The gate reads the same text. The URL is
- * built again from that text, so a decoded "?" starts the query, as in h3.
- * A path with a bad escape stays as it came, as in h3. Not event.path: under
- * a Nuxt app.baseURL it loses the base that core's routes keep.
+ * The path and the query that h3 routes, as one string for the gate. h3
+ * 1.15.11 routes the raw request target decoded once with decodeURIComponent,
+ * with "%2F" and "%25" kept (_decodePath and ufo's decodePath, read
+ * 2026-10-15). It does not resolve dot segments or backslashes:
+ * "/account/%2e%2e" routes as "/account/.." to a child route "/account/:id".
+ * So the text is decoded here the same way and is never parsed as a URL: a
+ * parse would resolve "..", turn a backslash into "/", drop a tab, and judge a path
+ * that h3 did not route. A bad escape stays raw, as in h3. h3 routes
+ * "//account" as is, so it stays as is (probed 2026-10-15). The source is
+ * originalUrl, not event.path: under a Nuxt app.baseURL, event.path loses the
+ * base that core's routes keep.
  */
-function routedURL(raw: string | URL): URL {
-  const url = new URL(raw);
-  let path = url.pathname;
+function routedPath(event: H3Event): string {
+  const raw = rawTarget(event);
+  const q = raw.indexOf("?");
+  const path = q === -1 ? raw : raw.slice(0, q);
+  const search = q === -1 ? "" : raw.slice(q);
   try {
-    path = decodeURIComponent(path.replace(/%25/g, "%2525").replace(/%2F/gi, "%252F"));
+    return decodeURIComponent(path.replace(/%25/g, "%2525").replace(/%2F/gi, "%252F")) + search;
   } catch {
     // A bad escape: h3 keeps the raw path, so the raw path is the routed path.
+    return raw;
   }
-  // One leading slash: "//x" after the origin would name another host.
-  return new URL(path.replace(/^[/\\]+/, "/") + url.search, url.origin);
+}
+
+/**
+ * The origin of the redirect. A web handler (toWebHandler, a Worker preset)
+ * keeps the request's own URL in event.web. On Node it is the protocol of
+ * h3 and the Host header, never the request target: an absolute-form line
+ * "GET http://evil.example/account" names another host (plan 11d2 path probe
+ * 2). A Host that does not parse as one host falls back to the origin of
+ * auth.baseURL, so no request answers 500.
+ */
+function originOf(event: H3Event, auth: GateAuth & { readonly baseURL?: string }): string {
+  if (event.web?.url) return new URL(event.web.url).origin;
+  const host = event.node.req.headers.host ?? "";
+  const protocol = getRequestProtocol(event);
+  try {
+    const url = new URL(`${protocol}://${host}`);
+    if (host !== "" && url.host === host.toLowerCase()) return url.origin;
+  } catch {
+    // Not a host: the fallback below.
+  }
+  return new URL(auth.baseURL ?? "http://localhost").origin;
+}
+
+/** The page URL on `origin`. A target that no URL parses gives the root, so no request answers 500. */
+function pageURL(origin: string, target: string): string {
+  try {
+    return new URL(`${origin}${target.startsWith("/") ? "" : "/"}${target}`).href;
+  } catch {
+    return `${origin}/`;
+  }
 }
 
 /**
@@ -77,16 +117,14 @@ function routedURL(raw: string | URL): URL {
 export function authSessionHandler(options: NuxtAuthOptions): EventHandler {
   checkGateOptions(options);
   return defineEventHandler(async (event) => {
-    // A web handler (toWebHandler, a Worker preset) keeps the request's URL in
-    // event.web; on Node, getRequestURL builds it from the Host header.
-    const raw = event.web?.url ?? getRequestURL(event);
-    // A body-less copy for the session read: the gate reads the headers only.
-    const request = new Request(raw, { headers: event.headers });
-    const gate = await readGate(
-      { ...options, auth: resolve(options.auth) },
-      request,
-      routedURL(raw),
-    );
+    const auth = resolve(options.auth);
+    // The request that the gate reads the cookie of, and takes the origin and
+    // next from: the raw target on the origin of originOf, with no body. A
+    // target with no leading "/" (the absolute form) becomes a path of it.
+    const target = rawTarget(event);
+    const origin = originOf(event, auth);
+    const request = new Request(pageURL(origin, target), { headers: event.headers });
+    const gate = await readGate({ ...options, auth }, request, routedPath(event));
     // A middleware that answers ends the request; one that answers nothing lets it go on.
     if (gate.redirect) return gate.redirect;
     event.context.session = gate.session;

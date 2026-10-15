@@ -30,9 +30,13 @@ On the server of Nuxt:
   Read private data only in a server route that calls `getSession(event)`, read
   the session in the browser with `useSession`, or link with plain `<a>` tags
   so that each page load reaches the server.
-- The session middleware gives `protect` the path decoded once, as h3 decodes
-  it (`%2F` and `%25` stay encoded). Vue Router matches a path in any case by default: set
-  `router: { options: { sensitive: true } }` in `nuxt.config.ts`, or compare in
-  lower case in `protect`. Prefer a prefix rule: the router also renders
-  `/account/` for `/account`.
+- `protect` gets the path exactly as h3 matched it: the raw request path
+  decoded once, with `%2F` and `%25` kept encoded. Dot segments stay
+  (`/account/%2e%2e` reaches the rule as `/account/..`, which a child route
+  `/account/[id]` matches), and slashes are not merged. A non-ASCII route
+  reaches the rule decoded: write `p === "/café"`, not `"/caf%C3%A9"`.
+- Vue Router compares a path in any case by default. Set
+  `router: { options: { sensitive: true } }` in `nuxt.config.ts`, as the
+  example does, or compare in lower case in `protect`. Prefer a prefix rule:
+  the router also renders `/account/` for `/account`.
 - The session middleware reads no session for a route of core: core reads and renews it itself.
