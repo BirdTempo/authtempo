@@ -377,6 +377,11 @@ export interface AuthApi {
 }
 
 export interface Auth {
+  /**
+   * The resolved `basePath` of the config (default "/auth"). The gate of the
+   * framework bindings reads it, so an app names its base path once (plan 11d2).
+   */
+  readonly basePath: string;
   /** Serves the auth routes under `basePath`. Mount it for any request whose path starts with `basePath`. */
   handle(request: Request): Promise<Response>;
   /**
@@ -419,6 +424,7 @@ export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
   const handle = createRouter(config, coreRoutes(config));
   return {
+    basePath: config.basePath,
     handle,
     session: (request, options) => sessionFromRequest(config, request, options),
     caller: (request) => callerFromRequest(config, request),

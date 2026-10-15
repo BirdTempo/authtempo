@@ -9,7 +9,13 @@ import type { ResolvedSession } from "./engine/sessions.js";
 
 export const DEFAULT_BASE_PATH = "/auth";
 
-export type GateAuth = Pick<Auth, "handle" | "session" | "sessionCookie">;
+/**
+ * `basePath` is optional, so an auth object of an older core, or a stand-in
+ * with the three calls, still fits. With it, the gate reads core's own base path.
+ */
+export type GateAuth = Pick<Auth, "handle" | "session" | "sessionCookie"> & {
+  readonly basePath?: string | undefined;
+};
 
 export interface GateOptions {
   auth: GateAuth;
@@ -21,7 +27,10 @@ export interface GateOptions {
    * query goes too, so keep secrets out of the query of a protected URL.
    */
   signInPath?: string | undefined;
-  /** The `basePath` of core. Default "/auth". */
+  /**
+   * The path under which core's routes reach this app. Default `auth.basePath`,
+   * then "/auth". Set it only for a proxy that mounts core under another prefix.
+   */
   basePath?: string | undefined;
 }
 
@@ -34,11 +43,20 @@ export interface Gate {
 }
 
 /** Throws for a wrong option. A binding calls it at construction, not per request. */
-export function checkGateOptions(options: Pick<GateOptions, "protect" | "signInPath">): void {
-  if (options.protect && !options.signInPath)
+export function checkGateOptions(
+  options: Pick<GateOptions, "protect" | "signInPath" | "basePath">,
+): void {
+  const { signInPath, basePath } = options;
+  if (options.protect && !signInPath)
     throw new Error("authtempo bindings: protect needs signInPath");
-  if (options.signInPath !== undefined && !options.signInPath.startsWith("/"))
-    throw new Error('authtempo bindings: signInPath must start with "/"');
+  // "//host" and "/\host" are links to another origin, as a browser reads them.
+  const foreign = signInPath?.startsWith("//") || signInPath?.startsWith("/\\");
+  if (signInPath !== undefined && (!signInPath.startsWith("/") || foreign))
+    throw new Error('authtempo bindings: signInPath must be a path of this origin, one "/" first');
+  // The rule of core's own basePath: with a "/" at the end, no path of core would match.
+  const trailing = basePath?.endsWith("/");
+  if (basePath !== undefined && (!basePath.startsWith("/") || trailing))
+    throw new Error('authtempo bindings: basePath must start with "/" and not end with "/"');
 }
 
 /** True for a path of core: under the base path, and not the base path itself. */
@@ -82,8 +100,9 @@ export function withSetCookie(response: Response, cookie: string | null): Respon
  */
 export async function readGate(options: GateOptions, request: Request): Promise<Gate> {
   const url = new URL(request.url);
-  if (isAuthPath(url.pathname, options.basePath))
-    return { session: null, redirect: null, cookie: null };
+  // One source for the base path: core's own, unless a proxy moved core's routes.
+  const basePath = options.basePath ?? options.auth.basePath ?? DEFAULT_BASE_PATH;
+  if (isAuthPath(url.pathname, basePath)) return { session: null, redirect: null, cookie: null };
   const session = await options.auth.session(request);
   if (!session && options.signInPath && options.protect?.(url.pathname))
     return { session, redirect: signInRedirect(url, options.signInPath), cookie: null };

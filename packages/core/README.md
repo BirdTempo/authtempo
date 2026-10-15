@@ -147,7 +147,17 @@ Two entries hold the facts that an SDK reads, so each fact has one copy (plan 11
 
 ### `@authtempo/core/bindings`
 
-The gate of the framework bindings (plan 11d2): `readGate` reads the session of a page request, answers the sign-in redirect of a protected path, and gives the renewed cookie. A path of core reads nothing. `signInRedirect` puts the path and the query of the request in `next`, with one leading slash, so `next` cannot name another origin. `withSetCookie` adds the cookie to the page's answer. A binding calls `checkGateOptions` at construction: `protect` needs `signInPath`.
+A third entry, of a different kind: the gate of the framework bindings (plan 11d2). Each server binding fits it to its framework, so the rule has one copy.
+
+- `readGate(options, request)`: the `Gate` of a page request. `session` is the session or null. `redirect` is the 307 to the sign-in page for a protected path with no session, or null. `cookie` is the renewed session cookie after the sliding refresh, or null. A path of core reads nothing, because `auth.handle` reads and renews the session itself.
+- `signInRedirect(url, signInPath)`: the 307 to `signInPath`, with `next` set to the path and the query of `url`. `next` gets one leading slash, so it cannot name another origin. A query of `signInPath` stays.
+- `withSetCookie(response, cookie)`: adds the cookie to the page's answer. An answer with fixed headers, such as one of `Response.redirect`, gets a copy.
+- `checkGateOptions(options)`: a binding calls it at construction. It throws when `protect` has no `signInPath`, when `signInPath` is not a path of this origin (it must start with one `/`, not `//` or `/\`), and when `basePath` does not start with `/` or ends with `/`.
+- `isAuthPath(pathname, basePath?)`: true for a path under the base path, not the base path itself.
+- `DEFAULT_BASE_PATH`: `"/auth"`, the default `basePath` of core.
+- The types `GateOptions` (`auth`, `protect`, `signInPath`, `basePath`), `GateAuth` (`handle`, `session`, `sessionCookie`, and the optional `basePath`), and `Gate`.
+
+The gate reads the base path from `auth.basePath`, the resolved `basePath` of the config, so an app names it once. The `basePath` option of the gate is for a proxy that mounts core under another prefix.
 
 ## Apps on another origin
 

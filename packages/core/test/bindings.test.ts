@@ -15,7 +15,8 @@ import { createMemoryAdapter } from "../src/storage/memory.js";
 const BASE = "https://app.example.com";
 const DAY = 24 * 60 * 60 * 1000;
 
-function setup() {
+function setup(basePath?: string) {
+  const base = basePath ?? "/auth";
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
   const auth = createAuth({
@@ -23,6 +24,7 @@ function setup() {
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [BASE],
     storage: createMemoryAdapter(),
+    ...(basePath ? { basePath } : {}),
     mail: {
       send: async (m) => {
         mail.push(m);
@@ -33,7 +35,7 @@ function setup() {
   async function signIn(): Promise<string> {
     const post = (path: string, body: unknown) =>
       auth.handle(
-        new Request(`${BASE}/auth${path}`, {
+        new Request(`${BASE}${base}${path}`, {
           method: "POST",
           headers: { "content-type": "application/json", origin: BASE },
           body: JSON.stringify(body),
@@ -63,6 +65,16 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(() => checkGateOptions({ protect: () => true })).toThrow(/signInPath/);
     expect(() => checkGateOptions({ signInPath: "sign-in" })).toThrow(/signInPath/);
     expect(() => checkGateOptions({})).not.toThrow();
+  });
+
+  it("refuses a signInPath of another origin and a basePath with a trailing slash", () => {
+    // A browser reads "//host" and "/\host" as links to another origin.
+    expect(() => checkGateOptions({ signInPath: "//evil.example/in" })).toThrow(/signInPath/);
+    expect(() => checkGateOptions({ signInPath: "/\\evil.example/in" })).toThrow(/signInPath/);
+    expect(() => checkGateOptions({ signInPath: "/in" })).not.toThrow();
+    expect(() => checkGateOptions({ basePath: "/api/auth/" })).toThrow(/basePath/);
+    expect(() => checkGateOptions({ basePath: "api/auth" })).toThrow(/basePath/);
+    expect(() => checkGateOptions({ basePath: "/api/auth" })).not.toThrow();
   });
 
   it("answers the session of a signed-in person, and no redirect", async () => {
@@ -115,6 +127,31 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     const g = await readGate({ auth: counting }, page("/auth/session"));
     expect(g).toEqual({ session: null, redirect: null, cookie: null });
     expect(reads).toBe(0);
+  });
+
+  it("reads the base path of core from the auth object when the gate has no basePath", async () => {
+    const { auth, signIn, advance } = setup("/api/auth");
+    expect(auth.basePath).toBe("/api/auth");
+    const cookie = await signIn();
+    advance(8 * DAY);
+    let reads = 0;
+    const counting = {
+      ...auth,
+      session: async (r: Request) => {
+        reads++;
+        return auth.session(r);
+      },
+    };
+    const request = page("/api/auth/session", cookie);
+    const g = await readGate({ auth: counting }, request);
+    expect(g).toEqual({ session: null, redirect: null, cookie: null });
+    expect(reads).toBe(0);
+    // The binding then answers core's own answer: the gate adds no line to it.
+    const answer = await auth.handle(request);
+    const lines = answer.headers.getSetCookie();
+    expect(lines.length).toBe(1);
+    expect(withSetCookie(answer, g.cookie)).toBe(answer);
+    expect(answer.headers.getSetCookie()).toEqual(lines);
   });
 
   it("adds a Set-Cookie line to an answer, and copies an answer whose headers are fixed", async () => {
