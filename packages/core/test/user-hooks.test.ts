@@ -17,8 +17,8 @@ import type { Result } from "../src/result.js";
 import type { IdentityRow, UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { makeAuth, tokenFromMail } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
+import { makeAuth, post, tokenFromMail } from "./helpers.js";
+import { FAST, pwHandle } from "./password-helpers.js";
 import {
   type FakeIdToken,
   fakeJwt,
@@ -142,6 +142,8 @@ const PATHS: {
   extra: Partial<AuthConfig>;
   run: (w: World, email: string) => Promise<Result<unknown>>;
   events: (email: string) => string[];
+  /** The answer to a refusal. The uniform sign-up hides it (lead ruling, 2026-10-15). */
+  refused?: unknown;
 }[] = [
   {
     name: "the magic link",
@@ -183,6 +185,7 @@ const PATHS: {
     extra: {},
     run: (w, email) => signUp(w.auth, email),
     events: (email) => [`user.beforeCreate:password:${email}`, "user.afterCreate:password:-"],
+    refused: { ok: true, value: { sent: true } },
   },
   {
     name: "the password sign-up with uniformSignUp off",
@@ -292,11 +295,14 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
         },
         path.extra,
       );
-      expect(await path.run(w, "no@example.com")).toMatchObject({
-        ok: false,
-        code: "hook_refused",
-        message: "Sign-ups are closed.",
-      });
+      expect(await path.run(w, "no@example.com")).toEqual(
+        path.refused ?? {
+          ok: false,
+          code: "hook_refused",
+          status: 403,
+          message: "Sign-ups are closed.",
+        },
+      );
       expect(await allRows(w.auth.storage)).toEqual({ users: [], identities: [], sessions: [] });
     });
   }
@@ -684,5 +690,72 @@ describe("the hook groups in the config (plan 12a)", () => {
     };
     await makeAuth({ hooks: { identity: group } }).config.hooks.identity.afterLink?.({} as never);
     expect(group[seen]).toEqual(["called"]);
+  });
+});
+
+describe("the uniform sign-up hides a user.beforeCreate stop (plan 12a, lead ruling 2026-10-15)", () => {
+  const PW = "correct horse battery";
+
+  /** A sign-up auth whose user.beforeCreate stops for no@example.com only. */
+  function stopping(stop: () => never) {
+    // pwHandle turns the uniform sign-up off unless the test asks for it.
+    return pwHandle(
+      { hash: FAST, uniformSignUp: true },
+      {
+        hooks: {
+          user: {
+            beforeCreate: (e) => {
+              if (e.user.email === "no@example.com") stop();
+            },
+          },
+        },
+      },
+    );
+  }
+
+  async function answer(h: ReturnType<typeof pwHandle>, email: string) {
+    const res = await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
+    return { status: res.status, body: await res.json(), cookie: res.headers.get("set-cookie") };
+  }
+
+  async function check(h: ReturnType<typeof pwHandle>) {
+    // A known address: the first sign-up makes the user, the second meets it.
+    await answer(h, "old@example.com");
+    const known = await answer(h, "old@example.com");
+    const refused = await answer(h, "no@example.com");
+    expect(refused).toEqual(known);
+    expect(refused).toEqual({ status: 200, body: { sent: true }, cookie: null });
+    const users = await h.storage.findMany("user", []);
+    expect(users.map((u) => u.email)).toEqual(["old@example.com"]);
+    expect(
+      await h.storage.findMany("identity", [
+        { field: "subject", op: "eq", value: "no@example.com" },
+      ]),
+    ).toEqual([]);
+    expect(await h.storage.findMany("session", [])).toEqual([]);
+    expect(h.mails.filter((m) => m.to === "no@example.com")).toEqual([]);
+  }
+
+  it("answers a refusal for an unknown address as for a known one, with no row and no mail", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await check(
+      stopping(() => {
+        throw hookRefusal("Sign-ups from no@example.com are closed.");
+      }),
+    );
+    // A refusal is the app's answer, not a fault: no line, and never the address.
+    expect(log.mock.calls).toEqual([]);
+  });
+
+  it("answers a throw for an unknown address as for a known one, and logs the reason only", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await check(
+      stopping(() => {
+        throw new TypeError("crm down for no@example.com");
+      }),
+    );
+    expect(log.mock.calls).toEqual([
+      ["authtempo: before hook failed", "user.beforeCreate", "TypeError"],
+    ]);
   });
 });

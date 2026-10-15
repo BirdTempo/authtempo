@@ -1046,10 +1046,11 @@ const auth = createAuth({
   a create that the rule refuses. A claim, the social fill of the name and
   the image, the sweep, and the importer fire no user or identity hook.
 - The uniform sign-up answers `{ sent: true }` for a new and a known
-  address. `user.beforeCreate` runs only for a new address. So a refusal or
-  a failure of that hook tells the caller that the address has no user.
-  Refuse by a rule that does not depend on the address, or accept that
-  answer.
+  address. `user.beforeCreate` runs only for a new address. When it refuses
+  or throws, the sign-up writes no row, sends no mail, and still answers
+  `{ sent: true }`. So the caller never learns whether the address has a
+  user, and your refusal message does not reach the caller. A throw logs
+  `authtempo: before hook failed user.beforeCreate <error name>`.
 - With no `afterEnd` hook, a reset, a change, a claim, and the enable of a second factor delete the ended sessions in one statement (plan 9h). With the hook, each ended row goes by id, so the hook fires once per row the flow ended; an account with many sessions then pays one statement per session.
 - `session.beforeCreate` runs on a password sign-in only after the password
   is correct. So `hook_refused` against `invalid_credentials` tells the

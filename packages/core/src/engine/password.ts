@@ -405,8 +405,12 @@ async function uniformSignUp(
     try {
       const r = await hookGuard(() => insertUniform(config, row, now, made));
       if (r.ok) done = r.value;
-      // The "invited" rule refused: the same answer as every other path, and no mail.
-      else if (r.code === "sign_up_closed") done = { outcome: "quiet" };
+      // The "invited" rule refused, or `user.beforeCreate` refused or threw
+      // (plan 12a, lead ruling 2026-10-15): the same answer as every other
+      // path, and no mail. Else the answer tells that the address has no
+      // user. runBefore logged a throw with the hook name and the error name.
+      else if (r.code === "sign_up_closed" || r.code === "hook_refused" || r.code === "hook_failed")
+        done = { outcome: "quiet" };
       else return r;
     } catch (err) {
       // A parallel sign-up created the user between the read and the create.
