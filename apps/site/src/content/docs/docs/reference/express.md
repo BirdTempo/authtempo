@@ -42,6 +42,7 @@ sidebar:
 - The path is not decoded, so `%61` stays `%61`. The binding does not resolve "." and "..".
 - Express matches without case by default, on the app and on each `express.Router()`. It also matches the hex digits of an escape without case.
 - So the binding also runs the rule on the lower-case form of the path, and on that form with each escape in upper-case hex.
+- Express matches without case by default. Write the rule in lower case: `p.startsWith("/myAccount")` misses `/myaccount`, which runs the same page.
 - Express routes with strict routing off by default, so `/account` also matches `/account/`. The binding also runs the rule on each form with its trailing slashes removed.
 - A path needs a session when the rule holds for any form. Also set `app.set("case sensitive routing", true)`, so `/ACCOUNT` gets a 404.
 - An exact rule covers one route only. It does not cover a route with a parameter, such as `/account{/:tab}`.
