@@ -227,6 +227,27 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect((await where("https://evil.example/x"))?.startsWith(`${BASE}/sign-in?next=`)).toBe(true);
   });
 
+  it("gives the rule the path in URL form: a non-ASCII letter is encoded again", async () => {
+    const { auth } = setup();
+    const seen: string[] = [];
+    const options = {
+      auth,
+      protect: (p: string) => {
+        seen.push(p);
+        return p === "/caf%C3%A9";
+      },
+      signInPath: "/sign-in",
+    };
+    const fromString = await readGate(options, page("/raw"), "/café");
+    const fromURL = await readGate(options, page("/raw"), new URL(`${BASE}/caf%C3%A9`));
+    expect(seen).toEqual(["/caf%C3%A9", "/caf%C3%A9"]);
+    for (const g of [fromString, fromURL]) {
+      expect(g.redirect?.status).toBe(307);
+      // next holds the URL-form path, encoded once more as a query value.
+      expect(g.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
+    }
+  });
+
   it("reads no session when the routed URL is under the base path", async () => {
     const { auth, signIn } = setup();
     const cookie = await signIn();

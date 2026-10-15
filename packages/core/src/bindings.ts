@@ -19,7 +19,7 @@ export type GateAuth = Pick<Auth, "handle" | "session" | "sessionCookie"> & {
 
 export interface GateOptions {
   auth: GateAuth;
-  /** True for a path that needs a session. Needs `signInPath`. */
+  /** True for a path that needs a session. Needs `signInPath`. It gets the path in URL form: see `readGate`. */
   protect?: ((pathname: string) => boolean) | undefined;
   /**
    * The sign-in page of the app, a path that starts with "/". The gate adds
@@ -125,6 +125,13 @@ function routedURL(request: Request, url: URL | string | undefined): URL {
  * takes only the path and the query of it, on the origin of `request.url`, so
  * the redirect stays on that origin. "//x" stays a path. A string with no
  * leading "/" gets one: "account" is judged as "/account", and "" as "/".
+ *
+ * `protect` gets the path in URL form: the WHATWG `pathname` of the routed
+ * URL. An escaped letter such as "%61" is decoded where the router decodes it.
+ * A space or a non-ASCII letter is encoded again by the URL parser: "/café"
+ * and "/caf%C3%A9" both reach the rule as "/caf%C3%A9", and "/my account" as
+ * "/my%20account". Write such a rule in the encoded form or as a prefix. A
+ * rule `p === "/café"` never matches, and the page opens with no session.
  */
 export async function readGate(
   options: GateOptions,
