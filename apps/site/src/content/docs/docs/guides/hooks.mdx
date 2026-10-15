@@ -54,6 +54,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - A before hook runs inside the flow's transaction, after the rank checks and the limits, and before the first write. A throw leaves no row.
 - An after hook runs after the commit, before the answer. A throw cannot undo the row: core logs one line and answers success.
 - Each hook gets a copy of its event. Only two hooks may change a row. `session.beforeCreate` may change `ip`, `userAgent`, and `activeOrganizationId`. `user.beforeCreate` may change `name` and `image`.
+- Answer a plain object. Core reads its own enumerable fields only. A class instance or another object that is not plain answers `hook_failed`.
 - In one sign-in that creates a user, the order is `user.beforeCreate`, `identity.beforeLink`, and `session.beforeCreate`, all before the first write. After the commit, the order is `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`.
 - The sign-up rule runs before `user.beforeCreate`. So no user hook sees a create that `signUp` refuses.
 - The `email` identity, a claim, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.

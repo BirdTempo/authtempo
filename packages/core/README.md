@@ -994,8 +994,10 @@ const auth = createAuth({
   except `session.beforeCreate`, which may answer `{ ip?, userAgent?,
   activeOrganizationId? }`, each a string or null. The organization must be
   one the user is a member of, or the sign-in answers 404 `not_found`. Any
-  other field answers 500 `hook_failed`. A patch that core cannot read, such
-  as one with a getter that throws, answers 500 `hook_failed` too.
+  other field answers 500 `hook_failed`. Answer a plain object. Core reads
+  its own enumerable fields only. A class instance, another object that is
+  not plain, and a patch that core cannot read (such as one with a getter
+  that throws) answer 500 `hook_failed` too.
   `user.beforeCreate` may change the name and the image of a new user (see
   the user points below).
 - Organization points: `beforeCreate`, `afterCreate`, `beforeUpdate`,

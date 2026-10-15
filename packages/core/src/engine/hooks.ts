@@ -372,9 +372,10 @@ export class HookStop extends Error {
  * The own fields of a before hook's patch answer, or null for no patch
  * (`undefined` or `null`). The session patch and the user patch read the
  * answer here only. The answer is the app's object, so a getter or a proxy
- * can throw. The copy reads each field once, in a `try`. A throw, an array,
- * or a value that is not an object goes to `refuse`. It logs the reason and
- * stops with `hook_failed` (review L3 of plan 12a Task 5).
+ * can throw. The copy reads each own enumerable field once, in a `try`. A
+ * throw, an array, a value that is not an object, or an object that is not
+ * plain goes to `refuse`. It logs the reason and stops with `hook_failed`
+ * (review L3 and L7 of plan 12a Task 5). A non-enumerable field is not read.
  */
 export function patchFields(
   patch: unknown,
@@ -382,13 +383,24 @@ export function patchFields(
 ): Record<string, unknown> | null {
   if (patch === undefined || patch === null) return null;
   if (typeof patch !== "object") return refuse("a value that is not an object");
-  let copy: Record<string, unknown> | null;
+  let copy: Record<string, unknown> | "array" | "not plain";
   try {
-    copy = Array.isArray(patch) ? null : { ...(patch as Record<string, unknown>) };
+    if (Array.isArray(patch)) copy = "array";
+    else {
+      // createAuth's rule for hook objects (L7): a class instance or an
+      // Object.create answer is refused, not read in part.
+      const proto: unknown = Object.getPrototypeOf(patch);
+      copy =
+        proto === Object.prototype || proto === null
+          ? { ...(patch as Record<string, unknown>) }
+          : "not plain";
+    }
   } catch {
     return refuse("a value that cannot be read");
   }
-  return copy ?? refuse("a value that is not an object");
+  if (copy === "array") return refuse("a value that is not an object");
+  if (copy === "not plain") return refuse("a value that is not a plain object");
+  return copy;
 }
 
 /** Stops the flow with a plain code, for example `not_found` for a session patch. */

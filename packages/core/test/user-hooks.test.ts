@@ -782,6 +782,57 @@ describe("a patch that cannot be read (review L3 of plan 12a Task 5)", () => {
   });
 });
 
+describe("a patch that is not a plain object (review L7 of plan 12a Task 5)", () => {
+  class Patch {
+    get name(): string {
+      return "Pat";
+    }
+  }
+
+  async function answer(patch: unknown, session = false) {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const hooks: HooksConfig = session
+      ? { session: { beforeCreate: () => patch as never } }
+      : { user: { beforeCreate: () => patch as never } };
+    const auth = makeAuth({ hooks });
+    const r = await magicLink(auth, "new@example.com");
+    const rows = await allRows(auth.storage);
+    const lines = [...log.mock.calls];
+    log.mockRestore();
+    return { r, rows, lines };
+  }
+
+  it("refuses a class instance and an Object.create answer with one line", async () => {
+    for (const patch of [new Patch(), Object.create({ name: "Pat" })]) {
+      const a = await answer(patch);
+      expect(a.r).toEqual({ ok: false, code: "hook_failed", status: 500 });
+      expect(a.lines).toEqual([
+        ["authtempo: user patch refused", "a value that is not a plain object"],
+      ]);
+      expect(a.rows).toEqual({ users: [], identities: [], sessions: [] });
+    }
+    const s = await answer(new Patch(), true);
+    expect(s.r).toEqual({ ok: false, code: "hook_failed", status: 500 });
+    expect(s.lines).toEqual([
+      ["authtempo: session patch refused", "a value that is not a plain object"],
+    ]);
+  });
+
+  it("applies an object with a null prototype", async () => {
+    const a = await answer(Object.assign(Object.create(null), { name: "Pat" }));
+    expect(a.r.ok).toBe(true);
+    expect(a.rows.users).toMatchObject([{ email: "new@example.com", name: "Pat" }]);
+    expect(a.lines).toEqual([]);
+  });
+
+  it("reads own enumerable fields only: a non-enumerable name is dropped", async () => {
+    const a = await answer(Object.defineProperty({}, "name", { value: "Pat", enumerable: false }));
+    expect(a.r.ok).toBe(true);
+    expect(a.rows.users).toMatchObject([{ email: "new@example.com", name: null }]);
+    expect(a.lines).toEqual([]);
+  });
+});
+
 describe("the uniform sign-up hides a user.beforeCreate stop (plan 12a, lead ruling 2026-10-15)", () => {
   const PW = "correct horse battery";
 
