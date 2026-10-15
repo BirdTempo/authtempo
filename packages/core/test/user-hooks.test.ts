@@ -529,6 +529,13 @@ describe("validImageUrl (plan 12a)", () => {
       "https://192.0.2.1/a.png",
       "https://[2001:db8::1]/a.png",
       "https://bücher.example/a.png",
+      // An `@` or a `%` after the authority is a path or query character.
+      "https://img.example.com/@ada/a%40b.png?by=@ada",
+      "https://img.example.com/a.png#@x",
+      // A private or loopback host passes: the owner decides that rule.
+      "https://127.0.0.1/a.png",
+      "https://10.0.0.1/a.png",
+      "https://localhost/a.png",
     ])
       expect(validImageUrl(value), value).toBe(true);
   });
@@ -583,8 +590,33 @@ describe("validImageUrl (plan 12a)", () => {
     ["a host that does not parse", "https://[2001:db8::1/a.png"],
     ["a scheme-relative URL", "//img.example.com/a.png"],
     ["the http scheme with slashes", "http://img.example.com/a.png"],
+    // Review L2 of Task 7: not URL code points, or text the parser rewrites.
+    ["a double quote", 'https://img.example.com/a".png'],
+    ["a less-than sign", "https://img.example.com/a<.png"],
+    ["a greater-than sign", "https://img.example.com/a>.png"],
+    ["a backtick", "https://img.example.com/a`.png"],
+    ["an open brace", "https://img.example.com/a{.png"],
+    ["a close brace", "https://img.example.com/a}.png"],
+    ["a vertical bar", "https://img.example.com/a|.png"],
+    ["a caret", "https://img.example.com/a^.png"],
+    ["an empty user name", "https://@img.example.com/a.png"],
+    ["an empty user name and password", "https://:@img.example.com/a.png"],
+    ["an at sign before a port", "https://img.example.com@:443/a.png"],
+    ["a percent escape in the host", "https://img%2Eexample.com/a.png"],
+    ["a percent escape in the host, with no path", "https://%69mg.example.com"],
   ])("refuses %s", (_, value) => {
     expect(validImageUrl(value)).toBe(false);
+  });
+
+  // Review L1 of Task 7: an array has a length, and RegExp.test reads it as text.
+  it.each([
+    ["an array", ["https://img.example.com/a.png"]],
+    ["a number", 7],
+    ["null", null],
+    ["undefined", undefined],
+    ["an object", { toString: () => "https://img.example.com/a.png" }],
+  ])("refuses %s, which is not a string", (_, value) => {
+    expect(validImageUrl(value as unknown as string)).toBe(false);
   });
 
   it("is the rule of the social fill too: a picture with credentials fills no image", async () => {

@@ -78,8 +78,8 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `ipKey` | The IP part of a per-IP limiter key: the IPv4 form of an IPv4-mapped address, the `/64` of another IPv6 address, `unknown` for no IP. |
 | `isIpLiteral` | True for a bare IPv4 or IPv6 literal. The notice mail prints an IP only in this form. |
 | `normalizeEmail`, `normalizeSlug` | The address rule and the slug rule of core. |
-| `validOrganizationName`, `validUserName` | The name rules of core. |
-| `validImageUrl` | The image rule of core: an `https://` URL with a host, of at most 2048 characters, with no credentials. It holds no whitespace, no control or format character, and no backslash. |
+| `validOrganizationName`, `validUserName` | The name rules of core. A user name has 1 to 200 code units and no control, format, or lone surrogate character. |
+| `validImageUrl` | The image rule of core: an `https://` URL with a host, of at most 2048 characters, with no `@` and no `%` in its authority. It holds no whitespace, no control or format character, no backslash, and none of `"<>{}\|^` or a backtick. |
 | `rankOf` | The rank of a role string in a rank table. |
 | `readSessionToken` | Reads the session token of a request, from the cookie and then the bearer header. |
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |

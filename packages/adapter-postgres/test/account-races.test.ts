@@ -217,3 +217,97 @@ describe("user hook races on Postgres (plan 12a Task 5, review M3)", () => {
     expect(Math.max(...raced)).toBeGreaterThan(1);
   }, 60000);
 });
+
+// The compare-and-set of the profile update (review M1 of Task 7). The text
+// is the reviewer's, with the file's BASE, SECRET, and OPEN.
+/** The profile fields of a user row, as afterUpdate and a SELECT give them. */
+type ProfileRow = { name: string | null; image: string | null; updatedAt: Date };
+
+describe("the profile update races on Postgres (plan 12a Task 7)", () => {
+  it("parallel updates of one user: each afterUpdate gets the row its write replaced", async () => {
+    const sent: MailMessage[] = [];
+    const after: { previous: ProfileRow; user: ProfileRow }[] = [];
+    let befores = 0;
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      hooks: {
+        user: {
+          beforeUpdate: async () => {
+            befores++;
+            // Hold the round open, so a parallel write can land first.
+            await new Promise((r) => setTimeout(r, 5));
+          },
+          afterUpdate: (e) => {
+            after.push({ previous: e.previous, user: e.user });
+          },
+        },
+      },
+    });
+    await auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
+    const token = /token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1)?.text ?? "")?.[1];
+    if (!token) throw new Error("no link");
+    const r = await auth.api.verifyMagicLink({
+      token: decodeURIComponent(token),
+      ip: null,
+      userAgent: null,
+    });
+    if (!r.ok || !("token" in r.value)) throw new Error("no session");
+    const s = await auth.api.getSession(r.value.token);
+    if (!s) throw new Error("no session");
+    const raced: number[] = [];
+    for (let round = 0; round < 6; round++) {
+      after.length = 0;
+      befores = 0;
+      const [initial] = await db.sql<
+        ProfileRow[]
+      >`SELECT name, image, updated_at AS "updatedAt" FROM ta_user WHERE id = ${s.user.id}`;
+      const patches = [
+        { name: `N${round}a` },
+        { image: `https://img.example.com/${round}b.png` },
+        { name: `N${round}c` },
+        { image: `https://img.example.com/${round}d.png` },
+      ];
+      const all = await Promise.all(patches.map((p) => auth.api.user.update({ session: s, ...p })));
+      for (const x of all) expect(x.ok || x.code === "conflict").toBe(true);
+      const oks = all.filter((x) => x.ok).length;
+      expect(after).toHaveLength(oks);
+      raced.push(befores - all.length);
+      // The chain: each write replaced the row that the one before it wrote.
+      const chain = [...after].sort(
+        (a, b) => a.user.updatedAt.getTime() - b.user.updatedAt.getTime(),
+      );
+      let prev: ProfileRow | undefined = initial;
+      for (const e of chain) {
+        expect({
+          name: e.previous.name,
+          image: e.previous.image,
+          at: e.previous.updatedAt.getTime(),
+        }).toEqual({
+          name: prev?.name ?? null,
+          image: prev?.image ?? null,
+          at: prev?.updatedAt.getTime(),
+        });
+        prev = e.user;
+      }
+      const [final] = await db.sql<
+        ProfileRow[]
+      >`SELECT name, image, updated_at AS "updatedAt" FROM ta_user WHERE id = ${s.user.id}`;
+      expect(final?.updatedAt.getTime()).toBe(prev?.updatedAt.getTime());
+      expect({ name: final?.name, image: final?.image }).toEqual({
+        name: prev?.name,
+        image: prev?.image,
+      });
+    }
+    // The race must show: some round ran user.beforeUpdate more than once for one update.
+    expect(Math.max(...raced)).toBeGreaterThan(0);
+  }, 60000);
+});

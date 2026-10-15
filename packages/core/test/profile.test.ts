@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/create-auth.js";
 import { hookRefusal, type UserHooks } from "../src/engine/hooks.js";
-import { updateProfile } from "../src/engine/profile.js";
+import { type ProfileUpdate, updateProfile } from "../src/engine/profile.js";
 import { later } from "../src/engine/second-factor.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial } from "../src/engine/social.js";
@@ -28,6 +28,8 @@ const SECRET = "0123456789abcdef0123456789abcdef";
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+type ProfilePatch = Omit<ProfileUpdate, "session">;
 
 const byId = (id: string): Where<"user">[] => [{ field: "id", op: "eq", value: id }];
 
@@ -155,6 +157,13 @@ describe("the profile update (plan 12a)", () => {
       expect({ patch, r: await updateProfile(auth.config, { session: s, ...patch }) }).toEqual({
         patch,
         r: { ok: false, code: "invalid_body", status: 400 },
+      });
+    // A JS caller of api.user.update can pass an array (review L1).
+    for (const patch of [{ name: ["Ada"] }, { image: [IMAGE] }] as unknown as ProfilePatch[])
+      expect(await updateProfile(auth.config, { session: s, ...patch })).toEqual({
+        ok: false,
+        code: "invalid_body",
+        status: 400,
       });
     expect(seen).toEqual([]);
     expect(await userRow(auth, s.user.id)).toEqual(before);

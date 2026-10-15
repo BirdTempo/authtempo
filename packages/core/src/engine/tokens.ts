@@ -66,7 +66,7 @@ export interface ApiTokenCreate {
   organizationId?: string | null | undefined;
 }
 
-/** The rule of `validUserName`, with 80 for the maximum. */
+/** 1 to 80 UTF-16 code units, with no C0 control character and no DEL. */
 export function validTokenName(name: string): boolean {
   return name.length >= 1 && name.length <= NAME_MAX && !hasControlChar(name);
 }

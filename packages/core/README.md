@@ -925,7 +925,7 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | GET | `/sessions` | session | `{ sessions: [{ id, createdAt, lastSeenAt, expiresAt, freshAt, ip, userAgent, activeOrganizationId, current }] }`, the live sessions newest first, at most 100, never a token or its hash; 401. `lastSeenAt` moves only at the sliding refresh. `expiresAt` is the earlier of the row's expiry and the absolute cap |
 | POST | `/sessions/revoke` | session (fresh), `{ id }` | `{ ok: true }`; the caller's own id clears the cookie; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found` (another user's, an unknown, or an ended id); 429 `rate_limited`. A session JWT of that session lives to its `exp` |
 | POST | `/sessions/revoke-others` | session (fresh) | `{ ended }`, the count of live sessions it ended: every other session, the second-factor challenges, and the handoff codes go. An ended row goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay; 401; 403 `session_not_fresh`; 429 `rate_limited` |
-| POST | `/user/update` | session, `{ name?, image? }` | `{ user }`. `name`: 1 to 200 code units with no control character, or null. `image`: an image URL by the rule below, or null. 400 `invalid_body` (no field, a bad value, or any other field, the address too); 401 (also when the user row goes during the update); 403 `email_unverified`, `hook_refused`; 409 `conflict`; 429 `rate_limited`; 500 `hook_failed`. No fresh rule |
+| POST | `/user/update` | session, `{ name?, image? }` | `{ user }`. `name`: a name by the name rule below, or null. `image`: an image URL by the image rule below, or null. 400 `invalid_body` (no field, a bad value, or any other field, the address too); 401 (also when the user row goes during the update); 403 `email_unverified`, `hook_refused`; 409 `conflict`; 429 `rate_limited`; 500 `hook_failed`. No fresh rule |
 
 The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it takes no `code`, whatever methods the user has on. After a password or an email code, `code` is the second factor. Item 2 says: "With the second factor on, the password and the email code need `code`, an authenticator code or a backup code." Item 12 lists "the email method of plan 12c as a re-authentication code" as a later input. So a user whose only method is the email method sends a backup code, or proves by a passkey. A user whose password row holds `LEGACY_VERIFY_HASH` proves by an email code or a passkey. The password proof refuses the marker, as the TOTP setup does.
 
@@ -939,7 +939,9 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 
 The profile update (`POST /user/update`, `api.user.update`) writes only the fields it gets. Null clears a field. It needs a verified address: a claim keeps the user row and its name, so a claimant must not set what the owner inherits. It has no fresh rule, because the name and the image do not affect a sign-in.
 
-The image rule (`validImageUrl`) holds for the profile update, the `user.beforeCreate` patch, the social fill, and the importer. An image is an `https://` URL with a host, of at most 2048 characters, with no credentials. It holds no whitespace, no control character (C0, DEL, C1), no format character (such as a bidi control or a zero-width character), and no backslash. A `data:` URL is refused.
+The name rule (`validUserName`) holds for the profile update, the password sign-up, the `user.beforeCreate` patch, the social fill, and the importer. A name is a string of 1 to 200 code units. It holds no control character (C0, DEL, C1), no format character, and no lone surrogate. A bidi control and a zero-width character are format characters. So an emoji that a zero-width joiner joins is refused, and so is a name with a zero-width non-joiner. The social fill then fills no name, and the importer drops the name and lists it.
+
+The image rule (`validImageUrl`) holds for the profile update, the `user.beforeCreate` patch, the social fill, and the importer. An image is an `https://` URL with a host, of at most 2048 characters. Its authority holds no `@` and no `%`, so it has no credentials and no escaped host. It holds no whitespace, no control character (C0, DEL, C1), no format character (such as a bidi control or a zero-width character), and no backslash. It holds none of `"`, `<`, `>`, a backtick, `{`, `}`, `|`, and `^`. A `data:` URL is refused. A private or loopback host passes.
 
 `user.beforeUpdate` gets the stored row, the patch, and `via: "profile"`. It runs before the write, so a refusal or a throw leaves the row as it was. The write is a compare-and-set on the row that the hook saw. A parallel write that lands first makes the update read the row again and run `user.beforeUpdate` again. After 5 lost rounds the answer is 409 `conflict`, and core logs `authtempo: profile update gave up <user id>`. `user.afterUpdate` gets the stored row after the write and, as `previous`, the row that the write replaced.
 
@@ -1052,9 +1054,8 @@ const auth = createAuth({
   organizations that go with the account. The magic link, the email code,
   social, the password sign-up, the reset link, and the reset code run the
   create points. `user.beforeCreate` may answer
-  `{ name?, image? }`, each a string or null. A name has 1 to 200 code
-  units and no control character. An image follows the image rule of
-  "Account". Any other key or value answers 500
+  `{ name?, image? }`, each a string or null. A name follows the name
+  rule of "Account", and an image follows the image rule there. Any other key or value answers 500
   `hook_failed` and logs `authtempo: user patch refused` with the reason,
   never the value.
 - Identity points (plan 12a): `beforeLink`, `afterLink`, `beforeUnlink`,

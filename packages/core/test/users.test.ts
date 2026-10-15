@@ -404,4 +404,57 @@ describe("validUserName (exported for the importer, plan 9b)", () => {
     expect(validUserName("a".repeat(201))).toBe(false);
     for (const c of controls) expect(validUserName(`Ada${c}x`)).toBe(false);
   });
+
+  // Review L4 of plan 12a Task 7: the rule refuses what makes one name read as another.
+  it.each([
+    ["a space and a hyphen", "Ada Lovelace-Byron"],
+    ["Latin letters with marks", "Zoë Ångström"],
+    ["a combining mark", "Ade\u0301le"],
+    ["Greek", "Ἀριστοτέλης"],
+    ["Cyrillic", "Ада Лавлейс"],
+    ["Arabic letters", "أدا لوفليس"],
+    ["Hebrew letters", "עדה"],
+    ["CJK", "艾达·洛夫莱斯"],
+    ["Devanagari", "अदा"],
+    ["an emoji of one code point", "Ada 🚀"],
+    ["an emoji with a skin tone", "Ada 👍🏽"],
+    ["a no-break space", "Ada\u00a0Lovelace"],
+  ])("takes a name with %s", (_, name) => {
+    expect(validUserName(name)).toBe(true);
+  });
+
+  it.each([
+    ["a C1 control (NEL)", "Ada\u0085x"],
+    ["a C1 control (CSI)", "Ada\u009bx"],
+    ["a C1 control (APC)", "Ada\u009fx"],
+    ["a right-to-left override", "\u202eadA"],
+    ["a left-to-right mark", "Ada\u200e"],
+    ["a right-to-left isolate", "Ada\u2067x"],
+    ["a pop directional isolate", "Ada\u2069"],
+    ["an Arabic letter mark", "Ada\u061c"],
+    ["a zero-width space", "A\u200bda"],
+    ["a zero-width non-joiner", "A\u200cda"],
+    ["a zero-width joiner", "A\u200dda"],
+    ["a word joiner", "A\u2060da"],
+    ["a byte order mark", "\ufeffAda"],
+    ["a soft hyphen", "A\u00adda"],
+    ["a tag character", "Ada\u{e0041}"],
+    ["a lone high surrogate", "Ada\ud800"],
+    ["a lone low surrogate", "Ada\udc00"],
+    // A joined emoji holds a zero-width joiner, a format character: the rule refuses it.
+    ["an emoji joined by a zero-width joiner", "Ada 👩\u200d💻"],
+  ])("refuses a name with %s", (_, name) => {
+    expect(validUserName(name)).toBe(false);
+  });
+
+  // Review L1 of plan 12a Task 7: an array has a length and reads as text.
+  it.each([
+    ["an array", ["Ada"]],
+    ["a number", 7],
+    ["null", null],
+    ["undefined", undefined],
+    ["an object", { length: 3 }],
+  ])("refuses %s, which is not a string", (_, value) => {
+    expect(validUserName(value as unknown as string)).toBe(false);
+  });
 });

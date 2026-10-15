@@ -121,8 +121,8 @@ export interface ImportUser {
   skip?: SkipReason;
   /**
    * What the reader left out, for the report: for example `passkey:no_public_key`.
-   * The importer adds `name:invalid` when the name breaks core's rule (1 to 200
-   * characters, no control character); it then writes the user with no name.
+   * The importer adds `name:invalid` when the name breaks core's rule
+   * (`validUserName`); it then writes the user with no name.
    */
   dropped?: string[];
 }

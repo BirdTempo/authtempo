@@ -1,6 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
-import { hasControlChar } from "../primitives/text.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { CreateSteps } from "./create-steps.js";
@@ -11,12 +10,24 @@ const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 const USER_NAME_MAX = 200;
 
 /**
- * The user name rule: 1 to 200 UTF-16 code units, no control character.
- * The password sign-up applies it, and the importer (plan 9b) applies it
- * too, so one rule holds for both.
+ * The characters that a user name must not hold (plan 12a Task 7, review L4).
+ * Other people see the name, for example in a member list. A control
+ * character (C0, DEL, C1) can break a line or a header. A format character,
+ * such as a bidi override or a zero-width character, can make one name read
+ * as another. A lone surrogate is not text.
+ */
+const NAME_REFUSED = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+
+/**
+ * The user name rule: a string of 1 to 200 UTF-16 code units, with no
+ * character of NAME_REFUSED. The password sign-up, the profile update, the
+ * social fill, the `user.beforeCreate` patch, and the importer (plan 9b)
+ * apply it, so one rule holds for all.
  */
 export function validUserName(name: string): boolean {
-  return name.length >= 1 && name.length <= USER_NAME_MAX && !hasControlChar(name);
+  // A JS caller can pass any value; an array has a length and reads as text (review L1).
+  if (typeof name !== "string") return false;
+  return name.length >= 1 && name.length <= USER_NAME_MAX && !NAME_REFUSED.test(name);
 }
 
 /** The longest image URL. LinkedIn's signed picture URLs pass 255 characters. */
@@ -27,33 +38,48 @@ const IMAGE_MAX = 2048;
  * of Task 5). They are whitespace of any kind, a control character (C0, DEL,
  * C1), and a format character. A bidi control, a zero-width character, and
  * the soft hyphen are format characters. A lone surrogate and a backslash are
- * refused too. The URL parser drops or rewrites some of them, so the stored
- * text and the parsed URL could differ.
+ * refused too. So are `"`, `<`, `>`, a backtick, `{`, `}`, `|`, and `^`
+ * (review L2 of Task 7). They are not URL code points: the parser escapes,
+ * drops, or rewrites them, so the stored text and the parsed URL could differ.
+ * A `"` also breaks an HTML attribute that an app builds by joining strings.
  */
-const IMAGE_REFUSED = /[\s\p{Cc}\p{Cf}\p{Cs}\\]/u;
+const IMAGE_REFUSED = /[\s\p{Cc}\p{Cf}\p{Cs}\\"<>`{}|^]/u;
+
+/**
+ * Text in the authority that the rule refuses (review L2 of Task 7). An `@`
+ * starts credentials, and an empty user name is still one. A `%` is an escape
+ * that the parser decodes in the host, so the stored host would differ.
+ */
+const AUTHORITY_REFUSED = /[@%]/;
 
 /** `https://`, then an authority that is not empty. The parser reads `https:/a` and `https:///a` as host `a`. */
 const IMAGE_PREFIX = /^https:\/\/[^/?#]/i;
 
 /**
  * The image rule of a profile (plan 12a): an `https://` URL with a host, of
- * at most 2048 characters, with no credentials. It holds no whitespace, no
- * control or format character, and no backslash. A `data:` URL is refused:
+ * at most 2048 characters, with no `@` and no `%` in the authority. It holds
+ * no whitespace, no control or format character, no backslash, and none of
+ * `"<>\`{}|^`. A private or loopback host passes. A `data:` URL is refused:
  * other people's pages show the image, and the bound would cut it. The
  * social profile, the `user.beforeCreate` patch, the profile update, and the
  * importer apply this one rule.
  */
 export function validImageUrl(value: string): boolean {
+  // A JS caller can pass any value; an array has a length and reads as text (review L1).
+  if (typeof value !== "string") return false;
   if (value.length > IMAGE_MAX || IMAGE_REFUSED.test(value) || !IMAGE_PREFIX.test(value))
     return false;
+  // The authority runs from after `https://` to the first `/`, `?`, or `#`.
+  const authority = value.slice("https://".length).split(/[/?#]/, 1)[0] ?? "";
+  if (AUTHORITY_REFUSED.test(authority)) return false;
   // The prefix fixed the scheme, and the parser refuses an empty `https:` host.
-  let url: URL;
+  // With no `@` in the authority, the URL has no credentials.
   try {
-    url = new URL(value);
+    new URL(value);
   } catch {
     return false;
   }
-  return url.username === "" && url.password === "";
+  return true;
 }
 
 /**
