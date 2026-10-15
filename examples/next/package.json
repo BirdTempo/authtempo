@@ -7,7 +7,7 @@
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev -p 3000",
     "next:build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run && NEXT_TELEMETRY_DISABLED=1 next build && node proof/next-start.mjs"
+    "test": "vitest run && node proof/next-start.mjs && NEXT_TELEMETRY_DISABLED=1 next build"
   },
   "dependencies": {
     "@authtempo/client": "workspace:*",

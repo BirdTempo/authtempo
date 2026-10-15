@@ -1,49 +1,70 @@
-// The Next.js example under the real server (plan 11d): `next start` of the
-// build, seven checks over HTTP (three signed out, four through a sign-in),
-// and one summary line. The test script runs it
-// after `next build`. Port 8793: the Node example uses 8791 and 8792.
-import { spawn } from "node:child_process";
+// The Next.js example under the real server (plan 11d): a build with the
+// proof's mail route, `next start`, seven checks over HTTP (three signed out,
+// four through a sign-in), and one summary line. The route lives in
+// proof/mail-route.ts. This script copies it into the app for its own build
+// and deletes it after, so the example app never ships it; the test script
+// then builds the app again without it. Port 8793: the Node example uses 8791
+// and 8792.
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const PORT = 8793;
 const BASE = `http://127.0.0.1:${PORT}`;
 const cwd = fileURLToPath(new URL("..", import.meta.url));
-const server = spawn("pnpm", ["exec", "next", "start", "-p", String(PORT), "-H", "127.0.0.1"], {
-  cwd,
-  env: {
-    ...process.env,
-    NEXT_TELEMETRY_DISABLED: "1",
-    BASE_URL: BASE,
-    AUTH_SECRET: "0123456789abcdef0123456789abcdef",
-    // The mail sink of lib/auth.ts and the route app/proof/mail: on for this proof only.
-    AUTHTEMPO_PROOF_MAIL: "1",
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-let log = "";
-server.stdout.on("data", (d) => {
-  log += d;
-});
-server.stderr.on("data", (d) => {
-  log += d;
-});
-
+const routeDir = fileURLToPath(new URL("../app/proof", import.meta.url));
 const failures = [];
 let checks = 0;
 const expectThat = (ok, what) => {
   checks++;
   if (!ok) failures.push(what);
 };
+let log = "";
+let server = null;
+
 try {
-  let up = false;
-  for (let i = 0; i < 60 && !up; i++) {
+  mkdirSync(`${routeDir}/mail`, { recursive: true });
+  copyFileSync(
+    fileURLToPath(new URL("mail-route.ts", import.meta.url)),
+    `${routeDir}/mail/route.ts`,
+  );
+  const build = spawnSync("pnpm", ["exec", "next", "build"], {
+    cwd,
+    env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
+    encoding: "utf8",
+  });
+  if (build.status !== 0)
+    throw new Error(`next build with the proof route failed:\n${build.stdout}${build.stderr}`);
+  server = spawn("pnpm", ["exec", "next", "start", "-p", String(PORT), "-H", "127.0.0.1"], {
+    cwd,
+    env: {
+      ...process.env,
+      NEXT_TELEMETRY_DISABLED: "1",
+      BASE_URL: BASE,
+      AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+      // The route app/proof/mail answers only with this variable: on for this proof only.
+      AUTHTEMPO_PROOF_MAIL: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  server.stdout.on("data", (d) => {
+    log += d;
+  });
+  server.stderr.on("data", (d) => {
+    log += d;
+  });
+  // The first answer of the proof route arms its mail sink: it makes the app's
+  // one auth instance before any page or route can make it with no sink.
+  let armed = null;
+  for (let i = 0; i < 60 && armed === null; i++) {
     await new Promise((r) => setTimeout(r, 500));
-    up = await fetch(`${BASE}/`).then(
-      () => true,
-      () => false,
+    armed = await fetch(`${BASE}/proof/mail`).then(
+      async (r) => (r.ok ? (await r.json()).armed : `status ${r.status}`),
+      () => null,
     );
   }
-  if (!up) throw new Error("next start did not answer in 30 s");
+  if (armed === null) throw new Error("next start did not answer in 30 s");
+  if (armed !== true) throw new Error(`the proof route did not arm its mail sink (${armed})`);
   const session = await fetch(`${BASE}/auth/session`);
   expectThat(session.status === 401, `GET /auth/session answered ${session.status}`);
   const account = await fetch(`${BASE}/account`, { redirect: "manual" });
@@ -85,7 +106,9 @@ try {
 } catch (e) {
   failures.push(e instanceof Error ? e.message : String(e));
 } finally {
-  server.kill("SIGTERM");
+  server?.kill("SIGTERM");
+  // The example app never keeps the proof route.
+  rmSync(routeDir, { recursive: true, force: true });
 }
 const pass = failures.length === 0 && checks === 7;
 console.log(`next-e2e: ${pass ? "PASS" : "FAIL"} checks=${checks} failures=${failures.length}`);
