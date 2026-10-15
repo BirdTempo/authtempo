@@ -29,7 +29,7 @@ export async function createApp(env: AppEnv): Promise<FastifyInstance> {
   // Declare the field once, as Fastify asks, so every request has the same shape.
   app.decorateRequest("authSession", null);
   // The session of every page, and /account for a signed-in person only.
-  // The rule gets the path that the router matches: the router is case-sensitive.
+  // The hook folds case: a rule in lower case also holds for /ACCOUNT.
   app.addHook(
     "onRequest",
     authSession({

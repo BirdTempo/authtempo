@@ -59,7 +59,6 @@ function headersOf(request: FastifyRequest): Headers {
 }
 
 interface RouterOptions {
-  caseSensitive?: boolean | undefined;
   ignoreTrailingSlash?: boolean | undefined;
   ignoreDuplicateSlashes?: boolean | undefined;
   useSemicolonDelimiter?: boolean | undefined;
@@ -69,13 +68,13 @@ interface RouterOptions {
  * The router options in force. Fastify 5.12.5 takes each one from
  * `routerOptions`, then from the deprecated field of the same name
  * (buildRouterOptions of lib/route.js). The type of `routerOptions` lacks
- * `useSemicolonDelimiter`, so the binding names the four fields it reads.
+ * `useSemicolonDelimiter`, so the binding names the three fields it reads.
+ * The binding does not read `caseSensitive`: it folds case itself (see authSession).
  */
 function routerOptionsOf(request: FastifyRequest): RouterOptions {
   const config = request.server.initialConfig;
   const own: RouterOptions = config.routerOptions ?? {};
   return {
-    caseSensitive: own.caseSensitive ?? config.caseSensitive,
     ignoreTrailingSlash: own.ignoreTrailingSlash ?? config.ignoreTrailingSlash,
     ignoreDuplicateSlashes: own.ignoreDuplicateSlashes ?? config.ignoreDuplicateSlashes,
     useSemicolonDelimiter: own.useSemicolonDelimiter ?? config.useSemicolonDelimiter,
@@ -87,7 +86,7 @@ function routerOptionsOf(request: FastifyRequest): RouterOptions {
  * ones of find-my-way 9.10.0 (lib/url-sanitizer.js and Router.prototype.find,
  * read 2026-10-15): cut at the first "?" or "#" (and ";" with
  * useSemicolonDelimiter), decode once with decodeURI but keep "%25", then
- * apply ignoreDuplicateSlashes, ignoreTrailingSlash, and caseSensitive.
+ * apply ignoreDuplicateSlashes and ignoreTrailingSlash. The case stays as it came.
  * A bad escape stays as it came: the router answers 400 before any hook runs.
  */
 function routedPath(request: FastifyRequest): { path: string; search: string } {
@@ -105,7 +104,6 @@ function routedPath(request: FastifyRequest): { path: string; search: string } {
   if (options.ignoreDuplicateSlashes) path = path.replace(/\/\/+/g, "/");
   if (options.ignoreTrailingSlash && path.length > 1 && path.endsWith("/"))
     path = path.slice(0, -1);
-  if (options.caseSensitive === false) path = path.toLowerCase();
   return { path, search };
 }
 
@@ -212,10 +210,12 @@ export function authSession(options: FastifySessionOptions): onRequestAsyncHookH
   return async (request, reply) => {
     const { path, search } = routedPath(request);
     // The rule sees the routed path as it is, with no step of the URL parser.
+    // It also sees the path in lower case, so the gate fails closed when the
+    // router ignores case (caseSensitive: false). `next` keeps the request's case.
     const gateOptions = {
       ...options,
       auth: resolve(options.auth),
-      protect: protect && (() => protect(path)),
+      protect: protect && (() => protect(path) || protect(path.toLowerCase())),
     };
     // The gate reads the cookie and the bearer from the headers: no body.
     const gateRequest = new Request(urlOf(request), { headers: headersOf(request) });

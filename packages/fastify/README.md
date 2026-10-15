@@ -16,14 +16,20 @@ takes `fastify` 5.12.5 or newer in 5 as a peer dependency.
   to the answer after the sliding refresh.
 - Each Set-Cookie line of core is added to the answer. A line that an
   earlier hook set stays.
-- `protect` gets the path that Fastify's router matches: decoded once, so
-  `/%61ccount` is `/account`, with no query and with dot segments kept. The
-  hook applies the router options `caseSensitive`, `ignoreTrailingSlash`,
-  `ignoreDuplicateSlashes`, and `useSemicolonDelimiter`, as the router does.
-  With `caseSensitive: false`, the rule gets the path in lower case, so write
-  the rule in lower case. Keep the router options and the rule in step:
-  prefer a prefix rule, because a route with a parameter or a wildcard also
-  matches paths under the prefix.
+- `protect` gets the path as Fastify's router matched it, not the URL form.
+  The router decodes the path once: `/%61ccount` is `/account`, and
+  `/caf%C3%A9` is `/café`. It keeps `%25` and the reserved escapes such as
+  `%2F`, drops the query, and keeps dot segments. The hook applies the router
+  options `ignoreTrailingSlash`, `ignoreDuplicateSlashes`, and
+  `useSemicolonDelimiter`, as the router does.
+- The hook folds case and fails closed: a path needs a session when
+  `protect(path)` or `protect(path.toLowerCase())` is true. So write the rule
+  in lower case. This holds with `caseSensitive: false` too. The `next` value
+  of the redirect keeps the case of the request.
+- Prefer a prefix rule: a route with a parameter or a wildcard also matches
+  paths under the prefix.
+- A request line in absolute form (`GET http://host/path`) is judged by its
+  path on the origin of the Host header.
 - `authRoutes` makes its route at registration. With a function in `auth`,
   the route is under "/auth" unless you set `basePath`. With an auth object,
   the route is under the auth object's base path.

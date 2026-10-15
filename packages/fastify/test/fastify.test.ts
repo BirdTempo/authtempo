@@ -1,5 +1,6 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import net from "node:net";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import Fastify, { type FastifyServerOptions } from "fastify";
 import { describe, expect, it } from "vitest";
@@ -17,6 +18,8 @@ interface AppOptions {
   /** A hook of the app sets a cookie before the routes of core run. */
   pref?: boolean;
   server?: FastifyServerOptions;
+  /** An exact rule: only "/account" needs a session. */
+  exact?: boolean;
 }
 
 async function makeApp(core: AppOptions = {}) {
@@ -52,7 +55,9 @@ async function makeApp(core: AppOptions = {}) {
   const hook = authSession({
     auth,
     // An exact rule on a path that a URL writes escaped.
-    protect: (p) => p.startsWith("/account") || p === "/über",
+    protect: core.exact
+      ? (p) => p === "/account"
+      : (p) => p.startsWith("/account") || p === "/über",
     signInPath: "/sign-in",
   });
   if (core.routesFirst) {
@@ -63,14 +68,25 @@ async function makeApp(core: AppOptions = {}) {
     await app.register(authRoutes({ auth }));
   }
   app.get("/", async (request) => getSession(request)?.user.email ?? "signed out");
-  app.get("/account", async (request) => `account of ${getSession(request)?.user.email}`);
-  app.get("/über", async (request) => `über of ${getSession(request)?.user.email}`);
-  app.get<{ Params: { tab: string } }>(
-    "/account/:tab",
-    async (request) => `tab ${request.params.tab} of ${getSession(request)?.user.email}`,
-  );
+  // The count of runs of the protected pages: a gate that fails runs one.
+  const runs = { pages: 0 };
+  app.get("/account", async (request) => {
+    runs.pages++;
+    return `account of ${getSession(request)?.user.email}`;
+  });
+  app.get("/über", async (request) => {
+    runs.pages++;
+    return `über of ${getSession(request)?.user.email}`;
+  });
+  app.get<{ Params: { tab: string } }>("/account/:tab", async (request) => {
+    runs.pages++;
+    return `tab ${request.params.tab} of ${getSession(request)?.user.email}`;
+  });
   // A wildcard route: it matches "/account/../auth/x" as the router keeps it.
-  app.get("/account/*", async (request) => `more of ${getSession(request)?.user.email}`);
+  app.get("/account/*", async (request) => {
+    runs.pages++;
+    return `more of ${getSession(request)?.user.email}`;
+  });
   await app.ready();
   async function signIn(
     as: "json" | "form" = "json",
@@ -102,6 +118,7 @@ async function makeApp(core: AppOptions = {}) {
     app,
     prefix,
     counter,
+    runs,
     signIn,
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
   };
@@ -188,38 +205,78 @@ describe("@authtempo/fastify (plan 11d2)", () => {
     expect(res.headers.location).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
   });
 
-  it("gates the path as the router matches it, decoded once and in its case", async () => {
-    const { app } = await makeApp();
+  it("gates the path as the router matches it, decoded once, with an exact rule", async () => {
+    const { app, runs } = await makeApp({ exact: true });
     // find-my-way decodes "%61" to "a": the page of /account would run.
     const encoded = await app.inject({ method: "GET", url: "/%61ccount" });
     expect(encoded.statusCode).toBe(307);
     expect(encoded.headers.location).toBe(`${BASE}/sign-in?next=%2Faccount`);
-    // The router is case-sensitive by default: no page runs for /ACCOUNT.
+    // The router is case-sensitive by default; the gate folds case and fails closed.
     const upper = await app.inject({ method: "GET", url: "/ACCOUNT" });
-    expect([307, 404]).toContain(upper.statusCode);
-    expect(upper.body).not.toContain("account of");
+    expect(upper.statusCode).toBe(307);
+    expect(upper.headers.location).toBe(`${BASE}/sign-in?next=%2FACCOUNT`);
+    expect(runs.pages).toBe(0);
   });
 
   it("gives the rule the decoded path, not the escaped form of a URL", async () => {
-    const { app } = await makeApp();
+    const { app, runs } = await makeApp();
     // The router matches "/über"; a URL writes the path as "/%C3%BCber".
     const res = await app.inject({ method: "GET", url: "/%C3%BCber" });
     expect(res.statusCode).toBe(307);
+    expect(runs.pages).toBe(0);
     expect(res.body).not.toContain("über of");
   });
 
-  it("gates the path in lower case when the router ignores case", async () => {
-    const { app } = await makeApp({ server: { routerOptions: { caseSensitive: false } } });
-    const res = await app.inject({ method: "GET", url: "/ACCOUNT" });
-    expect(res.statusCode).toBe(307);
-    expect(res.body).not.toContain("account of");
+  it("folds case when the router ignores case, and keeps the case in next", async () => {
+    const { app, runs } = await makeApp({
+      exact: true,
+      server: { routerOptions: { caseSensitive: false } },
+    });
+    for (const url of ["/ACCOUNT", "/Account", "/%41ccount"]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode).toBe(307);
+      expect(res.headers.location).toBe(
+        `${BASE}/sign-in?next=${encodeURIComponent(decodeURI(url))}`,
+      );
+    }
+    expect(runs.pages).toBe(0);
+  });
+
+  // "GET http://evil.example/account HTTP/1.1": the host of the request line
+  // must not become the origin, and the URL must not break.
+  it("gates a request line in absolute form on the origin of the Host header", async () => {
+    const { app, runs } = await makeApp({ exact: true });
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    try {
+      const { port } = app.server.address() as AddressInfo;
+      const head = await new Promise<string>((done, fail) => {
+        const socket = net.connect(port, "127.0.0.1", () => {
+          socket.write(
+            `GET http://evil.example/account HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`,
+          );
+        });
+        let text = "";
+        socket.on("data", (chunk: Buffer) => {
+          text += chunk.toString("utf8");
+        });
+        socket.on("end", () => done(text.split("\r\n\r\n")[0] ?? ""));
+        socket.on("error", fail);
+      });
+      expect(head.split("\r\n")[0]).toBe("HTTP/1.1 307 Temporary Redirect");
+      expect(head.toLowerCase()).toContain(
+        `location: http://127.0.0.1:${port}/sign-in?next=%2faccount`,
+      );
+      expect(runs.pages).toBe(0);
+    } finally {
+      await app.close();
+    }
   });
 
   // light-my-request and fetch drop a dot segment before the request leaves;
   // a raw client does not, and find-my-way routes "/account/.." to "/account/:tab".
   // A URL reads "\\" as "/"; find-my-way routes "/account/x\\..\\.." to "/account/*".
   it("gates a dot segment that the router keeps", async () => {
-    const { app } = await makeApp();
+    const { app, runs } = await makeApp();
     await app.listen({ port: 0, host: "127.0.0.1" });
     try {
       const { port } = app.server.address() as AddressInfo;
@@ -247,6 +304,7 @@ describe("@authtempo/fastify (plan 11d2)", () => {
         expect(res.body).not.toMatch(/tab|more of/);
         expect(res.status).toBe(307);
       }
+      expect(runs.pages).toBe(0);
     } finally {
       await app.close();
     }
