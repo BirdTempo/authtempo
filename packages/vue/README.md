@@ -21,6 +21,9 @@ On the server of Nuxt:
 
 - The subscription of `useSession` ends with the component's scope.
 - A server render shows the pending state, and starts no subscription and no read.
+  In Nuxt, install the plugin on both sides (`app/plugins/authtempo.ts`, not
+  `.client.ts`), with `baseURL: useRequestURL().origin`. Else a page that calls
+  `useSession` fails in the server render.
 - The session middleware reads the URL and the headers only, never the body.
 - `protect` guards a page load from the server only. A `<NuxtLink>` navigation
   renders the page in the browser and never reaches the server middleware.
