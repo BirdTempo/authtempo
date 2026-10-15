@@ -19,6 +19,11 @@ dependency.
   `export default createMiddleware({ onRequest: [authOnRequest({ auth: getAuth })] });`.
   An API route reads `getSession(event)`. Server code of a page reads
   `getSession(getRequestEvent())`, not `useSession`.
+- Export every method of the handlers: GET, POST, PUT, PATCH, DELETE, and
+  OPTIONS. HEAD falls back to GET. A method with no export falls through to
+  the pages, and the middleware does not gate a path of core: a catch-all page
+  would run for it with no session. With every export, core answers each
+  method under its base path itself.
 - Protect paths: `authOnRequest({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
   A person with no session gets a 307 to the sign-in page, and no route runs.
 - A server function runs at `/_server`, so a `protect` rule for a page does

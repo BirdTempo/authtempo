@@ -25,14 +25,24 @@ function resolve<A extends object>(source: AuthSource<A>): A {
 
 type Handler = (event: { request: Request }) => Promise<Response>;
 
-/** The handlers of `src/routes/auth/[...path].ts`. Export each method by name: `export const GET = h.GET;`. */
+/**
+ * The handlers of `src/routes/auth/[...path].ts`, one per method that the
+ * file router of Solid Start 2.0.6 reads (HTTP_METHODS of
+ * dist/config/fs-router.js; HEAD falls back to GET). Export each one by name:
+ * `export const GET = h.GET;`. A method with no export falls through to the
+ * pages, past the middleware, which skips a path of core: so core gets every
+ * method under its base path, and answers each one itself.
+ */
 export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
   GET: Handler;
   POST: Handler;
+  PUT: Handler;
+  PATCH: Handler;
+  DELETE: Handler;
   OPTIONS: Handler;
 } {
   const handle: Handler = ({ request }) => resolve(auth).handle(request);
-  return { GET: handle, POST: handle, OPTIONS: handle };
+  return { GET: handle, POST: handle, PUT: handle, PATCH: handle, DELETE: handle, OPTIONS: handle };
 }
 
 /** The fields of Solid Start's FetchEvent that the entry reads and writes. */

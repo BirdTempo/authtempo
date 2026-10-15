@@ -79,19 +79,26 @@ function setup(
       return new Response(`page ${name} ${getSession(event)?.user.email ?? "none"}`);
     };
   const inner: { response: Response | null } = { response: null };
+  // The methods that the auth route exports, as the file router of Solid
+  // Start reads them (HTTP_METHODS of dist/config/fs-router.js). HEAD falls
+  // back to GET (matchAPIRoute of dist/server/routes.js).
+  const methods: Record<string, RouteFn | undefined> = { ...handlers };
   const core_: RouteFn = async (event) => {
-    const response = await (event.request.method === "POST" ? handlers.POST : handlers.GET)(event);
+    const { method } = event.request;
+    const fn = methods[method] ?? (method === "HEAD" ? methods.GET : undefined);
+    if (!fn) throw new Error(`no ${method} handler`);
+    const response = await fn(event);
     inner.response = response;
     return response;
   };
   // The API routes of the example, with a child route under /account. The
   // keys are the radix3 paths that routes.js makes of the file routes.
-  const routes: Record<string, { fn: RouteFn }> = {
+  const routes: Record<string, { fn: RouteFn; methods?: Record<string, unknown> }> = {
     "/": { fn: page("home") },
     "/account": { fn: page("account") },
     "/account/:id": { fn: page("account-child") },
     "/myAccount": { fn: page("my-account") },
-    [`${prefix}/**:path`]: { fn: core_ },
+    [`${prefix}/**:path`]: { fn: core_, methods },
     ...(options.catchAll ? { "/**:rest": { fn: page("catch-all") } } : {}),
   };
   const router = radix3.createRouter({ routes });
@@ -110,8 +117,13 @@ function setup(
       handler: (e: unknown) => {
         const event = getFetchEvent(e) as StartEventLike;
         const match = router.lookup(new URL(event.request.url).pathname);
-        if (!match) return new Response("not found", { status: 404 });
-        return match.fn(event);
+        // An API route with no export for the method matches nothing: Solid
+        // Start renders the pages, where a catch-all page may run.
+        const { method } = event.request;
+        const exported = (m: Record<string, unknown>) => m[method] ?? (method === "HEAD" && m.GET);
+        if (match && (!match.methods || exported(match.methods))) return match.fn(event);
+        if (options.catchAll) return page("catch-all")(event);
+        return new Response("not found", { status: 404 });
       },
     }),
   );
@@ -299,6 +311,37 @@ describe("@authtempo/solid/start (plan 11d2)", () => {
     seen.length = 0;
     const core = await fetch(new Request(`${BASE}/account/../auth/session`));
     expect(core.status).toBe(401);
+    expect(seen).toEqual([]);
+  });
+
+  // Core answers every method under its base path. A method that the auth
+  // route does not export falls through to the pages, past the gate, which
+  // skips a path of core: a catch-all page would run with no session.
+  it("hands every method under the base path to core", async () => {
+    const seen: string[] = [];
+    const { fetch, runs, counter, auth } = setup(
+      {},
+      {
+        protect: (p) => {
+          seen.push(p);
+          return p !== "/";
+        },
+      },
+      { catchAll: true },
+    );
+    const request = (method: string) =>
+      new Request(`${BASE}/auth/x`, { method, headers: { origin: BASE } });
+    for (const method of ["PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]) {
+      const out = await fetch(request(method));
+      // The status of core's own answer to the same request.
+      const before = counter.reads;
+      const direct = await auth.handle(request(method));
+      counter.reads = before;
+      expect(out.status, method).toBe(direct.status);
+      if (method !== "HEAD") expect(await out.text(), method).not.toContain("page");
+    }
+    expect(count(runs)).toBe(0);
+    expect(counter.reads).toBe(0);
     expect(seen).toEqual([]);
   });
 
