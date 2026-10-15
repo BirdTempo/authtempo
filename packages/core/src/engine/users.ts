@@ -3,6 +3,7 @@ import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import type { CreateSteps } from "./create-steps.js";
 import { stopWith } from "./hooks.js";
 import { endSessions } from "./sessions.js";
 
@@ -16,6 +17,27 @@ const USER_NAME_MAX = 200;
  */
 export function validUserName(name: string): boolean {
   return name.length >= 1 && name.length <= USER_NAME_MAX && !hasControlChar(name);
+}
+
+/** The longest image URL. LinkedIn's signed picture URLs pass 255 characters. */
+const IMAGE_MAX = 2048;
+
+/**
+ * The image rule of a profile (plan 12a): an absolute `https:` URL of at
+ * most 2048 characters, with no credentials and no control character. A
+ * `data:` URL is refused: other people's pages show the image, and the
+ * bound would cut it. The social profile, the `user.beforeCreate` patch,
+ * and the profile update apply this one rule.
+ */
+export function validImageUrl(value: string): boolean {
+  if (value.length > IMAGE_MAX || hasControlChar(value)) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && url.username === "" && url.password === "";
 }
 
 /**
@@ -204,6 +226,7 @@ export function findOrCreateUserByEmail<T>(
   after: AfterResolve<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
+  steps?: CreateSteps,
 ): Promise<{ user: UserRow; created: boolean; after: T }>;
 export async function findOrCreateUserByEmail<T>(
   storage: StorageAdapter,
@@ -212,10 +235,11 @@ export async function findOrCreateUserByEmail<T>(
   after?: AfterResolve<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
+  steps?: CreateSteps,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await createOrFindInTransaction(storage, email, now, after, ended, before);
+      return await createOrFindInTransaction(storage, email, now, after, ended, before, steps);
     } catch (err) {
       // A concurrent call created the user between our read and our create.
       // Run the resolution once more, outside the failed transaction, so it
@@ -241,11 +265,14 @@ function createOrFindInTransaction<T>(
   after: AfterResolve<T> | undefined,
   ended: SessionRow[] | undefined,
   before: BeforeResolveWrite | undefined,
+  steps: CreateSteps | undefined,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   return storage.transaction(async (tx) => {
     // A retry runs the claim again. The rows of an attempt that rolled back did not end.
     if (ended) ended.length = 0;
-    const { user, created } = await resolveInTransaction(tx, email, now, ended, before);
+    // A retry forgets the user and the identity of the attempt that rolled back.
+    steps?.begin();
+    const { user, created } = await resolveInTransaction(tx, email, now, ended, before, steps);
     if (!after) return { user, created };
     return { user, created, after: await after(tx, user, created) };
   });
@@ -257,6 +284,7 @@ async function resolveInTransaction(
   now: Date,
   ended: SessionRow[] | undefined,
   before: BeforeResolveWrite | undefined,
+  steps: CreateSteps | undefined,
 ): Promise<{ user: UserRow; created: boolean }> {
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (existing) {
@@ -275,7 +303,7 @@ async function resolveInTransaction(
     }
     return { user: resolved, created: false };
   }
-  const minted: UserRow = {
+  const drafted: UserRow = {
     id: newId(now),
     email,
     emailVerified: true,
@@ -284,7 +312,9 @@ async function resolveInTransaction(
     createdAt: now,
     updatedAt: now,
   };
-  // Before the user create: the D1 undo (`BeforeResolveWrite`).
+  // The sign-up rule and `user.beforeCreate`, then the session hook, all
+  // before the user create (plan 12a, spec 8.9): the D1 undo (`BeforeResolveWrite`).
+  const minted = steps ? await steps.user(tx, drafted) : drafted;
   if (before) await before(tx, minted, true);
   const user = await tx.create("user", minted);
   await tx.create("identity", {
@@ -327,24 +357,22 @@ export async function mayCreateUser(
 }
 
 /**
- * A `BeforeResolveWrite` that applies the sign-up rule to a created user,
- * then runs `before`. Under `"invited"` the created user needs a proved
- * address: else a stranger who knows an invited address, and has a social
- * account with that address unverified, gets a signed-in user (owner
- * ruling, 2026-10-15). The magic link and the email code create a verified
- * user, so only social meets this check.
+ * The sign-up rule of a user that a sign-in creates (plan 12b): stops the
+ * flow with `sign_up_closed` unless `signUp` lets `user` become a user.
+ * Under `"invited"` the created user needs a proved address (owner ruling,
+ * 2026-10-15). Else a stranger who knows an invited address gets a
+ * signed-in user through a social account with that address unverified. The
+ * magic link and the email code create a verified user, so only social
+ * meets this check. `createSteps` runs it before `user.beforeCreate` (plan
+ * 12a), so no hook sees a create that the rule refuses.
  */
-export function signUpGuard(
+export async function signUpRule(
   config: ResolvedConfig,
-  before?: BeforeResolveWrite,
-): BeforeResolveWrite {
-  return async (tx, user, created) => {
-    if (created) {
-      if (config.signUp === "invited" && !user.emailVerified) stopWith("sign_up_closed");
-      await mayCreateUser(config, tx, user.email);
-    }
-    if (before) await before(tx, user, created);
-  };
+  tx: StorageAdapter,
+  user: UserRow,
+): Promise<void> {
+  if (config.signUp === "invited" && !user.emailVerified) stopWith("sign_up_closed");
+  await mayCreateUser(config, tx, user.email);
 }
 
 /** The `email` identity means "this address signs in by magic link". It exists once the address is proved. */

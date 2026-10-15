@@ -7,11 +7,12 @@ import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
+import { createSteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
 import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
-import { findOrCreateUserByEmail, normalizeEmail, signUpGuard } from "./users.js";
+import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { attemptsOf, countAttempt, MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
@@ -338,6 +339,8 @@ export async function verifyEmailOtp(
     },
     now,
   );
+  // The user hooks of a new user, with the sign-up rule first (plan 12a).
+  const made = createSteps(config, "email_otp", { signUpRule: true });
   const resolved = await hookGuard(async () =>
     ok(
       await findOrCreateUserByEmail(
@@ -346,12 +349,15 @@ export async function verifyEmailOtp(
         now,
         (tx) => steps.write(tx),
         ended,
-        signUpGuard(config, steps.before),
+        steps.before,
+        made,
       ),
     ),
   );
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
+  // After the commit, before the session hook and before a challenge answer (plan 12a).
+  await made.after(user);
   await sessionsEnded(config, ended, "claim");
   if (after.kind === "challenge") return ok(after.pending);
   await touchTrust(config, steps.trustId(), now);

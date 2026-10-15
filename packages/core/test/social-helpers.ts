@@ -1,4 +1,5 @@
 import type { AuthConfig } from "../src/config.js";
+import { startSocial } from "../src/engine/social.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { JwtSeam } from "../src/seams/jwt.js";
 import { makeAuth } from "./helpers.js";
@@ -88,4 +89,33 @@ export async function stateRow(storage: ReturnType<typeof makeAuth>["storage"], 
   return storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: await sha256Hex(state) },
   ]);
+}
+
+/** Starts a Google flow; the callback needs the state, the nonce, and the binding value. */
+export async function startGoogle(auth: ReturnType<typeof socialAuth>, next = "/home") {
+  const r = await startSocial(auth.config, { provider: "google", next, ip: "1.1.1.1" });
+  if (!r.ok) throw new Error(`start failed: ${r.code}`);
+  const url = new URL(r.value.location);
+  return {
+    state: url.searchParams.get("state") ?? "",
+    nonce: url.searchParams.get("nonce") ?? "",
+    bindToken: r.value.bindToken,
+  };
+}
+
+/** A Google ID token for the fake jwt seam, with the flow's nonce. */
+export function googleClaims(nonce: string, claims: Record<string, unknown>): FakeIdToken {
+  return {
+    audience: GOOGLE.clientId,
+    issuer: "https://accounts.google.com",
+    claims: {
+      sub: "g-1",
+      email: "ada@example.com",
+      email_verified: true,
+      name: "Ada",
+      picture: "https://p/a.png",
+      nonce,
+      ...claims,
+    },
+  };
 }

@@ -3,10 +3,12 @@ import {
   HOOK_REFUSED_TEXT,
   hookGuard,
   hookRefusal,
+  IDENTITY_HOOK_POINTS,
   ORGANIZATION_HOOK_POINTS,
   runAfter,
   runBefore,
   SESSION_HOOK_POINTS,
+  USER_HOOK_POINTS,
 } from "../src/engine/hooks.js";
 import { ERRORS } from "../src/errors.js";
 import { respond } from "../src/http/json.js";
@@ -47,7 +49,12 @@ describe("hooks config (plan 9d)", () => {
     const auth = make({ organization: group });
     await auth.config.hooks.organization.beforeCreate?.({} as never);
     expect(group[seen]).toEqual(["called"]);
-    expect(make(undefined).config.hooks).toEqual({ organization: {}, session: {} });
+    expect(make(undefined).config.hooks).toEqual({
+      organization: {},
+      session: {},
+      user: {},
+      identity: {},
+    });
   });
 
   it("refuses a hook that is not a function, a name that is no hook point, an unknown group, and an object that is not plain", () => {
@@ -56,7 +63,10 @@ describe("hooks config (plan 9d)", () => {
     }
     const cases: [unknown, string][] = [
       ["hooks", "hooks must be a plain object"],
-      [{ request: {} }, "hooks.request is not a hook group; core has organization and session"],
+      [
+        { request: {} },
+        "hooks.request is not a hook group; core has organization, session, user, and identity",
+      ],
       [
         { organization: { beforeCreate: "x" } },
         "hooks.organization.beforeCreate must be a function",
@@ -108,6 +118,21 @@ describe("hooks config (plan 9d)", () => {
       "afterCreate",
       "afterEnd",
       "beforeCreate",
+    ]);
+    // Plan 12a.
+    expect(Object.keys(USER_HOOK_POINTS).sort()).toEqual([
+      "afterCreate",
+      "afterDelete",
+      "afterUpdate",
+      "beforeCreate",
+      "beforeDelete",
+      "beforeUpdate",
+    ]);
+    expect(Object.keys(IDENTITY_HOOK_POINTS).sort()).toEqual([
+      "afterLink",
+      "afterUnlink",
+      "beforeLink",
+      "beforeUnlink",
     ]);
   });
 });

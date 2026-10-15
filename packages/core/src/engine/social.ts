@@ -16,7 +16,6 @@ import type { SessionRow, UserRow } from "../schema.js";
 import {
   buildQuery,
   type ConfiguredProvider,
-  isHttpsUrl,
   type OAuth2Provider,
   type OidcProvider,
   PROVIDER_TIMEOUT_MS,
@@ -25,7 +24,8 @@ import {
   stringClaim,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { hookGuard } from "./hooks.js";
+import { type CreateSteps, createSteps } from "./create-steps.js";
+import { hookGuard, type IdentitySummary } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import {
@@ -34,9 +34,9 @@ import {
   claimEmail,
   ensureEmailIdentity,
   normalizeEmail,
-  signUpGuard,
   undoSessionIfIdentityGone,
   userStillUnverified,
+  validImageUrl,
   validUserName,
 } from "./users.js";
 
@@ -227,6 +227,8 @@ export async function completeSocial(
     },
     now,
   );
+  // The user and identity hooks, with the sign-up rule first (plan 12a).
+  const made = createSteps(config, "social", { signUpRule: true });
   const resolved = await hookGuard(() =>
     resolveSocialUser(
       config.storage,
@@ -235,11 +237,14 @@ export async function completeSocial(
       now,
       (tx) => steps.write(tx),
       ended,
-      signUpGuard(config, steps.before),
+      steps.before,
+      made,
     ),
   );
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
+  // After the commit, before the session hook and before a challenge answer (plan 12a).
+  await made.after(user);
   await sessionsEnded(config, ended, "claim");
   if (after.kind === "challenge") return ok({ ...after.pending, next, user });
   await touchTrust(config, steps.trustId(), now);
@@ -410,17 +415,13 @@ function boundProfile(profile: SocialProfile, providerName: string): SocialProfi
   return {
     ...profile,
     name: name !== null && validUserName(name) ? name : null,
-    image:
-      image !== null && image.length <= IMAGE_MAX && !hasControlChar(image) && isHttpsUrl(image)
-        ? image
-        : null,
+    // The profile's image rule (plan 12a): one rule for the fill, the hook patch, and the update.
+    image: image !== null && validImageUrl(image) ? image : null,
   };
 }
 
 /** The identity row's subject. 255 covers every provider id we know and bounds the row. */
 const SUBJECT_MAX = 255;
-/** An image URL. LinkedIn's signed picture URLs pass 255, so the bound is wider than the subject's. */
-const IMAGE_MAX = 2048;
 /**
  * Links the identity to a user by the spec's rules. One transaction per
  * attempt. A `unique_violation` is caught here, outside the transaction,
@@ -446,6 +447,7 @@ export function resolveSocialUser<T extends AfterWrite>(
   after: (tx: StorageAdapter, user: UserRow) => Promise<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
+  steps?: CreateSteps,
 ): Promise<Result<{ user: UserRow; after: T }>>;
 export async function resolveSocialUser<T extends AfterWrite>(
   storage: StorageAdapter,
@@ -455,6 +457,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
   after?: (tx: StorageAdapter, user: UserRow) => Promise<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
+  steps?: CreateSteps,
 ): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -462,6 +465,8 @@ export async function resolveSocialUser<T extends AfterWrite>(
         async (tx): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> => {
           // A retry runs the claim again. The rows of an attempt that rolled back did not end.
           if (ended) ended.length = 0;
+          // A retry forgets the user and the identity of the attempt that rolled back.
+          steps?.begin();
           const linked = await linkInTransaction(
             tx,
             provider,
@@ -469,6 +474,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
             now,
             ended,
             before ? (user, created) => before(tx, user, created) : undefined,
+            steps,
           );
           if (!linked.ok) return linked;
           const { user, trustedIdentityId, created } = linked.value;
@@ -536,6 +542,7 @@ async function linkInTransaction(
   now: Date,
   ended: SessionRow[] | undefined,
   before: ((user: UserRow, created: boolean) => Promise<void>) | undefined,
+  steps: CreateSteps | undefined,
 ): Promise<Result<Linked>> {
   // Each branch calls `before` with the user it answers, after its checks and
   // before its first write: the D1 undo (see `insertSignUp` in password.ts).
@@ -585,6 +592,9 @@ async function linkInTransaction(
       ? existing
       : { ...existing, emailVerified: true, updatedAt: now };
     const filled = filledUser(current, profile, now);
+    const linking: IdentitySummary = { provider, subject: profile.subject };
+    // `identity.beforeLink`, then the session hook, before the first write (plan 12a).
+    if (steps) await steps.identity(filled, linking);
     if (before) await before(filled, false);
     if (!existing.emailVerified) await claimEmail(tx, existing.id, null, now, ended);
     await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
@@ -592,7 +602,7 @@ async function linkInTransaction(
     await writeFill(tx, current, filled);
     return ok({ user: filled, trustedIdentityId: null, created: false });
   }
-  const minted: UserRow = {
+  const drafted: UserRow = {
     id: newId(now),
     email,
     emailVerified: profile.emailVerified,
@@ -601,6 +611,11 @@ async function linkInTransaction(
     createdAt: now,
     updatedAt: now,
   };
+  const linking: IdentitySummary = { provider, subject: profile.subject };
+  // The sign-up rule and `user.beforeCreate`, then `identity.beforeLink`, then
+  // the session hook, all before the user create (plan 12a, spec 8.9).
+  const minted = steps ? await steps.user(tx, drafted) : drafted;
+  if (steps) await steps.identity(minted, linking);
   if (before) await before(minted, true);
   const user = await tx.create("user", minted);
   const identityId = (
@@ -610,7 +625,11 @@ async function linkInTransaction(
   // exists only once the address is verified.
   if (profile.emailVerified) await tx.create("identity", identityRow(user.id, "email", email, now));
   // A claim can find this unverified user before the commit on D1.
-  return ok({ user, trustedIdentityId: profile.emailVerified ? null : identityId, created: true });
+  return ok({
+    user,
+    trustedIdentityId: profile.emailVerified ? null : identityId,
+    created: true,
+  });
 }
 
 function identityRow(userId: string, provider: string, subject: string, now: Date) {

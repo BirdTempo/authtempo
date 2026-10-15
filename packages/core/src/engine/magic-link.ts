@@ -6,10 +6,11 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
+import { createSteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
-import { findOrCreateUserByEmail, normalizeEmail, signUpGuard } from "./users.js";
+import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
 export const MAGIC_LINK_PREFIX = "ml_";
@@ -115,6 +116,8 @@ export async function verifyMagicLink(
     },
     now,
   );
+  // The user hooks of a new user, with the sign-up rule first (plan 12a).
+  const made = createSteps(config, "magic_link", { signUpRule: true });
   const resolved = await hookGuard(async () =>
     ok(
       await findOrCreateUserByEmail(
@@ -123,12 +126,15 @@ export async function verifyMagicLink(
         now,
         (tx) => steps.write(tx),
         ended,
-        signUpGuard(config, steps.before),
+        steps.before,
+        made,
       ),
     ),
   );
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
+  // After the commit, before the session hook and before a challenge answer (plan 12a).
+  await made.after(user);
   await sessionsEnded(config, ended, "claim");
   if (after.kind === "challenge") return ok({ ...after.pending, next, user });
   await touchTrust(config, steps.trustId(), now);

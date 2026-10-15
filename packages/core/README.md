@@ -994,7 +994,8 @@ const auth = createAuth({
   except `session.beforeCreate`, which may answer `{ ip?, userAgent?,
   activeOrganizationId? }`, each a string or null. The organization must be
   one the user is a member of, or the sign-in answers 404 `not_found`. Any
-  other field answers 500 `hook_failed`.
+  other field answers 500 `hook_failed`. `user.beforeCreate` may change the
+  name and the image of a new user (see the user points below).
 - Organization points: `beforeCreate`, `afterCreate`, `beforeUpdate`,
   `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember` and
   `afterAddMember` (`via`: `create` for the creator's owner row, `add`, or
@@ -1020,6 +1021,35 @@ const auth = createAuth({
   social sign-in, the verify link, and the reset of an unverified user. A
   reset of a verified user ends that user's sessions with `password_reset`.
 - Plan 9f adds the end reason `two_factor`: the enable of a second factor ends every other session of the user. A session that a challenge opens has `via: "password"`.
+- User points (plan 12a): `beforeCreate`, `afterCreate`, `beforeUpdate`,
+  `afterUpdate`, `beforeDelete`, and `afterDelete`. The `via` of a create is
+  the sign-in's `via`, or `password_reset` for a reset that creates the
+  user. The `via` of an update is `profile` or `email_change`, and `patch`
+  holds the fields the flow writes. `beforeDelete` gets the ids of the
+  organizations that go with the account. The magic link, the email code,
+  social, the password sign-up, the reset link, and the reset code run the
+  create points. `user.beforeCreate` may answer
+  `{ name?, image? }`, each a string or null. A name has 1 to 200 code
+  units and no control character. An image is an `https:` URL of at most
+  2048 characters with no credentials. Any other key or value answers 500
+  `hook_failed` and logs `authtempo: user patch refused` with the reason,
+  never the value.
+- Identity points (plan 12a): `beforeLink`, `afterLink`, `beforeUnlink`,
+  and `afterUnlink`. The `via` of a link is `sign_in` or `link`. `sign_in`
+  is a social sign-in that creates a user or links a verified equal
+  address. `link` is the link of a signed-in user. The `email` identity
+  fires no identity hook.
+- The order in one flow: `user.beforeCreate`, `identity.beforeLink`, and
+  `session.beforeCreate`, each before the first write. After the commit:
+  `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`. The
+  sign-up rule (`signUp`) runs before `user.beforeCreate`, so no hook sees
+  a create that the rule refuses. A claim, the social fill of the name and
+  the image, the sweep, and the importer fire no user or identity hook.
+- The uniform sign-up answers `{ sent: true }` for a new and a known
+  address. `user.beforeCreate` runs only for a new address. So a refusal or
+  a failure of that hook tells the caller that the address has no user.
+  Refuse by a rule that does not depend on the address, or accept that
+  answer.
 - With no `afterEnd` hook, a reset, a change, a claim, and the enable of a second factor delete the ended sessions in one statement (plan 9h). With the hook, each ended row goes by id, so the hook fires once per row the flow ended; an account with many sessions then pays one statement per session.
 - `session.beforeCreate` runs on a password sign-in only after the password
   is correct. So `hook_refused` against `invalid_credentials` tells the
@@ -1055,7 +1085,10 @@ const auth = createAuth({
   transaction and answers an error. A verify link whose password row is
   gone answers `invalid_token` after the hook. A flow that retries after a unique key race
   (the magic link, the social sign-in, the sign-up, the reset) runs its
-  before hook again. The organization flows have the same window: a role
+  before hook again. `user.afterCreate` and `identity.afterLink` fire only
+  for the user and the identity that the committed attempt wrote. A
+  sign-up that loses a claim race answers an error, and its
+  `user.afterCreate` does not fire. The organization flows have the same window: a role
   change or a remove whose member changed since the read answers
   `conflict` after its before hook, and an accept that loses the consume
   race answers `invalid_token` after `beforeAddMember`, and for a raise
@@ -1077,9 +1110,10 @@ const auth = createAuth({
   the commit and are not affected.
 - Core has no request hooks. Wrap `auth.handle`, and read
   `auth.caller(request)` for the caller.
-- `createAuth` refuses a hook that is not a function, a name that is no
-  hook point, a hook object that is not a plain object, and organization
-  hooks while `organizations` is off.
+- `createAuth` refuses a hook that is no function, a name that is no hook
+  point, and a hook object that is not plain. It refuses a group other than
+  `organization`, `session`, `user`, and `identity`. It refuses
+  organization hooks while `organizations` is off.
 
 ### Limits
 

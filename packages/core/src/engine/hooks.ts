@@ -184,21 +184,105 @@ export interface SessionHooks {
   afterEnd?(e: { session: SessionRow; reason: SessionEndReason }): Awaitable<void>;
 }
 
+/** How a user row came: the flow's sign-in, or a reset that created the user (plan 12a). */
+export type UserCreateVia = SessionVia | "password_reset";
+/** The profile update, or the change of address (plan 12a). */
+export type UserUpdateVia = "profile" | "email_change";
+/**
+ * How an identity came (plan 12a). `sign_in` is a social sign-in that
+ * creates a user or links a verified equal address. `link` is the link of
+ * a signed-in user.
+ */
+export type IdentityLinkVia = "sign_in" | "link";
+
+/** The identity a hook sees: the provider name and the provider's subject. Never the `email` identity. */
+export interface IdentitySummary {
+  provider: string;
+  subject: string;
+}
+
+/** The fields of a user update. Only the fields the flow writes are present (plan 12a). */
+export interface UserPatch {
+  name?: string | null;
+  image?: string | null;
+  email?: string;
+}
+
+/**
+ * What `user.beforeCreate` may change (plan 12a): `name` and `image`, each a
+ * string or null, under the profile rules. A name has 1 to 200 code units
+ * and no control character. An image is an `https:` URL of at most 2048
+ * characters. Any other key or value answers `hook_failed`.
+ */
+export interface UserCreatePatch {
+  name?: string | null;
+  image?: string | null;
+}
+
+/** A patch, or nothing: a hook with no return statement returns void. */
+// biome-ignore lint/suspicious/noConfusingVoidType: with undefined, a hook with no return statement does not type-check.
+type UserCreatePatchAnswer = UserCreatePatch | void;
+
+/**
+ * The user points (plan 12a, spec 8.9). A claim's flip of `emailVerified`,
+ * the social fill of the name and the image, the sweep, and the importer
+ * fire no user hook.
+ */
+export interface UserHooks {
+  /**
+   * Before every user create: the magic link, the email code, social, the
+   * password sign-up, and the reset that creates a user. `user` is the row
+   * that core minted. It does not exist yet.
+   */
+  beforeCreate?(e: { user: UserRow; via: UserCreateVia }): Awaitable<UserCreatePatchAnswer>;
+  afterCreate?(e: { user: UserRow; via: UserCreateVia }): Awaitable<void>;
+  /** The profile update and the change of address. `patch` holds the fields the flow writes. */
+  beforeUpdate?(e: { user: UserRow; patch: UserPatch; via: UserUpdateVia }): Awaitable<void>;
+  /** `user` is the stored row after the update. */
+  afterUpdate?(e: { user: UserRow; previous: UserRow; via: UserUpdateVia }): Awaitable<void>;
+  /** The account delete. `organizations` holds the ids of the organizations that go with the account. */
+  beforeDelete?(e: { user: UserRow; organizations: string[] }): Awaitable<void>;
+  /** `user` is the row as it was before the delete. */
+  afterDelete?(e: { user: UserRow }): Awaitable<void>;
+}
+
+/** The identity points (plan 12a, spec 8.9). A claim's identity deletes and the account delete fire none. */
+export interface IdentityHooks {
+  beforeLink?(e: {
+    user: UserRow;
+    identity: IdentitySummary;
+    via: IdentityLinkVia;
+  }): Awaitable<void>;
+  afterLink?(e: {
+    user: UserRow;
+    identity: IdentitySummary;
+    via: IdentityLinkVia;
+  }): Awaitable<void>;
+  beforeUnlink?(e: { user: UserRow; identity: IdentitySummary }): Awaitable<void>;
+  afterUnlink?(e: { user: UserRow; identity: IdentitySummary }): Awaitable<void>;
+}
+
 export interface HooksConfig {
   organization?: OrganizationHooks;
   session?: SessionHooks;
+  user?: UserHooks;
+  identity?: IdentityHooks;
 }
 
-/** After `resolveConfig`: both groups present, each hook bound to the object it came on. */
+/** After `resolveConfig`: every group present, each hook bound to the object it came on. */
 export interface ResolvedHooks {
   organization: OrganizationHooks;
   session: SessionHooks;
+  user: UserHooks;
+  identity: IdentityHooks;
 }
 
 /** The name in a log line. */
 export type HookName =
   | `organization.${keyof OrganizationHooks & string}`
-  | `session.${keyof SessionHooks & string}`;
+  | `session.${keyof SessionHooks & string}`
+  | `user.${keyof UserHooks & string}`
+  | `identity.${keyof IdentityHooks & string}`;
 
 /** Every hook point. A Record, so a point added to the interface and not listed here fails the compile. */
 export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, true>> = {
@@ -225,6 +309,22 @@ export const SESSION_HOOK_POINTS: Readonly<Record<keyof SessionHooks, true>> = {
   beforeCreate: true,
   afterCreate: true,
   afterEnd: true,
+};
+
+export const USER_HOOK_POINTS: Readonly<Record<keyof UserHooks, true>> = {
+  beforeCreate: true,
+  afterCreate: true,
+  beforeUpdate: true,
+  afterUpdate: true,
+  beforeDelete: true,
+  afterDelete: true,
+};
+
+export const IDENTITY_HOOK_POINTS: Readonly<Record<keyof IdentityHooks, true>> = {
+  beforeLink: true,
+  afterLink: true,
+  beforeUnlink: true,
+  afterUnlink: true,
 };
 
 /** The longest refusal text, in UTF-16 code units. The text goes into a JSON body that a client shows. */

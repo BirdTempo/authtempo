@@ -15,11 +15,15 @@ import {
 } from "./engine/email-otp-mail.js";
 import {
   type HooksConfig,
+  IDENTITY_HOOK_POINTS,
+  type IdentityHooks,
   ORGANIZATION_HOOK_POINTS,
   type OrganizationHooks,
   type ResolvedHooks,
   SESSION_HOOK_POINTS,
   type SessionHooks,
+  USER_HOOK_POINTS,
+  type UserHooks,
 } from "./engine/hooks.js";
 import type { CimdEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
@@ -1502,12 +1506,17 @@ function hookGroup(
   return out;
 }
 
+/** The hook groups of core. The refusal message names them in this order. */
+const HOOK_GROUPS: readonly string[] = ["organization", "session", "user", "identity"];
+
 function resolveHooks(input: HooksConfig | undefined, organizationsOn: boolean): ResolvedHooks {
-  if (input === undefined) return { organization: {}, session: {} };
+  if (input === undefined) return { organization: {}, session: {}, user: {}, identity: {} };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
-    if (key !== "organization" && key !== "session")
-      throw new ConfigError(`hooks.${key} is not a hook group; core has organization and session`);
+    if (!HOOK_GROUPS.includes(key))
+      throw new ConfigError(
+        `hooks.${key} is not a hook group; core has organization, session, user, and identity`,
+      );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
     "hooks.organization",
@@ -1521,7 +1530,13 @@ function resolveHooks(input: HooksConfig | undefined, organizationsOn: boolean):
     input.session,
     SESSION_HOOK_POINTS,
   ) as unknown as SessionHooks;
-  return { organization, session };
+  const user = hookGroup("hooks.user", input.user, USER_HOOK_POINTS) as unknown as UserHooks;
+  const identity = hookGroup(
+    "hooks.identity",
+    input.identity,
+    IDENTITY_HOOK_POINTS,
+  ) as unknown as IdentityHooks;
+  return { organization, session, user, identity };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {

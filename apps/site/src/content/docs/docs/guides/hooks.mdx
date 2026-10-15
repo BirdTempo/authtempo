@@ -1,6 +1,6 @@
 ---
 title: Run your code at a flow point (hooks)
-description: Run the app's code before or after an organization or session write, refuse a write, or patch a new session.
+description: Run the app's code before or after an organization, session, user, or identity write, refuse a write, or patch a new row.
 type: how-to
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
@@ -23,7 +23,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 ## Steps
 
-1. Pass plain objects of functions in `hooks.organization` and `hooks.session`.
+1. Pass plain objects of functions in `hooks.organization`, `hooks.session`, `hooks.user`, and `hooks.identity`.
 2. To refuse, throw `hookRefusal(message)` in a before hook. The caller gets `hook_refused` with your message.
 3. To write the app's own row with each core row, write it in the before hook.
    - The app's row takes the id that core minted, so the two rows match.
@@ -40,15 +40,23 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | --- | --- |
 | `hooks.organization` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember`, `afterAddMember`, `beforeUpdateMemberRole`, `afterUpdateMemberRole`, `beforeRemoveMember`, `afterRemoveMember`, `beforeInvite`, `afterInvite`, `afterAcceptInvitation`, `afterDeclineInvitation`, `afterRevokeInvitation` |
 | `hooks.session` | `beforeCreate`, `afterCreate`, `afterEnd` |
+| `hooks.user` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete` |
+| `hooks.identity` | `beforeLink`, `afterLink`, `beforeUnlink`, `afterUnlink` |
 | `via` of a member | `create`, `add`, `invitation`; for a removal `remove` or `leave` |
 | `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp` |
+| `via` of a user create | the `via` of the sign-in, or `password_reset` for a reset that creates the user |
+| `via` of a user update | `profile`, `email_change` |
+| `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
 | `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked` |
 
 ## How it behaves
 
 - A before hook runs inside the flow's transaction, after the rank checks and the limits, and before the first write. A throw leaves no row.
 - An after hook runs after the commit, before the answer. A throw cannot undo the row: core logs one line and answers success.
-- Each hook gets a copy of its event. Only `session.beforeCreate` may change a row, and only `ip`, `userAgent`, and `activeOrganizationId`.
+- Each hook gets a copy of its event. Only two hooks may change a row. `session.beforeCreate` may change `ip`, `userAgent`, and `activeOrganizationId`. `user.beforeCreate` may change `name` and `image`.
+- In one sign-in that creates a user, the order is `user.beforeCreate`, `identity.beforeLink`, and `session.beforeCreate`, all before the first write. After the commit, the order is `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`.
+- The sign-up rule runs before `user.beforeCreate`. So no user hook sees a create that `signUp` refuses.
+- The `email` identity, a claim, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.
 - A refusal message of 1 to 200 characters with no control character reaches the caller. Any other message becomes "The app refused this request.".
 - Hooks have no timeout. A hook that never settles holds the request, and a before hook holds the transaction.
 - The sweep fires no hook. `expired` fires only when a request presents a token after its expiry.
@@ -61,10 +69,10 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
 ## If it fails
 
 - [`hook_refused`](/docs/reference/errors/#hook_refused): a before hook threw `hookRefusal(message)`. The body carries `message`.
-- [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook threw another error, or a session patch was wrong.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook threw another error, or a session patch or a user patch was wrong.
 - [`not_found`](/docs/reference/errors/#not_found): a session patch named an organization that the user is not a member of.
 
-`createAuth` refuses a hook that is not a function, a name that is no hook point, and organization hooks while `organizations` is off.
+`createAuth` refuses a hook that is not a function and a name that is no hook point. It also refuses a group that core does not have, and organization hooks while `organizations` is off.
 
 ## Next
 

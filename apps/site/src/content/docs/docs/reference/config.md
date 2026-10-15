@@ -53,7 +53,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
 | `operator` | object or `false` | off | Turns on `POST /operator/keys/rotate`. Refused without `jwtMint`. |
-| `hooks` | object | no hook | The groups `organization` and `session`. Any other group is refused. |
+| `hooks` | object | no hook | The groups `organization`, `session`, `user`, and `identity`. Any other group is refused. |
 | `account` | object | the defaults below | The settings page: the proof mails, the notices, the confirm page, and the delete. See the keys under Account. |
 
 ## Cookie
@@ -243,6 +243,8 @@ Another key of `operator` is refused.
 | --- | --- | --- | --- |
 | `hooks.organization` | `OrganizationHooks` | none | Needs `organizations`. A name that is no hook point is refused. |
 | `hooks.session` | `SessionHooks` | none | `beforeCreate`, `afterCreate`, and `afterEnd`. |
+| `hooks.user` | `UserHooks` | none | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, and `afterDelete`. [Run your code at a flow point](/docs/guides/hooks/) gives the order. |
+| `hooks.identity` | `IdentityHooks` | none | `beforeLink`, `afterLink`, `beforeUnlink`, and `afterUnlink`. The `email` identity fires none. |
 
 ## Captcha
 

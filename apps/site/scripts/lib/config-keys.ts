@@ -206,7 +206,12 @@ export const CONFIG_KEYS = {
     cimd: true,
   } satisfies Keys<NonNullable<OAuthConfig["registration"]>>,
   operator: { secretHash: true } satisfies Keys<OperatorConfig>,
-  hooks: { organization: true, session: true } satisfies Keys<HooksConfig>,
+  hooks: {
+    organization: true,
+    session: true,
+    user: true,
+    identity: true,
+  } satisfies Keys<HooksConfig>,
   account: { mail: true } satisfies Keys<AccountConfig>,
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
 } as const;

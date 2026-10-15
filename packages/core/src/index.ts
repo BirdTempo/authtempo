@@ -62,6 +62,9 @@ export {
   HookRefusal,
   type HooksConfig,
   hookRefusal,
+  type IdentityHooks,
+  type IdentityLinkVia,
+  type IdentitySummary,
   type MemberVia,
   type OrganizationHookEvent,
   type OrganizationHooks,
@@ -73,6 +76,11 @@ export {
   type SessionHooks,
   type SessionPatch,
   type SessionVia,
+  type UserCreatePatch,
+  type UserCreateVia,
+  type UserHooks,
+  type UserPatch,
+  type UserUpdateVia,
 } from "./engine/hooks.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";

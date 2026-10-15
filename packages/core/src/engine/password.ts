@@ -8,6 +8,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { type CreateSteps, createSteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
@@ -221,12 +222,15 @@ export async function passwordSignUp(
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
   const now = config.clock.now();
-  if (pw.uniformSignUp) return uniformSignUp(config, pw, { email, name: name ?? null, hash }, now);
+  // The user hooks of the new user (plan 12a). The transaction runs the sign-up rule itself.
+  const made = createSteps(config, "password", { signUpRule: false });
+  if (pw.uniformSignUp)
+    return uniformSignUp(config, pw, { email, name: name ?? null, hash }, now, made);
   let created: Result<Created> | null = null;
   for (let attempt = 0; created === null; attempt++) {
     try {
       created = await hookGuard(() =>
-        insertSignUp(config, input, { email, name: name ?? null, hash }, now),
+        insertSignUp(config, input, { email, name: name ?? null, hash }, now, made),
       );
     } catch (err) {
       // A concurrent sign-up or sign-in created the user between our read
@@ -249,6 +253,8 @@ export async function passwordSignUp(
   }
   if (!created.ok) return created;
   const answer = created.value.answer;
+  // Right after the commit, before the session hook and the mail (plan 12a).
+  await made.after(answer.user);
   // Right after the commit, before the mail: the session exists whatever the mail does.
   if ("session" in answer) await sessionOpened(config, answer.session, answer.user, "password");
   await sendVerifyMail(config, email, created.value.passwordId, now);
@@ -270,8 +276,11 @@ function insertSignUp(
   input: PasswordSignUp,
   row: { email: string; name: string | null; hash: string },
   now: Date,
+  made: CreateSteps,
 ): Promise<Result<Created>> {
   return config.storage.transaction(async (tx): Promise<Result<Created>> => {
+    // A retry forgets the user of the attempt that rolled back.
+    made.begin();
     // "invited": before the existence read, so a known address with no
     // invitation gets the same answer as a new one (plan 12b).
     if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
@@ -292,7 +301,8 @@ function insertSignUp(
     // (`undoCreateWhere`), so the owner's verified user stays, and the retry
     // reads it and answers `email_taken`. Postgres isolates the transaction,
     // so the order is no guard there. Checked 2026-10-10.
-    const minted: UserRow = {
+    // `user.beforeCreate` before the session hook and the first write (plan 12a).
+    const minted: UserRow = await made.user(tx, {
       id: newId(now),
       email: row.email,
       emailVerified: false,
@@ -300,7 +310,7 @@ function insertSignUp(
       image: null,
       createdAt: now,
       updatedAt: now,
-    };
+    });
     // The session hook before the first write, with the minted user (plan
     // 9d, fix round 1). On D1 a refusal after a create makes the undo
     // delete the created row by id (`undoCreateWhere`), and only the user
@@ -374,7 +384,7 @@ function insertSignUp(
 }
 
 type UniformOutcome =
-  | { outcome: "created"; passwordId: string }
+  | { outcome: "created"; passwordId: string; user: UserRow }
   | { outcome: "existing" | "quiet" };
 
 /**
@@ -388,11 +398,12 @@ async function uniformSignUp(
   pw: Resolved,
   row: { email: string; name: string | null; hash: string },
   now: Date,
+  made: CreateSteps,
 ): Promise<Result<{ sent: true }>> {
   let done: UniformOutcome | null = null;
   for (let attempt = 0; done === null; attempt++) {
     try {
-      const r = await hookGuard(() => insertUniform(config, row, now));
+      const r = await hookGuard(() => insertUniform(config, row, now, made));
       if (r.ok) done = r.value;
       // The "invited" rule refused: the same answer as every other path, and no mail.
       else if (r.code === "sign_up_closed") done = { outcome: "quiet" };
@@ -410,7 +421,11 @@ async function uniformSignUp(
       throw err;
     }
   }
-  if (done.outcome === "created") await sendVerifyMail(config, row.email, done.passwordId, now);
+  if (done.outcome === "created") {
+    // Right after the commit, before the mail (plan 12a).
+    await made.after(done.user);
+    await sendVerifyMail(config, row.email, done.passwordId, now);
+  }
   if (done.outcome === "existing") await sendExistingAccountMail(config, pw, row.email);
   return ok({ sent: true });
 }
@@ -424,8 +439,11 @@ function insertUniform(
   config: ResolvedConfig,
   row: { email: string; name: string | null; hash: string },
   now: Date,
+  made: CreateSteps,
 ): Promise<Result<UniformOutcome>> {
   return config.storage.transaction(async (tx): Promise<Result<UniformOutcome>> => {
+    // A retry forgets the user of the attempt that rolled back.
+    made.begin();
     // "invited": before the existence read, as in `insertSignUp` (plan 12b
     // Task 8). A known and a new address with no invitation then do the
     // same reads and get no mail, so the time of the answer tells nothing.
@@ -433,7 +451,9 @@ function insertUniform(
     const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: row.email }]);
     if (existing) return ok({ outcome: "existing" });
     // The order and the guards of `insertSignUp`, with no session.
-    const user = await tx.create("user", {
+    // `user.beforeCreate` before the first write (plan 12a). A known address
+    // returned above, so only a new address meets the hook.
+    const minted = await made.user(tx, {
       id: newId(now),
       email: row.email,
       emailVerified: false,
@@ -442,6 +462,7 @@ function insertUniform(
       createdAt: now,
       updatedAt: now,
     });
+    const user = await tx.create("user", minted);
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
     const password = await tx.create("password", {
       id: newId(now),
@@ -460,7 +481,7 @@ function insertUniform(
     }
     const active = await tx.update("password", own, { hash: row.hash, updatedAt: now });
     return ok(
-      active === 0 ? { outcome: "quiet" } : { outcome: "created", passwordId: password.id },
+      active === 0 ? { outcome: "quiet" } : { outcome: "created", passwordId: password.id, user },
     );
   });
 }
@@ -1032,11 +1053,14 @@ export async function runReset(
   const ended: ResetEnded = { claim: endedList(config), reset: endedList(config) };
   // The trust row that skipped the gate, for its `lastSeenAt` after the commit.
   const trust: { id: string | null } = { id: null };
+  // The user hooks of a user that the reset creates (plan 12a). The
+  // transaction runs the sign-up rule itself.
+  const made = createSteps(config, "password_reset", { signUpRule: false });
   let reset: Result<ResetResult> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
       reset = await hookGuard(() =>
-        applyReset(config, input, proof, consume, hash, now, ended, trust),
+        applyReset(config, input, proof, consume, hash, now, ended, trust, made),
       );
     } catch (err) {
       // Caught outside the transaction, so its deletes are undone.
@@ -1060,6 +1084,8 @@ export async function runReset(
     }
   }
   if (reset.ok) {
+    // After the commit, before the session hooks and before a challenge answer (plan 12a).
+    await made.after(reset.value.user);
     // One reason for one cause: the claim's rows end with `claim`, the
     // verified user's own rows with `password_reset` (fix round 1).
     await sessionsEnded(config, ended.claim, "claim");
@@ -1134,12 +1160,14 @@ function applyReset(
   now: Date,
   ended: ResetEnded,
   trust: { id: string | null },
+  made: CreateSteps,
 ): Promise<Result<ResetResult>> {
   return config.storage.transaction(async (tx): Promise<Result<ResetResult>> => {
     // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
     if (ended.claim) ended.claim.length = 0;
     if (ended.reset) ended.reset.length = 0;
     trust.id = null;
+    made.begin();
     // The lock order (plan 12c, Task 12): every reset takes the pending reset
     // rows of its address in id order, then the password row. So the older
     // rows go first, one delete per row in sorted order, then the consume of
@@ -1182,7 +1210,9 @@ function applyReset(
       // the session hook, so a refused user never reaches the hook. The stop
       // undoes the consume, so the link stays usable.
       await mayCreateUser(config, tx, email);
-      minted = {
+      // `user.beforeCreate` after the rule and before the session hook (plan 12a).
+      // Its stop undoes the consume too, so the link stays usable.
+      minted = await made.user(tx, {
         id: newId(now),
         email,
         emailVerified: true,
@@ -1190,7 +1220,7 @@ function applyReset(
         image: null,
         createdAt: now,
         updatedAt: now,
-      };
+      });
       user = minted;
     } else user = found.emailVerified ? found : { ...found, emailVerified: true, updatedAt: now };
     // The second factor (plan 12c, owner decision 1 of 2026-10-14): a reset
