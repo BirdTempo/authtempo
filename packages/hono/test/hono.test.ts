@@ -187,19 +187,77 @@ describe("@authtempo/hono (plan 11d2)", () => {
     expect(runs.account).toBe(0);
   });
 
-  // The gate makes a URL of the routed path: protect gets "/caf%C3%A9", not "/café".
-  it("gives protect the path in URL form", async () => {
+  // protect gets c.req.path as given: Hono decodes it once, so the rule sees "/café".
+  function cafeApp(rule: (p: string) => boolean) {
     const { auth } = makeApp();
+    const seen: string[] = [];
     let runs = 0;
     const app = new Hono<AuthEnv>();
-    app.use("*", authSession({ auth, protect: (p) => p === "/caf%C3%A9", signInPath: "/sign-in" }));
+    const protect = (p: string) => {
+      seen.push(p);
+      return rule(p);
+    };
+    app.use("*", authSession({ auth, protect, signInPath: "/sign-in" }));
     app.get("/café", (c) => {
       runs++;
       return c.text("café");
     });
+    return { app, seen, runs: () => runs };
+  }
+
+  it("gives protect the path that Hono matched, decoded once", async () => {
+    const { app, seen, runs } = cafeApp((p) => p === "/café");
+    for (const path of ["/caf%C3%A9", "/café"]) {
+      const res = await app.request(`${BASE}${path}`);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%C3%A9`);
+    }
+    expect(seen).toEqual(["/café", "/café"]);
+    expect(runs()).toBe(0);
+  });
+
+  it("does not match a rule written in the encoded form", async () => {
+    const { app, seen, runs } = cafeApp((p) => p === "/caf%C3%A9");
     const res = await app.request(`${BASE}/caf%C3%A9`);
-    expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
+    expect(res.status).toBe(200);
+    expect(seen).toEqual(["/café"]);
+    expect(runs()).toBe(1);
+  });
+
+  // The runtime's Request resolves ".." and "%2e%2e" before Hono reads the
+  // URL, so the router and the gate see the same resolved path.
+  it("judges a dot segment as Hono matched it", async () => {
+    const { auth } = makeApp();
+    const seen: string[] = [];
+    let runs = 0;
+    const dots = new Hono<AuthEnv>();
+    const protect = (p: string) => {
+      seen.push(p);
+      return p.startsWith("/account");
+    };
+    dots.use("*", authSession({ auth, protect, signInPath: "/sign-in" }));
+    dots.on(["GET", "POST"], "/auth/*", authHandler(auth));
+    dots.get("/account", (c) => {
+      runs++;
+      return c.text("account");
+    });
+    dots.get("/account/:id", (c) => {
+      runs++;
+      return c.text(c.req.param("id"));
+    });
+    for (const path of ["/account/..", "/account/%2e%2e"]) {
+      seen.length = 0;
+      const res = await dots.request(`${BASE}${path}`);
+      expect(res.status).toBe(404);
+      expect(seen).toEqual(["/"]);
+    }
+    for (const path of ["/account/../auth/session", "/account/%2e%2e/auth/session"]) {
+      seen.length = 0;
+      const res = await dots.request(`${BASE}${path}`);
+      // A path of core: core answers it, and the gate runs no rule.
+      expect(res.status).toBe(401);
+      expect(seen).toEqual([]);
+    }
     expect(runs).toBe(0);
   });
 });
