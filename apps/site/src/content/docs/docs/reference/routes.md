@@ -99,8 +99,8 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Field | Value |
 | --- | --- |
 | Needs | A fresh session |
-| Input | JSON `{}` |
-| Answer | `{ ended }`. Every other session, the second-factor challenges, and the handoff codes go. The trusted devices, the API tokens, and the OAuth grants stay |
+| Input | None |
+| Answer | `{ ended }`, the count of live sessions that the call ended. Every other session, the second-factor challenges, and the handoff codes go. A row past its expiry or the absolute cap goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## Magic link

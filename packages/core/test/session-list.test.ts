@@ -73,6 +73,25 @@ async function open(auth: Auth, userId: string, ip: string) {
   return { ...s, token };
 }
 
+/**
+ * The config of `auth` after the deployment turns `absoluteDays: 1` on (plan
+ * 12b), on the same storage and clock. A row from the old config keeps its
+ * 30-day expiry, past the new cap.
+ */
+function cappedConfig(auth: Auth) {
+  return resolveConfig({
+    baseURL: BASE_URL,
+    secret: SECRET,
+    trustedOrigins: [APP_ORIGIN],
+    storage: auth.storage,
+    clock: auth.clock,
+    mail: { send: async () => {} },
+    password: { hash: FAST, uniformSignUp: false },
+    session: { absoluteDays: 1 },
+    hooks: auth.config.hooks,
+  });
+}
+
 const ids = async (auth: Auth, userId: string) =>
   (await auth.storage.findMany("session", [{ field: "userId", op: "eq", value: userId }]))
     .map((s) => s.id)
@@ -136,16 +155,7 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
     auth.clock.advance(2 * DAY);
     const me = await open(auth, user.id, "2.2.2.2");
     // The deployment turns absoluteDays on (plan 12b). The old row keeps its 30-day expiry.
-    const capped = resolveConfig({
-      baseURL: BASE_URL,
-      secret: SECRET,
-      trustedOrigins: [APP_ORIGIN],
-      storage: auth.storage,
-      clock: auth.clock,
-      mail: { send: async () => {} },
-      password: { hash: FAST, uniformSignUp: false },
-      session: { absoluteDays: 1 },
-    });
+    const capped = cappedConfig(auth);
     expect(old.session.expiresAt.getTime()).toBeGreaterThan(auth.clock.now().getTime());
     const r = await listSessions(capped, { session: me });
     if (!r.ok) throw new Error(r.code);
@@ -156,6 +166,39 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
       code: "not_found",
     });
   });
+
+  // The list and the revoke read a row as live exactly when resolveSession
+  // does, at both edges (review M4). The texts are the reviewer's.
+  for (const edge of ["cap", "expiry"] as const)
+    for (const offset of [-1, 0]) {
+      it(`agrees with resolveSession at the ${edge} edge ${offset} ms`, async () => {
+        const auth = totpAuth();
+        const config = edge === "cap" ? cappedConfig(auth) : auth.config;
+        const user = await auth.seedUser("edge@example.com");
+        // The target opens under the default config: its expiry is 30 days, past the cap of 1 day.
+        const t = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
+        const target = await resolveSession(auth.config, t.token, { refresh: false });
+        if (!target) throw new Error("no target");
+        auth.clock.advance(DAY / 2);
+        const m = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+        const me = await resolveSession(config, m.token);
+        if (!me) throw new Error("no session");
+        const end =
+          edge === "cap"
+            ? target.session.createdAt.getTime() + DAY
+            : target.session.expiresAt.getTime();
+        auth.clock.advance(end + offset - auth.clock.now().getTime());
+        const live = (await resolveSession(config, t.token, { refresh: false })) !== null;
+        expect(live).toBe(offset < 0);
+        const listed = await listSessions(config, { session: me });
+        if (!listed.ok) throw new Error(listed.code);
+        expect(listed.value.some((s) => s.id === target.session.id)).toBe(live);
+        const fresh = { ...me, session: { ...me.session, freshAt: auth.clock.now() } };
+        expect((await revokeSession(config, { session: fresh, id: target.session.id })).ok).toBe(
+          live,
+        );
+      });
+    }
 
   it("a stale session lists, refuses the revoke, and passes after a re-authentication with the same token", async () => {
     const auth = totpAuth();
@@ -253,6 +296,29 @@ describe("the revoke of one session (plan 12a)", () => {
     expect(await resolveSession(auth.config, me.token)).toBeNull();
   });
 
+  it("ends and clears the old cookie name when the caller revokes its own session with both names", async () => {
+    const auth = totpAuth();
+    const a = await verifiedSession(auth);
+    const b = await verifiedSession(auth, EMAIL, "2.2.2.2");
+    const legacy = auth.config.legacyCookieName;
+    if (legacy === null) throw new Error("no old cookie name");
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const res = await handle(
+      post(
+        "/auth/sessions/revoke",
+        { id: a.session.id },
+        { cookie: `${auth.config.cookieName}=${a.token}; ${legacy}=${b.token}` },
+      ),
+    );
+    expect(res.status).toBe(200);
+    // startsWith: a toContain of "tempo_session=;" also matches the new name.
+    expect(res.headers.getSetCookie().some((c) => c.startsWith(`${legacy}=;`))).toBe(true);
+    // As the sign-out does: the old token's session ends too (review M1).
+    expect((await handle(get("/auth/session", { cookie: `${legacy}=${b.token}` }))).status).toBe(
+      401,
+    );
+  });
+
   it("clears no cookie when the caller revokes another session", async () => {
     const auth = totpAuth();
     const other = await verifiedSession(auth);
@@ -272,8 +338,8 @@ describe("the revoke of one session (plan 12a)", () => {
 });
 
 describe("the revoke limit (plan 12a)", () => {
-  // The literals are the numbers that the README and the limits page promise,
-  // so a change of the constant fails here and the docs move with it.
+  // The literals are the numbers that the README and the limits page promise.
+  // So a change of the constant fails here, and the docs move with it.
   it("counts the revoke of one and of the others on one key per user: 30 per 15 minutes", async () => {
     const auth = totpAuth();
     const me = await verifiedSession(auth);
@@ -301,6 +367,31 @@ describe("the revoke limit (plan 12a)", () => {
     expect((await revokeOtherSessions(auth.config, { session: me })).ok).toBe(true);
   });
 
+  it("counts no try of a stale session on the revoke key", async () => {
+    const auth = totpAuth();
+    const me = await verifiedSession(auth);
+    const other = await verifiedSession(auth, EMAIL, "2.2.2.2");
+    const old = await stale(auth, me.token);
+    // 31 refused calls of each flow: a thief's old cookie must not fill the owner's key (review M3).
+    for (let i = 0; i < 31; i++) {
+      expect(
+        await revokeSession(auth.config, { session: old, id: other.session.id }),
+      ).toMatchObject({ code: "session_not_fresh" });
+      expect(await revokeOtherSessions(auth.config, { session: old })).toMatchObject({
+        code: "session_not_fresh",
+      });
+    }
+    const proof = { password: PASSWORD };
+    expect((await reauthenticate(auth.config, { session: old, proof, ip: null })).ok).toBe(true);
+    const again = await resolveSession(auth.config, me.token);
+    if (!again) throw new Error("the session ended");
+    expect(await revokeSession(auth.config, { session: again, id: other.session.id })).toEqual({
+      ok: true,
+      value: { current: false },
+    });
+    expect((await revokeOtherSessions(auth.config, { session: again })).ok).toBe(true);
+  });
+
   it("counts every session of one user on the one user key", async () => {
     const auth = totpAuth();
     const a = await verifiedSession(auth);
@@ -326,11 +417,11 @@ describe("the revoke limit (plan 12a)", () => {
 const OAUTH = { resources: [RESOURCE], scopes: SCOPES, registration: { cimd: false } };
 
 /**
- * A user with every kind of access that a sign-in, a factor, a handoff, a
- * token, and an OAuth client make, each through the product's own calls: the
- * caller's session, a second session with a trusted device from a verify on
- * another device, a challenge in waiting, a handoff code, an API token, a
- * refresh token, and an unspent OAuth code.
+ * A user with every kind of access, each made through the product's own
+ * calls. The kinds are the caller's session and a second session with a
+ * trusted device, from a verify on another device. Then a challenge in
+ * waiting, a handoff code, and an API token. Last, a refresh token and an
+ * unspent OAuth code.
  */
 async function stocked() {
   const ended: string[] = [];
@@ -439,8 +530,8 @@ async function stocked() {
   }
   const before = await access();
   // Each kind exists before the end, so an assertion of zero after it means a
-  // delete. The verify and the exchange mark their rows spent and keep them,
-  // so two challenges and two OAuth codes exist: one spent and one in waiting.
+  // delete. The verify and the exchange mark their rows spent and keep them.
+  // So two challenges and two OAuth codes exist: one spent, one in waiting.
   expect(before).toEqual({
     sessions: [me.session.id, other.id].sort(),
     challenges: 2,
@@ -485,6 +576,26 @@ describe("the revoke of the other sessions (plan 12a)", () => {
     });
     expect(await ids(auth, user.id)).toEqual([me.session.id]);
   });
+
+  // An ended row that no read deleted yet: past its expiry, or past a cap
+  // that the deployment turned on later. Both go, with no count and no hook (review L3).
+  for (const end of ["expiry", "cap"] as const)
+    it(`deletes a row past its ${end} with no revoked event and no count`, async () => {
+      const { auth, ended } = listening();
+      const config = end === "cap" ? cappedConfig(auth) : auth.config;
+      const user = await auth.seedUser(`dead-${end}@example.com`);
+      const dead = await open(auth, user.id, "1.1.1.1");
+      auth.clock.advance(end === "cap" ? 2 * DAY : 31 * DAY);
+      const other = await open(auth, user.id, "2.2.2.2");
+      const me = await open(auth, user.id, "3.3.3.3");
+      expect(await ids(auth, user.id)).toContain(dead.session.id);
+      expect(await revokeOtherSessions(config, { session: me })).toEqual({
+        ok: true,
+        value: { ended: 1 },
+      });
+      expect(ended).toEqual([`${other.session.id}:revoked`]);
+      expect(await ids(auth, user.id)).toEqual([me.session.id]);
+    });
 
   it("serves the three routes with a session and answers 401 to a token", async () => {
     const auth = totpAuth();
@@ -565,6 +676,28 @@ describe("the revoke of the other sessions (plan 12a)", () => {
     expect(res.headers.getSetCookie().join("\n")).toContain(
       `${auth.config.cookieName}=${me.token};`,
     );
+  });
+});
+
+describe("the renewed cookie of the revoke routes (plan 12a)", () => {
+  it("sends the renewed cookie on the two revoke routes", async () => {
+    const auth = totpAuth();
+    const me = await verifiedSession(auth);
+    const other = await verifiedSession(auth, EMAIL, "2.2.2.2");
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const proof = { password: PASSWORD };
+    const renewed = `${auth.config.cookieName}=${me.token};`;
+    auth.clock.advance(auth.config.session.slidingRefreshDays * DAY);
+    expect((await reauthenticate(auth.config, { session: me, proof, ip: null })).ok).toBe(true);
+    const cookie = { cookie: `${auth.config.cookieName}=${me.token}` };
+    const one = await handle(post("/auth/sessions/revoke", { id: other.session.id }, cookie));
+    expect(one.status).toBe(200);
+    expect(one.headers.getSetCookie().join("\n")).toContain(renewed);
+    auth.clock.advance(auth.config.session.slidingRefreshDays * DAY);
+    expect((await reauthenticate(auth.config, { session: me, proof, ip: null })).ok).toBe(true);
+    const others = await handle(post("/auth/sessions/revoke-others", {}, cookie));
+    expect(others.status).toBe(200);
+    expect(others.headers.getSetCookie().join("\n")).toContain(renewed);
   });
 });
 

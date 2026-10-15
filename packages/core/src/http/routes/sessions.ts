@@ -16,6 +16,31 @@ import { sent, unauthorized, withSession } from "../session-route.js";
 // A core session id has 26 characters (newId). The cap of 64 leaves a margin and bounds the read.
 const revokeBody = z.strictObject({ id: z.string().min(1).max(64) });
 
+/**
+ * The answer of a request that ended the caller's session: the sign-out, and
+ * the revoke of the caller's own id. `token` is the session that the request
+ * ended. It clears the cookie. The cookie move of plan 12b needs more: with
+ * both names, the router keeps the old cookie, and `token` is the new one. So
+ * the old token's session ends too, and the old name is cleared. Else the next
+ * request signs in again under it. A sibling subdomain can set `tempo_session` too.
+ */
+async function signedOut(
+  config: ResolvedConfig,
+  request: Request,
+  token: string | null,
+): Promise<Response> {
+  const res = json({ ok: true }, 200, {
+    "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite),
+  });
+  const legacy = config.legacyCookieName;
+  const old = legacy === null ? null : readCookie(request, legacy);
+  if (legacy !== null && old !== null) {
+    if (old !== token) await destroySession(config, old);
+    res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
+  }
+  return res;
+}
+
 export function sessionRoutes(config: ResolvedConfig): Route[] {
   return [
     {
@@ -44,20 +69,7 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const token = readSessionToken(config, ctx.request);
         if (token) await destroySession(config, token);
-        const res = json({ ok: true }, 200, {
-          "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite),
-        });
-        // The cookie move (plan 12b): with both names, the router keeps the
-        // old cookie, and `token` is the new one. End the old token's session
-        // too, and clear the old name, or the next request signs in again
-        // under it. A sibling subdomain can set `tempo_session` too.
-        const legacy = config.legacyCookieName;
-        const old = legacy === null ? null : readCookie(ctx.request, legacy);
-        if (legacy !== null && old !== null) {
-          if (old !== token) await destroySession(config, old);
-          res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
-        }
-        return res;
+        return signedOut(config, ctx.request, token);
       },
     },
     {
@@ -80,13 +92,11 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
         if (!body.ok) return sent(respond(body), s.renewed);
         const r = await revokeSession(config, { session: s.resolved, id: body.value.id });
         if (!r.ok) return sent(respond(r), s.renewed);
-        // The caller ended its own session: clear the cookie, as the sign-out
-        // does. The router clears the old cookie name of plan 12b when the
-        // request carried it (moveLegacyCookie), so no second clear is needed here.
+        // The caller ended its own session: answer as the sign-out does
+        // (review M1). The router does not clear the old name when the
+        // request carries both names, so `signedOut` does it.
         if (r.value.current)
-          return json({ ok: true }, 200, {
-            "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite),
-          });
+          return signedOut(config, ctx.request, readSessionToken(config, ctx.request));
         return sent(json({ ok: true }), s.renewed);
       },
     },

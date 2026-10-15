@@ -71,11 +71,16 @@ function world() {
 }
 
 describe("account races on Postgres (plan 12a)", () => {
-  it("revoke-others beside eight sign-ins: each ended row fires one hook, and the caller's session stays", async () => {
+  it("revoke-others beside eight sign-ins, a delay sweep: each new row survives or counts in ended", async () => {
     const w = world();
     const email = "race@example.com";
     const me = await w.signIn(email);
-    for (let round = 0; round < ROUNDS; round++) {
+    // With no delay the revoke commits before any sign-in writes its row, in
+    // every round (review M2, probe P4a). So the revoke starts 0 to 15 ms
+    // after the sign-ins. In some rounds a sign-in then commits between the
+    // revoke's read and its last delete (probe P4d: 4 to 7 ms). A pass proves
+    // the orders that the rounds met, not every order.
+    for (let delay = 0; delay < 16; delay++) {
       for (let i = 0; i < 8; i++) await w.auth.api.requestMagicLink({ email, ip: null });
       const links = w.sent
         .filter((m) => m.to === email)
@@ -83,10 +88,14 @@ describe("account races on Postgres (plan 12a)", () => {
         .map(w.tokenOf);
       w.ended.length = 0;
       const [revoked, ...signIns] = await Promise.all([
-        w.auth.api.session.revokeOthers({ session: me }),
+        (async () => {
+          await new Promise((r) => setTimeout(r, delay));
+          return w.auth.api.session.revokeOthers({ session: me });
+        })(),
         ...links.map((token) => w.auth.api.verifyMagicLink({ token, ip: null, userAgent: null })),
       ]);
-      expect(revoked?.ok).toBe(true);
+      if (!revoked?.ok) throw new Error(revoked?.code ?? "no answer");
+      expect(signIns.every((r) => r.ok)).toBe(true);
       const rows = await db.sql<
         { id: string }[]
       >`SELECT id FROM ta_session WHERE user_id = ${me.user.id}`;
@@ -96,12 +105,12 @@ describe("account races on Postgres (plan 12a)", () => {
       expect(new Set(ids).size).toBe(ids.length);
       for (const e of w.ended) expect(e.endsWith(":revoked")).toBe(true);
       for (const id of ids) expect(left.has(id)).toBe(false);
-      // The count is every row the revoke deleted: the hooked rows and the
-      // rows that a sign-in committed between the read and the last delete.
-      if (revoked?.ok) expect(revoked.value.ended).toBeGreaterThanOrEqual(ids.length);
-      expect(signIns.every((r) => r.ok)).toBe(true);
+      // Each of the 8 new rows either survives or is in the answered count.
+      expect(revoked.value.ended + (left.size - 1)).toBe(8);
+      // Clear the round's survivors with no race.
+      await w.auth.api.session.revokeOthers({ session: me });
     }
-  });
+  }, 60_000);
 
   it("revoke-others beside the sign-outs of the other sessions: each row fires exactly one event", async () => {
     const w = world();
@@ -117,8 +126,8 @@ describe("account races on Postgres (plan 12a)", () => {
       ]);
       expect(revoked?.ok).toBe(true);
       for (const out of outs) expect(out.status).toBe(200);
-      // A sign-out that lands between the revoke's read and its delete fired
-      // its own event, so the revoke must not fire a second one (plan 9d M-1).
+      // A sign-out between the revoke's read and its delete fired its own
+      // event. The revoke must not fire a second one (plan 9d M-1).
       const ids = w.ended.map((e) => e.split(":")[0] ?? "").sort();
       expect(ids).toEqual(others.map((o) => o.session.id).sort());
       for (const e of w.ended) expect(e).toMatch(/:(revoked|sign_out)$/);

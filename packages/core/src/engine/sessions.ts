@@ -44,6 +44,64 @@ export function sessionCapMs(config: ResolvedConfig, createdAt: Date): number {
     : createdAt.getTime() + config.session.absoluteDays * DAY_MS;
 }
 
+/**
+ * True while `session` is live at `now`: before its expiry and before the
+ * cap. `resolveSession` reads it. `liveSessionWhere` is the same rule as a
+ * storage condition, for a list (plan 12a review M4).
+ */
+export function sessionIsLive(
+  config: ResolvedConfig,
+  session: Pick<SessionRow, "createdAt" | "expiresAt">,
+  now: Date,
+): boolean {
+  const t = now.getTime();
+  return session.expiresAt.getTime() > t && sessionCapMs(config, session.createdAt) > t;
+}
+
+/**
+ * The live sessions of `userId` at `now`, as storage conditions: the where
+ * form of `sessionIsLive`. `createdAt + absoluteDays > now` is
+ * `createdAt > now - absoluteDays`, so the edge is the same.
+ */
+export function liveSessionWhere(
+  config: ResolvedConfig,
+  userId: string,
+  now: Date,
+): Where<"session">[] {
+  const where: Where<"session">[] = [
+    { field: "userId", op: "eq", value: userId },
+    { field: "expiresAt", op: "gt", value: now },
+  ];
+  const days = config.session.absoluteDays;
+  if (days !== null)
+    where.push({ field: "createdAt", op: "gt", value: new Date(now.getTime() - days * DAY_MS) });
+  return where;
+}
+
+/**
+ * Deletes the ended sessions of `userId` at `now`, with no hook: the
+ * complement of `liveSessionWhere`, one delete per bound. A row that a
+ * sign-in writes now is live, so no delete here can take it. The sweep
+ * deletes such rows with no hook too (plan 12a review L3).
+ */
+export async function deleteEndedSessions(
+  tx: StorageAdapter,
+  config: ResolvedConfig,
+  userId: string,
+  now: Date,
+): Promise<void> {
+  await tx.delete("session", [
+    { field: "userId", op: "eq", value: userId },
+    { field: "expiresAt", op: "lte", value: now },
+  ]);
+  const days = config.session.absoluteDays;
+  if (days !== null)
+    await tx.delete("session", [
+      { field: "userId", op: "eq", value: userId },
+      { field: "createdAt", op: "lte", value: new Date(now.getTime() - days * DAY_MS) },
+    ]);
+}
+
 /** The `Max-Age` of the cookie of a new session: its life, in whole seconds (plan 12b). */
 export function sessionMaxAgeSeconds(config: ResolvedConfig): number {
   const days = Math.min(config.session.ttlDays, config.session.absoluteDays ?? Infinity);
@@ -231,14 +289,14 @@ export async function sessionOpened(
 }
 
 /**
- * Deletes the sessions that `where` matches, inside the flow's transaction,
- * and answers the count of rows it deleted (plan 12a: the revoke of the other
- * sessions answers it). With a list (an `afterEnd` hook listens, see
- * `endedList`), each read row is deleted by id and goes to `ended` only when
- * its delete count is 1: a sign-out between the read and the delete already
- * fired `afterEnd` for that row, so a second event would name a row this
- * flow did not end (final fix wave M-1). The last delete still matches
- * `where`, so a session that another request adds between the read and the
+ * Deletes the sessions that `where` matches, inside the flow's transaction.
+ * It answers the count of rows it deleted (plan 12a: the revoke of the other
+ * sessions answers it). With a list, an `afterEnd` hook listens (see
+ * `endedList`). Then each read row is deleted by id, and goes to `ended` only
+ * when its delete count is 1. A sign-out between the read and the delete
+ * already fired `afterEnd` for that row. A second event would name a row that
+ * this flow did not end (final fix wave M-1). The last delete still matches
+ * `where`. So a session that another request adds between the read and the
  * delete goes too, with no hook. With `ended` null, only the last delete
  * runs: one statement for any number of sessions (plan 9h).
  */
@@ -316,8 +374,7 @@ export async function resolveSession(
   if (!session) return null;
   // The absolute cap ends a session whose expiresAt is later: a row written
   // before `absoluteDays` was set (plan 12b).
-  const capped = sessionCapMs(config, session.createdAt) <= now.getTime();
-  if (capped || session.expiresAt.getTime() <= now.getTime()) {
+  if (!sessionIsLive(config, session, now)) {
     if (!write) return null;
     const n = await config.storage.delete("session", [
       { field: "id", op: "eq", value: session.id },
