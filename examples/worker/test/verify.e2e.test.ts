@@ -1,4 +1,5 @@
 import { SELF } from "cloudflare:test";
+import { DEFAULT_COOKIE_NAME } from "@authtempo/core/credentials";
 import { createVerifier } from "@authtempo/verify";
 import { expect, it } from "vitest";
 import { BASE, signIn } from "./helpers.js";
@@ -24,6 +25,13 @@ it("verifies a session JWT at /notes on Workers with the live check, and refuses
   });
   expect(basic.status).toBe(401);
   expect(basic.headers.get("www-authenticate")).toBe("Bearer");
+  // The verifier reads the bearer only: a session cookie beside a refused bearer
+  // does not hide the refusal, so the answer still names invalid_token.
+  const withCookie = await SELF.fetch(`${BASE}/notes`, {
+    headers: { cookie: `${DEFAULT_COOKIE_NAME}=ts_x`, authorization: "Bearer ts_refused" },
+  });
+  expect(withCookie.status).toBe(401);
+  expect(withCookie.headers.get("www-authenticate")).toBe('Bearer error="invalid_token"');
   await client.signOut();
   const refused = await notes(minted.value.token);
   expect(refused.status).toBe(401);

@@ -3,6 +3,7 @@
 // Node and then with Bun. It prints one summary line and exits 1 on a failure.
 import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
 import type { MailMessage } from "@authtempo/core";
+import { DEFAULT_COOKIE_NAME } from "@authtempo/core/credentials";
 import postgres from "postgres";
 import { createApp, type Serve } from "../src/app.ts";
 
@@ -94,6 +95,15 @@ try {
       refused.headers.get("www-authenticate") === 'Bearer error="invalid_token"',
     `/files with a refused bearer answered ${refused.status} with ${refused.headers.get("www-authenticate")}`,
   );
+  // The verifier reads the bearer only: a session cookie beside it does not hide the refusal.
+  const withCookie = await fetch(`${BASE}/files`, {
+    headers: { cookie: `${DEFAULT_COOKIE_NAME}=ts_x`, authorization: "Bearer ts_refused" },
+  });
+  expectThat(
+    withCookie.status === 401 &&
+      withCookie.headers.get("www-authenticate") === 'Bearer error="invalid_token"',
+    `/files with a cookie and a refused bearer answered ${withCookie.status} with ${withCookie.headers.get("www-authenticate")}`,
+  );
 } catch (e) {
   failures.push(
     `${e instanceof Error ? e.message : String(e)}; is Postgres up (docker compose up -d)?`,
@@ -104,7 +114,7 @@ try {
   await admin.unsafe(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`).catch(() => {});
   await admin.end({ timeout: 5 });
 }
-const pass = failures.length === 0 && checks === 9;
+const pass = failures.length === 0 && checks === 10;
 console.log(
   `${runtime}-e2e: ${pass ? "PASS" : "FAIL"} version=${version} checks=${checks} failures=${failures.length}`,
 );
