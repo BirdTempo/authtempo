@@ -2,7 +2,11 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
-import Fastify, { type FastifyServerOptions } from "fastify";
+import Fastify, {
+  type FastifyRouterOptions,
+  type FastifyServerOptions,
+  type RawServerDefault,
+} from "fastify";
 import { describe, expect, it } from "vitest";
 import { authRoutes, authSession, getSession } from "../src/index.js";
 
@@ -52,12 +56,15 @@ async function makeApp(core: AppOptions = {}) {
     app.addHook("onRequest", async (_request, reply) => {
       reply.header("set-cookie", "pref=1; Path=/");
     });
+  // Every path that the rule got, in order.
+  const seen: string[] = [];
   const hook = authSession({
     auth,
     // An exact rule on a path that a URL writes escaped.
-    protect: core.exact
-      ? (p) => p === "/account"
-      : (p) => p.startsWith("/account") || p === "/über",
+    protect: (p) => {
+      seen.push(p);
+      return core.exact ? p === "/account" : p.startsWith("/account") || p === "/über";
+    },
     signInPath: "/sign-in",
   });
   if (core.routesFirst) {
@@ -119,6 +126,7 @@ async function makeApp(core: AppOptions = {}) {
     prefix,
     counter,
     runs,
+    seen,
     signIn,
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
   };
@@ -275,39 +283,72 @@ describe("@authtempo/fastify (plan 11d2)", () => {
   // light-my-request and fetch drop a dot segment before the request leaves;
   // a raw client does not, and find-my-way routes "/account/.." to "/account/:tab".
   // A URL reads "\\" as "/"; find-my-way routes "/account/x\\..\\.." to "/account/*".
-  it("gates a dot segment that the router keeps", async () => {
-    const { app, runs } = await makeApp();
+  it("gives the rule the matched path itself, and next holds it encoded once", async () => {
+    const { app, runs, seen } = await makeApp();
     await app.listen({ port: 0, host: "127.0.0.1" });
     try {
       const { port } = app.server.address() as AddressInfo;
-      for (const path of [
-        "/account/..",
-        "/account/%2e%2e",
-        "/account/../auth/x",
-        "/account/x\\..\\..\\auth\\y",
-        "/account/x%5C..%5C..%5Cauth%5Cy",
-        // The router keeps "%2e" and a tab as text; a URL reads "%2e" as "." and drops a tab.
-        "/account/%252e%252e/auth/x",
-        "/account/%09../auth/x",
-      ]) {
-        const res = await new Promise<{ status: number; body: string }>((done, fail) => {
-          http
-            .get({ host: "127.0.0.1", port, path }, (r) => {
-              let body = "";
-              r.on("data", (chunk: Buffer) => {
-                body += chunk.toString("utf8");
-              });
-              r.on("end", () => done({ status: r.statusCode ?? 0, body }));
-            })
-            .on("error", fail);
-        });
-        expect(res.body).not.toMatch(/tab|more of/);
+      // The raw path a client sends, and the path find-my-way matches.
+      const cases: [string, string][] = [
+        ["/account/..", "/account/.."],
+        ["/account/%2e%2e", "/account/.."],
+        ["/account/../auth/x", "/account/../auth/x"],
+        ["/account/x\\..\\..\\auth\\y", "/account/x\\..\\..\\auth\\y"],
+        ["/account/x%5C..%5C..%5Cauth%5Cy", "/account/x\\..\\..\\auth\\y"],
+        // The router keeps "%25", so "%252e" stays "%252e" (a route "/x/%2e" matches it).
+        ["/account/%252e%252e/auth/x", "/account/%252e%252e/auth/x"],
+        ["/account/%09../auth/x", "/account/\t../auth/x"],
+      ];
+      for (const [path, matched] of cases) {
+        const res = await new Promise<{ status: number; body: string; location: string }>(
+          (done, fail) => {
+            http
+              .get({ host: "127.0.0.1", port, path }, (r) => {
+                let body = "";
+                r.on("data", (chunk: Buffer) => {
+                  body += chunk.toString("utf8");
+                });
+                r.on("end", () =>
+                  done({ status: r.statusCode ?? 0, body, location: r.headers.location ?? "" }),
+                );
+              })
+              .on("error", fail);
+          },
+        );
         expect(res.status).toBe(307);
+        expect(res.location).toBe(
+          `http://127.0.0.1:${port}/sign-in?next=${encodeURIComponent(matched)}`,
+        );
+        expect(seen.at(-1)).toBe(matched);
       }
+      // One pinned value: the backslash path in next, encoded once.
+      expect(encodeURIComponent("/account/x\\..\\..\\auth\\y")).toBe(
+        "%2Faccount%2Fx%5C..%5C..%5Cauth%5Cy",
+      );
       expect(runs.pages).toBe(0);
     } finally {
       await app.close();
     }
+  });
+
+  it("cuts at a semicolon only when the router does", async () => {
+    // Default: the router matches "/account;x" as it is, and no route has that path.
+    const plain = await makeApp({ exact: true });
+    const kept = await plain.app.inject({ method: "GET", url: "/account;x" });
+    expect(kept.statusCode).toBe(404);
+    expect(plain.runs.pages).toBe(0);
+    // With useSemicolonDelimiter the router matches "/account": the gate cuts there too.
+    const cut = await makeApp({
+      exact: true,
+      // The type of routerOptions in fastify 5.12.5 lacks this find-my-way option.
+      server: {
+        routerOptions: { useSemicolonDelimiter: true } as FastifyRouterOptions<RawServerDefault>,
+      },
+    });
+    const res = await cut.app.inject({ method: "GET", url: "/account;jsessionid=1" });
+    expect(res.statusCode).toBe(307);
+    expect(res.headers.location).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    expect(cut.runs.pages).toBe(0);
   });
 
   it("renews the session cookie on the page's answer", async () => {

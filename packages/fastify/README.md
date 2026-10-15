@@ -16,16 +16,19 @@ takes `fastify` 5.12.5 or newer in 5 as a peer dependency.
   to the answer after the sliding refresh.
 - Each Set-Cookie line of core is added to the answer. A line that an
   earlier hook set stays.
-- `protect` gets the path as Fastify's router matched it, not the URL form.
-  The router decodes the path once: `/%61ccount` is `/account`, and
-  `/caf%C3%A9` is `/café`. It keeps `%25` and the reserved escapes such as
-  `%2F`, drops the query, and keeps dot segments. The hook applies the router
-  options `ignoreTrailingSlash`, `ignoreDuplicateSlashes`, and
-  `useSemicolonDelimiter`, as the router does.
+- `protect` gets the path exactly as Fastify's router matched it.
+  find-my-way decodes the path once and keeps `%25`, so `/%61ccount` is
+  `/account` and `/caf%C3%A9` is `/café`. It keeps the reserved escapes such
+  as `%2F`, drops the query, and keeps dot segments: `/account/..` reaches the
+  rule as `/account/..`. The router options `ignoreTrailingSlash`,
+  `ignoreDuplicateSlashes`, and `useSemicolonDelimiter` apply as configured.
+  Write the rule for that matched form. find-my-way stores a `%` of a route
+  as `%25`, so a route `/x/%2e` is the path `/x/%252e` for the rule.
 - The hook folds case and fails closed: a path needs a session when
-  `protect(path)` or `protect(path.toLowerCase())` is true. So write the rule
-  in lower case. This holds with `caseSensitive: false` too. The `next` value
-  of the redirect keeps the case of the request.
+  `protect(path)` or `protect(path.toLowerCase())` is true. find-my-way
+  compares with `toLowerCase` when `caseSensitive` is false, so write the
+  rule in lower case. The `next` value of the redirect holds the matched path
+  in the request's case, encoded once.
 - Prefer a prefix rule: a route with a parameter or a wildcard also matches
   paths under the prefix.
 - A request line in absolute form (`GET http://host/path`) is judged by its

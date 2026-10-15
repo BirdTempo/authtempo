@@ -107,28 +107,6 @@ function routedPath(request: FastifyRequest): { path: string; search: string } {
   return { path, search };
 }
 
-/**
- * The routed path and query, as text for the third argument of readGate.
- * The gate parses it as a URL, and a URL parser changes a path that
- * find-my-way keeps as it is: it drops a "." or ".." segment, reads "\" as
- * "/", reads "%2e" as ".", and drops a tab. "/account/.." runs the route
- * "/account/:tab", and "/account/x\..\..\auth" runs "/account/*". So each
- * segment is escaped with encodeURIComponent, and each dot of a dot segment
- * is escaped twice: the parser then changes nothing. `protect` gets the
- * routed path itself (see authSession).
- */
-function gateTarget(path: string, search: string): string {
-  const kept = path
-    .split("/")
-    .map((segment) =>
-      segment === "." || segment === ".."
-        ? segment.replaceAll(".", "%252E")
-        : encodeURIComponent(segment),
-    )
-    .join("/");
-  return `${kept}${search}`;
-}
-
 /** The web Request of a Fastify request of `authRoutes`: the full URL, every header, and the raw body. */
 export function toWebRequest(request: FastifyRequest): Request {
   const headers = headersOf(request);
@@ -190,7 +168,7 @@ export interface FastifySessionOptions {
   auth: AuthSource<GateAuth>;
   /**
    * True for a path that needs a session. Needs `signInPath`. It gets the
-   * path that Fastify's router matches: decoded once, with the router's options.
+   * path exactly as Fastify's router matched it, and that path in lower case.
    */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The hook adds `?next=<path and query>`. */
@@ -209,18 +187,17 @@ export function authSession(options: FastifySessionOptions): onRequestAsyncHookH
   const { protect } = options;
   return async (request, reply) => {
     const { path, search } = routedPath(request);
-    // The rule sees the routed path as it is, with no step of the URL parser.
-    // It also sees the path in lower case, so the gate fails closed when the
-    // router ignores case (caseSensitive: false). `next` keeps the request's case.
+    // find-my-way compares case with toLowerCase of the path when caseSensitive
+    // is false. The rule sees both forms, so the gate fails closed either way.
     const gateOptions = {
       ...options,
       auth: resolve(options.auth),
-      protect: protect && (() => protect(path) || protect(path.toLowerCase())),
+      protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
     };
     // The gate reads the cookie and the bearer from the headers: no body.
     const gateRequest = new Request(urlOf(request), { headers: headersOf(request) });
-    // The gate judges the routed path, not the raw URL (readGate's third argument).
-    const gate = await readGate(gateOptions, gateRequest, gateTarget(path, search));
+    // The gate judges the matched path as it is (readGate's third argument, core 218476d).
+    const gate = await readGate(gateOptions, gateRequest, `${path}${search}`);
     const location = gate.redirect?.headers.get("location");
     if (location) return reply.redirect(location, 307);
     request.authSession = gate.session;
