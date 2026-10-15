@@ -358,6 +358,13 @@ describe("migration 0007 (plan 12a)", () => {
 
   it("adds taFreshAt to session with no fill, and moves the versions to 10 and 7", () => {
     const db = sqlite(BETTER_AUTH_SQLITE);
+    // A session of Better Auth from before the files: a fill of 0007 would reach it.
+    db.exec(
+      `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('u1', 'Ada', 'ada@example.com', 1, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`,
+    );
+    db.exec(
+      `INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, userId) VALUES ('s1', '2026-11-01T00:00:00.000Z', 't1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'u1')`,
+    );
     for (const text of [
       shipped,
       shipped0002,
@@ -376,6 +383,9 @@ describe("migration 0007 (plan 12a)", () => {
     expect(cols.find((c) => c.name === "taFreshAt")).toMatchObject({
       notnull: 0,
       dflt_value: null,
+    });
+    expect(db.prepare(`SELECT "taFreshAt" AS f FROM "session" WHERE id = 's1'`).get()).toEqual({
+      f: null,
     });
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "7" },

@@ -1075,9 +1075,12 @@ export function runAdapterConformance(
         { field: "expiresAt" as const, op: "gt" as const, value: later },
       ];
       expect(await db.update("session", live, { freshAt: later, updatedAt: later })).toBe(1);
-      expect(
-        (await db.findOne("session", [{ field: "id", op: "eq", value: "s1" }]))?.freshAt,
-      ).toEqual(later);
+      // The write keeps the token hash and the expiry: only freshAt and updatedAt move.
+      expect(await db.findOne("session", [{ field: "id", op: "eq", value: "s1" }])).toEqual({
+        ...stale,
+        freshAt: later,
+        updatedAt: later,
+      });
       expect(
         (await db.findOne("session", [{ field: "id", op: "eq", value: "s2" }]))?.freshAt,
       ).toEqual(at);

@@ -78,7 +78,10 @@ export type VerificationPurpose =
    * token; data: { newEmail, oldEmail, sessionId, next, attempts }.
    */
   | "email-change"
-  /** A change-of-address code (plan 12a): `email-change`'s data, the code rules of `email-otp`. */
+  /**
+   * A change-of-address code (plan 12a). identifier: the user id; data:
+   * `email-change`'s data; the code rules of `email-otp`.
+   */
   | "email-change-otp";
 
 export interface VerificationRow extends BaseRow {
