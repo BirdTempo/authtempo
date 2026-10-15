@@ -169,4 +169,22 @@ describe("sign in from a browser extension", () => {
     expect(await client.session()).toEqual({ ok: true, value: null });
     expect(box.value()).toBe("ts_newer");
   });
+
+  it("keeps the token when the sign-out does not reach the server", async () => {
+    const h = harness();
+    const base = extensionFetch(createExtensionAuth(h));
+    let offline = false;
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (offline) throw new TypeError("Failed to fetch");
+      return base(input, init);
+    }) as typeof globalThis.fetch;
+    const box = memoryBox();
+    const client = createExtensionClient(box, fetch);
+    await signInByCode(client, box, "ada@example.com", async () => codeIn(h, "ada@example.com"));
+    const token = box.value();
+    offline = true;
+    // The server never heard the sign-out, so the token stays for a second try.
+    expect(await signOut(client, box)).toEqual({ ok: false, code: "network", status: 0 });
+    expect(box.value()).toBe(token);
+  });
 });
