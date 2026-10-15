@@ -12,10 +12,11 @@ takes `astro` 7.3.8 or newer in 7 as a peer dependency.
 
 - `getAuth` is a function that makes the auth instance at the first request,
   so `astro build` reads no secret.
-- `protect` gets the pathname of `context.url`, the URL that Astro's router
-  matched: decoded until it stops changing, with duplicate slashes merged and
-  the case kept. As a URL pathname, a non-ASCII letter stays percent-encoded
-  (`"/caf%C3%A9"`), so write the rule for that form.
+- `protect` gets the text that Astro's router matched, from
+  `context.originPathname`: decoded until it stops changing, with duplicate
+  slashes merged and the case kept. It has no trailing "/" and no `base` of
+  the Astro config. A non-ASCII route reaches the rule decoded (`"/café"`).
+  The `next` of the sign-in redirect comes from `context.url`.
 - Astro resolves dot segments before the match. `/account/..` is `/`, so a
   dotted request never reaches a protected page as that page.
 - The middleware reads no session for a route of core, and adds the renewed

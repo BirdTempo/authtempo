@@ -32,11 +32,19 @@ function setup(core: { basePath?: string } = {}) {
   };
   const route = authRoute(auth);
   /**
-   * The two fields of APIContext that the binding reads. The real pipeline of
-   * Astro runs in the example's proof; this test holds the binding's own rule.
+   * The fields of APIContext that the binding reads, built as Astro 7.3.8
+   * builds them (dist/core/fetch/fetch-state.js). `routed` is the text that
+   * Astro's router matched. Astro writes it into `url` with the pathname
+   * setter, which parses it again, and keeps it in `originPathname` with a "/"
+   * appended (trailing slash "ignore", build format "directory"). The real
+   * pipeline of Astro runs in the example's proof.
    */
-  const context = (request: Request, routed: string = request.url) =>
-    ({ request, url: new URL(routed, request.url), locals: {} }) as unknown as APIContext;
+  const context = (request: Request, routed: string = new URL(request.url).pathname) => {
+    const url = new URL(request.url);
+    url.pathname = routed;
+    const originPathname = routed.endsWith("/") ? routed : `${routed}/`;
+    return { request, url, originPathname, locals: {} } as unknown as APIContext;
+  };
   async function signIn(): Promise<string> {
     const post = (path: string, body: unknown) =>
       route(
@@ -154,13 +162,13 @@ describe("@authtempo/astro (plan 11d2)", () => {
     });
   }
 
-  // The rule gets the URL form of the routed path: Astro routes the raw
-  // "/caf%25C3%25A9" as "/café", and the URL of it has "/caf%C3%A9".
-  it("gives protect the routed path in URL form", async () => {
+  // Astro routes the raw "/caf%25C3%25A9" as "/café", and the rule gets that
+  // text. next comes from context.url, whose pathname is "/caf%C3%A9".
+  it("gives protect the decoded text that Astro routed", async () => {
     const { auth, context } = setup();
     const exact = authMiddleware({
       auth,
-      protect: (p) => p === "/caf%C3%A9",
+      protect: (p) => p === "/café",
       signInPath: "/sign-in",
     });
     let runs = 0;
@@ -206,6 +214,37 @@ describe("@authtempo/astro (plan 11d2)", () => {
     expect(res.status).toBe(401);
     expect(counter.reads).toBe(0);
   });
+
+  // The second path probe of plan 11d2: on a splat route /account/[...rest],
+  // Astro routes the decoded text, and context.url parses that text again
+  // ("/account/../x" becomes "/x"). The rule must get the routed text.
+  for (const [raw, routed] of [
+    ["/account/%252e%252e/x", "/account/../x"],
+    ["/account/x%5C..%5C..%5Cauth%5Cy", "/account/x\\..\\..\\auth\\y"],
+    ["/account/%09../auth/x", "/account/\t../auth/x"],
+    ["/account/%252e%252e", "/account/.."],
+  ] as const) {
+    it(`protects the splat route at ${raw}, judged as Astro routed it`, async () => {
+      const { auth, context } = setup();
+      const seen: string[] = [];
+      const prefix = authMiddleware({
+        auth,
+        protect: (p) => {
+          seen.push(p);
+          return p.startsWith("/account");
+        },
+        signInPath: "/sign-in",
+      });
+      let runs = 0;
+      const res = (await prefix(context(new Request(`${BASE}${raw}`), routed), async () => {
+        runs++;
+        return new Response("SPLAT-RAN");
+      })) as Response;
+      expect(seen).toEqual([routed]);
+      expect(runs).toBe(0);
+      expect(res.status).toBe(307);
+    });
+  }
 
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, context, middleware, advance } = setup();
