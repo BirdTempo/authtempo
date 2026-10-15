@@ -4,8 +4,9 @@ The TanStack Start binding of authtempo, for React Start and Solid Start of
 TanStack. It imports nothing of TanStack, so one package serves both, and it
 names no peer dependency. Its typings fixture compiles against
 `@tanstack/react-start` 1.169.1 and `@tanstack/solid-start` 1.169.1.
-The Solid fit is checked at the type level only: `@tanstack/solid-router`
-does not load in vitest on Node, and the example app is React.
+A test also runs the real request middleware of `@tanstack/solid-start` in
+vitest, with happy-dom, the browser build of solid-js, and an inline
+transform of solid-js and `@tanstack`. The example app is React.
 
 1. Mount core: `src/routes/auth.$.ts` holds
    `export const Route = createFileRoute("/auth/$")({ server: { handlers: authRouteHandlers(getAuth) } });`.

@@ -391,9 +391,8 @@ describe("@authtempo/tanstack-start (plan 11d2)", () => {
     expect(out.runs).toBe(0);
   });
 
-  // Solid Start does not load in vitest on Node: its router calls a
-  // client-only API of solid-js at import. The typings fixture
-  // (typetest/shapes.ts) holds the fit to both frameworks.
+  // Solid Start needs its own vitest project: see vitest.config.ts and
+  // tanstack-start.solid.test.ts.
   it("runs as the request middleware of React Start", async () => {
     const { auth } = setup();
     const mw = createMiddleware({ type: "request" }).server(
