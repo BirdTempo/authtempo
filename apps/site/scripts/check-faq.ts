@@ -1,5 +1,5 @@
 import { pageUrl } from "./check-frontmatter.ts";
-import { type Page, parseFrontmatter } from "./lib/markdown.ts";
+import { type Page, parseFrontmatter, sentences } from "./lib/markdown.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The FAQ page, by its path under src/content/docs/. */
@@ -51,6 +51,14 @@ function hrefs(text: string): string[] {
   return [...text.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1] ?? "");
 }
 
+/** The guides are the one source of each fact, so the last sentence links into them. */
+const GUIDE_PREFIX = "/docs/migrate/";
+
+/** The last sentence of an answer, with its lines joined. */
+function lastSentence(answer: string): string {
+  return sentences(answer.replace(/\s+/g, " ").trim()).at(-1) ?? "";
+}
+
 /**
  * The FAQ answers the questions of the migration guides and holds no fact of
  * its own: each answer links the guide section that holds the full fact. So a
@@ -70,6 +78,10 @@ export function checkFaq(faqSource: string, guides: readonly string[]): CheckRep
       r.failures.push(`the question "${e.question}" does not end with ?`);
     const targets = hrefs(e.answer);
     if (targets.length === 0) r.failures.push(`the answer of "${e.question}" has no link`);
+    else if (!hrefs(lastSentence(e.answer)).some((t) => t.startsWith(GUIDE_PREFIX)))
+      r.failures.push(
+        `the last sentence of the answer of "${e.question}" links no migration guide`,
+      );
     for (const t of targets) linked.add(t.split("#")[0] ?? "");
   }
   for (const g of guides) if (!linked.has(g)) r.failures.push(`no answer links the guide ${g}`);

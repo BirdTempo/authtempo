@@ -35,6 +35,17 @@ describe("checkFaq", () => {
     expect(r.failures).toEqual(['the answer of "Question 0?" has no link']);
   });
 
+  it("fails on an answer whose link leaves the migration guides", () => {
+    const source = page(8).replace(
+      "See [the guide](/docs/migrate/a/#how-it-behaves).",
+      "See [the guide](/docs/migrate/a/#how-it-behaves). Then read [Errors](/docs/reference/errors/).",
+    );
+    const r = checkFaq(source, guides);
+    expect(r.failures).toEqual([
+      'the last sentence of the answer of "Question 0?" links no migration guide',
+    ]);
+  });
+
   it("fails at fewer than 8 entries, and on a question with no question mark", () => {
     expect(checkFaq(page(7), guides).failures).toEqual(["7 entries; the page needs at least 8"]);
     const r = checkFaq(page(8).replace("### Question 1?", "### Question 1"), guides);

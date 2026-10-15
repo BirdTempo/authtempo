@@ -27,7 +27,7 @@ sources:
 
 ### Do my users have to reset their passwords?
 
-No. An old password hash verifies until the user's first right sign-in, as [How the cutover behaves](/docs/migrate/cutover/#how-it-behaves) states.
+An imported password hash keeps the password: an old hash verifies until the user's first right sign-in. [An Auth0 import](/docs/migrate/auth0/#how-it-behaves) with no hash file imports no password, and [a Cognito user](/docs/migrate/cognito/#how-it-behaves) with a challenge resets the password. [How the cutover behaves](/docs/migrate/cutover/#how-it-behaves) gives the hash rule.
 
 ### Do my users stay signed in after the cutover?
 
@@ -39,7 +39,7 @@ After an import, a rollback to the old system loses each user and each change ma
 
 ### Does my app code change?
 
-An app on Better Auth keeps its code, and changes only its package aliases and the options that core refuses. An app that you import changes its auth calls, as the table of [Choose a migration path](/docs/migrate/#steps) shows.
+An app on Better Auth keeps its code, and changes its package aliases and the options that core refuses. An app that you import changes its auth calls, as the table of [Choose a migration path](/docs/migrate/#steps) shows.
 
 ### What happens to a magic link or an invitation that I sent before the cutover?
 
@@ -71,7 +71,7 @@ The command prints one line and imports no password. A reset or a magic link the
 
 ### Why does every imported Firebase password fail?
 
-A hash parameter of the Firebase project is wrong. The export carries no hash parameters, so a wrong value refuses every first sign-in with no line in the report. [If it fails](/docs/migrate/firebase/#if-it-fails) names the cause.
+A hash parameter of the Firebase project is wrong. The export carries no hash parameters, and a wrong value refuses every first sign-in with no line in the report. [If it fails](/docs/migrate/firebase/#if-it-fails) names the cause, and [How it behaves](/docs/migrate/firebase/#how-it-behaves) states the rule of the export.
 
 ### Does the import from Auth.js copy the OAuth tokens of the providers?
 
@@ -79,7 +79,7 @@ No. The select leaves out the OAuth tokens of `Account`, because a refresh token
 
 ### How do my Cognito users keep their passwords?
 
-Cognito exports no hash, so core asks Cognito once, at each user's first password sign-in. A right answer writes core's own hash, and a user with a Cognito challenge resets the password. [How it behaves](/docs/migrate/cognito/#how-it-behaves) gives each case.
+Core asks Cognito at a password sign-in until a right answer writes core's own hash over the marker. A user with a Cognito challenge, such as the second factor, resets the password. [How it behaves](/docs/migrate/cognito/#how-it-behaves) gives each case.
 
 ### Do the JWTs and the OAuth clients of the old system still work?
 
