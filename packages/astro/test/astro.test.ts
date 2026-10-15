@@ -154,6 +154,25 @@ describe("@authtempo/astro (plan 11d2)", () => {
     });
   }
 
+  // The rule gets the URL form of the routed path: Astro routes the raw
+  // "/caf%25C3%25A9" as "/café", and the URL of it has "/caf%C3%A9".
+  it("gives protect the routed path in URL form", async () => {
+    const { auth, context } = setup();
+    const exact = authMiddleware({
+      auth,
+      protect: (p) => p === "/caf%C3%A9",
+      signInPath: "/sign-in",
+    });
+    let runs = 0;
+    const res = (await exact(context(new Request(`${BASE}/caf%25C3%25A9`), "/café"), async () => {
+      runs++;
+      return new Response("page");
+    })) as Response;
+    expect(runs).toBe(0);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, context, middleware, advance } = setup();
     const cookie = await signIn();

@@ -35,7 +35,9 @@ export interface AstroAuthOptions {
   auth: AuthSource<GateAuth>;
   /**
    * True for a path that needs a session. Needs `signInPath`. It gets the path
-   * as Astro routed it: decoded until stable, duplicate slashes merged, case kept.
+   * in URL form, as Astro routed it: duplicate slashes merged, case kept. A
+   * non-ASCII letter comes encoded ("/caf%C3%A9"): write such a rule in the
+   * encoded form or as a prefix (the gate contract in the README of core).
    */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */
