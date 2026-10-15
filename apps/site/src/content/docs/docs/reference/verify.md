@@ -81,6 +81,7 @@ The verifier reads the `Authorization` header only. It never reads the session c
 - `invalidToken: true` adds `error="invalid_token"`. Pass it when the request held a token that you refused.
 - `verifier.insufficientScope({ resource, scope, description })` answers 403 with `error="insufficient_scope"`. Name every scope of the operation in one challenge.
 - A scope with a quote, or `offline_access`, throws: `offline_access` is not a resource scope.
+- A `resource` that is not a URL throws too. So does a `description` with a quote, a backslash, or a control character.
 - The input of both is a `ChallengeInput`.
 
 ## Exports
