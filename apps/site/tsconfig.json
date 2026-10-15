@@ -7,6 +7,9 @@
     // The checks run as .ts files under Node's type stripping, which needs the
     // .ts extension in each relative import.
     "allowImportingTsExtensions": true,
+    // tsc reads the JSDoc type of frameworks.mjs, the one list that
+    // astro.config.mjs and test/sidebar-frameworks.test.ts import.
+    "allowJs": true,
     // TypeScript 7 loads no @types package unless "types" names it. The checks read node:fs.
     "types": ["node"]
   },
