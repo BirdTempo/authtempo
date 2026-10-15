@@ -210,8 +210,15 @@ export function authSession(options: FastifySessionOptions): onRequestAsyncHookH
     // Fail closed: the rule runs on each form that the router can match. And
     // find-my-way compares case with toLowerCase of the path when caseSensitive
     // is false, so the rule also runs on each form in lower case.
+    // find-my-way compares the hex digits of a kept escape as text: "%3f" and
+    // "%3F" reach the same route. So the rule also runs with each escape in upper case.
+    const upper = (f: string) => f.replace(/%[0-9a-f]{2}/gi, (h) => h.toUpperCase());
     const holds = (p: string) =>
-      protect !== undefined && [p, ...forms].some((f) => protect(f) || protect(f.toLowerCase()));
+      protect !== undefined &&
+      [p, ...forms].some((f) => {
+        const lower = f.toLowerCase();
+        return [f, lower, upper(f), upper(lower)].some((form) => protect(form));
+      });
     const auth = resolve(options.auth);
     const gateOptions = { ...options, auth, protect: protect && holds };
     // The gate reads the cookie and the bearer from the headers: no body.

@@ -31,7 +31,11 @@ takes `fastify` 5.12.5 or newer in 5 as a peer dependency.
   one form.
 - The hook folds case and fails closed: the rule also runs on each form in
   lower case. find-my-way compares with `toLowerCase` when `caseSensitive` is
-  false, so write the rule in lower case.
+  false, so write the rule in lower case. Keep that rule for the text after
+  `%25`: the upper-case step below does not change it.
+- find-my-way compares the hex digits of a kept escape as text, so `/q%3fx`
+  and `/q%3Fx` reach the same route. The hook also runs the rule with each
+  escape in upper case, so write a kept escape in upper case: `%3F`, `%2F`.
 - The `next` value of the redirect is the path and the query of the request,
   as a URL reads them. One decode by the router gives back the page that the
   person asked for: `/account/a%2Fb` returns to `/account/a%2Fb`, and an

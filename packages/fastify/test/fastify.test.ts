@@ -339,6 +339,39 @@ describe("@authtempo/fastify (plan 11d2)", () => {
     expect(runs.pages).toBe(0);
   });
 
+  // find-my-way keeps "%3F" escaped in the path and compares the hex digits as
+  // text, so "/q%3fx" and "/q%3Fx" both reach the route "/:slug" with slug "q?x".
+  // A rule written with "%3F" must hold for every hex case.
+  it("asks the rule with the escapes in upper case, so the hex case of a request does not open a page", async () => {
+    for (const caseSensitive of [true, false]) {
+      const auth = createAuth({
+        baseURL: BASE,
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [BASE],
+        storage: createMemoryAdapter(),
+        mail: { send: async () => {} },
+      });
+      const app = Fastify({ routerOptions: { caseSensitive } });
+      app.decorateRequest("authSession", null);
+      app.addHook(
+        "onRequest",
+        authSession({ auth, protect: (p) => p === "/q%3Fx", signInPath: "/sign-in" }),
+      );
+      let runs = 0;
+      app.get("/:slug", async (request) => {
+        runs++;
+        return request.params;
+      });
+      await app.ready();
+      for (const url of ["/q%3Fx", "/q%3fx", "/Q%3FX", "/Q%3fx/"]) {
+        const res = await app.inject({ method: "GET", url });
+        expect([307, 404]).toContain(res.statusCode);
+      }
+      expect(runs).toBe(0);
+      await app.close();
+    }
+  });
+
   it("keeps an escaped backslash escaped in next", async () => {
     const { app } = await makeApp({ all: true });
     const res = await app.inject({ method: "GET", url: "/%5Cevil.example" });
