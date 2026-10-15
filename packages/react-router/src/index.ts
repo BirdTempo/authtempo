@@ -76,7 +76,8 @@ function routedPath(request: Request): string {
 }
 
 /**
- * React Router matches a route without case unless the route sets
+ * The forms of the path that the rule must hold for. React Router matches a
+ * route without case unless the route sets
  * caseSensitive (the RegExp flag "i" of compilePath, router/utils.js of 8.4.0,
  * read 2026-10-15). The binding fails closed: a path needs a session when the
  * rule holds for the path or for its folded form. The path is already decoded,
@@ -84,20 +85,28 @@ function routedPath(request: Request): string {
  * the flag "i" compares upper-case forms, so a plain toLowerCase misses "ς"
  * against a route "σ". Each other difference of this fold only protects more
  * paths. An escape that the decode kept ("%2F") keeps its upper-case hex, so a
- * rule that names it still holds. `next` keeps the case of the request.
+ * rule that names it still holds. React Router also ignores trailing slashes
+ * on a route that is not a splat, so the rule gets the path with them removed
+ * too ("/" stays "/"). A path needs a session when any form holds. `next`
+ * keeps the case and the slashes of the request.
  */
 function foldCase(
   protect: ((pathname: string) => boolean) | undefined,
 ): ((pathname: string) => boolean) | undefined {
   if (!protect) return undefined;
+  const fold = (p: string) =>
+    p
+      .toUpperCase()
+      .toLowerCase()
+      .replace(/%[0-9a-f]{2}/g, (hex) => hex.toUpperCase());
+  // A route that is not a splat ends in "\/*$" (compilePath, router/utils.js of
+  // 8.4.0, read 2026-10-15): "/account/" and "/account//" render "/account".
+  const trim = (p: string) => p.replace(/\/+$/, "") || "/";
   return (pathname) =>
     protect(pathname) ||
-    protect(
-      pathname
-        .toUpperCase()
-        .toLowerCase()
-        .replace(/%[0-9a-f]{2}/g, (hex) => hex.toUpperCase()),
-    );
+    protect(fold(pathname)) ||
+    protect(trim(pathname)) ||
+    protect(trim(fold(pathname)));
 }
 
 /**

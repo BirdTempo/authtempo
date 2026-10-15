@@ -260,6 +260,30 @@ describe("@authtempo/react-router (plan 11d2)", () => {
     }
   });
 
+  // A route that is not a splat ends in "\/*$", so "/account/" renders
+  // "/account". The rule gets the path without trailing slashes too.
+  it("holds an exact rule on a path with trailing slashes", async () => {
+    const { run } = probe((p) => p === "/account");
+    const cases: [string, string][] = [
+      ["/account/", "%2Faccount%2F"],
+      ["/account//", "%2Faccount%2F%2F"],
+      ["/ACCOUNT//", "%2FACCOUNT%2F%2F"],
+      ["/account/_.data?_routes=account", "%2Faccount%2F"],
+    ];
+    for (const [raw, next] of cases) {
+      const { ran, res, location } = await run(raw);
+      expect(ran, raw).toBe(false);
+      expect(res.status, raw).toBe(307);
+      expect(location, raw).toBe(`${BASE}/sign-in?next=${next}`);
+    }
+    // "/" stays "/": the home page still runs with no session.
+    for (const raw of ["/", "/_.data?_routes=root"]) {
+      const { ran, res } = await run(raw);
+      expect(ran, raw).toBe(true);
+      expect(res.status, raw).toBe(200);
+    }
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, args, middleware, advance } = setup();
     const cookie = await signIn();

@@ -16,14 +16,20 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
   segment decoded once, a decoded "/" kept as `%2F`, and no resolution of "."
   or "..". So "/%61ccount" reaches the rule as "/account". Write a rule in
   decoded text: "/café", "/σ".
-- A splat route needs a prefix rule, such as `p.startsWith("/account")` for
-  "account/*". A data request "/account/...data" reaches that route as
-  "/account/..", and an exact rule misses it.
+- A rule must hold for every path that the route matches. Use a prefix rule
+  for a splat or a parameter, and name each form of an optional segment:
+  ":lang?/account" renders for "/en/account", which a rule on "/account" does
+  not name. A data request "/account/...data" reaches a splat route
+  "account/*" as "/account/..", and an exact rule misses it.
 - `next` keeps the page URL in URL form, with the case of the request.
 - React Router matches a path without case by default, so "/ACCOUNT" runs the
   page of "/account". The binding folds case for `protect`: a path needs a
   session when the rule holds for the path or for its lower-case form. Still
   set `caseSensitive: true` on each protected route, so "/ACCOUNT" gets a 404.
+- React Router ignores trailing slashes on every route that is not a splat, so
+  "/account/" renders "/account". The rule gets the path as matched, its
+  lower-case form, and both forms with trailing slashes removed. A path needs
+  a session when the rule holds for any of them.
 - The middleware reads no session for a route of core, and adds the renewed
   cookie to the page's answer after the sliding refresh.
 - A function given to both `authRouteModule` and `authMiddleware` runs twice
