@@ -12,5 +12,6 @@ and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
   request to core, so make it return one instance per environment.
 - `authSession` reads no session for a route of core, and adds the renewed
   cookie to the answer after the sliding refresh.
+- `protect` gets the path as Hono matched it: decoded once, with its case kept.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every
   server binding.

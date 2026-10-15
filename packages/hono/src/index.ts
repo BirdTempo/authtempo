@@ -42,7 +42,9 @@ export interface HonoSessionOptions {
 export function authSession(options: HonoSessionOptions): MiddlewareHandler<AuthEnv> {
   checkGateOptions(options);
   return async (c, next) => {
-    const gate = await readGate({ ...options, auth: resolve(options.auth, c) }, c.req.raw);
+    // The path the router matched (Hono's getPath: decoded once, case kept), with the query.
+    const routed = `${c.req.path}${new URL(c.req.url).search}`;
+    const gate = await readGate({ ...options, auth: resolve(options.auth, c) }, c.req.raw, routed);
     if (gate.redirect) return gate.redirect;
     c.set("session", gate.session);
     await next();

@@ -154,4 +154,36 @@ describe("@authtempo/hono (plan 11d2)", () => {
     const { auth } = makeApp();
     expect(() => authSession({ auth, protect: () => true })).toThrow(/signInPath/);
   });
+
+  // The router decodes the path once: "/%61ccount" is the route "/account".
+  // The gate must judge that path, or the page runs with no session.
+  function exactApp() {
+    const { auth } = makeApp();
+    const runs = { account: 0 };
+    const app = new Hono<AuthEnv>();
+    app.use("*", authSession({ auth, protect: (p) => p === "/account", signInPath: "/sign-in" }));
+    app.get("/account", (c) => {
+      runs.account++;
+      return c.text(`account of ${getSession(c)?.user.email}`);
+    });
+    return { app, runs };
+  }
+
+  it("gates an escaped path as the path that Hono matched", async () => {
+    const { app, runs } = exactApp();
+    const res = await app.request(`${BASE}/%61ccount`);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    const withQuery = await app.request(`${BASE}/%61ccount?tab=2`);
+    expect(withQuery.status).toBe(307);
+    expect(withQuery.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
+    expect(runs.account).toBe(0);
+  });
+
+  it("never serves the page for the path in another case", async () => {
+    const { app, runs } = exactApp();
+    const res = await app.request(`${BASE}/ACCOUNT`);
+    expect([307, 404]).toContain(res.status);
+    expect(runs.account).toBe(0);
+  });
 });
