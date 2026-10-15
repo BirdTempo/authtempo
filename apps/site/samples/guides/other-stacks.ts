@@ -7,7 +7,8 @@ import type { Auth } from "@authtempo/core";
  */
 function withOrigin(request: Request, baseURL: string): Request {
   if (URL.canParse(request.url)) return request;
-  const url = new URL(request.url, new URL(baseURL).origin);
+  // Join as text: a path that starts with "//" is a path here, not a host.
+  const url = new URL(`${new URL(baseURL).origin}${request.url}`);
   const init = { method: request.method, headers: request.headers, body: request.body };
   return new Request(url, { ...init, duplex: "half" } as RequestInit);
 }

@@ -1,7 +1,7 @@
 import { createClient } from "@authtempo/client";
 import type { MailMessage } from "@authtempo/core";
 import { describe, expect, it, vi } from "vitest";
-import { type AppEnv, createApp } from "../src/app.js";
+import { type AppEnv, createApp, withOrigin } from "../src/app.js";
 
 const BASE = "http://localhost:3000";
 
@@ -145,6 +145,12 @@ describe("the Elysia example (plan 11d2)", () => {
     );
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://app.example:8080/sign-in?next=%2Faccount");
+  });
+
+  it("keeps a path that starts with // on the app's origin", () => {
+    const url = new URL(withOrigin(new Request(`${BASE}//evil.example/account`), BASE).url);
+    expect(url.origin).toBe(BASE);
+    expect(url.pathname).toBe("//evil.example/account");
   });
 
   it("gives no 500 for a Host header that does not parse", async () => {

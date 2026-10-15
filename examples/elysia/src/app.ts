@@ -17,7 +17,7 @@ export interface AppEnv {
  * in absolute form, whatever the runtime does. Bun gives the path only for a
  * Host that does not parse ("a b"): that request also gets the BASE_URL origin.
  */
-function withOrigin(request: Request, baseURL: string): Request {
+export function withOrigin(request: Request, baseURL: string): Request {
   const fallback = new URL(baseURL);
   const parsed = URL.canParse(request.url) ? new URL(request.url) : null;
   const protocol = parsed?.protocol ?? fallback.protocol;
@@ -25,7 +25,8 @@ function withOrigin(request: Request, baseURL: string): Request {
   const host = request.headers.get("host");
   if (host && URL.canParse(`${protocol}//${host}`)) origin = new URL(`${protocol}//${host}`).origin;
   const path = parsed ? `${parsed.pathname}${parsed.search}` : request.url;
-  const url = new URL(path, origin);
+  // Join as text: a path that starts with "//" is a path here, not a host.
+  const url = new URL(`${origin}${path}`);
   // The common case: the URL is already on that origin, and the request passes unchanged.
   if (parsed?.href === url.href) return request;
   const init = { method: request.method, headers: request.headers, body: request.body };

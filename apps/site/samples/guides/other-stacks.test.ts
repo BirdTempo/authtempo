@@ -59,5 +59,10 @@ describe("mount authtempo on any other stack", () => {
     const fetch = createFetchHandler(auth);
     expect((await fetch(new PathOnlyRequest(`${API}/me`))).status).toBe(401);
     expect((await fetch(new PathOnlyRequest(`${API}/auth/session`))).status).toBe(401);
+    // A path that starts with "//" stays a path on the origin of baseURL: no route of core.
+    const twoSlashes = new PathOnlyRequest(`${API}//evil.example/auth/session`, {
+      headers: { host: "a b" },
+    });
+    expect((await fetch(twoSlashes)).status).toBe(404);
   });
 });
