@@ -246,6 +246,44 @@ describe("@authtempo/astro (plan 11d2)", () => {
     });
   }
 
+  // Plan-wide P1 (the SvelteKit review): a path that the router decodes to a
+  // path of core must never run a page. Astro decodes "/%61uth/session" to
+  // "/auth/session" before its match, so pages/auth/[...path].ts wins over a
+  // catch-all page. With core 12f6eed the gate skips such a path and core,
+  // which matches the raw path, answers 404. Since core round 10 (3aa2d84) the
+  // gate skips only when the raw and the routed path are both of core, so it
+  // answers 307 first. No page runs either way: pin the set, not one status.
+  for (const [raw, routed] of [
+    ["/%61uth/session", "/auth/session"],
+    ["/%61uth/x", "/auth/x"],
+  ] as const) {
+    it(`runs no page for ${raw}, which Astro routes to core`, async () => {
+      const { auth, route, context } = setup();
+      const seen: string[] = [];
+      const all = authMiddleware({
+        auth,
+        protect: (p) => {
+          seen.push(p);
+          return p !== "/";
+        },
+        signInPath: "/sign-in",
+      });
+      let runs = 0;
+      const page = async () => {
+        runs++;
+        return new Response("PAGE RAN");
+      };
+      const ctx = context(new Request(`${BASE}${raw}`), routed);
+      // Astro's router: the auth endpoint matches the routed text before a catch-all page.
+      const astro = async () => (routed.startsWith("/auth/") ? route(ctx) : page());
+      const res = (await all(ctx, astro)) as Response;
+      expect([307, 401, 404]).toContain(res.status);
+      expect(runs).toBe(0);
+      // When the gate asks the rule, the rule gets Astro's routed text only.
+      expect(seen.every((p) => p === routed)).toBe(true);
+    });
+  }
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, context, middleware, advance } = setup();
     const cookie = await signIn();
