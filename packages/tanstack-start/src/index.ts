@@ -51,8 +51,9 @@ export interface StartAuthOptions {
    * True for a path that needs a session. Needs `signInPath`. It gets the
    * path as the router of TanStack matches it: decoded once, with no "/" at
    * the end. The router compares lower-case forms, so the binding also runs
-   * the rule on the path in lower case. Write the rule in lower case: then it
-   * holds for every case of the path. A rule with a capital letter, such as
+   * the rule on the path in lower case, and in lower case with each escape in
+   * upper-case hex ("/q%3Fx"). Write the rule in lower case: then it holds for
+   * every case of the path. A rule with a capital letter, such as
    * `p.startsWith("/myAccount")`, misses "/myaccount", which runs the same page.
    */
   protect?: ((pathname: string) => boolean) | undefined;
@@ -112,6 +113,15 @@ function routedPath(pathname: string): string {
 }
 
 /**
+ * The path in lower case with each kept escape in upper-case hex. The router
+ * compares lower-case forms, so "/q%3fx" and "/Q%3FX" run the route "/q%3Fx";
+ * a rule written with upper-case hex must see this form too.
+ */
+function upperHex(path: string): string {
+  return path.toLowerCase().replace(/%[0-9a-f]{2}/g, (hex) => hex.toUpperCase());
+}
+
+/**
  * The origin of the redirect: the Host header, with the protocol of the
  * request. srvx 0.11.22, the Node server of TanStack Start, builds the URL of
  * a request line in absolute form ("GET http://evil.example/account") from
@@ -166,7 +176,8 @@ export function authRequestServer(options: StartAuthOptions): RequestServer {
     const gateOptions = {
       ...options,
       auth,
-      protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
+      protect:
+        protect && ((p: string) => protect(p) || protect(p.toLowerCase()) || protect(upperHex(p))),
     };
     // The gate takes the origin of the redirect from its request: one on the
     // app's own origin, with the raw path and query and every header.

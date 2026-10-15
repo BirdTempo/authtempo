@@ -336,6 +336,18 @@ describe("@authtempo/tanstack-start (plan 11d2)", () => {
     }
   });
 
+  // decodePath keeps a reserved escape such as "%3F" in the hex case of the
+  // request, and the router compares lower-case forms, so "/q%3fx" and
+  // "/Q%3FX" run the route "/q%3Fx" (review M3).
+  it("runs the rule with each kept escape in upper-case hex", async () => {
+    const { run } = setup({}, { protect: (p) => p === "/q%3Fx" || p === "/café" });
+    for (const path of ["/q%3Fx", "/q%3fx", "/Q%3FX", "/Q%3fx/", "/caf%c3%a9"]) {
+      const out = await run(new Request(`${BASE}${path}`), path);
+      expect(out.response.status).toBe(307);
+      expect(out.runs).toBe(0);
+    }
+  });
+
   // core 3aa2d84: the gate reads no session only when the raw path and the
   // routed path are both of core. TanStack gives "/auth/session" for
   // "/%61uth/session", and a catch-all page must not run for it.

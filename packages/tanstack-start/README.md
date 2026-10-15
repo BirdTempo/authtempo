@@ -26,8 +26,10 @@ transform of solid-js and `@tanstack`. The example app is React.
 - The router matches a path without case: it compares the lower-case form of
   the route with the lower-case form of the path (router-core 1.171.37). So
   "/ACCOUNT" runs the page of "/account". The binding cannot read a case
-  option, so it runs `protect` on the path and on its lower-case form: a path
-  needs a session when either holds. Write the rule in lower case, and it
+  option, so it runs `protect` on the path, on its lower-case form, and on the
+  lower-case form with each escape in upper-case hex ("/q%3Fx"): a path needs
+  a session when one of them holds. The router keeps an escape such as
+  "%3F" in the hex case of the request. Write the rule in lower case, and it
   holds for every case of the path. A rule with a capital letter, such as
   `p.startsWith("/myAccount")`, misses "/myaccount" and "/MYACCOUNT", which
   run the page of "/myAccount" with no session.
