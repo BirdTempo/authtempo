@@ -6,7 +6,10 @@ import { authHandle } from "../src/index.js";
 const BASE = "https://app.example.com";
 const DAY = 24 * 60 * 60 * 1000;
 
-function setup(core: { basePath?: string } = {}) {
+function setup(
+  core: { basePath?: string } = {},
+  protect: (pathname: string) => boolean = (p) => p.startsWith("/account"),
+) {
   const prefix = core.basePath ?? "/auth";
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
@@ -32,22 +35,23 @@ function setup(core: { basePath?: string } = {}) {
   };
   const handle = authHandle({
     auth,
-    protect: (p) => p.startsWith("/account"),
+    protect,
     signInPath: "/sign-in",
   });
   /**
    * The three fields of RequestEvent that the binding reads. The real pipeline
    * of SvelteKit runs in the example's proof; this test holds the binding's rule.
+   * `url` is the routed URL; Kit makes it differ from request.url for a data request.
    */
-  const event = (request: Request) =>
-    ({ request, url: new URL(request.url), locals: {} }) as unknown as RequestEvent;
+  const event = (request: Request, url: URL) =>
+    ({ request, url, locals: {} }) as unknown as RequestEvent;
   let pageRuns = 0;
   const page = async () => {
     pageRuns++;
     return new Response("page");
   };
-  async function run(request: Request) {
-    const e = event(request);
+  async function run(request: Request, url = new URL(request.url)) {
+    const e = event(request, url);
     const res = await handle({ event: e, resolve: page });
     return { res, locals: e.locals };
   }
@@ -126,6 +130,20 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
   it("sends a person with no session on a protected path to the sign-in page", async () => {
     const { run, pageRuns } = setup();
     const { res } = await run(new Request(`${BASE}/account`));
+    expect(pageRuns()).toBe(0);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+  });
+
+  // Kit's shape of a data request: the client sends GET /account/__data.json
+  // for a link click to /account, and Kit strips the suffix and its query from
+  // event.url only. An exact rule must still see "/account".
+  it("gates the routed URL of a data request, not the URL of the request", async () => {
+    const { run, pageRuns } = setup({}, (p) => p === "/account");
+    const { res } = await run(
+      new Request(`${BASE}/account/__data.json?x-sveltekit-invalidated=01`),
+      new URL(`${BASE}/account`),
+    );
     expect(pageRuns()).toBe(0);
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);

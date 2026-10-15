@@ -56,9 +56,14 @@ export function authHandle(options: SvelteKitAuthOptions): Handle {
   return async ({ event, resolve }) => {
     const auth = resolveAuth(options.auth);
     // The rule of the gate: the option, then core's own base path, then "/auth".
+    // A copy of the basePath line of readGate (packages/core/src/bindings.ts:104):
+    // keep the two equal, or the hook and the gate disagree on a path of core.
     const basePath = options.basePath ?? auth.basePath ?? DEFAULT_BASE_PATH;
     if (isAuthPath(event.url.pathname, basePath)) return auth.handle(event.request);
-    const gate = await readGate({ ...options, auth }, event.request);
+    // The routed URL, not request.url: for a data request of a client-side
+    // navigation, Kit strips /__data.json and the x-sveltekit-* query from event.url only.
+    const routed = new Request(event.url, { headers: event.request.headers });
+    const gate = await readGate({ ...options, auth }, routed);
     if (gate.redirect) return gate.redirect;
     event.locals.session = gate.session;
     return withSetCookie(await resolve(event), gate.cookie);
