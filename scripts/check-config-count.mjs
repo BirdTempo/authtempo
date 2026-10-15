@@ -12,9 +12,10 @@ import { execFileSync } from "node:child_process";
 // Task 11), and examples/pbkdf2-probe (18, Task 13). Plan 11d adds
 // packages/verify (19, Task 9), then packages/react and examples/react (21,
 // Task 10), packages/sdk-conformance (22, Task 13), and packages/next and
-// examples/next (24, Task 11). Raise this number when a package adds a
+// examples/next (24, Task 11). Plan 11d2 adds packages/hono and
+// examples/hono (26, Task 2). Raise this number when a package adds a
 // vitest config.
-const MINIMUM = 24;
+const MINIMUM = 26;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

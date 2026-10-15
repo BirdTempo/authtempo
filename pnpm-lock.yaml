@@ -270,6 +270,28 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  examples/hono:
+    dependencies:
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@authtempo/hono':
+        specifier: workspace:*
+        version: link:../../packages/hono
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
+    devDependencies:
+      '@authtempo/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+
   examples/next:
     dependencies:
       '@authtempo/client':
@@ -699,6 +721,22 @@ importers:
         specifier: workspace:*
         version: link:../core
     devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+
+  packages/hono:
+    dependencies:
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -2963,6 +3001,10 @@ packages:
 
   hastscript@9.0.1:
     resolution: {integrity: sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==}
+
+  hono@4.13.13:
+    resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
+    engines: {node: '>=16.9.0'}
 
   html-escaper@3.0.3:
     resolution: {integrity: sha512-RuMffC89BOWQoY0WKGpIhn5gX3iI54O6nRA0yC124NYVtzjmFWBIiFd8M0x+ZdX0P9R4lADg1mgP8C7PxGOWuQ==}
@@ -5990,6 +6032,8 @@ snapshots:
       hast-util-parse-selector: 4.0.0
       property-information: 7.2.0
       space-separated-tokens: 2.0.2
+
+  hono@4.13.13: {}
 
   html-escaper@3.0.3: {}
 
