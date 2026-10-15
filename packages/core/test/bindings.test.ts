@@ -227,25 +227,65 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect((await where("https://evil.example/x"))?.startsWith(`${BASE}/sign-in?next=`)).toBe(true);
   });
 
-  it("gives the rule the path in URL form: a non-ASCII letter is encoded again", async () => {
+  // A router that matches the raw path matched "/account/:id" with id "..", or
+  // "/account/*rest". No case may reach isAuthPath as "/auth/session".
+  it.each([
+    "/account/..",
+    "/account/../auth/session",
+    "/account/%2e%2e",
+    "/account/%2e%2e/auth/session",
+  ])("judges the routed path %s as given, with no resolution of dot segments", async (routed) => {
+    const { auth } = setup();
+    const seen: string[] = [];
+    let reads = 0;
+    const options = {
+      auth: {
+        ...auth,
+        session: async (r: Request) => {
+          reads++;
+          return auth.session(r);
+        },
+      },
+      protect: (p: string) => {
+        seen.push(p);
+        return p.startsWith("/account");
+      },
+      signInPath: "/sign-in",
+    };
+    const g = await readGate(options, page("/raw"), routed);
+    expect(seen).toEqual([routed]);
+    // The gate reads the session once to know that there is none.
+    expect(reads).toBe(1);
+    expect(g.redirect?.status).toBe(307);
+    expect(g.redirect?.headers.get("location")).toBe(
+      `${BASE}/sign-in?next=${encodeURIComponent(routed)}`,
+    );
+  });
+
+  it("gives the rule the path that the framework gave, with the query in next", async () => {
     const { auth } = setup();
     const seen: string[] = [];
     const options = {
       auth,
       protect: (p: string) => {
         seen.push(p);
-        return p === "/caf%C3%A9";
+        return p === "/account" || p.startsWith("/caf");
       },
       signInPath: "/sign-in",
     };
+    // A string is not encoded again; a URL object keeps the pathname the framework parsed.
     const fromString = await readGate(options, page("/raw"), "/café");
     const fromURL = await readGate(options, page("/raw"), new URL(`${BASE}/caf%C3%A9`));
-    expect(seen).toEqual(["/caf%C3%A9", "/caf%C3%A9"]);
-    for (const g of [fromString, fromURL]) {
-      expect(g.redirect?.status).toBe(307);
-      // next holds the URL-form path, encoded once more as a query value.
-      expect(g.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
-    }
+    expect(fromString.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%C3%A9`);
+    expect(fromURL.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
+    // The query splits at the first "?" and stays in next; the fragment goes.
+    const q = await readGate(options, page("/raw"), "/account?tab=2&x=?#frag");
+    expect(q.redirect?.headers.get("location")).toBe(
+      `${BASE}/sign-in?next=${encodeURIComponent("/account?tab=2&x=?")}`,
+    );
+    // "//account" stays "//account", with no merge of slashes.
+    await readGate(options, page("/raw"), "//account");
+    expect(seen).toEqual(["/café", "/caf%C3%A9", "/account", "//account"]);
   });
 
   it("reads no session when the routed URL is under the base path", async () => {

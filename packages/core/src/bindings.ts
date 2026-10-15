@@ -19,7 +19,7 @@ export type GateAuth = Pick<Auth, "handle" | "session" | "sessionCookie"> & {
 
 export interface GateOptions {
   auth: GateAuth;
-  /** True for a path that needs a session. Needs `signInPath`. It gets the path in URL form: see `readGate`. */
+  /** True for a path that needs a session. Needs `signInPath`. It gets the path as the router matched it: see `readGate`. */
   protect?: ((pathname: string) => boolean) | undefined;
   /**
    * The sign-in page of the app, a path that starts with "/". The gate adds
@@ -70,9 +70,14 @@ export function isAuthPath(pathname: string, basePath: string = DEFAULT_BASE_PAT
  * Task 11), moved here so every binding has the same one.
  */
 export function signInRedirect(url: URL, signInPath: string): Response {
-  const target = new URL(signInPath, url);
+  return redirectTo(url, url.pathname, url.search, signInPath);
+}
+
+/** The redirect of `signInRedirect`, for a path and a search that no URL parser touched. */
+function redirectTo(base: URL | string, pathname: string, search: string, signInPath: string) {
+  const target = new URL(signInPath, base);
   // One leading slash: "//host/x" would be a link to another origin on the sign-in page.
-  const next = `${url.pathname.replace(/^\/+/, "/")}${url.search}`;
+  const next = `${pathname.replace(/^\/+/, "/")}${search}`;
   const query = `${target.search ? `${target.search}&` : "?"}next=${encodeURIComponent(next)}`;
   return Response.redirect(`${target.origin}${target.pathname}${query}`, 307);
 }
@@ -93,18 +98,31 @@ export function withSetCookie(response: Response, cookie: string | null): Respon
   }
 }
 
+/** What the gate judges: the origin of the request, and the path and the search of the route. */
+interface Judged {
+  origin: string;
+  pathname: string;
+  search: string;
+}
+
 /**
- * The URL the gate judges: the origin of `request.url`, with the path and the
- * query of the routed URL when the binding gives it. The fragment goes.
+ * The origin always comes from `request.url`, so the redirect never leaves it.
+ * A routed string is not parsed as a URL: a parse resolves "..", ".", and
+ * "%2e", re-encodes letters, and would judge a path that the router did not
+ * match (plan 11d2 Task 3 review, C1). The fragment goes.
  */
-function routedURL(request: Request, url: URL | string | undefined): URL {
+function judge(request: Request, url: URL | string | undefined): Judged {
   const raw = new URL(request.url);
-  if (url === undefined) return raw;
-  const path = typeof url === "string" ? url : `${url.pathname}${url.search}`;
-  // A path with no leading "/" gets one, so no request can throw here.
+  if (url === undefined) return { origin: raw.origin, pathname: raw.pathname, search: raw.search };
+  if (typeof url !== "string")
+    return { origin: raw.origin, pathname: url.pathname, search: url.search };
+  const text = url.split("#")[0] ?? "";
+  const q = text.indexOf("?");
+  const path = q === -1 ? text : text.slice(0, q);
+  const search = q === -1 ? "" : text.slice(q);
+  // A path with no leading "/" gets one: "account" is judged as "/account", and "" as "/".
   const slash = path.startsWith("/") ? "" : "/";
-  // Only the path and the query count: the redirect never leaves the origin of the request.
-  return new URL(`${raw.origin}${slash}${path}`);
+  return { origin: raw.origin, pathname: `${slash}${path}`, search };
 }
 
 /**
@@ -112,39 +130,39 @@ function routedURL(request: Request, url: URL | string | undefined): URL {
  * renewed cookie. A path of core reads nothing: `auth.handle` reads and renews
  * the session itself.
  *
- * `url` is the URL that the framework's router matched, with the query: the
- * path decoded as the router decodes it, in the case the router compares. The
- * gate uses it for the base path check, the `protect` rule, and the `next` of
- * the redirect. The cookie and the bearer still come from `request`. Without
- * `url` the gate judges the raw `request.url`, which is right only for a
- * router that matches the raw path. A router that decodes "/%61ccount" to
- * "/account", or matches "/ACCOUNT" as "/account", needs `url`, or a protected
- * page renders with no session (plan 11d2 path probe).
+ * `url` is the path that the framework's router matched, with the query: a
+ * string, or a URL object that the framework parsed. The gate uses its path
+ * for the base path check, the `protect` rule, and the `next` of the
+ * redirect. The cookie and the bearer still come from `request`, and the
+ * origin of the redirect from `request.url`. Without `url` the gate judges the
+ * raw `request.url`, which is right only for a router that matches the raw
+ * path. A router that decodes "/%61ccount" to "/account", or matches
+ * "/ACCOUNT" as "/account", needs `url`, or a protected page renders with no
+ * session (plan 11d2 path probe).
  *
- * Pass a path with a leading "/" (and the query), or a URL object. The gate
- * takes only the path and the query of it, on the origin of `request.url`, so
- * the redirect stays on that origin. "//x" stays a path. A string with no
- * leading "/" gets one: "account" is judged as "/account", and "" as "/".
- *
- * `protect` gets the path in URL form: the WHATWG `pathname` of the routed
- * URL. An escaped letter such as "%61" is decoded where the router decodes it.
- * A space or a non-ASCII letter is encoded again by the URL parser: "/café"
- * and "/caf%C3%A9" both reach the rule as "/caf%C3%A9", and "/my account" as
- * "/my%20account". Write such a rule in the encoded form or as a prefix. A
- * rule `p === "/café"` never matches, and the page opens with no session.
+ * `protect` gets the path exactly as the router matched it. The gate does not
+ * change it: no resolution of "." or "..", no decoding, no encoding, no merge
+ * of slashes. Of a string the gate drops the fragment and splits the query at
+ * the first "?". A path with no leading "/" gets one. Of a URL object the gate
+ * takes `pathname` and `search`, as the framework parsed them. Each binding's
+ * README states how its router decodes the path and compares the case.
  */
 export async function readGate(
   options: GateOptions,
   request: Request,
   url?: URL | string,
 ): Promise<Gate> {
-  const routed = routedURL(request, url);
+  const routed = judge(request, url);
   // One source for the base path: core's own, unless a proxy moved core's routes.
   const basePath = options.basePath ?? options.auth.basePath ?? DEFAULT_BASE_PATH;
   if (isAuthPath(routed.pathname, basePath)) return { session: null, redirect: null, cookie: null };
   const session = await options.auth.session(request);
   if (!session && options.signInPath && options.protect?.(routed.pathname))
-    return { session, redirect: signInRedirect(routed, options.signInPath), cookie: null };
+    return {
+      session,
+      redirect: redirectTo(routed.origin, routed.pathname, routed.search, options.signInPath),
+      cookie: null,
+    };
   return {
     session,
     redirect: null,
