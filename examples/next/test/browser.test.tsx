@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 import { Providers } from "../app/providers";
+import SignIn from "../app/sign-in/page";
 
 const BASE = "http://localhost:3000";
 const DAY = 86_400_000;
@@ -102,6 +103,35 @@ describe("the Next example in the browser (plan 11d final review)", () => {
       );
     } finally {
       history.replaceState(null, "", "/");
+      view.unmount();
+    }
+  });
+  it("sends a sign-in link from the sign-in page and shows its sent state", async () => {
+    const a = app();
+    const client = createClient({ baseURL: BASE, fetch: a.fetch, broadcast: false });
+    const view = mount(
+      <Providers client={client}>
+        <SignIn />
+      </Providers>,
+    );
+    try {
+      // The page shows its form once the session read answers no session.
+      const input = await vi.waitFor(() => {
+        const el = view.el.querySelector<HTMLInputElement>('input[name="email"]');
+        if (!el) throw new Error("no email field yet");
+        return el;
+      });
+      // React reads the value through the input event of the native setter.
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        input,
+        "ada@example.com",
+      );
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      view.el.querySelector<HTMLButtonElement>('button[type="submit"]')?.click();
+      // The real request reached core, which mailed the link to the typed address.
+      await vi.waitFor(() => expect(a.mail.at(-1)?.to).toBe(input.value));
+      await vi.waitFor(() => expect(view.el.textContent).toBe("Open the link in the mail."));
+    } finally {
       view.unmount();
     }
   });
