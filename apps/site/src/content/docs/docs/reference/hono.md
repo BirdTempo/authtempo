@@ -20,7 +20,7 @@ sidebar:
 
 ## Steps
 
-1. Mount core: `app.on(["GET", "POST", "OPTIONS"], "/auth/*", authHandler(auth))`.
+1. Mount core for every method: `app.all("/auth/*", authHandler(auth))`.
 2. Read the session: `app.use("*", authSession({ auth }))`, then `getSession(c)` in a route.
 3. Protect paths: `authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 

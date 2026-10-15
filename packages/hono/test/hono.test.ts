@@ -307,4 +307,23 @@ describe("@authtempo/hono (plan 11d2)", () => {
     // The rule gets the path that Hono matched, never the raw "/%61uth/...".
     expect(seen).toEqual(["/auth/session", "/auth/x"]);
   });
+
+  // The README mounts core for every method (final review m1). With GET, POST,
+  // and OPTIONS only, a PUT under the base path skipped the gate and ran a page.
+  it("sends every method under the base path to core with the README mount", async () => {
+    const { auth } = makeApp();
+    let runs = 0;
+    const app = new Hono<AuthEnv>();
+    app.use("*", authSession({ auth, protect: (p) => p !== "/", signInPath: "/sign-in" }));
+    app.all("/auth/*", authHandler(auth));
+    app.all("/*", (c) => {
+      runs++;
+      return c.text("page");
+    });
+    for (const method of ["PUT", "DELETE", "PATCH"]) {
+      const res = await app.request(`${BASE}/auth/x`, { method, headers: { origin: BASE } });
+      expect(res.status).not.toBe(200);
+    }
+    expect(runs).toBe(0);
+  });
 });

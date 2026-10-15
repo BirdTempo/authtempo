@@ -3,7 +3,7 @@
 The Hono binding of authtempo. It runs where Hono runs: Workers, Node, Bun,
 and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
 
-1. Mount core: `app.on(["GET", "POST", "OPTIONS"], "/auth/*", authHandler(auth))`.
+1. Mount core for every method: `app.all("/auth/*", authHandler(auth))`.
 2. Read the session: `app.use("*", authSession({ auth }))`, then `getSession(c)` in a route.
 3. Protect paths: `authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
@@ -20,5 +20,13 @@ and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
   judges the path as the binding gives it.
   An exact rule covers one route only. For a route with a wildcard, use
   `p === "/account" || p.startsWith("/account/")`.
+- Mount core for every method. With fewer methods, a PUT to `/auth/x` skips
+  the gate and reaches a catch-all page of the app with no session.
+- The redirect to the sign-in page takes its origin from the request URL, as
+  the server builds it. Bun 1.4.3 builds it from the Host header.
+  `@hono/node-server` 1.19.17 and 2.1.5 build it from the Host header, but
+  take an absolute-form request line, such as `GET http://other.example/x`, as
+  given. The redirect then names that origin. Check the rule of your server
+  on Deno and on Workers.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every
   server binding.
