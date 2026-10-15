@@ -295,7 +295,11 @@ describe("@authtempo/react-router (plan 11d2)", () => {
    * createRequestHandler (getNormalizedPath, server-runtime/urls.js of 8.4.0),
    * so the middleware gets the real `pattern` and `params` of the match.
    */
-  function pipeline(caseSensitive: boolean) {
+  function pipeline(
+    caseSensitive: boolean,
+    protect: (p: string) => boolean = (p) =>
+      p.startsWith("/myAccount") || /^\/[^/]+\/myAccount/.test(p),
+  ) {
     const { auth } = setup();
     const runs: string[] = [];
     const page = (id: string, path: string): RouteObject => ({
@@ -314,7 +318,7 @@ describe("@authtempo/react-router (plan 11d2)", () => {
         middleware: [
           authMiddleware({
             auth,
-            protect: (p) => p.startsWith("/myAccount") || /^\/[^/]+\/myAccount/.test(p),
+            protect,
             signInPath: "/sign-in",
           }),
         ],
@@ -324,6 +328,7 @@ describe("@authtempo/react-router (plan 11d2)", () => {
           page("myAccount", "myAccount"),
           page("myAccount-rest", "myAccount/*"),
           page("lang-myAccount", ":lang/myAccount"),
+          page("q-hex", "q%3Fx"),
         ],
       },
     ]);
@@ -388,6 +393,21 @@ describe("@authtempo/react-router (plan 11d2)", () => {
       expect((await serve(raw)).status, raw).toBe(200);
     }
     expect(runs).toEqual(["about", "about", "about"]);
+  });
+
+  // React Router decodes "%253f" once to the text "%3f", and matches the route
+  // "q%3Fx" without case. The rule is in the route's text, so it must still
+  // hold. Two guards hold it: the upper-case hex step of the fold, and the
+  // form in the route's case. Each guard alone holds it, so the proof of this
+  // test removes both.
+  it("holds a rule with an escape in the route's text for another hex case", async () => {
+    const { runs, serve } = pipeline(false, (p) => p === "/q%3Fx");
+    for (const raw of ["/q%253fx", "/Q%253FX", "/Q%253fx/", "/q%253fx.data?_routes=q-hex"]) {
+      const res = await serve(raw);
+      expect(res.status, raw).toBe(307);
+      expect(res.headers.get("location"), raw).toMatch(/\/sign-in\?/);
+    }
+    expect(runs).toEqual([]);
   });
 
   it("answers 404 for another case when the route sets caseSensitive", async () => {
