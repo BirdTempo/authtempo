@@ -12,6 +12,8 @@ takes `astro` 7.3.8 or newer in 7 as a peer dependency.
 
 - `getAuth` is a function that makes the auth instance at the first request,
   so `astro build` reads no secret.
+- `protect` gets the path as Astro routed it: decoded until it stops
+  changing, with duplicate slashes merged, and with its case kept.
 - The middleware reads no session for a route of core, and adds the renewed
   cookie to the page's answer after the sliding refresh.
 - Set `security.allowedDomains` to the host of your app. Without it, Astro gives

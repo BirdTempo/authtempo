@@ -33,7 +33,10 @@ export function authRoute(auth: AuthSource<Pick<Auth, "handle">>): APIRoute {
 
 export interface AstroAuthOptions {
   auth: AuthSource<GateAuth>;
-  /** True for a path that needs a session. Needs `signInPath`. */
+  /**
+   * True for a path that needs a session. Needs `signInPath`. It gets the path
+   * as Astro routed it: decoded until stable, duplicate slashes merged, case kept.
+   */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */
   signInPath?: string | undefined;
@@ -53,7 +56,14 @@ export interface AstroAuthOptions {
 export function authMiddleware(options: AstroAuthOptions): MiddlewareHandler {
   checkGateOptions(options);
   return async (context, next) => {
-    const gate = await readGate({ ...options, auth: resolve(options.auth) }, context.request);
+    // context.url is the URL that Astro's router matched: decoded until it
+    // stops changing, duplicate slashes merged. The raw request.url of
+    // "/%61ccount" would pass a protect rule that the routed "/account" fails.
+    const gate = await readGate(
+      { ...options, auth: resolve(options.auth) },
+      context.request,
+      context.url,
+    );
     if (gate.redirect) return gate.redirect;
     context.locals.session = gate.session;
     return withSetCookie(await next(), gate.cookie);

@@ -35,8 +35,8 @@ function setup(core: { basePath?: string } = {}) {
    * The two fields of APIContext that the binding reads. The real pipeline of
    * Astro runs in the example's proof; this test holds the binding's own rule.
    */
-  const context = (request: Request) =>
-    ({ request, url: new URL(request.url), locals: {} }) as unknown as APIContext;
+  const context = (request: Request, routed: string = request.url) =>
+    ({ request, url: new URL(routed, request.url), locals: {} }) as unknown as APIContext;
   async function signIn(): Promise<string> {
     const post = (path: string, body: unknown) =>
       route(
@@ -131,6 +131,28 @@ describe("@authtempo/astro (plan 11d2)", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
   });
+
+  // Astro decodes the path until it stops changing and merges duplicate
+  // slashes before its router matches (plan 11d2 path probe). The gate must
+  // judge that routed URL, not the raw request.url.
+  for (const raw of ["/%61ccount", "//account"]) {
+    it(`judges the routed URL, not the raw path ${raw}`, async () => {
+      const { auth, context } = setup();
+      const exact = authMiddleware({
+        auth,
+        protect: (p) => p === "/account",
+        signInPath: "/sign-in",
+      });
+      let runs = 0;
+      const res = (await exact(context(new Request(`${BASE}${raw}`), "/account"), async () => {
+        runs++;
+        return new Response("page");
+      })) as Response;
+      expect(runs).toBe(0);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    });
+  }
 
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, context, middleware, advance } = setup();
