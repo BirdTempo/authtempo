@@ -186,4 +186,20 @@ describe("@authtempo/hono (plan 11d2)", () => {
     expect([307, 404]).toContain(res.status);
     expect(runs.account).toBe(0);
   });
+
+  // The gate makes a URL of the routed path: protect gets "/caf%C3%A9", not "/café".
+  it("gives protect the path in URL form", async () => {
+    const { auth } = makeApp();
+    let runs = 0;
+    const app = new Hono<AuthEnv>();
+    app.use("*", authSession({ auth, protect: (p) => p === "/caf%C3%A9", signInPath: "/sign-in" }));
+    app.get("/café", (c) => {
+      runs++;
+      return c.text("café");
+    });
+    const res = await app.request(`${BASE}/caf%C3%A9`);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
+    expect(runs).toBe(0);
+  });
 });

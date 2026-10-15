@@ -12,6 +12,10 @@ and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
   request to core, so make it return one instance per environment.
 - `authSession` reads no session for a route of core, and adds the renewed
   cookie to the answer after the sliding refresh.
-- `protect` gets the path as Hono matched it: decoded once, with its case kept.
+- `protect` gets the path that Hono matched, in URL form, with its case kept.
+  An escaped letter such as `%61` is decoded, and a space or a non-ASCII
+  letter is encoded again: `/caf%C3%A9`, `/my%20account`. Write a rule for
+  such a path in the encoded form, or use a rule on a prefix. The gate of
+  `@authtempo/core/bindings` gives this form to every binding.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every
   server binding.

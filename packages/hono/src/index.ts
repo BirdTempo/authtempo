@@ -42,7 +42,8 @@ export interface HonoSessionOptions {
 export function authSession(options: HonoSessionOptions): MiddlewareHandler<AuthEnv> {
   checkGateOptions(options);
   return async (c, next) => {
-    // The path the router matched (Hono's getPath: decoded once, case kept), with the query.
+    // The path the router matched, with the query. The gate makes a URL of it, so
+    // protect gets the URL form: "%61" decoded, a space or "é" encoded again.
     const routed = `${c.req.path}${new URL(c.req.url).search}`;
     const gate = await readGate({ ...options, auth: resolve(options.auth, c) }, c.req.raw, routed);
     if (gate.redirect) return gate.redirect;
