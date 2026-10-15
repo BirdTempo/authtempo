@@ -23,6 +23,10 @@ the same there. The Express adapter of NestJS 12 pins Express 5.2.1.
   upper-case escape hex. It protects the path when `protect` is true for any
   form. Also set `app.set("case sensitive routing", true)`, so "/ACCOUNT" gets
   a 404.
+- With "case sensitive routing" off, write the rule in lower case, with each
+  escape in upper-case hex (`%3F`). A rule with a capital letter, such as
+  `p.startsWith("/myAccount")`, misses "/myaccount" and "/MYACCOUNT", which run
+  the page of "/myAccount" with no session. Else set "case sensitive routing".
 - Express routes with strict routing off by default, so `/account` also
   matches `/account/`. The binding also tests each form with its trailing
   slashes removed.

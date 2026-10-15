@@ -370,9 +370,20 @@ describe("@authtempo/express (plan 11d2)", () => {
         mail: { send: async () => {} },
       }));
     const pages: string[] = [];
+    // Each path that the rule got: the gate must run the rule on the raw text.
+    const seen: string[] = [];
     const app = express();
     app.use("/auth", authHandler(getAuth));
-    app.use(authSession({ auth: getAuth, protect: (p) => p !== "/", signInPath: "/sign-in" }));
+    app.use(
+      authSession({
+        auth: getAuth,
+        protect: (p) => {
+          seen.push(p);
+          return p !== "/";
+        },
+        signInPath: "/sign-in",
+      }),
+    );
     app.use((req, res) => {
       pages.push(req.originalUrl);
       res.send("page");
@@ -386,6 +397,7 @@ describe("@authtempo/express (plan 11d2)", () => {
         expect(res.status).toBe(307);
       }
       expect(pages).toEqual([]);
+      expect(seen).toEqual(["/%61uth/session", "/%61uth/x"]);
     } finally {
       server.close();
     }
