@@ -20,7 +20,7 @@ import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
-import { sessionCapMs } from "./sessions.js";
+import { sessionIsLive } from "./sessions.js";
 
 /**
  * JWT minting (plan 9g, spec 8.12). Core owns the keys: it writes the first
@@ -332,13 +332,9 @@ export async function mintSessionJwt(
     { field: "id", op: "eq", value: input.sessionId },
     { field: "userId", op: "eq", value: input.userId },
   ]);
-  // The absolute cap ends a session whose expiresAt is later (plan 12b), as in resolveSession.
-  if (
-    !session ||
-    session.expiresAt.getTime() <= now.getTime() ||
-    sessionCapMs(config, session.createdAt) <= now.getTime()
-  )
-    return fail("unauthorized");
+  // The absolute cap ends a session whose expiresAt is later (plan 12b).
+  // `sessionIsLive` is the rule of resolveSession, so the two cannot drift.
+  if (!session || !sessionIsLive(config, session, now)) return fail("unauthorized");
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
@@ -401,8 +397,7 @@ export async function sessionLive(
   const row = await config.storage.findOne("session", [
     { field: "id", op: "eq", value: input.sid },
   ]);
-  const now = config.clock.now().getTime();
-  return row !== null && row.expiresAt.getTime() > now && sessionCapMs(config, row.createdAt) > now;
+  return row !== null && sessionIsLive(config, row, config.clock.now());
 }
 
 /**

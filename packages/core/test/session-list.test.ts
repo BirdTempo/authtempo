@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
+import { mintSessionJwt, sessionLive } from "../src/engine/jwt.js";
 import { changePassword, passwordSignIn } from "../src/engine/password.js";
 import { reauthenticate } from "../src/engine/reauth.js";
 import {
@@ -12,7 +13,7 @@ import {
   revokeSession,
   SESSION_LIST_MAX,
 } from "../src/engine/session-list.js";
-import { createSession, resolveSession } from "../src/engine/sessions.js";
+import { createSession, peekSession, resolveSession } from "../src/engine/sessions.js";
 import { createApiToken } from "../src/engine/tokens.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
@@ -167,11 +168,12 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
     });
   });
 
-  // The list and the revoke read a row as live exactly when resolveSession
-  // does, at both edges (review M4). The texts are the reviewer's.
+  // The list, the revoke, peekSession, the JWT mint, and the JWT live check
+  // read a row as live exactly when resolveSession does, at both edges
+  // (review M4 and round 3 L7). Each path reads `sessionIsLive`.
   for (const edge of ["cap", "expiry"] as const)
     for (const offset of [-1, 0]) {
-      it(`agrees with resolveSession at the ${edge} edge ${offset} ms`, async () => {
+      it(`every live read agrees with resolveSession at the ${edge} edge ${offset} ms`, async () => {
         const auth = totpAuth();
         const config = edge === "cap" ? cappedConfig(auth) : auth.config;
         const user = await auth.seedUser("edge@example.com");
@@ -193,6 +195,13 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
         const listed = await listSessions(config, { session: me });
         if (!listed.ok) throw new Error(listed.code);
         expect(listed.value.some((s) => s.id === target.session.id)).toBe(live);
+        expect((await peekSession(config, t.token)) !== null).toBe(live);
+        expect(await sessionLive(config, { sid: target.session.id })).toBe(live);
+        const minted = await mintSessionJwt(config, {
+          userId: user.id,
+          sessionId: target.session.id,
+        });
+        expect(minted.ok).toBe(live);
         const fresh = { ...me, session: { ...me.session, freshAt: auth.clock.now() } };
         expect((await revokeSession(config, { session: fresh, id: target.session.id })).ok).toBe(
           live,
@@ -589,6 +598,29 @@ describe("the revoke of the other sessions (plan 12a)", () => {
       const other = await open(auth, user.id, "2.2.2.2");
       const me = await open(auth, user.id, "3.3.3.3");
       expect(await ids(auth, user.id)).toContain(dead.session.id);
+      expect(await revokeOtherSessions(config, { session: me })).toEqual({
+        ok: true,
+        value: { ended: 1 },
+      });
+      expect(ended).toEqual([`${other.session.id}:revoked`]);
+      expect(await ids(auth, user.id)).toEqual([me.session.id]);
+    });
+
+  // A row exactly at its edge is ended, so it goes with no count and no hook
+  // (review round 2, M5). The text is the reviewer's.
+  for (const end of ["expiry", "cap"] as const)
+    it(`deletes a row exactly at its ${end} with no revoked event and no count`, async () => {
+      const { auth, ended } = listening();
+      const config = end === "cap" ? cappedConfig(auth) : auth.config;
+      const user = await auth.seedUser(`edge-${end}@example.com`);
+      const dead = await open(auth, user.id, "1.1.1.1");
+      const other = await open(auth, user.id, "2.2.2.2");
+      const edge =
+        end === "cap" ? dead.session.createdAt.getTime() + DAY : dead.session.expiresAt.getTime();
+      // `open` moves the clock 1 second first, so the caller's session opens at the edge.
+      auth.clock.advance(edge - 1000 - auth.clock.now().getTime());
+      const me = await open(auth, user.id, "3.3.3.3");
+      expect(auth.clock.now().getTime()).toBe(edge);
       expect(await revokeOtherSessions(config, { session: me })).toEqual({
         ok: true,
         value: { ended: 1 },

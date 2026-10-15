@@ -425,9 +425,8 @@ export async function peekSession(
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
   ]);
   if (!row) return null;
-  // Live as `resolveSession` reads it: before expiresAt and before the absolute cap.
-  const now = config.clock.now().getTime();
-  return row.expiresAt.getTime() > now && sessionCapMs(config, row.createdAt) > now ? row : null;
+  // Live as `resolveSession` reads it: the one rule, `sessionIsLive`.
+  return sessionIsLive(config, row, config.clock.now()) ? row : null;
 }
 
 /** The caller's session from the cookie or the bearer header, or null. */
