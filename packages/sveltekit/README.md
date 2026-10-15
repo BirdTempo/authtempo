@@ -11,18 +11,25 @@ in 3 as a peer dependency.
 - `getAuth` is a function that makes the auth instance at the first request,
   so `vite build` reads no secret.
 - Put other hooks beside it with `sequence` of `@sveltejs/kit/hooks`.
+- The sign-in redirect takes the origin of `event.request.url`, which the
+  adapter builds. adapter-node 6.0.0 reads no `ORIGIN` at run time. It writes
+  `paths.origin` of the plugin config into the build.
+- With `paths.origin` unset, the origin is `https://` plus the Host header. Over
+  plain HTTP, set `paths.origin` at build time, as the example does from `ORIGIN`.
 - The hook reads no session for a route of core, and adds the renewed cookie
   to the page's answer after the sliding refresh.
 - `protect` gets the path exactly as SvelteKit matched it: the path of
-  `event.url`, decoded once by `decode_pathname` of Kit, with "%25" and "%2F"
-  kept and the case kept.
+  `event.url`, decoded once by `decode_pathname` of Kit. That path keeps "%25"
+  and "%2F" encoded, and keeps the case.
 - A non-ASCII route reaches the rule decoded, such as "/café". Write the rule
   for that form.
+- The hook sends a request to core when the raw path or the path that
+  SvelteKit decodes is under the base path. No page runs for such a request.
 - A path that SvelteKit decodes to a path of core, such as "/%61uth/x", goes to
   core. Core matches its routes on the raw path. So it answers as for a path it
   does not have: 404, or its own answer to an OPTIONS.
 - An app's `reroute` hook changes the path that SvelteKit matches, but the hook
-  judges `event.url`: write the rule for both forms of a rerouted protected path.
+  judges `event.url`. Write the rule for both forms of a rerouted protected path.
 - A remote function at `/_app/remote/<id>` is outside the protect rule, so it
   must check `locals.session` itself.
 

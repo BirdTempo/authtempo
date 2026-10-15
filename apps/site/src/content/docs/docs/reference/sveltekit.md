@@ -61,8 +61,11 @@ sidebar:
 - The package takes `@sveltejs/kit` 3.0.1 or a later 3 release as a peer dependency.
 - `getAuth` is a function that makes the auth instance at the first request, so `vite build` reads no secret.
 - Put other hooks beside it with `sequence` of `@sveltejs/kit/hooks`.
+- The sign-in redirect takes the origin of `event.request.url`, which the adapter builds.
+- `@sveltejs/adapter-node` 6.0.0 reads no `ORIGIN` at run time. It writes `paths.origin` of the plugin config into the build.
+- With `paths.origin` unset, the origin is `https://` plus the Host header. Over plain HTTP, set `paths.origin` at build time.
 - The hook reads no session for a route of core. Core reads and renews the session itself.
-- The hook skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
+- The hook sends a request to core when the raw path or the path that SvelteKit matched is under the base path. No page runs for such a request.
 - A path that SvelteKit decodes to a path of core, such as "/%61uth/x", goes to core. It never runs a page.
 - Core matches its routes on the raw path. So core answers such a path as a path that it does not have: 404, or its own answer to an OPTIONS.
 - After the sliding refresh, the page's answer carries the renewed session cookie.
