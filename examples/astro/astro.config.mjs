@@ -10,7 +10,9 @@ export default defineConfig({
     // this list; for any other host the origin is localhost:<port>. The gate
     // builds the sign-in redirect from that origin, and Astro's origin check
     // refuses a form post from the app's own host. List the host of your
-    // deploy here. 127.0.0.1:8794 is the host of the example's proof.
-    allowedDomains: [{ protocol: "http", hostname: "127.0.0.1", port: "8794" }],
+    // deploy here. 127.0.0.1 is the host of the example's proof. The pattern
+    // names no port, so it matches every port: the proof port stays one fact,
+    // in the test script of package.json.
+    allowedDomains: [{ protocol: "http", hostname: "127.0.0.1" }],
   },
 });
