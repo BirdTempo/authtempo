@@ -6,6 +6,7 @@ import type {
   Response as ExpressResponse,
   RequestHandler,
 } from "express";
+import parseurl from "parseurl";
 
 /**
  * The Express binding of authtempo (plan 11d2), for Express 5 on Node. It is
@@ -19,23 +20,17 @@ function resolve<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
-/** The scheme and the authority of a request line in absolute form. */
-const AUTHORITY = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*/;
-
 /**
- * The raw path and query of the request line, as Express's router reads them
- * through parseurl: no resolution of "." or "..", no decode. A line in absolute
- * form ("GET http://other.example/account") gives the text after its
- * authority, so the origin of a URL of the binding is always the app's. A line
- * in origin form stays raw: "//account" is a path, not a host.
+ * The raw path and query of the request line, read by parseurl, the parser of
+ * Express's router: one text for the binding and the router. No resolution of
+ * "." or "..", no decode. A line in absolute form ("GET http://other.example/account")
+ * gives its path only, so the origin of a URL of the binding is always the
+ * app's. "//account" stays a path, not a host. A target that is not a path,
+ * such as "*", is judged as "/", and the router matches no route for it.
  */
 function pathOf(req: ExpressRequest): string {
-  const raw = req.originalUrl;
-  if (raw.startsWith("/")) return raw;
-  const authority = AUTHORITY.exec(raw);
-  if (!authority) return "/";
-  const rest = raw.slice(authority[0].length).split("#")[0] ?? "";
-  return rest.startsWith("/") ? rest : `/${rest}`;
+  const path = parseurl.original(req)?.path ?? "/";
+  return path.startsWith("/") ? path : "/";
 }
 
 /** The part of the auth object that gives the fallback origin. */

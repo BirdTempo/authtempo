@@ -300,6 +300,21 @@ describe("@authtempo/express (plan 11d2)", () => {
     expect(seen).toContain("/%5Cevil.example");
   });
 
+  it("runs no page for a request line that Node refuses before Express", async () => {
+    const { base, runs } = await serve();
+    // parseurl, the parser of the router, reads /account/7 and /account from these
+    // lines. Node 26.10.0 answers 400 to both before Express runs, even with
+    // insecureHTTPParser, so this test pins Node's answer.
+    for (const target of ["http://evil.example\\account/7", "http:/account"]) {
+      const res = await rawLines(
+        base,
+        `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`,
+      );
+      expect(res.status).toBe(400);
+    }
+    expect(runs.account).toBe(0);
+  });
+
   it("answers no 500 to a Host header that does not parse, on the origin of baseURL", async () => {
     const { base, signIn } = await serve();
     const lines = (path: string, extra = "") =>
