@@ -15,6 +15,7 @@ import { sessionRoutes } from "./sessions.js";
 import { socialRoutes } from "./social.js";
 import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
+import { userRoutes } from "./user.js";
 
 /**
  * Every route of a config, in the router's order. One function, so that the
@@ -24,6 +25,7 @@ export function coreRoutes(config: ResolvedConfig): Route[] {
   return [
     ...sessionRoutes(config),
     ...reauthRoutes(config),
+    ...userRoutes(config),
     ...magicLinkRoutes(config),
     ...socialRoutes(config),
     ...passkeyRoutes(config),

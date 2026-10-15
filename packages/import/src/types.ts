@@ -95,7 +95,7 @@ export interface ImportUser {
   emailVerified: boolean;
   name: string | null;
   /**
-   * The importer keeps only an `https:` URL of at most 2048 characters. Any
+   * The importer keeps only an image that passes core's `validImageUrl`. Any
    * other value is dropped and listed as `image:invalid`: a source such as
    * Supabase's user metadata lets the user write it, and core writes an image
    * only from a verified ID token.

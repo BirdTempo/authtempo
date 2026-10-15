@@ -22,9 +22,10 @@ export const BACKUP_CODES_VERSION = 2;
 /**
  * The rounds of a compare-and-set on the row. Each lost round means that a
  * parallel write landed first. An adapter whose `eq` on a date never matches
- * loses every round; the bound stops the loop then.
+ * loses every round; the bound stops the loop then. The profile update
+ * (plan 12a) reads the same bound.
  */
-const ROUNDS = 5;
+export const ROUNDS = 5;
 
 // Per 15 minutes, for the password check of the TOTP setup and of every
 // method's enable and disable (plan 9h, owner decision 3a; plan 12c). Its own

@@ -951,6 +951,10 @@ describe("the notice and app data (plan 12a review L1, L2)", () => {
     ["fe80::1%eth0", false],
     ["[2001:db8::1]", false],
     ["unknown", false],
+    // Hex and colons only, so the IPv6 parse decides (review R3-L1 of Task 6).
+    ["1:2:3", false],
+    [":::", false],
+    ["1234:".repeat(40), false],
   ])("the default text prints the IP %s: %s", (ip, printed) => {
     const text = defaultNoticeMail({
       event: "password_changed",

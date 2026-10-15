@@ -211,8 +211,9 @@ export interface UserPatch {
 /**
  * What `user.beforeCreate` may change (plan 12a): `name` and `image`, each a
  * string or null, under the profile rules. A name has 1 to 200 code units
- * and no control character. An image is an `https:` URL of at most 2048
- * characters, with no credentials. Any other key or value answers `hook_failed`.
+ * and no control character. An image passes `validImageUrl`: an `https://`
+ * URL with a host, of at most 2048 characters, with no credentials. Any
+ * other key or value answers `hook_failed`.
  */
 export interface UserCreatePatch {
   name?: string | null;

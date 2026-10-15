@@ -48,6 +48,7 @@ export const ROUTES = Object.freeze([
   { method: "GET", path: "/sessions", feature: "account" },
   { method: "POST", path: "/sessions/revoke", feature: "account" },
   { method: "POST", path: "/sessions/revoke-others", feature: "account" },
+  { method: "POST", path: "/user/update", feature: "account" },
   { method: "POST", path: "/magic-link/request", feature: "magicLink" },
   { method: "GET", path: "/magic-link/verify", feature: "magicLink" },
   { method: "POST", path: "/magic-link/verify", feature: "magicLink" },

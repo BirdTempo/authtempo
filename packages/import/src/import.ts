@@ -235,7 +235,7 @@ export function formatName(hash: string): string {
  * - An organization only with an owner.
  * - A name only inside core's rule: an organization with an invalid name is
  *   skipped (`invalid_name`), and an invalid user name is dropped and listed.
- * - An image only as an `https:` URL of at most 2048 characters.
+ * - An image only when it passes core's `validImageUrl`.
  * - A slug outside core's reserved set, the app's `reservedSlugs`, and the
  *   app's platform organization slug.
  * Each record is one transaction. The key is the id `importId` derives from

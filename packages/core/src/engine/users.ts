@@ -23,21 +23,37 @@ export function validUserName(name: string): boolean {
 const IMAGE_MAX = 2048;
 
 /**
- * The image rule of a profile (plan 12a): an absolute `https:` URL of at
- * most 2048 characters, with no credentials and no control character. A
- * `data:` URL is refused: other people's pages show the image, and the
- * bound would cut it. The social profile, the `user.beforeCreate` patch,
- * and the profile update apply this one rule.
+ * The characters that an image URL must not hold (plan 12a Task 7, review L2
+ * of Task 5). They are whitespace of any kind, a control character (C0, DEL,
+ * C1), and a format character. A bidi control, a zero-width character, and
+ * the soft hyphen are format characters. A lone surrogate and a backslash are
+ * refused too. The URL parser drops or rewrites some of them, so the stored
+ * text and the parsed URL could differ.
+ */
+const IMAGE_REFUSED = /[\s\p{Cc}\p{Cf}\p{Cs}\\]/u;
+
+/** `https://`, then an authority that is not empty. The parser reads `https:/a` and `https:///a` as host `a`. */
+const IMAGE_PREFIX = /^https:\/\/[^/?#]/i;
+
+/**
+ * The image rule of a profile (plan 12a): an `https://` URL with a host, of
+ * at most 2048 characters, with no credentials. It holds no whitespace, no
+ * control or format character, and no backslash. A `data:` URL is refused:
+ * other people's pages show the image, and the bound would cut it. The
+ * social profile, the `user.beforeCreate` patch, the profile update, and the
+ * importer apply this one rule.
  */
 export function validImageUrl(value: string): boolean {
-  if (value.length > IMAGE_MAX || hasControlChar(value)) return false;
+  if (value.length > IMAGE_MAX || IMAGE_REFUSED.test(value) || !IMAGE_PREFIX.test(value))
+    return false;
+  // The prefix fixed the scheme, and the parser refuses an empty `https:` host.
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     return false;
   }
-  return url.protocol === "https:" && url.username === "" && url.password === "";
+  return url.username === "" && url.password === "";
 }
 
 /**

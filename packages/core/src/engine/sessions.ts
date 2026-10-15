@@ -479,6 +479,9 @@ export function publicUser(user: UserRow): {
   };
 }
 
+/** The public shape of a user (plan 12a: the profile and the change of address answer it). */
+export type PublicUser = ReturnType<typeof publicUser>;
+
 /** The public shape of a session. Never the hash, never internal ids a client does not need. */
 export function publicSession(resolved: ResolvedSession): {
   user: ReturnType<typeof publicUser>;

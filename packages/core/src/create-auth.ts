@@ -84,6 +84,7 @@ import {
   verifyPassword,
   verifyPasswordEmail,
 } from "./engine/password.js";
+import { type ProfileUpdate, updateProfile } from "./engine/profile.js";
 import {
   type ReauthInput,
   reauthenticate,
@@ -106,6 +107,7 @@ import {
 import {
   destroySession,
   type PublicSession,
+  type PublicUser,
   type ResolvedSession,
   renewedSessionCookie,
   resolveSession,
@@ -298,6 +300,12 @@ export interface SessionApi {
   revokeOthers(input: { session: ResolvedSession }): Promise<Result<{ ended: number }>>;
 }
 
+/** The user operations of a settings page (plan 12a). Present in every deployment. */
+export interface UserApi {
+  /** Writes `name` and `image`. Needs a verified email. No fresh rule. */
+  update(input: ProfileUpdate): Promise<Result<{ user: PublicUser }>>;
+}
+
 export interface AuthApi {
   /** Deletes rows that no flow can use any more. Call it from a scheduled handler. */
   sweepExpired(): Promise<SweepResult>;
@@ -408,6 +416,7 @@ export interface AuthApi {
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
   session: SessionApi;
+  user: UserApi;
   secrets: SecretsApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
@@ -523,6 +532,9 @@ export function createAuth(input: AuthConfig): Auth {
         list: (i) => listSessions(config, i),
         revoke: (i) => revokeSession(config, i),
         revokeOthers: (i) => revokeOtherSessions(config, i),
+      },
+      user: {
+        update: (i) => updateProfile(config, i),
       },
       secrets: {
         status: () => secretsStatus(config),

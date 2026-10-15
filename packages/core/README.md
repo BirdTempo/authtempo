@@ -925,6 +925,7 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | GET | `/sessions` | session | `{ sessions: [{ id, createdAt, lastSeenAt, expiresAt, freshAt, ip, userAgent, activeOrganizationId, current }] }`, the live sessions newest first, at most 100, never a token or its hash; 401. `lastSeenAt` moves only at the sliding refresh. `expiresAt` is the earlier of the row's expiry and the absolute cap |
 | POST | `/sessions/revoke` | session (fresh), `{ id }` | `{ ok: true }`; the caller's own id clears the cookie; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found` (another user's, an unknown, or an ended id); 429 `rate_limited`. A session JWT of that session lives to its `exp` |
 | POST | `/sessions/revoke-others` | session (fresh) | `{ ended }`, the count of live sessions it ended: every other session, the second-factor challenges, and the handoff codes go. An ended row goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay; 401; 403 `session_not_fresh`; 429 `rate_limited` |
+| POST | `/user/update` | session, `{ name?, image? }` | `{ user }`. `name`: 1 to 200 code units with no control character, or null. `image`: an image URL by the rule below, or null. 400 `invalid_body` (no field, a bad value, or any other field, the address too); 401 (also when the user row goes during the update); 403 `email_unverified`, `hook_refused`; 409 `conflict`; 429 `rate_limited`; 500 `hook_failed`. No fresh rule |
 
 The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it takes no `code`, whatever methods the user has on. After a password or an email code, `code` is the second factor. Item 2 says: "With the second factor on, the password and the email code need `code`, an authenticator code or a backup code." Item 12 lists "the email method of plan 12c as a re-authentication code" as a later input. So a user whose only method is the email method sends a backup code, or proves by a passkey. A user whose password row holds `LEGACY_VERIFY_HASH` proves by an email code or a passkey. The password proof refuses the marker, as the TOTP setup does.
 
@@ -934,6 +935,13 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | `POST /reauth/email`, then `otp:email` and `otp:email-day` of the address, shared with every mailed code |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
+| `user-update:user:<userId>` | 15 minutes | 30 | `POST /user/update`, also when a hook refuses it. A refused body and an unverified user count no try |
+
+The profile update (`POST /user/update`, `api.user.update`) writes only the fields it gets. Null clears a field. It needs a verified address: a claim keeps the user row and its name, so a claimant must not set what the owner inherits. It has no fresh rule, because the name and the image do not affect a sign-in.
+
+The image rule (`validImageUrl`) holds for the profile update, the `user.beforeCreate` patch, the social fill, and the importer. An image is an `https://` URL with a host, of at most 2048 characters, with no credentials. It holds no whitespace, no control character (C0, DEL, C1), no format character (such as a bidi control or a zero-width character), and no backslash. A `data:` URL is refused.
+
+`user.beforeUpdate` gets the stored row, the patch, and `via: "profile"`. It runs before the write, so a refusal or a throw leaves the row as it was. The write is a compare-and-set on the row that the hook saw. A parallel write that lands first makes the update read the row again and run `user.beforeUpdate` again. After 5 lost rounds the answer is 409 `conflict`, and core logs `authtempo: profile update gave up <user id>`. `user.afterUpdate` gets the stored row after the write and, as `previous`, the row that the write replaced.
 
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
@@ -1045,8 +1053,8 @@ const auth = createAuth({
   social, the password sign-up, the reset link, and the reset code run the
   create points. `user.beforeCreate` may answer
   `{ name?, image? }`, each a string or null. A name has 1 to 200 code
-  units and no control character. An image is an `https:` URL of at most
-  2048 characters with no credentials. Any other key or value answers 500
+  units and no control character. An image follows the image rule of
+  "Account". Any other key or value answers 500
   `hook_failed` and logs `authtempo: user patch refused` with the reason,
   never the value.
 - Identity points (plan 12a): `beforeLink`, `afterLink`, `beforeUnlink`,

@@ -42,6 +42,7 @@ export {
   type SessionApi,
   type TokensApi,
   type TotpApi,
+  type UserApi,
 } from "./create-auth.js";
 export { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
 export type {
@@ -115,13 +116,19 @@ export {
   LEGACY_VERIFY_HASH,
   PENDING_HASH_PREFIX,
 } from "./engine/password.js";
+export type { ProfileUpdate } from "./engine/profile.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { ReauthInput, ReauthProof } from "./engine/reauth.js";
 export type { SignInChallenge } from "./engine/second-factor.js";
 export type { MethodEnabled } from "./engine/second-factor-methods.js";
 export type { SecretsRewrap, SecretsStatus, SecretVersionCount } from "./engine/secrets.js";
 export type { SessionSummary } from "./engine/session-list.js";
-export { type PublicSession, type ResolvedSession, readSessionToken } from "./engine/sessions.js";
+export {
+  type PublicSession,
+  type PublicUser,
+  type ResolvedSession,
+  readSessionToken,
+} from "./engine/sessions.js";
 export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
 export {

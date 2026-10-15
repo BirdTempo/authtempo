@@ -103,6 +103,15 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Answer | `{ ended }`, the count of live sessions that the call ended. Every other session, the second-factor challenges, and the handoff codes go. A row past its expiry or the absolute cap goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
+<h3 id="post-user-update"><code>POST /user/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session of a verified user. No fresh rule |
+| Input | JSON `{ name?, image? }`. `name`: 1 to 200 characters with no control character, or null. `image`: an `https://` URL with a host, of at most 2048 characters, or null. The image holds no credentials, no whitespace, no control or format character, and no backslash. Any other field is refused, the address too |
+| Answer | `{ user }`: the `id`, `email`, `emailVerified`, `name`, and `image` of the stored row. Only the given fields change |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
 ## Magic link
 
 These routes exist in every deployment.

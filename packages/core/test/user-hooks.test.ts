@@ -520,6 +520,17 @@ describe("validImageUrl (plan 12a)", () => {
   it("takes an https URL of at most 2048 characters", () => {
     expect(validImageUrl(`${base}a.png`)).toBe(true);
     expect(validImageUrl(base + "a".repeat(2048 - base.length))).toBe(true);
+    // The scheme is case-insensitive; a port, a query, a fragment, and an escape are a URL's own parts.
+    for (const value of [
+      "HTTPS://img.example.com/a.png",
+      "https://img.example.com:8443/a.png?s=96#x",
+      "https://img.example.com/a%20b.png",
+      "https://img.example.com",
+      "https://192.0.2.1/a.png",
+      "https://[2001:db8::1]/a.png",
+      "https://bücher.example/a.png",
+    ])
+      expect(validImageUrl(value), value).toBe(true);
   });
 
   it("refuses a longer URL, another scheme, credentials, a control character, and no URL", () => {
@@ -537,6 +548,43 @@ describe("validImageUrl (plan 12a)", () => {
       "",
     ])
       expect(validImageUrl(value), value).toBe(false);
+  });
+
+  // Review L2 of Task 5: the URL parser drops or rewrites these, so the stored text would differ.
+  it.each([
+    ["a space", "https://img.example.com/a b.png"],
+    ["a leading space", " https://img.example.com/a.png"],
+    ["a trailing space", "https://img.example.com/a.png "],
+    ["a tab", "https://img.example.com/a\t.png"],
+    ["a line feed", "https://img.example.com/a\n.png"],
+    ["a no-break space", "https://img.example.com/a\u00a0.png"],
+    ["an ideographic space", "https://img.example.com/a\u3000.png"],
+    ["a line separator", "https://img.example.com/a\u2028.png"],
+    ["DEL", "https://img.example.com/a\u007f.png"],
+    ["a C1 control (NEL)", "https://img.example.com/a\u0085.png"],
+    ["a C1 control (CSI)", "https://img.example.com/a\u009b.png"],
+    ["a right-to-left override", "https://img.example.com/\u202egnp.a"],
+    ["a left-to-right mark", "https://img.example.com/a\u200e.png"],
+    ["a right-to-left isolate", "https://img.example.com/a\u2067.png"],
+    ["an Arabic letter mark", "https://img.example.com/a\u061c.png"],
+    ["a zero-width space", "https://img.example.com/a\u200b.png"],
+    ["a zero-width joiner", "https://img.example.com/a\u200d.png"],
+    ["a byte order mark", "\ufeffhttps://img.example.com/a.png"],
+    ["a soft hyphen", "https://img.\u00adexample.com/a.png"],
+    ["a lone surrogate", "https://img.example.com/a\ud800.png"],
+    ["a backslash in the path", "https://img.example.com\\a.png"],
+    ["a backslash for the slashes", "https:\\\\img.example.com/a.png"],
+    ["https: with one slash", "https:/img.example.com/a.png"],
+    ["https: with no slash", "https:img.example.com/a.png"],
+    ["https: with three slashes", "https:///img.example.com/a.png"],
+    ["no host", "https://"],
+    ["an empty host with a port", "https://:443/a.png"],
+    ["an empty host with an at sign", "https://@/a.png"],
+    ["a host that does not parse", "https://[2001:db8::1/a.png"],
+    ["a scheme-relative URL", "//img.example.com/a.png"],
+    ["the http scheme with slashes", "http://img.example.com/a.png"],
+  ])("refuses %s", (_, value) => {
+    expect(validImageUrl(value)).toBe(false);
   });
 
   it("is the rule of the social fill too: a picture with credentials fills no image", async () => {
