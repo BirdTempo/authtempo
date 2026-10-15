@@ -287,8 +287,13 @@ describe("@authtempo/hono (plan 11d2)", () => {
   it("never runs a page for an escaped path of core", async () => {
     const { auth } = makeApp();
     let runs = 0;
+    const seen: string[] = [];
+    const protect = (p: string) => {
+      seen.push(p);
+      return p !== "/";
+    };
     const app = new Hono<AuthEnv>();
-    app.use("*", authSession({ auth, protect: (p) => p !== "/", signInPath: "/sign-in" }));
+    app.use("*", authSession({ auth, protect, signInPath: "/sign-in" }));
     app.on(["GET", "POST", "OPTIONS"], "/auth/*", authHandler(auth));
     app.get("/*", (c) => {
       runs++;
@@ -299,5 +304,7 @@ describe("@authtempo/hono (plan 11d2)", () => {
       expect([307, 401, 404]).toContain(res.status);
     }
     expect(runs).toBe(0);
+    // The rule gets the path that Hono matched, never the raw "/%61uth/...".
+    expect(seen).toEqual(["/auth/session", "/auth/x"]);
   });
 });
