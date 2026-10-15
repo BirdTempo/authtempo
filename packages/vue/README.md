@@ -22,8 +22,13 @@ On the server of Nuxt:
 - The subscription of `useSession` ends with the component's scope.
 - A server render shows the pending state, and starts no subscription and no read.
 - The session middleware reads the URL and the headers only, never the body.
-- The session middleware gives `protect` the path decoded once, as Vue Router
-  reads it. Vue Router matches a path in any case by default: set
+- `protect` guards a page load from the server only. A `<NuxtLink>` navigation
+  renders the page in the browser and never reaches the server middleware.
+  Read private data only in a server route that calls `getSession(event)`, read
+  the session in the browser with `useSession`, or link with plain `<a>` tags
+  so that each page load reaches the server.
+- The session middleware gives `protect` the path decoded once, as h3 decodes
+  it (`%2F` and `%25` stay encoded). Vue Router matches a path in any case by default: set
   `router: { options: { sensitive: true } }` in `nuxt.config.ts`, or compare in
   lower case in `protect`. Prefer a prefix rule: the router also renders
   `/account/` for `/account`.

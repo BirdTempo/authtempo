@@ -6,7 +6,10 @@ import { API, APP, makeServer, SESSION } from "./support.js";
 const DAY = 24 * 60 * 60 * 1000;
 
 /** An h3 app as Nitro builds one: a server middleware, the routes of core, and two pages. */
-function makeApp(core: { basePath?: string } = {}) {
+function makeApp(
+  core: { basePath?: string } = {},
+  protect: (pathname: string) => boolean = (p) => p.startsWith("/account"),
+) {
   const prefix = core.basePath ?? "/auth";
   let now = new Date("2026-01-01T00:00:00.000Z");
   const server = makeServer({ clock: { now: () => now }, ...core });
@@ -21,7 +24,7 @@ function makeApp(core: { basePath?: string } = {}) {
   app.use(
     authSessionHandler({
       auth: server.auth,
-      protect: (p) => p.startsWith("/account"),
+      protect,
       signInPath: "/sign-in",
     }),
   );
@@ -31,9 +34,14 @@ function makeApp(core: { basePath?: string } = {}) {
     "/",
     defineEventHandler((event) => getSession(event)?.user.email ?? "signed out"),
   );
+  // The page code: a redirect must answer before it runs.
+  let pageRuns = 0;
   router.get(
     "/account",
-    defineEventHandler((event) => `account of ${getSession(event)?.user.email}`),
+    defineEventHandler((event) => {
+      pageRuns++;
+      return `account of ${getSession(event)?.user.email}`;
+    }),
   );
   app.use(router.handler);
   const fetch = toWebHandler(app);
@@ -58,6 +66,7 @@ function makeApp(core: { basePath?: string } = {}) {
     counter,
     fetch,
     signIn,
+    pageRuns: () => pageRuns,
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
   };
 }
@@ -108,18 +117,29 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
   });
 
   it("sends a person with no session on a protected path to the sign-in page", async () => {
-    const { fetch } = makeApp();
+    const { fetch, pageRuns } = makeApp();
     const res = await fetch(new Request(`${API}/account`));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Faccount`);
+    expect(pageRuns()).toBe(0);
   });
 
   it("reads the decoded path, as the page router reads it", async () => {
     // Vue Router renders the page of /account for /%61ccount: the gate must protect it too.
-    const { fetch } = makeApp();
+    const { fetch, pageRuns } = makeApp();
     const res = await fetch(new Request(`${API}/%61ccount`));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Faccount`);
+    expect(pageRuns()).toBe(0);
+  });
+
+  it("reads an escaped ? as h3 reads it, under an exact rule", async () => {
+    // h3 decodes "%3F", so /account%3F routes to the page of /account.
+    const { fetch, pageRuns } = makeApp({}, (p) => p === "/account");
+    const res = await fetch(new Request(`${API}/account%3F`));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Faccount`);
+    expect(pageRuns()).toBe(0);
   });
 
   it("renews the session cookie on the page's answer", async () => {

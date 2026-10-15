@@ -48,20 +48,24 @@ export interface NuxtAuthOptions {
 }
 
 /**
- * The URL that the page router reads. Vue Router decodes the path once before
- * it matches ("/%61ccount" renders the page of "/account", vue-router 5.4.0,
- * probed 2026-10-15), so the gate reads the decoded path too: a protect rule
- * then sees the path of the page that runs. decodeURI keeps an escaped "/".
- * A path with a bad escape stays as it came.
+ * The URL that h3 routes and the Nuxt renderer reads. h3 1.15.11 decodes the
+ * path once with decodeURIComponent and keeps "%2F" and "%25" (_decodePath and
+ * ufo's decodePath, read 2026-10-15), so "/%61ccount" and "/account%3F" both
+ * render the page of "/account". The gate reads the same text. The URL is
+ * built again from that text, so a decoded "?" starts the query, as in h3.
+ * A path with a bad escape stays as it came, as in h3. Not event.path: under
+ * a Nuxt app.baseURL it loses the base that core's routes keep.
  */
 function routedURL(raw: string | URL): URL {
   const url = new URL(raw);
+  let path = url.pathname;
   try {
-    url.pathname = decodeURI(url.pathname);
+    path = decodeURIComponent(path.replace(/%25/g, "%2525").replace(/%2F/gi, "%252F"));
   } catch {
-    // A bad escape: no router decodes it, so the raw path is the routed path.
+    // A bad escape: h3 keeps the raw path, so the raw path is the routed path.
   }
-  return url;
+  // One leading slash: "//x" after the origin would name another host.
+  return new URL(path.replace(/^[/\\]+/, "/") + url.search, url.origin);
 }
 
 /**
@@ -75,9 +79,14 @@ export function authSessionHandler(options: NuxtAuthOptions): EventHandler {
   return defineEventHandler(async (event) => {
     // A web handler (toWebHandler, a Worker preset) keeps the request's URL in
     // event.web; on Node, getRequestURL builds it from the Host header.
-    const url = routedURL(event.web?.url ?? getRequestURL(event));
-    const request = new Request(url, { headers: event.headers });
-    const gate = await readGate({ ...options, auth: resolve(options.auth) }, request);
+    const raw = event.web?.url ?? getRequestURL(event);
+    // A body-less copy for the session read: the gate reads the headers only.
+    const request = new Request(raw, { headers: event.headers });
+    const gate = await readGate(
+      { ...options, auth: resolve(options.auth) },
+      request,
+      routedURL(raw),
+    );
     // A middleware that answers ends the request; one that answers nothing lets it go on.
     if (gate.redirect) return gate.redirect;
     event.context.session = gate.session;
