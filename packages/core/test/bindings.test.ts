@@ -67,6 +67,29 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(() => checkGateOptions({})).not.toThrow();
   });
 
+  it("refuses a signInPath that a URL parser reads as another origin", () => {
+    // The URL parser drops a tab or a newline, so "/\t/evil.example" is "//evil.example".
+    for (const signInPath of ["/\t/evil.example/x", "/\n/evil.example/x", "/\r/evil.example/x"])
+      expect(() => checkGateOptions({ signInPath }), JSON.stringify(signInPath)).toThrow(
+        /path of this origin/,
+      );
+    expect(() => checkGateOptions({ signInPath: "/sign-in?x=1" })).not.toThrow();
+  });
+
+  it("fails closed for a stand-in auth object with a malformed base path", async () => {
+    expect(isAuthPath("/x", "")).toBe(false);
+    expect(isAuthPath("/auth/x", "/auth/")).toBe(false);
+    expect(isAuthPath("/auth/x", "auth")).toBe(false);
+    // createAuth refuses basePath "", so only a hand-made GateAuth reaches it.
+    const { auth } = setup();
+    const standIn = { ...auth, basePath: "" };
+    const g = await readGate(
+      { auth: standIn, protect: () => true, signInPath: "/sign-in" },
+      page("/x"),
+    );
+    expect(g.redirect?.status).toBe(307);
+  });
+
   it("refuses a signInPath of another origin and a basePath with a trailing slash", () => {
     // A browser reads "//host" and "/\host" as links to another origin.
     expect(() => checkGateOptions({ signInPath: "//evil.example/in" })).toThrow(/signInPath/);

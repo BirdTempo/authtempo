@@ -52,8 +52,11 @@ export function checkGateOptions(
   const { signInPath, basePath } = options;
   if (options.protect && !signInPath)
     throw new Error("authtempo bindings: protect needs signInPath");
-  // "//host" and "/\host" are links to another origin, as a browser reads them.
-  const foreign = signInPath?.startsWith("//") || signInPath?.startsWith("/\\");
+  // Judge the origin with the parser that the redirect uses: it reads "//host", "/\host",
+  // and "/\t/host" (a tab, a newline, or a carriage return is dropped) as another origin.
+  const local = "http://gate.invalid";
+  const foreign =
+    signInPath?.startsWith("/") === true && new URL(signInPath, local).origin !== local;
   if (signInPath !== undefined && (!signInPath.startsWith("/") || foreign))
     throw new Error('authtempo bindings: signInPath must be a path of this origin, one "/" first');
   // The rule of core's own basePath: with a "/" at the end, no path of core would match.
@@ -62,8 +65,13 @@ export function checkGateOptions(
     throw new Error('authtempo bindings: basePath must start with "/" and not end with "/"');
 }
 
-/** True for a path of core: under the base path, and not the base path itself. */
+/**
+ * True for a path of core: under the base path, and not the base path itself.
+ * False for a malformed base path ("", no leading "/", or a "/" at the end), so
+ * a hand-made auth object with such a base path makes the gate fail closed.
+ */
 export function isAuthPath(pathname: string, basePath: string = DEFAULT_BASE_PATH): boolean {
+  if (!basePath.startsWith("/") || basePath.endsWith("/")) return false;
   return pathname.startsWith(`${basePath}/`);
 }
 
