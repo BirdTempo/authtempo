@@ -19,8 +19,27 @@ function resolve<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
+/**
+ * The path and query of the request line, as Express's router reads them. A
+ * line in absolute form ("GET http://other.example/account") gives its path
+ * and query only, so the origin of a URL of the binding is always the app's.
+ * A line in origin form stays raw: "//account" is a path, not a host.
+ */
+function pathOf(req: ExpressRequest): string {
+  const raw = req.originalUrl;
+  if (raw.startsWith("/")) return raw;
+  try {
+    const url = new URL(raw);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return "/";
+  }
+}
+
+/** The URL on the app's own origin: the protocol, the Host header, and the path of the request line. */
 function urlOf(req: ExpressRequest): string {
-  return `${req.protocol}://${req.get("host") ?? "localhost"}${req.originalUrl}`;
+  const path = pathOf(req);
+  return `${req.protocol}://${req.get("host") ?? "localhost"}${path}`;
 }
 
 function headersOf(req: ExpressRequest): Headers {
@@ -100,15 +119,21 @@ export interface ExpressSessionOptions {
  */
 export function authSession(options: ExpressSessionOptions): RequestHandler {
   checkGateOptions(options);
+  const protect = options.protect;
   return async (req, res, next) => {
     // The gate reads the URL and the headers only: no body.
     const request = new Request(urlOf(req), { headers: headersOf(req) });
-    // The routed text: Express's router matches the raw path of originalUrl, with no
-    // decode, and without case unless the app sets "case sensitive routing".
+    // The routed text: Express's router matches the raw path of the request line, with
+    // no decode. It matches without case by default, on the app and on each Router,
+    // so the gate fails closed: a path is protected when it or its lower case is.
     const gate = await readGate(
-      { ...options, auth: resolve(options.auth) },
+      {
+        ...options,
+        protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
+        auth: resolve(options.auth),
+      },
       request,
-      req.originalUrl,
+      pathOf(req),
     );
     const location = gate.redirect?.headers.get("location");
     if (location) {

@@ -1,6 +1,7 @@
+import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
-import express from "express";
+import express, { type RequestHandler } from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { authHandler, authSession, getSession } from "../src/index.js";
 
@@ -10,10 +11,34 @@ afterEach(() => {
   for (const stop of stops.splice(0)) stop();
 });
 
+/** A raw GET with the request target as written: Node's fetch would make it a path. */
+function rawGet(
+  base: string,
+  target: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; location: string | null }> {
+  const { hostname, port } = new URL(base);
+  return new Promise((done, fail) => {
+    const req = httpRequest({ host: hostname, port, path: target, headers }, (res) => {
+      res.resume();
+      res.on("end", () =>
+        done({ status: res.statusCode ?? 0, location: res.headers.location ?? null }),
+      );
+    });
+    req.on("error", fail);
+    req.end();
+  });
+}
+
 /** An Express app on a port of the test. The auth instance is made after the port is known. */
 async function serve(
   parser?: "json" | "form",
-  opts: { sessionFirst?: boolean; pref?: boolean; caseSensitive?: boolean } = {},
+  opts: {
+    sessionFirst?: boolean;
+    pref?: boolean;
+    caseSensitive?: boolean;
+    subRouter?: boolean;
+  } = {},
 ) {
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
@@ -48,10 +73,16 @@ async function serve(
   app.get("/", (_req, res) => {
     res.send(getSession(res)?.user.email ?? "signed out");
   });
-  app.get("/account", (_req, res) => {
+  const account: RequestHandler = (_req, res) => {
     runs.account++;
     res.send(`account of ${getSession(res)?.user.email}`);
-  });
+  };
+  // A Router has its own case rule, false by default, whatever the app sets.
+  if (opts.subRouter) {
+    const pages = express.Router();
+    pages.get("/account", account);
+    app.use(pages);
+  } else app.get("/account", account);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((r) => server.once("listening", () => r()));
   stops.push(() => server.close());
@@ -155,6 +186,34 @@ describe("@authtempo/express (plan 11d2)", () => {
     expect(runs.account).toBe(0);
     // The exact path still goes to the sign-in page.
     expect((await fetch(`${base}/account`, { redirect: "manual" })).status).toBe(307);
+  });
+
+  it("folds case for protect in a default app, on the app and on a Router", async () => {
+    for (const subRouter of [false, true]) {
+      const { base, runs } = await serve(undefined, { subRouter });
+      for (const path of ["/ACCOUNT", "/Account", "/ACCOUNT/"]) {
+        const res = await fetch(`${base}${path}`, { redirect: "manual" });
+        expect(res.status).toBe(307);
+        // next keeps the case of the request.
+        expect(res.headers.get("location")).toBe(
+          `${base}/sign-in?next=${encodeURIComponent(path)}`,
+        );
+      }
+      expect(runs.account).toBe(0);
+    }
+  });
+
+  it("judges the path of a request line in absolute form on the app's own origin", async () => {
+    const { base, runs, signIn } = await serve();
+    // Express's router reads "/account" from this line; the gate must judge the same path.
+    const away = await rawGet(base, "http://evil.example/account");
+    expect(away.status).toBe(307);
+    expect(away.location).toBe(`${base}/sign-in?next=%2Faccount`);
+    expect(runs.account).toBe(0);
+    const cookie = await signIn();
+    const page = await rawGet(base, "http://evil.example/account", { cookie });
+    expect(page.status).toBe(200);
+    expect(runs.account).toBe(1);
   });
 
   it("does not decode an escape in the path, as Express's router does not", async () => {
