@@ -9,6 +9,7 @@ import { operatorRoutes } from "./operator.js";
 import { organizationRoutes } from "./organizations.js";
 import { passkeyRoutes } from "./passkeys.js";
 import { passwordRoutes } from "./password.js";
+import { reauthRoutes } from "./reauth.js";
 import { secondFactorRoutes } from "./second-factor.js";
 import { sessionRoutes } from "./sessions.js";
 import { socialRoutes } from "./social.js";
@@ -22,6 +23,7 @@ import { totpRoutes } from "./totp.js";
 export function coreRoutes(config: ResolvedConfig): Route[] {
   return [
     ...sessionRoutes(config),
+    ...reauthRoutes(config),
     ...magicLinkRoutes(config),
     ...socialRoutes(config),
     ...passkeyRoutes(config),

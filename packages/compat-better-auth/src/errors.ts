@@ -83,6 +83,10 @@ export const BETTER_AUTH_CODES = {
   // (dist/plugins/haveibeenpwned/index.mjs:9, read 2026-10-15). When the
   // range API gives no answer, it answers 500 with no code (:20, :27).
   breach_check_unavailable: "BREACH_CHECK_UNAVAILABLE",
+  // Plan 12a. Better Auth 1.7.2's own name (@better-auth/core dist/error/codes.mjs:36, read
+  // 2026-10-14). Better Auth answers 403 on a list and SESSION_EXPIRED 400 on a delete; the
+  // status stays core's, 403, on every route.
+  session_not_fresh: "SESSION_NOT_FRESH",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

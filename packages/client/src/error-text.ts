@@ -63,6 +63,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   captcha_unavailable: "The captcha check is not available now. Try again later.",
   breach_check_unavailable:
     "The password check is not available now. Wait a few minutes, then start again. A used email code does not work again.",
+  session_not_fresh:
+    "Confirm that it is you to continue: enter your password, or use your passkey.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

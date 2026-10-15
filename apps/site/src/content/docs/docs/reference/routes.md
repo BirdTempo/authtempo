@@ -45,6 +45,19 @@ These routes exist in every deployment.
 | Answer | `{ ok: true }`, and the cookie is cleared |
 | Errors | None |
 
+## Account
+
+These routes serve a settings page (plan 12a). They exist in every deployment unless a row names a feature. A fresh session is one that a sign-in or a re-authentication proved within `session.freshMinutes`.
+
+<h3 id="post-reauth"><code>POST /reauth</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session |
+| Input | JSON `{ password, code? }`. `code` is an authenticator code or a backup code, and it is required while the second factor is on |
+| Answer | `{ freshUntil }`, an ISO date. The session token and the expiry stay the same |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
 ## Magic link
 
 These routes exist in every deployment.

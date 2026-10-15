@@ -53,6 +53,8 @@ export const ERRORS = {
   captcha_unavailable: 503,
   // plan 12b: the breach check gave no answer; the check fails closed
   breach_check_unavailable: 503,
+  // plan 12a: a sensitive change needs a sign-in or a re-authentication within session.freshMinutes
+  session_not_fresh: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

@@ -147,6 +147,14 @@ export interface AuthConfig {
      * whatever its sliding refresh, and the person signs in again.
      */
     absoluteDays?: number;
+    /**
+     * The fresh window of a session in minutes, 1 to 1440 (plan 12a). A
+     * sensitive change needs a sign-in or a re-authentication within it:
+     * the address, a link, an unlink, the delete, a revoke, a passkey, an API
+     * token, the second factor. Default 1440 (24 hours), Better Auth's
+     * `freshAge`. A shorter window asks a person to prove it again sooner.
+     */
+    freshMinutes?: number;
   };
   magicLink?: {
     ttlMinutes?: number;
@@ -549,7 +557,12 @@ export interface ResolvedConfig {
   cookieName: string;
   /** The old session cookie that the router moves, or null when `cookieName` is not the default (plan 12b). */
   legacyCookieName: string | null;
-  session: { ttlDays: number; slidingRefreshDays: number; absoluteDays: number | null };
+  session: {
+    ttlDays: number;
+    slidingRefreshDays: number;
+    absoluteDays: number | null;
+    freshMinutes: number;
+  };
   magicLink: {
     ttlMinutes: number;
     linkBuilder: (token: string, next: string) => string;
@@ -1013,15 +1026,19 @@ const SESSION_KEYS: Readonly<Record<keyof NonNullable<AuthConfig["session"]>, tr
   ttlDays: true,
   slidingRefreshDays: true,
   absoluteDays: true,
+  freshMinutes: true,
 };
 
-/** `session`. ttlDays and slidingRefreshDays keep the defaults of version 1; absoluteDays is off by default (plan 12b). */
+/**
+ * `session`. ttlDays and slidingRefreshDays keep the defaults of version 1;
+ * absoluteDays is off by default (plan 12b); freshMinutes is 1440 by default (plan 12a).
+ */
 function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["session"] {
   const o = input ?? {};
   for (const [key, value] of Object.entries(o))
     if (value !== undefined && !Object.hasOwn(SESSION_KEYS, key))
       throw new ConfigError(
-        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, and absoluteDays`,
+        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, absoluteDays, and freshMinutes`,
       );
   const { absoluteDays } = o;
   if (
@@ -1036,6 +1053,7 @@ function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["ses
     ttlDays: o.ttlDays ?? 30,
     slidingRefreshDays: o.slidingRefreshDays ?? 7,
     absoluteDays: absoluteDays ?? null,
+    freshMinutes: integerIn("session.freshMinutes", o.freshMinutes ?? 1440, 1, 1440),
   };
 }
 

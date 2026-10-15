@@ -912,6 +912,18 @@ Check the member's rank on each request.
 | `hook_refused` | 403 | A before hook threw `hookRefusal(message)`; the body carries `message` |
 | `hook_failed` | 500 | A before hook threw another error, or a session patch was wrong |
 
+## Account
+
+The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk_` bearer or a JWT bearer answers 401. A route marked "fresh" needs a session whose sign-in or re-authentication is younger than `session.freshMinutes` (default 1440, 24 hours). Else it answers 403 `session_not_fresh`: the client re-authenticates at `POST /reauth` and sends the change again. The token and the expiry do not change.
+
+| Method | Path | Body or query | Answer |
+| --- | --- | --- | --- |
+| POST | `/reauth` | session, `{ password, code? }` | `{ freshUntil }`; 400 `invalid_body` (no proof, an unknown field, or no `code` while the second factor is on), `invalid_code`; 401, `invalid_credentials`; 429 `rate_limited` |
+
+| Limit | Window | Count | Route |
+| --- | --- | --- | --- |
+| `reauth:user:<userId>` | 15 minutes | 10 | `POST /reauth`, right or wrong. Its own key: a guess here costs the owner's sign-in nothing |
+
 ## Hooks
 
 A hook is your code at a named point of a core flow (plan 9d). Pass plain

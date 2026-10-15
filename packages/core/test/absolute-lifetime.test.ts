@@ -61,7 +61,7 @@ describe("session.absoluteDays (plan 12b, ASVS 5.0.0 7.3.2)", () => {
       );
     expect(() => world({ idleDays: 3 } as SessionInput)).toThrow(
       new ConfigError(
-        "session.idleDays is not an option; core has ttlDays, slidingRefreshDays, and absoluteDays",
+        "session.idleDays is not an option; core has ttlDays, slidingRefreshDays, absoluteDays, and freshMinutes",
       ),
     );
   });

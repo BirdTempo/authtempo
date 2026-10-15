@@ -73,9 +73,12 @@ export const CONFIG_KEYS = {
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
-  session: { ttlDays: true, slidingRefreshDays: true, absoluteDays: true } satisfies Keys<
-    Part<"session">
-  >,
+  session: {
+    ttlDays: true,
+    slidingRefreshDays: true,
+    absoluteDays: true,
+    freshMinutes: true,
+  } satisfies Keys<Part<"session">>,
   magicLink: {
     ttlMinutes: true,
     linkBuilder: true,

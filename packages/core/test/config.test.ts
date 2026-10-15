@@ -27,7 +27,12 @@ describe("resolveConfig", () => {
     expect(c.basePath).toBe("/auth");
     expect(c.cookieName).toBe("__Host-tempo_session");
     expect(c.legacyCookieName).toBe("tempo_session");
-    expect(c.session).toEqual({ ttlDays: 30, slidingRefreshDays: 7, absoluteDays: null });
+    expect(c.session).toEqual({
+      ttlDays: 30,
+      slidingRefreshDays: 7,
+      absoluteDays: null,
+      freshMinutes: 1440,
+    });
     expect(c.magicLink.ttlMinutes).toBe(15);
     expect(c.magicLink.linkBuilder("tok", "/x")).toBe(
       "https://api.example.com/auth/magic-link/verify?token=tok",

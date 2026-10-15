@@ -258,6 +258,31 @@ async function proveFactor(
   return (await spendBackupCode(config, factor, code, now)) !== null;
 }
 
+/** True when the user's second factor is on (plan 12a): the factor row of plan 12c exists. */
+export async function secondFactorOn(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return config.totp !== null && (await factorRow(config.storage, userId)) !== null;
+}
+
+/**
+ * A code of the user's second factor, for the re-authentication (plan
+ * 12a): an authenticator code or a backup code, on the per-user code keys
+ * of every code check (`totp-code:user`, `totp-code:user-day`).
+ * `totp_not_enabled` when no factor is on.
+ */
+export async function proveUserFactor(
+  config: ResolvedConfig,
+  userId: string,
+  code: string,
+): Promise<Result<true>> {
+  if (!config.totp) return fail("not_found");
+  if (!(await codeCheckAllowed(config, userId))) return fail("rate_limited");
+  const factor = await factorRow(config.storage, userId);
+  if (!factor) return fail("totp_not_enabled");
+  return (await proveFactor(config, factor, code, config.clock.now()))
+    ? ok(true)
+    : fail("invalid_code");
+}
+
 /** The setup's input: the user and the user's password (plan 9f final fix wave, review I-1). */
 export interface TotpSetupInput {
   userId: string;

@@ -384,6 +384,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | The routes of [`captcha_required`](#captcha_required). |
 
+<h3 id="session_not_fresh"><code>session_not_fresh</code> 403</h3>
+
+- **Meaning:** The change needs a session that a sign-in or a re-authentication proved within `session.freshMinutes`.
+- **Do:** Re-authenticate at `POST /reauth`, then send the change again. The session token stays the same.
+
+| Routes |
+| --- |
+| [`POST /reauth`](/docs/reference/routes/#post-reauth) makes the session fresh. |
+
 ## OAuth codes
 
 `OAUTH_ERRORS` of `@authtempo/core` holds these codes. The provider routes answer them, because an OAuth client reads these strings. `invalid_token` and `rate_limited` are in both tables, so an OAuth anchor has the prefix `oauth-`.

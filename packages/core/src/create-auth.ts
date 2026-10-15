@@ -9,6 +9,7 @@ import {
   resetPasswordWithOtp,
   verifyEmailOtp,
 } from "./engine/email-otp.js";
+import { requireFresh } from "./engine/fresh.js";
 import {
   continueHandoff,
   type HandoffStart,
@@ -83,6 +84,7 @@ import {
   verifyPassword,
   verifyPasswordEmail,
 } from "./engine/password.js";
+import { type ReauthInput, reauthenticate } from "./engine/reauth.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
 import {
   rewrapSecrets,
@@ -259,6 +261,19 @@ export interface EmailOtpApi {
   reset(input: EmailOtpReset): Promise<Result<EmailOtpSession | TwoFactorPending>>;
 }
 
+/**
+ * The fresh rule and the session operations of a settings page (plan 12a).
+ * Present in every deployment. An app's own sensitive change calls
+ * `requireFresh` first (ASVS 5.0.0 7.5.3); so does an app that calls
+ * `api.tokens.create`, `api.passkeyRegistrationOptions`, or
+ * `api.deletePasskey` in process, because those take a user, not a session.
+ */
+export interface SessionApi {
+  /** `session_not_fresh` unless a sign-in or a re-authentication is younger than `session.freshMinutes`. */
+  requireFresh(resolved: ResolvedSession): Result<true>;
+  reauthenticate(input: ReauthInput): Promise<Result<{ freshUntil: Date }>>;
+}
+
 export interface AuthApi {
   /** Deletes rows that no flow can use any more. Call it from a scheduled handler. */
   sweepExpired(): Promise<SweepResult>;
@@ -368,6 +383,7 @@ export interface AuthApi {
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
+  session: SessionApi;
   secrets: SecretsApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
@@ -474,6 +490,10 @@ export function createAuth(input: AuthConfig): Auth {
         list: (i) => listApiTokens(config, i),
         revoke: (i) => revokeApiToken(config, i),
         current: (i) => currentApiToken(config, i),
+      },
+      session: {
+        requireFresh: (resolved) => requireFresh(config, resolved.session),
+        reauthenticate: (i) => reauthenticate(config, i),
       },
       secrets: {
         status: () => secretsStatus(config),

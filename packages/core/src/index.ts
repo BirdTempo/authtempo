@@ -37,6 +37,7 @@ export {
   type OAuthApi,
   type PasswordApi,
   type SecretsApi,
+  type SessionApi,
   type TokensApi,
   type TotpApi,
 } from "./create-auth.js";
@@ -103,6 +104,7 @@ export {
   PENDING_HASH_PREFIX,
 } from "./engine/password.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
+export type { ReauthInput, ReauthProof } from "./engine/reauth.js";
 export type { SignInChallenge } from "./engine/second-factor.js";
 export type { MethodEnabled } from "./engine/second-factor-methods.js";
 export type { SecretsRewrap, SecretsStatus, SecretVersionCount } from "./engine/secrets.js";

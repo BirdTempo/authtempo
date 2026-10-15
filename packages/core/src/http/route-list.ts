@@ -8,6 +8,7 @@
  */
 export type RouteFeature =
   | "session"
+  | "account"
   | "magicLink"
   | "social"
   | "passkey"
@@ -31,7 +32,8 @@ export interface RouteEntry {
    * are in every deployment; `emailOtp` and `jwtMint` are on by default;
    * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
    * `oauthRegistration` needs `oauth` with `registration.dynamic`; `operator`
-   * needs `operator.secretHash` (plan 11c).
+   * needs `operator.secretHash` (plan 11c). `account` (plan 12a) is in every
+   * deployment.
    */
   readonly feature: RouteFeature;
 }
@@ -40,6 +42,7 @@ export interface RouteEntry {
 export const ROUTES = Object.freeze([
   { method: "GET", path: "/session", feature: "session" },
   { method: "POST", path: "/sign-out", feature: "session" },
+  { method: "POST", path: "/reauth", feature: "account" },
   { method: "POST", path: "/magic-link/request", feature: "magicLink" },
   { method: "GET", path: "/magic-link/verify", feature: "magicLink" },
   { method: "POST", path: "/magic-link/verify", feature: "magicLink" },

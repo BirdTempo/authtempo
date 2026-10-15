@@ -23,12 +23,12 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(79);
+    expect(listed.length).toBe(80);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
     const served = coreRoutes(resolveConfig(base)).map(templated).sort();
-    const always = new Set(["session", "magicLink", "emailOtp", "tokens", "jwtMint"]);
+    const always = new Set(["session", "account", "magicLink", "emailOtp", "tokens", "jwtMint"]);
     const listed = ROUTES.filter((r) => always.has(r.feature)).map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual(listed.sort());
   });
