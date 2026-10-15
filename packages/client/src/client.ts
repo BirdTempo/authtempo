@@ -456,6 +456,27 @@ function captchaHeader(token: string | undefined): Record<string, string> | unde
   return token !== undefined ? { [CAPTCHA_HEADER]: token } : undefined;
 }
 
+/** A plain object, not an array and not null. */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * The shape of core's session answer (`PublicSession`): a user and a session,
+ * each with a string id. A 200 of another shape (another JSON service at the
+ * baseURL, a captive portal) is not a session, as the OAuth client and the
+ * verifier already hold (plan 11d Task 13 review, M1).
+ */
+function isPublicSession(v: unknown): v is PublicSession {
+  return (
+    isRecord(v) &&
+    isRecord(v.user) &&
+    typeof v.user.id === "string" &&
+    isRecord(v.session) &&
+    typeof v.session.id === "string"
+  );
+}
+
 export function createClient(options: ClientOptions): Client {
   const call = createRawTransport(options);
   /** One operation of `CLIENT_CALLS`: its method and path come from the table (plan 11d). */
@@ -488,6 +509,7 @@ export function createClient(options: ClientOptions): Client {
           .catch(() => {});
       return ok(null);
     }
+    if (r.ok && r.value !== null && !isPublicSession(r.value)) return fail("unexpected", 200);
     return r;
   }
   const inner = createSessionStore<PublicSession, ClientFailure>({
@@ -724,7 +746,15 @@ export function createClient(options: ClientOptions): Client {
         ),
     },
     handoff: {
-      redeem: (input) => changes(send<{ token: string } & PublicSession>("handoff.redeem", input)),
+      // The redeem answers the session and its bearer token: another shape is not a sign-in.
+      redeem: (input) =>
+        changes(
+          send<{ token: string } & PublicSession>("handoff.redeem", input).then((r) =>
+            r.ok && !(isPublicSession(r.value) && typeof r.value.token === "string")
+              ? fail("unexpected", 200)
+              : r,
+          ),
+        ),
     },
     passkey: {
       async register(input = {}) {

@@ -68,8 +68,12 @@ runErrorShapeSuite("react hook", "core", async (fetch) => {
       <Probe />
     </AuthProvider>,
   );
-  await vi.waitFor(() => expect(seen).not.toBeNull());
-  root.unmount();
+  try {
+    await vi.waitFor(() => expect(seen).not.toBeNull());
+  } finally {
+    // A wait that times out must not leave the root and its client mounted for the later cases.
+    root.unmount();
+  }
   return seen;
 });
 

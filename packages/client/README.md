@@ -113,7 +113,7 @@ client can see:
 | Code | When it appears |
 | --- | --- |
 | `network` | The fetch rejected. The device is offline, or the host is not reachable. |
-| `unexpected` | The answer is not JSON, or its error code is not in the core table. |
+| `unexpected` | The answer is not JSON, or its error code is not in the core table. A session read or a handoff redeem that answers 200 with a body of another shape gives `unexpected` with status 200. |
 | `cancelled` | The person dismissed the passkey prompt, or no authenticator matched. |
 
 ## Error texts

@@ -80,7 +80,7 @@ describe("the SDK call tables and ROUTES (plan 11d)", () => {
       // An exemption that names no route, or a route that an SDK calls, has rotted.
       expect(routes, key(e)).toContain(key(e));
       expect(called.has(key(e)), `${key(e)} is called and exempt`).toBe(false);
-      expect(e.reason.length).toBeGreaterThan(0);
+      expect(e.reason.trim(), `${key(e)} has no reason`).not.toBe("");
     }
     const covered = routes.filter((r) => called.has(r)).length;
     console.log(

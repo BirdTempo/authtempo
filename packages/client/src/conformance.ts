@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 /**
  * The error-shape conformance suite of the SDKs (plan 11d, spec 20), as
  * `@authtempo/core/conformance` is for the storage adapters. Each SDK runs
- * the same six faults and must answer one shape: `{ ok: false, code,
+ * the same seven faults and must answer one shape: `{ ok: false, code,
  * status }`, plus `message` on `hook_refused` only. A core route family and an
  * OAuth route family differ only where the tables differ.
  */
@@ -60,6 +60,13 @@ export const ERROR_SHAPE_CASES: readonly ErrorShapeCase[] = [
       oauth: { code: "unexpected", status: 404 },
     },
   },
+  {
+    // Another JSON service at the baseURL, or a captive portal: a 200 whose body is not the
+    // answer of the call (plan 11d Task 13 review, M1).
+    name: "a 200 of the wrong shape",
+    answer: { status: 200, body: '{"nope":1}' },
+    expect: both("unexpected", 200),
+  },
 ];
 
 /** A fetch that answers the case to every request. */
@@ -73,11 +80,14 @@ export function caseFetch(c: ErrorShapeCase): typeof fetch {
   }) as typeof fetch;
 }
 
-/** The SDKs whose suite ran every case in this process, in order. */
+/** The SDKs whose suite finished every case in this process, in order. */
 export const SDKS_RUN: string[] = [];
 
+/** Each case that finished its assert, as `<sdk>: <case>`. A failed or skipped case is not here. */
+export const CASES_RUN: string[] = [];
+
 /**
- * Runs the six cases for one SDK. `run` makes one call of the SDK with the
+ * Runs the cases for one SDK. `run` makes one call of the SDK with the
  * fetch it is given and answers the failure that the SDK answered.
  */
 export function runErrorShapeSuite(
@@ -89,8 +99,13 @@ export function runErrorShapeSuite(
     for (const c of ERROR_SHAPE_CASES)
       it(`answers ${c.name} in the one shape`, async () => {
         expect(await run(caseFetch(c))).toEqual({ ok: false, ...c.expect[family] });
+        CASES_RUN.push(`${sdk}: ${c.name}`);
       });
-    it("ran every case", () => {
+    // Counts the cases that finished, not the suite that ran: a failed, skipped, or lone case fails here.
+    it("finished every case", () => {
+      expect(CASES_RUN.filter((x) => x.startsWith(`${sdk}: `))).toHaveLength(
+        ERROR_SHAPE_CASES.length,
+      );
       SDKS_RUN.push(sdk);
     });
   });
