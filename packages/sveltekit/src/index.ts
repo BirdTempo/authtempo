@@ -78,7 +78,9 @@ export function authHandle(options: SvelteKitAuthOptions): Handle {
     // navigation, Kit strips /__data.json and the x-sveltekit-* query from event.url
     // only. event.url keeps the escapes, but Kit matches the path decoded once.
     const routed = `${kitPath(event.url.pathname)}${event.url.search}`;
-    const gate = await readGate({ ...options, auth }, event.request, routed);
+    // next comes from event.url, the page URL: a data request returns the person
+    // to the page, and the decoded text never becomes next on its own.
+    const gate = await readGate({ ...options, auth }, event.request, routed, event.url);
     if (gate.redirect) return gate.redirect;
     event.locals.session = gate.session;
     return withSetCookie(await resolve(event), gate.cookie);

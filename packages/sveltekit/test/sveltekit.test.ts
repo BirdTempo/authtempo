@@ -161,7 +161,8 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     expect(pageRuns()).toBe(0);
     for (const { res } of [page, data]) {
       expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+      // next is the page URL as the browser sent it, not the decoded text.
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2F%2561ccount`);
     }
   });
 
@@ -172,7 +173,8 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     for (const path of ["/caf%C3%A9", "/café"]) {
       const { res } = await run(new Request(`${BASE}${path}`));
       expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%C3%A9`);
+      // next is event.url, the page URL: "/caf%C3%A9" for both forms.
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
     }
     expect(pageRuns()).toBe(0);
   });
@@ -208,6 +210,37 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     }
     // "/" is the public home page: the two runs of it. No protected page runs.
     expect(pageRuns()).toBe(2);
+  });
+
+  // An escaped backslash or tab stays one character of a segment after Kit's
+  // decode, so no ".." resolves and a splat route under /account stays behind
+  // the prefix rule (plan 11d2 path probe 2).
+  it("gives protect a backslash and a tab as characters, not as separators", async () => {
+    const seen: string[] = [];
+    const { run, pageRuns } = setup({}, (p) => {
+      seen.push(p);
+      return p.startsWith("/account");
+    });
+    const cases = [
+      {
+        path: "/account/x%5C..%5C..%5Cauth%5Cy",
+        judged: "/account/x\\..\\..\\auth\\y",
+        next: "%2Faccount%2Fx%255C..%255C..%255Cauth%255Cy",
+      },
+      {
+        path: "/account/%09../auth/x",
+        judged: "/account/\t../auth/x",
+        next: "%2Faccount%2F%2509..%2Fauth%2Fx",
+      },
+    ];
+    for (const c of cases) {
+      seen.length = 0;
+      const { res } = await run(new Request(`${BASE}${c.path}`));
+      expect(res.status, c.path).toBe(307);
+      expect(res.headers.get("location"), c.path).toBe(`${BASE}/sign-in?next=${c.next}`);
+      expect(seen, c.path).toEqual([c.judged]);
+    }
+    expect(pageRuns()).toBe(0);
   });
 
   // The query of next comes from event.url, and "%3F" stays escaped, as Kit
