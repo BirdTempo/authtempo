@@ -103,9 +103,16 @@ export async function reauthenticate(
   // the limit counts a try. The answer is the same for every user, so it
   // tells nothing about one account.
   if ("password" in input.proof && !config.password) return fail("not_found");
+  // The same rule for the other two proofs (plan 12a Task 3): the answer
+  // depends on the deployment only, so the limit counts no try for it.
+  if ("emailCode" in input.proof && !config.emailOtp) return fail("not_found");
+  if ("passkey" in input.proof && !config.passkey) return fail("not_found");
   if (!(await config.limiter.allow(`reauth:user:${user.id}`, REAUTH_PER_USER)))
     return fail("rate_limited");
   const proof = input.proof;
+  // A passkey is two factors (spec 8.15 item 2): core asks for user
+  // verification, so it proves possession and the person. No factor code
+  // follows it, whatever second-factor methods the user has on.
   if ("passkey" in proof) {
     const proved = await provePasskeyOf(config, { userId: user.id, response: proof.passkey });
     return proved.ok ? markFresh(config, session.id) : proved;
@@ -113,6 +120,10 @@ export async function reauthenticate(
   const factorOn = await secondFactorOn(config, user.id);
   // Before any check, so a missing code costs no guess. ASVS 7.5.1 asks for
   // a full re-authentication: a password or a mailbox is one factor.
+  // `code` is "an authenticator code or a backup code" (spec 8.15 item 2).
+  // The email method of plan 12c is not a code here: item 12 lists it as a
+  // later input. So a user whose methods are email or passkey only sends a
+  // backup code after a password or an email code, or proves by a passkey.
   if (factorOn && proof.code === undefined) return fail("invalid_body");
   const proved =
     "password" in proof

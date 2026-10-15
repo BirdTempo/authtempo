@@ -1,18 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../src/config.js";
 import { defaultAccountMail } from "../src/engine/account-mail.js";
-import { requestEmailOtp } from "../src/engine/email-otp.js";
+import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
 import { requireFresh } from "../src/engine/fresh.js";
-import { passkeyRegistrationOptions, verifyPasskeyRegistration } from "../src/engine/passkeys.js";
+import {
+  passkeyAuthenticationOptions,
+  passkeyRegistrationOptions,
+  verifyPasskeyRegistration,
+} from "../src/engine/passkeys.js";
+import { LEGACY_VERIFY_HASH } from "../src/engine/password.js";
 import { reauthenticate, reauthPasskeyOptions, requestReauthCode } from "../src/engine/reauth.js";
+import { enablePasskeyMethod } from "../src/engine/second-factor-methods.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { makeAuth, post } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
-import { type Auth, EMAIL, enrolled, totpAuth, verifiedSession } from "./totp-helpers.js";
+import { type Auth, EMAIL, enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 const DAY = 86_400_000;
 const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
@@ -143,6 +150,27 @@ describe("the re-authentication by an email code (plan 12a)", () => {
   });
 });
 
+describe("the order of the feature check and the limit (plan 12a)", () => {
+  it("answers not_found for an email code with emailOtp off, and the limit counts no try", async () => {
+    const auth = totpAuth({ emailOtp: false });
+    const s = await verifiedSession(auth);
+    // 11 tries: one more than REAUTH_PER_USER allows.
+    for (let i = 0; i < 11; i++)
+      expect(
+        await reauthenticate(auth.config, { session: s, proof: { emailCode: "123456" }, ip: null }),
+      ).toMatchObject({ ok: false, code: "not_found" });
+  });
+
+  it("answers not_found for a passkey with no passkey config, and the limit counts no try", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    for (let i = 0; i < 11; i++)
+      expect(
+        await reauthenticate(auth.config, { session: s, proof: { passkey: {} }, ip: null }),
+      ).toMatchObject({ ok: false, code: "not_found" });
+  });
+});
+
 describe("the re-authentication by a passkey (plan 12a)", () => {
   it("makes the session fresh with a passkey of the user, with no factor code", async () => {
     const auth = passkeyAuth();
@@ -186,6 +214,105 @@ describe("the re-authentication by a passkey (plan 12a)", () => {
     expect(
       await reauthenticate(auth.config, { session: ada, proof: { passkey: response }, ip: null }),
     ).toMatchObject({ ok: false, code: "invalid_token" });
+  });
+});
+
+describe("the second factor with each proof (plan 12a, Task 2 review M1 and L2)", () => {
+  it("takes a passkey with no code from a user whose only factor method is the passkey", async () => {
+    const auth = passkeyAuth();
+    const signedIn = await verifiedSession(auth);
+    const soft = await registered(auth, signedIn.user);
+    const signInOptions = await passkeyAuthenticationOptions(auth.config, { ip: null });
+    if (!signInOptions.ok) throw new Error(signInOptions.code);
+    const enabled = await enablePasskeyMethod(auth.config, {
+      session: signedIn,
+      password: PASSWORD,
+      response: await soft.authenticate(signInOptions.value.challenge),
+    });
+    if (!enabled.ok) throw new Error(enabled.code);
+    expect(enabled.value.methods).toEqual(["passkey"]);
+    const old = await stale(auth, signedIn.token);
+    // The factor is on: the password alone is one factor.
+    expect(
+      await reauthenticate(auth.config, { session: old, proof: { password: PASSWORD }, ip: null }),
+    ).toMatchObject({ ok: false, code: "invalid_body" });
+    const options = await reauthPasskeyOptions(auth.config, { session: old, ip: null });
+    if (!options.ok) throw new Error(options.code);
+    const r = await reauthenticate(auth.config, {
+      session: old,
+      proof: { passkey: await soft.authenticate(options.value.challenge) },
+      ip: null,
+    });
+    expect(r.ok).toBe(true);
+    expect(await freshNow(auth, signedIn.token)).toEqual({ ok: true, value: true });
+  });
+
+  it("gives a user with a legacy password marker the email code and the passkey", async () => {
+    const auth = passkeyAuth();
+    // The rows that @authtempo/import writes for a Cognito user with no
+    // exportable hash (spec 17.4): a verified user, its email identity, and
+    // the marker as the password row.
+    const now = auth.clock.now();
+    const user = await auth.seedUser(EMAIL);
+    await auth.storage.create("identity", {
+      id: newId(now),
+      userId: user.id,
+      provider: "email",
+      subject: EMAIL,
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await auth.storage.create("password", {
+      id: newId(now),
+      userId: user.id,
+      hash: LEGACY_VERIFY_HASH,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // A real sign-in by an email code: the marker stays.
+    expect((await requestEmailOtp(auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+    const signedIn = await verifyEmailOtp(auth.config, {
+      email: EMAIL,
+      code: codeOf(auth),
+      ip: null,
+      userAgent: null,
+    });
+    if (!signedIn.ok || !("token" in signedIn.value)) throw new Error("no session");
+    const token = signedIn.value.token;
+    const row = await auth.storage.findOne("password", [
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    expect(row?.hash).toBe(LEGACY_VERIFY_HASH);
+    const old = await stale(auth, token);
+    expect(
+      await reauthenticate(auth.config, { session: old, proof: { password: PASSWORD }, ip: null }),
+    ).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect((await requestReauthCode(auth.config, { session: old })).ok).toBe(true);
+    expect(
+      (
+        await reauthenticate(auth.config, {
+          session: old,
+          proof: { emailCode: codeOf(auth) },
+          ip: null,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(await freshNow(auth, token)).toEqual({ ok: true, value: true });
+    const soft = await registered(auth, old.user);
+    const later = await stale(auth, token);
+    const options = await reauthPasskeyOptions(auth.config, { session: later, ip: null });
+    if (!options.ok) throw new Error(options.code);
+    expect(
+      (
+        await reauthenticate(auth.config, {
+          session: later,
+          proof: { passkey: await soft.authenticate(options.value.challenge) },
+          ip: null,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(await freshNow(auth, token)).toEqual({ ok: true, value: true });
   });
 });
 
