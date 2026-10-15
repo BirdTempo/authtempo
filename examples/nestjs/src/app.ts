@@ -16,7 +16,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import type { Request as ExpressRequest, Response as ExpressResponse } from "express";
+import { ExpressAdapter } from "@nestjs/platform-express";
+import express, { type Request as ExpressRequest, type Response as ExpressResponse } from "express";
 
 export interface AppEnv {
   /** The public origin of the app, read at the first request. */
@@ -25,6 +26,8 @@ export interface AppEnv {
   mail: MailPort;
   /** Called with each text that the rule tests, and at each page run. The test counts them. */
   trace?: ((event: "rule" | "page", text: string) => void) | undefined;
+  /** True for a path that needs a session. Default: the exact path "/account". */
+  protect?: ((path: string) => boolean) | undefined;
 }
 
 type WithCaller = ExpressRequest & { caller?: { email: string } };
@@ -92,7 +95,14 @@ export async function createApp(env: AppEnv): Promise<INestApplication> {
   @Module({ controllers: [AccountController] })
   class AppModule {}
 
-  const app = await NestFactory.create(AppModule, { logger: false });
+  // Express routes without case by default: "/myaccount" would run the page of
+  // "/myAccount", which a rule with a capital letter misses. So the router
+  // compares case too. Set it on an Express app of our own, before Nest gets it:
+  // Express reads it when it makes the router, and the constructor of
+  // ExpressAdapter already calls use(), so a set after NestFactory.create does nothing.
+  const server = express();
+  server.set("case sensitive routing", true);
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(server), { logger: false });
   // Every route of core under /auth, through the Express binding.
   app.use("/auth", authHandler(getAuth));
   // The session of every page, and /account for a signed-in person only. Express
@@ -103,7 +113,7 @@ export async function createApp(env: AppEnv): Promise<INestApplication> {
       auth: getAuth,
       protect: (p) => {
         env.trace?.("rule", p);
-        return p === "/account";
+        return env.protect ? env.protect(p) : p === "/account";
       },
       signInPath: "/sign-in",
     }),

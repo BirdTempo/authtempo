@@ -131,3 +131,37 @@ describe("the NestJS example (plan 11d2)", () => {
     expect(res.location).toBe(`${base}/sign-in?next=%2Faccount`);
   });
 });
+
+describe("the NestJS example with a rule that has a capital letter (plan 11d2)", () => {
+  it("runs no page of /myAccount for /myaccount or /MYACCOUNT: the router compares case", async () => {
+    const runs: string[] = [];
+    const caseApp = await createApp({
+      baseURL: () => base,
+      AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+      mail: { async send() {} },
+      protect: (p) => p.startsWith("/myAccount"),
+    });
+    // A route of the app at /myAccount, on the same Express instance.
+    caseApp
+      .getHttpAdapter()
+      .get("/myAccount", (req: { path: string }, res: { json: (v: unknown) => void }) => {
+        runs.push(req.path);
+        res.json({ page: "myAccount" });
+      });
+    await caseApp.listen(0, "127.0.0.1");
+    const port = (caseApp.getHttpServer().address() as AddressInfo).port;
+    try {
+      for (const path of ["/myaccount", "/MYACCOUNT"]) {
+        const res = await fetch(`http://127.0.0.1:${port}${path}`, { redirect: "manual" });
+        expect(res.status, path).toBe(404);
+      }
+      expect(runs).toEqual([]);
+      // The route itself is protected: no session gives the redirect.
+      const own = await fetch(`http://127.0.0.1:${port}/myAccount`, { redirect: "manual" });
+      expect(own.status).toBe(307);
+      expect(runs).toEqual([]);
+    } finally {
+      await caseApp.close();
+    }
+  });
+});

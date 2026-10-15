@@ -42,7 +42,8 @@ import test from "../../../../../../../examples/nestjs/test/app.test.ts?raw";
 
 - Nest 12 runs on Express 5, so the middleware of the Express package is the gate.
 - The rule gets the raw path as Express matched it. Express does not decode it, so `/%61ccount` matches no route and gets a 404.
-- Express matches without case, and with an optional trailing slash. The middleware tests those forms too, so `/ACCOUNT` and `/account/` get the redirect.
+- Express matches without case by default, and with an optional trailing slash. The middleware tests those forms too, so `/ACCOUNT` and `/account/` get the redirect.
+- The app sets `case sensitive routing` on its own Express app, and passes it to Nest with `new ExpressAdapter(server)`. Then `/myaccount` does not run the page of `/myAccount`.
 - An exact rule covers one route only. For a route with a parameter, use `p === "/account" || p.startsWith("/account/")`.
 - The router does not decode `/%61uth/session` to a path of core. The rule gets `/%61uth/session`, no page matches, and the answer is a 404.
 - The origin of the redirect comes from the Host header, never from a request line in absolute form.
