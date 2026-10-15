@@ -19,14 +19,20 @@ export type RouteHandler = (ctx: { request: Request }) => Promise<Response>;
 /**
  * The server handlers of the splat route `src/routes/auth.$.ts`:
  * `export const Route = createFileRoute("/auth/$")({ server: { handlers: authRouteHandlers(getAuth) } });`.
+ * Every method goes to core, which answers a method it does not serve. A
+ * missing method would fall through to a catch-all page with no gate.
+ * TanStack answers HEAD with the GET handler.
  */
 export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
   GET: RouteHandler;
   POST: RouteHandler;
+  PUT: RouteHandler;
+  PATCH: RouteHandler;
+  DELETE: RouteHandler;
   OPTIONS: RouteHandler;
 } {
   const handle: RouteHandler = ({ request }) => resolve(auth).handle(request);
-  return { GET: handle, POST: handle, OPTIONS: handle };
+  return { GET: handle, POST: handle, PUT: handle, PATCH: handle, DELETE: handle, OPTIONS: handle };
 }
 
 /** The context that the middleware gives to the next step. */

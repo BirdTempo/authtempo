@@ -114,6 +114,28 @@ describe("@authtempo/tanstack-start (plan 11d2)", () => {
     expect((await signIn()).cookie.startsWith(`${COOKIE}=ts_`)).toBe(true);
   });
 
+  // A method with no handler on the route of core would fall through to a
+  // catch-all page, which runs with no gate (final review m1).
+  it("hands every method under the base path to core", async () => {
+    const { run, handlers, counter } = setup({}, { protect: () => true });
+    let pages = 0;
+    const router = (request: Request) => {
+      const handler = handlers[request.method as keyof typeof handlers];
+      if (handler) return handler({ request });
+      pages++;
+      return new Response("catch-all page");
+    };
+    const before = counter.reads;
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+      const request = new Request(`${BASE}/auth/x`, { method, headers: { origin: BASE } });
+      const out = await run(request, "/auth/x", router);
+      expect(out.response.status).not.toBe(307);
+      expect(await out.response.text()).not.toBe("catch-all page");
+    }
+    expect(pages).toBe(0);
+    expect(counter.reads - before).toBe(0);
+  });
+
   it("passes every Set-Cookie line of core unchanged", async () => {
     const { signIn } = setup();
     // The old cookie name (plan 12b): core answers the session line and the clear of the old name.

@@ -15,6 +15,9 @@ transform of solid-js and `@tanstack`. The example app is React.
    to `requestMiddleware`, and a handler reads `getSession(context)`.
 3. Protect paths: `authRequestServer({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
+- `authRouteHandlers` answers GET, POST, PUT, PATCH, DELETE, and OPTIONS:
+  every method under the base path goes to core. TanStack answers HEAD with
+  the GET handler.
 - `createMiddleware` comes from `@tanstack/react-start` or `@tanstack/solid-start`.
 - `protect` gets the path that the router of TanStack matches, not the raw
   path of the request. The router decodes the path once: "/%61ccount"
