@@ -1,5 +1,5 @@
 import { type Auth, createAuth, type MailPort, type StorageAdapter } from "@authtempo/core";
-import { readBearer } from "@authtempo/core/credentials";
+import { readBearer, readSessionToken, sessionCookieNames } from "@authtempo/core/credentials";
 import { insufficientScopeResponse, unauthorizedResponse } from "@authtempo/verify";
 
 export function createProviderAuth(deps: {
@@ -27,6 +27,19 @@ export function createProviderAuth(deps: {
 
 const RESOURCE = "https://api.example.com/mcp";
 
+/**
+ * True when the request held a bearer and no session cookie. Core lets a
+ * session cookie win and never reads the bearer then, so a refused cookie
+ * request names no invalid_token (RFC 6750 section 3.1). The cookie names come
+ * from core.
+ */
+function refusedBearer(request: Request): boolean {
+  if (readBearer(request) === null) return false;
+  const headers = new Headers(request.headers);
+  headers.delete("authorization");
+  return readSessionToken(sessionCookieNames(), { headers }) === null;
+}
+
 /** The MCP resource: an access token for this resource, with the scope of the tools. */
 export async function mcpRoute(auth: Auth, request: Request): Promise<Response> {
   const c = await auth.caller(request);
@@ -36,7 +49,7 @@ export async function mcpRoute(auth: Auth, request: Request): Promise<Response> 
     return unauthorizedResponse({
       resource: RESOURCE,
       scope: "mcp:tools",
-      invalidToken: readBearer(request) !== null,
+      invalidToken: refusedBearer(request),
     });
   // Check the scope of each tool: a token with only openid must not call it.
   if (!c.scopes.includes("mcp:tools"))

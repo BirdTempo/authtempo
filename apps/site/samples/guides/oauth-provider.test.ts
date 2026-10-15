@@ -1,4 +1,5 @@
 import type { Auth } from "@authtempo/core";
+import { DEFAULT_COOKIE_NAME } from "@authtempo/core/credentials";
 import { describe, expect, it } from "vitest";
 import { call, type Harness, harness, signIn } from "../support/harness.ts";
 import { createProviderAuth, mcpRoute } from "./oauth-provider.ts";
@@ -86,6 +87,27 @@ describe("be the OAuth and OIDC provider for MCP clients", () => {
     const res = await mcpRoute(createProviderAuth(harness()), new Request(`${API}/mcp`));
     expect(res.status).toBe(401);
     expect(res.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"',
+    );
+    // A Basic header is no bearer: the plain challenge.
+    const basic = await mcpRoute(
+      createProviderAuth(harness()),
+      new Request(`${API}/mcp`, { headers: { authorization: "Basic dXNlcjpwYXNz" } }),
+    );
+    expect(basic.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"',
+    );
+    // With a session cookie, core reads the cookie and never the bearer: no error code.
+    const withCookie = await mcpRoute(
+      createProviderAuth(harness()),
+      new Request(`${API}/mcp`, {
+        headers: {
+          cookie: `${DEFAULT_COOKIE_NAME}=ts_not_a_session`,
+          authorization: "Bearer ts_not_a_token",
+        },
+      }),
+    );
+    expect(withCookie.headers.get("www-authenticate")).toBe(
       'Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"',
     );
     // A bearer that the route refuses adds error="invalid_token" (RFC 6750 section 3.1).

@@ -654,8 +654,16 @@ The limits are per isolate under the memory limiter: on Workers each isolate cou
 `oauth` (plan 9g) makes core the authorization server for agents and MCP clients. It is off by default. With `oauth` set, `oauth.resources` must name 1 to 20 resources, and core refuses the config with `jwtMint: false`.
 
 ```ts
-import { readBearer } from "@authtempo/core/credentials";
+import { readBearer, readSessionToken, sessionCookieNames } from "@authtempo/core/credentials";
 import { insufficientScopeResponse, unauthorizedResponse } from "@authtempo/verify";
+
+// A bearer and no session cookie: core lets a cookie win and never reads the bearer.
+const refusedBearer = (request: Request) => {
+  if (readBearer(request) === null) return false;
+  const headers = new Headers(request.headers);
+  headers.delete("authorization");
+  return readSessionToken(sessionCookieNames(), { headers }) === null;
+};
 
 const auth = createAuth({
   // ...
@@ -682,7 +690,7 @@ export default {
         return unauthorizedResponse({
           resource,
           scope: "mcp:tools",
-          invalidToken: readBearer(request) !== null,
+          invalidToken: refusedBearer(request),
         });
       // Check the scope of each tool: a token with only openid must not call it.
       if (!c.scopes.includes("mcp:tools"))

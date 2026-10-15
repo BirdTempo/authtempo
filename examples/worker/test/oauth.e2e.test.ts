@@ -213,8 +213,12 @@ it("answers 401 at /mcp to a session cookie, a tk_ token, and a token of another
   const other = await connect("mcp-d@example.com", "mcp:tools", OTHER_RESOURCE);
   const metadata = `resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp"`;
   // A cookie is no bearer: no error code. A bearer that the route refuses: invalid_token.
+  // A Basic header is no bearer. With a session cookie core reads the cookie and never
+  // the bearer, so a cookie plus a valid bearer gets no error code either.
   for (const [headers, error] of [
     [{ cookie: c.cookie }, ""],
+    [{ authorization: "Basic dXNlcjpwYXNz" }, ""],
+    [{ cookie: c.cookie, authorization: `Bearer ${c.tokens.access_token}` }, ""],
     [{ authorization: `Bearer ${apiToken}` }, 'error="invalid_token", '],
     [{ authorization: `Bearer ${other.tokens.access_token}` }, 'error="invalid_token", '],
   ] as const) {

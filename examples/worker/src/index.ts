@@ -1,6 +1,6 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
 import { type Auth, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
-import { readBearer } from "@authtempo/core/credentials";
+import { readBearer, readSessionToken, sessionCookieNames } from "@authtempo/core/credentials";
 import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
 import {
   createVerifier,
@@ -8,6 +8,20 @@ import {
   unauthorizedResponse,
   type Verifier,
 } from "@authtempo/verify";
+
+/**
+ * True when the request held a bearer and no session cookie. Core lets a
+ * session cookie win and never reads the bearer then, so a refused cookie
+ * request names no invalid_token (RFC 6750 section 3.1). The cookie names come
+ * from core.
+ */
+function refusedBearer(request: Request): boolean {
+  if (readBearer(request) === null) return false;
+  const headers = new Headers(request.headers);
+  headers.delete("authorization");
+  return readSessionToken(sessionCookieNames(), { headers }) === null;
+}
+
 import { compatLastLink, getCompat } from "./compat.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 import { exampleHooks } from "./hooks.js";
@@ -181,7 +195,7 @@ export default {
         return unauthorizedResponse({
           resource,
           scope: "mcp:tools",
-          invalidToken: readBearer(request) !== null,
+          invalidToken: refusedBearer(request),
         });
       // The tools need the scope mcp:tools. Without this check a token with only
       // openid calls them, and every app that copies this example inherits that.

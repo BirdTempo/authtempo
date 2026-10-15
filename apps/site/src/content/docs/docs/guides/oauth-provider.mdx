@@ -53,6 +53,7 @@ import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
 - A revoke under another client's `client_id` answers `unauthorized_client` and revokes nothing.
 - A browser client on another origin can call `/auth/oauth/token` from a web origin of its own redirect URIs. The answer carries `access-control-allow-origin` with that origin and no credentials. Its form post to `/auth/oauth/revoke`, and its `POST /auth/oauth/userinfo` with no body, answer 403 [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted). Every other foreign origin also gets that 403 at `/auth/oauth/token`. A trusted origin gets credentialed CORS there.
 - The resource answers its 401 with `resource_metadata` and `scope`, and its 403 with `error="insufficient_scope"`. The functions `unauthorizedResponse` and `insufficientScopeResponse` of `@authtempo/verify` write both.
+- The 401 names `error="invalid_token"` only for a request with a bearer and no session cookie. Core reads a session cookie first and does not read the bearer then.
 
 ## If it fails
 
