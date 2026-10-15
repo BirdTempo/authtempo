@@ -52,6 +52,31 @@ export interface RouterAuthOptions {
 }
 
 /**
+ * The path and query that React Router matched. `url` is the routed URL, not
+ * request.url: a client navigation sends "/page.data?_routes=...", and React
+ * Router normalizes only `url` (server-runtime/urls.js and router.js of 8.4.0,
+ * read 2026-10-15). The router then decodes each segment once with
+ * decodeURIComponent and keeps a decoded "/" as "%2F" (decodePath of
+ * router/utils.js, read 2026-10-15), so "/%61ccount" runs the page of
+ * "/account". The gate reads the same text. A bad escape leaves the whole
+ * path raw, as in the router.
+ */
+function routedPath(url: URL): string {
+  let path = url.pathname;
+  try {
+    path = path
+      .split("/")
+      .map((segment) => decodeURIComponent(segment).replace(/\//g, "%2F"))
+      .join("/");
+  } catch {
+    // A bad escape: React Router matches the raw path, so the gate reads it too.
+  }
+  // The router matches a decoded "?", "#", or "\" as text of the path. In a URL
+  // they would start the query, start the fragment, or turn into "/".
+  return path.replace(/[?#\\]/g, encodeURIComponent) + url.search;
+}
+
+/**
  * The middleware of the root route: `export const middleware = [authMiddleware({ auth: getAuth })];`.
  * It sets `sessionContext`, answers the redirect of a protected path (the
  * pipeline returns a Response of a middleware at once), and adds the renewed
@@ -61,12 +86,12 @@ export interface RouterAuthOptions {
 export function authMiddleware(options: RouterAuthOptions): MiddlewareFunction {
   checkGateOptions(options);
   return async ({ request, url, context }, next) => {
-    // The routed URL, not request.url: a client navigation sends
-    // "/page.data?_routes=...", and React Router normalizes only `url`
-    // (server-runtime/urls.js and router.js of 8.4.0, read 2026-10-15). The gate
-    // reads only the headers, so the copy takes no body.
-    const page = new Request(url, { headers: request.headers });
-    const gate = await readGate({ ...options, auth: resolve(options.auth) }, page);
+    // The gate judges the routed path and reads the cookie from the request.
+    const gate = await readGate(
+      { ...options, auth: resolve(options.auth) },
+      request,
+      routedPath(url),
+    );
     if (gate.redirect) return gate.redirect;
     context.set(sessionContext, gate.session);
     // On the server, next() answers the Response of the page. A route's

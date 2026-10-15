@@ -71,10 +71,14 @@ function makeApp() {
       normalizePath,
       generateMiddlewareResponse: async (query) => {
         const inner: StaticHandlerContext | Response = await query(request);
-        return inner instanceof Response ? inner : Response.json(inner.loaderData);
+        return inner instanceof Response
+          ? inner
+          : Response.json(inner.loaderData, { status: inner.statusCode });
       },
     });
-    return result instanceof Response ? result : Response.json(result.loaderData);
+    return result instanceof Response
+      ? result
+      : Response.json(result.loaderData, { status: result.statusCode });
   }
   async function signIn(): Promise<string> {
     const post = (path: string, body: unknown) =>
@@ -126,6 +130,22 @@ describe("the React Router example (plan 11d2)", () => {
       "ada@example.com",
     );
     expect(loads).toEqual(["account"]);
+  });
+
+  // React Router decodes each segment once, and the route "account" sets
+  // caseSensitive. No form of the path runs the page with no session.
+  it("runs no page for another case or an escape of a protected path", async () => {
+    const { loads, serve } = makeApp();
+    for (const path of ["/%61ccount", "/%61ccount.data?_routes=account"]) {
+      const res = await serve(new Request(`${BASE}${path}`));
+      expect(res.status, path).toBe(307);
+      expect(res.headers.get("location"), path).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    }
+    for (const path of ["/ACCOUNT", "/Account", "/%41ccount", "/ACCOUNT.data?_routes=account"]) {
+      const res = await serve(new Request(`${BASE}${path}`));
+      expect(res.status, path).toBe(404);
+    }
+    expect(loads).toEqual([]);
   });
 
   // React Router 8.4.0 runs the loader of a resource route for OPTIONS

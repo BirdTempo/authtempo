@@ -171,6 +171,28 @@ describe("@authtempo/react-router (plan 11d2)", () => {
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
   });
 
+  // React Router decodes each segment once before it matches: "/%61ccount"
+  // runs the page of "/account", on a page request and on a data request.
+  it("gates the once-decoded path that the router matched", async () => {
+    const { auth, args } = setup();
+    const exact = authMiddleware({
+      auth,
+      protect: (p) => p === "/account",
+      signInPath: "/sign-in",
+    });
+    for (const raw of ["/%61ccount", "/%61ccount.data?_routes=account"]) {
+      const a = { ...args(new Request(`${BASE}${raw}`)), url: new URL(`${BASE}/%61ccount`) };
+      let ran = false;
+      const res = (await exact(a, async () => {
+        ran = true;
+        return new Response("page");
+      })) as Response;
+      expect(ran).toBe(false);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    }
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, args, middleware, advance } = setup();
     const cookie = await signIn();

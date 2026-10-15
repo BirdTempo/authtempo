@@ -12,6 +12,11 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
    loader reads `getSession(context)`.
 3. Protect paths: `authMiddleware({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
+- `protect` gets the path that React Router matched: without ".data", and with
+  each segment decoded once, so "/%61ccount" reaches the rule as "/account".
+- React Router matches a path without case by default, so "/ACCOUNT" runs the
+  page of "/account". Set `caseSensitive: true` on each protected route, or
+  compare the path in lower case in `protect`.
 - The middleware reads no session for a route of core, and adds the renewed
   cookie to the page's answer after the sliding refresh.
 - A function given to both `authRouteModule` and `authMiddleware` runs twice

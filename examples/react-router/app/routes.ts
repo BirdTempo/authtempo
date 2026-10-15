@@ -33,6 +33,10 @@ export function createRoutes(
         {
           id: "account",
           path: "account",
+          // React Router matches a path without case unless the route says so:
+          // without this, "/ACCOUNT" runs this loader, and the gate's rule sees
+          // "/ACCOUNT", not "/account". Set it on every protected route.
+          caseSensitive: true,
           loader: ({ context }) => {
             onLoad("account");
             return { email: getSession(context)?.user.email ?? null };
