@@ -40,7 +40,7 @@ sidebar:
 - That text is decoded until it stops changing, with duplicate slashes merged and the case kept.
 - It has no trailing "/", and no `base` of the Astro config.
 - A non-ASCII route reaches the rule decoded (`"/café"`). Write the rule for that form.
-- Astro resolves dot segments before the match. `/account/..` is `/`, so a dotted request never reaches a protected page as that page.
+- The adapter resolves a literal or once-escaped dot segment before the match: `/account/..` is `/`. A twice-escaped one stays in the text: `/account/%252e%252e/x` reaches the rule as `/account/../x`. A prefix rule covers it.
 - The `next` of the sign-in redirect comes from `context.url`.
 
 ## How it behaves
