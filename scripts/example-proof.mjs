@@ -132,12 +132,20 @@ try {
   );
   // A router that decodes "%61" to "a", or matches without case, must not
   // render the protected page with no session (plan 11d2 path probe). A 307
-  // must name the canonical path in next; a 404 means the router matched no page.
-  for (const path of ["/%61ccount", "/ACCOUNT"]) {
+  // must name an allowed path in next; a 404 means the router matched no page.
+  // For "/%61ccount" next is the path the router matched. For "/ACCOUNT" next
+  // keeps the case of the request (plan-wide ruling): a router that matches
+  // without case serves it, and a binding that folds case redirects it.
+  const allowed = {
+    "/%61ccount": ["%2Faccount"],
+    "/ACCOUNT": ["%2Faccount", "%2FACCOUNT"],
+  };
+  for (const [path, nexts] of Object.entries(allowed)) {
     const res = await fetch(`${BASE}${path}`, { redirect: "manual" });
     const location = res.headers.get("location");
+    const redirected = nexts.some((n) => location === `${BASE}/sign-in?next=${n}`);
     expectThat(
-      res.status === 404 || (res.status === 307 && location === `${BASE}/sign-in?next=%2Faccount`),
+      res.status === 404 || (res.status === 307 && redirected),
       `GET ${path} with no cookie answered ${res.status}${location ? ` to ${location}` : ""}`,
     );
   }
