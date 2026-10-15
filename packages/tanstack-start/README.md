@@ -40,7 +40,8 @@ transform of solid-js and `@tanstack`. The example app is React.
   core's `baseURL`.
 - Behind a proxy, send the public Host to the app: the binding never reads
   X-Forwarded-Host, even when srvx trusts it. `auth.baseURL` serves only
-  when Host does not parse.
+  when the Host header is missing or does not parse as one host, or the
+  request URL is not http or https.
 - `next` holds the page URL that TanStack gives the middleware, with the
   query, not the decoded path: "/%61ccount" gives `next=%2Faccount`, and
   "/%2561ccount" keeps its escape. `next` keeps the case of the request and a
