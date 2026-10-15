@@ -173,10 +173,11 @@ describe("@authtempo/hono (plan 11d2)", () => {
     const { app, runs } = exactApp();
     const res = await app.request(`${BASE}/%61ccount`);
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    // next is the path of the request as sent (core 12f6eed): the same URL again.
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2F%2561ccount`);
     const withQuery = await app.request(`${BASE}/%61ccount?tab=2`);
     expect(withQuery.status).toBe(307);
-    expect(withQuery.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
+    expect(withQuery.headers.get("location")).toBe(`${BASE}/sign-in?next=%2F%2561ccount%3Ftab%3D2`);
     expect(runs.account).toBe(0);
   });
 
@@ -210,7 +211,8 @@ describe("@authtempo/hono (plan 11d2)", () => {
     for (const path of ["/caf%C3%A9", "/café"]) {
       const res = await app.request(`${BASE}${path}`);
       expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%C3%A9`);
+      // The request URL holds "/caf%C3%A9" for both, and next encodes it once more.
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
     }
     expect(seen).toEqual(["/café", "/café"]);
     expect(runs()).toBe(0);
