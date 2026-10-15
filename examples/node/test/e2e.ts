@@ -79,6 +79,12 @@ try {
   );
   const anonymous = await fetch(`${BASE}/files`);
   expectThat(anonymous.status === 401, `/files with no token answered ${anonymous.status}`);
+  // A Basic header is no bearer: the plain challenge, with no error code (RFC 6750 section 3.1).
+  const basic = await fetch(`${BASE}/files`, { headers: { authorization: "Basic dXNlcjpwYXNz" } });
+  expectThat(
+    basic.status === 401 && basic.headers.get("www-authenticate") === "Bearer",
+    `/files with a Basic header answered ${basic.status} with ${basic.headers.get("www-authenticate")}`,
+  );
 } catch (e) {
   failures.push(
     `${e instanceof Error ? e.message : String(e)}; is Postgres up (docker compose up -d)?`,
@@ -89,7 +95,7 @@ try {
   await admin.unsafe(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`).catch(() => {});
   await admin.end({ timeout: 5 });
 }
-const pass = failures.length === 0 && checks === 7;
+const pass = failures.length === 0 && checks === 8;
 console.log(
   `${runtime}-e2e: ${pass ? "PASS" : "FAIL"} version=${version} checks=${checks} failures=${failures.length}`,
 );

@@ -1,5 +1,6 @@
 import { createPostgresAdapter, createPostgresLimiter } from "@authtempo/adapter-postgres";
 import { type Auth, createAuth, type MailPort } from "@authtempo/core";
+import { readBearer } from "@authtempo/core/credentials";
 import { createVerifier } from "@authtempo/verify";
 import type { Sql } from "postgres";
 
@@ -83,9 +84,11 @@ export function createApp(options: AppOptions): {
             { error: r.code },
             { status: r.code === "rate_limited" ? 429 : 503 },
           );
-        // A refused token gets error="invalid_token" (RFC 6750 section 3.1); no token, the plain challenge.
+        // A refused bearer gets error="invalid_token" (RFC 6750 section 3.1). No bearer,
+        // and a Basic header is none, gets the plain challenge. The verifier reads the
+        // bearer only, never a cookie, so a cookie does not change this answer.
         if (r.value?.kind !== "session-jwt")
-          return verifier.unauthorized({ invalidToken: request.headers.has("authorization") });
+          return verifier.unauthorized({ invalidToken: readBearer(request) !== null });
         return Response.json({ owner: r.value.email });
       }
       return new Response("not found", { status: 404 });
