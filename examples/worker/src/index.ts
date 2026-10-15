@@ -180,9 +180,11 @@ export default {
       // The auth app limited the live checks: 429. It did not answer: 503.
       if (!r.ok)
         return Response.json({ error: r.code }, { status: r.code === "rate_limited" ? 429 : 503 });
-      // A refused token gets error="invalid_token" (RFC 6750 section 3.1); no token, the plain challenge.
+      // A refused bearer gets error="invalid_token" (RFC 6750 section 3.1). No bearer, and a
+      // Basic header is none, gets the plain challenge. The verifier reads the bearer only,
+      // never a cookie, so this route needs no cookie rule (that is /mcp's, through caller).
       if (r.value?.kind !== "session-jwt")
-        return v.unauthorized({ invalidToken: request.headers.has("authorization") });
+        return v.unauthorized({ invalidToken: readBearer(request) !== null });
       return Response.json({ owner: r.value.email });
     }
     // An MCP resource (plan 9g): an OAuth access token for this resource only. A session

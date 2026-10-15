@@ -18,6 +18,12 @@ it("verifies a session JWT at /notes on Workers with the live check, and refuses
   const none = await notes();
   expect(none.status).toBe(401);
   expect(none.headers.get("www-authenticate")).toBe("Bearer");
+  // A Basic header is no bearer: the plain challenge, as with no header.
+  const basic = await SELF.fetch(`${BASE}/notes`, {
+    headers: { authorization: "Basic dXNlcjpwYXNz" },
+  });
+  expect(basic.status).toBe(401);
+  expect(basic.headers.get("www-authenticate")).toBe("Bearer");
   await client.signOut();
   const refused = await notes(minted.value.token);
   expect(refused.status).toBe(401);

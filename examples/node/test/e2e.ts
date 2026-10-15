@@ -85,6 +85,15 @@ try {
     basic.status === 401 && basic.headers.get("www-authenticate") === "Bearer",
     `/files with a Basic header answered ${basic.status} with ${basic.headers.get("www-authenticate")}`,
   );
+  // A refused bearer gets error="invalid_token": the verifier read it and refused it.
+  const refused = await fetch(`${BASE}/files`, {
+    headers: { authorization: "Bearer ts_not_a_token" },
+  });
+  expectThat(
+    refused.status === 401 &&
+      refused.headers.get("www-authenticate") === 'Bearer error="invalid_token"',
+    `/files with a refused bearer answered ${refused.status} with ${refused.headers.get("www-authenticate")}`,
+  );
 } catch (e) {
   failures.push(
     `${e instanceof Error ? e.message : String(e)}; is Postgres up (docker compose up -d)?`,
@@ -95,7 +104,7 @@ try {
   await admin.unsafe(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`).catch(() => {});
   await admin.end({ timeout: 5 });
 }
-const pass = failures.length === 0 && checks === 8;
+const pass = failures.length === 0 && checks === 9;
 console.log(
   `${runtime}-e2e: ${pass ? "PASS" : "FAIL"} version=${version} checks=${checks} failures=${failures.length}`,
 );
