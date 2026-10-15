@@ -8,6 +8,8 @@ and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
 3. Protect paths: `authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
 - On Workers, pass a function of the context: `authHandler((c) => getAuth(c.env))`.
+  A function given to both `authSession` and `authHandler` runs twice for a
+  request to core, so make it return one instance per environment.
 - `authSession` reads no session for a route of core, and adds the renewed
   cookie to the answer after the sliding refresh.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every

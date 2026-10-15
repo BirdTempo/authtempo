@@ -30,7 +30,7 @@ export interface HonoSessionOptions {
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */
   signInPath?: string | undefined;
-  /** The `basePath` of core. Default "/auth". */
+  /** The base path of core's routes. Default: the base path of the auth object, then "/auth". */
   basePath?: string | undefined;
 }
 
