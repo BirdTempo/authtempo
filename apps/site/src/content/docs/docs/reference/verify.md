@@ -32,14 +32,14 @@ sources:
 | `resources` | none | The `oauth.resources` entries that this server serves. Required for `oauth`. |
 | `accept` | `["session-jwt"]` | The caller kinds to accept, of the type `CallerKind`. |
 | `checkSessionEnd` | `false` | Asks `POST /token/live` for each session JWT, so a sign-out ends access at once. |
-| `cache` | `{ apiTokenSeconds: 0 }` | How long an API token answer is kept: 0 to `API_TOKEN_CACHE_MAX_SECONDS` (60) seconds. |
+| `cache` | `{ apiTokenSeconds: 0 }` | How long the verifier keeps an API token answer: 0 to `API_TOKEN_CACHE_MAX_SECONDS` (60) seconds. |
 | `timeoutMs` | `TIMEOUT_DEFAULT_MS` (5000) | The deadline of each call to the auth app, from `TIMEOUT_MIN_MS` (100) to `TIMEOUT_MAX_MS` (30000). |
 | `fetch` | `globalThis.fetch` | The fetch of every call to the auth app. Any function of a request and its init that answers a `Response`. |
 | `clock` | the system clock | Tests inject one. |
 
-A URL that is both an `audience` entry and a `resources` entry is refused: one key signs both kinds of token.
+`createVerifier` refuses a URL that is both an `audience` entry and a `resources` entry: one key signs both kinds of token.
 
-**Warning: an `http:` issuer is accepted on any host.** The verifier then reads the key set and sends each bearer over plain HTTP. Use `https:` outside local development.
+**Warning: the verifier accepts an `http:` issuer on any host.** It then reads the key set and sends each bearer over plain HTTP. Use `https:` outside local development.
 
 ## The caller kinds
 

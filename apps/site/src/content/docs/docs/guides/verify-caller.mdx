@@ -30,7 +30,8 @@ import test from "../../../../../samples/guides/verify-caller.test.ts?raw";
 5. In each request, call `verifier.verifyRequest(request)`.
    - A `rate_limited` failure means that the live check is over its limit. Answer 429.
    - Any other failure means that the auth app did not answer. Answer 503.
-   - A `null` value means no valid credential. Answer `verifier.unauthorized()`.
+   - A `null` value means no valid credential. Answer `verifier.unauthorized({ invalidToken })`.
+   - Set `invalidToken` to true when the request holds a bearer. The 401 then names `invalid_token`.
 
 <Code code={server} lang="ts" title="The second server" />
 

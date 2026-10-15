@@ -8,12 +8,13 @@ on Workers, Node 22.18 or newer, and Bun; it imports no Node module.
 
 ## Install
 
-When the package is published, run `pnpm add @authtempo/verify`.
+When the package is on npm, run `pnpm add @authtempo/verify`.
 Publication is on hold. In this workspace, add it with `"workspace:*"`.
 
 ## Verify a request
 
 ```ts
+import { readBearer } from "@authtempo/core/credentials";
 import { createVerifier } from "@authtempo/verify";
 
 const verifier = createVerifier({
@@ -23,15 +24,16 @@ const verifier = createVerifier({
 
 const r = await verifier.verifyRequest(request);
 if (!r.ok) return new Response("try again", { status: 503 });
-if (r.value === null) return verifier.unauthorized();
+// invalidToken: the request held a bearer, and the verifier refused it.
+if (r.value === null) return verifier.unauthorized({ invalidToken: readBearer(request) !== null });
 ```
 
 ## The caller kinds
 
-| Kind | The credential | How it is checked |
+| Kind | The credential | The check |
 | --- | --- | --- |
 | `session-jwt` | A session JWT, `typ: "JWT"` | Offline: the signature against the key set, `iss`, `sub`, `sid`, `aud` (one of `audience`), and `exp` |
-| `oauth` | An access token, `typ: "at+jwt"` | Offline: as above, and `aud` must be the entry of `resources` that the request URL falls under |
+| `oauth` | An access token, `typ: "at+jwt"` | Offline: the signature against the key set, `iss`, `sub`, `client_id`, `scope`, `jti`, and `exp`. `aud` must be the entry of `resources` that the request URL falls under |
 | `api-token` | A `tk_` bearer | One `GET <basePath>/tokens/current`; `cache.apiTokenSeconds` (0 to 60, default 0) keeps the answer |
 | `session-token` | A `ts_` bearer | One `GET <basePath>/session`. Off by default: it sends the person's session token to the auth app. Each check can extend the person's session, as a visit does |
 
@@ -47,7 +49,7 @@ that `accept` does not list answers null with no network call.
 | `resources` | none | resource URLs, the rule of `oauth.resources` | The `oauth.resources` entries that this server serves. Needed for `oauth`. |
 | `accept` | `["session-jwt"]` | one or more kinds | The kinds to accept. |
 | `checkSessionEnd` | `false` | a boolean | Ask the live route for each session JWT. |
-| `cache.apiTokenSeconds` | 0 | an integer from 0 to 60 | How long a `tk_` answer is kept. |
+| `cache.apiTokenSeconds` | 0 | an integer from 0 to 60 | How long the verifier keeps a `tk_` answer. |
 | `timeoutMs` | 5000 | an integer from 100 to 30000 | The deadline of each call to the auth app, and of the read of its body. |
 | `fetch` | the global `fetch` | a fetch function | Tests give a stub. |
 
@@ -62,7 +64,7 @@ that `accept` does not list answers null with no network call.
 
 A malformed resource throws at construction, not at each request.
 
-**Warning: an `http:` issuer is accepted on any host.** The verifier then
+**Warning: the verifier accepts an `http:` issuer on any host.** It then
 reads the key set and sends each bearer over plain HTTP. Core accepts an
 `http:` `baseURL` on any host too. Use `https:` outside local development.
 
@@ -76,8 +78,8 @@ reads the key set and sends each bearer over plain HTTP. Core accepts an
 - No call follows a redirect. A 3xx answer gives `unexpected` with its
   status. A call with no answer within `timeoutMs` gives `network`.
 - The claim rule is a copy of core's rule, and a test holds the two copies
-  equal. `exp` is strict: a token is refused at the second of its `exp`,
-  with no clock skew.
+  equal. `exp` is strict: the verifier refuses a token at the second of its
+  `exp`, with no clock skew.
 - The key set lives for the `max-age` of its answer. Core sends 300 s. The
   verifier keeps the set at least 60 s and at most 3600 s.
 - An unknown `kid` reads the key set again at most once per 30 s.
@@ -87,13 +89,13 @@ reads the key set and sends each bearer over plain HTTP. Core accepts an
 - A key set body over 64 KiB gives `unexpected`. A set of more keys than
   core can list gives `unexpected` too. Core lists the signing key and at
   most `JWKS_RETIRED_MAX` retired keys: 101 keys today, about 19 KB.
-- Each key of the set is checked when it is read. `kty`, `crv`, and `alg`
+- The verifier checks each key of the set when it reads the set. `kty`, `crv`, and `alg`
   must be OKP, Ed25519, and EdDSA, or EC, P-256, and ES256. A key may leave
   out `use`; when it has one, the value must be `sig`. A key may leave out
-  `key_ops`; when it has one, the list must hold `verify`. A key that fails
-  is dropped, so a token that it signed answers null.
-- Core keeps a retired key in the set for 24 hours, so a token signed before
-  a rotation verifies until its `exp`.
+  `key_ops`; when it has one, the list must hold `verify`. The verifier drops
+  a key that fails, so a token that the key signed answers null.
+- Core keeps a retired key in the set for 24 hours, so a token that core
+  signed before a rotation verifies until its `exp`.
 - A session JWT stays a bearer after a sign-out. With `checkSessionEnd: true`
   the verifier asks `POST <basePath>/token/live` for each session JWT, and a
   sign-out ends access at once.
