@@ -65,7 +65,8 @@ sidebar:
 - After the sliding refresh, the page's answer carries the renewed session cookie.
 - The origin of the redirect comes from the Host header, with the protocol of the request, not from the request line.
 - The Node server of TanStack Start builds the URL of an absolute-form line, such as "GET http://evil.example/account", from that line. The binding does not use it.
-- A Host that does not parse falls back to the origin of core's `baseURL`.
+- A missing Host header, or a Host that does not parse as one host, falls back to the origin of core's `baseURL`.
+- So does a request URL that is not http or https.
 - Behind a proxy, send the public Host to the app. The binding never reads X-Forwarded-Host, even when srvx trusts it.
 - `next` holds the page URL that TanStack gives the middleware, with the query, not the decoded path.
 - So "/%61ccount" gives `next=%2Faccount`, and "/%2561ccount" keeps its escape. `next` keeps the case of the request and a "/" at the end.

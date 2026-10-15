@@ -50,7 +50,8 @@ sidebar:
 
 ## How it behaves
 
-- The package takes `express` 5.3.0 or a later 5 release as a peer dependency.
+- The package takes `express` 5.2.1 or a later 5 release as a peer dependency.
+- The Express adapter of NestJS 12 pins Express 5.2.1, so the binding runs there too.
 - A body parser such as `express.json()` may run before the routes of core. The binding writes the parsed body again in its content type.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
