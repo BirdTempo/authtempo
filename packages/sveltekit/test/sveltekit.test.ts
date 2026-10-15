@@ -165,15 +165,49 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     }
   });
 
-  // The gate makes a URL of the matched path, so protect gets a non-ASCII
-  // path encoded again: the rule must name "/caf%C3%A9", not "/café".
-  it("gives protect a non-ASCII path in URL form", async () => {
-    const { run, pageRuns } = setup({}, (p) => p === "/caf%C3%A9");
+  // The gate judges the path exactly as Kit matched it: a non-ASCII path
+  // reaches protect decoded, "/café", in both request forms.
+  it("gives protect a non-ASCII path as Kit matched it, decoded", async () => {
+    const { run, pageRuns } = setup({}, (p) => p === "/café");
     for (const path of ["/caf%C3%A9", "/café"]) {
       const { res } = await run(new Request(`${BASE}${path}`));
       expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%C3%A9`);
     }
     expect(pageRuns()).toBe(0);
+  });
+
+  it("does not match a rule in the encoded form of a non-ASCII path", async () => {
+    const { run, pageRuns } = setup({}, (p) => p === "/caf%C3%A9");
+    const { res } = await run(new Request(`${BASE}/caf%C3%A9`));
+    expect(res.status).toBe(200);
+    expect(pageRuns()).toBe(1);
+  });
+
+  // Kit builds event.url with new URL, which resolves "..", and "%2e%2e" too
+  // (WHATWG URL reads "%2e" as "." in a dot segment). The rule gets the path
+  // after that resolution, the path that Kit matches. In real Kit, "/account/"
+  // gets Kit's own 308 to "../account" before the hook; the stub has no such step.
+  it("gives protect the path after the dot segments, as Kit matched it", async () => {
+    const seen: string[] = [];
+    const { run, pageRuns } = setup({}, (p) => {
+      seen.push(p);
+      return p.startsWith("/account");
+    });
+    const cases = [
+      { path: "/account/..", status: 200, judged: "/" },
+      { path: "/account/%2e%2e", status: 200, judged: "/" },
+      { path: "/account/../auth/session", status: 401, judged: null },
+      { path: "/account/x/..", status: 307, judged: "/account/" },
+    ];
+    for (const c of cases) {
+      seen.length = 0;
+      const { res } = await run(new Request(`${BASE}${c.path}`));
+      expect(res.status, c.path).toBe(c.status);
+      expect(seen, c.path).toEqual(c.judged === null ? [] : [c.judged]);
+    }
+    // "/" is the public home page: the two runs of it. No protected page runs.
+    expect(pageRuns()).toBe(2);
   });
 
   // The query of next comes from event.url, and "%3F" stays escaped, as Kit
