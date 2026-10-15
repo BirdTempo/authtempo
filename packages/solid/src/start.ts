@@ -113,13 +113,15 @@ export function authOnRequest(
     // The gate takes the origin of the redirect from the request it reads.
     const gateRequest =
       url.origin === origin ? request : new Request(page, { headers: request.headers });
-    // Solid Router matches a page without case, and radix3 matches an API
-    // route with case. The entry cannot know which one serves a path, so it
-    // fails closed: the rule sees the path and the path in lower case.
+    // radix3 matches an API route with case. Solid Router matches a page
+    // without case: it compares each static part in lower case. The entry
+    // cannot know which one serves a path, so it fails closed: the rule sees
+    // the path as matched, then the path in lower case when that differs.
+    const fold = (p: string) => p.toLowerCase();
     const gateOptions = {
       ...options,
       auth,
-      protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
+      protect: protect && ((p: string) => protect(p) || (fold(p) !== p && protect(fold(p)))),
     };
     const gate = await readGate(gateOptions, gateRequest, routedPath(url), page);
     if (gate.redirect) return gate.redirect;

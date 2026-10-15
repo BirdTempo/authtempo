@@ -90,6 +90,7 @@ function setup(
     "/": { fn: page("home") },
     "/account": { fn: page("account") },
     "/account/:id": { fn: page("account-child") },
+    "/myAccount": { fn: page("my-account") },
     [`${prefix}/**:path`]: { fn: core_ },
     ...(options.catchAll ? { "/**:rest": { fn: page("catch-all") } } : {}),
   };
@@ -298,15 +299,50 @@ describe("@authtempo/solid/start (plan 11d2)", () => {
     expect(seen).toEqual([]);
   });
 
+  // radix3 compares the case of an API route: "/MYACCOUNT" runs no route
+  // "/myAccount". A rule in mixed case holds for the path that runs it.
+  it("compares the case of an API route, as radix3 does", async () => {
+    const seen: string[] = [];
+    const { fetch, runs } = setup(
+      {},
+      {
+        protect: (p) => {
+          seen.push(p);
+          return p.startsWith("/myAccount");
+        },
+      },
+    );
+    const cases = [
+      ["/myAccount", 307],
+      ["/myaccount", 404],
+      ["/MYACCOUNT", 404],
+    ] as const;
+    for (const [path, status] of cases) {
+      const out = await fetch(new Request(`${BASE}${path}`));
+      expect(out.status, path).toBe(status);
+    }
+    expect(count(runs)).toBe(0);
+    // The rule gets the path as matched, then in lower case when that differs.
+    expect(seen).toEqual(["/myAccount", "/myaccount", "/MYACCOUNT", "/myaccount"]);
+  });
+
   // Neither radix3 nor Solid Router decodes, so "/%61uth/session" is no route
   // of core. The gate judges the same raw text: a decode would read
   // "/auth/session", skip the rule, and run a catch-all page with no session.
   it("runs no catch-all page for an escaped base path with no session", async () => {
-    const { fetch, runs, signIn } = setup({}, { protect: (p) => p !== "/" }, { catchAll: true });
-    for (const path of ["/%61uth/session", "/%61uth/x", "/%61uth/sign-out"]) {
+    const seen: string[] = [];
+    const rule = (p: string) => {
+      seen.push(p);
+      return p !== "/";
+    };
+    const { fetch, runs, signIn } = setup({}, { protect: rule }, { catchAll: true });
+    const paths = ["/%61uth/session", "/%61uth/x", "/%61uth/sign-out"];
+    for (const path of paths) {
       const out = await fetch(new Request(`${BASE}${path}`));
       expect([307, 401, 404], path).toContain(out.status);
     }
+    // The rule gets each path as the routers match it, never the decoded "/auth/…".
+    expect(seen).toEqual(paths);
     expect(count(runs)).toBe(0);
     // With a session the catch-all runs for the same path: the count works.
     const { cookie } = await signIn();

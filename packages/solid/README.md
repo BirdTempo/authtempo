@@ -26,9 +26,17 @@ dependency.
   The parse resolves `..`, `%2e`, a backslash, and a tab. No escape is
   decoded: `/%61ccount` reaches the rule as `/%61ccount`, and no route
   `/account` matches it. Write a non-ASCII path encoded: `p === "/caf%C3%A9"`.
-- An API route matches with case (radix3), and a page matches without case
-  (Solid Router). The entry asks `protect` with the path and with the path in
-  lower case, so `/ACCOUNT` is protected by a rule for `/account`.
+- An API route matches with case (radix3 1.1.2): `/MYACCOUNT` runs no route
+  `/myAccount`, and answers 404. A page matches without case (Solid Router
+  1.0.0 compares each static part in lower case): `/ACCOUNT` runs the page
+  `/account`. The entry asks `protect` with the path as matched, then with
+  the path in lower case when that differs. A path needs a session when
+  either holds, so a rule for `/account` protects `/ACCOUNT`.
+- Warning: a rule with an upper-case letter does not protect a page in
+  another case. `p.startsWith("/myAccount")` holds for neither `/MYACCOUNT`
+  nor `/myaccount`, and Solid Router runs the page `/myAccount` for both.
+  For a page, compare in lower case:
+  `protect: (p) => p.toLowerCase().startsWith("/myaccount")`.
 - The rule gets the full path. Under a `server.baseURL`, write the rule with
   that base.
 - The middleware writes the renewed cookie to the event's response headers.
