@@ -133,11 +133,13 @@ try {
   // A router that decodes "%61" to "a", or matches without case, must not
   // render the protected page with no session (plan 11d2 path probe). A 307
   // must name an allowed path in next; a 404 means the router matched no page.
-  // For "/%61ccount" next is the path the router matched. For "/ACCOUNT" next
+  // For "/%61ccount" next is the page URL that the binding gives (the decoded
+  // "/account"), or the request's own path, encoded once, when the binding
+  // gives a routed string and no returnTo (core round 8). For "/ACCOUNT" next
   // keeps the case of the request (plan-wide ruling): a router that matches
   // without case serves it, and a binding that folds case redirects it.
   const allowed = {
-    "/%61ccount": ["%2Faccount"],
+    "/%61ccount": ["%2Faccount", "%2F%2561ccount"],
     "/ACCOUNT": ["%2Faccount", "%2FACCOUNT"],
   };
   for (const [path, nexts] of Object.entries(allowed)) {
