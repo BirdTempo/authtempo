@@ -484,6 +484,32 @@ describe("@authtempo/fastify (plan 11d2)", () => {
     expect(lines.some((l) => l.startsWith("__Host-tempo_session=ts_"))).toBe(true);
   });
 
+  it("sends every method under the base path to core, never to a catch-all page", async () => {
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [BASE],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+    });
+    const runs: string[] = [];
+    const app = Fastify();
+    app.addHook("onRequest", authSession({ auth, protect: () => true, signInPath: "/sign-in" }));
+    await app.register(authRoutes({ auth }));
+    // A catch-all route of the app, for every method.
+    app.all("/*", async (request) => {
+      runs.push(request.method);
+      return "page";
+    });
+    try {
+      for (const method of ["PUT", "DELETE", "PATCH"] as const)
+        expect((await app.inject({ method, url: "/auth/x" })).statusCode, method).not.toBe(200);
+      expect(runs).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("refuses protect without signInPath at construction", async () => {
     const { app } = await makeApp();
     expect(() => authSession({ auth: {} as never, protect: () => true })).toThrow(/signInPath/);

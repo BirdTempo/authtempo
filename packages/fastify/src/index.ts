@@ -171,7 +171,9 @@ export function authRoutes(options: FastifyRoutesOptions): FastifyPluginAsync {
       done(null, body),
     );
     instance.route({
-      method: ["GET", "POST", "OPTIONS"],
+      // Every method core can get: a method left out would reach the app's other
+      // routes under the base path, where the gate reads no session. Fastify adds HEAD to GET.
+      method: ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
       url: `${basePath}/*`,
       handler: async (request, reply) => {
         const auth = resolve(options.auth);

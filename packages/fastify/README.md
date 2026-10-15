@@ -3,7 +3,9 @@
 The Fastify binding of authtempo, for Fastify 5 on Node 22.18 or newer. It
 takes `fastify` 5.12.5 or newer in 5 as a peer dependency.
 
-1. Mount core: `await app.register(authRoutes({ auth }))`.
+1. Mount core: `await app.register(authRoutes({ auth }))`. It mounts core for
+   every method under the base path: DELETE, GET (with HEAD), OPTIONS, PATCH,
+   POST, and PUT.
 2. Read the session: `app.decorateRequest("authSession", null)` and
    `app.addHook("onRequest", authSession({ auth }))`, then `getSession(request)` in a route.
 3. Protect paths: `authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
