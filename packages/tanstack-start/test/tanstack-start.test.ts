@@ -260,6 +260,43 @@ describe("@authtempo/tanstack-start (plan 11d2)", () => {
     expect(seen).toContain("/%2561ccount");
   });
 
+  // A dot segment never reaches the router: the URL parser of the request
+  // resolves it, and TanStack gives the middleware the resolved path (read
+  // with a probe of the built example, 2026-10-15). A child route under the
+  // prefix rule therefore runs only for a path that the rule sees.
+  it("gives a prefix rule the path left after the dot segments", async () => {
+    const seen: string[] = [];
+    const { run } = setup(
+      {},
+      {
+        protect: (p) => {
+          seen.push(p);
+          return p.startsWith("/account");
+        },
+      },
+    );
+    const cases = [
+      ["/account/..", "/", 1],
+      ["/account/%2e%2e", "/", 1],
+      ["/account/x/..", "/account/", 0],
+      ["/account/.%2e/account", "/account", 0],
+    ] as const;
+    for (const [path, pathname, runs] of cases) {
+      const request = new Request(`${BASE}${path}`);
+      expect(new URL(request.url).pathname).toBe(pathname);
+      const out = await run(request, pathname);
+      expect(out.runs).toBe(runs);
+      expect(out.response.status).toBe(runs ? 200 : 307);
+    }
+    // "/account/../auth/session" is the route of core: the rule never runs.
+    const before = seen.length;
+    const core = await run(new Request(`${BASE}/account/../auth/session`), "/auth/session");
+    expect(seen.length).toBe(before);
+    expect(core.runs).toBe(1);
+    // The fold asks the rule again in lower case when the first answer is false.
+    expect([...new Set(seen)]).toEqual(["/", "/account"]);
+  });
+
   // next is the page URL, not the decoded path: the decoded "/%61ccount" of
   // "/%2561ccount" would open as "/account" in the browser.
   it("puts the page URL in next, not the decoded path", async () => {

@@ -4,6 +4,8 @@ The TanStack Start binding of authtempo, for React Start and Solid Start of
 TanStack. It imports nothing of TanStack, so one package serves both, and it
 names no peer dependency. Its typings fixture compiles against
 `@tanstack/react-start` 1.169.1 and `@tanstack/solid-start` 1.169.1.
+The Solid fit is checked at the type level only: `@tanstack/solid-router`
+does not load in vitest on Node, and the example app is React.
 
 1. Mount core: `src/routes/auth.$.ts` holds
    `export const Route = createFileRoute("/auth/$")({ server: { handlers: authRouteHandlers(getAuth) } });`.
@@ -18,7 +20,8 @@ names no peer dependency. Its typings fixture compiles against
   reaches the rule as "/account", and "/caf%C3%A9" as "/café". "%25" and
   "%5C" stay escaped. The URL parser has already resolved "." and ".."
   segments and read "\" as "/". The router removes each "/" at the end, so
-  "/account/" reaches the rule as "/account".
+  "/account/" reaches the rule as "/account". "/account/.." reaches it as
+  "/", the path that the router matches.
 - The router matches a path without case by default, so "/ACCOUNT" runs the
   page of "/account". The binding cannot read the router's case option, so it
   folds case for `protect`: a path needs a session when the rule holds for the
