@@ -198,7 +198,7 @@ async function main() {
 - `session()` clears the token when it answers `null`: the token is dead.
 - `signOut()` clears the token when the server ended the session or did not know it.
 - A read of the store that throws sends no token, and the session answers `null`. A write that throws in `signInWithBrowser` answers `unexpected`. Nothing throws for an answer.
-- `signIn.password`, `password.signUp`, `password.reset`, `emailOtp.verify`, and the second factor verify answer a token that the native client does not keep. When `r.ok` and `"token" in r.value`, call `store.set(r.value.token)`, then `app.store.refetchIfStarted()`.
+- `signIn.password`, `password.signUp`, `password.reset`, `emailOtp.verify`, and the second factor verify answer a token that the native client does not keep. For `signIn.password` with `kind === "session"`, call `store.set(r.value.session.token)`. For the others, when `"token" in r.value`, call `store.set(r.value.token)`. Then call `app.store.refetchIfStarted()`.
 
 On Expo, the store is `expoTokenStore(SecureStore)` of `@authtempo/handoff/expo`, on the iOS Keychain or the Android Keystore through `expo-secure-store`. A key holds letters, digits, `.`, `-`, and `_` only; the default is `authtempo.session`. A read that throws, as a locked keychain does, answers `null` for that read and keeps the token. Pass `secureStoreOptions`, such as `keychainAccessible`, to give each call the options of `expo-secure-store`. On Electron, the store is `createTokenStore` of `@authtempo/handoff/electron`.
 
