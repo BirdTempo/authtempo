@@ -39,14 +39,27 @@ function targetOf(request: FastifyRequest): string {
   return rest.startsWith("/") ? rest : `/${rest}`;
 }
 
-function originOf(request: FastifyRequest): string {
+/**
+ * The origin of the request: the Host header, with Fastify's protocol. A Host
+ * that does not parse ("a b") falls back to the origin of core's baseURL,
+ * then to http://localhost, so the binding never answers a 500 of its own.
+ */
+function originOf(request: FastifyRequest, baseURL: string | undefined): string {
   // Fastify 5: request.host is the Host header with its port.
-  return `${request.protocol}://${request.host || "localhost"}`;
+  for (const base of [request.host ? `${request.protocol}://${request.host}` : "", baseURL]) {
+    if (!base) continue;
+    try {
+      return new URL(base).origin;
+    } catch {
+      // Not an origin: try the next one.
+    }
+  }
+  return "http://localhost";
 }
 
 /** The full URL of the request, for core: core reads the URL itself. */
-function urlOf(request: FastifyRequest): string {
-  return `${originOf(request)}${targetOf(request)}`;
+function urlOf(request: FastifyRequest, baseURL: string | undefined): string {
+  return `${originOf(request, baseURL)}${targetOf(request)}`;
 }
 
 function headersOf(request: FastifyRequest): Headers {
@@ -58,64 +71,62 @@ function headersOf(request: FastifyRequest): Headers {
   return headers;
 }
 
-interface RouterOptions {
-  ignoreTrailingSlash?: boolean | undefined;
-  ignoreDuplicateSlashes?: boolean | undefined;
-  useSemicolonDelimiter?: boolean | undefined;
-}
-
-/**
- * The router options in force. Fastify 5.12.5 takes each one from
- * `routerOptions`, then from the deprecated field of the same name
- * (buildRouterOptions of lib/route.js). The type of `routerOptions` lacks
- * `useSemicolonDelimiter`, so the binding names the three fields it reads.
- * The binding does not read `caseSensitive`: it folds case itself (see authSession).
- */
-function routerOptionsOf(request: FastifyRequest): RouterOptions {
-  const config = request.server.initialConfig;
-  const own: RouterOptions = config.routerOptions ?? {};
-  return {
-    ignoreTrailingSlash: own.ignoreTrailingSlash ?? config.ignoreTrailingSlash,
-    ignoreDuplicateSlashes: own.ignoreDuplicateSlashes ?? config.ignoreDuplicateSlashes,
-    useSemicolonDelimiter: own.useSemicolonDelimiter ?? config.useSemicolonDelimiter,
-  };
-}
-
-/**
- * The path that Fastify's router matches, and the query. The steps are the
- * ones of find-my-way 9.10.0 (lib/url-sanitizer.js and Router.prototype.find,
- * read 2026-10-15): cut at the first "?" or "#" (and ";" with
- * useSemicolonDelimiter), decode once with decodeURI but keep "%25", then
- * apply ignoreDuplicateSlashes and ignoreTrailingSlash. The case stays as it came.
- * A bad escape stays as it came: the router answers 400 before any hook runs.
- */
-function routedPath(request: FastifyRequest): { path: string; search: string } {
-  const options = routerOptionsOf(request);
-  const target = targetOf(request);
-  const cut = options.useSemicolonDelimiter ? /[?#;]/ : /[?#]/;
-  const end = target.slice(1).search(cut) + 1;
-  let path = end > 0 ? target.slice(0, end) : target;
-  const search = end > 0 && target[end] === "?" ? (target.slice(end).split("#")[0] ?? "") : "";
+/** find-my-way's decode: one decodeURI that keeps "%25". A bad escape stays as it came. */
+function decodePath(path: string): string {
   try {
-    path = decodeURI(path.replaceAll("%25", "%2525"));
+    return decodeURI(path.replaceAll("%25", "%2525"));
   } catch {
-    // A bad escape: the router does not route it.
+    // A bad escape: the router answers 400 before any hook runs.
+    return path;
   }
-  if (options.ignoreDuplicateSlashes) path = path.replace(/\/\/+/g, "/");
-  if (options.ignoreTrailingSlash && path.length > 1 && path.endsWith("/"))
-    path = path.slice(0, -1);
-  return { path, search };
+}
+
+/**
+ * The path that Fastify's router matches, the query, and every form that the
+ * router can match for the path. The steps are the ones of find-my-way 9.10.0
+ * (lib/url-sanitizer.js and Router.prototype.find, read 2026-10-15): cut at
+ * the first "?" or "#" (and ";" with useSemicolonDelimiter), decode once with
+ * decodeURI but keep "%25", then merge duplicate slashes
+ * (ignoreDuplicateSlashes) and cut the last slash (ignoreTrailingSlash).
+ *
+ * The binding reads none of these options. Fastify takes each one from
+ * `routerOptions` when the app set it there, else from the deprecated field
+ * of the same name (buildRouterOptions of lib/route.js), and initialConfig
+ * does not show that choice. So `forms` holds the path with and without each
+ * step, and the hook protects a path when the rule holds for one form.
+ */
+function routedPath(request: FastifyRequest): { path: string; search: string; forms: string[] } {
+  const target = targetOf(request);
+  const end = target.slice(1).search(/[?#]/) + 1;
+  const raw = end > 0 ? target.slice(0, end) : target;
+  const search = end > 0 && target[end] === "?" ? (target.slice(end).split("#")[0] ?? "") : "";
+  const semicolon = raw.indexOf(";", 1);
+  const cuts = semicolon > 0 ? [raw, raw.slice(0, semicolon)] : [raw];
+  const forms = new Set<string>();
+  for (const cut of cuts) {
+    const decoded = decodePath(cut);
+    const merged = decoded.replace(/\/\/+/g, "/");
+    for (const form of [decoded, merged]) {
+      forms.add(form);
+      if (form.length > 1 && form.endsWith("/")) forms.add(form.slice(0, -1));
+    }
+  }
+  return { path: decodePath(raw), search, forms: [...forms] };
 }
 
 /** The web Request of a Fastify request of `authRoutes`: the full URL, every header, and the raw body. */
-export function toWebRequest(request: FastifyRequest): Request {
+export function toWebRequest(request: FastifyRequest, baseURL?: string): Request {
   const headers = headersOf(request);
   const method = request.method.toUpperCase();
   const body = request.body;
   if (method === "GET" || method === "HEAD" || !(body instanceof Uint8Array))
-    return new Request(urlOf(request), { method, headers });
+    return new Request(urlOf(request, baseURL), { method, headers });
   // A copy on its own ArrayBuffer: the body type of fetch takes no shared buffer.
-  return new Request(urlOf(request), { method, headers, body: new Uint8Array(body) });
+  return new Request(urlOf(request, baseURL), {
+    method,
+    headers,
+    body: new Uint8Array(body),
+  });
 }
 
 /** Writes a web Response to Fastify: the status, every header, each Set-Cookie line, and the body. */
@@ -132,7 +143,12 @@ export async function sendWebResponse(
 }
 
 export interface FastifyRoutesOptions {
-  auth: AuthSource<Pick<Auth, "handle"> & { readonly basePath?: string | undefined }>;
+  auth: AuthSource<
+    Pick<Auth, "handle"> & {
+      readonly basePath?: string | undefined;
+      readonly baseURL?: string | undefined;
+    }
+  >;
   /**
    * The base path of core's routes. Default: the base path of the auth
    * object, then "/auth". The route is made at registration: with a function
@@ -157,18 +173,22 @@ export function authRoutes(options: FastifyRoutesOptions): FastifyPluginAsync {
     instance.route({
       method: ["GET", "POST", "OPTIONS"],
       url: `${basePath}/*`,
-      handler: async (request, reply) =>
-        sendWebResponse(reply, await resolve(options.auth).handle(toWebRequest(request))),
+      handler: async (request, reply) => {
+        const auth = resolve(options.auth);
+        return sendWebResponse(reply, await auth.handle(toWebRequest(request, auth.baseURL)));
+      },
     });
   };
   return plugin;
 }
 
 export interface FastifySessionOptions {
-  auth: AuthSource<GateAuth>;
+  /** `baseURL` is optional: with it, a Host header that does not parse falls back to its origin. */
+  auth: AuthSource<GateAuth & { readonly baseURL?: string | undefined }>;
   /**
    * True for a path that needs a session. Needs `signInPath`. It gets the
-   * path exactly as Fastify's router matched it, and that path in lower case.
+   * path exactly as Fastify's router matched it, each other form that the
+   * router can match with its options, and each form in lower case.
    */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The hook adds `?next=<path and query>`. */
@@ -186,16 +206,18 @@ export function authSession(options: FastifySessionOptions): onRequestAsyncHookH
   checkGateOptions(options);
   const { protect } = options;
   return async (request, reply) => {
-    const { path, search } = routedPath(request);
+    const { path, search, forms } = routedPath(request);
+    // Fail closed: the rule runs on each form that the router can match. And
     // find-my-way compares case with toLowerCase of the path when caseSensitive
-    // is false. The rule sees both forms, so the gate fails closed either way.
-    const gateOptions = {
-      ...options,
-      auth: resolve(options.auth),
-      protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
-    };
+    // is false, so the rule also runs on each form in lower case.
+    const holds = (p: string) =>
+      protect !== undefined && [p, ...forms].some((f) => protect(f) || protect(f.toLowerCase()));
+    const auth = resolve(options.auth);
+    const gateOptions = { ...options, auth, protect: protect && holds };
     // The gate reads the cookie and the bearer from the headers: no body.
-    const gateRequest = new Request(urlOf(request), { headers: headersOf(request) });
+    const gateRequest = new Request(urlOf(request, auth.baseURL), {
+      headers: headersOf(request),
+    });
     // The gate judges the matched path as it is (readGate's third argument, core 218476d).
     const gate = await readGate(gateOptions, gateRequest, `${path}${search}`);
     const location = gate.redirect?.headers.get("location");

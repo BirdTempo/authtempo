@@ -1,12 +1,7 @@
-import http from "node:http";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
-import Fastify, {
-  type FastifyRouterOptions,
-  type FastifyServerOptions,
-  type RawServerDefault,
-} from "fastify";
+import Fastify, { type FastifyServerOptions } from "fastify";
 import { describe, expect, it } from "vitest";
 import { authRoutes, authSession, getSession } from "../src/index.js";
 
@@ -24,6 +19,41 @@ interface AppOptions {
   server?: FastifyServerOptions;
   /** An exact rule: only "/account" needs a session. */
   exact?: boolean;
+  /** A rule that protects every path. */
+  all?: boolean;
+  /** core's baseURL. Default BASE. */
+  baseURL?: string;
+}
+
+/** The status line and the headers of a raw request, sent as it is over a socket. */
+async function raw(port: number, target: string, host = `127.0.0.1:${port}`) {
+  const head = await new Promise<string>((done, fail) => {
+    const socket = net.connect(port, "127.0.0.1", () => {
+      socket.write(`GET ${target} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`);
+    });
+    let text = "";
+    socket.on("data", (chunk: Buffer) => {
+      text += chunk.toString("utf8");
+    });
+    socket.on("end", () => done(text));
+    socket.on("error", fail);
+  });
+  const status = Number(head.split(" ")[1]);
+  const location = /^location: (.*)$/im.exec(head)?.[1]?.trim() ?? "";
+  return { status, location, text: head };
+}
+
+/** Runs `check` with the app on a port of the test, and closes it after. */
+async function onPort(
+  app: Awaited<ReturnType<typeof makeApp>>["app"],
+  check: (port: number) => Promise<void>,
+) {
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  try {
+    await check((app.server.address() as AddressInfo).port);
+  } finally {
+    await app.close();
+  }
 }
 
 async function makeApp(core: AppOptions = {}) {
@@ -31,7 +61,7 @@ async function makeApp(core: AppOptions = {}) {
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
   const auth: Auth = createAuth({
-    baseURL: BASE,
+    baseURL: core.baseURL ?? BASE,
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [BASE],
     storage: createMemoryAdapter(),
@@ -63,6 +93,7 @@ async function makeApp(core: AppOptions = {}) {
     // An exact rule on a path that a URL writes escaped.
     protect: (p) => {
       seen.push(p);
+      if (core.all) return true;
       return core.exact ? p === "/account" : p.startsWith("/account") || p === "/über";
     },
     signInPath: "/sign-in",
@@ -193,6 +224,10 @@ describe("@authtempo/fastify (plan 11d2)", () => {
     await signOutAfterRefresh({ basePath: "/api/auth" });
   });
 
+  it("reads no session for a path of core on a base path with an @", async () => {
+    await signOutAfterRefresh({ basePath: "/@auth" });
+  });
+
   it("reads no session for a path of core, with the routes registered before the hook", async () => {
     await signOutAfterRefresh({ routesFirst: true });
   });
@@ -213,12 +248,14 @@ describe("@authtempo/fastify (plan 11d2)", () => {
     expect(res.headers.location).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
   });
 
+  // next comes from the request's URL (core: a routed string never gives next),
+  // so one decode by the router gives back the path that the person asked for.
   it("gates the path as the router matches it, decoded once, with an exact rule", async () => {
     const { app, runs } = await makeApp({ exact: true });
     // find-my-way decodes "%61" to "a": the page of /account would run.
     const encoded = await app.inject({ method: "GET", url: "/%61ccount" });
     expect(encoded.statusCode).toBe(307);
-    expect(encoded.headers.location).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    expect(encoded.headers.location).toBe(`${BASE}/sign-in?next=%2F%2561ccount`);
     // The router is case-sensitive by default; the gate folds case and fails closed.
     const upper = await app.inject({ method: "GET", url: "/ACCOUNT" });
     expect(upper.statusCode).toBe(307);
@@ -227,10 +264,11 @@ describe("@authtempo/fastify (plan 11d2)", () => {
   });
 
   it("gives the rule the decoded path, not the escaped form of a URL", async () => {
-    const { app, runs } = await makeApp();
+    const { app, runs, seen } = await makeApp();
     // The router matches "/über"; a URL writes the path as "/%C3%BCber".
     const res = await app.inject({ method: "GET", url: "/%C3%BCber" });
     expect(res.statusCode).toBe(307);
+    expect(seen).toContain("/über");
     expect(runs.pages).toBe(0);
     expect(res.body).not.toContain("über of");
   });
@@ -240,116 +278,129 @@ describe("@authtempo/fastify (plan 11d2)", () => {
       exact: true,
       server: { routerOptions: { caseSensitive: false } },
     });
-    for (const url of ["/ACCOUNT", "/Account", "/%41ccount"]) {
-      const res = await app.inject({ method: "GET", url });
+    for (const [url, next] of [
+      ["/ACCOUNT", "%2FACCOUNT"],
+      ["/Account", "%2FAccount"],
+      ["/%41ccount", "%2F%2541ccount"],
+    ]) {
+      const res = await app.inject({ method: "GET", url: url ?? "" });
       expect(res.statusCode).toBe(307);
-      expect(res.headers.location).toBe(
-        `${BASE}/sign-in?next=${encodeURIComponent(decodeURI(url))}`,
-      );
+      expect(res.headers.location).toBe(`${BASE}/sign-in?next=${next}`);
     }
     expect(runs.pages).toBe(0);
+  });
+
+  it("returns to the path as it came: /account/a%2Fb gives next=/account/a%2Fb", async () => {
+    const { app, runs } = await makeApp();
+    const res = await app.inject({ method: "GET", url: "/account/a%2Fb" });
+    expect(res.statusCode).toBe(307);
+    expect(res.headers.location).toBe(`${BASE}/sign-in?next=%2Faccount%2Fa%252Fb`);
+    expect(runs.pages).toBe(0);
+  });
+
+  // A next of "/\evil.example" would send the person to evil.example from an
+  // app's own sign-in page: a browser reads "/\" as "//".
+  it("keeps an escaped backslash escaped in next", async () => {
+    const { app } = await makeApp({ all: true });
+    const res = await app.inject({ method: "GET", url: "/%5Cevil.example" });
+    expect(res.statusCode).toBe(307);
+    const next = new URL(res.headers.location ?? "").searchParams.get("next") ?? "";
+    expect(next).toBe("/%5Cevil.example");
+    expect(next.startsWith("/%5C")).toBe(true);
   });
 
   // "GET http://evil.example/account HTTP/1.1": the host of the request line
   // must not become the origin, and the URL must not break.
   it("gates a request line in absolute form on the origin of the Host header", async () => {
     const { app, runs } = await makeApp({ exact: true });
-    await app.listen({ port: 0, host: "127.0.0.1" });
-    try {
-      const { port } = app.server.address() as AddressInfo;
-      const head = await new Promise<string>((done, fail) => {
-        const socket = net.connect(port, "127.0.0.1", () => {
-          socket.write(
-            `GET http://evil.example/account HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`,
-          );
-        });
-        let text = "";
-        socket.on("data", (chunk: Buffer) => {
-          text += chunk.toString("utf8");
-        });
-        socket.on("end", () => done(text.split("\r\n\r\n")[0] ?? ""));
-        socket.on("error", fail);
-      });
-      expect(head.split("\r\n")[0]).toBe("HTTP/1.1 307 Temporary Redirect");
-      expect(head.toLowerCase()).toContain(
-        `location: http://127.0.0.1:${port}/sign-in?next=%2faccount`,
-      );
-      expect(runs.pages).toBe(0);
-    } finally {
-      await app.close();
-    }
+    await onPort(app, async (port) => {
+      const res = await raw(port, "http://evil.example/account");
+      expect(res.text.split("\r\n")[0]).toBe("HTTP/1.1 307 Temporary Redirect");
+      expect(res.location).toBe(`http://127.0.0.1:${port}/sign-in?next=%2Faccount`);
+    });
+    expect(runs.pages).toBe(0);
+  });
+
+  // A Host header that is not an authority: the origin of core's baseURL.
+  it("answers no 500 for a Host header that does not parse", async () => {
+    const { app, runs } = await makeApp({ exact: true, baseURL: "http://app.example" });
+    await onPort(app, async (port) => {
+      const page = await raw(port, "/", "a b");
+      expect(page.status).toBe(200);
+      const account = await raw(port, "/account", "a b");
+      expect(account.status).toBe(307);
+      expect(account.location).toBe("http://app.example/sign-in?next=%2Faccount");
+      const core = await raw(port, "/auth/session", "a b");
+      expect(core.status).toBe(401);
+    });
+    expect(runs.pages).toBe(0);
   });
 
   // light-my-request and fetch drop a dot segment before the request leaves;
   // a raw client does not, and find-my-way routes "/account/.." to "/account/:tab".
   // A URL reads "\\" as "/"; find-my-way routes "/account/x\\..\\.." to "/account/*".
-  it("gives the rule the matched path itself, and next holds it encoded once", async () => {
+  it("gives the rule the matched path itself, and next the path of the request", async () => {
     const { app, runs, seen } = await makeApp();
-    await app.listen({ port: 0, host: "127.0.0.1" });
-    try {
-      const { port } = app.server.address() as AddressInfo;
-      // The raw path a client sends, and the path find-my-way matches.
-      const cases: [string, string][] = [
-        ["/account/..", "/account/.."],
-        ["/account/%2e%2e", "/account/.."],
-        ["/account/../auth/x", "/account/../auth/x"],
-        ["/account/x\\..\\..\\auth\\y", "/account/x\\..\\..\\auth\\y"],
-        ["/account/x%5C..%5C..%5Cauth%5Cy", "/account/x\\..\\..\\auth\\y"],
+    await onPort(app, async (port) => {
+      // The raw path, the path find-my-way matches, and next: the request's
+      // URL as a URL parser reads it.
+      const cases: [string, string, string][] = [
+        ["/account/..", "/account/..", "%2F"],
+        ["/account/%2e%2e", "/account/..", "%2F"],
+        ["/account/../auth/x", "/account/../auth/x", "%2Fauth%2Fx"],
+        ["/account/x\\..\\..\\auth\\y", "/account/x\\..\\..\\auth\\y", "%2Fauth%2Fy"],
+        [
+          "/account/x%5C..%5C..%5Cauth%5Cy",
+          "/account/x\\..\\..\\auth\\y",
+          "%2Faccount%2Fx%255C..%255C..%255Cauth%255Cy",
+        ],
         // The router keeps "%25", so "%252e" stays "%252e" (a route "/x/%2e" matches it).
-        ["/account/%252e%252e/auth/x", "/account/%252e%252e/auth/x"],
-        ["/account/%09../auth/x", "/account/\t../auth/x"],
+        [
+          "/account/%252e%252e/auth/x",
+          "/account/%252e%252e/auth/x",
+          "%2Faccount%2F%25252e%25252e%2Fauth%2Fx",
+        ],
+        ["/account/%09../auth/x", "/account/\t../auth/x", "%2Faccount%2F%2509..%2Fauth%2Fx"],
       ];
-      for (const [path, matched] of cases) {
-        const res = await new Promise<{ status: number; body: string; location: string }>(
-          (done, fail) => {
-            http
-              .get({ host: "127.0.0.1", port, path }, (r) => {
-                let body = "";
-                r.on("data", (chunk: Buffer) => {
-                  body += chunk.toString("utf8");
-                });
-                r.on("end", () =>
-                  done({ status: r.statusCode ?? 0, body, location: r.headers.location ?? "" }),
-                );
-              })
-              .on("error", fail);
-          },
-        );
+      for (const [path, matched, next] of cases) {
+        const res = await raw(port, path);
         expect(res.status).toBe(307);
-        expect(res.location).toBe(
-          `http://127.0.0.1:${port}/sign-in?next=${encodeURIComponent(matched)}`,
-        );
+        expect(res.location).toBe(`http://127.0.0.1:${port}/sign-in?next=${next}`);
         expect(seen.at(-1)).toBe(matched);
       }
-      // One pinned value: the backslash path in next, encoded once.
-      expect(encodeURIComponent("/account/x\\..\\..\\auth\\y")).toBe(
-        "%2Faccount%2Fx%5C..%5C..%5Cauth%5Cy",
-      );
-      expect(runs.pages).toBe(0);
-    } finally {
-      await app.close();
-    }
+    });
+    expect(runs.pages).toBe(0);
   });
 
-  it("cuts at a semicolon only when the router does", async () => {
-    // Default: the router matches "/account;x" as it is, and no route has that path.
-    const plain = await makeApp({ exact: true });
-    const kept = await plain.app.inject({ method: "GET", url: "/account;x" });
-    expect(kept.statusCode).toBe(404);
-    expect(plain.runs.pages).toBe(0);
-    // With useSemicolonDelimiter the router matches "/account": the gate cuts there too.
-    const cut = await makeApp({
-      exact: true,
-      // The type of routerOptions in fastify 5.12.5 lacks this find-my-way option.
-      server: {
-        routerOptions: { useSemicolonDelimiter: true } as FastifyRouterOptions<RawServerDefault>,
-      },
+  // Fastify takes a router option from routerOptions when the app set it
+  // there, else from the deprecated top-level field. The hook reads neither:
+  // it protects each form that the router can match.
+  const shapes = (option: string): [string, FastifyServerOptions][] => [
+    ["a default app", {}],
+    ["the option at the top level", { [option]: true }],
+    ["the option in routerOptions", { routerOptions: { [option]: true } }],
+    [
+      "the option at the top level and routerOptions for another key",
+      { [option]: true, routerOptions: { maxParamLength: 500 } },
+    ],
+  ];
+  for (const [option, target, next] of [
+    ["ignoreDuplicateSlashes", "//account", "%2Faccount"],
+    ["ignoreTrailingSlash", "/account/", "%2Faccount%2F"],
+    ["useSemicolonDelimiter", "/account;x=1", "%2Faccount%3Bx%3D1"],
+  ] as const) {
+    it(`gates ${target} with ${option} in each place, and runs no page`, async () => {
+      for (const [, server] of shapes(option)) {
+        const { app, runs } = await makeApp({ exact: true, server });
+        await onPort(app, async (port) => {
+          const res = await raw(port, target);
+          expect(res.status).toBe(307);
+          expect(res.location).toBe(`http://127.0.0.1:${port}/sign-in?next=${next}`);
+        });
+        expect(runs.pages).toBe(0);
+      }
     });
-    const res = await cut.app.inject({ method: "GET", url: "/account;jsessionid=1" });
-    expect(res.statusCode).toBe(307);
-    expect(res.headers.location).toBe(`${BASE}/sign-in?next=%2Faccount`);
-    expect(cut.runs.pages).toBe(0);
-  });
+  }
 
   it("renews the session cookie on the page's answer", async () => {
     const { app, signIn, advance } = await makeApp();
