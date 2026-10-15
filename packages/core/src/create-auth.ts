@@ -98,6 +98,12 @@ import {
   secretsStatus,
 } from "./engine/secrets.js";
 import {
+  listSessions,
+  revokeOtherSessions,
+  revokeSession,
+  type SessionSummary,
+} from "./engine/session-list.js";
+import {
   destroySession,
   type PublicSession,
   type ResolvedSession,
@@ -284,6 +290,12 @@ export interface SessionApi {
     session: ResolvedSession;
     ip: string | null;
   }): Promise<Result<PublicKeyCredentialRequestOptionsJSON>>;
+  /** The user's live sessions, newest first. No fresh rule: ASVS 7.5.2 lets a person view them. */
+  list(input: { session: ResolvedSession }): Promise<Result<SessionSummary[]>>;
+  /** Ends one session of the user. Fresh rule. */
+  revoke(input: { session: ResolvedSession; id: string }): Promise<Result<{ current: boolean }>>;
+  /** Ends every other session and the sessions in waiting. Fresh rule. */
+  revokeOthers(input: { session: ResolvedSession }): Promise<Result<{ ended: number }>>;
 }
 
 export interface AuthApi {
@@ -508,6 +520,9 @@ export function createAuth(input: AuthConfig): Auth {
         reauthenticate: (i) => reauthenticate(config, i),
         requestReauthCode: (i) => requestReauthCode(config, i),
         reauthPasskeyOptions: (i) => reauthPasskeyOptions(config, i),
+        list: (i) => listSessions(config, i),
+        revoke: (i) => revokeSession(config, i),
+        revokeOthers: (i) => revokeOtherSessions(config, i),
       },
       secrets: {
         status: () => secretsStatus(config),

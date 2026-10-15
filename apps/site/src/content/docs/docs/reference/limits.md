@@ -58,6 +58,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `token-create:user:<userId>` | 1 hour | 20 | API token create |
 | `reauth:user:<userId>` | 15 minutes | 10 | Re-authentication, right or wrong |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
+| `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke and revoke-others together |
 | `token-live:session:<sessionId>` | 1 minute | 120 | The live check of a session JWT |
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |

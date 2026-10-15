@@ -231,27 +231,31 @@ export async function sessionOpened(
 }
 
 /**
- * Deletes the sessions that `where` matches, inside the flow's transaction.
- * With a list (an `afterEnd` hook listens, see `endedList`), each read row
- * is deleted by id and goes to `ended` only when its delete count is 1: a
- * sign-out between the read and the delete already fired `afterEnd` for that
- * row, so a second event would name a row this flow did not end (final fix
- * wave M-1). The last delete still matches `where`, so a session that
- * another request adds between the read and the delete goes too, with no
- * hook. With `ended` null, only the last delete runs: one statement for any
- * number of sessions (plan 9h).
+ * Deletes the sessions that `where` matches, inside the flow's transaction,
+ * and answers the count of rows it deleted (plan 12a: the revoke of the other
+ * sessions answers it). With a list (an `afterEnd` hook listens, see
+ * `endedList`), each read row is deleted by id and goes to `ended` only when
+ * its delete count is 1: a sign-out between the read and the delete already
+ * fired `afterEnd` for that row, so a second event would name a row this
+ * flow did not end (final fix wave M-1). The last delete still matches
+ * `where`, so a session that another request adds between the read and the
+ * delete goes too, with no hook. With `ended` null, only the last delete
+ * runs: one statement for any number of sessions (plan 9h).
  */
 export async function endSessions(
   tx: StorageAdapter,
   where: Where<"session">[],
   ended: SessionRow[] | null,
-): Promise<void> {
+): Promise<number> {
+  let n = 0;
   if (ended)
     for (const row of await tx.findMany("session", where)) {
-      const n = await tx.delete("session", [{ field: "id", op: "eq", value: row.id }]);
-      if (n === 1) ended.push(row);
+      if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
+        ended.push(row);
+        n++;
+      }
     }
-  await tx.delete("session", where);
+  return n + (await tx.delete("session", where));
 }
 
 /**

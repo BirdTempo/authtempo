@@ -7,11 +7,12 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
-import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
+import { deleteHandoffCodes, endOtherAccess } from "./session-list.js";
 import {
   endedList,
   endSessions,
@@ -1276,18 +1277,6 @@ function applyReset(
   });
 }
 
-/**
- * A handoff code is a session in waiting: the redeem does not check the
- * session that minted it. So a flow that ends sessions ends the codes too,
- * as `claimEmail` does for a claimant.
- */
-async function deleteHandoffCodes(tx: StorageAdapter, userId: string): Promise<void> {
-  await tx.delete("verification", [
-    { field: "purpose", op: "eq", value: "handoff-code" },
-    { field: "identifier", op: "eq", value: userId },
-  ]);
-}
-
 /** Writes `hash` into the user's one password row, or creates it. Returns the row id. */
 async function setPassword(
   tx: StorageAdapter,
@@ -1400,19 +1389,11 @@ export async function changePassword(
           updatedAt: now,
         });
       }
-      const others: Where<"session">[] = [
-        { field: "userId", op: "eq", value: user.id },
-        { field: "id", op: "ne", value: session.id },
-      ];
-      // The second-factor challenges before the session delete, as in a reset (plan 9f).
-      await deleteTwoFactorChallenges(tx, user.id);
-      // With an after hook, each row by id (plan 9d, final fix wave M-1); with none, one statement (plan 9h).
-      await endSessions(tx, others, ended ?? null);
-      // The OAuth refresh tokens and codes go with the other sessions, as in a reset (plan 9g final fix wave).
-      await deleteOAuthTokens(tx, user.id);
-      // The codes of the changer's own session go too. The row names the
-      // user, not the session, and a lost code costs one more handoff.
-      await deleteHandoffCodes(tx, user.id);
+      // The challenges, the other sessions, the handoff codes, and the OAuth
+      // refresh tokens and codes, in one function with the change of
+      // address (plan 12a). The challenges go before the session delete, as
+      // in a reset (plan 9f).
+      await endOtherAccess(tx, user.id, session.id, ended ?? null);
       // The pending reset links and codes of the address go, as in a reset.
       // A person who changes the password after a mailbox exposure must not
       // leave a live proof there that sets a password and ends every session.

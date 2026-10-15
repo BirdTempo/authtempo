@@ -76,6 +76,33 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Answer | The request options for `navigator.credentials.get`, with the user's passkeys. Send the assertion to `POST /reauth` as `passkey` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
+<h3 id="get-sessions"><code>GET /sessions</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session |
+| Input | None |
+| Answer | `{ sessions }`: the live sessions of the user, newest first, at most 100. Each has `id`, `createdAt`, `lastSeenAt`, `expiresAt`, `freshAt`, `ip`, `userAgent`, `activeOrganizationId`, and `current`. `lastSeenAt` moves only at the sliding refresh. `expiresAt` is the earlier of the row's expiry and the absolute cap |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-sessions-revoke"><code>POST /sessions/revoke</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A fresh session |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. The caller's own id also clears the session cookie. A session JWT of that session lives to its `exp` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`not_found`](/docs/reference/errors/#not_found), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-sessions-revoke-others"><code>POST /sessions/revoke-others</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A fresh session |
+| Input | JSON `{}` |
+| Answer | `{ ended }`. Every other session, the second-factor challenges, and the handoff codes go. The trusted devices, the API tokens, and the OAuth grants stay |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
 ## Magic link
 
 These routes exist in every deployment.

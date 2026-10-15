@@ -1162,11 +1162,14 @@ describe("changePassword", () => {
       // The second-factor challenges, before the session delete (plan 9f).
       "delete:verification",
       "delete:session",
+      // The handoff codes. Since plan 12a the change ends its access through
+      // endOtherAccess, which ends the sessions in waiting before the OAuth rows.
+      "delete:verification",
       // The OAuth refresh tokens, in the same transaction (plan 9g final fix wave).
       "delete:oauthToken",
       // The user's OAuth codes (plan 9g final fix wave, round 2).
       "delete:verification",
-      "delete:verification",
+      // The pending reset links of the address (plan 8 final review M-3).
       "delete:verification",
     ]);
   });

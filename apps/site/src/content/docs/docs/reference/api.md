@@ -48,7 +48,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | Handoff | `startHandoff`, `continueHandoff`, `redeemHandoff` |
 | Organizations | `createOrganization`, `listOrganizations`, `updateOrganization`, `deleteOrganization`, `listMembers`, `addMember`, `updateMemberRole`, `removeMember`, `inviteMember`, `listInvitations`, `revokeInvitation`, `acceptInvitation`, `declineInvitation` |
 | `api.tokens` | `create`, `list`, `revoke`, `current` |
-| `api.session` | `requireFresh(resolved)`, `reauthenticate`, `requestReauthCode`, `reauthPasskeyOptions`; present in every deployment |
+| `api.session` | `requireFresh(resolved)`, `reauthenticate`, `requestReauthCode`, `reauthPasskeyOptions`, `list`, `revoke`, `revokeOthers`; present in every deployment |
 | `api.password` | `signUp`, `signIn`, `verify`, `verifyEmail`, `resendVerification`, `requestReset`, `reset`, `change`; present when `password` is set |
 | `api.emailOtp` | `request`, `verify`, `requestReset`, `reset`; present unless `emailOtp` is `false` |
 | `api.totp` | `setup`, `enable`, `verify`, `disable`, `disableWithCode`, `regenerateBackupCodes`, `regenerateBackupCodesWithCode`, `status`, `uri`, `revokeTrustedDevices`; present when the second factor is on. `disable` turns every method off |
@@ -127,7 +127,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Email codes | `EmailOtpApi`, `EmailOtpRequest`, `EmailOtpVerify`, `EmailOtpReset`, `EmailOtpSession`, `ResolvedEmailOtp` |
 | Second factor | `TotpApi`, `TotpSetup`, `TotpSetupInput`, `TotpStatus`, `TwoFactorPending`, `TwoFactorSession`, `TwoFactorVerify`, `ChallengeMethod`, `SignInChallenge`, `MethodEnabled`, `ChallengeView` |
 | API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary` |
-| Account | `ReauthInput`, `ReauthProof` |
+| Account | `ReauthInput`, `ReauthProof`, `SessionSummary` |
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthAccess`, `OAuthGrantSummary` |
 | Organizations | `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |

@@ -922,6 +922,9 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | POST | `/reauth` | session, `{ emailCode, code? }` or `{ passkey }` | the other two proofs of `/reauth`; a passkey is two factors and takes no `code`. Two first proofs, or `code` beside a passkey, answer 400 `invalid_body`; 400 `passkey_failed` (a passkey of another user), `invalid_token` (a spent challenge), `token_expired` (an old passkey challenge), `too_many_attempts` (an email code that its cap spent); 404 `not_found` (no `emailOtp`, or no `passkey` config), and the limit counts no try |
 | POST | `/reauth/email` | session | `{ sent: true }`: a code to the user's address; 404 with `emailOtp: false`; 429 `rate_limited` |
 | POST | `/reauth/passkey/options` | session | the request options for `navigator.credentials.get`, with the user's passkeys; 404 without `passkey`; 429 `rate_limited` |
+| GET | `/sessions` | session | `{ sessions: [{ id, createdAt, lastSeenAt, expiresAt, freshAt, ip, userAgent, activeOrganizationId, current }] }`, the live sessions newest first, at most 100, never a token or its hash; 401. `lastSeenAt` moves only at the sliding refresh. `expiresAt` is the earlier of the row's expiry and the absolute cap |
+| POST | `/sessions/revoke` | session (fresh), `{ id }` | `{ ok: true }`; the caller's own id clears the cookie; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found` (another user's, an unknown, or an ended id); 429 `rate_limited`. A session JWT of that session lives to its `exp` |
+| POST | `/sessions/revoke-others` | session (fresh) | `{ ended }`: every other session, the second-factor challenges, and the handoff codes go. The trusted devices, the API tokens, and the OAuth grants stay; 401; 403 `session_not_fresh`; 429 `rate_limited` |
 
 The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it takes no `code`, whatever methods the user has on. After a password or an email code, `code` is the second factor. Item 2 says: "With the second factor on, the password and the email code need `code`, an authenticator code or a backup code." Item 12 lists "the email method of plan 12c as a re-authentication code" as a later input. So a user whose only method is the email method sends a backup code, or proves by a passkey. A user whose password row holds `LEGACY_VERIFY_HASH` proves by an email code or a passkey. The password proof refuses the marker, as the TOTP setup does.
 
@@ -930,6 +933,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `reauth:user:<userId>` | 15 minutes | 10 | `POST /reauth`, right or wrong. Its own key: a guessed password costs the owner's sign-in nothing. A wrong email code also counts on `otp-verify:ip` and `otp-verify:email`, the keys of the email code sign-in |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | `POST /reauth/email`, then `otp:email` and `otp:email-day` of the address, shared with every mailed code |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
+| `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
 
 ## Hooks
 
@@ -1008,10 +1012,10 @@ const auth = createAuth({
 - Session points: `beforeCreate` and `afterCreate` (`via`: `password`,
   `magic_link`, `social`, `passkey`, `handoff`, or `email_otp`; a reset by
   code is `password`), and `afterEnd`
-  (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`, or
-  `expired`), once per ended row. `sweepExpired` deletes expired rows in
-  bulk and fires no hook, so `expired` fires only when a request presents
-  the token after its expiry. A claim ends a claimant's sessions with
+  (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`,
+  `expired`, `two_factor`, or `revoked` since plan 12a), once per ended
+  row. `sweepExpired` deletes expired rows in bulk and fires no hook, so
+  `expired` fires only when a request presents the token after its expiry. A claim ends a claimant's sessions with
   `claim` in every flow that proves the address: the magic link, the
   social sign-in, the verify link, and the reset of an unverified user. A
   reset of a verified user ends that user's sessions with `password_reset`.
