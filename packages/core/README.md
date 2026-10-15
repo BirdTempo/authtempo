@@ -935,6 +935,17 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
 
+A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
+
+- a password change, or a first password
+- a reset by link or by code, also when the reset answers a second-factor challenge
+- a passkey added or removed
+- a second-factor method turned on or off: TOTP, the passkey method, the email method, and `api.totp.disable`
+
+The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change and a reset pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. Core sends the notice after the commit, never inside a transaction. A refused change sends none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
+
+`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names the change of address, a provider link and unlink, and the account delete. No flow of this version sends those yet.
+
 ## Hooks
 
 A hook is your code at a named point of a core flow (plan 9d). Pass plain

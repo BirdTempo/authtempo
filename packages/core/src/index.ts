@@ -13,6 +13,7 @@ export {
 } from "./captcha.js";
 export type {
   AccountConfig,
+  AccountNoticesConfig,
   AuthConfig,
   EmailOtpConfig,
   JwtMintConfig,
@@ -85,6 +86,7 @@ export {
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
+export { defaultNoticeMail, type NoticeEvent, type NoticeMailInput } from "./engine/notices.js";
 export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
 export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";

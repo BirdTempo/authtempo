@@ -1373,8 +1373,12 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       ok: false,
       code: "invalid_credentials",
     });
-    // The claimant got no verify mail: the reset mail is the only one.
-    expect(auth.mail).toHaveLength(1);
+    // The claimant got no verify mail. The reset mail and the owner's reset
+    // notice (plan 12a) are the only ones, both to the owner's address.
+    expect(auth.mail.map((m) => [m.to, m.subject])).toEqual([
+      [EMAIL, "Reset your password for api.example.com"],
+      [EMAIL, "Security notice for your api.example.com account"],
+    ]);
   });
 
   it("keeps the owner's new password when the owner's reset lands after the sign-up's two creates (plan 8 final review I-2)", async () => {

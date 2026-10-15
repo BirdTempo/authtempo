@@ -25,6 +25,7 @@ import {
   USER_HOOK_POINTS,
   type UserHooks,
 } from "./engine/hooks.js";
+import { defaultNoticeMail, type NoticeMailInput } from "./engine/notices.js";
 import type { CimdEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
@@ -95,10 +96,23 @@ export interface AccountConfig {
    * builder answers. Default `defaultAccountMail`.
    */
   mail?: (input: AccountMailInput) => MailMessage;
+  /**
+   * The notice mails after a change of a way in (plan 12a; ASVS 5.0.0
+   * 6.3.7). They are on by default, and `false` turns every notice off.
+   * `mail` replaces the default text. Core sends it to the input's address.
+   */
+  notices?: AccountNoticesConfig | false;
+}
+
+export interface AccountNoticesConfig {
+  /** Default `defaultNoticeMail`. */
+  mail?: (input: NoticeMailInput) => MailMessage;
 }
 
 export interface ResolvedAccount {
   mail: (input: AccountMailInput) => MailMessage;
+  /** Null when `account.notices` is `false`. */
+  notices: { mail: (input: NoticeMailInput) => MailMessage } | null;
 }
 
 export interface AuthConfig {
@@ -1143,7 +1157,7 @@ function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEma
 }
 
 /** The keys of `account`. A Record, so a key added to `AccountConfig` and not listed here fails the compile. */
-const ACCOUNT_KEYS: Readonly<Record<keyof AccountConfig, true>> = { mail: true };
+const ACCOUNT_KEYS: Readonly<Record<keyof AccountConfig, true>> = { mail: true, notices: true };
 
 /** `account` (plan 12a). Absent: the defaults. A key that core does not know is refused by name. */
 function resolveAccount(input: AccountConfig | undefined): ResolvedAccount {
@@ -1157,7 +1171,29 @@ function resolveAccount(input: AccountConfig | undefined): ResolvedAccount {
       );
   if (o.mail !== undefined && typeof o.mail !== "function")
     throw new ConfigError("account.mail must be a function");
-  return { mail: o.mail ?? defaultAccountMail };
+  return { mail: o.mail ?? defaultAccountMail, notices: resolveNotices(o.notices) };
+}
+
+/** The keys of `account.notices`. A Record, so a key added to `AccountNoticesConfig` and not listed here fails the compile. */
+const NOTICE_KEYS: Readonly<Record<keyof AccountNoticesConfig, true>> = { mail: true };
+
+/** `account.notices`. Absent: on with the default text. `false`: off. */
+function resolveNotices(
+  input: AccountNoticesConfig | false | undefined,
+): ResolvedAccount["notices"] {
+  if (input === false) return null;
+  const o: AccountNoticesConfig = input === undefined ? {} : input;
+  // `as unknown`: the guard must not narrow `o`, or its fields lose their types.
+  if (!isPlainObject(o as unknown))
+    throw new ConfigError("account.notices must be an object or false");
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(NOTICE_KEYS, key))
+      throw new ConfigError(
+        `account.notices.${key} is not an option; core has ${Object.keys(NOTICE_KEYS).join(", ")}`,
+      );
+  if (o.mail !== undefined && typeof o.mail !== "function")
+    throw new ConfigError("account.notices.mail must be a function");
+  return { mail: o.mail ?? defaultNoticeMail };
 }
 
 const TOTP_KEYS: Readonly<Record<keyof TotpConfig, true>> = {

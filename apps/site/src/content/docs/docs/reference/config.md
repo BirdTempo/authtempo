@@ -263,6 +263,8 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `account.mail` | function of `AccountMailInput` | `defaultAccountMail` | Answers the proof mails: the re-authentication code, the change-of-address link and code, and the note to a taken address. Core sends each to its address. |
+| `account.notices` | object or `false` | on | The notice mails after a change of a way in. `false` turns them off. |
+| `account.notices.mail` | function of `NoticeMailInput` | `defaultNoticeMail` | Answers a notice. Core sends it to the input's address. |
 
 ## Next
 

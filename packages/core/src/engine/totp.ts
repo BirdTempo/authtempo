@@ -17,6 +17,7 @@ import type {
 } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
+import { sendNotice } from "./notices.js";
 import { checkUserPassword } from "./password.js";
 import {
   addMethod,
@@ -481,6 +482,13 @@ export async function enableTotp(
   }
   if (!done.ok) return done;
   if (done.value.first) await sessionsEnded(config, ended, "two_factor");
+  // After the commit (plan 12a), for the first method and for a later one.
+  await sendNotice(config, {
+    event: "factor_enabled",
+    email: user.email,
+    ip: null,
+    userAgent: null,
+  });
   return totpStatus(config, { userId: user.id });
 }
 
@@ -499,6 +507,18 @@ export async function disableTotp(
   // nothing is written, so a setup in progress stays.
   if (!(await factorRow(config.storage, input.userId))) return fail("totp_not_enabled");
   if ((await disableSecondFactor(config, input.userId)) === 0) return fail("totp_not_enabled");
+  // After the commit (plan 12a). The input has the user id only, so the
+  // address comes from the row as it is now.
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: input.userId },
+  ]);
+  if (user)
+    await sendNotice(config, {
+      event: "factor_disabled",
+      email: user.email,
+      ip: null,
+      userAgent: null,
+    });
   return ok({ ok: true });
 }
 
@@ -526,6 +546,13 @@ export async function disableTotpWithCode(
     if (err instanceof FactorRaceError) return fail("conflict");
     throw err;
   }
+  // After the commit (plan 12a).
+  await sendNotice(config, {
+    event: "factor_disabled",
+    email: input.user.email,
+    ip: null,
+    userAgent: null,
+  });
   return ok({ ok: true });
 }
 

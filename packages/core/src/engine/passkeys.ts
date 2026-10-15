@@ -12,6 +12,7 @@ import type {
 } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
+import { sendNotice } from "./notices.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
 import { openSession, sessionOpened } from "./sessions.js";
 
@@ -206,6 +207,13 @@ export async function verifyPasskeyRegistration(
     }
     throw e;
   }
+  // After the write (plan 12a). The create is one statement, with no transaction.
+  await sendNotice(config, {
+    event: "passkey_added",
+    email: input.user.email,
+    ip: null,
+    userAgent: null,
+  });
   return ok(summary(row));
 }
 
@@ -471,8 +479,9 @@ export async function deletePasskey(
 ): Promise<Result<{ ok: true }>> {
   if (!config.passkey) return fail("not_found");
   const now = config.clock.now();
+  let removed: Result<{ ok: true }>;
   try {
-    return await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
+    removed = await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
       const factor = await factorRow(tx, input.user.id);
       if (factor) {
         const held = await tx.update(
@@ -505,4 +514,13 @@ export async function deletePasskey(
     if (err instanceof FactorRaceError) return fail("conflict");
     throw err;
   }
+  // After the commit (plan 12a). A refused delete sends no notice.
+  if (removed.ok)
+    await sendNotice(config, {
+      event: "passkey_removed",
+      email: input.user.email,
+      ip: null,
+      userAgent: null,
+    });
+  return removed;
 }

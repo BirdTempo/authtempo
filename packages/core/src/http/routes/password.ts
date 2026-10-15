@@ -269,6 +269,9 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
                 session: resolved,
                 currentPassword: body.value.currentPassword,
                 newPassword: body.value.newPassword,
+                // For the notice mail (plan 12a).
+                ip: ctx.ip,
+                userAgent: ctx.request.headers.get("user-agent"),
               }),
             )
           : respond(body);

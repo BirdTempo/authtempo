@@ -7,6 +7,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
+import { sendNotice } from "./notices.js";
 import {
   checkSecondFactorPasskey,
   checkSignInAssertionOf,
@@ -143,6 +144,14 @@ export async function enableMethod(
     throw err;
   }
   if (added.first) await sessionsEnded(config, ended, "two_factor");
+  // After the commit (plan 12a). The one enable of the passkey and the email
+  // method, so each enable sends one notice.
+  await sendNotice(config, {
+    event: "factor_enabled",
+    email: session.user.email,
+    ip: null,
+    userAgent: null,
+  });
   return ok({ methods: added.row.methods, backupCodes: added.first ? codes : [] });
 }
 
@@ -187,6 +196,13 @@ export async function disableMethod(
     if (err instanceof FactorRaceError) return fail("conflict");
     throw err;
   }
+  // After the commit (plan 12a).
+  await sendNotice(config, {
+    event: "factor_disabled",
+    email: input.user.email,
+    ip: null,
+    userAgent: null,
+  });
   const left = await factorRow(config.storage, input.user.id);
   return ok({ ok: true, methods: left?.methods ?? [] });
 }

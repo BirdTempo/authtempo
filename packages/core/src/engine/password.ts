@@ -10,6 +10,7 @@ import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { type CreateSteps, createSteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
+import { sendNotice } from "./notices.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
@@ -1099,6 +1100,14 @@ export async function runReset(
       await touchTrust(config, trust.id, now);
       await sessionOpened(config, reset.value.session, reset.value.user, "password");
     }
+    // After the commit and before the answer (plan 12a). The password is set,
+    // also when plan 12c answers the second-factor challenge in place of a session.
+    await sendNotice(config, {
+      event: "password_reset",
+      email: reset.value.user.email,
+      ip: input.ip,
+      userAgent: input.userAgent,
+    });
   }
   return reset;
 }
@@ -1345,6 +1354,10 @@ export interface PasswordChange {
   session: ResolvedSession;
   currentPassword?: string | undefined;
   newPassword: string;
+  /** The client IP, for the notice mail (plan 12a). */
+  ip?: string | null | undefined;
+  /** The user agent, for the notice mail (plan 12a). */
+  userAgent?: string | null | undefined;
 }
 
 /**
@@ -1446,7 +1459,16 @@ export async function changePassword(
       return fail("conflict");
     throw err;
   }
-  if (changed.ok) await sessionsEnded(config, ended, "password_change");
+  if (changed.ok) {
+    await sessionsEnded(config, ended, "password_change");
+    // After the commit (plan 12a). A first password is a change of a way in too.
+    await sendNotice(config, {
+      event: "password_changed",
+      email: user.email,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+    });
+  }
   return changed;
 }
 
