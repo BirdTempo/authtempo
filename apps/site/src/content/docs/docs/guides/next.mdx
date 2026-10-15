@@ -53,6 +53,8 @@ import layout from "../../../../../../../examples/next/app/layout.tsx?raw";
 
 `SessionRenewal` subscribes to the session store of `@authtempo/react`, so each page reads `GET /auth/session` in the browser. That read slides the session and sends the renewed cookie.
 
+`AuthErrorNotice` reads the flow error that core sends to the app root, and shows it on every page.
+
 <Code code={providers} lang="tsx" title="app/providers.tsx" />
 
 <Code code={layout} lang="tsx" title="app/layout.tsx" />
