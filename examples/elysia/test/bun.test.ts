@@ -100,6 +100,12 @@ describe("the Elysia example on Bun (plan 11d2)", () => {
     ["/%61ccount", 404],
     ["/ACCOUNT", 404],
     ["/account/", 307],
+    // Elysia removes one trailing slash only.
+    ["/account//", 404],
+    // Bun and the URL parser resolve dot segments before the router: "/account/." is "/account/".
+    ["/account/.", 307],
+    ["/account/..", 404],
+    ["/auth/../account", 307],
   ])(
     "answers %s with no cookie under an exact rule with %i, and runs no page",
     async (target, status) => {

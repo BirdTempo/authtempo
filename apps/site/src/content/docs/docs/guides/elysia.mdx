@@ -28,11 +28,12 @@ import test from "../../../../../../../examples/elysia/test/app.test.ts?raw";
 ## Steps
 
 1. Add the packages: `pnpm --filter my-app add @authtempo/core @authtempo/verify elysia`.
-2. Mount core: `.all("/auth/*", ({ request }) => auth.handle(request))`.
-3. In a `resolve` hook, call `readGate` of `@authtempo/core/bindings` with the `path` of the context.
-4. In `onBeforeHandle`, answer `gate.redirect` when it is not null. No page code runs then.
-5. Read `gate.session` in a page. The hook sends the renewed cookie after the sliding refresh.
-6. For a route that a script calls, check the caller with [the verify package](/docs/reference/verify/).
+2. Copy `withOrigin` from the code below. Bun gives a path only for a Host that does not parse.
+3. Mount core: `.all("/auth/*", ({ request }) => auth.handle(withOrigin(request, env.BASE_URL)))`.
+4. In a `resolve` hook, call `readGate` of `@authtempo/core/bindings` with the `path` of the context.
+5. In `onBeforeHandle`, answer `gate.redirect` when it is not null. No page code runs then.
+6. Read `gate.session` in a page. The hook sends the renewed cookie after the sliding refresh.
+7. For a route that a script calls, check the caller with [the verify package](/docs/reference/verify/).
 
 <Code code={app} lang="ts" title="src/app.ts" />
 
@@ -43,6 +44,7 @@ import test from "../../../../../../../examples/elysia/test/app.test.ts?raw";
 - The rule gets the `path` of the context: the raw path as Elysia's router matched it.
 - Elysia does not decode the path, and compares with case. So `/%61ccount` and `/ACCOUNT` match no route and get a 404.
 - Elysia runs `/account` for `/account/`, because `strictPath` is off by default. So the rule also tests the path with its trailing slashes cut.
+- Bun resolves `.` and `..` in the path before the router runs, so `/account/.` gets the redirect. Elysia removes one trailing slash only, so `/account//` gets a 404.
 - An exact rule covers one route only. For a route with a parameter, use `p === "/account" || p.startsWith("/account/")`.
 - The router does not decode `/%61uth/session` to a path of core, so no page and no route of core runs. It gets a 404.
 - Bun builds `request.url` from the Host header, not from a request line in absolute form.

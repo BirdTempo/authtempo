@@ -12,6 +12,7 @@
     "@authtempo/verify": "workspace:*",
     "@sinclair/typebox": "0.34.52",
     "elysia": "1.4.30",
+    "exact-mirror": "0.2.7",
     "file-type": "22.1.1",
     "openapi-types": "12.1.3"
   },

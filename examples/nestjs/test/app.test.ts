@@ -60,7 +60,7 @@ describe("the NestJS example (plan 11d2)", () => {
     }) as typeof globalThis.fetch;
     const client = createClient({ baseURL: base, fetch: jarFetch, credentials: "omit" });
     expect((await fetch(`${base}/files`)).status).toBe(401);
-    // A POST to core after Nest's body parsers: the Express binding writes the body again.
+    // A POST to core: core runs before Nest's body parsers and reads the raw body.
     expect((await client.magicLink.request({ email: "ada@example.com" })).ok).toBe(true);
     const token = /token=([A-Za-z0-9_-]+)/.exec(sent.at(-1)?.text ?? "")?.[1] ?? "";
     expect((await client.magicLink.verify({ token })).ok).toBe(true);
@@ -90,6 +90,11 @@ describe("the NestJS example (plan 11d2)", () => {
     ["/%61ccount", 404],
     ["/ACCOUNT", 307],
     ["/account/", 307],
+    // The middleware removes every trailing slash, so it fails closed for "/account//".
+    ["/account//", 307],
+    // Node and Express do not resolve dot segments: no route matches.
+    ["/account/.", 404],
+    ["/account/..", 404],
   ])(
     "answers %s with no cookie under an exact rule with %i, and runs no page",
     async (path, status) => {
@@ -109,7 +114,7 @@ describe("the NestJS example (plan 11d2)", () => {
     expect(pages).toEqual([]);
     expect(rule.length).toBeGreaterThan(0);
     // The raw path and its case forms: never the decoded "/auth/session".
-    for (const text of rule) expect(text.toLowerCase().startsWith("/%61uth/session")).toBe(true);
+    expect(new Set(rule)).toEqual(new Set(["/%61uth/session"]));
   });
 
   it("gives no 500 for a Host header that does not parse: the origin of baseURL", async () => {

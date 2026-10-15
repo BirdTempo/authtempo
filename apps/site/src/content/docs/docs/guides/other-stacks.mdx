@@ -44,7 +44,7 @@ import test from "../../../../../samples/guides/other-stacks.test.ts?raw";
 - A router that decodes the path, folds the case, or cuts a trailing slash runs a page for more than one text. Test the rule on each of those forms.
 - A path that your router decodes to a path of core must never run a page.
 - An exact rule covers one route only. For a route with a parameter, use a prefix rule.
-- Take the origin of a redirect from the Host header. When the Host does not parse, use `new URL(auth.baseURL).origin`.
+- Take the origin of a redirect from the Host header. When the Host does not parse, use `new URL(auth.baseURL).origin`, as `withOrigin` of the sample does.
 - Never take the origin from a request line in absolute form. Bun 1.4 builds `request.url` from the Host header.
 - A page that reads the session sends the renewed cookie that `auth.sessionCookie` answers.
 

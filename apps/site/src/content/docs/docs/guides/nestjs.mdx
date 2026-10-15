@@ -48,7 +48,7 @@ import test from "../../../../../../../examples/nestjs/test/app.test.ts?raw";
 - The origin of the redirect comes from the Host header, never from a request line in absolute form.
 - A Host that does not parse gets the origin of `baseURL`, so the app answers no 500.
 - Each Set-Cookie line of core passes unchanged.
-- Nest parses JSON and form bodies before the routes of core. The Express package writes the parsed body again for core.
+- The app mounts core before Nest registers its body parsers at `listen`, so core reads the raw body. If core runs after a parser, the Express package writes the parsed body again.
 - The guard is an instance, so Nest needs no `emitDecoratorMetadata` for it.
 - Nest needs the legacy decorators: `experimentalDecorators` in the tsconfig, and `oxc.decorator.legacy` in the vitest config.
 - The verifier reads the Authorization header only, never the session cookie.
