@@ -1,4 +1,5 @@
 import { createAuth } from "@authtempo/core";
+import { DEFAULT_COOKIE_NAME } from "@authtempo/core/credentials";
 import { describe, expect, it } from "vitest";
 import { API, call, harness, signIn } from "../support/harness.ts";
 import { createFilesServer } from "./verify-caller.ts";
@@ -66,6 +67,13 @@ describe("verify a caller on another server", () => {
     expect(await challenge({ authorization: "Bearer ts_refused" })).toBe(
       'Bearer error="invalid_token"',
     );
+    // The verifier reads no cookie, so a cookie beside the bearer does not change the answer.
+    expect(
+      await challenge({
+        authorization: "Bearer ts_refused",
+        cookie: `${DEFAULT_COOKIE_NAME}=ts_x`,
+      }),
+    ).toBe('Bearer error="invalid_token"');
     // Basic is no bearer, so the 401 names no invalid token.
     expect(await challenge({ authorization: "Basic YTpi" })).toBe("Bearer");
   });
