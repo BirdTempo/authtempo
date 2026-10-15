@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // tsc checks the .ts files; `vite build` compiles the .svelte files.
+  // $lib is the alias of SvelteKit for src/lib; tsc reads it from paths.
+  "compilerOptions": { "noEmit": true, "types": ["node"], "paths": { "$lib/*": ["./src/lib/*"] } },
+  "include": ["src/**/*.ts"]
+}

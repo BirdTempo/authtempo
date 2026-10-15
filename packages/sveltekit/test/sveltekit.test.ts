@@ -1,0 +1,148 @@
+import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
+import type { RequestEvent } from "@sveltejs/kit";
+import { describe, expect, it } from "vitest";
+import { authHandle } from "../src/index.js";
+
+const BASE = "https://app.example.com";
+const DAY = 24 * 60 * 60 * 1000;
+
+function setup(core: { basePath?: string } = {}) {
+  const prefix = core.basePath ?? "/auth";
+  let now = new Date("2026-01-01T00:00:00.000Z");
+  const mail: MailMessage[] = [];
+  const auth: Auth = createAuth({
+    baseURL: BASE,
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [BASE],
+    storage: createMemoryAdapter(),
+    mail: {
+      send: async (m) => {
+        mail.push(m);
+      },
+    },
+    clock: { now: () => now },
+    ...core,
+  });
+  // The real session call of core, with a count of the calls of the hook.
+  const counter = { reads: 0 };
+  const session = auth.session.bind(auth);
+  auth.session = (request, options) => {
+    counter.reads++;
+    return session(request, options);
+  };
+  const handle = authHandle({
+    auth,
+    protect: (p) => p.startsWith("/account"),
+    signInPath: "/sign-in",
+  });
+  /**
+   * The three fields of RequestEvent that the binding reads. The real pipeline
+   * of SvelteKit runs in the example's proof; this test holds the binding's rule.
+   */
+  const event = (request: Request) =>
+    ({ request, url: new URL(request.url), locals: {} }) as unknown as RequestEvent;
+  let pageRuns = 0;
+  const page = async () => {
+    pageRuns++;
+    return new Response("page");
+  };
+  async function run(request: Request) {
+    const e = event(request);
+    const res = await handle({ event: e, resolve: page });
+    return { res, locals: e.locals };
+  }
+  async function signIn(): Promise<string> {
+    const post = (path: string, body: unknown) =>
+      run(
+        new Request(`${BASE}${prefix}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE },
+          body: JSON.stringify(body),
+        }),
+      );
+    await post("/magic-link/request", { email: "ada@example.com" });
+    const token = /token=([A-Za-z0-9_-]+)/.exec(mail.at(-1)?.text ?? "")?.[1] ?? "";
+    const { res } = await post("/magic-link/verify", { token });
+    return (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+  }
+  return {
+    auth,
+    prefix,
+    counter,
+    run,
+    signIn,
+    pageRuns: () => pageRuns,
+    advance: (ms: number) => (now = new Date(now.getTime() + ms)),
+  };
+}
+
+describe("@authtempo/sveltekit (plan 11d2)", () => {
+  it("answers a route of core in the hook, and the page does not run", async () => {
+    const { signIn, pageRuns } = setup();
+    expect((await signIn()).startsWith("__Host-tempo_session=ts_")).toBe(true);
+    expect(pageRuns()).toBe(0);
+  });
+
+  // A read of the session on a route of core would add a renewed cookie after
+  // core's clear line of a sign-out, and the browser would keep the cookie.
+  async function signOutAfterRefresh(core: { basePath?: string }) {
+    const { prefix, counter, signIn, run, advance } = setup(core);
+    const cookie = await signIn();
+    advance(8 * DAY);
+    const before = counter.reads;
+    const { res } = await run(
+      new Request(`${BASE}${prefix}/sign-out`, {
+        method: "POST",
+        headers: { cookie, origin: BASE },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(counter.reads - before).toBe(0);
+    const lines = res.headers.getSetCookie();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.startsWith("__Host-tempo_session=;")).toBe(true);
+    expect(lines[0]).toContain("Max-Age=0");
+    // The count works: a page request reads the session once.
+    await run(new Request(`${BASE}/`));
+    expect(counter.reads - before).toBe(1);
+  }
+
+  it("reads no session for a path of core", async () => {
+    await signOutAfterRefresh({});
+  });
+
+  it("reads no session for a path of core on the base path of the auth object", async () => {
+    await signOutAfterRefresh({ basePath: "/api/auth" });
+  });
+
+  it("puts the session in locals, and runs the page", async () => {
+    const { signIn, run } = setup();
+    const cookie = await signIn();
+    const { res, locals } = await run(new Request(`${BASE}/`, { headers: { cookie } }));
+    expect(await res.text()).toBe("page");
+    expect(locals.session?.user.email).toBe("ada@example.com");
+  });
+
+  it("sends a person with no session on a protected path to the sign-in page", async () => {
+    const { run, pageRuns } = setup();
+    const { res } = await run(new Request(`${BASE}/account`));
+    expect(pageRuns()).toBe(0);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+  });
+
+  it("renews the session cookie on the page's answer", async () => {
+    const { signIn, run, advance } = setup();
+    const cookie = await signIn();
+    advance(8 * DAY);
+    const { res } = await run(new Request(`${BASE}/account`, { headers: { cookie } }));
+    expect(res.headers.getSetCookie().some((l) => l.startsWith("__Host-tempo_session=ts_"))).toBe(
+      true,
+    );
+  });
+
+  it("refuses protect without signInPath at construction", () => {
+    const { auth } = setup();
+    expect(() => authHandle({ auth, protect: () => true })).toThrow(/signInPath/);
+  });
+});

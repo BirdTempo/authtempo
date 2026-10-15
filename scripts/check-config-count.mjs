@@ -15,8 +15,9 @@ import { execFileSync } from "node:child_process";
 // examples/next (24, Task 11). Plan 11d2 adds packages/hono and
 // examples/hono (26, Task 2), then packages/express and examples/express
 // (28, Task 3), then packages/astro (29, Task 4; the example has no vitest
+// config), then packages/sveltekit (30, Task 5; the example has no vitest
 // config). Raise this number when a package adds a vitest config.
-const MINIMUM = 29;
+const MINIMUM = 30;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

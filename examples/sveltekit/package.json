@@ -1,0 +1,24 @@
+{
+  "name": "authtempo-example-sveltekit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "ORIGIN=http://127.0.0.1:8795 vite build && node ../../scripts/example-proof.mjs sveltekit-e2e 8795 node build/index.js"
+  },
+  "dependencies": {
+    "@authtempo/core": "workspace:*",
+    "@authtempo/sveltekit": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "6.0.0",
+    "@sveltejs/kit": "3.0.1",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/node": "24.19.1",
+    "svelte": "5.57.2",
+    "typescript": "6.0.3",
+    "vite": "8.3.3"
+  }
+}
