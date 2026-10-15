@@ -279,6 +279,9 @@ describe("@authtempo/solid/start (plan 11d2)", () => {
       ["/account\\x", "/account/x"],
       ["/acc\tount/x", "/account/x"],
       ["/account/%5Cx", "/account/%5Cx"],
+      // No router decodes "%3F" or "%23": they stay in the path the rule gets.
+      ["/account%3Fx", "/account%3Fx"],
+      ["/account%23x", "/account%23x"],
     ] as const;
     for (const [path, routed] of cases) {
       seen.length = 0;
@@ -340,6 +343,22 @@ describe("@authtempo/solid/start (plan 11d2)", () => {
     seen.length = 0;
     await fetch(new Request(`${BASE}/`));
     expect(seen).toEqual(["/"]);
+  });
+
+  // Solid Router lower-cases a page path and its pattern, hex included, so
+  // "/caf%c3%a9", "/CAF%C3%A9", and "/Caf%c3%a9/" run the page "/café".
+  it("holds an encoded rule for every case of a page path and its escapes", async () => {
+    for (const rule of ["/caf%C3%A9", "/caf%c3%a9"]) {
+      const { onRequest } = setup({}, { protect: (p) => p === rule });
+      for (const path of ["/caf%C3%A9", "/caf%c3%a9", "/CAF%C3%A9", "/Caf%c3%a9/"]) {
+        const out = await onRequest({
+          request: new Request(`${BASE}${path}`),
+          response: { headers: new Headers() },
+          locals: {},
+        });
+        expect(out?.status, `${rule} ${path}`).toBe(307);
+      }
+    }
   });
 
   // radix3 compares the case of an API route: "/MYACCOUNT" runs no route

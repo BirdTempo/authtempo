@@ -47,8 +47,10 @@ export interface SolidStartAuthOptions {
   /**
    * True for a path that needs a session. Needs `signInPath`. It gets the
    * path as the routers of Solid Start match it: the parsed path of the
-   * request, not decoded, with one "/" at the end removed. The entry folds
-   * case (see the README).
+   * request, not decoded, with one "/" at the end removed. Solid Router
+   * compares a page path in lower case, escapes too. Write the rule in lower
+   * case, with escapes in upper case: `p === "/caf%C3%A9"`. The entry also
+   * asks the rule with the path in that form (see the README).
    */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */
@@ -80,11 +82,20 @@ function routedPath(url: URL): string {
  * "/" at the end, so "/account//" runs a child route "/account/:id" with an
  * empty id: the entry asks the form with each "/" at the end removed too.
  * "/" stays "/". The rule sees the path as matched first.
+ * Solid Router 1.0.0 encodes a static part of a page (`encodeSegment` of
+ * dist/routing.js) and lower-cases the pattern and the path, hex included
+ * (`createMatcher` of dist/utils.js): the entry asks the lower-case forms
+ * with each escape in upper case too.
  */
 function failClosed(protect: (pathname: string) => boolean): (pathname: string) => boolean {
   return (p) => {
     const trimmed = p.replace(/\/+$/, "") || "/";
-    const forms = new Set([p, trimmed, p.toLowerCase(), trimmed.toLowerCase()]);
+    const lower = [p.toLowerCase(), trimmed.toLowerCase()];
+    // Solid Router lower-cases the hex of an escape too: "/caf%c3%a9" runs the
+    // page "/café", whose pattern is "/caf%C3%A9". A rule in that form needs
+    // the lower-case path with each escape in upper case.
+    const hexUp = lower.map((f) => f.replace(/%[0-9a-f]{2}/g, (e) => e.toUpperCase()));
+    const forms = new Set([p, trimmed, ...lower, ...hexUp]);
     for (const form of forms) if (protect(form)) return true;
     return false;
   };
