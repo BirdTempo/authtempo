@@ -7,6 +7,8 @@ sources:
   - packages/vue/src/index.ts
   - packages/vue/src/nuxt.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a Vue app, or of a Nuxt app.

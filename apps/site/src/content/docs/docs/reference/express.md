@@ -6,6 +6,8 @@ sources:
   - packages/express/README.md
   - packages/express/src/index.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of an Express 5 app on Node 22.18 or newer.

@@ -6,6 +6,8 @@ sources:
   - packages/react-router/README.md
   - packages/react-router/src/index.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a React Router 8 app with server middleware.

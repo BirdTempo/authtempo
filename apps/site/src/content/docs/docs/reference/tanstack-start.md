@@ -6,6 +6,8 @@ sources:
   - packages/tanstack-start/README.md
   - packages/tanstack-start/src/index.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a TanStack Start app with React or with Solid.

@@ -5,6 +5,7 @@
 // (@astrojs/telemetry 3.3.3, read 2026-10-14). test/scripts.test.ts holds it.
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
+import { FRAMEWORK_PAGES } from "./frameworks.mjs";
 
 /**
  * The sidebar. Each content task of plan 11a adds its group. A group with
@@ -15,6 +16,12 @@ const sidebar = [
   { label: "FAQ", slug: "docs/faq" },
   // Starlight 0.39 and later: a group has `items`, and `autogenerate` is an item.
   { label: "Getting started", items: [{ autogenerate: { directory: "docs/start" } }] },
+  // Plan 11d2 Task 16 (Better Auth docs audit): the framework is the reader's
+  // first choice. Each page here has sidebar.hidden, so it has one place.
+  {
+    label: "Frameworks",
+    items: FRAMEWORK_PAGES.map(({ label, slug }) => ({ label, slug })),
+  },
   { label: "How-to guides", items: [{ autogenerate: { directory: "docs/guides" } }] },
   { label: "Migration", items: [{ autogenerate: { directory: "docs/migrate" } }] },
   { label: "Operations", items: [{ autogenerate: { directory: "docs/operations" } }] },

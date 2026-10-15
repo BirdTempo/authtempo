@@ -6,6 +6,8 @@ sources:
   - packages/fastify/README.md
   - packages/fastify/src/index.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a Fastify 5 app on Node 22.18 or newer.

@@ -7,6 +7,8 @@ sources:
   - packages/solid/src/index.ts
   - packages/solid/src/start.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a Solid app, or of a Solid Start app.

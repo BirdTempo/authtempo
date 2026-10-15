@@ -8,6 +8,8 @@ sources:
   - examples/next/proxy.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a Next.js app on the App Router.

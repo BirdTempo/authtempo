@@ -7,6 +7,8 @@ sources:
   - packages/react/src/index.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a React DOM app or a React Native app.

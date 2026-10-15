@@ -7,6 +7,8 @@ sources:
   - packages/sveltekit/src/index.ts
   - packages/sveltekit/src/store.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+sidebar:
+  hidden: true
 ---
 
 **For:** a developer of a SvelteKit 3 app.
