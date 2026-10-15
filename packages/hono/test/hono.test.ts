@@ -278,4 +278,26 @@ describe("@authtempo/hono (plan 11d2)", () => {
     }
     expect(runs).toBe(0);
   });
+
+  // Plan-wide pin (P1): a path that the router decodes to a path of core never
+  // runs a page. Core 12f6eed: the auth mount wins, and core answers 404 on the
+  // raw path. Core 3aa2d84 and later: the gate skips only when the raw and the
+  // routed path are both of core, so it answers 307 first. Any of the three
+  // statuses is safe; a page run is not.
+  it("never runs a page for an escaped path of core", async () => {
+    const { auth } = makeApp();
+    let runs = 0;
+    const app = new Hono<AuthEnv>();
+    app.use("*", authSession({ auth, protect: (p) => p !== "/", signInPath: "/sign-in" }));
+    app.on(["GET", "POST", "OPTIONS"], "/auth/*", authHandler(auth));
+    app.get("/*", (c) => {
+      runs++;
+      return c.text("page");
+    });
+    for (const path of ["/%61uth/session", "/%61uth/x"]) {
+      const res = await app.request(`${BASE}${path}`);
+      expect([307, 401, 404]).toContain(res.status);
+    }
+    expect(runs).toBe(0);
+  });
 });
