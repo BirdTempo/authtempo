@@ -3,9 +3,15 @@ import { ERROR_SHAPE_CASES, runErrorShapeSuite, SDKS_RUN } from "@authtempo/clie
 import { createOAuthClient } from "@authtempo/client/oauth";
 import { createHandoff, createNativeClient } from "@authtempo/handoff";
 import { AuthProvider, useSession } from "@authtempo/react";
+import { AuthProvider as SolidProvider, useSession as useSolidSession } from "@authtempo/solid";
+import { sessionStore } from "@authtempo/sveltekit/store";
 import { createVerifier } from "@authtempo/verify";
+import { authPlugin, useSession as useVueSession } from "@authtempo/vue";
 import { createRoot } from "react-dom/client";
+import { createComponent } from "solid-js";
+import { render as renderSolid } from "solid-js/web";
 import { expect, it, vi } from "vitest";
+import { createApp, defineComponent } from "vue";
 
 const BASE = "https://api.example.com";
 const ISSUER = `${BASE}/auth`;
@@ -77,7 +83,72 @@ runErrorShapeSuite("react hook", "core", async (fetch) => {
   return seen;
 });
 
-it("ran the suite for six SDKs, with every case", () => {
+runErrorShapeSuite("vue composable", "core", async (fetch) => {
+  const client = createClient({ baseURL: BASE, fetch, broadcast: false });
+  let seen: unknown = null;
+  // The function form of defineComponent: the function is the setup of the component.
+  function Probe() {
+    const { session } = useVueSession();
+    return () => {
+      seen = session.value.error;
+      return null;
+    };
+  }
+  const app = createApp(defineComponent(Probe)).use(authPlugin(client));
+  app.mount(document.createElement("div"));
+  try {
+    await vi.waitFor(() => expect(seen).not.toBeNull());
+  } finally {
+    // A wait that times out must not leave the app and its client mounted for the later cases.
+    app.unmount();
+  }
+  return seen;
+});
+
+runErrorShapeSuite("solid primitive", "core", async (fetch) => {
+  const client = createClient({ baseURL: BASE, fetch, broadcast: false });
+  let seen: unknown = null;
+  function Probe() {
+    const { session } = useSolidSession();
+    // A function child: Solid runs it again when the signal changes.
+    return () => {
+      seen = session().error;
+      return null;
+    };
+  }
+  const dispose = renderSolid(
+    () =>
+      createComponent(SolidProvider, {
+        client,
+        get children() {
+          return createComponent(Probe as never, {});
+        },
+      }),
+    document.createElement("div"),
+  );
+  try {
+    await vi.waitFor(() => expect(seen).not.toBeNull());
+  } finally {
+    dispose();
+  }
+  return seen;
+});
+
+runErrorShapeSuite("svelte store", "core", async (fetch) => {
+  const client = createClient({ baseURL: BASE, fetch, broadcast: false });
+  let seen: unknown = null;
+  const stop = sessionStore(client).subscribe((s) => {
+    if (s.error) seen = s.error;
+  });
+  try {
+    await vi.waitFor(() => expect(seen).not.toBeNull());
+  } finally {
+    stop();
+  }
+  return seen;
+});
+
+it("ran the suite for nine SDKs, with every case", () => {
   console.log(
     `conformance: ${SDKS_RUN.length} SDKs ran ${ERROR_SHAPE_CASES.length} error-shape cases (${SDKS_RUN.join(", ")})`,
   );
@@ -88,5 +159,8 @@ it("ran the suite for six SDKs, with every case", () => {
     "native client",
     "verifier",
     "react hook",
+    "vue composable",
+    "solid primitive",
+    "svelte store",
   ]);
 });

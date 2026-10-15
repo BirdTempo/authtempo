@@ -1299,9 +1299,18 @@ importers:
       '@authtempo/react':
         specifier: workspace:*
         version: link:../react
+      '@authtempo/solid':
+        specifier: workspace:*
+        version: link:../solid
+      '@authtempo/sveltekit':
+        specifier: workspace:*
+        version: link:../sveltekit
       '@authtempo/verify':
         specifier: workspace:*
         version: link:../verify
+      '@authtempo/vue':
+        specifier: workspace:*
+        version: link:../vue
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -1317,12 +1326,18 @@ importers:
       react-dom:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
+      solid-js:
+        specifier: 1.9.17
+        version: 1.9.17
       typescript:
         specifier: 7.0.2
         version: 7.0.2
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+      vue:
+        specifier: 3.5.43
+        version: 3.5.43(typescript@7.0.2)
 
   packages/solid:
     dependencies:
