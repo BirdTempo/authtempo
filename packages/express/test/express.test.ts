@@ -11,7 +11,10 @@ afterEach(() => {
 });
 
 /** An Express app on a port of the test. The auth instance is made after the port is known. */
-async function serve(parser?: "json" | "form") {
+async function serve(
+  parser?: "json" | "form",
+  opts: { sessionFirst?: boolean; pref?: boolean } = {},
+) {
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
   let auth: Auth | null = null;
@@ -22,14 +25,23 @@ async function serve(parser?: "json" | "form") {
   const app = express();
   if (parser === "json") app.use(express.json());
   if (parser === "form") app.use(express.urlencoded({ extended: false }));
+  const mountSession = () =>
+    app.use(
+      authSession({
+        auth: getAuth,
+        protect: (p) => p.startsWith("/account"),
+        signInPath: "/sign-in",
+      }),
+    );
+  // A cookie of the app, set before the routes of core.
+  if (opts.pref)
+    app.use((_req, res, next) => {
+      res.cookie("pref", "1");
+      next();
+    });
+  if (opts.sessionFirst) mountSession();
   app.use("/auth", authHandler(getAuth));
-  app.use(
-    authSession({
-      auth: getAuth,
-      protect: (p) => p.startsWith("/account"),
-      signInPath: "/sign-in",
-    }),
-  );
+  if (!opts.sessionFirst) mountSession();
   app.get("/", (_req, res) => {
     res.send(getSession(res)?.user.email ?? "signed out");
   });
@@ -52,6 +64,13 @@ async function serve(parser?: "json" | "form") {
     },
     clock: { now: () => now },
   });
+  // The real session call of core, with a count of the calls of the gate.
+  const counter = { reads: 0 };
+  const session = auth.session.bind(auth);
+  auth.session = (request, options) => {
+    counter.reads++;
+    return session(request, options);
+  };
   async function signIn(verifyAs: "json" | "form" = "json"): Promise<string> {
     await fetch(`${base}/auth/magic-link/request`, {
       method: "POST",
@@ -69,9 +88,18 @@ async function serve(parser?: "json" | "form") {
       body:
         verifyAs === "json" ? JSON.stringify({ token }) : new URLSearchParams({ token }).toString(),
     });
-    return (res.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+    lastLines = res.headers.getSetCookie();
+    const line = lastLines.find((l) => l.startsWith("__Host-tempo_session=")) ?? "";
+    return line.split(";")[0] ?? "";
   }
-  return { base, signIn, advance: (ms: number) => (now = new Date(now.getTime() + ms)) };
+  let lastLines: string[] = [];
+  return {
+    base,
+    counter,
+    signIn,
+    lines: () => lastLines,
+    advance: (ms: number) => (now = new Date(now.getTime() + ms)),
+  };
 }
 
 describe("@authtempo/express (plan 11d2)", () => {
@@ -82,6 +110,35 @@ describe("@authtempo/express (plan 11d2)", () => {
     expect(cookie.startsWith("__Host-tempo_session=ts_")).toBe(true);
     const me = await fetch(`${base}/auth/session`, { headers: { cookie } });
     expect(((await me.json()) as { user: { email: string } }).user.email).toBe("ada@example.com");
+  });
+
+  it("keeps a Set-Cookie line of an earlier middleware on the answer of core", async () => {
+    const { signIn, lines } = await serve(undefined, { pref: true });
+    const cookie = await signIn();
+    expect(cookie.startsWith("__Host-tempo_session=ts_")).toBe(true);
+    expect(lines().some((l) => l.startsWith("pref=1"))).toBe(true);
+  });
+
+  // A read of the session on a route of core would add a renewed cookie after
+  // core's clear line of a sign-out, and the browser would keep the cookie.
+  it("reads no session for a path of core, with authSession mounted first", async () => {
+    const { base, counter, signIn, advance } = await serve(undefined, { sessionFirst: true });
+    const cookie = await signIn();
+    advance(8 * DAY);
+    const before = counter.reads;
+    const res = await fetch(`${base}/auth/sign-out`, {
+      method: "POST",
+      headers: { cookie, origin: base },
+    });
+    expect(res.status).toBe(200);
+    expect(counter.reads - before).toBe(0);
+    const lines = res.headers.getSetCookie();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.startsWith("__Host-tempo_session=;")).toBe(true);
+    expect(lines[0]).toContain("Max-Age=0");
+    // The count works: a page request reads the session once.
+    await fetch(`${base}/`);
+    expect(counter.reads - before).toBe(1);
   });
 
   it("reads a body that express.json() parsed", async () => {

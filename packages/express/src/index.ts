@@ -71,8 +71,8 @@ export async function sendWebResponse(res: ExpressResponse, response: Response):
   res.status(response.status);
   for (const [name, value] of response.headers)
     if (name !== "set-cookie") res.setHeader(name, value);
-  const cookies = response.headers.getSetCookie();
-  if (cookies.length > 0) res.setHeader("set-cookie", cookies);
+  // Append each line: a Set-Cookie line of an earlier middleware stays on the answer.
+  for (const cookie of response.headers.getSetCookie()) res.append("set-cookie", cookie);
   res.end(Buffer.from(await response.arrayBuffer()));
 }
 
@@ -89,7 +89,7 @@ export interface ExpressSessionOptions {
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */
   signInPath?: string | undefined;
-  /** The `basePath` of core. Default "/auth". */
+  /** The base path of core's routes. Default: the base path of the auth object, then "/auth". */
   basePath?: string | undefined;
 }
 

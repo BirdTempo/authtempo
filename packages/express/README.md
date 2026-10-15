@@ -12,3 +12,5 @@ takes `express` 5.3.0 or newer in 5 as a peer dependency.
 - `authSession` reads no session for a route of core, and adds the renewed
   cookie to the answer after the sliding refresh.
 - `toWebRequest` and `sendWebResponse` are the two seams to Express.
+- Behind a TLS proxy, set `app.set("trust proxy", ...)`, so the sign-in
+  redirect keeps https.
