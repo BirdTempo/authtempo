@@ -279,11 +279,6 @@ export async function sessionsEnded(
 }
 
 /**
- * Null for an unknown, malformed, or expired token. An expired row is
- * deleted on the way out. After `slidingRefreshDays` the expiry moves
- * forward by a full ttl.
- */
-/**
  * How a session read runs. `refresh: false` is a read with no write: it
  * applies the expiry and the absolute cap, but it neither slides the expiry
  * nor deletes an ended row (plan 11d Task 11 review, J1). A server render
@@ -294,6 +289,12 @@ export interface SessionReadOptions {
   /** Default true: slide the expiry and delete an ended row, as every route does. */
   refresh?: boolean | undefined;
 }
+
+/**
+ * Null for an unknown, malformed, or expired token. An expired row is
+ * deleted on the way out. After `slidingRefreshDays` the expiry moves
+ * forward by a full ttl. With `refresh: false`, see `SessionReadOptions`.
+ */
 
 export async function resolveSession(
   config: ResolvedConfig,

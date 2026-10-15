@@ -96,6 +96,7 @@ import {
   type ResolvedSession,
   renewedSessionCookie,
   resolveSession,
+  type SessionReadOptions,
   sessionFromRequest,
 } from "./engine/sessions.js";
 import {
@@ -384,7 +385,7 @@ export interface Auth {
    * and no delete of an ended row. A server render that cannot set a cookie
    * reads this way, so the browser's `GET /session` still gets the renewed cookie.
    */
-  session(request: Request, options?: { refresh?: boolean }): Promise<ResolvedSession | null>;
+  session(request: Request, options?: SessionReadOptions): Promise<ResolvedSession | null>;
   /**
    * The caller as a session, an API token, or an OAuth access token (plan
    * 9g), or null. Use it in a route that a script or an OAuth client may

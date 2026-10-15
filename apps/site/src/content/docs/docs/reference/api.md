@@ -27,7 +27,7 @@ sources:
 | Member | What it does |
 | --- | --- |
 | `handle(request)` | Serves the routes under `basePath`. Mount it for each path that starts with `basePath`. |
-| `session(request)` | Answers the `ResolvedSession` of the cookie or the `ts_` bearer token, or null. A `tk_` token answers null. |
+| `session(request, options?)` | Answers the `ResolvedSession` of the cookie or the `ts_` bearer token, or null. A `tk_` token answers null. With the `SessionReadOptions` value `{ refresh: false }`, the read writes nothing: no sliding refresh and no delete of an ended row. |
 | `caller(request)` | Answers a `Caller`: a session, an API token, or an OAuth access token under its resource, or null. |
 | `sessionCookie(request, resolved)` | Answers the `Set-Cookie` value after a sliding refresh, or null. Send it, or the browser drops the cookie early. |
 | `wellKnown(request)` | Serves the documents under `/.well-known/` at the origin root. 404 while `oauth` is off. |
@@ -113,7 +113,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 
 | Area | Types |
 | --- | --- |
-| The auth object | `Auth`, `AuthApi`, `Caller`, `Result`, `Awaitable`, `PublicSession`, `ResolvedSession`, `ResolvedApiToken`, `SweepResult`, `Clock` |
+| The auth object | `Auth`, `AuthApi`, `Caller`, `Result`, `Awaitable`, `PublicSession`, `ResolvedSession`, `SessionReadOptions`, `ResolvedApiToken`, `SweepResult`, `Clock` |
 | Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `TotpConfig`, `TotpGateConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `HooksConfig`, `CaptchaConfig` |
 | Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
 | Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `SecondFactorRow`, `SecondFactorMethod`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow` |
