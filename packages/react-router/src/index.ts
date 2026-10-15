@@ -3,6 +3,7 @@ import { checkGateOptions, type GateAuth, readGate, withSetCookie } from "@autht
 import {
   type ActionFunctionArgs,
   createContext,
+  generatePath,
   type LoaderFunctionArgs,
   type MiddlewareFunction,
   type RouterContext,
@@ -11,7 +12,8 @@ import {
 
 /**
  * The React Router binding of authtempo (plan 11d2), for the server
- * middleware of React Router 8. It imports `createContext` of react-router.
+ * middleware of React Router 8. It imports `createContext` and `generatePath`
+ * of react-router.
  */
 
 /** The auth instance, or a function that makes it at the first request. */
@@ -109,6 +111,19 @@ function foldCase(
     protect(trim(fold(pathname)));
 }
 
+/** The matched path in the route's own text, or undefined when generatePath cannot build it. */
+function routeText(
+  pattern: string,
+  params: Record<string, string | undefined>,
+): string | undefined {
+  try {
+    // generatePath types its params from a literal pattern; this pattern is a runtime string.
+    return generatePath(pattern, params as never);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The middleware of the root route: `export const middleware = [authMiddleware({ auth: getAuth })];`.
  * It sets `sessionContext`, answers the redirect of a protected path (the
@@ -119,11 +134,18 @@ function foldCase(
 export function authMiddleware(options: RouterAuthOptions): MiddlewareFunction {
   checkGateOptions(options);
   const protect = foldCase(options.protect);
-  return async ({ request, url, context }, next) => {
+  return async ({ request, url, pattern, params, context }, next) => {
+    // One more form: the matched path in the case of the route's own text.
+    // React Router matches "/myaccount" to a route "myAccount" without case, so
+    // a rule written in the route's case must see "/myAccount". generatePath
+    // builds it from the pattern and the params of this match; it encodes a
+    // param value and throws on a missing one, so it is an extra form only.
+    const routeCase = protect ? routeText(pattern, params) : undefined;
+    const ruled = protect && ((p: string) => protect(p) || (!!routeCase && protect(routeCase)));
     // The object form: the gate judges the decoded path as given, and a decoded
     // "?" or "#" stays text of the path, as the router matched it.
     const gate = await readGate(
-      { ...options, auth: resolve(options.auth), protect },
+      { ...options, auth: resolve(options.auth), protect: ruled },
       request,
       { pathname: routedPath(request), search: url.search },
       // next: the page URL without ".data" and "_routes", in URL form. Not the

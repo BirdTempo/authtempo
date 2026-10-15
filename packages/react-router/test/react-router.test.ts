@@ -1,5 +1,11 @@
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
-import { RouterContextProvider } from "react-router";
+import {
+  createStaticHandler,
+  type Path,
+  type RouteObject,
+  RouterContextProvider,
+  type StaticHandlerContext,
+} from "react-router";
 import { describe, expect, it } from "vitest";
 import { authMiddleware, authRouteModule, getSession } from "../src/index.js";
 
@@ -282,6 +288,117 @@ describe("@authtempo/react-router (plan 11d2)", () => {
       expect(ran, raw).toBe(true);
       expect(res.status, raw).toBe(200);
     }
+  });
+
+  /**
+   * The pipeline of React Router: createStaticHandler with the normalizePath of
+   * createRequestHandler (getNormalizedPath, server-runtime/urls.js of 8.4.0),
+   * so the middleware gets the real `pattern` and `params` of the match.
+   */
+  function pipeline(caseSensitive: boolean) {
+    const { auth } = setup();
+    const runs: string[] = [];
+    const page = (id: string, path: string): RouteObject => ({
+      id,
+      path,
+      caseSensitive,
+      loader: () => {
+        runs.push(id);
+        return { id };
+      },
+    });
+    const handler = createStaticHandler([
+      {
+        id: "root",
+        path: "/",
+        middleware: [
+          authMiddleware({
+            auth,
+            protect: (p) => p.startsWith("/myAccount") || /^\/[^/]+\/myAccount/.test(p),
+            signInPath: "/sign-in",
+          }),
+        ],
+        children: [
+          { id: "home", index: true, loader: () => ({ home: true }) },
+          page("about", "about"),
+          page("myAccount", "myAccount"),
+          page("myAccount-rest", "myAccount/*"),
+          page("lang-myAccount", ":lang/myAccount"),
+        ],
+      },
+    ]);
+    const normalizePath = (request: Request): Path => {
+      const url = new URL(request.url);
+      const pathname = url.pathname.endsWith("/_.data")
+        ? url.pathname.replace(/_\.data$/, "")
+        : url.pathname.replace(/\.data$/, "");
+      url.searchParams.delete("_routes");
+      return { pathname, search: url.search, hash: "" };
+    };
+    async function serve(raw: string): Promise<Response> {
+      const request = new Request(`${BASE}${raw}`);
+      const result = await handler.query(request, {
+        requestContext: new RouterContextProvider(),
+        normalizePath,
+        generateMiddlewareResponse: async (query) => {
+          const inner: StaticHandlerContext | Response = await query(request);
+          return inner instanceof Response
+            ? inner
+            : Response.json(inner.loaderData, { status: inner.statusCode });
+        },
+      });
+      return result instanceof Response
+        ? result
+        : Response.json(result.loaderData, { status: result.statusCode });
+    }
+    return { runs, serve };
+  }
+
+  // React Router matches "/myaccount" to the route "myAccount" without case.
+  // The rule is in the route's case, so the binding runs it on the route's text.
+  it("holds a rule in the route's case for another case of the path", async () => {
+    const { runs, serve } = pipeline(false);
+    const closed = [
+      "/myAccount",
+      "/myaccount",
+      "/MYACCOUNT",
+      "/MyAccount",
+      "/myaccount/",
+      "/%6Dyaccount",
+      "/MYACCOUNT/x",
+      "/myaccount/...data?_routes=myAccount-rest",
+      "/en/myaccount",
+      "/en/MYACCOUNT",
+    ];
+    for (const path of closed) {
+      for (const raw of path.includes(".data") ? [path] : [path, `${path}.data?_routes=x`]) {
+        const res = await serve(raw);
+        expect(res.status, raw).toBe(307);
+      }
+    }
+    expect(runs).toEqual([]);
+    // Public pages still run with no session.
+    for (const raw of [
+      "/",
+      "/about",
+      "/ABOUT",
+      "/_.data?_routes=home",
+      "/about.data?_routes=about",
+    ]) {
+      expect((await serve(raw)).status, raw).toBe(200);
+    }
+    expect(runs).toEqual(["about", "about", "about"]);
+  });
+
+  it("answers 404 for another case when the route sets caseSensitive", async () => {
+    const { runs, serve } = pipeline(true);
+    for (const raw of ["/myaccount", "/MYACCOUNT", "/myaccount.data?_routes=myAccount"]) {
+      expect((await serve(raw)).status, raw).toBe(404);
+    }
+    for (const raw of ["/myAccount", "/%6DyAccount"]) {
+      expect((await serve(raw)).status, raw).toBe(307);
+    }
+    expect(runs).toEqual([]);
   });
 
   it("renews the session cookie on the page's answer", async () => {

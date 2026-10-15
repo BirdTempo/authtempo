@@ -28,8 +28,13 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
   set `caseSensitive: true` on each protected route, so "/ACCOUNT" gets a 404.
 - React Router ignores trailing slashes on every route that is not a splat, so
   "/account/" renders "/account". The rule gets the path as matched, its
-  lower-case form, and both forms with trailing slashes removed. A path needs
-  a session when the rule holds for any of them.
+  lower-case form, both forms with trailing slashes removed, and the matched
+  path in the case of the route's own text ("/myaccount" on the route
+  "myAccount" gives "/myAccount"). A path needs a session when the rule holds
+  for any of them. Write a rule in the route's own text.
+- A parameter value or a splat value keeps the case of the request: the route
+  has no text for it. A rule on "/en/myAccount" for ":lang/myAccount" misses
+  "/EN/MYACCOUNT". Compare such segments in lower case in the rule.
 - The middleware reads no session for a route of core, and adds the renewed
   cookie to the page's answer after the sliding refresh.
 - A function given to both `authRouteModule` and `authMiddleware` runs twice
