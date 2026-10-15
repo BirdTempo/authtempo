@@ -1,7 +1,9 @@
 # @authtempo/express
 
 The Express binding of authtempo, for Express 5 on Node 22.18 or newer. It
-takes `express` 5.3.0 or newer in 5 as a peer dependency.
+takes `express` 5.2.1 or newer in 5 as a peer dependency. It runs on 5.2.1
+because it uses only the router and parseurl, and the Express adapter of
+NestJS 12 pins Express 5.2.1.
 
 1. Mount core: `app.use("/auth", authHandler(auth))`.
 2. Read the session: `app.use(authSession({ auth }))`, then `getSession(res)` in a route.
