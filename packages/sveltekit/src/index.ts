@@ -70,14 +70,19 @@ export function authHandle(options: SvelteKitAuthOptions): Handle {
   return async ({ event, resolve }) => {
     const auth = resolveAuth(options.auth);
     // The rule of the gate: the option, then core's own base path, then "/auth".
-    // A copy of the basePath line of readGate (packages/core/src/bindings.ts:104):
+    // A copy of the basePath line of readGate (packages/core/src/bindings.ts:216):
     // keep the two equal, or the hook and the gate disagree on a path of core.
     const basePath = options.basePath ?? auth.basePath ?? DEFAULT_BASE_PATH;
-    if (isAuthPath(event.url.pathname, basePath)) return auth.handle(event.request);
     // The routed URL, not request.url: for a data request of a client-side
     // navigation, Kit strips /__data.json and the x-sveltekit-* query from event.url
     // only. event.url keeps the escapes, but Kit matches the path decoded once.
-    const routed = `${kitPath(event.url.pathname)}${event.url.search}`;
+    const path = kitPath(event.url.pathname);
+    // Core matches its routes on the raw path. A path that Kit decodes to a path
+    // of core ("/%61uth/x") goes to core too, which answers 404: else the gate
+    // skips protect for it and Kit runs a catch-all page.
+    if (isAuthPath(event.url.pathname, basePath) || isAuthPath(path, basePath))
+      return auth.handle(event.request);
+    const routed = `${path}${event.url.search}`;
     // next comes from event.url, the page URL: a data request returns the person
     // to the page, and the decoded text never becomes next on its own.
     const gate = await readGate({ ...options, auth }, event.request, routed, event.url);

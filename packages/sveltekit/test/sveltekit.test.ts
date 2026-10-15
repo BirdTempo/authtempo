@@ -262,6 +262,19 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     }
   });
 
+  // Core matches its routes on the raw path, but Kit matches the decoded one.
+  // "/%61uth/x" must go to core (404), not to a catch-all page with no gate.
+  it("sends a path that Kit decodes to a path of core to core, not to a page", async () => {
+    const { run, pageRuns } = setup({}, (p) => p !== "/sign-in");
+    const page = await run(new Request(`${BASE}/%61uth/x`));
+    const data = await run(
+      new Request(`${BASE}/%61uth/x/__data.json?x-sveltekit-invalidated=01`),
+      new URL(`${BASE}/%61uth/x`),
+    );
+    expect(pageRuns()).toBe(0);
+    for (const { res } of [page, data]) expect(res.status).toBe(404);
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, run, advance } = setup();
     const cookie = await signIn();

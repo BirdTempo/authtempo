@@ -18,6 +18,8 @@ in 3 as a peer dependency.
   kept and the case kept.
 - A non-ASCII route reaches the rule decoded, such as "/café". Write the rule
   for that form.
+- A path that SvelteKit decodes to a path of core, such as "/%61uth/x", goes to
+  core. Core matches its routes on the raw path, so it answers 404.
 - An app's `reroute` hook changes the path that SvelteKit matches, but the hook
   judges `event.url`: write the rule for both forms of a rerouted protected path.
 - A remote function at `/_app/remote/<id>` is outside the protect rule, so it
