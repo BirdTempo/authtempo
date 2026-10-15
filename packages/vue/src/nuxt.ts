@@ -148,9 +148,11 @@ function pagePath(text: string): string {
  * renders the page "/secret/[id]" with id "x#y", reviewed 2026-10-15), and it
  * renders the page of pagePath. So the rule runs on four forms, in this order:
  * the full text; the text cut at the first "?"; the page path; and, as an
- * extra form, the text cut at the first "#". An extra form only adds a
- * redirect, never removes one. A path needs a session when the rule holds for
- * any form, so an exact rule fails closed. The rule sees each form only once.
+ * extra form, the text cut at the first "#". Then each form runs in lower
+ * case, because Vue Router compares in any case by default. An extra form
+ * only adds a redirect, never removes one. A path needs a session when the
+ * rule holds for any form, so an exact rule fails closed. The rule sees each
+ * form only once.
  */
 function bothForms(
   protect: ((pathname: string) => boolean) | undefined,
@@ -167,6 +169,11 @@ function bothForms(
     add(page);
     const hash = pathname.indexOf("#");
     add(hash === -1 ? pathname : pathname.slice(0, hash));
+    // Vue Router compares a path in any case by default (sensitive: false), so
+    // each form runs in lower case too (final review, M1). toUpperCase first
+    // folds more letters than toLowerCase alone; a form that no router renders
+    // only adds a redirect.
+    for (const form of [...forms]) add(form.toUpperCase().toLowerCase());
     return forms.some((form) => protect(form));
   };
 }

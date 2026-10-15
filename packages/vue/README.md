@@ -47,8 +47,13 @@ On the server of Nuxt:
   cut at the first `#`. A path needs a session when the rule holds for any
   form, so an exact rule `p === "/account"` guards every path that renders
   that page. An extra form only adds a redirect.
-- Vue Router compares a path in any case by default. Set
-  `router: { options: { sensitive: true } }` in `nuxt.config.ts`, as the
-  example does, or compare in lower case in `protect`. Prefer a prefix rule:
-  the router also renders `/account/` for `/account`.
+- Vue Router compares a path in any case by default, so the middleware also
+  runs each form in lower case: write the rule in lower case. `/ACCOUNT` then
+  needs a session under `p.startsWith("/account")`. The example also sets
+  `router: { options: { sensitive: true } }` in `nuxt.config.ts`, so its
+  router renders no page for `/ACCOUNT`.
+- The origin of the redirect: on Node, the protocol of h3 and the Host header,
+  never a request line in absolute form (`GET http://evil.example/account`). A
+  Host that does not parse as one host falls back to `new URL(auth.baseURL).origin`.
+  A web handler, such as a Worker preset, takes the origin of its request URL.
 - The session middleware reads no session for a route of core: core reads and renews it itself.

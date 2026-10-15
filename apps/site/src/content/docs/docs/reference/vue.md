@@ -77,7 +77,7 @@ On the server of Nuxt:
 - For example, `/secret/x%23y` renders `/secret/[id]` with the id `x#y`.
 - The page router also treats `\` as `/`, resolves `.` and `..`, and matches with or without a trailing `/`.
 - So `/account/`, `/account/.`, and `/account%3F` all render the page of `/account`.
-- The middleware runs `protect` on four forms, each once. The first form is the text of h3, and the second is that text cut at the first `?`.
+- The middleware runs `protect` on four forms, each once, and on each form in lower case. The first form is the text of h3, and the second is that text cut at the first `?`.
 - The third form is the page path: cut at `?`, with `\` as `/`, `.` and `..` resolved, and no trailing `/`.
 - The page path is still decoded, so `/café/` gives `/café`. The fourth form, an extra one, is the text cut at the first `#`.
 - A path needs a session when the rule holds for any form. So an exact rule `p === "/account"` guards every path that renders that page.

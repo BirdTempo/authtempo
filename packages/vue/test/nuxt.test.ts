@@ -224,6 +224,18 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
     },
   );
 
+  // Vue Router compares a path in any case by default, so it renders /account
+  // for each of these when the app's router is not case-sensitive.
+  it.each(["/ACCOUNT", "/Account/", "/%41ccount", "/ACCOUNT%3F"])(
+    "needs a session for %s under a lower-case prefix rule, as Vue Router folds case",
+    async (target) => {
+      const { app, pageRuns } = makeApp({}, (p) => p.startsWith("/account"));
+      const res = await rawGet(app, target);
+      expect(res.status).toBe(307);
+      expect(pageRuns()).toBe(0);
+    },
+  );
+
   it("keeps the page path decoded: an exact rule /café guards /café/", async () => {
     const { app, pageRuns } = makeApp({}, (p) => p === "/café");
     const res = await rawGet(app, "/caf%C3%A9/");
