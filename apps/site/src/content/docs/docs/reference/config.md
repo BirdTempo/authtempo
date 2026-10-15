@@ -54,6 +54,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
 | `operator` | object or `false` | off | Turns on `POST /operator/keys/rotate`. Refused without `jwtMint`. |
 | `hooks` | object | no hook | The groups `organization` and `session`. Any other group is refused. |
+| `account` | object | the defaults below | The settings page: the proof mails, the notices, the confirm page, and the delete. See the keys under Account. |
 
 ## Cookie
 
@@ -254,6 +255,12 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `captcha.port` | `CaptchaPort` | required | An object with `verify`. `@authtempo/captcha-turnstile` gives one. Its optional `page` puts the widget on core's sign-in page: `scriptSrc` is an https URL, `responseField` is 1 to 64 letters, digits, `_`, or `-`, and `cspSources` holds https origins with no path. |
 | `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in` is the fifth flow, and it is off by default. `password-reset-request` covers the reset link and the reset code. |
 | `captcha.onUnavailable` | `"allow"` \| `"refuse"` | `"allow"` | What happens when the captcha gives no answer. `"allow"` writes one log line and goes on: the limits still bound the flow. `"refuse"` answers 503 `captcha_unavailable`. |
+
+## Account
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `account.mail` | function of `AccountMailInput` | `defaultAccountMail` | Answers the proof mails: the re-authentication code, the change-of-address link and code, and the note to a taken address. Core sends each to its address. |
 
 ## Next
 

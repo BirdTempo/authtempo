@@ -1,4 +1,5 @@
 import type {
+  AccountConfig,
   AppleConfig,
   AuthConfig,
   CaptchaConfig,
@@ -69,6 +70,7 @@ export const CONFIG_KEYS = {
     oauth: true,
     operator: true,
     hooks: true,
+    account: true,
     captcha: true,
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
@@ -205,6 +207,7 @@ export const CONFIG_KEYS = {
   } satisfies Keys<NonNullable<OAuthConfig["registration"]>>,
   operator: { secretHash: true } satisfies Keys<OperatorConfig>,
   hooks: { organization: true, session: true } satisfies Keys<HooksConfig>,
+  account: { mail: true } satisfies Keys<AccountConfig>,
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
 } as const;
 

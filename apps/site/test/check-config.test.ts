@@ -6,9 +6,9 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 142 keys, the nested ones by their path", () => {
+  it("lists 144 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
-    expect(keys.length).toBe(142);
+    expect(keys.length).toBe(144);
     expect(keys).toContain("password.minLength");
     expect(keys).toContain("social.oidc[].endpoints.jwksUrl");
     expect(new Set(keys).size).toBe(keys.length);

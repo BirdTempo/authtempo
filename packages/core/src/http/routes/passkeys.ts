@@ -19,7 +19,7 @@ import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
 
 /** The browser's `PublicKeyCredential.toJSON()`. Only the fields the engine reads are checked; the seam checks the rest. */
-const credentialJson = z
+export const credentialJson = z
   .object({
     id: z.string().min(1).max(1024),
     response: z.object({ clientDataJSON: z.string().min(1).max(16_384) }).loose(),

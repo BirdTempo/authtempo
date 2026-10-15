@@ -84,7 +84,12 @@ import {
   verifyPassword,
   verifyPasswordEmail,
 } from "./engine/password.js";
-import { type ReauthInput, reauthenticate } from "./engine/reauth.js";
+import {
+  type ReauthInput,
+  reauthenticate,
+  reauthPasskeyOptions,
+  requestReauthCode,
+} from "./engine/reauth.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
 import {
   rewrapSecrets,
@@ -272,6 +277,13 @@ export interface SessionApi {
   /** `session_not_fresh` unless a sign-in or a re-authentication is younger than `session.freshMinutes`. */
   requireFresh(resolved: ResolvedSession): Result<true>;
   reauthenticate(input: ReauthInput): Promise<Result<{ freshUntil: Date }>>;
+  /** A re-authentication code to the user's address. `not_found` with `emailOtp: false`. */
+  requestReauthCode(input: { session: ResolvedSession }): Promise<Result<{ sent: true }>>;
+  /** The WebAuthn options of a re-authentication by a passkey. `not_found` without `passkey`. */
+  reauthPasskeyOptions(input: {
+    session: ResolvedSession;
+    ip: string | null;
+  }): Promise<Result<PublicKeyCredentialRequestOptionsJSON>>;
 }
 
 export interface AuthApi {
@@ -494,6 +506,8 @@ export function createAuth(input: AuthConfig): Auth {
       session: {
         requireFresh: (resolved) => requireFresh(config, resolved.session),
         reauthenticate: (i) => reauthenticate(config, i),
+        requestReauthCode: (i) => requestReauthCode(config, i),
+        reauthPasskeyOptions: (i) => reauthPasskeyOptions(config, i),
       },
       secrets: {
         status: () => secretsStatus(config),

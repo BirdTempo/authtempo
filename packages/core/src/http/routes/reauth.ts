@@ -1,19 +1,39 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
-import { reauthenticate } from "../../engine/reauth.js";
+import {
+  type ReauthProof,
+  reauthenticate,
+  reauthPasskeyOptions,
+  requestReauthCode,
+} from "../../engine/reauth.js";
+import { fail } from "../../result.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
+import { credentialJson } from "./passkeys.js";
 
 const reauthBody = z.strictObject({
   // The engine refuses more than 128 code points; this cap bounds the body.
-  password: z.string().max(1024),
+  password: z.string().max(1024).optional(),
+  emailCode: z.string().min(1).max(16).optional(),
+  passkey: credentialJson.optional(),
   code: z.string().min(1).max(64).optional(),
 });
 
-/** The re-authentication routes (plan 12a). They exist in every deployment. */
+/** One first proof: exactly one of the three, and no `code` beside a passkey. */
+function proofOf(body: z.infer<typeof reauthBody>): ReauthProof | null {
+  const { password, emailCode, passkey, code } = body;
+  const given = [password, emailCode, passkey].filter((p) => p !== undefined).length;
+  if (given !== 1) return null;
+  if (passkey !== undefined) return code === undefined ? { passkey } : null;
+  if (password !== undefined) return { password, code };
+  if (emailCode !== undefined) return { emailCode, code };
+  return null;
+}
+
+/** The re-authentication routes (plan 12a). `/reauth` exists in every deployment. */
 export function reauthRoutes(config: ResolvedConfig): Route[] {
-  return [
+  const routes: Route[] = [
     {
       method: "POST",
       path: "/reauth",
@@ -22,11 +42,9 @@ export function reauthRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, reauthBody);
         if (!body.ok) return sent(respond(body), s.renewed);
-        const r = await reauthenticate(config, {
-          session: s.resolved,
-          proof: { password: body.value.password, code: body.value.code },
-          ip: ctx.ip,
-        });
+        const proof = proofOf(body.value);
+        if (!proof) return sent(respond(fail("invalid_body")), s.renewed);
+        const r = await reauthenticate(config, { session: s.resolved, proof, ip: ctx.ip });
         return sent(
           r.ok ? json({ freshUntil: r.value.freshUntil.toISOString() }) : respond(r),
           s.renewed,
@@ -34,4 +52,28 @@ export function reauthRoutes(config: ResolvedConfig): Route[] {
       },
     },
   ];
+  if (config.passkey)
+    routes.push({
+      method: "POST",
+      path: "/reauth/passkey/options",
+      async handler(ctx) {
+        const s = await withSession(config, ctx.request);
+        if (!s) return unauthorized();
+        return sent(
+          respond(await reauthPasskeyOptions(config, { session: s.resolved, ip: ctx.ip })),
+          s.renewed,
+        );
+      },
+    });
+  if (config.emailOtp)
+    routes.push({
+      method: "POST",
+      path: "/reauth/email",
+      async handler(ctx) {
+        const s = await withSession(config, ctx.request);
+        if (!s) return unauthorized();
+        return sent(respond(await requestReauthCode(config, { session: s.resolved })), s.renewed);
+      },
+    });
+  return routes;
 }

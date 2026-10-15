@@ -6,6 +6,7 @@ import {
   DEFAULT_CAPTCHA_FLOWS,
   type ResolvedCaptcha,
 } from "./captcha.js";
+import { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
 import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
@@ -80,6 +81,20 @@ export interface MailMessage {
 
 export interface MailPort {
   send(message: MailMessage): Promise<void>;
+}
+
+export interface AccountConfig {
+  /**
+   * The proof mails (plan 12a): the re-authentication code, the
+   * change-of-address link and code, and the note to an address that an
+   * account holds. Core sends each to the input's address, whatever `to` the
+   * builder answers. Default `defaultAccountMail`.
+   */
+  mail?: (input: AccountMailInput) => MailMessage;
+}
+
+export interface ResolvedAccount {
+  mail: (input: AccountMailInput) => MailMessage;
 }
 
 export interface AuthConfig {
@@ -272,6 +287,12 @@ export interface AuthConfig {
    * `organizations`.
    */
   hooks?: HooksConfig;
+  /**
+   * The settings page of a signed-in person (plan 12a, spec 8.15): the
+   * proof mails, the notices, the confirm page of a change of address, and
+   * the account delete. Pass `{}` or leave it out for the defaults.
+   */
+  account?: AccountConfig;
   /**
    * A captcha on the flows that send mail or write rows (plan 12b). The token
    * comes in the header `x-captcha-response`, after the flow's limits. Off
@@ -605,6 +626,7 @@ export interface ResolvedConfig {
   oauth: ResolvedOAuth | null;
   operator: { secretHash: string } | null;
   hooks: ResolvedHooks;
+  account: ResolvedAccount;
   captcha: ResolvedCaptcha | null;
 }
 
@@ -901,6 +923,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     oauth: resolveOAuth(input.oauth, jwtMint),
     operator: resolveOperator(input.operator, jwtMint),
     hooks: resolveHooks(input.hooks, organizations !== null),
+    account: resolveAccount(input.account),
     captcha: resolveCaptcha(
       input.captcha,
       // Core's own sign-in page serves the handoff and the OAuth login step,
@@ -1113,6 +1136,24 @@ function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEma
     mail: o.mail ?? defaultEmailOtpMail,
     resetMail: o.resetMail ?? defaultResetOtpMail,
   };
+}
+
+/** The keys of `account`. A Record, so a key added to `AccountConfig` and not listed here fails the compile. */
+const ACCOUNT_KEYS: Readonly<Record<keyof AccountConfig, true>> = { mail: true };
+
+/** `account` (plan 12a). Absent: the defaults. A key that core does not know is refused by name. */
+function resolveAccount(input: AccountConfig | undefined): ResolvedAccount {
+  const o: AccountConfig = input === undefined ? {} : input;
+  // `as unknown`: the guard must not narrow `o`, or its fields lose their types.
+  if (!isPlainObject(o as unknown)) throw new ConfigError("account must be an object");
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(ACCOUNT_KEYS, key))
+      throw new ConfigError(
+        `account.${key} is not an option; core has ${Object.keys(ACCOUNT_KEYS).join(", ")}`,
+      );
+  if (o.mail !== undefined && typeof o.mail !== "function")
+    throw new ConfigError("account.mail must be a function");
+  return { mail: o.mail ?? defaultAccountMail };
 }
 
 const TOTP_KEYS: Readonly<Record<keyof TotpConfig, true>> = {

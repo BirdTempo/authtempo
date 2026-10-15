@@ -43,6 +43,8 @@ export const ROUTES = Object.freeze([
   { method: "GET", path: "/session", feature: "session" },
   { method: "POST", path: "/sign-out", feature: "session" },
   { method: "POST", path: "/reauth", feature: "account" },
+  { method: "POST", path: "/reauth/passkey/options", feature: "passkey" },
+  { method: "POST", path: "/reauth/email", feature: "emailOtp" },
   { method: "POST", path: "/magic-link/request", feature: "magicLink" },
   { method: "GET", path: "/magic-link/verify", feature: "magicLink" },
   { method: "POST", path: "/magic-link/verify", feature: "magicLink" },

@@ -1,5 +1,5 @@
 import { checkCaptcha } from "../captcha.js";
-import type { ResolvedConfig } from "../config.js";
+import type { ResolvedConfig, ResolvedEmailOtp } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
@@ -24,12 +24,21 @@ import { attemptsOf, countAttempt, MAILED_CODES_PER_EMAIL_DAY } from "./verifica
 
 export type EmailOtpPurpose = "email-otp" | "password-reset-otp";
 
+/**
+ * Every purpose of a mailed code (plan 12a): the sign-in and the reset of
+ * plan 9e, the re-authentication (identifier: the address), and the change
+ * of address (identifier: the user id). One code is live per purpose and
+ * identifier.
+ */
+export type CodePurpose = EmailOtpPurpose | "reauth-otp" | "email-change-otp";
+
 // Per 15 minutes, for the sign-in code and the reset code together: one
 // budget per address and per IP for every mailed code. 3 per address is the
 // verify mail resend's limit (password.ts), not the magic link's 5: with
-// `maxAttempts` guesses per code, it bounds the guesses on one address.
+// `maxAttempts` guesses per code, it bounds the guesses on one address. The
+// re-authentication code (plan 12a) counts on the same per-address key.
 const REQUEST_PER_IP = { seconds: 900, max: 20 };
-const REQUEST_PER_EMAIL = { seconds: 900, max: 3 };
+export const REQUEST_PER_EMAIL = { seconds: 900, max: 3 };
 // Per 24 hours, for both purposes, checked after the 15-minute keys. The
 // 15-minute keys alone let one address take 960 guesses a day: about 1 in
 // 1,040 per day and about 30 % per year for a patient attacker. 20 codes a
@@ -80,6 +89,65 @@ export function codeHash(secret: string, rowId: string, code: string): Promise<s
 }
 
 /**
+ * Writes one live code of `purpose` for `identifier` and answers the clear
+ * code (plan 9e; moved here by plan 12a for every purpose). The earlier live
+ * rows of the purpose and identifier are spent first, so one code is live.
+ * The new row comes strictly after the newest of them (plan 9h): with equal
+ * times the fallback read of `newestCode` could find a spent older row first.
+ * `data` joins the attempt count. The caller runs its limits first and sends
+ * the mail after, never inside a transaction.
+ */
+export async function issueCode(
+  config: ResolvedConfig,
+  otp: ResolvedEmailOtp,
+  purpose: CodePurpose,
+  identifier: string,
+  data: Record<string, unknown>,
+): Promise<string> {
+  const now = config.clock.now();
+  await config.storage.update(
+    "verification",
+    [
+      { field: "purpose", op: "eq", value: purpose },
+      { field: "identifier", op: "eq", value: identifier },
+      { field: "consumedAt", op: "eq", value: null },
+    ],
+    { consumedAt: now, updatedAt: now },
+  );
+  // After the spend, so every row that this request spent is in the read
+  // (plan 9h). The new row comes strictly after the newest of them: the id is
+  // random inside its millisecond, so with equal times the fallback read of
+  // `newestCode` could find a spent older row first and answer invalid_code
+  // after the cap (spec 8.10 item 4). A parallel request that this read does
+  // not see left its row live, and the cap spends live rows.
+  const [newest] = await config.storage.findMany(
+    "verification",
+    [
+      { field: "purpose", op: "eq", value: purpose },
+      { field: "identifier", op: "eq", value: identifier },
+    ],
+    { sort: NEWEST_FIRST, limit: 1 },
+  );
+  const createdAt = new Date(Math.max(now.getTime(), (newest?.createdAt.getTime() ?? 0) + 1));
+  const id = newId(createdAt);
+  const code = randomDigits(otp.length);
+  await config.storage.create("verification", {
+    id,
+    purpose,
+    identifier,
+    valueHash: await codeHash(currentSecret(config.keyring), id, code),
+    // From the request time: the bump above moves the order, not the life.
+    expiresAt: new Date(now.getTime() + otp.ttlMinutes * 60_000),
+    consumedAt: null,
+    data: { ...data, attempts: 0 },
+    createdAt,
+    updatedAt: createdAt,
+    secretVersion: config.keyring.current,
+  });
+  return code;
+}
+
+/**
  * Always `ok` for a well-formed call, so a caller cannot learn whether an
  * address has an account. `rate_limited` is the one visible failure. The
  * earlier live codes of the address and purpose are spent first, so one
@@ -112,46 +180,7 @@ async function requestCode(
     return fail("rate_limited");
   if (!(await config.limiter.allow(`otp:email-day:${email}`, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
-  const now = config.clock.now();
-  await config.storage.update(
-    "verification",
-    [
-      { field: "purpose", op: "eq", value: purpose },
-      { field: "identifier", op: "eq", value: email },
-      { field: "consumedAt", op: "eq", value: null },
-    ],
-    { consumedAt: now, updatedAt: now },
-  );
-  // After the spend, so every row that this request spent is in the read
-  // (plan 9h). The new row comes strictly after the newest of them: the id is
-  // random inside its millisecond, so with equal times the fallback read of
-  // `newestCode` could find a spent older row first and answer invalid_code
-  // after the cap (spec 8.10 item 4). A parallel request that this read does
-  // not see left its row live, and the cap spends live rows.
-  const [newest] = await config.storage.findMany(
-    "verification",
-    [
-      { field: "purpose", op: "eq", value: purpose },
-      { field: "identifier", op: "eq", value: email },
-    ],
-    { sort: NEWEST_FIRST, limit: 1 },
-  );
-  const createdAt = new Date(Math.max(now.getTime(), (newest?.createdAt.getTime() ?? 0) + 1));
-  const id = newId(createdAt);
-  const code = randomDigits(otp.length);
-  await config.storage.create("verification", {
-    id,
-    purpose,
-    identifier: email,
-    valueHash: await codeHash(currentSecret(config.keyring), id, code),
-    // From the request time: the bump above moves the order, not the life.
-    expiresAt: new Date(now.getTime() + otp.ttlMinutes * 60_000),
-    consumedAt: null,
-    data: { attempts: 0 },
-    createdAt,
-    updatedAt: createdAt,
-    secretVersion: config.keyring.current,
-  });
+  const code = await issueCode(config, otp, purpose, email, {});
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });
   // To the address the code belongs to, whatever the builder wrote.
@@ -167,8 +196,11 @@ export function requestEmailOtp(
   return requestCode(config, "email-otp", input);
 }
 
-/** The verify limits, then the normalized address, or null for a malformed one. */
-async function verifyGate(
+/**
+ * The verify limits, then the normalized address, or null for a malformed one.
+ * Public since plan 12a: the re-authentication and the change of address use it.
+ */
+export async function verifyGate(
   config: ResolvedConfig,
   input: { email: string; ip: string | null },
 ): Promise<Result<string | null>> {
@@ -189,16 +221,17 @@ async function verifyGate(
  * `too_many_attempts`. The request writes each row after every row that it
  * spent (plan 9h), so the newest row is the last request's row; rows of two
  * parallel requests can share a millisecond, and both are live until the cap
- * spends both.
+ * spends both. Public since plan 12a: the re-authentication and the change of
+ * address use it.
  */
-async function newestCode(
+export async function newestCode(
   storage: StorageAdapter,
-  purpose: EmailOtpPurpose,
-  email: string,
+  purpose: CodePurpose,
+  identifier: string,
 ): Promise<VerificationRow | null> {
   const where: Where<"verification">[] = [
     { field: "purpose", op: "eq", value: purpose },
-    { field: "identifier", op: "eq", value: email },
+    { field: "identifier", op: "eq", value: identifier },
   ];
   const [live] = await storage.findMany(
     "verification",
@@ -217,18 +250,19 @@ async function newestCode(
  * row. Every failure answers `invalid_code`, except a row that its cap spent,
  * which answers `too_many_attempts` until a new request. No row, an expired
  * row, and a spent row answer as a wrong code: the answer tells nothing
- * about the account.
+ * about the account. Public since plan 12a: the re-authentication and the
+ * change of address use it.
  */
-async function checkCode(
+export async function checkCode(
   config: ResolvedConfig,
-  purpose: EmailOtpPurpose,
-  email: string | null,
+  purpose: CodePurpose,
+  identifier: string | null,
   code: string,
   now: Date,
 ): Promise<Result<VerificationRow>> {
   const otp = config.emailOtp;
   if (!otp) return fail("not_found");
-  const row = email === null ? null : await newestCode(config.storage, purpose, email);
+  const row = identifier === null ? null : await newestCode(config.storage, purpose, identifier);
   // One HMAC and one compare on every path, against a fixed value when no row exists.
   // The row's version keys the HMAC (plan 12b). With no row, the current
   // version runs it against NO_ROW_HASH. One HMAC and one compare on every path.
@@ -247,9 +281,10 @@ async function checkCode(
 
 /**
  * Spends a right code in one conditional update. Zero rows: a parallel
- * right code, the cap, or a newer request spent it first.
+ * right code, the cap, or a newer request spent it first. Public since plan
+ * 12a: the re-authentication and the change of address use it.
  */
-async function consumeCode(
+export async function consumeCode(
   storage: StorageAdapter,
   row: VerificationRow,
   now: Date,

@@ -12,6 +12,7 @@ export {
   DEFAULT_CAPTCHA_FLOWS,
 } from "./captcha.js";
 export type {
+  AccountConfig,
   AuthConfig,
   EmailOtpConfig,
   JwtMintConfig,
@@ -41,6 +42,7 @@ export {
   type TokensApi,
   type TotpApi,
 } from "./create-auth.js";
+export { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
 export type {
   EmailOtpRequest,
   EmailOtpReset,

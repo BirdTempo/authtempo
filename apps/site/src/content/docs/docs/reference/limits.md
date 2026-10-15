@@ -26,7 +26,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `magic-link:ip:<ip>` | 15 minutes | 20 | Magic link request |
 | `magic-link:email:<email>` | 15 minutes | 5 | Magic link request |
 | `social-start:ip:<ip>` | 15 minutes | 30 | Social start, for every provider |
-| `passkey-options:ip:<ip>` | 15 minutes | 30 | Passkey sign-in options |
+| `passkey-options:ip:<ip>` | 15 minutes | 30 | Passkey sign-in options and re-authentication options |
 | `passkey-verify:ip:<ip>` | 15 minutes | 20 | Passkey sign-in verify |
 | `handoff-start:ip:<ip>` | 15 minutes | 30 | Handoff start |
 | `handoff-redeem:ip:<ip>` | 15 minutes | 20 | Handoff redeem |
@@ -41,8 +41,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `password-reset-post:ip:<ip>` | 15 minutes | 20 | Reset form post |
 | `password-change:user:<userId>` | 15 minutes | 10 | Password change |
 | `otp:ip:<ip>` | 15 minutes | 20 | Email code request, both purposes |
-| `otp:email:<email>` | 15 minutes | 3 | Email code request, both purposes |
-| `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes |
+| `otp:email:<email>` | 15 minutes | 3 | Email code request, both purposes, and the re-authentication code |
+| `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes, and the re-authentication code |
 | `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify and reset |
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify and reset |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
@@ -57,6 +57,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `invitation-accept:ip:<ip>` | 15 minutes | 20 | Invitation accept |
 | `token-create:user:<userId>` | 1 hour | 20 | API token create |
 | `reauth:user:<userId>` | 15 minutes | 10 | Re-authentication, right or wrong |
+| `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
 | `token-live:session:<sessionId>` | 1 minute | 120 | The live check of a session JWT |
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |

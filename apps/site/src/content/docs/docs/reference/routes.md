@@ -54,9 +54,27 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Field | Value |
 | --- | --- |
 | Needs | A session |
-| Input | JSON `{ password, code? }`. `code` is an authenticator code or a backup code, and it is required while the second factor is on |
+| Input | JSON with one first proof: `{ password, code? }`, `{ emailCode, code? }`, or `{ passkey }`. `code` is an authenticator code or a backup code, required after a password or an email code while the second factor is on |
 | Answer | `{ freshUntil }`, an ISO date. The session token and the expiry stay the same |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`invalid_token`](/docs/reference/errors/#invalid_token), [`not_found`](/docs/reference/errors/#not_found) |
+
+<h3 id="post-reauth-email"><code>POST /reauth/email</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session, and `emailOtp` on |
+| Input | JSON `{}` |
+| Answer | `{ sent: true }`. A code goes to the user's address. Send it to `POST /reauth` as `emailCode` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-reauth-passkey-options"><code>POST /reauth/passkey/options</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session, and `passkey` set |
+| Input | JSON `{}` |
+| Answer | The request options for `navigator.credentials.get`, with the user's passkeys. Send the assertion to `POST /reauth` as `passkey` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## Magic link
 

@@ -20,8 +20,11 @@ const SIGN_IN = "sign-in";
 const OPTIONS_LIMIT = { seconds: 15 * 60, max: 30 };
 const VERIFY_LIMIT = { seconds: 15 * 60, max: 20 };
 
-/** `second-factor`: a ceremony bound to one `tf_` challenge (plan 12c). */
-type Kind = "registration" | "authentication" | "second-factor";
+/**
+ * `second-factor`: a ceremony bound to one `tf_` challenge (plan 12c).
+ * `reauth`: a re-authentication of one signed-in user (plan 12a).
+ */
+type Kind = "registration" | "authentication" | "second-factor" | "reauth";
 
 export interface PasskeySummary {
   id: string;
@@ -309,6 +312,55 @@ export async function verifyPasskeyAuthentication(
   const { token, session } = opened.value;
   await sessionOpened(config, session, user, "passkey");
   return ok({ token, user, session });
+}
+
+/**
+ * WebAuthn request options for a re-authentication (plan 12a): a challenge
+ * row for the user id of kind `reauth`, with the user's passkeys in
+ * `allowCredentials`. The per-IP limit of the sign-in options applies.
+ */
+export async function reauthPasskeyChallenge(
+  config: ResolvedConfig,
+  input: { user: UserRow; ip: string | null },
+): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
+  if (!config.passkey) return fail("not_found");
+  if (!(await config.limiter.allow(`passkey-options:ip:${ipKey(input.ip)}`, OPTIONS_LIMIT)))
+    return fail("rate_limited");
+  const keys = await config.storage.findMany("passkey", [
+    { field: "userId", op: "eq", value: input.user.id },
+  ]);
+  const { bytes } = await issueChallenge(config, input.user.id, "reauth");
+  return ok(
+    await config.webauthn.authenticationOptions({
+      rpID: config.passkey.rpID,
+      challenge: bytes,
+      allowCredentials: keys.map((p) => ({
+        id: p.credentialId,
+        transports: p.transports ? p.transports.split(",") : null,
+      })),
+    }),
+  );
+}
+
+/**
+ * The proof of a re-authentication by a passkey (plan 12a): an assertion
+ * over the options of `reauthPasskeyChallenge` for this user, by a passkey of
+ * this user. The challenge row is spent whatever comes next. The assertion
+ * check and the counter rule are 12c's `checkAssertion`, one copy for every
+ * ceremony. Core asks for user verification (spec 8.4), so a passkey is two
+ * factors.
+ */
+export async function provePasskeyOf(
+  config: ResolvedConfig,
+  input: { userId: string; response: unknown },
+): Promise<Result<true>> {
+  if (!config.passkey) return fail("not_found");
+  const challenge = challengeFromResponse(input.response);
+  if (!challenge) return fail("invalid_token");
+  const consumed = await consumeChallenge(config, challenge, input.userId, "reauth");
+  if (!consumed.ok) return consumed;
+  const checked = await checkAssertion(config, input.response, challenge, input.userId);
+  return checked.ok ? ok(true) : fail("passkey_failed");
 }
 
 /**

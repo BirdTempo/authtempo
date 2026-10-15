@@ -1,15 +1,21 @@
 import type { ResolvedConfig } from "../config.js";
-import { fail, type Result } from "../result.js";
+import { fail, ok, type Result } from "../result.js";
+import type { UserRow } from "../schema.js";
+import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
+import { checkCode, consumeCode, issueCode, REQUEST_PER_EMAIL, verifyGate } from "./email-otp.js";
 import { markFresh } from "./fresh.js";
+import { provePasskeyOf, reauthPasskeyChallenge } from "./passkeys.js";
 import { checkUserPassword } from "./password.js";
 import type { ResolvedSession } from "./sessions.js";
 import { proveUserFactor, secondFactorOn } from "./totp.js";
+import { MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
  * The re-authentication (plan 12a, spec 8.15): a proof of the person on a
- * session that exists, which makes it fresh with no new token. It never
- * reads the trust cookie: a trusted device skips a sign-in's second factor,
- * not this proof.
+ * session that exists, which makes it fresh with no new token. A password or
+ * an email code is one factor, so the second-factor code follows it while
+ * the factor is on. A passkey is two factors. It never reads the trust
+ * cookie: a trusted device skips a sign-in's second factor, not this proof.
  */
 
 // Per 15 minutes, for every re-authentication of one user, right or wrong
@@ -18,14 +24,74 @@ import { proveUserFactor, secondFactorOn } from "./totp.js";
 // hold the owner's sign-in at rate_limited (the rule of plan 9h for the TOTP
 // setup). 10 is the sign-in's per-address budget.
 export const REAUTH_PER_USER = { seconds: 900, max: 10 };
+// Per 15 minutes, per user, for the mail of a re-authentication code (plan
+// 12a), before the address keys of every mailed code (`otp:email`,
+// `otp:email-day`). A stolen session must not fill the owner's mailbox; 3 is
+// the per-address budget of a sign-in code.
+export const REAUTH_MAIL_PER_USER = { seconds: 900, max: 3 };
 
-/** The first proof, and the second-factor code when the factor is on. */
-export type ReauthProof = { password: string; code?: string | undefined };
+/** The first proof, and the second-factor code after a password or an email code. */
+export type ReauthProof =
+  | { password: string; code?: string | undefined }
+  | { emailCode: string; code?: string | undefined }
+  | { passkey: unknown };
 
 export interface ReauthInput {
   session: ResolvedSession;
   proof: ReauthProof;
   ip: string | null;
+}
+
+/** A re-authentication code to the user's address (plan 12a). Needs `emailOtp`. */
+export async function requestReauthCode(
+  config: ResolvedConfig,
+  input: { session: ResolvedSession },
+): Promise<Result<{ sent: true }>> {
+  const otp = config.emailOtp;
+  if (!otp) return fail("not_found");
+  const { user } = input.session;
+  if (!(await config.limiter.allow(`reauth-mail:user:${user.id}`, REAUTH_MAIL_PER_USER)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`otp:email:${user.email}`, REQUEST_PER_EMAIL)))
+    return fail("rate_limited");
+  if (!(await config.limiter.allow(`otp:email-day:${user.email}`, MAILED_CODES_PER_EMAIL_DAY)))
+    return fail("rate_limited");
+  const code = await issueCode(config, otp, "reauth-otp", user.email, {});
+  const message = config.account.mail({
+    kind: "reauth_code",
+    email: user.email,
+    code,
+    ttlMinutes: otp.ttlMinutes,
+    appName: config.appName,
+  });
+  // To the user's address, whatever the builder wrote.
+  await config.mail.send({ ...message, to: user.email });
+  return ok({ sent: true });
+}
+
+/** The options of a re-authentication by a passkey (plan 12a). Needs `passkey`. */
+export function reauthPasskeyOptions(
+  config: ResolvedConfig,
+  input: { session: ResolvedSession; ip: string | null },
+): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
+  return reauthPasskeyChallenge(config, { user: input.session.user, ip: input.ip });
+}
+
+/** A right re-authentication code, spent. The verify limits of every mailed code apply. */
+async function proveReauthCode(
+  config: ResolvedConfig,
+  user: UserRow,
+  code: string,
+  ip: string | null,
+): Promise<Result<true>> {
+  if (!config.emailOtp) return fail("not_found");
+  const gate = await verifyGate(config, { email: user.email, ip });
+  if (!gate.ok) return gate;
+  const now = config.clock.now();
+  const checked = await checkCode(config, "reauth-otp", user.email, code, now);
+  if (!checked.ok) return checked;
+  const spent = await consumeCode(config.storage, checked.value, now);
+  return spent.ok ? ok(true) : spent;
 }
 
 export async function reauthenticate(
@@ -35,14 +101,22 @@ export async function reauthenticate(
   const { user, session } = input.session;
   if (!(await config.limiter.allow(`reauth:user:${user.id}`, REAUTH_PER_USER)))
     return fail("rate_limited");
+  const proof = input.proof;
+  if ("passkey" in proof) {
+    const proved = await provePasskeyOf(config, { userId: user.id, response: proof.passkey });
+    return proved.ok ? markFresh(config, session.id) : proved;
+  }
   const factorOn = await secondFactorOn(config, user.id);
-  // Before any check, so a missing code costs no password guess. ASVS 7.5.1
-  // asks for a full re-authentication: the password alone is one factor.
-  if (factorOn && input.proof.code === undefined) return fail("invalid_body");
-  const proved = await checkUserPassword(config, user.id, input.proof.password);
+  // Before any check, so a missing code costs no guess. ASVS 7.5.1 asks for
+  // a full re-authentication: a password or a mailbox is one factor.
+  if (factorOn && proof.code === undefined) return fail("invalid_body");
+  const proved =
+    "password" in proof
+      ? await checkUserPassword(config, user.id, proof.password)
+      : await proveReauthCode(config, user, proof.emailCode, input.ip);
   if (!proved.ok) return proved;
-  if (factorOn && input.proof.code !== undefined) {
-    const factor = await proveUserFactor(config, user.id, input.proof.code);
+  if (factorOn && proof.code !== undefined) {
+    const factor = await proveUserFactor(config, user.id, proof.code);
     if (!factor.ok) return factor;
   }
   return markFresh(config, session.id);
