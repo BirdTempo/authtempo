@@ -96,7 +96,12 @@ The verifier reads the `Authorization` header only. It never reads the session c
 | `API_TOKEN_CACHE_MAX_SECONDS` | The longest API token cache. |
 | `unauthorizedResponse`, `insufficientScopeResponse`, `bearerChallenge` | The 401, the 403, and the challenge text, with no verifier. A server that checks the caller with `auth.caller` uses them. |
 
-The types: `Verifier`, `VerifierOptions`, `VerifyResult`, `Caller`, `CallerKind`, `ChallengeInput`, `VerifyOperation`.
+| Area | Types |
+| --- | --- |
+| The verifier | `Verifier`, `VerifierOptions` |
+| The answers | `VerifyResult`, `Caller`, `CallerKind` |
+| The 401 and the 403 | `ChallengeInput` |
+| The route table | `VerifyOperation` |
 
 ## Next
 

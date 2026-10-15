@@ -23,6 +23,7 @@ sources:
 | --- | --- |
 | `AuthProvider` | Gives a client to every hook below it. Make the client once, outside the render. |
 | `useSession` | Answers a `UseSession`: the state of `client.store`, `{ data, error, isPending, isRefetching }`, and `refetch`. |
+| `UseSession` | The type of the answer of `useSession`. |
 | `useClient` | Answers the client of the nearest provider. It throws when there is none. |
 | `useAuthError` | Answers the code of `?auth_error=` in the URL, read once at mount, or `null`. With no location (React Native) it reads only its argument. |
 | `AuthErrorCode` | The type of the code that `useAuthError` answers: the answer of `client.readRedirectError`. It holds a code of the core table or of the OAuth table. |

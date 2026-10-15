@@ -78,3 +78,18 @@ export function columnCodes(html: string, headers: readonly string[]): string[] 
   }
   return out;
 }
+
+/**
+ * The HTML of the part of a page under the h2 or h3 whose text is `heading`:
+ * up to the next heading of the same level or higher. Null when the page has
+ * no such heading.
+ */
+export function sectionOf(html: string, heading: string): string | null {
+  for (const m of html.matchAll(/<h([23])\b[^>]*>([\s\S]*?)<\/h\1>/g)) {
+    if (stripTags(m[2] ?? "") !== heading) continue;
+    const start = (m.index ?? 0) + m[0].length;
+    const end = new RegExp(m[1] === "2" ? "<h2\\b" : "<h[23]\\b").exec(html.slice(start));
+    return html.slice(start, end ? start + end.index : html.length);
+  }
+  return null;
+}

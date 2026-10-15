@@ -50,7 +50,7 @@ import proxy from "../../../../../../../examples/next/proxy.ts?raw";
 - An app with no such read loses the cookie at its first `Max-Age`, and the person must sign in again.
 - Without `auth`, the proxy checks only that a session cookie is present, or a bearer that starts with `ts_`. The page checks the session. Never trust the proxy alone.
 - The session cookie is `__Host-tempo_session` by default. Set `cookieName` on the proxy when the config of core sets another name.
-- Next 16 renamed middleware to proxy. A file named `middleware.ts` gets a deprecation warning from Next.
+- Next 16 renamed middleware to proxy. For a file named `middleware.ts`, `next build` warns that the "middleware" file convention is deprecated.
 
 ## If it fails
 

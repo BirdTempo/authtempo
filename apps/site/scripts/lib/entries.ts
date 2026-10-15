@@ -12,8 +12,13 @@ export interface ExportEntry {
   entry: string;
   /** The source file of the entry, from the repo root. */
   source: string;
-  /** The page whose code spans must hold every export. */
+  /** The page of the entry's exports tables. */
   page: string;
+  /**
+   * The h2 or h3 headings of the page whose tables list the exports of this
+   * entry, and nothing else. The check reads those sections only.
+   */
+  headings: readonly string[];
 }
 
 export const EXPORT_ENTRIES: readonly ExportEntry[] = [
@@ -23,14 +28,16 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: ".",
     source: "packages/core/src/index.ts",
     page: "/docs/reference/api/",
+    headings: ["Functions", "Classes and constants", "Types"],
   },
-  // The two SDK fact entries of core (plan 11d Task 1). Each SDK imports them, so each export is on the core page.
+  // The SDK fact entries of core (plan 11d Task 1) and the operator secret entry, each in its own part of the core page.
   {
     label: "core-routes",
     pkg: "@authtempo/core",
     entry: "./routes",
     source: "packages/core/src/routes.ts",
     page: "/docs/reference/api/",
+    headings: ["The route entry"],
   },
   {
     label: "core-credentials",
@@ -38,6 +45,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: "./credentials",
     source: "packages/core/src/credentials.ts",
     page: "/docs/reference/api/",
+    headings: ["The credential entry"],
   },
   {
     label: "core-operator-secret",
@@ -45,6 +53,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: "./operator-secret",
     source: "packages/core/src/operator-secret.ts",
     page: "/docs/reference/api/",
+    headings: ["The operator secret entry"],
   },
   {
     label: "client",
@@ -52,6 +61,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: ".",
     source: "packages/client/src/index.ts",
     page: "/docs/reference/client/",
+    headings: ["Exports"],
   },
   {
     label: "client-oauth",
@@ -59,6 +69,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: "./oauth",
     source: "packages/client/src/oauth/index.ts",
     page: "/docs/reference/client-oauth/",
+    headings: ["Exports"],
   },
   {
     label: "verify",
@@ -66,6 +77,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: ".",
     source: "packages/verify/src/index.ts",
     page: "/docs/reference/verify/",
+    headings: ["Exports"],
   },
   {
     label: "react",
@@ -73,6 +85,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: ".",
     source: "packages/react/src/index.ts",
     page: "/docs/reference/react/",
+    headings: ["Exports"],
   },
   {
     label: "next",
@@ -80,6 +93,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: ".",
     source: "packages/next/src/index.ts",
     page: "/docs/reference/next/",
+    headings: ["Exports"],
   },
   {
     label: "handoff",
@@ -87,6 +101,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: ".",
     source: "packages/handoff/src/index.ts",
     page: "/docs/reference/handoff/",
+    headings: ["The main entry"],
   },
   {
     label: "handoff-expo",
@@ -94,6 +109,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: "./expo",
     source: "packages/handoff/src/expo.ts",
     page: "/docs/reference/handoff/",
+    headings: ["The Expo entry"],
   },
   {
     label: "handoff-electron",
@@ -101,6 +117,7 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     entry: "./electron",
     source: "packages/handoff/src/electron.ts",
     page: "/docs/reference/handoff/",
+    headings: ["The Electron entry"],
   },
 ];
 

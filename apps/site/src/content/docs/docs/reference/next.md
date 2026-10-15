@@ -31,7 +31,7 @@ sources:
 ## How it behaves
 
 - The package imports nothing of Next at run time. It takes a web request and answers a web response.
-- Next 16 renamed middleware to proxy. The file is `proxy.ts`, and its export is `proxy`. A file named `middleware.ts` gets a deprecation warning from Next.
+- Next 16 renamed middleware to proxy. The file is `proxy.ts`, and its export is `proxy`. For a file named `middleware.ts`, `next build` warns that the "middleware" file convention is deprecated.
 - Without `auth`, the proxy checks only that a session cookie is present, or a bearer that starts with `ts_` (`SESSION_TOKEN_PREFIX`). It does not check that the session is live. Never trust the proxy alone.
 - With `auth`, the proxy asks core, with no write: one storage read per protected request.
 - The default `cookieName` is `__Host-tempo_session`. With the default, the proxy also reads the cookie name of before plan 12b, as core does.

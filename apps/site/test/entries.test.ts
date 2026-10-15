@@ -41,6 +41,8 @@ describe("the export entry list (plan 11d)", () => {
       expect(e.page).toMatch(/^\/docs\/reference\/[a-z-]+\/$/);
     }
     for (const e of EXEMPT_ENTRIES) expect(e.reason.length).toBeGreaterThan(0);
+    // Each row names the sections of its exports tables (plan 11d Task 15 review, P5).
+    for (const e of EXPORT_ENTRIES) expect(e.headings.length, e.label).toBeGreaterThan(0);
     expect(new Set(EXPORT_ENTRIES.map((e) => e.label)).size).toBe(EXPORT_ENTRIES.length);
   });
 });

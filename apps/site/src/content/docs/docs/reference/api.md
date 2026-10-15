@@ -143,7 +143,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | `@authtempo/core/testing` | `SoftAuthenticator`, `totpCode`, `base32Decode`, `ROUTES`, the route list, and `TEST_SECRET`, the app secret of the tests. |
 | `@authtempo/core/routes` | The route facts of an SDK. The next part lists them. |
 | `@authtempo/core/credentials` | The credential facts of an SDK. The part after it lists them. |
-| `@authtempo/core/operator-secret` | `OPERATOR_SECRET`, the form of the operator secret, and `isOperatorSecret`, its test. The CLI reads them, not an app. |
+| `@authtempo/core/operator-secret` | The form of the operator secret, for the CLI, not for an app. The last part of this page lists it. |
 
 ## The route entry
 
@@ -170,13 +170,22 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `SESSION_JWT_TYPE`, `ACCESS_TOKEN_TYPE` | `JWT` and `at+jwt`, the header `typ` of a session JWT and of an OAuth access token. |
 | `DEFAULT_COOKIE_NAME` | `__Host-tempo_session`, the session cookie name when the config sets no `cookieName`. |
 | `LEGACY_COOKIE_NAME` | The session cookie name before plan 12b. Core reads it for one release when `cookieName` is the default. |
-| `sessionCookieNames` | Answers the `SessionCookieNames` of a `cookieName` setting. The old name is read only with the default name. |
+| `sessionCookieNames`, `SessionCookieNames` | The cookie names of a `cookieName` setting, and their type. The old name is read only with the default name. |
 | `readSessionToken` | The session token of a request: the cookie, then the bearer header. |
 | `readBearer` | The value of `Authorization: Bearer <value>`, or null. |
 | `JWS_RE`, `decodeJws`, `DecodedJws` | The shape of a compact JWS, and its parts with no check. |
 | `verifyJws`, `PublicJwk`, `JwsAlg` | The signature check on Web Crypto, for EdDSA and ES256. The header must name the alg and the kid of the key. |
 | `JWKS_RETIRED_MAX` | The retired keys that the key set lists at most. |
 | `isResourceUrl`, `resourceOf` | The rule of an `oauth.resources` entry, and the entry that a request URL falls under. |
+
+## The operator secret entry
+
+`@authtempo/core/operator-secret` holds the one rule of the operator secret. The operator route and `authtempo keys rotate` read it.
+
+| Export | What it is |
+| --- | --- |
+| `OPERATOR_SECRET` | The form of the operator secret: 32 to 512 visible ASCII characters. |
+| `isOperatorSecret` | True when a value has the form of an operator secret. |
 
 ## Next
 

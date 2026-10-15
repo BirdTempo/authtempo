@@ -1,4 +1,4 @@
-import { codeTexts, columnCodes } from "./lib/html.ts";
+import { columnCodes, sectionOf } from "./lib/html.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** What `readExports` found: the names, and each `export` line it could not turn into a name. */
@@ -63,39 +63,46 @@ export function exportNames(source: string): string[] {
 }
 
 /**
- * The column headers of a page table whose code spans are export names: the
- * "Export" tables, the "Entry | Exports" table of a page with more than one
- * entry, and the "Area | Types" tables.
+ * The column headers of a table whose code spans are export names: an
+ * "Export" table, the "Entry | Exports" form, and an "Area | Types" table.
  */
 export const EXPORT_COLUMNS = ["Export", "Exports", "Types"] as const;
 
 /**
- * Both directions (plan 11d Task 15 review, M2). Every export of an entry
- * appears as a code span on its reference page. And every code span of an
- * export column of the page names an export of the page: `pageExports` is the
- * union of the exports of every entry that the page lists, so a removed or
- * renamed export cannot stay on its page.
+ * Both directions, on the entry's own tables (plan 11d Task 15 review, M2 and
+ * P5). `headings` names the sections of the page that hold the exports tables
+ * of this entry. Every export is a code span in an export column of a table in
+ * those sections, and every such code span is an export of this entry. A name
+ * that is on the page for another reason, such as in the table of another
+ * entry, does not count, and a removed or renamed export cannot stay.
  */
 export function checkExports(
   html: string,
   read: ExportRead,
   label: string,
-  pageExports: ReadonlySet<string>,
+  headings: readonly string[],
 ): CheckReport {
-  // `read` and `pageExports` are required, with no default: a caller cannot skip a direction.
+  // `read` and `headings` are required, with no default: a caller cannot skip a direction.
   const { names, unreadable } = read;
-  const code = codeTexts(html);
-  const rows = columnCodes(html, EXPORT_COLUMNS);
   const r: CheckReport = {
     name: `check-exports-${label}`,
-    counts: { exports: names.length, found: 0, rows: rows.length },
+    counts: { exports: names.length, found: 0, rows: 0 },
     failures: [...unreadable],
   };
-  for (const n of names) {
-    if (code.has(n)) r.counts.found = (r.counts.found ?? 0) + 1;
-    else r.failures.push(`${label} export ${n} is not on the page`);
+  const rows: string[] = [];
+  for (const h of headings) {
+    const part = sectionOf(html, h);
+    if (part === null) r.failures.push(`${label} page has no heading ${h}`);
+    else rows.push(...columnCodes(part, EXPORT_COLUMNS));
   }
-  for (const n of new Set(rows))
-    if (!pageExports.has(n)) r.failures.push(`${label} page row ${n} names no export of the page`);
+  r.counts.rows = rows.length;
+  const listed = new Set(rows);
+  const exported = new Set(names);
+  for (const n of names) {
+    if (listed.has(n)) r.counts.found = (r.counts.found ?? 0) + 1;
+    else r.failures.push(`${label} export ${n} is not in its exports table`);
+  }
+  for (const n of listed)
+    if (!exported.has(n)) r.failures.push(`${label} row ${n} names no export of the entry`);
   return requireCounts(r, ["exports"]);
 }

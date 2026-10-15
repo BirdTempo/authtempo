@@ -78,7 +78,12 @@ Every call answers an `OAuthResult`: `{ ok: true, value }` or an `OAuthFailure` 
 | `parseReturnedUrl` | The parser of a URL that a redirect brought back, which answers a `Returned`. It does not use `URL`, which Hermes lacks in part. |
 | `OAUTH_CALLS` | The route table of the entry. |
 
-The types: `OAuthClient`, `OAuthClientOptions`, `OAuthTokens`, `PendingSignIn`, `PendingStore`, `StorageLike`, `PkceCrypto`, `Returned`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`.
+| Area | Types |
+| --- | --- |
+| The client | `OAuthClient`, `OAuthClientOptions`, `OAuthTokens` |
+| The pending sign-in | `PendingSignIn`, `PendingStore`, `StorageLike` |
+| PKCE and the redirect | `PkceCrypto`, `Returned` |
+| The answers | `OAuthClientCode`, `OAuthFailure`, `OAuthResult` |
 
 ## Next
 

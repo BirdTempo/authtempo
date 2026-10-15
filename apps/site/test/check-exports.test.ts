@@ -53,53 +53,6 @@ export * as G from "./g.js";`;
 
 const read = (names: string[], unreadable: string[] = []) => ({ names, unreadable });
 
-describe("checkExports", () => {
-  it("fails closed on an export line that the reader could not read", () => {
-    const r = checkExports(
-      "<code>a</code>",
-      read(["a"], ["x.ts:2: cannot read the export: export =  foo;"]),
-      "core",
-      new Set(["a"]),
-    );
-    expect(r.failures).toEqual(["x.ts:2: cannot read the export: export =  foo;"]);
-  });
-
-  it("passes when each name is a code span on the page", () => {
-    const r = checkExports(
-      "<p><code>createAuth</code> and <code>AuthConfig</code></p>",
-      read(["createAuth", "AuthConfig"]),
-      "core",
-      new Set(["createAuth", "AuthConfig"]),
-    );
-    expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ exports: 2, found: 2, rows: 0 });
-  });
-
-  it("refuses a name that the page does not show in a code span", () => {
-    const r = checkExports(
-      "<p>createAuth</p>",
-      read(["createAuth"]),
-      "core",
-      new Set(["createAuth"]),
-    );
-    expect(r.failures).toEqual(["core export createAuth is not on the page"]);
-  });
-
-  it("fails when it reads no export", () => {
-    expect(checkExports("", read([]), "core", new Set()).failures).toEqual(["read 0 exports"]);
-  });
-
-  it("takes the read of readExports, so an export * in the source fails the check", () => {
-    const r = checkExports(
-      "<code>ok</code>",
-      readExports('export const ok = 1;\nexport * from "./more.js";', "src/index.ts"),
-      "core",
-      new Set(["ok"]),
-    );
-    expect(r.failures).toHaveLength(1);
-  });
-});
-
 /** A built table: a header row of `heads`, and one body row per entry of `rows`. */
 function table(heads: string[], rows: string[][]): string {
   const th = heads.map((h) => `<th>${h}</th>`).join("");
@@ -107,34 +60,73 @@ function table(heads: string[], rows: string[][]): string {
   return `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
-describe("checkExports, the page side (plan 11d Task 15 review, M2)", () => {
-  it("refuses an export row that names no export of the page", () => {
-    const html = table(
-      ["Export", "What it is"],
-      [
-        ["<code>createAuth</code>", "Makes it."],
-        ['<code dir="auto">gone</code>', "Old."],
-      ],
+/** A built h2 in the wrapper that Starlight writes. */
+const h2 = (text: string) =>
+  `<div class="sl-heading-wrapper level-h2"><h2 id="x">${text}</h2></div>`;
+
+describe("checkExports", () => {
+  it("fails closed on an export line that the reader could not read", () => {
+    const r = checkExports(
+      h2("Exports") + table(["Export"], [["<code>a</code>"]]),
+      read(["a"], ["x.ts:2: cannot read the export: export =  foo;"]),
+      "core",
+      ["Exports"],
     );
-    const r = checkExports(html, read(["createAuth"]), "core", new Set(["createAuth"]));
-    expect(r.failures).toEqual(["core page row gone names no export of the page"]);
-    expect(r.counts).toEqual({ exports: 1, found: 1, rows: 2 });
+    expect(r.failures).toEqual(["x.ts:2: cannot read the export: export =  foo;"]);
   });
 
-  it("reads the Exports and Types columns too, and every code span of a cell", () => {
+  it("passes when each name is a row of the entry's exports table, and each row an export", () => {
     const html =
-      table(["Entry", "Exports"], [["<code>@x/a</code>", "<code>a</code>, <code>b</code>"]]) +
-      table(["Area", "Types"], [["Sessions", "<code>T</code>, <code>U</code>"]]);
-    const r = checkExports(html, read(["a"]), "core", new Set(["a", "b", "T"]));
-    expect(r.failures).toEqual(["core page row U names no export of the page"]);
+      h2("Exports") +
+      table(
+        ["Export", "What it is"],
+        [['<code dir="auto">createAuth</code>, <code>AuthConfig</code>', "The two."]],
+      );
+    const r = checkExports(html, read(["createAuth", "AuthConfig"]), "core", ["Exports"]);
+    expect(r.failures).toEqual([]);
+    expect(r.counts).toEqual({ exports: 2, found: 2, rows: 2 });
   });
 
-  it("takes the names of every entry of a shared page, and skips the other tables", () => {
+  it("refuses an export that is a code span elsewhere on the page but not a row of its table", () => {
+    const html = `<p><code>ROUTES</code></p>${h2("Exports")}${table(["Export"], [["<code>a</code>"]])}`;
+    const r = checkExports(html, read(["a", "ROUTES"]), "core", ["Exports"]);
+    expect(r.failures).toEqual(["core export ROUTES is not in its exports table"]);
+  });
+
+  it("refuses a row of the table that names no export of the entry", () => {
+    const html = h2("Exports") + table(["Export"], [["<code>a</code>, <code>gone</code>"]]);
+    const r = checkExports(html, read(["a"]), "core", ["Exports"]);
+    expect(r.failures).toEqual(["core row gone names no export of the entry"]);
+  });
+
+  it("reads only its own sections, every table in them, and the Exports and Types columns", () => {
     const html =
-      table(["Export", "What it is"], [["<code>a</code>, <code>other</code>", "Two entries."]]) +
-      table(["Option", "Default"], [["<code>issuer</code>", "required"]]);
-    const r = checkExports(html, read(["a"]), "core", new Set(["a", "other"]));
+      h2("Mine") +
+      table(["Entry", "Exports"], [["<code>@x/a</code>", "<code>a</code>"]]) +
+      table(["Area", "Types"], [["Sessions", "<code>T</code>"]]) +
+      table(["Option", "Default"], [["<code>issuer</code>", "none"]]) +
+      h2("Other") +
+      table(["Export"], [["<code>b</code>"]]);
+    const r = checkExports(html, read(["a", "T"]), "core", ["Mine"]);
     expect(r.failures).toEqual([]);
     expect(r.counts.rows).toBe(2);
+  });
+
+  it("fails on a heading that the page lacks, and on no export", () => {
+    expect(checkExports("<p></p>", read(["a"]), "core", ["Exports"]).failures).toEqual([
+      "core page has no heading Exports",
+      "core export a is not in its exports table",
+    ]);
+    expect(checkExports("", read([]), "core", []).failures).toContain("read 0 exports");
+  });
+
+  it("takes the read of readExports, so an export * in the source fails the check", () => {
+    const r = checkExports(
+      h2("Exports") + table(["Export"], [["<code>ok</code>"]]),
+      readExports('export const ok = 1;\nexport * from "./more.js";', "src/index.ts"),
+      "core",
+      ["Exports"],
+    );
+    expect(r.failures).toHaveLength(1);
   });
 });

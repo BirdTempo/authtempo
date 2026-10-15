@@ -98,10 +98,22 @@ A `TokenStore` has `get`, `set`, and `clear`. On Electron, `createTokenStore` an
 
 ## Exports
 
+### The main entry
+
 | Entry | Exports |
 | --- | --- |
 | `@authtempo/handoff` | `createHandoff`, `Handoff`, `HandoffOptions`, `HandoffOpener`, `HandoffResult`, `HandoffSession`, `HandoffFailure`, `HandoffCode`, `makePkce`, `webCrypto`, `base64Url`, `HandoffCrypto`, `parseReturnedUrl`, `Returned`, `HANDOFF_CALLS`, `createNativeClient`, `NativeClient`, `NativeClientOptions`, `TokenStore` |
+
+### The Expo entry
+
+| Entry | Exports |
+| --- | --- |
 | `@authtempo/handoff/expo` | `expoOpener`, `ExpoWebBrowserLike`, `expoCrypto`, `ExpoCryptoLike`, `expoTokenStore`, `SecureStoreLike`, `SecureStoreOptionsLike`, `TokenStore` |
+
+### The Electron entry
+
+| Entry | Exports |
+| --- | --- |
 | `@authtempo/handoff/electron` | `electronOpener`, `ElectronOpener`, `ElectronShellLike`, `ElectronAppLike`, `createTokenStore`, `TokenStore`, `TokenStoreError`, `TokenCipher`, `CipherOptions`, `safeStorageCipher`, `SafeStorageLike`, `asyncSafeStorageCipher`, `AsyncSafeStorageLike` |
 
 `HANDOFF_CALLS` is the table of the route that the handoff builds a URL for: `GET /handoff/start`, which the system browser opens. The redeem is the call `handoff.redeem` of the client.
