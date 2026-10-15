@@ -3,6 +3,7 @@ title: Mount authtempo in Next.js
 description: Serve the routes of authtempo from a Next.js app, read the session in a server component, and protect paths.
 type: how-to
 sources:
+  - packages/next/README.md
   - packages/next/src/index.ts
   - examples/next/proxy.ts
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
@@ -31,6 +32,9 @@ import proxy from "../../../../../../../examples/next/proxy.ts?raw";
 4. Read the session with `authSession` in a server component.
 5. Protect paths with `authProxy` in `proxy.ts`.
 6. Set `BASE_URL` and `AUTH_SECRET` in the environment of the server.
+7. Read `GET /auth/session` from the browser, so the browser gets the renewed cookie.
+   - The page below is a server component, and it makes no such read. Add one when you copy it.
+   - The session store of `@authtempo/react` makes the read. A `fetch("/auth/session")` in a client component makes it too.
 
 <Code code={auth} lang="ts" title="lib/auth.ts" />
 
@@ -42,10 +46,11 @@ import proxy from "../../../../../../../examples/next/proxy.ts?raw";
 
 ## How it behaves
 
-- A server component cannot set a cookie. The browser gets a renewed cookie at its next call to a route under `/auth`.
-- Without `auth`, the proxy checks only that the session cookie is present. The page checks the session.
+- A server component cannot set a cookie, so `authSession` leaves the sliding refresh for the browser. Only the browser's read of `GET /auth/session` sends the renewed cookie.
+- An app with no such read loses the cookie at its first `Max-Age`, and the person must sign in again.
+- Without `auth`, the proxy checks only that a session cookie is present, or a bearer that starts with `ts_`. The page checks the session. Never trust the proxy alone.
 - The session cookie is `__Host-tempo_session` by default. Set `cookieName` on the proxy when the config of core sets another name.
-- Next 16 renamed middleware to proxy. A file named `middleware.ts` gets a warning from Next.
+- Next 16 renamed middleware to proxy. A file named `middleware.ts` gets a deprecation warning from Next.
 
 ## If it fails
 

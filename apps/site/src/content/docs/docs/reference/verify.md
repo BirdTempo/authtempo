@@ -48,7 +48,7 @@ A URL that is both an `audience` entry and a `resources` entry is refused: one k
 | Kind | The credential | The check | The fields |
 | --- | --- | --- | --- |
 | `session-jwt` | A session JWT, header `typ` `JWT` | Offline: the signature, `iss`, `sub`, `sid`, `aud`, and `exp` | `userId`, `sessionId`, `email`, `emailVerified`, `name`, `organizationId`, `claims`, `expiresAt` |
-| `oauth` | An access token, header `typ` `at+jwt` | Offline: as above, and `aud` must be the resource that the request URL falls under | `userId`, `clientId`, `scopes`, `resource`, `tokenId`, `expiresAt` |
+| `oauth` | An access token, header `typ` `at+jwt` | Offline: the signature, `iss`, `sub`, `client_id`, `scope`, `jti`, and `exp`. `aud` must be the resource that the request URL falls under | `userId`, `clientId`, `scopes`, `resource`, `tokenId`, `expiresAt` |
 | `api-token` | A `tk_` bearer token | One call to `GET /tokens/current` | `user`, `apiToken` |
 | `session-token` | A `ts_` bearer token | One call to `GET /session`. Each check can extend the session, as a visit does. | `user`, `session` |
 

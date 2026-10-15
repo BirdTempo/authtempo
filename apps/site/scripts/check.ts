@@ -58,7 +58,8 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     name: "check-config",
     run: () => checkConfig(distPageOrEmpty("/docs/reference/config/"), configKeyPaths()),
   },
-  // One export check per SDK entry (plan 11d): each export is a code span on its page.
+  // One export check per SDK entry (plan 11d): each export is a code span on its page, and
+  // each export row of the page names an export of an entry of that page.
   ...EXPORT_ENTRIES.map((e) => ({
     name: `check-exports-${e.label}`,
     run: () =>
@@ -66,6 +67,11 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         distPageOrEmpty(e.page),
         readExports(readRepoFile(e.source) ?? "", e.source),
         e.label,
+        new Set(
+          EXPORT_ENTRIES.filter((x) => x.page === e.page).flatMap(
+            (x) => readExports(readRepoFile(x.source) ?? "", x.source).names,
+          ),
+        ),
       ),
   })),
   {

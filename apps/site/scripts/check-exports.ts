@@ -1,4 +1,4 @@
-import { codeTexts } from "./lib/html.ts";
+import { codeTexts, columnCodes } from "./lib/html.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** What `readExports` found: the names, and each `export` line it could not turn into a name. */
@@ -62,19 +62,40 @@ export function exportNames(source: string): string[] {
   return readExports(source, "").names;
 }
 
-/** Every export of an entry appears as a code span on its reference page. */
-export function checkExports(html: string, read: ExportRead, label: string): CheckReport {
-  // `read` is required, with no default: a caller cannot skip the unreadable lines.
+/**
+ * The column headers of a page table whose code spans are export names: the
+ * "Export" tables, the "Entry | Exports" table of a page with more than one
+ * entry, and the "Area | Types" tables.
+ */
+export const EXPORT_COLUMNS = ["Export", "Exports", "Types"] as const;
+
+/**
+ * Both directions (plan 11d Task 15 review, M2). Every export of an entry
+ * appears as a code span on its reference page. And every code span of an
+ * export column of the page names an export of the page: `pageExports` is the
+ * union of the exports of every entry that the page lists, so a removed or
+ * renamed export cannot stay on its page.
+ */
+export function checkExports(
+  html: string,
+  read: ExportRead,
+  label: string,
+  pageExports: ReadonlySet<string>,
+): CheckReport {
+  // `read` and `pageExports` are required, with no default: a caller cannot skip a direction.
   const { names, unreadable } = read;
   const code = codeTexts(html);
+  const rows = columnCodes(html, EXPORT_COLUMNS);
   const r: CheckReport = {
     name: `check-exports-${label}`,
-    counts: { exports: names.length, found: 0 },
+    counts: { exports: names.length, found: 0, rows: rows.length },
     failures: [...unreadable],
   };
   for (const n of names) {
     if (code.has(n)) r.counts.found = (r.counts.found ?? 0) + 1;
     else r.failures.push(`${label} export ${n} is not on the page`);
   }
+  for (const n of new Set(rows))
+    if (!pageExports.has(n)) r.failures.push(`${label} page row ${n} names no export of the page`);
   return requireCounts(r, ["exports"]);
 }

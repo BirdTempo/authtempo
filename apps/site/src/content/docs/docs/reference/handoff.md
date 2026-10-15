@@ -85,7 +85,7 @@ The path of Windows and Linux is not proven. The macOS proof ran on 2026-10-09 w
 - `session()` clears the token when it answers `null`.
 - A session end clears the token only when the store still holds the token that the request sent. A newer token stays.
 - `signOut()` clears the token when the server ended the session or did not know it.
-- A store that throws answers `unexpected`. Nothing throws for an answer.
+- A store write that throws in `signInWithBrowser()` answers `unexpected`. A read that throws sends no token, and a clear that throws is skipped. Nothing throws for an answer.
 - A password sign-in, an email code verify, and a second factor verify answer a token that the native client does not keep. Write it with `store.set`.
 
 A `TokenStore` has `get`, `set`, and `clear`. On Electron, `createTokenStore` answers a `TokenStore`.

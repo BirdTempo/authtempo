@@ -1,4 +1,17 @@
+import { readBearer, readSessionToken, sessionCookieNames } from "@authtempo/core/credentials";
 import { createVerifier, type VerifierOptions } from "@authtempo/verify";
+
+/**
+ * True when the request held a bearer and no session cookie: the token that
+ * the server refused is the bearer, so the 401 names invalid_token. A Basic
+ * header is no bearer, and a cookie beside the bearer is a browser.
+ */
+function refusedBearer(request: Request): boolean {
+  if (readBearer(request) === null) return false;
+  const headers = new Headers(request.headers);
+  headers.delete("authorization");
+  return readSessionToken(sessionCookieNames(), { headers }) === null;
+}
 
 /**
  * A files server that is not the auth app. It knows the person of each
@@ -25,9 +38,8 @@ export function createFilesServer(fetch?: VerifierOptions["fetch"]) {
         const status = r.code === "rate_limited" ? 429 : 503;
         return Response.json({ error: r.code }, { status });
       }
-      // invalidToken tells the client that the token it sent is refused.
-      if (r.value === null)
-        return verifier.unauthorized({ invalidToken: request.headers.has("authorization") });
+      // invalidToken tells the client that the bearer it sent is refused.
+      if (r.value === null) return verifier.unauthorized({ invalidToken: refusedBearer(request) });
       const owner =
         r.value.kind === "session-jwt"
           ? r.value.email

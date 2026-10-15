@@ -33,7 +33,7 @@ sources:
 | `navigate` | `location.assign` | Sends the browser to the social start URL. A router or a test injects one. With the default and no `location`, as in a server render, `social.signIn` answers `unexpected`. |
 | `broadcast` | `true` where `BroadcastChannel` exists | Tell the other tabs of the origin after a change, on the channel `authtempo-session`, and read again when one tells. |
 | `refetchOnVisible` | `true` where `document` exists | Read the session again when the page becomes visible. |
-| `onSessionEnd` | none | Runs when `session()` answers `null` to a read that sent a token. Clear the stored token there, so the next read sends none. |
+| `onSessionEnd` | none | Runs with `sent`, the token that the read sent, when `session()` answers `null` to a 401. It does not run when no token was sent. Clear the stored token only when it is still `sent`: a newer sign-in may have written another. |
 
 `createTransport(options)` answers a `Call` for a route of your own app's code. Its path is a `RoutePath` of `@authtempo/core/routes`, so a path that core does not serve fails the compile. A query goes in the fourth argument, never in the path. More request headers go in the fifth argument.
 

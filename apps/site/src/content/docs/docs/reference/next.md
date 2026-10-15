@@ -3,6 +3,7 @@ title: The Next.js package
 description: The route handlers, the session read, and the proxy of @authtempo/next.
 type: reference
 sources:
+  - packages/next/README.md
   - packages/next/src/index.ts
   - examples/next/proxy.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
@@ -30,10 +31,13 @@ sources:
 ## How it behaves
 
 - The package imports nothing of Next at run time. It takes a web request and answers a web response.
-- Next 16 renamed middleware to proxy. The file is `proxy.ts`, and its export is `proxy`.
-- Without `auth`, the proxy checks only that the session cookie is present. With `auth`, it asks core: one storage read per protected request.
+- Next 16 renamed middleware to proxy. The file is `proxy.ts`, and its export is `proxy`. A file named `middleware.ts` gets a deprecation warning from Next.
+- Without `auth`, the proxy checks only that a session cookie is present, or a bearer that starts with `ts_` (`SESSION_TOKEN_PREFIX`). It does not check that the session is live. Never trust the proxy alone.
+- With `auth`, the proxy asks core, with no write: one storage read per protected request.
 - The default `cookieName` is `__Host-tempo_session`. With the default, the proxy also reads the cookie name of before plan 12b, as core does.
-- A server component cannot set a cookie. The browser gets a renewed cookie at its next call to a route under `/auth`.
+- `authSession` is a read with no write. A server component cannot set a cookie, so the read leaves the sliding refresh for the browser.
+- The browser gets the renewed cookie from its own read of `GET /auth/session`, such as the read of the session store of `@authtempo/react`. Other routes under `/auth` do not renew it.
+- An app with no such read calls `/auth/session` from the page. Otherwise the cookie ends at its first `Max-Age`.
 - It takes `next` 16.4 or a later 16 release as a peer dependency.
 
 ## Next

@@ -34,7 +34,7 @@ sources:
 | `pending` | `memoryPendingStore()` | Where a sign-in waits for its redirect, a `PendingStore`. A single-page app passes `browserPendingStore()`. |
 | `clock` | the system clock | Tests inject one. |
 
-An `http` issuer is for a loopback host in development.
+**Warning: an `http:` issuer is accepted on any host.** The client then sends the code, the verifier, and the tokens over plain HTTP. Use `https:` outside local development.
 
 ## Calls
 

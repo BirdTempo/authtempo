@@ -50,3 +50,31 @@ export function h3Headings(html: string): { id: string; text: string }[] {
     text: stripTags(m[2] ?? ""),
   }));
 }
+
+/**
+ * The text of every `<code>` element in a body cell whose column header is
+ * one of `headers`, for every table of a page. A cell may hold more than one
+ * code span, as in "`a`, `b`".
+ */
+export function columnCodes(html: string, headers: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const t of html.matchAll(/<table>([\s\S]*?)<\/table>/g)) {
+    const heads = [
+      ...(/<thead>([\s\S]*?)<\/thead>/.exec(t[1] ?? "")?.[1] ?? "").matchAll(
+        /<th[^>]*>([\s\S]*?)<\/th>/g,
+      ),
+    ].map((m) => stripTags(m[1] ?? ""));
+    const columns = heads.flatMap((h, i) => (headers.includes(h) ? [i] : []));
+    if (columns.length === 0) continue;
+    const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(t[1] ?? "")?.[1] ?? "";
+    for (const row of body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
+      const cells = [...(row[1] ?? "").matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(
+        (m) => m[1] ?? "",
+      );
+      for (const i of columns)
+        for (const c of (cells[i] ?? "").matchAll(/<code[^>]*>([\s\S]*?)<\/code>/g))
+          out.push(stripTags(c[1] ?? ""));
+    }
+  }
+  return out;
+}
