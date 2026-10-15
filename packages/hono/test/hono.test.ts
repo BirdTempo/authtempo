@@ -326,4 +326,24 @@ describe("@authtempo/hono (plan 11d2)", () => {
     }
     expect(runs).toBe(0);
   });
+
+  // The origin of the redirect is never the request target (final review m5):
+  // @hono/node-server keeps an absolute-form line as the request URL.
+  it("takes the redirect origin from the Host header, not the request target", async () => {
+    const { app } = makeApp();
+    const res = await app.fetch(
+      new Request("http://evil.example/account", { headers: { host: "app.example.com" } }),
+    );
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://app.example.com/sign-in?next=%2Faccount");
+  });
+
+  it("takes the origin of auth.baseURL for a Host that is not one host", async () => {
+    const { app } = makeApp();
+    const res = await app.fetch(
+      new Request("http://evil.example/account", { headers: { host: "a b" } }),
+    );
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+  });
 });

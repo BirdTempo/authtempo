@@ -17,11 +17,38 @@ function resolve<A extends object>(source: HonoAuthSource<A>, c: Context): A {
   return typeof source === "function" ? (source as (c: Context) => A)(c) : source;
 }
 
-/** The handler of the routes of core: `app.on(["GET", "POST", "OPTIONS"], "/auth/*", authHandler(auth))`. */
+/** The handler of the routes of core, for every method: `app.all("/auth/*", authHandler(auth))`. */
 export function authHandler(
   auth: HonoAuthSource<Pick<Auth, "handle">>,
 ): (c: Context) => Promise<Response> {
   return (c) => resolve(auth, c).handle(c.req.raw);
+}
+
+/**
+ * The origin of the redirect: the Host header, with the protocol of the
+ * request, then the origin of core's baseURL, then the origin of the request.
+ * Never the request target: @hono/node-server 2.1.5 keeps an absolute-form
+ * line ("GET http://evil.example/account") as the request URL and reads no
+ * Host (final review m5). The rule is the one of the TanStack Start binding.
+ */
+function originOf(request: Request, url: URL, baseURL: string | undefined): string {
+  const host = request.headers.get("host") ?? "";
+  if (host && (url.protocol === "http:" || url.protocol === "https:")) {
+    try {
+      // A slash, a backslash, "?", "#", "@", or a space would end the host or name a user.
+      if (!/[/\\?#@\s]/.test(host)) return new URL(`${url.protocol}//${host}`).origin;
+    } catch {
+      // Not one host: try core's baseURL.
+    }
+  }
+  if (baseURL) {
+    try {
+      return new URL(baseURL).origin;
+    } catch {
+      // core checks baseURL at creation; a stand-in may not.
+    }
+  }
+  return url.origin;
 }
 
 export interface HonoSessionOptions {
@@ -48,8 +75,17 @@ export function authSession(options: HonoSessionOptions): MiddlewareHandler<Auth
   return async (c, next) => {
     // The path exactly as the router matched it (Hono's getPath: decoded once,
     // "%25" kept, case kept), with the query. protect gets it as given: "/café".
-    const routed = `${c.req.path}${new URL(c.req.url).search}`;
-    const gate = await readGate({ ...options, auth: resolve(options.auth, c) }, c.req.raw, routed);
+    const url = new URL(c.req.url);
+    const routed = `${c.req.path}${url.search}`;
+    const auth = resolve(options.auth, c);
+    // The gate takes the origin of the redirect from its request: one on the
+    // app's own origin, with the raw path and query and every header.
+    const origin = originOf(c.req.raw, url, auth.baseURL);
+    const request =
+      origin === url.origin
+        ? c.req.raw
+        : new Request(`${origin}${url.pathname}${url.search}`, { headers: c.req.raw.headers });
+    const gate = await readGate({ ...options, auth }, request, routed);
     if (gate.redirect) return gate.redirect;
     c.set("session", gate.session);
     await next();

@@ -22,11 +22,9 @@ and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
   `p === "/account" || p.startsWith("/account/")`.
 - Mount core for every method. With fewer methods, a PUT to `/auth/x` skips
   the gate and reaches a catch-all page of the app with no session.
-- The redirect to the sign-in page takes its origin from the request URL, as
-  the server builds it. Bun 1.4.3 builds it from the Host header.
-  `@hono/node-server` 1.19.17 and 2.1.5 build it from the Host header, but
-  take an absolute-form request line, such as `GET http://other.example/x`, as
-  given. The redirect then names that origin. Check the rule of your server
-  on Deno and on Workers.
+- The redirect to the sign-in page takes its origin from the Host header,
+  with the protocol of the request URL. When the Host header is missing or is
+  not one host, it takes the origin of `auth.baseURL`. It never takes the
+  origin of the request target, such as `GET http://other.example/x`.
 - The rule is `readGate` of `@authtempo/core/bindings`, the same in every
   server binding.

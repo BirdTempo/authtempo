@@ -28,7 +28,7 @@ export function createApp(env: AppEnv): Hono<AuthEnv> {
     authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" }),
   );
   // Every route of core under /auth, the default basePath.
-  app.on(["GET", "POST", "OPTIONS"], "/auth/*", authHandler(auth));
+  app.all("/auth/*", authHandler(auth));
   app.get("/account", (c) => c.json({ email: getSession(c)?.user.email ?? null }));
   return app;
 }
