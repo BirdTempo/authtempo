@@ -370,6 +370,42 @@ describe("@authtempo/express (plan 11d2)", () => {
     }
   });
 
+  // Express's router does not decode the mount path, so "/%61uth/session" is not a
+  // route of core. The gate must judge the same raw text: a decode would read
+  // "/auth/session", skip the rule, and run a catch-all page with no session.
+  it("runs no catch-all page for an escaped base path with no session", async () => {
+    let base = "";
+    let auth: ReturnType<typeof createAuth> | null = null;
+    const getAuth = () =>
+      (auth ??= createAuth({
+        baseURL: base,
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: [base],
+        storage: createMemoryAdapter(),
+        mail: { send: async () => {} },
+      }));
+    const pages: string[] = [];
+    const app = express();
+    app.use("/auth", authHandler(getAuth));
+    app.use(authSession({ auth: getAuth, protect: (p) => p !== "/", signInPath: "/sign-in" }));
+    app.use((req, res) => {
+      pages.push(req.originalUrl);
+      res.send("page");
+    });
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((r) => server.once("listening", () => r()));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      for (const path of ["/%61uth/session", "/%61uth/x"]) {
+        const res = await fetch(`${base}${path}`, { redirect: "manual" });
+        expect(res.status).toBe(307);
+      }
+      expect(pages).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
   it("does not decode an escape in the path, as Express's router does not", async () => {
     const { base, runs } = await serve(undefined, { caseSensitive: true });
     // The router matches the raw path, so "/%61ccount" is no route: 404, and no page runs.
