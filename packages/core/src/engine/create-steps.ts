@@ -3,6 +3,7 @@ import type { UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
 import {
   type IdentitySummary,
+  patchFields,
   runAfter,
   runBefore,
   stopWith,
@@ -41,10 +42,8 @@ function refusePatch(what: string): never {
  * flow with `hook_failed`.
  */
 export function patchedNewUser(user: UserRow, patch: unknown): UserRow {
-  if (patch === undefined || patch === null) return user;
-  if (typeof patch !== "object" || Array.isArray(patch))
-    return refusePatch("a value that is not an object");
-  const fields = patch as Record<string, unknown>;
+  const fields = patchFields(patch, refusePatch);
+  if (!fields) return user;
   for (const key of Object.keys(fields))
     if (key !== "name" && key !== "image") return refusePatch("a field other than name and image");
   const out: UserRow = { ...user };

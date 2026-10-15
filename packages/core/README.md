@@ -994,8 +994,10 @@ const auth = createAuth({
   except `session.beforeCreate`, which may answer `{ ip?, userAgent?,
   activeOrganizationId? }`, each a string or null. The organization must be
   one the user is a member of, or the sign-in answers 404 `not_found`. Any
-  other field answers 500 `hook_failed`. `user.beforeCreate` may change the
-  name and the image of a new user (see the user points below).
+  other field answers 500 `hook_failed`. A patch that core cannot read, such
+  as one with a getter that throws, answers 500 `hook_failed` too.
+  `user.beforeCreate` may change the name and the image of a new user (see
+  the user points below).
 - Organization points: `beforeCreate`, `afterCreate`, `beforeUpdate`,
   `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember` and
   `afterAddMember` (`via`: `create` for the creator's owner row, `add`, or
@@ -1050,7 +1052,10 @@ const auth = createAuth({
   or throws, the sign-up writes no row, sends no mail, and still answers
   `{ sent: true }`. So the caller never learns whether the address has a
   user, and your refusal message does not reach the caller. A throw logs
-  `authtempo: before hook failed user.beforeCreate <error name>`.
+  `authtempo: before hook failed user.beforeCreate <error name>`. The time
+  of `user.beforeCreate` and `user.afterCreate` shows in the answer time of
+  a new address only. So a slow hook tells the caller that the address is
+  new. Keep these hooks fast, or move slow work out of the request.
 - With no `afterEnd` hook, a reset, a change, a claim, and the enable of a second factor delete the ended sessions in one statement (plan 9h). With the hook, each ended row goes by id, so the hook fires once per row the flow ended; an account with many sessions then pays one statement per session.
 - `session.beforeCreate` runs on a password sign-in only after the password
   is correct. So `hook_refused` against `invalid_credentials` tells the
@@ -1087,9 +1092,13 @@ const auth = createAuth({
   gone answers `invalid_token` after the hook. A flow that retries after a unique key race
   (the magic link, the social sign-in, the sign-up, the reset) runs its
   before hook again. `user.afterCreate` and `identity.afterLink` fire only
-  for the user and the identity that the committed attempt wrote. A
-  sign-up that loses a claim race answers an error, and its
-  `user.afterCreate` does not fire. The organization flows have the same window: a role
+  for the user and the identity that the committed attempt wrote. On D1,
+  a sign-up that loses a claim race keeps the user row it minted, and the
+  claimer owns it. Its `user.beforeCreate` ran, and no flow fires
+  `user.afterCreate` for that row. An app that must mirror every user
+  writes its row in `user.beforeCreate` (spec 8.9 item 1). The sign-up
+  answers `{ sent: true }`, or `email_taken_unverified` with
+  `uniformSignUp: false`. The organization flows have the same window: a role
   change or a remove whose member changed since the read answers
   `conflict` after its before hook, and an accept that loses the consume
   race answers `invalid_token` after `beforeAddMember`, and for a raise

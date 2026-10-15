@@ -693,6 +693,95 @@ describe("the hook groups in the config (plan 12a)", () => {
   });
 });
 
+// Proposed by review-12a-task5 (M1, M2), copied from its proposed file.
+describe("the create steps on every path (review-12a-task5)", () => {
+  for (const path of PATHS) {
+    it(`applies a user.beforeCreate patch on ${path.name}`, async () => {
+      const r = recorded({ name: "Pat", image: "https://img.example.com/p.png" });
+      const w = world(r.hooks, path.extra);
+      expect((await path.run(w, "new@example.com")).ok).toBe(true);
+      expect(await w.auth.storage.findMany("user", [])).toMatchObject([
+        { email: "new@example.com", name: "Pat", image: "https://img.example.com/p.png" },
+      ]);
+      expect(r.events.filter((e) => e.startsWith("user.afterCreate:"))).toEqual([
+        expect.stringMatching(/:Pat$/),
+      ]);
+    });
+  }
+
+  it("runs the sign-up rule before user.beforeCreate on both password sign-ups and the reset code", async () => {
+    const r = recorded();
+    // "invited" with no invitation: the rule runs inside the transaction. `false` refuses
+    // the password sign-up before it, so it cannot show the order.
+    const closed = { signUp: "invited" as const, organizations: {} };
+    const uniform = world(r.hooks, closed);
+    expect(await signUp(uniform.auth, "up@example.com")).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(await resetCode(uniform.auth, "code@example.com")).toMatchObject({
+      ok: false,
+      code: "sign_up_closed",
+    });
+    const off = world(r.hooks, { ...closed, password: { hash: FAST, uniformSignUp: false } });
+    expect(await signUp(off.auth, "up@example.com")).toMatchObject({
+      ok: false,
+      code: "sign_up_closed",
+    });
+    expect(r.events).toEqual([]);
+  });
+
+  it("runs no user hook for a password sign-up of an address that has a user", async () => {
+    for (const extra of [{}, { password: { hash: FAST, uniformSignUp: false } }]) {
+      const r = recorded();
+      const w = world(r.hooks, extra);
+      expect((await magicLink(w.auth, "old@example.com")).ok).toBe(true);
+      r.events.length = 0;
+      await signUp(w.auth, "old@example.com");
+      expect(r.events).toEqual([]);
+    }
+  });
+});
+
+describe("a patch that cannot be read (review L3 of plan 12a Task 5)", () => {
+  /** An answer whose field getter throws, with an address in its message. */
+  const unreadable = () => ({
+    get name(): string {
+      throw new TypeError("getter for new@example.com");
+    },
+  });
+
+  it("answers hook_failed with one line for a user patch whose getter throws", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = makeAuth({ hooks: { user: { beforeCreate: () => unreadable() as never } } });
+    expect(await magicLink(auth, "new@example.com")).toEqual({
+      ok: false,
+      code: "hook_failed",
+      status: 500,
+    });
+    expect(log.mock.calls).toEqual([
+      ["authtempo: user patch refused", "a value that cannot be read"],
+    ]);
+    expect(await allRows(auth.storage)).toEqual({ users: [], identities: [], sessions: [] });
+  });
+
+  it("answers hook_failed with one line for a session patch whose getter throws", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = makeAuth({
+      hooks: { session: { beforeCreate: () => unreadable() as never } },
+    });
+    expect(await magicLink(auth, "new@example.com")).toEqual({
+      ok: false,
+      code: "hook_failed",
+      status: 500,
+    });
+    expect(log.mock.calls).toEqual([
+      ["authtempo: session patch refused", "a value that cannot be read"],
+    ]);
+    expect(await allRows(auth.storage)).toEqual({ users: [], identities: [], sessions: [] });
+  });
+});
+
 describe("the uniform sign-up hides a user.beforeCreate stop (plan 12a, lead ruling 2026-10-15)", () => {
   const PW = "correct horse battery";
 

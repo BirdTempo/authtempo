@@ -362,6 +362,29 @@ describe("importUsers: records the review named (M-1, M-3, M-4, M-5)", () => {
     );
   });
 
+  it("drops an image with credentials or a control character, by core's image rule", async () => {
+    const db = createMemoryAdapter();
+    const r = await importUsers(
+      db,
+      listSource([
+        user("a", { image: "https://u:p@example.com/a.png" }),
+        user("b", { image: "https://:p@example.com/b.png" }),
+        user("c", { image: "https://example.com/c\u0001.png" }),
+      ]),
+      { formats: LEGACY_FORMATS, now },
+    );
+    const images = await Promise.all(
+      ["a", "b", "c"].map(async (s) => {
+        const id = await importId("user", "supabase", s);
+        return (await db.findOne("user", [{ field: "id", op: "eq", value: id }]))?.image;
+      }),
+    );
+    expect(images).toEqual([null, null, null]);
+    expect(r.dropped).toEqual(
+      ["a", "b", "c"].map((sourceId) => ({ sourceId, item: "image:invalid" })),
+    );
+  });
+
   it("counts every invalid_ and reserved_ skip as a refusal, and no other skip", async () => {
     const db = createMemoryAdapter();
     await appUser(db, "app-1", "taken@example.com", true);

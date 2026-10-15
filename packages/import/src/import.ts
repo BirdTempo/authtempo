@@ -8,6 +8,7 @@ import {
   PENDING_HASH_PREFIX,
   type StorageAdapter,
   StorageError,
+  validImageUrl,
   validOrganizationName,
   validUserName,
 } from "@authtempo/core";
@@ -50,8 +51,6 @@ const SOCIAL: ReadonlyMap<string, ((subject: string) => boolean) | null> = new M
   ["linkedin", null],
 ]);
 const RANK: Record<ImportRole, number> = { member: 1, admin: 2, owner: 3 };
-/** The longest image URL the importer keeps (M-4 of the Task 5 review). */
-const IMAGE_MAX = 2048;
 /**
  * The skip for a record whose write meets a unique_violation on both
  * attempts, by the model the error names. The second plan reads every key
@@ -208,16 +207,6 @@ function roleMap(source: Source, options: ImportOptions): Map<string, ImportRole
   return out;
 }
 
-/** An `https:` URL of at most IMAGE_MAX characters, or null. */
-function validImage(image: string): boolean {
-  if (image.length > IMAGE_MAX) return false;
-  try {
-    return new URL(image).protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 /** The format name a report gives a hash it refuses: the tag, or "unknown". */
 export function formatName(hash: string): string {
   if (hash === LEGACY_VERIFY_HASH) return "legacy-verify";
@@ -357,7 +346,8 @@ function userRows(
     name = null;
   }
   let image = r.image;
-  if (image !== null && !validImage(image)) {
+  // Core's one image rule (plan 12a): the social fill, the hook patch, and the importer read it.
+  if (image !== null && !validImageUrl(image)) {
     dropped.push("image:invalid");
     image = null;
   }

@@ -11,6 +11,7 @@ import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import {
+  patchFields,
   runAfter,
   runBefore,
   type SessionDraft,
@@ -187,10 +188,8 @@ async function patchedInput(
   patch: unknown,
 ): Promise<SessionInput> {
   const input: SessionInput = { userId: draft.userId, ip: draft.ip, userAgent: draft.userAgent };
-  if (patch === undefined || patch === null) return input;
-  if (typeof patch !== "object" || Array.isArray(patch))
-    return refusePatch("a value that is not an object");
-  const fields = patch as Record<string, unknown>;
+  const fields = patchFields(patch, refusePatch);
+  if (!fields) return input;
   for (const key of Object.keys(fields))
     if (!PATCH_KEYS.has(key)) return refusePatch(`the field ${key}`);
   const { ip, userAgent, activeOrganizationId } = fields;

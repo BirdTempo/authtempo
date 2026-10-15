@@ -212,7 +212,7 @@ export interface UserPatch {
  * What `user.beforeCreate` may change (plan 12a): `name` and `image`, each a
  * string or null, under the profile rules. A name has 1 to 200 code units
  * and no control character. An image is an `https:` URL of at most 2048
- * characters. Any other key or value answers `hook_failed`.
+ * characters, with no credentials. Any other key or value answers `hook_failed`.
  */
 export interface UserCreatePatch {
   name?: string | null;
@@ -366,6 +366,29 @@ export class HookStop extends Error {
     this.name = "HookStop";
     this.result = result;
   }
+}
+
+/**
+ * The own fields of a before hook's patch answer, or null for no patch
+ * (`undefined` or `null`). The session patch and the user patch read the
+ * answer here only. The answer is the app's object, so a getter or a proxy
+ * can throw. The copy reads each field once, in a `try`. A throw, an array,
+ * or a value that is not an object goes to `refuse`. It logs the reason and
+ * stops with `hook_failed` (review L3 of plan 12a Task 5).
+ */
+export function patchFields(
+  patch: unknown,
+  refuse: (what: string) => never,
+): Record<string, unknown> | null {
+  if (patch === undefined || patch === null) return null;
+  if (typeof patch !== "object") return refuse("a value that is not an object");
+  let copy: Record<string, unknown> | null;
+  try {
+    copy = Array.isArray(patch) ? null : { ...(patch as Record<string, unknown>) };
+  } catch {
+    return refuse("a value that cannot be read");
+  }
+  return copy ?? refuse("a value that is not an object");
 }
 
 /** Stops the flow with a plain code, for example `not_found` for a session patch. */

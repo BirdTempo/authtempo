@@ -165,3 +165,55 @@ describe("account races on Postgres (plan 12a)", () => {
     }
   });
 });
+
+describe("user hook races on Postgres (plan 12a Task 5, review M3)", () => {
+  it("parallel magic links of one new address: one user and one user.afterCreate", async () => {
+    const sent: MailMessage[] = [];
+    const events: string[] = [];
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      hooks: {
+        user: {
+          beforeCreate: (e) => {
+            events.push(`before:${e.user.id}`);
+          },
+          afterCreate: (e) => {
+            events.push(`after:${e.user.id}`);
+          },
+        },
+      },
+    });
+    const raced: number[] = [];
+    for (let round = 0; round < 8; round++) {
+      const email = `race${round}@example.com`;
+      const links: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        await auth.api.requestMagicLink({ email, ip: null });
+        const token = /token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1)?.text ?? "")?.[1];
+        if (!token) throw new Error("no link");
+        links.push(decodeURIComponent(token));
+      }
+      events.length = 0;
+      const all = await Promise.all(
+        links.map((token) => auth.api.verifyMagicLink({ token, ip: null, userAgent: null })),
+      );
+      expect(all.every((r) => r.ok)).toBe(true);
+      const users = await db.sql`SELECT id FROM ta_user WHERE email = ${email}`;
+      expect(users).toHaveLength(1);
+      raced.push(events.filter((e) => e.startsWith("before:")).length);
+      // One row, so one afterCreate, with that row's id, whatever the order of the commits.
+      expect(events.filter((e) => e.startsWith("after:"))).toEqual([`after:${users[0]?.id}`]);
+    }
+    // The race must show in some round: more than one attempt minted a row.
+    expect(Math.max(...raced)).toBeGreaterThan(1);
+  }, 60000);
+});

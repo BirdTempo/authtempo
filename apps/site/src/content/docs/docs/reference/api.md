@@ -77,6 +77,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `ipKey` | The IP part of a per-IP limiter key: the IPv4 form of an IPv4-mapped address, the `/64` of another IPv6 address, `unknown` for no IP. |
 | `normalizeEmail`, `normalizeSlug` | The address rule and the slug rule of core. |
 | `validOrganizationName`, `validUserName` | The name rules of core. |
+| `validImageUrl` | The image rule of core: an `https:` URL of at most 2048 characters, with no credentials and no control character. |
 | `rankOf` | The rank of a role string in a rank table. |
 | `readSessionToken` | Reads the session token of a request, from the cookie and then the bearer header. |
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |
