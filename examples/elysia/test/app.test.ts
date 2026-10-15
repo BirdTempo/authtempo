@@ -137,6 +137,16 @@ describe("the Elysia example (plan 11d2)", () => {
     expect(rule).toEqual(["/account/", "/account"]);
   });
 
+  it("takes the origin of the redirect from Host, not from the request URL", async () => {
+    const { app } = setup();
+    // An absolute-form request line names another origin; the Host header names the app.
+    const res = await app.handle(
+      new Request("http://evil.example/account", { headers: { host: "app.example:8080" } }),
+    );
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://app.example:8080/sign-in?next=%2Faccount");
+  });
+
   it("gives no 500 for a Host header that does not parse", async () => {
     const { app } = setup();
     const page = await app.handle(new Request(`${BASE}/account`, { headers: { host: "a b" } }));

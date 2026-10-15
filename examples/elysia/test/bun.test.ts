@@ -129,6 +129,8 @@ describe("the Elysia example on Bun (plan 11d2)", () => {
     expect((await run("/auth/session", "a b")).status).toBe(401);
   });
 
+  // Bun builds request.url from Host, and withOrigin builds it from Host again, so the app
+  // keeps this promise on its own. The Node test of withOrigin breaks without the Host line.
   it("takes the origin of the redirect from Host, not from an absolute-form request line", async () => {
     const r = await run("http://evil.example/account");
     expect(r.status).toBe(307);

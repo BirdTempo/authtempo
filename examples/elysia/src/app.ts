@@ -12,13 +12,22 @@ export interface AppEnv {
 }
 
 /**
- * The request with a full URL. Bun builds `request.url` from the Host header,
- * and a Host that does not parse ("a b") gives the path only. The origin of
- * BASE_URL then replaces it, so a bad Host gets no 500.
+ * The request on the app's own origin: the Host header, else the origin of
+ * BASE_URL. The app builds it, so the origin never comes from a request line
+ * in absolute form, whatever the runtime does. Bun gives the path only for a
+ * Host that does not parse ("a b"): that request also gets the BASE_URL origin.
  */
 function withOrigin(request: Request, baseURL: string): Request {
-  if (URL.canParse(request.url)) return request;
-  const url = new URL(request.url, new URL(baseURL).origin);
+  const fallback = new URL(baseURL);
+  const parsed = URL.canParse(request.url) ? new URL(request.url) : null;
+  const protocol = parsed?.protocol ?? fallback.protocol;
+  let origin = fallback.origin;
+  const host = request.headers.get("host");
+  if (host && URL.canParse(`${protocol}//${host}`)) origin = new URL(`${protocol}//${host}`).origin;
+  const path = parsed ? `${parsed.pathname}${parsed.search}` : request.url;
+  const url = new URL(path, origin);
+  // The common case: the URL is already on that origin, and the request passes unchanged.
+  if (parsed?.href === url.href) return request;
   const init = { method: request.method, headers: request.headers, body: request.body };
   return new Request(url, { ...init, duplex: "half" } as RequestInit);
 }

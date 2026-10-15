@@ -47,8 +47,8 @@ import test from "../../../../../../../examples/elysia/test/app.test.ts?raw";
 - Bun resolves `.` and `..` in the path before the router runs, so `/account/.` gets the redirect. Elysia removes one trailing slash only, so `/account//` gets a 404.
 - An exact rule covers one route only. For a route with a parameter, use `p === "/account" || p.startsWith("/account/")`.
 - The router does not decode `/%61uth/session` to a path of core, so no page and no route of core runs. It gets a 404.
-- Bun builds `request.url` from the Host header, not from a request line in absolute form.
-- A Host that does not parse gives a path only. Then `withOrigin` uses the origin of `BASE_URL`, so the app answers no 500.
+- `withOrigin` builds the URL of each request from the Host header, so the origin never comes from a request line in absolute form.
+- A Host that does not parse gets the origin of `BASE_URL`, so the app answers no 500. On Bun, such a request has a path only as its URL.
 - A route of core returns the answer of core, so each Set-Cookie line passes unchanged.
 - The hooks name no body, so Elysia reads no body. Core reads the body as it came.
 - The verifier reads the Authorization header only, never the session cookie. An API token costs one call to the auth app per request.
