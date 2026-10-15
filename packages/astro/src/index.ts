@@ -34,10 +34,11 @@ export function authRoute(auth: AuthSource<Pick<Auth, "handle">>): APIRoute {
 export interface AstroAuthOptions {
   auth: AuthSource<GateAuth>;
   /**
-   * True for a path that needs a session. Needs `signInPath`. It gets the path
-   * in URL form, as Astro routed it: duplicate slashes merged, case kept. A
-   * non-ASCII letter comes encoded ("/caf%C3%A9"): write such a rule in the
-   * encoded form or as a prefix (the gate contract in the README of core).
+   * True for a path that needs a session. Needs `signInPath`. It gets the
+   * pathname of `context.url`, the URL that Astro's router matched: decoded
+   * until it stops changing, duplicate slashes merged, dot segments resolved,
+   * case kept. As a URL pathname, a non-ASCII letter stays percent-encoded
+   * ("/caf%C3%A9"): write the rule for that form.
    */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */

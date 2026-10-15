@@ -173,6 +173,40 @@ describe("@authtempo/astro (plan 11d2)", () => {
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fcaf%25C3%25A9`);
   });
 
+  // Astro resolves dot segments before its router matches, and the gate
+  // judges context.url. A dotted path is judged as the path it resolves to.
+  it("judges /account/.. as the path / that Astro routed", async () => {
+    const { auth, context, counter } = setup();
+    const prefix = authMiddleware({
+      auth,
+      protect: (p) => p.startsWith("/account"),
+      signInPath: "/sign-in",
+    });
+    let runs = 0;
+    const res = (await prefix(context(new Request(`${BASE}/account/..`), "/"), async () => {
+      runs++;
+      return new Response("home");
+    })) as Response;
+    expect(runs).toBe(1);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("home");
+    expect(counter.reads).toBe(1);
+  });
+
+  it("passes /account/../auth/session to core as /auth/session", async () => {
+    const { auth, route, context, counter } = setup();
+    const prefix = authMiddleware({
+      auth,
+      protect: (p) => p.startsWith("/account"),
+      signInPath: "/sign-in",
+    });
+    const ctx = context(new Request(`${BASE}/account/../auth/session`), "/auth/session");
+    const res = (await prefix(ctx, async () => route(ctx))) as Response;
+    // Core's own answer for no session, and no read by the gate on a path of core.
+    expect(res.status).toBe(401);
+    expect(counter.reads).toBe(0);
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, context, middleware, advance } = setup();
     const cookie = await signIn();

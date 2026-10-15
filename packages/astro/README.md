@@ -12,10 +12,12 @@ takes `astro` 7.3.8 or newer in 7 as a peer dependency.
 
 - `getAuth` is a function that makes the auth instance at the first request,
   so `astro build` reads no secret.
-- `protect` gets the path in URL form, as Astro routed it: duplicate slashes
-  merged, case kept. A space or a non-ASCII letter comes encoded, so write
-  such a rule in the encoded form (`"/caf%C3%A9"`) or as a prefix. The README
-  of `@authtempo/core` states this contract of the gate.
+- `protect` gets the pathname of `context.url`, the URL that Astro's router
+  matched: decoded until it stops changing, with duplicate slashes merged and
+  the case kept. As a URL pathname, a non-ASCII letter stays percent-encoded
+  (`"/caf%C3%A9"`), so write the rule for that form.
+- Astro resolves dot segments before the match. `/account/..` is `/`, so a
+  dotted request never reaches a protected page as that page.
 - The middleware reads no session for a route of core, and adds the renewed
   cookie to the page's answer after the sliding refresh.
 - Set `security.allowedDomains` to the host of your app. Without it, Astro gives
