@@ -4,7 +4,7 @@
 // which only the proof sets. Its first call makes the app's one auth instance
 // with a mail port that keeps the last mail, so the proof calls it first.
 import type { Auth, MailMessage } from "@authtempo/core";
-import { createAppAuth } from "../../../lib/auth";
+import { createAppAuth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 

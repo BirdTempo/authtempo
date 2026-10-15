@@ -1,2 +1,4 @@
 .next/
 next-env.d.ts
+# The proof copies its mail route here and deletes it after; a killed proof can leave it.
+app/proof/

@@ -1,5 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "noEmit": true, "jsx": "react-jsx", "types": ["node"] },
-  "include": ["app", "lib", "proxy.ts", "test"]
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    // `@/` is the folder of the app, as Next reads it. proof/mail-route.ts imports
+    // `@/lib/auth`, which resolves both in proof/ and in app/proof/mail/ after the
+    // proof copies it there, so tsc checks the route where it is kept.
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["app", "lib", "proxy.ts", "test", "proof/mail-route.ts"]
 }
