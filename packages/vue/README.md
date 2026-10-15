@@ -34,7 +34,10 @@ On the server of Nuxt:
   decoded once, with `%2F` and `%25` kept encoded. Dot segments stay
   (`/account/%2e%2e` reaches the rule as `/account/..`, which a child route
   `/account/[id]` matches), and slashes are not merged. A non-ASCII route
-  reaches the rule decoded: write `p === "/café"`, not `"/caf%C3%A9"`.
+  reaches the rule decoded: write `p === "/café"`, not `"/caf%C3%A9"`. h3
+  decodes `%3F` and `%23` into the path, so `/account%3F` reaches the rule as
+  `/account?`, and h3 still renders the page of `/account` for it. An exact
+  rule `p === "/account"` does not match that path: use a prefix rule.
 - Vue Router compares a path in any case by default. Set
   `router: { options: { sensitive: true } }` in `nuxt.config.ts`, as the
   example does, or compare in lower case in `protect`. Prefer a prefix rule:

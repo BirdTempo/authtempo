@@ -1,5 +1,10 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { checkGateOptions, type GateAuth, readGate } from "@authtempo/core/bindings";
+import {
+  checkGateOptions,
+  type GateAuth,
+  type RoutedPath,
+  readGate,
+} from "@authtempo/core/bindings";
 import {
   appendResponseHeader,
   defineEventHandler,
@@ -53,7 +58,7 @@ function rawTarget(event: H3Event): string {
 }
 
 /**
- * The path and the query that h3 routes, as one string for the gate. h3
+ * The path and the query that h3 routes, in the object form of the gate. h3
  * 1.15.11 routes the raw request target decoded once with decodeURIComponent,
  * with "%2F" and "%25" kept (_decodePath and ufo's decodePath, read
  * 2026-10-15). It does not resolve dot segments or backslashes:
@@ -65,16 +70,21 @@ function rawTarget(event: H3Event): string {
  * originalUrl, not event.path: under a Nuxt app.baseURL, event.path loses the
  * base that core's routes keep.
  */
-function routedPath(event: H3Event): string {
+function routedPath(event: H3Event): RoutedPath {
   const raw = rawTarget(event);
   const q = raw.indexOf("?");
   const path = q === -1 ? raw : raw.slice(0, q);
   const search = q === -1 ? "" : raw.slice(q);
+  // The object form: h3 decodes "%3F" and "%23" into the path, so the gate
+  // must not split the decoded text at "?" or drop it at "#".
   try {
-    return decodeURIComponent(path.replace(/%25/g, "%2525").replace(/%2F/gi, "%252F")) + search;
+    return {
+      pathname: decodeURIComponent(path.replace(/%25/g, "%2525").replace(/%2F/gi, "%252F")),
+      search,
+    };
   } catch {
     // A bad escape: h3 keeps the raw path, so the raw path is the routed path.
-    return raw;
+    return { pathname: path, search };
   }
 }
 
@@ -86,7 +96,7 @@ function routedPath(event: H3Event): string {
  * 2). A Host that does not parse as one host falls back to the origin of
  * auth.baseURL, so no request answers 500.
  */
-function originOf(event: H3Event, auth: GateAuth & { readonly baseURL?: string }): string {
+function originOf(event: H3Event, auth: GateAuth): string {
   if (event.web?.url) return new URL(event.web.url).origin;
   const host = event.node.req.headers.host ?? "";
   const protocol = getRequestProtocol(event);

@@ -44,6 +44,8 @@ function makeApp(
   router.get("/account", page);
   router.get("/account/:id", page);
   router.get("/café", page);
+  // A catch-all page, as Nuxt's renderer "/**" is: it must never get a path of core.
+  router.get("/**", page);
   app.use(router.handler);
   const fetch = toWebHandler(app);
   async function signIn(): Promise<string> {
@@ -155,15 +157,46 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
     expect(pageRuns()).toBe(0);
   });
 
-  it("reads an escaped ? as h3 reads it, under an exact rule", async () => {
-    // h3 decodes "%3F", so /account%3F routes to the page of /account.
-    const { fetch, pageRuns } = makeApp({}, (p) => p === "/account");
+  it("gives the rule an escaped ? as h3 decodes it, in the path", async () => {
+    // h3 decodes "%3F" into the path, so the rule gets "/account?", not "/account".
+    const seen: string[] = [];
+    const { fetch, pageRuns } = makeApp({}, (p) => {
+      seen.push(p);
+      return p.startsWith("/account");
+    });
     const res = await fetch(new Request(`${API}/account%3F`));
+    expect(seen).toEqual(["/account?"]);
     expect(res.status).toBe(307);
-    // The gate judges the text that h3 routes, "/account?"; next is the request's own path.
+    // next is the request's own path, never the decoded text.
     expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Faccount%253F`);
     expect(pageRuns()).toBe(0);
   });
+
+  it("gives the rule an escaped ? and # in the path, with no split and no drop", async () => {
+    const seen: string[] = [];
+    const { fetch, pageRuns } = makeApp({}, (p) => {
+      seen.push(p);
+      return p.startsWith("/a");
+    });
+    const res = await fetch(new Request(`${API}/a%3F/secret%23x`));
+    expect(seen).toEqual(["/a?/secret#x"]);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Fa%253F%2Fsecret%2523x`);
+    expect(pageRuns()).toBe(0);
+  });
+
+  // h3 decodes "/%61uth/..." to a path of core. The gate reads no session for
+  // it, and the request goes on to core's route, never to a page.
+  it.each(["/%61uth/session", "/%61uth/x"])(
+    "sends %s to core and runs no page, with a catch-all page",
+    async (target) => {
+      const { app, counter, pageRuns } = makeApp({}, () => true);
+      const res = await rawGet(app, target);
+      expect([401, 404]).toContain(res.status);
+      expect(counter.reads).toBe(0);
+      expect(pageRuns()).toBe(0);
+    },
+  );
 
   it("gives a non-ASCII path to the rule decoded, as h3 routes it", async () => {
     const seen: string[] = [];
