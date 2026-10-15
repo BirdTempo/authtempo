@@ -13,6 +13,7 @@ import type {
   OAuthTokenRow,
   PasskeyRow,
   SecondFactorRow,
+  SessionRow,
   TotpRow,
   TrustedDeviceRow,
   UserRow,
@@ -1040,6 +1041,46 @@ export function runAdapterConformance(
       expect(
         (await db.findOne("secondFactor", [{ field: "id", op: "eq", value: "s1" }]))?.secretVersion,
       ).toBe(2);
+    });
+
+    it("round-trips the version 10 session freshAt, a null among them (plan 12a)", async () => {
+      const at = new Date("2026-10-14T00:00:00.000Z");
+      // A session names a user; the compatibility storage has a foreign key on it.
+      await db.create("user", user("u-fresh", "fresh@example.com", at));
+      const stale: SessionRow = {
+        id: "s1",
+        userId: "u-fresh",
+        tokenHash: "h1",
+        expiresAt: new Date(at.getTime() + 60_000),
+        lastSeenAt: at,
+        ip: null,
+        userAgent: null,
+        activeOrganizationId: null,
+        freshAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("session", stale);
+      await db.create("session", { ...stale, id: "s2", tokenHash: "h2", freshAt: at });
+      expect(await db.findOne("session", [{ field: "id", op: "eq", value: "s1" }])).toEqual(stale);
+      expect(
+        (await db.findMany("session", [{ field: "freshAt", op: "eq", value: null }])).map(
+          (s) => s.id,
+        ),
+      ).toEqual(["s1"]);
+      // The re-authentication's write: one live row by id.
+      const later = new Date(at.getTime() + 1000);
+      const live = [
+        { field: "id" as const, op: "eq" as const, value: "s1" },
+        { field: "expiresAt" as const, op: "gt" as const, value: later },
+      ];
+      expect(await db.update("session", live, { freshAt: later, updatedAt: later })).toBe(1);
+      expect(
+        (await db.findOne("session", [{ field: "id", op: "eq", value: "s1" }]))?.freshAt,
+      ).toEqual(later);
+      expect(
+        (await db.findOne("session", [{ field: "id", op: "eq", value: "s2" }]))?.freshAt,
+      ).toEqual(at);
     });
   });
 }

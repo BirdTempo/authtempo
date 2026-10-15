@@ -470,6 +470,7 @@ describe("resolveSocialUser", () => {
       ip: null,
       userAgent: null,
       activeOrganizationId: null,
+      freshAt: now,
       createdAt: now,
       updatedAt: now,
     });

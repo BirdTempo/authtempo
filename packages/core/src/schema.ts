@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export interface BaseRow {
   id: string;
@@ -28,6 +28,12 @@ export interface SessionRow extends BaseRow {
   ip: string | null;
   userAgent: string | null;
   activeOrganizationId: string | null;
+  /**
+   * When a sign-in or a re-authentication last proved the person (plan 12a,
+   * spec 8.15). A sensitive change needs it within `session.freshMinutes`.
+   * Null is never fresh: a row of schema version 9 or older holds null.
+   */
+  freshAt: Date | null;
 }
 
 export type VerificationPurpose =
@@ -60,7 +66,20 @@ export type VerificationPurpose =
    * valueHash: the SHA-256 hex of the `oq_` id; data: { params, userId }.
    * Lives 10 minutes; spent at the decision, the code, or another final answer.
    */
-  | "oauth-request";
+  | "oauth-request"
+  /**
+   * A re-authentication code (plan 12a), as `email-otp`: identifier the
+   * address, data { attempts }, valueHash the keyed hash of `<id>:<code>`.
+   */
+  | "reauth-otp"
+  /**
+   * A change-of-address link (plan 12a). identifier: the user id, so one
+   * user has one live request; valueHash: the SHA-256 hex of the `ec_`
+   * token; data: { newEmail, oldEmail, sessionId, next, attempts }.
+   */
+  | "email-change"
+  /** A change-of-address code (plan 12a): `email-change`'s data, the code rules of `email-otp`. */
+  | "email-change-otp";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;
@@ -334,6 +353,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       ip: { type: "string", nullable: true },
       userAgent: { type: "string", nullable: true },
       activeOrganizationId: { type: "string", nullable: true },
+      freshAt: { type: "date", nullable: true },
     },
     unique: [["tokenHash"]],
     indexes: [["userId"], ["activeOrganizationId"]],

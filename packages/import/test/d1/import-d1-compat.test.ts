@@ -80,7 +80,7 @@ describe("the D1 Worker's TARGET (plan 9b2)", () => {
       ).rejects.toMatchObject({ code: "schema_mismatch" });
     } finally {
       await env.DB.prepare(
-        "INSERT INTO ta_meta (key, value) VALUES ('compat_better_auth', '6')",
+        "INSERT INTO ta_meta (key, value) VALUES ('compat_better_auth', '7')",
       ).run();
     }
     expect(await count("user")).toBe(0);

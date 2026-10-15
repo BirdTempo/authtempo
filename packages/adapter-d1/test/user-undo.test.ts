@@ -95,6 +95,7 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         ip: null,
         userAgent: null,
         activeOrganizationId: null,
+        freshAt: t0,
         createdAt: t0,
         updatedAt: t0,
       }),

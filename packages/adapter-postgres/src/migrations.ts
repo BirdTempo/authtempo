@@ -8,6 +8,7 @@ import * as m0006 from "./migrations/0006_schema_v6.js";
 import * as m0007 from "./migrations/0007_schema_v7.js";
 import * as m0008 from "./migrations/0008_schema_v8.js";
 import * as m0009 from "./migrations/0009_schema_v9.js";
+import * as m0010 from "./migrations/0010_schema_v10.js";
 
 export interface Migration {
   name: string;
@@ -25,6 +26,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { name: m0007.name, sql: m0007.sql },
   { name: m0008.name, sql: m0008.sql },
   { name: m0009.name, sql: m0009.sql },
+  { name: m0010.name, sql: m0010.sql },
 ];
 
 const TABLE = "ta_migrations";

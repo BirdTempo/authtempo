@@ -154,6 +154,7 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       tokenHash: as("token"),
       lastSeenAt: as("taLastSeenAt"),
       ip: as("ipAddress"),
+      freshAt: as("taFreshAt"),
     },
   },
   verification: {

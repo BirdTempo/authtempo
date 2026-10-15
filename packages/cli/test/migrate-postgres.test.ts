@@ -17,6 +17,7 @@ const CORE = [
   "0007_schema_v7",
   "0008_schema_v8",
   "0009_schema_v9",
+  "0010_schema_v10",
 ];
 const COMPAT = [
   "0001_compat_better_auth",
@@ -25,6 +26,7 @@ const COMPAT = [
   "0004_compat_schema_v7",
   "0005_compat_schema_v8",
   "0006_compat_schema_v9",
+  "0007_compat_schema_v10",
 ];
 
 let db: Awaited<ReturnType<typeof freshDatabase>>;
@@ -44,12 +46,12 @@ const migrate = (extra: string[], url = db.url) =>
   });
 
 describe("authtempo migrate --target postgres (spec 19)", () => {
-  it("applies 0001 to 0009 on a fresh database, prints each, and moves the version from none to 9", () => {
+  it("applies 0001 to 0010 on a fresh database, prints each, and moves the version from none to 10", () => {
     const r = migrate([]);
     expect(r.status, r.stderr).toBe(0);
     expect(linesOf(r.stdout)).toEqual([
       ...CORE.map((n) => `applied ${n}`),
-      "version before: none; version after: 9",
+      "version before: none; version after: 10",
     ]);
     expect(linesOf(r.stderr)[0]).toMatch(/^connecting to \S+:\d+\/cli_/);
   });
@@ -58,7 +60,7 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
     expect(migrate([]).status).toBe(0);
     const r = migrate([]);
     expect(r.status).toBe(0);
-    expect(linesOf(r.stdout)).toEqual(["version before: 9; version after: 9"]);
+    expect(linesOf(r.stdout)).toEqual(["version before: 10; version after: 10"]);
   });
 
   it("lists the pending migrations on --dry-run and writes nothing", async () => {
@@ -74,17 +76,17 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
     expect(reg[0]?.t).toBeNull();
   });
 
-  it("stops before any write on a database at version 10, written by a migration fixture", async () => {
+  it("stops before any write on a database at version 11, written by a migration fixture", async () => {
     await applyPostgresMigrations(db.sql);
-    await db.sql.unsafe(readFileSync(join(PKG, "test/fixtures/postgres/0010_future.sql"), "utf8"));
+    await db.sql.unsafe(readFileSync(join(PKG, "test/fixtures/postgres/0011_future.sql"), "utf8"));
     const r = migrate([]);
     expect(r.status).toBe(2);
     expect(r.stdout).toBe("");
     expect(linesOf(r.stderr).at(-1)).toBe(
-      "stopped: the database is at version 10; this CLI knows version 9; use a newer CLI",
+      "stopped: the database is at version 11; this CLI knows version 10; use a newer CLI",
     );
     const count = await db.sql<{ n: string }[]>`SELECT count(*)::text AS n FROM ta_migrations`;
-    expect(count[0]?.n).toBe("10");
+    expect(count[0]?.n).toBe("11");
   });
 
   it("stops before any write on a schema_version it cannot read, and names the raw value", async () => {
@@ -101,7 +103,7 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
     expect(missing.status).toBe(2);
     expect(missing.stdout).toBe("");
     expect(linesOf(missing.stderr).at(-1)).toBe(
-      "stopped: ta_meta has no schema_version, but ta_migrations holds 9 applied migration(s); nothing was written",
+      "stopped: ta_meta has no schema_version, but ta_migrations holds 10 applied migration(s); nothing was written",
     );
     expect(linesOf(missing.stderr)).not.toContain("applying 0 migration(s)");
     const rows = await db.sql<
@@ -121,12 +123,12 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
       tables: "core",
       dryRun: false,
       before: null,
-      after: 9,
+      after: 10,
       pending: CORE,
       applied: CORE,
       copied: [],
     });
-    expect(linesOf(r.stderr)).toContain("version before: none; version after: 9");
+    expect(linesOf(r.stderr)).toContain("version before: none; version after: 10");
   });
 
   it("applies the compat migrations on a Better Auth schema with --tables compat, then lists none", async () => {
@@ -140,10 +142,10 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(linesOf(r.stdout)).toEqual([
       ...COMPAT.map((n) => `applied ${n}`),
-      "version before: none; version after: 9",
+      "version before: none; version after: 10",
     ]);
     const dry = migrate(["--tables", "compat", "--dry-run"]);
-    expect(linesOf(dry.stdout)).toEqual(["version before: 9; version after: 9"]);
+    expect(linesOf(dry.stdout)).toEqual(["version before: 10; version after: 10"]);
   });
 
   it("stops with the compatibility package's own error on a schema with core's tables", async () => {

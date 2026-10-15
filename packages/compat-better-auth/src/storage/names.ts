@@ -40,6 +40,7 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "userId",
     "activeOrganizationId",
     "taLastSeenAt",
+    "taFreshAt",
   ],
   account: [
     "id",

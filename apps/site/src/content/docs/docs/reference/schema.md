@@ -11,7 +11,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 9 needs the migrations up to `0009_schema_v9`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 10 needs the migrations up to `0010_schema_v10`.
 
 ## Before you start
 
@@ -30,10 +30,21 @@ sources:
 | 7 | `0007_schema_v7` | `ta_jwk`, `ta_oauth_client`, `ta_oauth_consent`, `ta_oauth_token` |
 | 8 | `0008_schema_v8` | `ta_second_factor` (copies each enabled `ta_totp` row with the same id, and deletes each `ta_totp` setup that no enable confirmed) |
 | 9 | `0009_schema_v9` | No table. It adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk`: the version of the app secret that seals or keys the value. Default 1. |
+| 10 | `0010_schema_v10` | No table. It adds `fresh_at` to `ta_session`, the field `freshAt` (date, nullable) after `activeOrganizationId`. When a sign-in or a re-authentication last proved the person. Null is never fresh (schema version 10, plan 12a). |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 9.
+`SCHEMA_VERSION` of `@authtempo/core` is 10.
 
-Core at version 9 needs the `0009_schema_v9` migration in both adapters, and the compatibility package needs `0006_compat_schema_v9`. Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
+Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
+
+Core at version 10 needs the `0010_schema_v10` migration in both adapters, and the compatibility package needs `0007_compat_schema_v10`. Version 10 adds `ta_session.fresh_at`, the field `freshAt` (plan 12a). It has no default and no fill. A session of version 9 holds null and re-authenticates once before its first sensitive change.
+
+Version 10 also adds three verification purposes. `purpose` is a text column, so they need no DDL.
+
+| Purpose | Identifier | What it holds |
+| --- | --- | --- |
+| `reauth-otp` | The address | A re-authentication code, with the rules of `email-otp`. |
+| `email-change` | The user id, so one user has one live request | A change-of-address link: the SHA-256 hex of the `ec_` token. |
+| `email-change-otp` | The user id | A change-of-address code: the data of `email-change`, with the code rules of `email-otp`. |
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 
@@ -111,6 +122,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0004_compat_schema_v7` | The four tables of version 7. |
 | `0005_compat_schema_v8` | `ta_second_factor`, with the same copy and the same delete. |
 | `0006_compat_schema_v9` | `secret_version` on `ta_totp`, `ta_second_factor`, and `ta_jwk`, and `taSecretVersion` on `verification`, which holds the same field. Default 1. The text names the verification table, so tables with other names take the text of `compatMigration0006Sql`. |
+| `0007_compat_schema_v10` | `taFreshAt` on `session`, which holds `freshAt`. No default and no fill. The text names the session table, so tables with other names take the text of `compatMigration0007Sql`. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

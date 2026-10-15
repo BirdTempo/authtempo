@@ -64,6 +64,7 @@ describe("sweepExpired", () => {
         ip: "1.1.1.1",
         userAgent: "ua",
         activeOrganizationId: null,
+        freshAt: now,
         createdAt: now,
         updatedAt: now,
       });

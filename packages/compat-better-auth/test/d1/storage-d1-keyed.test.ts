@@ -57,6 +57,7 @@ const signUpRows =
       ip: null,
       userAgent: null,
       activeOrganizationId: null,
+      freshAt: at,
       createdAt: at,
       updatedAt: at,
     });

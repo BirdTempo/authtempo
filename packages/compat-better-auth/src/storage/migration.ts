@@ -287,6 +287,27 @@ export function compatMigration0006Sql(dialect: "postgres" | "sqlite", n: Names)
   ].join("\n")}\n`;
 }
 
+export const MIGRATION_0007_NAME = "0007_compat_schema_v10";
+
+/**
+ * Migration 0007 (plan 12a): core's schema version 10. Core 10 adds
+ * `session.freshAt`, the time a sign-in or a re-authentication last proved
+ * the person. Better Auth's `session` gets `taFreshAt`, which holds core's
+ * field. It has no default and no fill: a session of today is not fresh, and
+ * it re-authenticates once before its first sensitive change. Better Auth
+ * ignores the extra column. The column takes the app's naming, so the text
+ * depends on `names`: the D1 files in this package are the text of the
+ * default naming, as for 0006. Append-only.
+ */
+export function compatMigration0007Sql(dialect: "postgres" | "sqlite", n: Names): string {
+  const date = dialect === "postgres" ? "timestamptz" : "TEXT";
+  return `${[
+    `ALTER TABLE ${n.table("session")} ADD COLUMN ${n.column("session", "taFreshAt")} ${date};`,
+    "UPDATE ta_meta SET value = '10' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '7' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
 
@@ -538,6 +559,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0004_NAME,
   MIGRATION_0005_NAME,
   MIGRATION_0006_NAME,
+  MIGRATION_0007_NAME,
 ];
 
 /**
@@ -553,6 +575,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   () => COMPAT_MIGRATION_0004_SQL.postgres,
   () => COMPAT_MIGRATION_0005_SQL.postgres,
   (names) => compatMigration0006Sql("postgres", names),
+  (names) => compatMigration0007Sql("postgres", names),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

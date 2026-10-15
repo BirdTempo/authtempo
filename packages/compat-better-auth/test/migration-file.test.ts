@@ -7,18 +7,21 @@ import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
 import shipped0004 from "../migrations/d1/0004_compat_schema_v7.sql?raw";
 import shipped0005 from "../migrations/d1/0005_compat_schema_v8.sql?raw";
 import shipped0006 from "../migrations/d1/0006_compat_schema_v9.sql?raw";
+import shipped0007 from "../migrations/d1/0007_compat_schema_v10.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
 import shipped0004Before17 from "../migrations/d1-before-1.7/0004_compat_schema_v7.sql?raw";
 import shipped0005Before17 from "../migrations/d1-before-1.7/0005_compat_schema_v8.sql?raw";
 import shipped0006Before17 from "../migrations/d1-before-1.7/0006_compat_schema_v9.sql?raw";
+import shipped0007Before17 from "../migrations/d1-before-1.7/0007_compat_schema_v10.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
   COMPAT_MIGRATION_0004_SQL,
   COMPAT_MIGRATION_0005_SQL,
   compatMigration0006Sql,
+  compatMigration0007Sql,
   compatMigrationSql,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
@@ -342,6 +345,41 @@ describe("migration 0006 (plan 12b)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "6" },
       { key: "schema_version", value: "9" },
+    ]);
+  });
+});
+
+describe("migration 0007 (plan 12a)", () => {
+  it("ships both D1 files as the default naming's SQLite text", () => {
+    const text = compatMigration0007Sql("sqlite", resolveNames());
+    expect(normalize(shipped0007)).toBe(normalize(text));
+    expect(normalize(shipped0007Before17)).toBe(normalize(text));
+  });
+
+  it("adds taFreshAt to session with no fill, and moves the versions to 10 and 7", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+    ])
+      db.exec(text);
+    const cols = db.prepare(`PRAGMA table_info("session")`).all() as {
+      name: string;
+      notnull: number;
+      dflt_value: unknown;
+    }[];
+    expect(cols.find((c) => c.name === "taFreshAt")).toMatchObject({
+      notnull: 0,
+      dflt_value: null,
+    });
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "7" },
+      { key: "schema_version", value: "10" },
     ]);
   });
 });

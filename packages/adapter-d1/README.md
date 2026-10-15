@@ -65,6 +65,8 @@ WHERE s.backup_codes_version = 1 AND t.backup_codes <> s.backup_codes;
 
 Version 9 (plan 12b, 2026-10-15) adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk`: the version of the app secret that seals or keys the value of the row, `NOT NULL DEFAULT 1`. Every row of today reads as version 1. Apply `0009_schema_v9` before you deploy a core at version 9; the adapter refuses a database at version 8. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
+Version 10 (plan 12a, 2026-10-15) adds `fresh_at` to `ta_session`: the time a sign-in or a re-authentication last proved the person. It is nullable, with no default and no fill. A session of version 9 holds null, and null is never fresh, so that session re-authenticates once before its first sensitive change. Apply `0010_schema_v10` before you deploy a core at version 10; the adapter refuses a database at version 9.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

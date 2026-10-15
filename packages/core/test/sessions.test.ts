@@ -260,3 +260,20 @@ describe("session routes", () => {
     expect(none.headers.get("set-cookie")).toBeNull();
   });
 });
+
+describe("session.freshAt (plan 12a, schema version 10)", () => {
+  it("a new session is fresh from its creation: freshAt equals createdAt", async () => {
+    const auth = makeAuth();
+    const user = await auth.seedUser("fresh@example.com");
+    const { session } = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    expect(session.freshAt).toEqual(session.createdAt);
+    const stored = await auth.storage.findOne("session", [
+      { field: "id", op: "eq", value: session.id },
+    ]);
+    expect(stored?.freshAt).toEqual(auth.clock.now());
+  });
+});

@@ -192,6 +192,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
             ip: null,
             userAgent: null,
             activeOrganizationId: null,
+            freshAt: at,
             createdAt: at,
             updatedAt: at,
           });

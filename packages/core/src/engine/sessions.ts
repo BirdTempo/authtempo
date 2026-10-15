@@ -97,6 +97,7 @@ export async function createSession(
     ip: input.ip,
     userAgent: input.userAgent,
     activeOrganizationId: input.activeOrganizationId ?? null,
+    freshAt: now,
     createdAt: now,
     updatedAt: now,
   });

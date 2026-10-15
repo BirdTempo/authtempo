@@ -124,6 +124,7 @@ describe("the Better Auth mapping on postgres", () => {
       "0004_compat_schema_v7",
       "0005_compat_schema_v8",
       "0006_compat_schema_v9",
+      "0007_compat_schema_v10",
     ]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
@@ -132,8 +133,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 9; a new core version needs migration 0007 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(9);
+  it("serves core schema version 10; a new core version needs migration 0008 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(10);
   });
 
   it("names only columns the table field list knows", () => {
@@ -183,6 +184,7 @@ describe("the Better Auth mapping on postgres", () => {
       ip: "203.0.113.9",
       userAgent: "ua",
       activeOrganizationId: null,
+      freshAt: at,
       createdAt: at,
       updatedAt: at,
     });
@@ -518,8 +520,8 @@ describe("the compat migration on postgres", () => {
         "ta_trusted_device",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "6" },
-        { key: "schema_version", value: "9" },
+        { key: "compat_better_auth", value: "7" },
+        { key: "schema_version", value: "10" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [
@@ -707,6 +709,7 @@ describe("the compat undo of a created user", () => {
       ip: null,
       userAgent: null,
       activeOrganizationId: null,
+      freshAt: at,
       createdAt: at,
       updatedAt: at,
     });
@@ -753,6 +756,7 @@ describe("the Better Auth foreign keys on postgres", () => {
       ip: null,
       userAgent: null,
       activeOrganizationId: null,
+      freshAt: at,
       createdAt: at,
       updatedAt: at,
     });
