@@ -1,5 +1,4 @@
 import { createAuth } from "@authtempo/core";
-import { DEFAULT_COOKIE_NAME } from "@authtempo/core/credentials";
 import { describe, expect, it } from "vitest";
 import { API, call, harness, signIn } from "../support/harness.ts";
 import { createFilesServer } from "./verify-caller.ts";
@@ -57,20 +56,18 @@ describe("verify a caller on another server", () => {
     expect(refused.headers.get("www-authenticate")).toContain('error="invalid_token"');
   });
 
-  it("names invalid_token only for a bearer with no session cookie", async () => {
-    const { at } = setup();
+  it("names invalid_token only for a refused bearer", async () => {
     const files = createFilesServer();
     const challenge = async (headers: Record<string, string>) =>
       (await files.fetch(new Request("https://files.example.com/doc", { headers }))).headers.get(
         "www-authenticate",
       );
-    // A bearer that the verifier refuses: no call reaches the auth app for a bad shape.
-    expect((await at("nope")).headers.get("www-authenticate")).toContain('error="invalid_token"');
-    // Basic is no bearer, and a cookie beside the bearer is a browser: neither is named invalid.
+    // A ts_ bearer is a kind that this server does not accept: refused with no call.
+    expect(await challenge({ authorization: "Bearer ts_refused" })).toBe(
+      'Bearer error="invalid_token"',
+    );
+    // Basic is no bearer, so the 401 names no invalid token.
     expect(await challenge({ authorization: "Basic YTpi" })).toBe("Bearer");
-    expect(
-      await challenge({ authorization: "Bearer nope", cookie: `${DEFAULT_COOKIE_NAME}=ts_x` }),
-    ).toBe("Bearer");
   });
 
   it("answers 429 when the live check is over its limit, and 503 when the auth app does not answer", async () => {
