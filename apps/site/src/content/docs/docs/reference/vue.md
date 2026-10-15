@@ -82,7 +82,8 @@ On the server of Nuxt:
 - The page path is still decoded, so `/café/` gives `/café`. The fourth form, an extra one, is the text cut at the first `#`.
 - A path needs a session when the rule holds for any form. So an exact rule `p === "/account"` guards every path that renders that page.
 - An extra form only adds a redirect.
-- Vue Router compares a path in any case by default. Set `router: { options: { sensitive: true } }` in `nuxt.config.ts`, or compare in lower case in `protect`.
+- Vue Router matches without case by default. Write the rule in lower case: `p.startsWith("/myAccount")` misses `/myaccount`, which runs the same page.
+- You can also set `router: { options: { sensitive: true } }` in `nuxt.config.ts`, as the example does.
 - Prefer a prefix rule: the router also renders `/account/` for `/account`.
 
 ## On the server of Nuxt
