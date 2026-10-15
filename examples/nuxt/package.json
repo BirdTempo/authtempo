@@ -1,0 +1,23 @@
+{
+  "name": "authtempo-example-nuxt",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "NUXT_TELEMETRY_DISABLED=1 nuxt dev",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "NUXT_TELEMETRY_DISABLED=1 nuxt build && node ../../scripts/example-proof.mjs nuxt-e2e 8796 node .output/server/index.mjs"
+  },
+  "dependencies": {
+    "@authtempo/client": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@authtempo/vue": "workspace:*",
+    "h3": "1.15.11",
+    "nuxt": "4.6.1",
+    "vue": "3.5.43"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2"
+  }
+}

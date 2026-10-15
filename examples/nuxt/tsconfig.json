@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // tsc checks the server files; `nuxt build` compiles the app and its .vue files.
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["server/**/*.ts"]
+}
