@@ -33,6 +33,19 @@ const ENV = {
 };
 let log = "";
 let server = null;
+/** The exit of the started server: null while it runs. */
+let exited = null;
+/** Resolves at the exit of the started server. */
+let serverGone = Promise.resolve();
+/**
+ * True when something answers on the port. The proof must check its own
+ * server: a server that another run left on the port would answer the checks.
+ */
+const answers = () =>
+  globalThis.fetch(`${BASE}/`, { redirect: "manual", signal: AbortSignal.timeout(2000) }).then(
+    () => true,
+    () => false,
+  );
 /** The fetch of the checks: over HTTP to the started server, or to the module in process. */
 let fetch = globalThis.fetch;
 if (command === "--module") {
@@ -50,6 +63,12 @@ if (command === "--module") {
   }
   fetch = (input, init) => handler(new Request(input, init));
 } else {
+  if (await answers()) {
+    console.error(
+      `${label}: FAIL, port ${PORT} answers before the start; stop the server that holds it`,
+    );
+    process.exit(1);
+  }
   server = spawn(command, args, {
     env: { ...process.env, ...ENV },
     stdio: ["ignore", "pipe", "pipe"],
@@ -60,6 +79,23 @@ if (command === "--module") {
   server.stderr.on("data", (d) => {
     log += d;
   });
+  serverGone = new Promise((done) => {
+    server.on("exit", (code, signal) => {
+      exited = `code ${code}, signal ${signal}`;
+      done();
+    });
+    server.on("error", (e) => {
+      exited = `error ${e.message}`;
+      done();
+    });
+  });
+  // A finally block does not run when a signal stops the proof: stop the server here too.
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+      server?.kill("SIGTERM");
+      process.exit(1);
+    });
+  }
 }
 
 const failures = [];
@@ -79,6 +115,7 @@ try {
   let up = false;
   for (let i = 0; i < 60 && !up; i++) {
     await new Promise((r) => setTimeout(r, 500));
+    if (exited) throw new Error(`the server exited before it answered (${exited})`);
     up = await fetch(`${BASE}/auth/session`).then(
       () => true,
       () => false,
@@ -89,14 +126,16 @@ try {
   expectThat(session.status === 401, `GET /auth/session answered ${session.status}`);
   const away = await fetch(`${BASE}/account`, { redirect: "manual" });
   expectThat(
-    away.status === 307 && away.headers.get("location")?.endsWith("/sign-in?next=%2Faccount"),
+    // The full URL: a framework that puts another origin on the request sends the person away.
+    away.status === 307 && away.headers.get("location") === `${BASE}/sign-in?next=%2Faccount`,
     `GET /account answered ${away.status} to ${away.headers.get("location")}`,
   );
   await post("/auth/magic-link/request", { email: "ada@example.com" });
   const { link } = await (await fetch(`${BASE}/test-only/last-link`)).json();
   const token = new URL(link ?? "http://x/").searchParams.get("token") ?? "";
   const verified = await post("/auth/magic-link/verify", { token });
-  const cookie = (verified.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+  const line = verified.headers.getSetCookie().find((l) => l.startsWith(`${SESSION_COOKIE}=`));
+  const cookie = (line ?? "").split(";")[0] ?? "";
   expectThat(
     cookie.startsWith(`${SESSION_COOKIE}=ts_`),
     `the verify set no session cookie (${verified.status})`,
@@ -108,10 +147,18 @@ try {
     account.status === 200 && (await account.text()).includes("ada@example.com"),
     `GET /account with the cookie answered ${account.status}`,
   );
+  // Every answer came from the started server only if it still runs now.
+  if (exited) failures.push(`the server exited before the last check (${exited})`);
 } catch (e) {
   failures.push(e instanceof Error ? e.message : String(e));
 } finally {
-  server?.kill("SIGTERM");
+  if (server && !exited) {
+    server.kill("SIGTERM");
+    // Wait for the exit, so the port is free when the proof ends; SIGKILL after 10 s.
+    const force = setTimeout(() => server.kill("SIGKILL"), 10_000);
+    await serverGone;
+    clearTimeout(force);
+  }
 }
 const pass = failures.length === 0 && checks === 5;
 console.log(`${label}: ${pass ? "PASS" : "FAIL"} checks=${checks} failures=${failures.length}`);
