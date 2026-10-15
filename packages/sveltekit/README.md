@@ -39,3 +39,12 @@ SvelteKit checks the origin of a form POST before the hook runs. It answers
 - An app that serves native OAuth clients from SvelteKit sets `trustedOrigins`
   to `["*"]`. Core's own origin and Fetch Metadata checks still guard the auth
   routes. The app's own form actions then need an origin check of their own.
+
+## The Svelte store
+
+`@authtempo/sveltekit/store` gives `sessionStore(client)`, the session as a
+Svelte store: `$session.data`, `$session.error`, `$session.isPending`. Make it
+once per client. The store reads the session at its first subscriber in the
+browser. A server render gets the pending state and starts no read, so the page
+shows the session after hydration. `authError(client)` reads `?auth_error=` of
+the page.

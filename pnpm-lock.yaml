@@ -1277,6 +1277,9 @@ importers:
 
   packages/sveltekit:
     dependencies:
+      '@authtempo/client':
+        specifier: workspace:*
+        version: link:../client
       '@authtempo/core':
         specifier: workspace:*
         version: link:../core
@@ -1287,6 +1290,9 @@ importers:
       '@sveltejs/vite-plugin-svelte':
         specifier: 7.3.1
         version: 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      happy-dom:
+        specifier: 20.14.6
+        version: 20.14.6
       svelte:
         specifier: 5.57.2
         version: 5.57.2

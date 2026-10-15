@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "default": "./dist/store.js"
     }
   },
   "files": [
@@ -18,6 +22,7 @@
     "test": "vitest run && node ../../scripts/check-no-node.mjs src"
   },
   "dependencies": {
+    "@authtempo/client": "workspace:*",
     "@authtempo/core": "workspace:*"
   },
   "peerDependencies": {
@@ -26,6 +31,7 @@
   "devDependencies": {
     "@sveltejs/kit": "3.0.1",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "happy-dom": "20.14.6",
     "svelte": "5.57.2",
     "typescript": "7.0.2",
     "vite": "8.3.3",
