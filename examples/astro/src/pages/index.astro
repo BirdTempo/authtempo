@@ -1,0 +1,9 @@
+---
+// biome-ignore lint/correctness/noUnusedVariables: Biome reads the frontmatter only; the template below reads session.
+const session = Astro.locals.session;
+---
+<html lang="en">
+  <body>
+    {session ? <p>Signed in as {session.user.email}</p> : <a href="/sign-in">Sign in</a>}
+  </body>
+</html>

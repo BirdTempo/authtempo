@@ -1,0 +1,10 @@
+---
+// The middleware sends a person with no session to /sign-in before this page runs.
+// biome-ignore lint/correctness/noUnusedVariables: Biome reads the frontmatter only; the template below reads session.
+const session = Astro.locals.session;
+---
+<html lang="en">
+  <body>
+    <p>Your account: {session?.user.email}</p>
+  </body>
+</html>

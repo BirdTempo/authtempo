@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // tsc checks the .ts files; `astro build` compiles the .astro pages.
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["src/**/*.ts"]
+}

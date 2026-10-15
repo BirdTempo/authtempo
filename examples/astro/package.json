@@ -1,0 +1,21 @@
+{
+  "name": "authtempo-example-astro",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "ASTRO_TELEMETRY_DISABLED=1 astro build && node ../../scripts/example-proof.mjs astro-e2e 8794 node dist/server/entry.mjs"
+  },
+  "dependencies": {
+    "@astrojs/node": "11.1.7",
+    "@authtempo/astro": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "astro": "7.3.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2"
+  }
+}
