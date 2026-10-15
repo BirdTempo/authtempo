@@ -179,9 +179,28 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
       return p.startsWith("/a");
     });
     const res = await fetch(new Request(`${API}/a%3F/secret%23x`));
-    expect(seen).toEqual(["/a?/secret#x"]);
+    expect(seen).toContain("/a?/secret#x");
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Fa%253F%2Fsecret%2523x`);
+    expect(pageRuns()).toBe(0);
+  });
+
+  it("fails closed for an escaped ? under an exact rule: the page router matches /account", async () => {
+    // Nuxt renders the page of /account for /account%3F; h3's text is "/account?".
+    const { fetch, pageRuns } = makeApp({}, (p) => p === "/account");
+    const res = await fetch(new Request(`${API}/account%3F`));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${API}/sign-in?next=%2Faccount%253F`);
+    expect(pageRuns()).toBe(0);
+  });
+
+  it.each([
+    ["only the cut form", (p: string) => p === "/a"],
+    ["only the full form", (p: string) => p === "/a?/secret#x"],
+  ])("needs a session when %s matches an exact rule", async (_, rule) => {
+    const { fetch, pageRuns } = makeApp({}, rule);
+    const res = await fetch(new Request(`${API}/a%3F/secret%23x`));
+    expect(res.status).toBe(307);
     expect(pageRuns()).toBe(0);
   });
 

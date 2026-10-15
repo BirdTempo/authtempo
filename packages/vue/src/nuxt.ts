@@ -119,6 +119,25 @@ function pageURL(origin: string, target: string): string {
 }
 
 /**
+ * Two routers read one request. h3's handlers match the decoded text, where
+ * "%3F" and "%23" became "?" and "#": "/account%3F" is "/account?". Nuxt's
+ * page router reads that text as a URL, so it matches the text cut at the
+ * first "?" or "#" and renders the page of "/account". A path needs a session
+ * when the rule holds for either form, so an exact rule fails closed. The rule
+ * sees the full form first; it sees the cut form only when the two differ.
+ */
+function bothForms(
+  protect: ((pathname: string) => boolean) | undefined,
+): ((pathname: string) => boolean) | undefined {
+  if (!protect) return undefined;
+  return (pathname) => {
+    if (protect(pathname)) return true;
+    const cut = pathname.search(/[?#]/);
+    return cut !== -1 && protect(pathname.slice(0, cut));
+  };
+}
+
+/**
  * The server middleware of `server/middleware/session.ts`:
  * `export default authSessionHandler({ auth: getAuth });`. It reads the URL
  * and the headers only, never the body that a later handler needs. A request
@@ -126,6 +145,7 @@ function pageURL(origin: string, target: string): string {
  */
 export function authSessionHandler(options: NuxtAuthOptions): EventHandler {
   checkGateOptions(options);
+  const protect = bothForms(options.protect);
   return defineEventHandler(async (event) => {
     const auth = resolve(options.auth);
     // The request that the gate reads the cookie of, and takes the origin and
@@ -134,7 +154,7 @@ export function authSessionHandler(options: NuxtAuthOptions): EventHandler {
     const target = rawTarget(event);
     const origin = originOf(event, auth);
     const request = new Request(pageURL(origin, target), { headers: event.headers });
-    const gate = await readGate({ ...options, auth }, request, routedPath(event));
+    const gate = await readGate({ ...options, auth, protect }, request, routedPath(event));
     // A middleware that answers ends the request; one that answers nothing lets it go on.
     if (gate.redirect) return gate.redirect;
     event.context.session = gate.session;

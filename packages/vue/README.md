@@ -35,9 +35,12 @@ On the server of Nuxt:
   (`/account/%2e%2e` reaches the rule as `/account/..`, which a child route
   `/account/[id]` matches), and slashes are not merged. A non-ASCII route
   reaches the rule decoded: write `p === "/café"`, not `"/caf%C3%A9"`. h3
-  decodes `%3F` and `%23` into the path, so `/account%3F` reaches the rule as
-  `/account?`, and h3 still renders the page of `/account` for it. An exact
-  rule `p === "/account"` does not match that path: use a prefix rule.
+  decodes `%3F` and `%23` into the path, so h3's text for `/account%3F` is
+  `/account?`, while Nuxt's page router cuts it at the first `?` or `#` and
+  renders the page of `/account`. The middleware runs `protect` on both forms:
+  first the full text, then, when it differs, the text cut at the first `?` or
+  `#`. A path needs a session when the rule holds for either form, so an exact
+  rule `p === "/account"` also guards `/account%3F`.
 - Vue Router compares a path in any case by default. Set
   `router: { options: { sensitive: true } }` in `nuxt.config.ts`, as the
   example does, or compare in lower case in `protect`. Prefer a prefix rule:
