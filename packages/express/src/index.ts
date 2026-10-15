@@ -19,27 +19,39 @@ function resolve<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
+/** The scheme and the authority of a request line in absolute form. */
+const AUTHORITY = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*/;
+
 /**
- * The path and query of the request line, as Express's router reads them. A
- * line in absolute form ("GET http://other.example/account") gives its path
- * and query only, so the origin of a URL of the binding is always the app's.
- * A line in origin form stays raw: "//account" is a path, not a host.
+ * The raw path and query of the request line, as Express's router reads them
+ * through parseurl: no resolution of "." or "..", no decode. A line in absolute
+ * form ("GET http://other.example/account") gives the text after its
+ * authority, so the origin of a URL of the binding is always the app's. A line
+ * in origin form stays raw: "//account" is a path, not a host.
  */
 function pathOf(req: ExpressRequest): string {
   const raw = req.originalUrl;
   if (raw.startsWith("/")) return raw;
-  try {
-    const url = new URL(raw);
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return "/";
-  }
+  const authority = AUTHORITY.exec(raw);
+  if (!authority) return "/";
+  const rest = raw.slice(authority[0].length).split("#")[0] ?? "";
+  return rest.startsWith("/") ? rest : `/${rest}`;
 }
 
 /** The URL on the app's own origin: the protocol, the Host header, and the path of the request line. */
 function urlOf(req: ExpressRequest): string {
   const path = pathOf(req);
   return `${req.protocol}://${req.get("host") ?? "localhost"}${path}`;
+}
+
+/**
+ * The forms of a path that `protect` tests. Express matches without case by
+ * default, on the app and on each Router, and the hex digits of an escape
+ * too: the path, its lower case, and its lower case with upper-case hex.
+ */
+function caseForms(path: string): string[] {
+  const lower = path.toLowerCase();
+  return [path, lower, lower.replace(/%[0-9a-f]{2}/g, (m) => m.toUpperCase())];
 }
 
 function headersOf(req: ExpressRequest): Headers {
@@ -124,12 +136,12 @@ export function authSession(options: ExpressSessionOptions): RequestHandler {
     // The gate reads the URL and the headers only: no body.
     const request = new Request(urlOf(req), { headers: headersOf(req) });
     // The routed text: Express's router matches the raw path of the request line, with
-    // no decode. It matches without case by default, on the app and on each Router,
-    // so the gate fails closed: a path is protected when it or its lower case is.
+    // no decode. It matches without case by default, so the gate fails closed: a path
+    // is protected when any of its case forms is.
     const gate = await readGate(
       {
         ...options,
-        protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
+        protect: protect && ((p: string) => caseForms(p).some((form) => protect(form))),
         auth: resolve(options.auth),
       },
       request,

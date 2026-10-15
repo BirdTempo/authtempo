@@ -12,14 +12,17 @@ takes `express` 5.3.0 or newer in 5 as a peer dependency.
 - `authSession` reads no session for a route of core, and adds the renewed
   cookie to the answer after the sliding refresh.
 - `toWebRequest` and `sendWebResponse` are the two seams to Express.
-- `protect` gets the path that Express's router matched, in URL form, with its
-  case kept. Express's router does not decode an escaped letter such as `%61`,
-  and a space or a non-ASCII letter is encoded again: `/caf%C3%A9`,
-  `/my%20account`. Write a rule for such a path in the encoded form, or use a
-  rule on a prefix.
+- `protect` gets the path exactly as Express's router matched it: the raw
+  request path, with its case. It is not decoded (`%61` stays `%61`), and "."
+  and ".." are not resolved.
 - Express matches without case by default, on the app and on each
-  `express.Router()`. So the binding folds case: it protects a path when
-  `protect` is true for the path or for its lower case. Also set
-  `app.set("case sensitive routing", true)`, so "/ACCOUNT" gets a 404.
+  `express.Router()`, and the hex digits of an escape too. So the binding also
+  tests the lower-case form of the path, and the lower-case form with
+  upper-case escape hex. It protects the path when `protect` is true for any
+  form. Also set `app.set("case sensitive routing", true)`, so "/ACCOUNT" gets
+  a 404.
+- Write a rule for a non-ASCII path in the escaped form, such as
+  `p.startsWith("/caf%C3%A9")`. Node answers 400 to a raw UTF-8 request line
+  before Express runs.
 - Behind a TLS proxy, set `app.set("trust proxy", ...)`, so the sign-in
   redirect keeps https.

@@ -38,11 +38,16 @@ async function serve(
     pref?: boolean;
     caseSensitive?: boolean;
     subRouter?: boolean;
+    /** The rule of the protected paths. Default: a prefix rule on "/account". */
+    rule?: (p: string) => boolean;
   } = {},
 ) {
   let now = new Date("2026-01-01T00:00:00.000Z");
   const mail: MailMessage[] = [];
   const runs = { account: 0 };
+  /** Each path that the protect rule got. */
+  const seen: string[] = [];
+  const rule = opts.rule ?? ((p: string) => p.startsWith("/account"));
   let auth: Auth | null = null;
   const getAuth = (): Auth => {
     if (!auth) throw new Error("no auth yet");
@@ -57,7 +62,10 @@ async function serve(
     app.use(
       authSession({
         auth: getAuth,
-        protect: (p) => p.startsWith("/account"),
+        protect: (p) => {
+          seen.push(p);
+          return rule(p);
+        },
         signInPath: "/sign-in",
       }),
     );
@@ -83,6 +91,10 @@ async function serve(
     pages.get("/account", account);
     app.use(pages);
   } else app.get("/account", account);
+  // Routes under /account that match a dot segment, and a route with an escape.
+  app.get("/account/:id", account);
+  app.get("/account/*rest", account);
+  app.get("/caf%C3%A9", account);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((r) => server.once("listening", () => r()));
   stops.push(() => server.close());
@@ -132,6 +144,7 @@ async function serve(
     base,
     counter,
     runs,
+    seen,
     signIn,
     lines: () => lastLines,
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
@@ -214,6 +227,47 @@ describe("@authtempo/express (plan 11d2)", () => {
     const page = await rawGet(base, "http://evil.example/account", { cookie });
     expect(page.status).toBe(200);
     expect(runs.account).toBe(1);
+  });
+
+  it("judges a raw path with dot segments as the router matched it", async () => {
+    const { base, runs, seen } = await serve();
+    for (const path of [
+      "/account/..",
+      "/account/%2e%2e",
+      "/account/../auth/session",
+      "/account/%2e%2e/auth/session",
+      "/account/x/../../auth/x",
+    ]) {
+      // Node's fetch would resolve the dot segments; a raw request line keeps them.
+      const res = await rawGet(base, path);
+      expect(res.status).toBe(307);
+      expect(res.location).toBe(`${base}/sign-in?next=${encodeURIComponent(path)}`);
+      expect(seen).toContain(path);
+    }
+    expect(runs.account).toBe(0);
+  });
+
+  it("judges the raw path of an absolute-form request line with dot segments", async () => {
+    const { base, runs, seen } = await serve();
+    for (const path of ["/account/x/../../auth/session", "/account/%2e%2e/auth/x", "/account/.."]) {
+      const res = await rawGet(base, `http://evil.example${path}`);
+      expect(res.status).toBe(307);
+      expect(res.location).toBe(`${base}/sign-in?next=${encodeURIComponent(path)}`);
+      expect(seen).toContain(path);
+    }
+    expect(runs.account).toBe(0);
+  });
+
+  it("folds the case of escape hex for an escaped rule", async () => {
+    // The route "/caf%C3%A9" matches without case, hex digits too.
+    for (const prefix of ["/caf%C3%A9", "/caf%c3%a9"]) {
+      const { base, runs } = await serve(undefined, { rule: (p) => p.startsWith(prefix) });
+      for (const path of ["/CAF%C3%A9", "/caf%c3%a9", "/caf%C3%A9"]) {
+        const res = await rawGet(base, path);
+        expect(res.status).toBe(307);
+      }
+      expect(runs.account).toBe(0);
+    }
   });
 
   it("does not decode an escape in the path, as Express's router does not", async () => {
