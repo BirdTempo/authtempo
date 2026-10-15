@@ -93,19 +93,40 @@ export function withSetCookie(response: Response, cookie: string | null): Respon
   }
 }
 
+/** The URL the gate judges: the routed one when the binding gives it, else the raw one. */
+function routedURL(request: Request, url: URL | string | undefined): URL {
+  if (url === undefined) return new URL(request.url);
+  if (typeof url !== "string") return url;
+  // A path joins the origin of the request, so "//x" stays a path and does not name a host.
+  return url.startsWith("/") ? new URL(`${new URL(request.url).origin}${url}`) : new URL(url);
+}
+
 /**
  * The session of a page request, the redirect of a protected path, and the
  * renewed cookie. A path of core reads nothing: `auth.handle` reads and renews
  * the session itself.
+ *
+ * `url` is the URL that the framework's router matched, with the query: the
+ * path decoded as the router decodes it, in the case the router compares. The
+ * gate uses it for the base path check, the `protect` rule, and the `next` of
+ * the redirect. The cookie and the bearer still come from `request`. Without
+ * `url` the gate judges the raw `request.url`, which is right only for a
+ * router that matches the raw path. A router that decodes "/%61ccount" to
+ * "/account", or matches "/ACCOUNT" as "/account", needs `url`, or a protected
+ * page renders with no session (plan 11d2 path probe).
  */
-export async function readGate(options: GateOptions, request: Request): Promise<Gate> {
-  const url = new URL(request.url);
+export async function readGate(
+  options: GateOptions,
+  request: Request,
+  url?: URL | string,
+): Promise<Gate> {
+  const routed = routedURL(request, url);
   // One source for the base path: core's own, unless a proxy moved core's routes.
   const basePath = options.basePath ?? options.auth.basePath ?? DEFAULT_BASE_PATH;
-  if (isAuthPath(url.pathname, basePath)) return { session: null, redirect: null, cookie: null };
+  if (isAuthPath(routed.pathname, basePath)) return { session: null, redirect: null, cookie: null };
   const session = await options.auth.session(request);
-  if (!session && options.signInPath && options.protect?.(url.pathname))
-    return { session, redirect: signInRedirect(url, options.signInPath), cookie: null };
+  if (!session && options.signInPath && options.protect?.(routed.pathname))
+    return { session, redirect: signInRedirect(routed, options.signInPath), cookie: null };
   return {
     session,
     redirect: null,

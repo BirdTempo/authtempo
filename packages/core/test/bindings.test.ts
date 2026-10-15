@@ -177,6 +177,70 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(own.session?.user.email).toBe("ada@example.com");
   });
 
+  it("judges the URL that the router matched, when the binding gives it", async () => {
+    const { auth } = setup();
+    let reads = 0;
+    const counting = {
+      ...auth,
+      session: async (r: Request) => {
+        reads++;
+        return auth.session(r);
+      },
+    };
+    const options = {
+      auth: counting,
+      protect: (p: string) => p === "/account",
+      signInPath: "/sign-in",
+    };
+    // A router decodes "/%61ccount" to "/account": the gate judges the routed path.
+    const g = await readGate(options, page("/%61ccount"), new URL(`${BASE}/account`));
+    expect(g.session).toBeNull();
+    expect(g.redirect?.status).toBe(307);
+    expect(g.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    // A string path takes the origin of the request, with its query.
+    const s = await readGate(options, page("/%61ccount?tab=2"), "/account?tab=2");
+    expect(s.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
+    // "//x" stays a path, not a host.
+    const seen: string[] = [];
+    const recording = { ...options, protect: (p: string) => seen.push(p) < 0 };
+    await readGate(recording, page("/x"), "//account");
+    expect(seen).toEqual(["//account"]);
+    expect(reads).toBe(3);
+  });
+
+  it("reads no session when the routed URL is under the base path", async () => {
+    const { auth, signIn } = setup();
+    const cookie = await signIn();
+    let reads = 0;
+    const counting = {
+      ...auth,
+      session: async (r: Request) => {
+        reads++;
+        return auth.session(r);
+      },
+    };
+    const g = await readGate(
+      { auth: counting },
+      page("/%61uth/session", cookie),
+      new URL(`${BASE}/auth/session`),
+    );
+    expect(g).toEqual({ session: null, redirect: null, cookie: null });
+    expect(reads).toBe(0);
+  });
+
+  it("judges the raw request URL with two arguments, as before", async () => {
+    const { auth } = setup();
+    const options = { auth, protect: (p: string) => p === "/account", signInPath: "/sign-in" };
+    // The raw "/%61ccount" is not "/account": the binding must give the routed URL.
+    expect(await readGate(options, page("/%61ccount"))).toEqual({
+      session: null,
+      redirect: null,
+      cookie: null,
+    });
+    const g = await readGate(options, page("/account?tab=2"));
+    expect(g.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
+  });
+
   it("adds a Set-Cookie line to an answer, and copies an answer whose headers are fixed", async () => {
     expect(withSetCookie(new Response("x"), null).headers.get("set-cookie")).toBeNull();
     const open = withSetCookie(new Response("x"), "a=1");
