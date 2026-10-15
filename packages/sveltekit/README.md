@@ -13,6 +13,8 @@ in 3 as a peer dependency.
 - Put other hooks beside it with `sequence` of `@sveltejs/kit/hooks`.
 - The hook reads no session for a route of core, and adds the renewed cookie
   to the page's answer after the sliding refresh.
+- `protect` gets the path as SvelteKit matched it: decoded once, with the case
+  kept, because the router is case-sensitive.
 - A remote function at `/_app/remote/<id>` is outside the protect rule, so it
   must check `locals.session` itself.
 

@@ -149,6 +149,22 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
   });
 
+  // Kit matches the path decoded once, but event.url keeps the escapes. An
+  // exact rule must see "/account" for "/%61ccount", in both request forms.
+  it("gates the path as Kit matched it, decoded once", async () => {
+    const { run, pageRuns } = setup({}, (p) => p === "/account");
+    const page = await run(new Request(`${BASE}/%61ccount`));
+    const data = await run(
+      new Request(`${BASE}/%61ccount/__data.json?x-sveltekit-invalidated=01`),
+      new URL(`${BASE}/%61ccount`),
+    );
+    expect(pageRuns()).toBe(0);
+    for (const { res } of [page, data]) {
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+    }
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, run, advance } = setup();
     const cookie = await signIn();

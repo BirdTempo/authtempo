@@ -31,6 +31,20 @@ function resolveAuth<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
+/**
+ * The path as the router of SvelteKit 3.0.1 matches it (`decode_pathname` of
+ * `src/utils/url.js`): `decodeURI` once on each part between "%25", so "%25"
+ * and "%2F" stay escaped. A bad escape keeps the raw path; Kit answers that
+ * request 400 with no page.
+ */
+function kitPath(pathname: string): string {
+  try {
+    return pathname.split("%25").map(decodeURI).join("%25");
+  } catch {
+    return pathname;
+  }
+}
+
 export interface SvelteKitAuthOptions {
   auth: AuthSource<GateAuth>;
   /** True for a path that needs a session. Needs `signInPath`. */
@@ -61,9 +75,10 @@ export function authHandle(options: SvelteKitAuthOptions): Handle {
     const basePath = options.basePath ?? auth.basePath ?? DEFAULT_BASE_PATH;
     if (isAuthPath(event.url.pathname, basePath)) return auth.handle(event.request);
     // The routed URL, not request.url: for a data request of a client-side
-    // navigation, Kit strips /__data.json and the x-sveltekit-* query from event.url only.
-    const routed = new Request(event.url, { headers: event.request.headers });
-    const gate = await readGate({ ...options, auth }, routed);
+    // navigation, Kit strips /__data.json and the x-sveltekit-* query from event.url
+    // only. event.url keeps the escapes, but Kit matches the path decoded once.
+    const routed = `${kitPath(event.url.pathname)}${event.url.search}`;
+    const gate = await readGate({ ...options, auth }, event.request, routed);
     if (gate.redirect) return gate.redirect;
     event.locals.session = gate.session;
     return withSetCookie(await resolve(event), gate.cookie);
