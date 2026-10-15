@@ -1,24 +1,15 @@
 "use client";
-import { ERRORS, type ErrorCode, errorText, type OAuthClientCode } from "@authtempo/client";
-import { type AuthErrorCode, useAuthError, useClient, useSession } from "@authtempo/react";
+import { errorText } from "@authtempo/client";
+import { useClient, useSession } from "@authtempo/react";
 import { useState } from "react";
 
 /**
- * The text of a redirect error. A code of core's table takes the core text;
- * any other code is an OAuth code or `unexpected`, which the OAuth table answers.
+ * The sign-in page. The client, the session, and the text of a redirect error
+ * come from the Providers of the layout.
  */
-function redirectText(code: NonNullable<AuthErrorCode>): string {
-  return Object.hasOwn(ERRORS, code)
-    ? errorText(code as ErrorCode)
-    : errorText(code as OAuthClientCode, "oauth");
-}
-
-/** The sign-in page. The client and the session come from the Providers of the layout. */
 export default function SignIn() {
   const c = useClient();
   const session = useSession();
-  // `?auth_error=<code>` of a social sign-in that came back with a failure, read once.
-  const authError = useAuthError();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -36,7 +27,6 @@ export default function SignIn() {
         else setFailure(errorText(r.code));
       }}
     >
-      {authError && <p role="alert">{redirectText(authError)}</p>}
       {failure && <p role="alert">{failure}</p>}
       <label>
         Email

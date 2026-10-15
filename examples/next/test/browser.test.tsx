@@ -1,4 +1,4 @@
-import { createClient, errorText } from "@authtempo/client";
+import { createClient, type ErrorCode, errorText } from "@authtempo/client";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import { DEFAULT_COOKIE_NAME } from "@authtempo/core/credentials";
 import { authRouteHandlers } from "@authtempo/next";
@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 import { Providers } from "../app/providers";
-import SignIn from "../app/sign-in/page";
 
 const BASE = "http://localhost:3000";
 const DAY = 86_400_000;
@@ -79,19 +78,26 @@ describe("the Next example in the browser (plan 11d final review)", () => {
     view.unmount();
   });
 
-  it("shows the text of the redirect error on the sign-in page", async () => {
+  it("shows the error of a failed magic link on the home page, where core sends it", async () => {
     const a = app();
-    history.replaceState(null, "", "/sign-in?auth_error=oauth_denied");
+    // The product's own answer: a verify link with an unknown token, as a browser opens it.
+    const res = await a.fetch(`${BASE}/auth/magic-link/verify?token=nope`);
+    const location = res.headers.get("location") ?? "";
+    const target = new URL(location);
+    const code = target.searchParams.get("auth_error");
+    expect(res.status).toBe(302);
+    expect(code).not.toBeNull();
+    history.replaceState(null, "", `${target.pathname}${target.search}`);
     const client = createClient({ baseURL: BASE, fetch: a.fetch, broadcast: false });
     const view = mount(
       <Providers client={client}>
-        <SignIn />
+        <p>home</p>
       </Providers>,
     );
     try {
       await vi.waitFor(() =>
         expect(view.el.querySelector('[role="alert"]')?.textContent).toBe(
-          errorText("oauth_denied"),
+          errorText(code as ErrorCode),
         ),
       );
     } finally {

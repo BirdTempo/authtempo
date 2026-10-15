@@ -1,6 +1,13 @@
 "use client";
-import { type Client, createClient } from "@authtempo/client";
-import { AuthProvider, useSession } from "@authtempo/react";
+import {
+  type Client,
+  createClient,
+  ERRORS,
+  type ErrorCode,
+  errorText,
+  type OAuthClientCode,
+} from "@authtempo/client";
+import { type AuthErrorCode, AuthProvider, useAuthError, useSession } from "@authtempo/react";
 import type { ReactNode } from "react";
 
 // The API is this app's own origin: core is mounted under /auth.
@@ -23,11 +30,32 @@ function SessionRenewal(): null {
   return null;
 }
 
+/**
+ * The text of a redirect error. A code of core's table takes the core text;
+ * any other code is an OAuth code or `unexpected`, which the OAuth table answers.
+ */
+function redirectText(code: NonNullable<AuthErrorCode>): string {
+  return Object.hasOwn(ERRORS, code)
+    ? errorText(code as ErrorCode)
+    : errorText(code as OAuthClientCode, "oauth");
+}
+
+/**
+ * Core sends every browser flow failure to the app's URL with
+ * `?auth_error=<code>`, such as a magic link that is spent. The read sits here,
+ * so the text shows on whichever page the failure lands.
+ */
+function AuthErrorNotice(): ReactNode {
+  const code = useAuthError();
+  return code ? <p role="alert">{redirectText(code)}</p> : null;
+}
+
 /** The client and the session store for every page. Tests pass a client of their own. */
 export function Providers({ children, client }: { children: ReactNode; client?: Client }) {
   return (
     <AuthProvider client={client ?? appClient()}>
       <SessionRenewal />
+      <AuthErrorNotice />
       {children}
     </AuthProvider>
   );
