@@ -712,8 +712,23 @@ export function createClient(options: ClientOptions): Client {
       async password(input) {
         const r = await password.signIn(input);
         if (!r.ok) return r;
-        if (!("twoFactor" in r.value)) return ok({ kind: "session", session: r.value });
-        const { challenge, expiresAt, methods } = r.value.twoFactor;
+        // A 200 of another shape answers unexpected, never a throw (final review, m1).
+        const v: unknown = r.value;
+        if (!isRecord(v)) return fail("unexpected", 200);
+        if (!("twoFactor" in v)) {
+          if (!(isPublicSession(v) && typeof (v as { token?: unknown }).token === "string"))
+            return fail("unexpected", 200);
+          return ok({ kind: "session", session: r.value as { token: string } & PublicSession });
+        }
+        const t = v.twoFactor;
+        if (
+          !isRecord(t) ||
+          typeof t.challenge !== "string" ||
+          typeof t.expiresAt !== "string" ||
+          !Array.isArray(t.methods)
+        )
+          return fail("unexpected", 200);
+        const { challenge, expiresAt, methods } = t as TwoFactorChallengeJSON["twoFactor"];
         return ok({
           kind: "second-factor",
           challenge,

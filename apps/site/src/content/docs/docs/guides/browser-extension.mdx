@@ -30,8 +30,8 @@ import test from "../../../../../samples/guides/browser-extension.test.ts?raw";
 2. Add the API's origin to `host_permissions` in `manifest.json`.
 3. Make the client with `credentials: "omit"` and the stored token as the bearer.
 4. Sign in by email code in the popup, and keep the token in `chrome.storage.local`.
-5. Clear the token when the session ends. The client calls `onSessionEnd` with the token that ended. Clear the box only when it still holds that token.
-6. Sign out with the `signOut` of the sample. It clears the box when the server ended the session.
+5. Clear the token when the session ends. The client calls `onSessionEnd` with the token that ended. Clear the token store only when it still holds that token.
+6. Sign out with the `signOut` of the sample. It clears the token store when the server ended the session.
 
 <Code code={config} lang="ts" title="The API" />
 

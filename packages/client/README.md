@@ -119,9 +119,10 @@ client can see:
 ## Error texts
 
 `errorText(code)` answers one sentence for a code, for an app to show to
-a person. `errorDocsURL(code)` answers the docs page of the code: its
-anchor on the error codes page, or the results section of the client
-page for `network`, `unexpected`, and `cancelled`. `redirect_mismatch`
+a person. `errorDocsURL(code)` answers the docs page of the code. For a
+code of a core table, that is its anchor on the error codes page. For
+`network`, `unexpected`, and `cancelled`, it is the results section of
+the client page. `redirect_mismatch`
 links to the failure codes of the handoff page. Pass `"oauth"` as the
 second argument for a code of the OAuth client, because `invalid_token`
 and `rate_limited` are in both tables. `ERROR_TEXT` holds every text, by

@@ -60,4 +60,16 @@ describe("the shape of a session answer (plan 11d)", () => {
         body,
       ).toEqual({ ok: false, code: "unexpected", status: 200 });
   });
+
+  it("answers unexpected, never a throw, for a password sign-in of the wrong shape", async () => {
+    // null, a string, and a twoFactor of null made signIn.password throw (final review, m1).
+    for (const body of ["null", '"x"', '{"twoFactor":null}', '{"twoFactor":{}}', ...WRONG])
+      expect(
+        await createClient({ baseURL: BASE, fetch: answering(body) }).signIn.password({
+          email: "a@b.c",
+          password: "p",
+        }),
+        body,
+      ).toEqual({ ok: false, code: "unexpected", status: 200 });
+  });
 });
