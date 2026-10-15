@@ -154,6 +154,29 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(answer.headers.getSetCookie()).toEqual(lines);
   });
 
+  it("takes the basePath option of the gate over auth.basePath, for a proxy prefix", async () => {
+    const { auth, signIn } = setup();
+    expect(auth.basePath).toBe("/auth");
+    const cookie = await signIn();
+    let reads = 0;
+    const counting = {
+      ...auth,
+      session: async (r: Request) => {
+        reads++;
+        return auth.session(r);
+      },
+    };
+    const options = { auth: counting, basePath: "/api/auth" };
+    // The proxy path of core's routes: the gate reads nothing and passes it on.
+    const proxied = await readGate(options, page("/api/auth/session", cookie));
+    expect(proxied).toEqual({ session: null, redirect: null, cookie: null });
+    expect(reads).toBe(0);
+    // Core's own path is a page to this gate, so the gate reads the session.
+    const own = await readGate(options, page("/auth/session", cookie));
+    expect(reads).toBe(1);
+    expect(own.session?.user.email).toBe("ada@example.com");
+  });
+
   it("adds a Set-Cookie line to an answer, and copies an answer whose headers are fixed", async () => {
     expect(withSetCookie(new Response("x"), null).headers.get("set-cookie")).toBeNull();
     const open = withSetCookie(new Response("x"), "a=1");
