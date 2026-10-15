@@ -1,0 +1,22 @@
+{
+  "name": "authtempo-example-solid-start",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vite build && node ../../scripts/example-proof.mjs solid-start-e2e 8798 --module dist/server/entry-server.js"
+  },
+  "dependencies": {
+    "@authtempo/core": "workspace:*",
+    "@authtempo/solid": "workspace:*",
+    "@solidjs/start": "2.0.6",
+    "solid-js": "1.9.17"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.3"
+  }
+}

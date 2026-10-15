@@ -11,5 +11,30 @@ dependency.
 - A server render shows the pending state and starts no read.
 - A test in a DOM needs the browser build of `solid-js`: set the `browser`
   condition and inline `solid-js` in the vitest config.
-- A SolidStart server route mounts core with no binding:
-  `auth.handle(event.request)`.
+- The server of Solid Start is `@authtempo/solid/start`. It takes
+  `@solidjs/start` 2.0.6 or newer in 2 as an optional peer dependency.
+  `src/routes/auth/[...path].ts` holds
+  `const h = authRouteHandlers(getAuth)` and one named export per method
+  (`export const GET = h.GET;`), and `src/middleware.ts` holds
+  `export default createMiddleware({ onRequest: [authOnRequest({ auth: getAuth })] });`.
+  An API route reads `getSession(event)`. Server code of a page reads
+  `getSession(getRequestEvent())`, not `useSession`.
+- Protect paths: `authOnRequest({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
+  A person with no session gets a 307 to the sign-in page, and no route runs.
+- `protect` gets the path as the routers of Solid Start 2.0.6 match it: the
+  path of `request.url` after the URL parse, with one `/` at the end removed.
+  The parse resolves `..`, `%2e`, a backslash, and a tab. No escape is
+  decoded: `/%61ccount` reaches the rule as `/%61ccount`, and no route
+  `/account` matches it. Write a non-ASCII path encoded: `p === "/caf%C3%A9"`.
+- An API route matches with case (radix3), and a page matches without case
+  (Solid Router). The entry asks `protect` with the path and with the path in
+  lower case, so `/ACCOUNT` is protected by a rule for `/account`.
+- The rule gets the full path. Under a `server.baseURL`, write the rule with
+  that base.
+- The middleware writes the renewed cookie to the event's response headers.
+  Solid Start 2.0.6 (h3 2.0.2) puts them on a page's answer and on an API
+  route's answer below status 400.
+- The origin of the redirect comes from the Host header, else from the
+  origin of `auth.baseURL`. An absolute-form request line never sets it.
+- The middleware reads no session for a route of core: core reads and renews
+  it itself.

@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./start": {
+      "types": "./dist/start.d.ts",
+      "default": "./dist/start.js"
     }
   },
   "files": [
@@ -14,7 +18,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p typetest/tsconfig.json && tsc -p tsconfig.test.json",
     "test": "vitest run && node ../../scripts/check-no-node.mjs src"
   },
   "dependencies": {
@@ -22,12 +26,21 @@
     "@authtempo/core": "workspace:*"
   },
   "peerDependencies": {
+    "@solidjs/start": "^2.0.6",
     "solid-js": "^1.9.17"
   },
+  "peerDependenciesMeta": {
+    "@solidjs/start": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@solidjs/start": "2.0.6",
+    "@types/node": "24.19.1",
     "happy-dom": "20.14.6",
     "solid-js": "1.9.17",
     "typescript": "7.0.2",
+    "vite": "8.3.3",
     "vitest": "5.0.3"
   }
 }

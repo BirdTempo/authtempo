@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // tsc checks the .ts files; `vite build` compiles the .tsx files with the Solid JSX.
+  // No declaration: the app emits none, and the type of createMiddleware names
+  // the Middleware of the h3 inside @solidjs/start, which a declaration cannot (TS2883).
+  "compilerOptions": { "noEmit": true, "declaration": false, "types": ["node"] },
+  "include": ["src/**/*.ts"]
+}
