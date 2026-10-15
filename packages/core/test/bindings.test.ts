@@ -338,6 +338,33 @@ describe("the gate of the server bindings (plan 11d2)", () => {
     expect(await at("/raw", "/a", loose("/a\uD800b"))).toBe(`${BASE}/sign-in?next=%2F`);
   });
 
+  it("judges the object form of a routed path as given, with no split at ? and no drop of #", async () => {
+    const { auth } = setup();
+    const seen: string[] = [];
+    const options = {
+      auth,
+      protect: (p: string) => {
+        seen.push(p);
+        return p.startsWith("/a");
+      },
+      signInPath: "/sign-in",
+    };
+    // A router decoded "/a%3F/secret%23x" into the path text "/a?/secret#x".
+    const routed = { pathname: "/a?/secret#x", search: "?tab=1" };
+    const raw = "/a%3F/secret%23x?tab=1";
+    const g = await readGate(options, page(raw), routed);
+    expect(g.redirect?.status).toBe(307);
+    // next comes from request.url, never from the decoded text.
+    expect(g.redirect?.headers.get("location")).toBe(
+      `${BASE}/sign-in?next=${encodeURIComponent(raw)}`,
+    );
+    const r = await readGate(options, page(raw), routed, new URL(`${BASE}/a?tab=1`));
+    expect(r.redirect?.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Fa%3Ftab%3D1`);
+    // The string form keeps its split: the rule gets the path before "?".
+    await readGate(options, page(raw), "/a?/secret#x");
+    expect(seen).toEqual(["/a?/secret#x", "/a?/secret#x", "/a"]);
+  });
+
   it("exposes the baseURL of the config, for a binding whose Host header does not parse", () => {
     const { auth } = setup();
     expect(auth.baseURL).toBe(BASE);

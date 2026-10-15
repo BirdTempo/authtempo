@@ -112,6 +112,17 @@ export function withSetCookie(response: Response, cookie: string | null): Respon
   }
 }
 
+/**
+ * A path that the router matched as text, for a router that decodes "%3F" or
+ * "%23" into the path: the gate judges `pathname` as given, with no split at
+ * "?" and no drop of "#". `search` is accepted and not read: `next` comes from
+ * `returnTo` or `request.url`, which hold the query.
+ */
+export interface RoutedPath {
+  pathname: string;
+  search?: string | undefined;
+}
+
 /** What the gate judges: the origin of the request, and the path and the search of the route. */
 interface Judged {
   origin: string;
@@ -125,11 +136,15 @@ interface Judged {
  * "%2e", re-encodes letters, and would judge a path that the router did not
  * match (plan 11d2 Task 3 review, C1). The fragment goes.
  */
-function judge(request: Request, url: URL | string | undefined): Judged {
+function judge(request: Request, url: URL | RoutedPath | string | undefined): Judged {
   const raw = new URL(request.url);
   if (url === undefined) return { origin: raw.origin, pathname: raw.pathname, search: raw.search };
-  if (typeof url !== "string")
-    return { origin: raw.origin, pathname: url.pathname, search: url.search };
+  if (url instanceof URL) return { origin: raw.origin, pathname: url.pathname, search: url.search };
+  if (typeof url !== "string") {
+    // The object form: the path text as the router matched it, "?" and "#" included.
+    const lead = url.pathname.startsWith("/") ? "" : "/";
+    return { origin: raw.origin, pathname: `${lead}${url.pathname}`, search: "" };
+  }
   const text = url.split("#")[0] ?? "";
   const q = text.indexOf("?");
   const path = q === -1 ? text : text.slice(0, q);
@@ -140,9 +155,14 @@ function judge(request: Request, url: URL | string | undefined): Judged {
 }
 
 /** The path and the query of `next`: of `returnTo`, else of a routed URL object, else of the request. */
-function back(request: Request, routed: URL | string | undefined, returnTo: URL | undefined): URL {
+function back(
+  request: Request,
+  routed: URL | RoutedPath | string | undefined,
+  returnTo: URL | undefined,
+): URL {
   if (returnTo !== undefined) return returnTo;
-  if (typeof routed === "object") return routed;
+  // A routed URL object is the framework's parse; a routed text or RoutedPath is never a next.
+  if (routed instanceof URL) return routed;
   return new URL(request.url);
 }
 
@@ -177,13 +197,18 @@ function redirectBack(origin: string, page: URL, signInPath: string): Response {
  * change it: no resolution of "." or "..", no decoding, no encoding, no merge
  * of slashes. Of a string the gate drops the fragment and splits the query at
  * the first "?". A path with no leading "/" gets one. Of a URL object the gate
- * takes `pathname` and `search`, as the framework parsed them. Each binding's
+ * takes `pathname` and `search`, as the framework parsed them. A router that
+ * decodes "%3F" or "%23" into the path text makes "?" or "#" part of the
+ * path: such a binding passes the object form `{ pathname }` (a
+ * `RoutedPath`), and the gate judges `pathname` as given, with no split and no
+ * drop of a fragment. The string form keeps its split, for a router whose
+ * decode keeps "%3F" escaped. Each binding's
  * README states how its router decodes the path and compares the case.
  */
 export async function readGate(
   options: GateOptions,
   request: Request,
-  routed?: URL | string,
+  routed?: URL | RoutedPath | string,
   returnTo?: URL,
 ): Promise<Gate> {
   const judged = judge(request, routed);
