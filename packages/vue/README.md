@@ -20,6 +20,7 @@ On the server of Nuxt:
 3. Protect paths: `authSessionHandler({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
 - The subscription of `useSession` ends with the component's scope.
+- A server render shows the pending state, and starts no subscription and no read.
 - The session middleware reads the URL and the headers only, never the body.
 - The session middleware gives `protect` the path decoded once, as Vue Router
   reads it. Vue Router matches a path in any case by default: set

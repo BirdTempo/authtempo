@@ -43,16 +43,23 @@ export interface UseSession {
 /**
  * The session, read at the first use and after each change. The store answers
  * the same object until a change, so a shallow ref is enough. The subscription
- * ends with the component's scope.
+ * ends with the component's scope. A server render never subscribes, as in
+ * `@authtempo/react`: it shows the store's current state (pending before the
+ * first read) and starts no read.
  */
 export function useSession(): UseSession {
   const { store } = useClient();
   const state = shallowRef(store.get());
+  const result = { session: shallowReadonly(state), refetch: store.refetch };
+  // A server render (no window) runs no onScopeDispose, so a subscription there
+  // would stay, and its read would run with no cookie of the person. Vue's
+  // import.meta.env.SSR is a value of the app's build, not of this library.
+  if (typeof window === "undefined") return result;
   const stop = store.subscribe(() => {
     state.value = store.get();
   });
   if (getCurrentScope()) onScopeDispose(stop);
-  return { session: shallowReadonly(state), refetch: store.refetch };
+  return result;
 }
 
 /**
