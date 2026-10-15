@@ -1,4 +1,4 @@
-// The proof of a built example app (plan 11d2): run five checks over the
+// The proof of a built example app (plan 11d2): run seven checks over the
 // app's own server and print one summary line. Two modes, one check list:
 //   node scripts/example-proof.mjs <label> <port> <command> [args…]
 //     starts the built server on the port (Astro, SvelteKit, Nuxt, Solid Start);
@@ -130,6 +130,17 @@ try {
     away.status === 307 && away.headers.get("location") === `${BASE}/sign-in?next=%2Faccount`,
     `GET /account answered ${away.status} to ${away.headers.get("location")}`,
   );
+  // A router that decodes "%61" to "a", or matches without case, must not
+  // render the protected page with no session (plan 11d2 path probe). A 307
+  // must name the canonical path in next; a 404 means the router matched no page.
+  for (const path of ["/%61ccount", "/ACCOUNT"]) {
+    const res = await fetch(`${BASE}${path}`, { redirect: "manual" });
+    const location = res.headers.get("location");
+    expectThat(
+      res.status === 404 || (res.status === 307 && location === `${BASE}/sign-in?next=%2Faccount`),
+      `GET ${path} with no cookie answered ${res.status}${location ? ` to ${location}` : ""}`,
+    );
+  }
   await post("/auth/magic-link/request", { email: "ada@example.com" });
   const { link } = await (await fetch(`${BASE}/test-only/last-link`)).json();
   const token = new URL(link ?? "http://x/").searchParams.get("token") ?? "";
@@ -160,7 +171,7 @@ try {
     clearTimeout(force);
   }
 }
-const pass = failures.length === 0 && checks === 5;
+const pass = failures.length === 0 && checks === 7;
 console.log(`${label}: ${pass ? "PASS" : "FAIL"} checks=${checks} failures=${failures.length}`);
 for (const f of failures) console.error(`${label}: ${f}`);
 if (!pass) {
