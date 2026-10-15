@@ -1,0 +1,37 @@
+import type { Auth } from "@authtempo/core";
+import { authMiddleware, authRouteModule, getSession } from "@authtempo/react-router";
+import type { RouteObject } from "react-router";
+
+/**
+ * The routes of the app as data routes, in the shape of a framework app: the
+ * root route is the parent of every route. In a framework app, each object is
+ * a route module: `app/root.tsx` exports `middleware`, and `app/routes/auth.$.ts`
+ * exports `loader` and `action` of authRouteModule.
+ */
+export function createRoutes(getAuth: () => Auth): RouteObject[] {
+  const auth = authRouteModule(getAuth);
+  return [
+    {
+      id: "root",
+      path: "/",
+      // The session of every page, and /account for a signed-in person only.
+      // The middleware also runs for the routes of core, and reads no session there.
+      middleware: [
+        authMiddleware({
+          auth: getAuth,
+          protect: (pathname) => pathname.startsWith("/account"),
+          signInPath: "/sign-in",
+        }),
+      ],
+      children: [
+        // Every route of core under /auth, the default basePath: a resource route.
+        { id: "auth", path: "auth/*", loader: auth.loader, action: auth.action },
+        {
+          id: "account",
+          path: "account",
+          loader: ({ context }) => ({ email: getSession(context)?.user.email ?? null }),
+        },
+      ],
+    },
+  ];
+}
