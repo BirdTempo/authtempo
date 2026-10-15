@@ -151,7 +151,8 @@ describe("the React Router example (plan 11d2)", () => {
     for (const path of ["/%61ccount", "/%61ccount.data?_routes=account"]) {
       const res = await serve(new Request(`${BASE}${path}`));
       expect(res.status, path).toBe(307);
-      expect(res.headers.get("location"), path).toBe(`${BASE}/sign-in?next=%2Faccount`);
+      // next keeps the URL form of the request.
+      expect(res.headers.get("location"), path).toBe(`${BASE}/sign-in?next=%2F%2561ccount`);
     }
     for (const path of ["/ACCOUNT", "/Account", "/%41ccount", "/ACCOUNT.data?_routes=account"]) {
       const res = await serve(new Request(`${BASE}${path}`));
@@ -166,9 +167,9 @@ describe("the React Router example (plan 11d2)", () => {
     const { loads, serve } = makeApp({ caseSensitive: false });
     const cases: [string, string][] = [
       ["/ACCOUNT", "%2FACCOUNT"],
-      ["/%41ccount", "%2FAccount"],
+      ["/%41ccount", "%2F%2541ccount"],
       ["/ACCOUNT.data?_routes=account", "%2FACCOUNT"],
-      ["/%41ccount.data?_routes=account", "%2FAccount"],
+      ["/%41ccount.data?_routes=account", "%2F%2541ccount"],
     ];
     for (const [path, next] of cases) {
       const res = await serve(new Request(`${BASE}${path}`));
@@ -176,6 +177,32 @@ describe("the React Router example (plan 11d2)", () => {
       expect(res.headers.get("location"), path).toBe(`${BASE}/sign-in?next=${next}`);
     }
     expect(loads).toEqual([]);
+  });
+
+  // A ".data" name that ends in dots reaches the matcher raw: "/account/...data"
+  // is "/account/.." to the splat route "account/*". The `url` of the
+  // middleware has the dots resolved: "/".
+  it("gates the dot segments of a data request on a splat route", async () => {
+    const { loads, serve, signIn } = makeApp();
+    const cases: [string, string][] = [
+      ["/account/...data?_routes=account-rest", "%2F"],
+      ["/account/..data?_routes=account-rest", "%2Faccount%2F"],
+      ["/account/x/...data?_routes=account-rest", "%2Faccount%2F"],
+    ];
+    for (const [path, next] of cases) {
+      const res = await serve(new Request(`${BASE}${path}`));
+      expect(res.status, path).toBe(307);
+      expect(res.headers.get("location"), path).toBe(`${BASE}/sign-in?next=${next}`);
+    }
+    expect(loads).toEqual([]);
+    // The same request with a session reaches the splat route: the case is real.
+    const cookie = await signIn();
+    const res = await serve(
+      new Request(`${BASE}/account/...data?_routes=account-rest`, { headers: { cookie } }),
+    );
+    const data = (await res.json()) as { "account-rest": { path: string } };
+    expect(data["account-rest"].path).toBe("..");
+    expect(loads).toEqual(["account-rest"]);
   });
 
   // React Router 8.4.0 runs the loader of a resource route for OPTIONS

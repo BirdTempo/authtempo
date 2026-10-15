@@ -12,12 +12,14 @@ React Router 8.4 needs Node 22.22 or newer (its engines field, read
    loader reads `getSession(context)`.
 3. Protect paths: `authMiddleware({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
-- `protect` gets the path that React Router matched, without ".data", in URL
-  form. An escaped letter such as `%61` is decoded where React Router decodes
-  it, so "/%61ccount" reaches the rule as "/account". A space or a non-ASCII
-  letter is encoded again: `/caf%C3%A9`, `/my%20account`. Write a rule for such
-  a path in the encoded form, or use a rule on a prefix. The gate of
-  `@authtempo/core/bindings` gives this form to every binding.
+- `protect` gets the path as React Router matched it: ".data" removed, each
+  segment decoded once, a decoded "/" kept as `%2F`, and no resolution of "."
+  or "..". So "/%61ccount" reaches the rule as "/account". Write a rule in
+  decoded text: "/café", "/σ".
+- A splat route needs a prefix rule, such as `p.startsWith("/account")` for
+  "account/*". A data request "/account/...data" reaches that route as
+  "/account/..", and an exact rule misses it.
+- `next` keeps the page URL in URL form, with the case of the request.
 - React Router matches a path without case by default, so "/ACCOUNT" runs the
   page of "/account". The binding folds case for `protect`: a path needs a
   session when the rule holds for the path or for its lower-case form. Still

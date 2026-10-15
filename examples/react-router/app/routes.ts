@@ -33,13 +33,25 @@ export function createRoutes(
         {
           id: "account",
           path: "account",
-          // React Router matches a path without case unless the route says so:
-          // without this, "/ACCOUNT" runs this loader, and the gate's rule sees
-          // "/ACCOUNT", not "/account". Set it on every protected route.
+          // React Router matches a path without case unless the route says so.
+          // The binding folds case for protect, so "/ACCOUNT" still needs a
+          // session; with this option it is a 404. Set it on every protected route.
           caseSensitive: true,
           loader: ({ context }) => {
             onLoad("account");
             return { email: getSession(context)?.user.email ?? null };
+          },
+        },
+        {
+          // The splat route of the account area. The prefix rule of protect
+          // covers it: an exact rule would miss "/account/x", and "/account/.."
+          // of a data request, which this route matches too.
+          id: "account-rest",
+          path: "account/*",
+          caseSensitive: true,
+          loader: ({ params, context }) => {
+            onLoad("account-rest");
+            return { path: params["*"] ?? "", email: getSession(context)?.user.email ?? null };
           },
         },
       ],

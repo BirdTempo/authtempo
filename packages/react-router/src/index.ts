@@ -52,60 +52,52 @@ export interface RouterAuthOptions {
 }
 
 /**
- * The path and query that React Router matched. `url` is the routed URL, not
- * request.url: a client navigation sends "/page.data?_routes=...", and React
- * Router normalizes only `url` (server-runtime/urls.js and router.js of 8.4.0,
- * read 2026-10-15). The router then decodes each segment once with
- * decodeURIComponent and keeps a decoded "/" as "%2F" (decodePath of
- * router/utils.js, read 2026-10-15), so "/%61ccount" runs the page of
- * "/account". The gate reads the same text. A bad escape leaves the whole
- * path raw, as in the router.
+ * The path that React Router matched, from request.url with the router's own
+ * steps (react-router 8.4.0, read 2026-10-15). First getNormalizedPath
+ * (server-runtime/urls.js): a client navigation sends "/page.data", and the
+ * router removes "/_.data" (the "/" stays) or ".data". Then decodePath
+ * (router/utils.js): each segment decoded once with decodeURIComponent, a
+ * decoded "/" kept as "%2F", the whole raw path on a bad escape. Not the `url`
+ * argument: its pathname setter resolves dot segments, and "/account/...data"
+ * reaches the matcher as "/account/..", which a splat route "account/*" matches.
  */
-function routedPath(url: URL): string {
-  let path = url.pathname;
+function routedPath(request: Request): string {
+  const raw = new URL(request.url).pathname;
+  const path = raw.endsWith("/_.data") ? raw.replace(/_\.data$/, "") : raw.replace(/\.data$/, "");
   try {
-    path = path
+    return path
       .split("/")
       .map((segment) => decodeURIComponent(segment).replace(/\//g, "%2F"))
       .join("/");
   } catch {
-    // A bad escape: React Router matches the raw path, so the gate reads it too.
+    // A bad escape: React Router matches the raw path, so the gate judges it too.
+    return path;
   }
-  // The router matches a decoded "?", "#", or "\" as text of the path. In a URL
-  // they would start the query, start the fragment, or turn into "/".
-  return path.replace(/[?#\\]/g, encodeURIComponent) + url.search;
 }
 
 /**
  * React Router matches a route without case unless the route sets
  * caseSensitive (the RegExp flag "i" of compilePath, router/utils.js of 8.4.0,
  * read 2026-10-15). The binding fails closed: a path needs a session when the
- * rule holds for the path or for its folded form. The fold works on the
- * decoded text, because "%c3%89" is still the escape of "É". It folds with
- * toUpperCase, then toLowerCase: the flag "i" compares upper-case forms, so a
- * plain toLowerCase misses "ς" against a route "σ". Each other difference of
- * this fold only protects more paths. `next` keeps the case of the request.
+ * rule holds for the path or for its folded form. The path is already decoded,
+ * so the fold works on the text. It folds with toUpperCase, then toLowerCase:
+ * the flag "i" compares upper-case forms, so a plain toLowerCase misses "ς"
+ * against a route "σ". Each other difference of this fold only protects more
+ * paths. An escape that the decode kept ("%2F") keeps its upper-case hex, so a
+ * rule that names it still holds. `next` keeps the case of the request.
  */
 function foldCase(
   protect: ((pathname: string) => boolean) | undefined,
 ): ((pathname: string) => boolean) | undefined {
   if (!protect) return undefined;
-  return (pathname) => {
-    if (protect(pathname)) return true;
-    let text = pathname;
-    try {
-      // decodeURI keeps "%2F", "%3F", and "%23" as escapes, so no segment changes.
-      text = decodeURI(pathname);
-    } catch {
-      // A bad escape: fold the URL form as it is.
-    }
-    // Back to URL form, with upper-case escape hex as the gate gives it.
-    const folded = new URL(`http://x${text.toUpperCase().toLowerCase()}`).pathname.replace(
-      /%[0-9a-f]{2}/g,
-      (hex) => hex.toUpperCase(),
+  return (pathname) =>
+    protect(pathname) ||
+    protect(
+      pathname
+        .toUpperCase()
+        .toLowerCase()
+        .replace(/%[0-9a-f]{2}/g, (hex) => hex.toUpperCase()),
     );
-    return protect(folded);
-  };
 }
 
 /**
@@ -119,11 +111,18 @@ export function authMiddleware(options: RouterAuthOptions): MiddlewareFunction {
   checkGateOptions(options);
   const protect = foldCase(options.protect);
   return async ({ request, url, context }, next) => {
-    // The gate judges the routed path and reads the cookie from the request.
+    const path = routedPath(request);
+    // The gate splits a routed string at "?" and drops a "#" fragment, and the
+    // decoded path can hold both as text. So the gate gets them escaped, for
+    // its base path check only, and the rule gets the exact decoded text.
     const gate = await readGate(
-      { ...options, auth: resolve(options.auth), protect },
+      { ...options, auth: resolve(options.auth), protect: protect && (() => protect(path)) },
       request,
-      routedPath(url),
+      path.replace(/[?#]/g, encodeURIComponent),
+      // next: the page URL without ".data" and "_routes", in URL form. Not the
+      // decoded path: "/%2561ccount" decodes to "/%61ccount", which a browser
+      // would open as "/account".
+      url,
     );
     if (gate.redirect) return gate.redirect;
     context.set(sessionContext, gate.session);

@@ -32,10 +32,24 @@ function setup(core: { basePath?: string } = {}) {
     return session(request, options);
   };
   const module = authRouteModule(auth);
-  // The arguments of a loader, an action, and a middleware, with React Router's own context.
+  /**
+   * The arguments of a loader, an action, and a middleware, with React Router's
+   * own context. `url` is built as React Router 8.4.0 builds it: getNormalizedPath
+   * removes ".data" and "_routes", and createDataFunctionUrl sets the pathname,
+   * whose setter resolves dot segments (server-runtime/urls.js, router/utils.js).
+   */
+  const routedURL = (request: Request) => {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    url.pathname = path.endsWith("/_.data")
+      ? path.replace(/_\.data$/, "")
+      : path.replace(/\.data$/, "");
+    url.searchParams.delete("_routes");
+    return url;
+  };
   const args = (request: Request) => ({
     request,
-    url: new URL(request.url),
+    url: routedURL(request),
     pattern: "/",
     params: {},
     context: new RouterContextProvider(),
@@ -148,77 +162,100 @@ describe("@authtempo/react-router (plan 11d2)", () => {
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
   });
 
-  // A client navigation of a framework app sends "/account.data?_routes=...".
-  // React Router gives the middleware the raw request and the routed `url`.
-  it("gates the routed URL of a data request, not the raw URL", async () => {
+  /** A middleware with `rule`, and a run that records what `protect` got. */
+  function probe(rule: (p: string) => boolean) {
     const { auth, args } = setup();
-    const exact = authMiddleware({
+    const seen: string[] = [];
+    const middleware = authMiddleware({
       auth,
-      protect: (p) => p === "/account",
+      protect: (p) => {
+        seen.push(p);
+        return rule(p);
+      },
       signInPath: "/sign-in",
     });
-    const a = {
-      ...args(new Request(`${BASE}/account.data?_routes=account&tab=2`)),
-      url: new URL(`${BASE}/account?tab=2`),
-    };
-    let ran = false;
-    const res = (await exact(a, async () => {
-      ran = true;
-      return new Response("page");
-    })) as Response;
+    async function run(raw: string) {
+      let ran = false;
+      const res = (await middleware(args(new Request(`${BASE}${raw}`)), async () => {
+        ran = true;
+        return new Response("page");
+      })) as Response;
+      return { ran, res, location: res.headers.get("location") };
+    }
+    return { seen, run };
+  }
+
+  // A client navigation of a framework app sends "/account.data?_routes=...".
+  it("gates the routed path of a data request, not the raw path", async () => {
+    const { run } = probe((p) => p === "/account");
+    const { ran, res, location } = await run("/account.data?_routes=account&tab=2");
     expect(ran).toBe(false);
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
+    expect(location).toBe(`${BASE}/sign-in?next=%2Faccount%3Ftab%3D2`);
   });
 
   // React Router decodes each segment once before it matches: "/%61ccount"
   // runs the page of "/account", on a page request and on a data request.
   it("gates the once-decoded path that the router matched", async () => {
-    const { auth, args } = setup();
-    const exact = authMiddleware({
-      auth,
-      protect: (p) => p === "/account",
-      signInPath: "/sign-in",
-    });
+    const { seen, run } = probe((p) => p === "/account");
     for (const raw of ["/%61ccount", "/%61ccount.data?_routes=account"]) {
-      const a = { ...args(new Request(`${BASE}${raw}`)), url: new URL(`${BASE}/%61ccount`) };
-      let ran = false;
-      const res = (await exact(a, async () => {
-        ran = true;
-        return new Response("page");
-      })) as Response;
-      expect(ran).toBe(false);
-      expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+      const { ran, res, location } = await run(raw);
+      expect(ran, raw).toBe(false);
+      expect(res.status, raw).toBe(307);
+      // next keeps the URL form of the request.
+      expect(location, raw).toBe(`${BASE}/sign-in?next=%2F%2561ccount`);
     }
+    expect(seen.every((p) => p === "/account")).toBe(true);
+  });
+
+  // The decoded path is not a safe next: "/%2561ccount" decodes to
+  // "/%61ccount", and a browser would open that as "/account".
+  it("keeps next in URL form", async () => {
+    const { seen, run } = probe((p) => p === "/%61ccount");
+    const { ran, location } = await run("/%2561ccount");
+    expect(seen[0]).toBe("/%61ccount");
+    expect(ran).toBe(false);
+    expect(location).toBe(`${BASE}/sign-in?next=%2F%252561ccount`);
+  });
+
+  // "/account/...data" reaches the matcher as "/account/..", which a splat
+  // route "account/*" matches; the `url` argument has the dots resolved.
+  it("gates the dot segments that a splat route matches in a data request", async () => {
+    const { seen, run } = probe((p) => p.startsWith("/account"));
+    const cases: [string, string, string][] = [
+      ["/account/...data?_routes=page", "/account/..", "%2F"],
+      ["/account/..data?_routes=page", "/account/.", "%2Faccount%2F"],
+      ["/account/x/...data?_routes=page", "/account/x/..", "%2Faccount%2F"],
+    ];
+    for (const [raw, judged, next] of cases) {
+      const { ran, res, location } = await run(raw);
+      expect(seen.at(-1), raw).toBe(judged);
+      expect(ran, raw).toBe(false);
+      expect(res.status, raw).toBe(307);
+      expect(location, raw).toBe(`${BASE}/sign-in?next=${next}`);
+    }
+  });
+
+  // React Router matches a decoded "?" or "#" as text of the path. The rule
+  // gets the whole text: the gate would cut a routed string at either one.
+  it("gives protect a decoded question mark and hash as text of the path", async () => {
+    const { seen, run } = probe((p) => p.startsWith("/a?/secret"));
+    const { ran, location } = await run("/a%3F/secret%23x");
+    expect(seen[0]).toBe("/a?/secret#x");
+    expect(ran).toBe(false);
+    expect(location).toBe(`${BASE}/sign-in?next=%2Fa%253F%2Fsecret%2523x`);
   });
 
   // A route with no caseSensitive (React Router's default) matches without
   // case, so the binding folds case for the rule. `next` keeps the request's case.
   it("folds case for protect, on the decoded text, and keeps the case in next", async () => {
-    const { auth, args } = setup();
-    const rule = (p: string) => p === "/account" || p === "/caf%C3%A9" || p === "/%CF%83";
-    const middleware = authMiddleware({ auth, protect: rule, signInPath: "/sign-in" });
-    // The request path, and the path in URL form that `next` keeps.
-    const cases: [string, string][] = [
-      ["/ACCOUNT", "/ACCOUNT"],
-      ["/%41ccount", "/Account"],
-      ["/CAF%C3%89", "/CAF%C3%89"],
-      ["/%CF%82", "/%CF%82"],
-    ];
-    for (const [path, kept] of cases) {
+    const { run } = probe((p) => p === "/account" || p === "/café" || p === "/σ");
+    for (const path of ["/ACCOUNT", "/%41ccount", "/CAF%C3%89", "/%CF%82"]) {
       for (const raw of [path, `${path}.data?_routes=page`]) {
-        const a = { ...args(new Request(`${BASE}${raw}`)), url: new URL(`${BASE}${path}`) };
-        let ran = false;
-        const res = (await middleware(a, async () => {
-          ran = true;
-          return new Response("page");
-        })) as Response;
+        const { ran, res, location } = await run(raw);
         expect(ran, raw).toBe(false);
         expect(res.status, raw).toBe(307);
-        expect(res.headers.get("location"), raw).toBe(
-          `${BASE}/sign-in?next=${encodeURIComponent(kept)}`,
-        );
+        expect(location, raw).toBe(`${BASE}/sign-in?next=${encodeURIComponent(path)}`);
       }
     }
   });
