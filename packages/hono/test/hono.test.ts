@@ -245,6 +245,10 @@ describe("@authtempo/hono (plan 11d2)", () => {
       runs++;
       return c.text(c.req.param("id"));
     });
+    dots.get("/account/*", (c) => {
+      runs++;
+      return c.text("splat");
+    });
     for (const path of ["/account/..", "/account/%2e%2e"]) {
       seen.length = 0;
       const res = await dots.request(`${BASE}${path}`);
@@ -257,6 +261,18 @@ describe("@authtempo/hono (plan 11d2)", () => {
       // A path of core: core answers it, and the gate runs no rule.
       expect(res.status).toBe(401);
       expect(seen).toEqual([]);
+    }
+    // Hono decodes %5C to "\\" and %09 to a tab and matches that text. A URL
+    // parse would read /auth/y and /auth/x, a path of core, and skip the rule.
+    const escaped: [string, string][] = [
+      ["/account/x%5C..%5C..%5Cauth%5Cy", "/account/x\\..\\..\\auth\\y"],
+      ["/account/%09../auth/x", "/account/\t../auth/x"],
+    ];
+    for (const [path, matched] of escaped) {
+      seen.length = 0;
+      const res = await dots.request(`${BASE}${path}`);
+      expect(res.status).toBe(307);
+      expect(seen).toEqual([matched]);
     }
     expect(runs).toBe(0);
   });
