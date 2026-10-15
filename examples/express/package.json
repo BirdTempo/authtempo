@@ -1,0 +1,22 @@
+{
+  "name": "authtempo-example-express",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@authtempo/core": "workspace:*",
+    "@authtempo/express": "workspace:*",
+    "express": "5.3.0"
+  },
+  "devDependencies": {
+    "@authtempo/client": "workspace:*",
+    "@types/express": "5.0.6",
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

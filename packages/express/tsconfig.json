@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // Express runs on Node: the binding reads the request stream with node:stream.
+  "compilerOptions": { "rootDir": "src", "outDir": "dist", "types": ["node"] },
+  "include": ["src"]
+}
