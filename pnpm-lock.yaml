@@ -247,7 +247,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 5.0.3
-        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       wrangler:
         specifier: 4.148.0
         version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
@@ -256,7 +256,7 @@ importers:
     dependencies:
       '@astrojs/node':
         specifier: 11.1.7
-        version: 11.1.7(astro@7.3.8(@astrojs/markdown-remark@7.3.2(supports-color@10.2.2))(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))(supports-color@10.2.2)
+        version: 11.1.7(astro@7.3.8(@astrojs/markdown-remark@7.3.2(supports-color@10.2.2))(@types/node@24.19.1)(db0@0.3.4)(esbuild@0.28.1)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(supports-color@10.2.2)
       '@authtempo/astro':
         specifier: workspace:*
         version: link:../../packages/astro
@@ -515,6 +515,34 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
 
+  examples/solid:
+    dependencies:
+      '@authtempo/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@authtempo/solid':
+        specifier: workspace:*
+        version: link:../../packages/solid
+      solid-js:
+        specifier: 1.9.17
+        version: 1.9.17
+    devDependencies:
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      happy-dom:
+        specifier: 20.14.6
+        version: 20.14.6
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.3.3
+        version: 8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+
   examples/sveltekit:
     dependencies:
       '@authtempo/core':
@@ -532,7 +560,7 @@ importers:
         version: 3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))(svelte@5.57.2)(typescript@6.0.3)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       '@sveltejs/vite-plugin-svelte':
         specifier: 7.3.1
-        version: 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1
@@ -703,7 +731,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 5.0.3
-        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   packages/breach-check:
     devDependencies:
@@ -808,7 +836,7 @@ importers:
         version: link:../handoff
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
-        version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)))
+        version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
@@ -838,7 +866,7 @@ importers:
         version: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
       vitest:
         specifier: 5.0.3
-        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       wrangler:
         specifier: 4.148.0
         version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
@@ -936,7 +964,7 @@ importers:
         version: link:../adapter-postgres
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
-        version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)))
+        version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
@@ -954,7 +982,7 @@ importers:
         version: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
       vitest:
         specifier: 5.0.3
-        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       wrangler:
         specifier: 4.148.0
         version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
@@ -1104,6 +1132,28 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
 
+  packages/solid:
+    dependencies:
+      '@authtempo/client':
+        specifier: workspace:*
+        version: link:../client
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      happy-dom:
+        specifier: 20.14.6
+        version: 20.14.6
+      solid-js:
+        specifier: 1.9.17
+        version: 1.9.17
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+
   packages/sveltekit:
     dependencies:
       '@authtempo/core':
@@ -1112,10 +1162,10 @@ importers:
     devDependencies:
       '@sveltejs/kit':
         specifier: 3.0.1
-        version: 3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)))(svelte@5.57.2)(typescript@7.0.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))(svelte@5.57.2)(typescript@7.0.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       '@sveltejs/vite-plugin-svelte':
         specifier: 7.3.1
-        version: 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       svelte:
         specifier: 5.57.2
         version: 5.57.2
@@ -1127,7 +1177,7 @@ importers:
         version: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
       vitest:
         specifier: 5.0.3
-        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   packages/verify:
     dependencies:
@@ -5996,6 +6046,12 @@ packages:
     resolution: {integrity: sha512-GL2BWwVa6JydKO6l/ljVgjAZF4QJ3S7dWDWi53s5GZT8PJzD2fNxi67HANQGKAqPrwEpL5ba7gUBGi0Ls/sEoQ==}
     engines: {node: '>=20.0.0'}
 
+  seroval-plugins@1.6.9:
+    resolution: {integrity: sha512-kiDK/Tb8IWZ61WEU8pA2PDmAuw37gKph9Y77OZlD56mg0Y2g0Bg7gZ1HeHhs5d40w+nRoUq/wj08V26ilbez9g==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      seroval: ^1.0
+
   seroval@1.6.9:
     resolution: {integrity: sha512-UeEzHwAK+yl0YLbsvROV1t5yMYEwZZ0CfKYxDvUgS2fO9Vxdf8djqVIB+OuVpuawRNPqw68LE1Du/GMsW2ZPqA==}
     engines: {node: '>=10'}
@@ -6096,6 +6152,9 @@ packages:
   smol-toml@1.9.1:
     resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
     engines: {node: '>= 18'}
+
+  solid-js@1.9.17:
+    resolution: {integrity: sha512-4GAmLOWPfNV8H9Jfn2LSFTpNEG6jiOKPiwd5lnLGQtehHaX6l3TOLzJqQ7mqwB/3k1Yy3zyumFVopmc/tm34ow==}
 
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
@@ -7058,7 +7117,7 @@ snapshots:
     optionalDependencies:
       '@astrojs/markdown-remark': 7.3.2(supports-color@10.2.2)
 
-  '@astrojs/node@11.1.7(astro@7.3.8(@astrojs/markdown-remark@7.3.2(supports-color@10.2.2))(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))(supports-color@10.2.2)':
+  '@astrojs/node@11.1.7(astro@7.3.8(@astrojs/markdown-remark@7.3.2(supports-color@10.2.2))(@types/node@24.19.1)(db0@0.3.4)(esbuild@0.28.1)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(supports-color@10.2.2)':
     dependencies:
       '@astrojs/internal-helpers': 0.12.0
       astro: 7.3.8(@astrojs/markdown-remark@7.3.2(supports-color@10.2.2))(@types/node@24.19.1)(db0@0.3.4)(esbuild@0.28.1)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
@@ -7391,6 +7450,20 @@ snapshots:
       unenv: 2.0.0-rc.24
     optionalDependencies:
       workerd: 1.20261006.1
+
+  '@cloudflare/vitest-plugin@1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))':
+    dependencies:
+      cjs-module-lexer: 1.2.3
+      esbuild: 0.28.2
+      miniflare: 5.20261006.1-alpha(@types/node@24.19.1)
+      vitest: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      wrangler: 4.149.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
+      zod: 4.6.5
+    transitivePeerDependencies:
+      - '@cloudflare/workers-types'
+      - '@types/node'
+      - bufferutil
+      - utf-8-validate
 
   '@cloudflare/vitest-plugin@1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)))':
     dependencies:
@@ -8907,7 +8980,7 @@ snapshots:
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       '@standard-schema/spec': 1.1.0
-      '@sveltejs/vite-plugin-svelte': 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+      '@sveltejs/vite-plugin-svelte': 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       cookie: 2.0.1
       devalue: 5.9.4
       esm-env: 1.2.2
@@ -8919,11 +8992,11 @@ snapshots:
     optionalDependencies:
       typescript: 6.0.3
 
-  '@sveltejs/kit@3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)))(svelte@5.57.2)(typescript@7.0.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))':
+  '@sveltejs/kit@3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))(svelte@5.57.2)(typescript@7.0.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       '@standard-schema/spec': 1.1.0
-      '@sveltejs/vite-plugin-svelte': 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+      '@sveltejs/vite-plugin-svelte': 7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       cookie: 2.0.1
       devalue: 5.9.4
       esm-env: 1.2.2
@@ -8935,14 +9008,14 @@ snapshots:
     optionalDependencies:
       typescript: 7.0.2
 
-  '@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))':
+  '@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.2)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))':
     dependencies:
       deepmerge: 4.3.1
       magic-string: 1.4.3
       obug: 2.2.1
       svelte: 5.57.2
       vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
-      vitefu: 1.1.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+      vitefu: 1.1.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   '@swc/helpers@0.5.23':
     dependencies:
@@ -9218,7 +9291,7 @@ snapshots:
       vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
       vue: 3.5.43(typescript@7.0.2)
 
-  '@vitest/mocker@5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))':
+  '@vitest/mocker@5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.3
@@ -9226,6 +9299,24 @@ snapshots:
       magic-string: 1.4.3
     optionalDependencies:
       vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
+
+  '@vitest/mocker@5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))':
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      '@vitest/spy': 5.0.3
+      estree-walker: 3.0.3
+      magic-string: 1.4.3
+    optionalDependencies:
+      vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)
+
+  '@vitest/mocker@5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))':
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      '@vitest/spy': 5.0.3
+      estree-walker: 3.0.3
+      magic-string: 1.4.3
+    optionalDependencies:
+      vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
 
   '@vitest/spy@5.0.3': {}
 
@@ -9536,7 +9627,7 @@ snapshots:
       unstorage: 1.17.5(db0@0.3.4)(ioredis@5.11.1(supports-color@10.2.2))
       verkit: 0.5.0
       vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
-      vitefu: 1.1.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+      vitefu: 1.1.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       xxhash-wasm: 1.1.0
       yargs-parser: 22.0.0
       zod: 4.6.5
@@ -12623,6 +12714,10 @@ snapshots:
 
   serialize-javascript@7.1.2: {}
 
+  seroval-plugins@1.6.9(seroval@1.6.9):
+    dependencies:
+      seroval: 1.6.9
+
   seroval@1.6.9: {}
 
   serve-placeholder@2.0.2:
@@ -12789,6 +12884,12 @@ snapshots:
   smob@1.6.2: {}
 
   smol-toml@1.9.1: {}
+
+  solid-js@1.9.17:
+    dependencies:
+      csstype: 3.2.3
+      seroval: 1.6.9
+      seroval-plugins: 1.6.9(seroval@1.6.9)
 
   source-map-js@1.2.2: {}
 
@@ -13410,6 +13511,19 @@ snapshots:
       terser: 5.51.2
       yaml: 2.9.1
 
+  vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1):
+    dependencies:
+      lightningcss: 1.33.0
+      picomatch: 4.0.7
+      postcss: 8.5.29
+      rolldown: 1.2.13
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 24.19.1
+      esbuild: 0.28.1
+      fsevents: 2.3.3
+      yaml: 2.9.1
+
   vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1):
     dependencies:
       lightningcss: 1.33.0
@@ -13425,9 +13539,31 @@ snapshots:
       terser: 5.51.2
       yaml: 2.9.1
 
-  vitefu@1.1.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)):
+  vitefu@1.1.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)):
     optionalDependencies:
       vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
+
+  vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)):
+    dependencies:
+      '@types/chai': 5.2.3
+      '@vitest/mocker': 5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      chai: 6.3.0
+      es-module-lexer: 2.3.2
+      expect-type: 1.4.0
+      magic-string: 1.4.3
+      obug: 2.2.1
+      picomatch: 4.0.7
+      std-env: 4.3.0
+      tinybench: 6.2.1
+      tinyexec: 1.3.1
+      tinyglobby: 0.2.17
+      vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
+      why-is-node-running: 3.2.1
+    optionalDependencies:
+      '@types/node': 24.19.1
+      happy-dom: 20.14.6
+    transitivePeerDependencies:
+      - msw
 
   vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)):
     dependencies:
@@ -13443,7 +13579,29 @@ snapshots:
       tinybench: 6.2.1
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
+      vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1)
+      why-is-node-running: 3.2.1
+    optionalDependencies:
+      '@types/node': 24.19.1
+      happy-dom: 20.14.6
+    transitivePeerDependencies:
+      - msw
+
+  vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)):
+    dependencies:
+      '@types/chai': 5.2.3
+      '@vitest/mocker': 5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      chai: 6.3.0
+      es-module-lexer: 2.3.2
+      expect-type: 1.4.0
+      magic-string: 1.4.3
+      obug: 2.2.1
+      picomatch: 4.0.7
+      std-env: 4.3.0
+      tinybench: 6.2.1
+      tinyexec: 1.3.1
+      tinyglobby: 0.2.17
+      vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@types/node': 24.19.1

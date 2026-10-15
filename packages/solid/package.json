@@ -1,0 +1,33 @@
+{
+  "name": "@authtempo/solid",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run && node ../../scripts/check-no-node.mjs src"
+  },
+  "dependencies": {
+    "@authtempo/client": "workspace:*",
+    "@authtempo/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "solid-js": "^1.9.17"
+  },
+  "devDependencies": {
+    "happy-dom": "20.14.6",
+    "solid-js": "1.9.17",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
