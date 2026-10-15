@@ -50,7 +50,10 @@ export interface StartAuthOptions {
   /**
    * True for a path that needs a session. Needs `signInPath`. It gets the
    * path as the router of TanStack matches it: decoded once, with no "/" at
-   * the end. The binding folds case (see the README).
+   * the end. The router compares lower-case forms, so the binding also runs
+   * the rule on the path in lower case. Write the rule in lower case: then it
+   * holds for every case of the path. A rule with a capital letter, such as
+   * `p.startsWith("/myAccount")`, misses "/myaccount", which runs the same page.
    */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */
@@ -109,6 +112,34 @@ function routedPath(pathname: string): string {
 }
 
 /**
+ * The origin of the redirect: the Host header, with the protocol of the
+ * request. srvx 0.11.22, the Node server of TanStack Start, builds the URL of
+ * a request line in absolute form ("GET http://evil.example/account") from
+ * that line, so the origin of `request.url` is not the app's. A Host that does
+ * not parse as one host ("a b") falls back to the origin of core's baseURL,
+ * then to the origin of the request, so the binding never answers a 500.
+ */
+function originOf(request: Request, url: URL, baseURL: string | undefined): string {
+  const host = request.headers.get("host") ?? "";
+  if (host && (url.protocol === "http:" || url.protocol === "https:")) {
+    try {
+      // A slash, a backslash, "?", "#", "@", or a space would end the host or name a user.
+      if (!/[/\\?#@\s]/.test(host)) return new URL(`${url.protocol}//${host}`).origin;
+    } catch {
+      // Not one host: try core's baseURL.
+    }
+  }
+  if (baseURL) {
+    try {
+      return new URL(baseURL).origin;
+    } catch {
+      // core checks baseURL at creation; a stand-in may not.
+    }
+  }
+  return url.origin;
+}
+
+/**
  * The server function of a request middleware:
  * `createMiddleware({ type: "request" }).server(authRequestServer({ auth: getAuth }))`.
  * It gives `{ session }` to the context, answers the redirect of a protected
@@ -131,14 +162,22 @@ export function authRequestServer(options: StartAuthOptions): RequestServer {
     // false), and a route can set its own case rule. The binding cannot read
     // either, so it fails closed: the rule sees the path and the path in lower
     // case. `next` keeps the case of the request.
+    const auth = resolve(options.auth);
     const gateOptions = {
       ...options,
-      auth: resolve(options.auth),
+      auth,
       protect: protect && ((p: string) => protect(p) || protect(p.toLowerCase())),
     };
+    // The gate takes the origin of the redirect from its request: one on the
+    // app's own origin, with the raw path and query and every header.
+    const origin = originOf(request, url, auth.baseURL);
+    const gateRequest =
+      origin === url.origin
+        ? request
+        : new Request(`${origin}${url.pathname}${url.search}`, { headers: request.headers });
     // The gate judges the routed path, reads the cookie from the request, and
     // takes `next` from the page URL. The rule never sees the query.
-    const gate = await readGate(gateOptions, request, path, page);
+    const gate = await readGate(gateOptions, gateRequest, path, page);
     if (gate.redirect) return gate.redirect;
     const result = await next({ context: { session: gate.session } });
     return { ...result, response: withSetCookie(result.response, gate.cookie) };

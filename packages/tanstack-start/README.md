@@ -22,10 +22,19 @@ does not load in vitest on Node, and the example app is React.
   segments and read "\" as "/". The router removes each "/" at the end, so
   "/account/" reaches the rule as "/account". "/account/.." reaches it as
   "/", the path that the router matches.
-- The router matches a path without case by default, so "/ACCOUNT" runs the
-  page of "/account". The binding cannot read the router's case option, so it
-  folds case for `protect`: a path needs a session when the rule holds for the
-  path or for its lower-case form.
+- The router matches a path without case: it compares the lower-case form of
+  the route with the lower-case form of the path (router-core 1.171.37). So
+  "/ACCOUNT" runs the page of "/account". The binding cannot read a case
+  option, so it runs `protect` on the path and on its lower-case form: a path
+  needs a session when either holds. Write the rule in lower case, and it
+  holds for every case of the path. A rule with a capital letter, such as
+  `p.startsWith("/myAccount")`, misses "/myaccount" and "/MYACCOUNT", which
+  run the page of "/myAccount" with no session.
+- The origin of the redirect comes from the Host header, with the protocol of
+  the request, not from the request line: the Node server of TanStack Start
+  builds the URL of an absolute-form line ("GET http://evil.example/account")
+  from that line. A Host that does not parse falls back to the origin of
+  core's `baseURL`.
 - `next` holds the page URL that TanStack gives the middleware, with the
   query, not the decoded path: "/%61ccount" gives `next=%2Faccount`, and
   "/%2561ccount" keeps its escape. `next` keeps the case of the request and a

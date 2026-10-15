@@ -297,6 +297,88 @@ describe("@authtempo/tanstack-start (plan 11d2)", () => {
     expect([...new Set(seen)]).toEqual(["/", "/account"]);
   });
 
+  // srvx 0.11.22, the Node server of TanStack Start, builds request.url from
+  // the request line: "GET http://evil.example/account" with Host
+  // app.example.com gives a request on http://evil.example (review M1).
+  it("takes the origin of the redirect from the Host header, not the request line", async () => {
+    const { run } = setup();
+    const request = new Request("http://evil.example/account", {
+      headers: { host: "app.example.com" },
+    });
+    const out = await run(request, "/account");
+    expect(out.response.status).toBe(307);
+    expect(out.response.headers.get("location")).toBe(
+      "http://app.example.com/sign-in?next=%2Faccount",
+    );
+    expect(out.runs).toBe(0);
+  });
+
+  // srvx gives a Host "a b" the origin http://_invalid_.
+  it("falls back on the origin of core's baseURL for a Host that does not parse", async () => {
+    const { run } = setup();
+    for (const host of ["a b", "app.example.com/x", "evil@app.example.com"]) {
+      const request = new Request("http://_invalid_/account", { headers: { host } });
+      const out = await run(request, "/account");
+      expect(out.response.status).toBe(307);
+      expect(out.response.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
+      expect(out.runs).toBe(0);
+    }
+  });
+
+  // The router compares the lower-case route with the lower-case path, so
+  // "/myaccount" and "/MYACCOUNT" run the page of "/myAccount" (review M2).
+  it("runs a lower-case rule on the lower-case path, so every case is protected", async () => {
+    const { run } = setup({}, { protect: (p) => p.startsWith("/myaccount") });
+    for (const path of ["/myAccount", "/MYACCOUNT", "/myaccount", "/MyAccount/x"]) {
+      const out = await run(new Request(`${BASE}${path}`), path);
+      expect(out.response.status).toBe(307);
+      expect(out.runs).toBe(0);
+    }
+  });
+
+  // core 3aa2d84: the gate reads no session only when the raw path and the
+  // routed path are both of core. TanStack gives "/auth/session" for
+  // "/%61uth/session", and a catch-all page must not run for it.
+  it("never runs a catch-all page for an escaped path of core", async () => {
+    const seen: string[] = [];
+    const { run, coreHandler } = setup(
+      {},
+      {
+        protect: (p) => {
+          seen.push(p);
+          return p !== "/";
+        },
+      },
+    );
+    const cases = [
+      ["GET", "/%61uth/session", "/auth/session"],
+      ["GET", "/%61uth/x", "/auth/x"],
+      ["POST", "/%61uth/sign-out", "/auth/sign-out"],
+    ] as const;
+    for (const [method, raw, pathname] of cases) {
+      const request = new Request(`${BASE}${raw}`, { method, headers: { origin: BASE } });
+      const out = await run(request, pathname, coreHandler);
+      expect([307, 401, 404]).toContain(out.response.status);
+      expect(out.runs).toBe(0);
+    }
+    expect([...new Set(seen)]).toEqual(["/auth/session", "/auth/x", "/auth/sign-out"]);
+  });
+
+  // decodePath escapes a control character again after it decodes it: the
+  // router matches "/account/%09../auth/x", not a path with a raw tab.
+  it("gives protect a control character escaped, as the router keeps it", async () => {
+    const seen: string[] = [];
+    const record = (p: string) => {
+      seen.push(p);
+      return true;
+    };
+    const { run } = setup({}, { protect: record });
+    const out = await run(new Request(`${BASE}/account/%09../auth/x`), "/account/%09../auth/x");
+    expect(out.response.status).toBe(307);
+    expect(seen).toContain("/account/%09../auth/x");
+    expect(seen.some((p) => p.includes("\t"))).toBe(false);
+  });
+
   // next is the page URL, not the decoded path: the decoded "/%61ccount" of
   // "/%2561ccount" would open as "/account" in the browser.
   it("puts the page URL in next, not the decoded path", async () => {
