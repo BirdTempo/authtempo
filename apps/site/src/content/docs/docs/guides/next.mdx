@@ -6,6 +6,7 @@ sources:
   - packages/next/README.md
   - packages/next/src/index.ts
   - examples/next/proxy.ts
+  - examples/next/app/providers.tsx
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
 ---
 
@@ -14,6 +15,8 @@ import auth from "../../../../../../../examples/next/lib/auth.ts?raw";
 import route from "../../../../../../../examples/next/app/auth/[...path]/route.ts?raw";
 import page from "../../../../../../../examples/next/app/page.tsx?raw";
 import proxy from "../../../../../../../examples/next/proxy.ts?raw";
+import providers from "../../../../../../../examples/next/app/providers.tsx?raw";
+import layout from "../../../../../../../examples/next/app/layout.tsx?raw";
 
 **For:** a developer of a Next.js 16 app on the App Router.
 
@@ -32,9 +35,9 @@ import proxy from "../../../../../../../examples/next/proxy.ts?raw";
 4. Read the session with `authSession` in a server component.
 5. Protect paths with `authProxy` in `proxy.ts`.
 6. Set `BASE_URL` and `AUTH_SECRET` in the environment of the server.
-7. Read `GET /auth/session` from the browser, so the browser gets the renewed cookie.
-   - The page below is a server component, and it makes no such read. Add one when you copy it.
-   - The session store of `@authtempo/react` makes the read. A `fetch("/auth/session")` in a client component makes it too.
+7. Read `GET /auth/session` from the browser on every page, so the browser gets the renewed cookie.
+   - `app/providers.tsx` below makes this read. `app/layout.tsx` puts it around every page.
+   - Copy both files. The server reads write nothing, so this browser read is the one that renews the cookie.
 
 <Code code={auth} lang="ts" title="lib/auth.ts" />
 
@@ -43,6 +46,12 @@ import proxy from "../../../../../../../examples/next/proxy.ts?raw";
 <Code code={page} lang="tsx" title="app/page.tsx" />
 
 <Code code={proxy} lang="ts" title="proxy.ts" />
+
+`SessionRenewal` subscribes to the session store of `@authtempo/react`, so each page reads `GET /auth/session` in the browser. That read slides the session and sends the renewed cookie.
+
+<Code code={providers} lang="tsx" title="app/providers.tsx" />
+
+<Code code={layout} lang="tsx" title="app/layout.tsx" />
 
 ## How it behaves
 
