@@ -26,7 +26,7 @@ import test from "../../../../../samples/guides/other-stacks.test.ts?raw";
 ## Steps
 
 1. **A runtime that speaks the web request:** Bun, Deno, Cloudflare Workers, or a framework that gives you a `Request`. Call `auth.handle(request)` for each path under `/auth`, as the sample below does.
-2. **A Node server on `http`:** use `@authtempo/express` or `@authtempo/fastify`. Their `toWebRequest` and `sendWebResponse` show the conversion for another Node framework.
+2. **A Node server on `http`:** use [the Express package](/docs/reference/express/) or [the Fastify package](/docs/reference/fastify/). Their `toWebRequest` and `sendWebResponse` show the conversion for another Node framework.
 3. **A front end with no package:** Angular, Qwik, Lit, or plain JavaScript. Use [the client package](/docs/reference/client/), and subscribe to `client.store` for the session.
 4. **A server that must know the caller:** use [the verify package](/docs/reference/verify/) in any runtime.
 5. **A native or desktop app:** use [the handoff package](/docs/reference/handoff/).
