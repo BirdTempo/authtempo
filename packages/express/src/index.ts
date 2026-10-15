@@ -38,10 +38,25 @@ function pathOf(req: ExpressRequest): string {
   return rest.startsWith("/") ? rest : `/${rest}`;
 }
 
-/** The URL on the app's own origin: the protocol, the Host header, and the path of the request line. */
-function urlOf(req: ExpressRequest): string {
-  const path = pathOf(req);
-  return `${req.protocol}://${req.get("host") ?? "localhost"}${path}`;
+/** The part of the auth object that gives the fallback origin. */
+type BaseURLSource = { readonly baseURL?: string | undefined };
+
+/**
+ * The app's own origin: the protocol and the Host header. A Host header that
+ * does not parse ("a b") falls back to the origin of `auth.baseURL`, then to
+ * "http://localhost", so a bad Host gets no 500 from the binding.
+ */
+function originOf(req: ExpressRequest, auth: BaseURLSource): string {
+  try {
+    return new URL(`${req.protocol}://${req.get("host") ?? "localhost"}`).origin;
+  } catch {
+    return auth.baseURL ? new URL(auth.baseURL).origin : "http://localhost";
+  }
+}
+
+/** The URL on the app's own origin, with the raw path of the request line. */
+function urlOf(req: ExpressRequest, auth: BaseURLSource): string {
+  return `${originOf(req, auth)}${pathOf(req)}`;
 }
 
 /**
@@ -77,18 +92,22 @@ function parsedBody(req: ExpressRequest, headers: Headers): string | null {
   return JSON.stringify(body);
 }
 
-/** The web Request of an Express request: the full URL, every header, and the body. */
-export function toWebRequest(req: ExpressRequest): Request {
+/**
+ * The web Request of an Express request: the full URL, every header, and the
+ * body. `auth.baseURL` gives the origin when the Host header does not parse.
+ */
+export function toWebRequest(req: ExpressRequest, auth: BaseURLSource = {}): Request {
   const headers = headersOf(req);
   const method = req.method.toUpperCase();
-  if (method === "GET" || method === "HEAD") return new Request(urlOf(req), { method, headers });
+  const url = urlOf(req, auth);
+  if (method === "GET" || method === "HEAD") return new Request(url, { method, headers });
   const parsed = parsedBody(req, headers);
   if (parsed !== null) {
     // The parser read the stream; the length of the text written again can differ.
     headers.delete("content-length");
-    return new Request(urlOf(req), { method, headers, body: parsed });
+    return new Request(url, { method, headers, body: parsed });
   }
-  return new Request(urlOf(req), {
+  return new Request(url, {
     method,
     headers,
     // node:stream/web's ReadableStream and the global one are one class at run time.
@@ -108,14 +127,18 @@ export async function sendWebResponse(res: ExpressResponse, response: Response):
 }
 
 /** The handler of the routes of core: `app.use("/auth", authHandler(auth))`. */
-export function authHandler(auth: AuthSource<Pick<Auth, "handle">>): RequestHandler {
+export function authHandler(
+  auth: AuthSource<Pick<Auth, "handle"> & BaseURLSource>,
+): RequestHandler {
   return async (req, res) => {
-    await sendWebResponse(res, await resolve(auth).handle(toWebRequest(req)));
+    const instance = resolve(auth);
+    await sendWebResponse(res, await instance.handle(toWebRequest(req, instance)));
   };
 }
 
 export interface ExpressSessionOptions {
-  auth: AuthSource<GateAuth>;
+  /** `baseURL` gives the origin when the Host header does not parse. */
+  auth: AuthSource<GateAuth & BaseURLSource>;
   /** True for a path that needs a session. Needs `signInPath`. */
   protect?: ((pathname: string) => boolean) | undefined;
   /** The sign-in page. The middleware adds `?next=<path and query>`. */
@@ -134,7 +157,8 @@ export function authSession(options: ExpressSessionOptions): RequestHandler {
   const protect = options.protect;
   return async (req, res, next) => {
     // The gate reads the URL and the headers only: no body.
-    const request = new Request(urlOf(req), { headers: headersOf(req) });
+    const auth = resolve(options.auth);
+    const request = new Request(urlOf(req, auth), { headers: headersOf(req) });
     // The routed text: Express's router matches the raw path of the request line, with
     // no decode. It matches without case by default, so the gate fails closed: a path
     // is protected when any of its case forms is.
@@ -142,7 +166,7 @@ export function authSession(options: ExpressSessionOptions): RequestHandler {
       {
         ...options,
         protect: protect && ((p: string) => caseForms(p).some((form) => protect(form))),
-        auth: resolve(options.auth),
+        auth,
       },
       request,
       pathOf(req),

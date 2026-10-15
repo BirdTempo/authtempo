@@ -1,5 +1,5 @@
 import { request as httpRequest } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect } from "node:net";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import express, { type RequestHandler } from "express";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,6 +27,30 @@ function rawGet(
     });
     req.on("error", fail);
     req.end();
+  });
+}
+
+/** Raw request lines over a socket: a Host header that Node's clients would refuse. */
+function rawLines(
+  base: string,
+  text: string,
+): Promise<{ status: number; location: string | null }> {
+  const { hostname, port } = new URL(base);
+  return new Promise((done, fail) => {
+    // Write, do not end: Node's server can drop a slow answer after the client's FIN.
+    // "Connection: close" in the text makes the server end the socket.
+    const socket = connect(Number(port), hostname, () => socket.write(text));
+    let out = "";
+    socket.on("data", (d) => {
+      out += d;
+    });
+    socket.on("end", () => {
+      const head = out.split("\r\n\r\n")[0] ?? "";
+      const status = Number(/^HTTP\/1\.1 (\d+)/.exec(head)?.[1] ?? 0);
+      const location = /\r\nlocation: ([^\r]*)/i.exec(head)?.[1] ?? null;
+      done({ status, location });
+    });
+    socket.on("error", fail);
   });
 }
 
@@ -231,17 +255,20 @@ describe("@authtempo/express (plan 11d2)", () => {
 
   it("judges a raw path with dot segments as the router matched it", async () => {
     const { base, runs, seen } = await serve();
-    for (const path of [
-      "/account/..",
-      "/account/%2e%2e",
-      "/account/../auth/session",
-      "/account/%2e%2e/auth/session",
-      "/account/x/../../auth/x",
-    ]) {
+    // The rule gets the raw path. next is the path of the request's own URL
+    // (core 12f6eed), where the URL parser resolved the dot segments.
+    const rows: [string, string][] = [
+      ["/account/..", "/"],
+      ["/account/%2e%2e", "/"],
+      ["/account/../auth/session", "/auth/session"],
+      ["/account/%2e%2e/auth/session", "/auth/session"],
+      ["/account/x/../../auth/x", "/auth/x"],
+    ];
+    for (const [path, next] of rows) {
       // Node's fetch would resolve the dot segments; a raw request line keeps them.
       const res = await rawGet(base, path);
       expect(res.status).toBe(307);
-      expect(res.location).toBe(`${base}/sign-in?next=${encodeURIComponent(path)}`);
+      expect(res.location).toBe(`${base}/sign-in?next=${encodeURIComponent(next)}`);
       expect(seen).toContain(path);
     }
     expect(runs.account).toBe(0);
@@ -249,13 +276,71 @@ describe("@authtempo/express (plan 11d2)", () => {
 
   it("judges the raw path of an absolute-form request line with dot segments", async () => {
     const { base, runs, seen } = await serve();
-    for (const path of ["/account/x/../../auth/session", "/account/%2e%2e/auth/x", "/account/.."]) {
+    const rows: [string, string][] = [
+      ["/account/x/../../auth/session", "/auth/session"],
+      ["/account/%2e%2e/auth/x", "/auth/x"],
+      ["/account/..", "/"],
+    ];
+    for (const [path, next] of rows) {
       const res = await rawGet(base, `http://evil.example${path}`);
       expect(res.status).toBe(307);
-      expect(res.location).toBe(`${base}/sign-in?next=${encodeURIComponent(path)}`);
+      expect(res.location).toBe(`${base}/sign-in?next=${encodeURIComponent(next)}`);
       expect(seen).toContain(path);
     }
     expect(runs.account).toBe(0);
+  });
+
+  it("keeps an escaped backslash in next as it is", async () => {
+    const rule = (p: string) => p.startsWith("/%5C") || p.startsWith("/account");
+    const { base, seen } = await serve(undefined, { rule });
+    // "/\\evil.example" would read as a link to another origin; the escape is not decoded.
+    const res = await rawGet(base, "/%5Cevil.example");
+    expect(res.status).toBe(307);
+    expect(res.location).toBe(`${base}/sign-in?next=${encodeURIComponent("/%5Cevil.example")}`);
+    expect(seen).toContain("/%5Cevil.example");
+  });
+
+  it("answers no 500 to a Host header that does not parse, on the origin of baseURL", async () => {
+    const { base, signIn } = await serve();
+    const lines = (path: string, extra = "") =>
+      rawLines(base, `GET ${path} HTTP/1.1\r\nHost: a b\r\n${extra}Connection: close\r\n\r\n`);
+    const away = await lines("/account");
+    expect(away.status).toBe(307);
+    expect(away.location).toBe(`${base}/sign-in?next=%2Faccount`);
+    expect((await lines("/auth/session")).status).toBe(401);
+    expect((await lines("/")).status).toBe(200);
+    const cookie = await signIn();
+    expect((await lines("/account", `Cookie: ${cookie}\r\n`)).status).toBe(200);
+  });
+
+  it("falls back to http://localhost for an auth object with no baseURL", async () => {
+    const real = createAuth({
+      baseURL: "https://app.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: ["https://app.example.com"],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+    });
+    // A hand-made auth object: the three calls of the gate, and no baseURL.
+    const auth = {
+      handle: real.handle.bind(real),
+      session: real.session.bind(real),
+      sessionCookie: real.sessionCookie.bind(real),
+    };
+    const app = express();
+    app.use(
+      authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((r) => server.once("listening", () => r()));
+    stops.push(() => server.close());
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const res = await rawLines(
+      base,
+      "GET /account HTTP/1.1\r\nHost: a b\r\nConnection: close\r\n\r\n",
+    );
+    expect(res.status).toBe(307);
+    expect(res.location).toBe("http://localhost/sign-in?next=%2Faccount");
   });
 
   it("folds the case of escape hex for an escaped rule", async () => {

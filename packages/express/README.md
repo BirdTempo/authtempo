@@ -24,5 +24,7 @@ takes `express` 5.3.0 or newer in 5 as a peer dependency.
 - Write a rule for a non-ASCII path in the escaped form, such as
   `p.startsWith("/caf%C3%A9")`. Node answers 400 to a raw UTF-8 request line
   before Express runs.
+- A Host header that does not parse gets no 500: the binding uses the origin
+  of `auth.baseURL`, or "http://localhost" for an auth object with no `baseURL`.
 - Behind a TLS proxy, set `app.set("trust proxy", ...)`, so the sign-in
   redirect keeps https.
