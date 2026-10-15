@@ -240,6 +240,11 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       slidingRefreshDays:
         (options.session?.updateAge ?? BETTER_AUTH_DEFAULTS.sessionUpdateAge) / DAY,
     },
+    // Better Auth sends no credential-change notice and has no callback for one.
+    // The shim's mail port routes a mail by its link and throws on a notice,
+    // which has none. So each notice would fail and log a line. Task 14 of
+    // plan 12a gives the shim its account mapping.
+    account: { notices: false },
     magicLink: { ttlMinutes: ttlSeconds / 60 },
     // Core turns email codes on by default; Better Auth serves them only with
     // its email-otp plugin (plan 9e).

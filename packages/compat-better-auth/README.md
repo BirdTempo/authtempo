@@ -291,6 +291,9 @@ These rules come from plan 12b.
   for Better Auth's `{ token, user }`. So a caller can learn that an address
   has an account, as with Better Auth. Use core's `createAuth` for the
   uniform answer.
+- Better Auth sends no mail after a password, passkey, or second-factor
+  change, and has no callback for one. The shim sets core's
+  `account.notices: false`. Use core's `createAuth` for the notice mails.
 - A sign-up of a new address writes rows and sends the verify mail. A taken
   address does neither, so the answer time can show that the address has an
   account, as in Better Auth.

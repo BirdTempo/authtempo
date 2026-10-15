@@ -645,6 +645,36 @@ describe("withPolicyCode on the reset and change routes (M-7)", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "password_policy", code: "PASSWORD_TOO_LONG" });
   });
+
+  it("sends no notice and logs no notice failure after a password change (plan 12a)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { auth, sent } = app();
+      await auth.api.signUpEmail({
+        body: { email: "a@example.com", password: "correct horse battery", name: "A" },
+      });
+      const verifyToken = sent.find((m) => m.kind === "verify")?.data.token ?? "";
+      const verified = await auth.handler(json("/password/verify", { token: verifyToken }));
+      const session =
+        /__Host-tempo_session=([^;]+)/.exec(verified.headers.get("set-cookie") ?? "")?.[1] ?? "";
+      const res = await auth.handler(
+        json(
+          "/password/change",
+          { currentPassword: "correct horse battery", newPassword: "another long password" },
+          { authorization: `Bearer ${session}` },
+        ),
+      );
+      expect(res.status).toBe(200);
+      expect(sent.map((m) => m.kind)).toEqual(["verify"]);
+      expect(log.mock.calls.filter((c) => c[0] === "authtempo: notice mail failed")).toEqual([]);
+      expect(
+        mapOptions({ baseURL: BASE, secret: TEST_SECRET, database: memoryDatabase() }).config
+          .account,
+      ).toEqual({ notices: false });
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
 
 describe("api refuses the arguments core cannot keep (M-3)", () => {
