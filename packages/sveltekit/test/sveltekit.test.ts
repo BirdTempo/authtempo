@@ -165,6 +165,17 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     }
   });
 
+  // The gate makes a URL of the matched path, so protect gets a non-ASCII
+  // path encoded again: the rule must name "/caf%C3%A9", not "/café".
+  it("gives protect a non-ASCII path in URL form", async () => {
+    const { run, pageRuns } = setup({}, (p) => p === "/caf%C3%A9");
+    for (const path of ["/caf%C3%A9", "/café"]) {
+      const { res } = await run(new Request(`${BASE}${path}`));
+      expect(res.status).toBe(307);
+    }
+    expect(pageRuns()).toBe(0);
+  });
+
   it("renews the session cookie on the page's answer", async () => {
     const { signIn, run, advance } = setup();
     const cookie = await signIn();

@@ -16,6 +16,8 @@ in 3 as a peer dependency.
 - `protect` gets the path in URL form, as SvelteKit matched it, with the case
   kept. Write a rule for a non-ASCII path in the encoded form, such as
   "/caf%C3%A9", or as a prefix.
+- An app's `reroute` hook changes the path that SvelteKit matches, but the hook
+  judges `event.url`: write the rule for both forms of a rerouted protected path.
 - A remote function at `/_app/remote/<id>` is outside the protect rule, so it
   must check `locals.session` itself.
 
