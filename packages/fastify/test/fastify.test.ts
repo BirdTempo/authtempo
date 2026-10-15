@@ -21,6 +21,8 @@ interface AppOptions {
   exact?: boolean;
   /** A rule that protects every path. */
   all?: boolean;
+  /** A catch-all page route "/*" at the root. */
+  catchAll?: boolean;
   /** core's baseURL. Default BASE. */
   baseURL?: string;
 }
@@ -125,6 +127,11 @@ async function makeApp(core: AppOptions = {}) {
     runs.pages++;
     return `more of ${getSession(request)?.user.email}`;
   });
+  if (core.catchAll)
+    app.get("/*", async () => {
+      runs.pages++;
+      return "catch-all";
+    });
   await app.ready();
   async function signIn(
     as: "json" | "form" = "json",
@@ -312,6 +319,23 @@ describe("@authtempo/fastify (plan 11d2)", () => {
       expect(res.statusCode).toBe(307);
       expect(seen.at(-1)).toBe(matched);
     }
+    expect(runs.pages).toBe(0);
+  });
+
+  // find-my-way decodes "/%61uth/session" to "/auth/session", so core's route
+  // wins over "/*". Core 12f6eed skips the session read on that matched path,
+  // and core answers 404 for the raw URL it gets. Core round 10 skips only when
+  // the raw path is under the base path too, so the gate reads the session and
+  // answers 307. Neither runs a page, and the rule only ever gets the matched
+  // path, never the raw escaped text.
+  it("leaves an escaped path of core to core under a catch-all route", async () => {
+    const { app, runs, seen } = await makeApp({ all: true, catchAll: true });
+    const before = seen.length;
+    for (const url of ["/%61uth/session", "/%61uth/x", "/a%75th/x"]) {
+      const res = await app.inject({ method: "GET", url });
+      expect([307, 401, 404]).toContain(res.statusCode);
+    }
+    for (const p of seen.slice(before)) expect(["/auth/session", "/auth/x"]).toContain(p);
     expect(runs.pages).toBe(0);
   });
 
