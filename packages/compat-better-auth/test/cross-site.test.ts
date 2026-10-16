@@ -93,7 +93,7 @@ function cases(accountId: string): [string, string, unknown][] {
 }
 
 describe("the shim's own POST paths and core's cross-site rules (final review F1)", () => {
-  it("answers 403 origin_not_trusted to a foreign Origin and to a cross-site Fetch Metadata post, and changes no row", async () => {
+  it("answers 403 INVALID_ORIGIN to a foreign Origin and to a cross-site Fetch Metadata post, and changes no row", async () => {
     const a = await app();
     await a.post(
       "/email-otp/request-email-change",
@@ -114,12 +114,36 @@ describe("the shim's own POST paths and core's cross-site rules (final review F1
       for (const headers of refusals) {
         const res = await a.post(path, body, a.cookie, headers);
         got.push({ family, headers, status: res.status, body: await res.json() });
-        want.push({ family, headers, status: 403, body: { error: "origin_not_trusted" } });
+        want.push({
+          family,
+          headers,
+          status: 403,
+          body: { code: "INVALID_ORIGIN", message: "Invalid origin" },
+        });
       }
     }
     expect(got).toEqual(want);
     expect(await a.snapshot()).toBe(before);
     expect(a.callbacks).toEqual([]);
+  });
+
+  it("answers INVALID_ORIGIN on a path that core serves and on an unknown path, before the route", async () => {
+    const a = await app();
+    const before = await a.snapshot();
+    const answers: unknown[] = [];
+    for (const path of ["/password/sign-in", "/sign-out", "/no-such-path"]) {
+      const res = await a.post(path, { email: EMAIL, password: PASSWORD }, a.cookie, {
+        origin: EVIL,
+      });
+      answers.push({ path, status: res.status, body: await res.json() });
+    }
+    const refused = { code: "INVALID_ORIGIN", message: "Invalid origin" };
+    expect(answers).toEqual([
+      { path: "/password/sign-in", status: 403, body: refused },
+      { path: "/sign-out", status: 403, body: refused },
+      { path: "/no-such-path", status: 403, body: refused },
+    ]);
+    expect(await a.snapshot()).toBe(before);
   });
 
   it("passes a same-origin post to each family", async () => {

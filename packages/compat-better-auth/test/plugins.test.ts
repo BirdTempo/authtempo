@@ -295,7 +295,7 @@ describe("expo()", () => {
     const withExpo = betterAuth(base({ plugins: [expo()] }));
     const refused = await withExpo.handler(request());
     expect(refused.status).toBe(403);
-    expect(await refused.json()).toEqual({ error: "origin_not_trusted" });
+    expect(await refused.json()).toEqual({ code: "INVALID_ORIGIN", message: "Invalid origin" });
     const without = betterAuth(base());
     expect((await without.handler(request())).status).toBe(401);
   });

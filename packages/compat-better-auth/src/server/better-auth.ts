@@ -1,6 +1,6 @@
 import { type Auth, ConfigError, createAuth, crossSiteRefusal } from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
-import { BETTER_AUTH_CODES, passwordPolicyCode } from "../errors.js";
+import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
 import { createApi } from "./api.js";
@@ -122,8 +122,10 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
     // route: the account, email OTP, and two-factor paths answer in the shim,
     // so core's router alone would not see them (plan 12a fix wave, final
     // review F1). After the expo-origin step, so a native app's scheme counts.
+    // In Better Auth's shape on every path (the lead's ruling): Better Auth
+    // 1.7.2 has one origin check, so both of core's rules answer INVALID_ORIGIN.
     const refusal = crossSiteRefusal(auth, req);
-    if (refusal) return refusal;
+    if (refusal) return invalidOrigin(refusal);
     const copy = req.method === "POST" ? req.clone() : null;
     // Better Auth's get-session and account paths, in Better Auth's shapes (plan 12a). Null for every other request.
     const account =
@@ -144,6 +146,15 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
     out.headers.append("access-control-expose-headers", "set-auth-token");
     return out;
   };
+}
+
+/** Core's 403 of a cross-site POST in Better Auth's shape, with core's status and headers. */
+function invalidOrigin(refusal: Response): Response {
+  const code = BETTER_AUTH_CODES.origin_not_trusted;
+  return new Response(JSON.stringify({ code, message: messageOf(code) }), {
+    status: refusal.status,
+    headers: refusal.headers,
+  });
 }
 
 /** Better Auth's `betterAuth(options)` on authtempo. Throws one BetterAuthCompatError at construction (spec 16.1). */
