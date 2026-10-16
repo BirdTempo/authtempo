@@ -461,7 +461,13 @@ export interface BetterAuthOptions {
       enabled?: boolean;
       beforeDelete?: (user: User, request?: Request) => HookResult<void>;
       afterDelete?: (user: User, request?: Request) => HookResult<void>;
-      sendDeleteAccountVerification?: unknown;
+      /**
+       * Turns on core's mailed confirm, `account.deleteConfirm` (plan 12a
+       * Task 20). The shim calls it with `{ user, url, token }` and no request.
+       * `url` opens core's confirm page, which posts the token.
+       */
+      sendDeleteAccountVerification?: SendEmail;
+      /** Seconds, a whole number of minutes from 300 to 86400. Core's `ttlMinutes`. Default 86400, as in Better Auth. */
       deleteTokenExpiresIn?: number;
     };
   };
@@ -701,6 +707,21 @@ export interface ClientSession {
   activeOrganizationId: string | null;
 }
 
+/**
+ * The passkey of `POST /passkey/update-passkey` (plan 12a): Better Auth
+ * 1.7.2's row without `publicKey`, `counter`, `transports`, and `aaguid`,
+ * which core keeps out of its answers. `createdAt` is ISO 8601 text.
+ */
+export interface Passkey {
+  id: string;
+  name: string | null;
+  userId: string;
+  credentialID: string;
+  deviceType: string;
+  backedUp: boolean;
+  createdAt: string;
+}
+
 export interface ClientPasskey {
   id: string;
   name: string | null;
@@ -924,6 +945,15 @@ export interface AuthClient<TF extends boolean = false> {
     addPasskey(input?: { name?: string }): Promise<CompatClientResult<ClientPasskey>>;
     listUserPasskeys(): Promise<CompatClientResult<ClientPasskey[]>>;
     deletePasskey(input: { id: string }): Promise<CompatClientResult<{ status: true }>>;
+    /**
+     * Core's `passkeys.rename` (plan 12a). The name is trimmed, as Better Auth
+     * 1.7.2 does. An unknown id and the id of another user's passkey answer
+     * `PASSKEY_NOT_FOUND` (404).
+     */
+    updatePasskey(input: {
+      id: string;
+      name: string;
+    }): Promise<CompatClientResult<{ passkey: ClientPasskey }>>;
   };
   /**
    * Better Auth's two-factor calls (plan 9f). `enable`, `disable`,

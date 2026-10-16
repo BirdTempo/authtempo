@@ -1,3 +1,4 @@
+import type { PasskeySummaryJSON } from "@authtempo/client";
 import {
   DEFAULT_SESSION_COOKIE,
   type InvitationSummary,
@@ -9,7 +10,7 @@ import {
   type SessionSummary,
   type UserRow,
 } from "@authtempo/core";
-import type { Invitation, Member, Organization, Session, User } from "../types.js";
+import type { Invitation, Member, Organization, Passkey, Session, User } from "../types.js";
 
 // Each converter builds an object literal under the declared return type, so
 // a field added to the type and not filled here fails the compile, and an
@@ -58,6 +59,24 @@ export function listedSession(s: SessionSummary, userId: string): Session {
     ipAddress: s.ip,
     userAgent: s.userAgent,
     activeOrganizationId: s.activeOrganizationId,
+  };
+}
+
+/**
+ * Better Auth 1.7.2's passkey row (@better-auth/passkey dist/index.mjs:669 to
+ * :716, read 2026-10-17), as far as core answers it: core keeps the public
+ * key, the counter, the transports, and the AAGUID out of its answers. The
+ * date stays the text of core's JSON.
+ */
+export function toPasskey(p: PasskeySummaryJSON, userId: string): Passkey {
+  return {
+    id: p.id,
+    name: p.name,
+    userId,
+    credentialID: p.credentialId,
+    deviceType: p.deviceType,
+    backedUp: p.backedUp,
+    createdAt: p.createdAt,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   listPasskeys,
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
+  renamePasskey,
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../../engine/passkeys.js";
@@ -27,12 +28,14 @@ export const credentialJson = z
   })
   .loose();
 
+// The engine applies the passkey name rule (plan 12a Task 19), so an api caller meets it too.
 const registerVerifyBody = z.object({
   response: credentialJson,
-  name: z.string().max(64).optional(),
+  name: z.string().optional(),
 });
 const authenticateVerifyBody = z.object({ response: credentialJson });
 const deleteBody = z.object({ id: z.string().min(1).max(64) });
+const renameBody = z.strictObject({ id: z.string().min(1).max(64), name: z.string() });
 
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];
@@ -139,6 +142,21 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         if (!body.ok) return send(respond(body), s.renewed);
         return send(
           respond(await deletePasskey(config, { user: s.user, id: body.value.id })),
+          s.renewed,
+        );
+      },
+    },
+    {
+      method: "POST",
+      path: "/passkeys/rename",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        // No fresh rule: a name is no way in (plan 12a Task 19).
+        const body = await readJson(ctx.request, renameBody);
+        if (!body.ok) return send(respond(body), s.renewed);
+        return send(
+          respond(await renamePasskey(config, { user: s.user, ...body.value })),
           s.renewed,
         );
       },

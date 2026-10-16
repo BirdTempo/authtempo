@@ -96,6 +96,7 @@ more request headers go in the fifth.
 | `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `ClientResult<PasskeySummaryJSON[]>` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `ClientResult<{ ok: true }>` |
+| `client.passkeys.rename({ id, name })` | `POST /passkeys/rename` | `ClientResult<PasskeySummaryJSON>`. No fresh session is needed |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `ClientResult<{ token } & PublicSession>` |
 
 The password operations are in the Passwords section.

@@ -10,17 +10,39 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "../seams/webauthn.js";
-import { StorageError } from "../storage/port.js";
+import { StorageError, type Where } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
 import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
 import { openSession, sessionOpened } from "./sessions.js";
+import { validShownName } from "./users.js";
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
 const SIGN_IN = "sign-in";
 const OPTIONS_LIMIT = { seconds: 15 * 60, max: 30 };
 const VERIFY_LIMIT = { seconds: 15 * 60, max: 20 };
+
+/**
+ * The renames of one user's passkeys: 30 per 15 minutes on the key
+ * `passkey-rename:user:<userId>` (plan 12a Task 19). A settings page renames
+ * by hand, so 30 leaves room. The README "Account" table and the limits page
+ * state the same key, window, and count.
+ */
+export const RENAME_PER_USER = { seconds: 900, max: 30 };
+
+/** The longest passkey name, in UTF-16 code units: the bound of the registration since plan 4. */
+const PASSKEY_NAME_MAX = 64;
+
+/**
+ * The passkey name rule: the character rule of a user name, with at most 64
+ * code units (plan 12a Task 19). The device list and the notices show the
+ * name, so a bidi override must not make one passkey read as another. The
+ * registration and the rename apply it.
+ */
+function validPasskeyName(name: string): boolean {
+  return validShownName(name, PASSKEY_NAME_MAX);
+}
 
 /**
  * `second-factor`: a ceremony bound to one `tf_` challenge (plan 12c).
@@ -164,6 +186,8 @@ export async function verifyPasskeyRegistration(
 ): Promise<Result<PasskeySummary>> {
   if (!config.passkey) return fail("not_found");
   if (!input.user.emailVerified) return fail("email_unverified");
+  // Before the consume, so a bad name does not spend the ceremony's challenge.
+  if (input.name !== undefined && !validPasskeyName(input.name)) return fail("invalid_body");
   const challenge = challengeFromResponse(input.response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, input.user.id, "registration");
@@ -449,6 +473,40 @@ export async function listPasskeys(
     { sort: { field: "id", dir: "asc" } },
   );
   return ok(rows.map(summary));
+}
+
+/**
+ * Renames one passkey of the user (plan 12a Task 19). A name is no way in, so
+ * the rename needs a session and no fresh session. The order: the feature,
+ * the name rule, the limit count, then one conditional update by the id and
+ * the user id. A refused name counts no try.
+ *
+ * The id of another user's passkey and an unknown id answer `not_found` by
+ * the same calls: the count and one update that matches no row. So the
+ * answer and its time tell nothing of another user's passkeys. The read
+ * after the update gives the stored row; a parallel rename can win it.
+ */
+export async function renamePasskey(
+  config: ResolvedConfig,
+  input: { user: UserRow; id: string; name: string },
+): Promise<Result<{ passkey: PasskeySummary }>> {
+  if (!config.passkey) return fail("not_found");
+  if (!validPasskeyName(input.name)) return fail("invalid_body");
+  if (!(await config.limiter.allow(`passkey-rename:user:${input.user.id}`, RENAME_PER_USER)))
+    return fail("rate_limited");
+  const own: Where<"passkey">[] = [
+    { field: "id", op: "eq", value: input.id },
+    { field: "userId", op: "eq", value: input.user.id },
+  ];
+  const now = config.clock.now();
+  const renamed = await config.storage.update("passkey", own, {
+    name: input.name,
+    updatedAt: now,
+  });
+  if (renamed !== 1) return fail("not_found");
+  // A parallel delete between the two statements leaves no row.
+  const row = await config.storage.findOne("passkey", own);
+  return row ? ok({ passkey: summary(row) }) : fail("not_found");
 }
 
 /** Thrown inside the delete's transaction when it took the last passkey of the passkey method. The throw undoes the delete. */

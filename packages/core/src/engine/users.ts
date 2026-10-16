@@ -21,15 +21,25 @@ const USER_NAME_MAX = 200;
 const NAME_REFUSED = /[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]|(?![\u200c\u200d])\p{Cf}/u;
 
 /**
- * The user name rule: a string of 1 to 200 UTF-16 code units, with no
- * character of NAME_REFUSED. The password sign-up, the profile update, the
- * social fill, the `user.beforeCreate` patch, and the importer (plan 9b)
- * apply it, so one rule holds for all.
+ * The rule of a name that other people or other devices show: a string of 1
+ * to `max` UTF-16 code units, with no character of NAME_REFUSED. The user
+ * name and the passkey name (plan 12a Task 19) apply it, so one character
+ * rule holds for both.
  */
-export function validUserName(name: string): boolean {
+export function validShownName(name: string, max: number): boolean {
   // A JS caller can pass any value; an array has a length and reads as text (review L1).
   if (typeof name !== "string") return false;
-  return name.length >= 1 && name.length <= USER_NAME_MAX && !NAME_REFUSED.test(name);
+  return name.length >= 1 && name.length <= max && !NAME_REFUSED.test(name);
+}
+
+/**
+ * The user name rule: `validShownName` with at most 200 code units. The
+ * password sign-up, the profile update, the social fill, the
+ * `user.beforeCreate` patch, and the importer (plan 9b) apply it, so one
+ * rule holds for all.
+ */
+export function validUserName(name: string): boolean {
+  return validShownName(name, USER_NAME_MAX);
 }
 
 /** The longest image URL. LinkedIn's signed picture URLs pass 255 characters. */
@@ -129,10 +139,16 @@ export async function claimEmail(
 ): Promise<void> {
   verified.claimed(userId);
   // First, so a concurrent session insert for this user sees the verified flag and undoes itself (see the conditional update after each session insert).
-  await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
-    emailVerified: true,
-    updatedAt: now,
-  });
+  // Only an unverified row: of two proofs of one user at once, one claims (plan 12a Task 18, review M1).
+  const flipped = await tx.update(
+    "user",
+    [
+      { field: "id", op: "eq", value: userId },
+      { field: "emailVerified", op: "eq", value: false },
+    ],
+    { emailVerified: true, updatedAt: now },
+  );
+  if (flipped === 0) throw new ClaimLostError();
   const where: Where<"identity">[] = [
     { field: "userId", op: "eq", value: userId },
     { field: "provider", op: "ne", value: "email" },
@@ -184,6 +200,20 @@ export type BeforeResolveWrite = (
   user: UserRow,
   created: boolean,
 ) => Promise<void>;
+
+/**
+ * Thrown by `claimEmail` when another flow verified the user after this
+ * transaction read it as unverified (plan 12a Task 18, review M1). The throw
+ * undoes this transaction. Each flow catches it outside, and runs once more:
+ * the retry finds a verified user and claims nothing, so the pair of verify
+ * hooks fires once, for the flow that claimed.
+ */
+export class ClaimLostError extends Error {
+  constructor() {
+    super("authtempo: another flow claimed this user first");
+    this.name = "ClaimLostError";
+  }
+}
 
 /**
  * Thrown inside a transaction when a claim verified the user after this
@@ -313,6 +343,8 @@ export async function findOrCreateUserByEmail<T>(
       ) {
         continue;
       }
+      // Another proof claimed the user first (review M1): the retry signs in the verified user.
+      if (attempt === 0 && err instanceof ClaimLostError) continue;
       throw err;
     }
   }

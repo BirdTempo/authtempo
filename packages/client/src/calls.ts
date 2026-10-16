@@ -31,6 +31,7 @@ export const CLIENT_CALLS = [
   { operation: "passkey.signIn.verify", method: "POST", path: "/passkey/authenticate/verify" },
   { operation: "passkeys.list", method: "GET", path: "/passkeys" },
   { operation: "passkeys.delete", method: "POST", path: "/passkeys/delete" },
+  { operation: "passkeys.rename", method: "POST", path: "/passkeys/rename" },
   { operation: "password.signUp", method: "POST", path: "/password/sign-up" },
   { operation: "password.signIn", method: "POST", path: "/password/sign-in" },
   { operation: "password.resendVerification", method: "POST", path: "/password/verify/resend" },

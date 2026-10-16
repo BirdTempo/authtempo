@@ -68,6 +68,40 @@ describe("passkeys through the client", () => {
     expect(empty.ok && empty.value).toEqual([]);
   });
 
+  it("renames a passkey, and refuses a name of another rule or the id of another user's passkey (plan 12a)", async () => {
+    const server = passkeyServer();
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
+    const { client } = await cookieClient(server, softSeam(soft));
+    const reg = await client.passkey.register({ name: "laptop" });
+    if (!reg.ok) throw new Error(reg.code);
+    const renamed = await client.passkeys.rename({ id: reg.value.id, name: "Work laptop" });
+    expect(renamed).toEqual({ ok: true, value: { ...reg.value, name: "Work laptop" } });
+    const list = await client.passkeys.list();
+    expect(list.ok && list.value.map((p) => p.name)).toEqual(["Work laptop"]);
+    expect(await client.passkeys.rename({ id: reg.value.id, name: "a\u202eb" })).toEqual({
+      ok: false,
+      code: "invalid_body",
+      status: 400,
+    });
+    // Another user's passkey answers as an unknown id.
+    const bob = createClient({
+      baseURL: BASE_URL,
+      fetch: inProcessFetch(server.auth).fetch,
+      webauthn: softSeam(soft),
+    });
+    const req = await bob.magicLink.request({ email: "bob@example.com" });
+    if (!req.ok) throw new Error(req.code);
+    const v = await bob.magicLink.verify({ token: tokenFromMail(server.mail.at(-1)?.text ?? "") });
+    if (!v.ok) throw new Error(v.code);
+    expect(await bob.passkeys.rename({ id: reg.value.id, name: "Mine" })).toEqual({
+      ok: false,
+      code: "not_found",
+      status: 404,
+    });
+    const after = await client.passkeys.list();
+    expect(after.ok && after.value.map((p) => p.name)).toEqual(["Work laptop"]);
+  });
+
   it("reaches the register and management routes with a bearer token and no cookie (plan 4 input)", async () => {
     const server = passkeyServer();
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });

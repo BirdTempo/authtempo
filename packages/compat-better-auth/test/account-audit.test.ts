@@ -4,10 +4,11 @@ import {
   createPbkdf2PasswordHash,
   systemClock,
 } from "@authtempo/core";
+import { SoftAuthenticator } from "@authtempo/core/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APIError } from "../src/errors.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
-import { magicLink } from "../src/plugins.js";
+import { magicLink, passkey } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
@@ -35,17 +36,18 @@ const sessionPair = (res: Response) =>
   (res.headers.getSetCookie().find((c) => c.startsWith(`${COOKIE_NAME}=`)) ?? "").split(";")[0] ??
   "";
 
-/** A shim on a memory database, with the magic link to sign in. */
+/** A shim on a memory database, with the magic link to sign in. `plugins` adds to the magic link. */
 function instance(extra: Partial<BetterAuthOptions> = {}) {
   const links: string[] = [];
   const database = memoryDatabase();
+  const { plugins = [], ...rest } = extra;
   const options: BetterAuthOptions = {
     baseURL: BASE,
     secret: SECRET,
     database,
     trustedOrigins: [BASE],
-    plugins: [magicLink({ sendMagicLink: async ({ url }) => void links.push(url) })],
-    ...extra,
+    plugins: [magicLink({ sendMagicLink: async ({ url }) => void links.push(url) }), ...plugins],
+    ...rest,
   };
   const auth = betterAuth(options);
   /** A verified user and the cookie of its session, by the magic link. */
@@ -227,5 +229,92 @@ describe("Task 18 email verification callbacks", () => {
     await signUp("cy@example.com");
     await expect(s.signedIn("cy@example.com")).rejects.toThrow("the magic link answered 403");
     expect(calls).toEqual([["before", "cy@example.com", false, "", undefined]]);
+  });
+});
+
+describe("Task 19 update-passkey", () => {
+  it("maps POST /passkey/update-passkey onto the rename", async () => {
+    const rp = { rpID: "api.example.com", rpName: "Example", origin: BASE };
+    const s = instance({ plugins: [passkey(rp)] });
+    const tempo = s.auth.tempo.api;
+    /** A passkey by core's register ceremony, as the product makes one. */
+    async function added(token: string) {
+      const me = await tempo.getSession(token);
+      if (!me) throw new Error("no session");
+      const soft = await SoftAuthenticator.create({ rpID: rp.rpID, origin: BASE });
+      const options = await tempo.passkeyRegistrationOptions({ user: me.user });
+      if (!options.ok) throw new Error(options.code);
+      const r = await tempo.verifyPasskeyRegistration({
+        user: me.user,
+        response: await soft.register(options.value.challenge),
+        name: "Phone",
+      });
+      if (!r.ok) throw new Error(r.code);
+      return { user: me.user, key: r.value };
+    }
+    const ada = await s.signedIn("ada@example.com");
+    const bob = await s.signedIn("bob@example.com");
+    const mine = await added(ada.token);
+    const theirs = await added(bob.token);
+    const update = (cookie: string, body: unknown) =>
+      s.auth.handler(
+        new Request(`${PATH}/passkey/update-passkey`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE, cookie },
+          body: JSON.stringify(body),
+        }),
+      );
+    // Better Auth 1.7.2 trims the name and answers { passkey } (@better-auth/passkey dist/index.mjs:634, :665).
+    const res = await update(ada.cookie, { id: mine.key.id, name: "  Work laptop " });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      passkey: {
+        id: mine.key.id,
+        name: "Work laptop",
+        userId: mine.user.id,
+        credentialID: mine.key.credentialId,
+        deviceType: mine.key.deviceType,
+        backedUp: mine.key.backedUp,
+        createdAt: mine.key.createdAt.toISOString(),
+      },
+    });
+    // Another user's passkey answers as an unknown id: Better Auth's code, with no oracle.
+    for (const id of [theirs.key.id, "pk_unknown"]) {
+      const missing = await update(ada.cookie, { id, name: "Mine" });
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({
+        code: "PASSKEY_NOT_FOUND",
+        message: "Passkey not found",
+      });
+    }
+    const rows = await s.auth.tempo.api.listPasskeys({ user: theirs.user });
+    expect(rows.ok && rows.value.map((p) => p.name)).toEqual(["Phone"]);
+    // A name that is empty after the trim, a missing name, or a name of another rule.
+    for (const body of [
+      { id: mine.key.id, name: "   " },
+      { id: mine.key.id },
+      { id: mine.key.id, name: "a\u202eb" },
+    ]) {
+      const refused = await update(ada.cookie, body);
+      expect(refused.status, JSON.stringify(body)).toBe(400);
+      expect(await refused.json()).toMatchObject({ code: "VALIDATION_ERROR" });
+    }
+    const unauthorized = await update("", { id: mine.key.id, name: "Mine" });
+    expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.json()).toMatchObject({ code: "UNAUTHORIZED" });
+    const list = await tempo.listPasskeys({ user: mine.user });
+    expect(list.ok && list.value.map((p) => p.name)).toEqual(["Work laptop"]);
+    // Without the passkey plugin, core's router answers the path 404.
+    const off = instance();
+    const you = await off.signedIn("cy@example.com");
+    const none = await off.auth.handler(
+      new Request(`${PATH}/passkey/update-passkey`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, cookie: you.cookie },
+        body: JSON.stringify({ id: "pk_x", name: "Mine" }),
+      }),
+    );
+    expect(none.status).toBe(404);
+    expect(await none.json()).toEqual({ error: "not_found" });
   });
 });

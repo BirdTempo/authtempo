@@ -1,3 +1,4 @@
+import type { PasskeySummaryJSON } from "@authtempo/client";
 import type { Auth, SessionSummary } from "@authtempo/core";
 import {
   APIError,
@@ -18,11 +19,12 @@ import {
 } from "./api.js";
 import { translate } from "./email-otp.js";
 import type { Mapped } from "./map-options.js";
-import { listedSession, toNext } from "./shapes.js";
+import { listedSession, toNext, toPasskey } from "./shapes.js";
 
 /**
  * Better Auth 1.7.2's account paths (dist/api/routes/session.mjs,
- * update-user.mjs, and account.mjs, read 2026-10-17), served by
+ * update-user.mjs, and account.mjs, read 2026-10-17), and the passkey rename
+ * of @better-auth/passkey 1.7.2 (dist/index.mjs:630, Task 19), served by
  * `auth.handler` in Better Auth's shapes (plan 12a). Each posts core's own
  * route, so core's router applies its Origin rule, its fetch-metadata rule,
  * CORS, and the cookie renewals. The shim keeps only Better Auth's checks
@@ -39,6 +41,7 @@ export const ACCOUNT_PATHS: readonly string[] = [
   "/list-accounts",
   "/link-social",
   "/unlink-account",
+  "/passkey/update-passkey",
 ];
 
 /** The GET paths. Every other path is a POST. */
@@ -116,7 +119,7 @@ async function answer(
   return Response.json({ code: to, message: messageOf(to) }, { status: COMPAT_CODES[to], headers });
 }
 
-/** The answer to one of the ten paths, or null for any other request. */
+/** The answer to one of the eleven paths, or null for any other request. */
 export async function accountRoute(
   auth: Auth,
   mapped: Mapped,
@@ -128,6 +131,8 @@ export async function accountRoute(
   if (!ACCOUNT_PATHS.includes(path)) return null;
   // Any other method, an OPTIONS preflight too, goes to core's router.
   if (request.method !== (GET_PATHS.includes(path) ? "GET" : "POST")) return null;
+  // Without the passkey plugin, core's router answers the path 404, as for any path it does not serve.
+  if (path === "/passkey/update-passkey" && !mapped.config.passkey) return null;
   /** One core route with the caller's headers: the cookie, the Origin, and the client IP. */
   const core = (method: "GET" | "POST", to: string, body?: Body) => {
     const headers = new Headers(request.headers);
@@ -233,6 +238,21 @@ export async function accountRoute(
           success: true,
           message: "User deleted",
         }));
+      }
+      case "/passkey/update-passkey": {
+        const id = required(body, "id");
+        // Better Auth 1.7.2 trims the name, then needs one character
+        // (@better-auth/passkey dist/index.mjs:634). Core refuses an empty name.
+        const name = required(body, "name").trim();
+        return answer(
+          await core("POST", "/passkeys/rename", { id, name }),
+          async (b) => ({
+            passkey: toPasskey(b.passkey as PasskeySummaryJSON, (await caller()).user.id),
+          }),
+          // Better Auth answers 401 for another user's passkey (authorization.mjs:35).
+          // Core answers it as an unknown id, so the answer tells nothing of it.
+          { not_found: "PASSKEY_NOT_FOUND" },
+        );
       }
       case "/link-social": {
         const refused = LINK_NOT_SUPPORTED.filter((k) => body[k] !== undefined);

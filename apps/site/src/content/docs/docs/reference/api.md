@@ -44,7 +44,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | Sessions | `getSession(token)`, `signOut(token)`, `setActiveOrganization` |
 | Magic link | `requestMagicLink`, `verifyMagicLink` |
 | Social sign-in | `startSocial`, `startLink`, `completeSocial` |
-| Passkeys | `passkeyRegistrationOptions`, `verifyPasskeyRegistration`, `passkeyAuthenticationOptions`, `verifyPasskeyAuthentication`, `listPasskeys`, `deletePasskey` |
+| Passkeys | `passkeyRegistrationOptions`, `verifyPasskeyRegistration`, `passkeyAuthenticationOptions`, `verifyPasskeyAuthentication`, `listPasskeys`, `deletePasskey`, `renamePasskey`. `renamePasskey` needs no fresh session |
 | Handoff | `startHandoff`, `continueHandoff`, `redeemHandoff` |
 | Organizations | `createOrganization`, `listOrganizations`, `updateOrganization`, `deleteOrganization`, `listMembers`, `addMember`, `updateMemberRole`, `removeMember`, `inviteMember`, `listInvitations`, `revokeInvitation`, `acceptInvitation`, `declineInvitation` |
 | `api.tokens` | `create`, `list`, `revoke`, `current` |

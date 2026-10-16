@@ -547,6 +547,44 @@ describe("createAuthClient: the other calls the apps make", () => {
     });
     expect((await c.passkey.listUserPasskeys()).data).toEqual([]);
   });
+
+  it("renames a passkey as Better Auth's updatePasskey does, and keeps an empty register name as none (plan 12a)", async () => {
+    const s = server({
+      plugins: [passkey({ rpID: "example.com", rpName: "Example", origin: BASE })],
+    });
+    const soft = await SoftAuthenticator.create({ rpID: "example.com", origin: BASE });
+    const webauthn: BrowserWebAuthn = {
+      create: async (options) => soft.register(options.challenge),
+      get: async (options) => soft.authenticate(options.challenge),
+    };
+    await plain(s).signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+    const token = await s.verifiedToken("pat@example.com");
+    const c = plain(s, { headers: { authorization: `Bearer ${token}` }, webauthn });
+    // Better Auth 1.7.2 trims the register name and keeps an empty one; core keeps none.
+    const added = await c.passkey.addPasskey({ name: "  " });
+    expect(added.error).toBeNull();
+    expect(added.data?.name).toBeNull();
+    const id = added.data?.id ?? "";
+    const renamed = await c.passkey.updatePasskey({ id, name: " Work laptop  " });
+    expect(renamed).toEqual({
+      data: { passkey: { ...added.data, name: "Work laptop" } },
+      error: null,
+    });
+    expect((await c.passkey.listUserPasskeys()).data?.map((p) => p.name)).toEqual(["Work laptop"]);
+    expect(await c.passkey.updatePasskey({ id: "pk_unknown", name: "Mine" })).toEqual({
+      data: null,
+      error: {
+        code: "PASSKEY_NOT_FOUND",
+        message: "Passkey not found",
+        status: 404,
+        statusText: "Not Found",
+      },
+    });
+    expect((await c.passkey.updatePasskey({ id, name: "   " })).error).toMatchObject({
+      code: "VALIDATION_ERROR",
+      status: 400,
+    });
+  });
 });
 
 function memoryStorage() {

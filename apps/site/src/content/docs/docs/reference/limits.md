@@ -61,6 +61,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke and revoke-others together |
 | `user-update:user:<userId>` | 15 minutes | 30 | Profile update |
+| `passkey-rename:user:<userId>` | 15 minutes | 30 | Passkey rename, also for an unknown id. A refused name counts no try |
 | `email-change:user:<userId>` | 1 hour | 5 | Change of address request |
 | `email-change:email:<email>` | 15 minutes | 3 | Change of address request, per new address |
 | `email-change-confirm:ip:<ip>` | 15 minutes | 20 | Change of address link confirm |

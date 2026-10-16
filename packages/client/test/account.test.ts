@@ -323,6 +323,18 @@ describe("the shape of each 200 answer (plan 12a)", () => {
       ["{}", '{"ok":false,"current":true}', '{"ok":true}', '{"ok":true,"current":"yes"}'],
     ],
     ["sessions.revokeOthers", (c) => c.sessions.revokeOthers(), ["{}", '{"ended":"2"}']],
+    [
+      "passkeys.rename",
+      (c) => c.passkeys.rename({ id: "p", name: "Phone" }),
+      [
+        "{}",
+        '{"passkey":null}',
+        '{"id":"p","name":"Phone","createdAt":"t"}',
+        '{"passkey":{"id":1,"name":"Phone","createdAt":"t"}}',
+        '{"passkey":{"id":"p","name":1,"createdAt":"t"}}',
+        '{"passkey":{"id":"p","name":"Phone"}}',
+      ],
+    ],
     ["reauth.password", (c) => c.reauth.password({ password: "p" }), ["{}", '{"freshUntil":1}']],
     ["reauth.requestEmailCode", (c) => c.reauth.requestEmailCode(), ["{}", '{"sent":"yes"}']],
     [

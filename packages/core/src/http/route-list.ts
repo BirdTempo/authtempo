@@ -72,6 +72,7 @@ export const ROUTES = Object.freeze([
   { method: "POST", path: "/passkey/authenticate/verify", feature: "passkey" },
   { method: "GET", path: "/passkeys", feature: "passkey" },
   { method: "POST", path: "/passkeys/delete", feature: "passkey" },
+  { method: "POST", path: "/passkeys/rename", feature: "passkey" },
   { method: "POST", path: "/password/sign-up", feature: "password" },
   { method: "POST", path: "/password/sign-in", feature: "password" },
   { method: "GET", path: "/password/verify", feature: "password" },

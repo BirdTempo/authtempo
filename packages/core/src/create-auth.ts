@@ -72,6 +72,7 @@ import {
   type PasskeySummary,
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
+  renamePasskey,
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "./engine/passkeys.js";
@@ -393,6 +394,12 @@ export interface AuthApi {
   listPasskeys(input: { user: UserRow }): Promise<Result<PasskeySummary[]>>;
   /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
   deletePasskey(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
+  /** The rename of `POST /passkeys/rename`. A name is no way in, so it needs no fresh session (plan 12a). */
+  renamePasskey(input: {
+    user: UserRow;
+    id: string;
+    name: string;
+  }): Promise<Result<{ passkey: PasskeySummary }>>;
   startHandoff(input: HandoffStart): Promise<Result<{ handoffId: string }>>;
   continueHandoff(input: {
     handoffId: string;
@@ -560,6 +567,7 @@ export function createAuth(input: AuthConfig): Auth {
       verifyPasskeyAuthentication: (i) => verifyPasskeyAuthentication(config, i),
       listPasskeys: (i) => listPasskeys(config, i),
       deletePasskey: (i) => deletePasskey(config, i),
+      renamePasskey: (i) => renamePasskey(config, i),
       startHandoff: (i) => startHandoff(config, i),
       continueHandoff: (i) => continueHandoff(config, i),
       redeemHandoff: (i) => redeemHandoff(config, i),

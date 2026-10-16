@@ -751,8 +751,10 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     },
     passkey: {
       addPasskey(input) {
-        const name = input?.name;
-        return run((c) => c.passkey.register(name !== undefined ? { name } : {}), passkeyOf);
+        // Better Auth 1.7.2 trims the name and keeps an empty one (@better-auth/passkey
+        // dist/index.mjs:306). Core's name rule needs one character, so an empty name goes as none.
+        const name = input?.name?.trim();
+        return run((c) => c.passkey.register(name ? { name } : {}), passkeyOf);
       },
       listUserPasskeys() {
         return run(
@@ -764,6 +766,15 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         return run(
           (c) => c.passkeys.delete({ id }),
           () => ({ status: true as const }),
+        );
+      },
+      updatePasskey({ id, name }) {
+        return run(
+          // Better Auth 1.7.2 trims the name (@better-auth/passkey dist/index.mjs:634).
+          (c) => c.passkeys.rename({ id, name: name.trim() }),
+          (v) => ({ passkey: passkeyOf(v) }),
+          // Core answers another user's passkey as an unknown id, with no oracle.
+          (f) => (f.code === "not_found" ? "PASSKEY_NOT_FOUND" : undefined),
         );
       },
     },

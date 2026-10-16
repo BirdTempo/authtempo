@@ -375,6 +375,20 @@ gains no account calls. A client app posts these paths, or calls
 | `databaseHooks.user` and `databaseHooks.account` map (see "Hooks"). A credential account fires no account hook, and the user delete fires none | Core's password row is not an identity |
 | `POST /reauth/email` answers 404 | Better Auth has no re-authentication code |
 
+The passkey rename of `@better-auth/passkey` 1.7.2 is a path of
+`auth.handler` and a call of the shim's client: `POST
+/passkey/update-passkey` and `passkey.updatePasskey({ id, name })`. Both
+call core's `POST /passkeys/rename` and answer `{ passkey }`. The server has
+no `auth.api.updatePasskey`, as it has no other passkey call.
+
+| Difference | Why |
+| --- | --- |
+| The id of another user's passkey answers `PASSKEY_NOT_FOUND` (404), as an unknown id does. Better Auth answers 401 `YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY` | The answer must tell nothing about the passkeys of another user |
+| A name has 1 to 64 characters after the trim, with no control or format character except the zero-width joiners. Else `VALIDATION_ERROR` (400) | Core's passkey name rule. A bidi override must not make one passkey read as another |
+| The answer's passkey has no `publicKey`, `counter`, `transports`, or `aaguid` | Core keeps them out of its answers |
+| `passkey.addPasskey` sends a name that is empty after the trim as no name, so the passkey has the name `null` | Better Auth keeps an empty name. Core's name rule needs one character |
+| 30 renames per user in 15 minutes, then `TOO_MANY_REQUESTS` (429) | Core's limit `passkey-rename:user:<userId>` |
+
 ## Client
 
 `createAuthClient` from `better-auth/react` or `better-auth/client` talks to
@@ -392,8 +406,8 @@ that are core's own routes (core `http/routes`, read 2026-10-10): `POST
 /sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
 core's magic link route. With the `magicLink` plugin, a Better Auth-era link
 answers `invalid_token`. Without the plugin, it answers 404. The handler
-serves `/get-session` and the ten account paths of plan 12a in Better Auth's
-shapes, so they are not in this list. See "The session read" and "Account operations". The email code paths are not in
+serves `/get-session`, the ten account paths of plan 12a, and
+`/passkey/update-passkey` in Better Auth's shapes, so they are not in this list. See "The session read" and "Account operations". The email code paths are not in
 it either (see "Email codes").
 
 - Core: `/account-info`, `/callback/:id`, `/change-password`,
@@ -416,8 +430,7 @@ it either (see "Email codes").
 - Magic link: `/sign-in/magic-link`, `/magic-link/verify` (see above).
 - Passkey: `/passkey/delete-passkey`, `/passkey/generate-authenticate-options`,
   `/passkey/generate-register-options`, `/passkey/list-user-passkeys`,
-  `/passkey/update-passkey`, `/passkey/verify-authentication`,
-  `/passkey/verify-registration`.
+  `/passkey/verify-authentication`, `/passkey/verify-registration`.
 - Expo: `/expo-authorization-proxy`.
 
 Results keep Better Auth's `{ data, error }` shape. `error.code` is Better
@@ -513,6 +526,7 @@ checks each row here.
 | `ACCOUNT_NOT_FOUND` | 400 | `unlinkAccount` with an id that is not the caller's account (plan 12a) |
 | `CHANGE_EMAIL_DISABLED` | 400 | `changeEmail` without `user.changeEmail.enabled` (plan 12a) |
 | `METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED` | 405 | `POST /get-session` without `session.deferSessionRefresh` (plan 12a) |
+| `PASSKEY_NOT_FOUND` | 404 | `POST /passkey/update-passkey` or `passkey.updatePasskey` with an id that is not a passkey of the caller (plan 12a) |
 
 On Expo, pass `expo-secure-store` as `storage`. The client accepts any object
 with `getItem` and `setItem`, as Better Auth does. With a plain store, such as

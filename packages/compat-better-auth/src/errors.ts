@@ -130,6 +130,11 @@ export const COMPAT_CODES = {
   // Plan 12a. POST /get-session with deferSessionRefresh off (@better-auth/core
   // dist/error/codes.mjs:50 and better-auth dist/api/routes/session.mjs:37, read 2026-10-17).
   METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED: 405,
+  // Plan 12a Task 19. @better-auth/passkey 1.7.2's name and status for an unknown
+  // passkey id (dist/index.mjs:640, dist/version-D9KSwkEL.mjs:7, and better-auth
+  // dist/api/middlewares/authorization.mjs:32, read 2026-10-17). Better Auth answers
+  // 401 for another user's passkey; core answers that as an unknown id, with no oracle.
+  PASSKEY_NOT_FOUND: 404,
 } as const;
 
 export type CompatCode = keyof typeof COMPAT_CODES;

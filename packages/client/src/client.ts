@@ -246,6 +246,12 @@ export interface Client {
   passkeys: {
     list(): Promise<ClientResult<PasskeySummaryJSON[]>>;
     delete(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    /**
+     * Renames one passkey of the caller (plan 12a). A name has 1 to 64
+     * characters, with no control or format character except the zero-width
+     * joiners. The rename needs no fresh session.
+     */
+    rename(input: { id: string; name: string }): Promise<ClientResult<PasskeySummaryJSON>>;
   };
   /**
    * Every operation answers `not_found` when the server runs without the `password` config.
@@ -648,6 +654,12 @@ const isIdentityList = (v: unknown): v is IdentityListJSON =>
   ) &&
   typeof v.password === "boolean" &&
   typeof v.passkeys === "number";
+const isPasskeyAnswer = (v: unknown): v is { passkey: PasskeySummaryJSON } =>
+  isRecord(v) &&
+  isRecord(v.passkey) &&
+  typeof v.passkey.id === "string" &&
+  (typeof v.passkey.name === "string" || v.passkey.name === null) &&
+  typeof v.passkey.createdAt === "string";
 const isRequestOptions = (v: unknown): v is PublicKeyCredentialRequestOptionsJSON =>
   isRecord(v) && typeof v.challenge === "string";
 
@@ -1118,6 +1130,10 @@ export function createClient(options: ClientOptions): Client {
         return r.ok ? ok(r.value.passkeys) : r;
       },
       delete: (input) => send<{ ok: true }>("passkeys.delete", input),
+      async rename({ id, name }) {
+        const r = await shaped(send<unknown>("passkeys.rename", { id, name }), isPasskeyAnswer);
+        return r.ok ? ok(r.value.passkey) : r;
+      },
     },
     password,
     emailOtp: {

@@ -139,6 +139,13 @@ The shim's own codes `EMAIL_CAN_NOT_BE_UPDATED`, `FIELD_NOT_ALLOWED`, `ACCOUNT_N
 
 `GET /get-session` answers `{ session, user }`, or `null` with no session, as on Better Auth. With `session.deferSessionRefresh` off, `POST /get-session` answers `METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED` with 405, as on Better Auth.
 
+`POST /passkey/update-passkey` and the client's `passkey.updatePasskey({ id, name })` rename a passkey through core's `POST /passkeys/rename`. They answer `{ passkey }`, with the name trimmed, as on Better Auth. The differences:
+
+- The id of another user's passkey answers `PASSKEY_NOT_FOUND` with 404, as an unknown id does. Better Auth answers 401 there. The answer tells nothing about another user's passkeys.
+- A name has 1 to 64 characters after the trim, with no control or format character except the zero-width joiners. Else the answer is `VALIDATION_ERROR` with 400.
+- The passkey in the answer has no `publicKey`, `counter`, `transports`, or `aaguid`.
+- The [limit](/docs/reference/limits/) `passkey-rename:user:<userId>` allows 30 renames per 15 minutes.
+
 ## Next
 
 - [Move from Better Auth](/docs/migrate/better-auth/)

@@ -34,6 +34,7 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 4. On "Add a passkey", call `client.passkey.register({ name })`. The person must be signed in with a verified address.
 5. On "Sign in with a passkey", call `client.passkey.signIn()`.
 6. Treat the code `cancelled` as a normal event. Show no error.
+7. On a settings page, call `client.passkeys.rename({ id, name })` to rename a passkey. The rename needs a session, not a fresh session.
 
 <Code code={client} lang="ts" title="The two buttons" />
 
@@ -50,6 +51,8 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 - A passkey sign-in has no second factor gate. A passkey can also be a method of the [second factor](/docs/guides/second-factor/) after a password.
 - The register and the delete need a [fresh session](/docs/concepts/fresh-sessions/). A stale one answers `session_not_fresh`. Wrap the call in `client.withFresh`.
 - `api.passkeyRegistrationOptions` and `api.deletePasskey` take a user, so they apply no fresh rule. Call `api.session.requireFresh` first.
+- A passkey name has 1 to 64 characters, with no control or format character except the zero-width joiners. The register and the rename apply this rule.
+- The rename has the [limit](/docs/reference/limits/) `passkey-rename:user:<userId>` 30 per 15 minutes. It sends no notice mail.
 
 ## If it fails
 
@@ -58,7 +61,8 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 - [`passkey_failed`](/docs/reference/errors/#passkey_failed): an unknown passkey, a bad signature, or a passkey that is already registered.
 - [`invalid_token`](/docs/reference/errors/#invalid_token) and [`token_expired`](/docs/reference/errors/#token_expired): the challenge is spent or older than five minutes. Start again.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): too many ceremonies from the IP.
-- [`not_found`](/docs/reference/errors/#not_found): the passkey to delete does not belong to the caller.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): a passkey name that breaks the name rule.
+- [`not_found`](/docs/reference/errors/#not_found): the passkey to delete or to rename does not belong to the caller.
 - [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): the session is older than the fresh window. Re-authenticate, then send it again.
 
 ## Next

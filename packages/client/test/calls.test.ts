@@ -51,7 +51,7 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(73);
+    expect(CLIENT_CALLS).toHaveLength(74);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -79,6 +79,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.passkey.signIn();
     await c.passkeys.list();
     await c.passkeys.delete({ id: "p" });
+    await c.passkeys.rename({ id: "p", name: "Phone" });
     await c.password.signUp({ email: "a@b.c", password: "p" });
     await c.password.signIn({ email: "a@b.c", password: "p" });
     await c.password.resendVerification({ email: "a@b.c" });

@@ -87,6 +87,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `PasskeySummaryJSON[]` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `{ ok: true }` |
+| `client.passkeys.rename({ id, name })` | `POST /passkeys/rename` | `PasskeySummaryJSON`. No fresh session is needed |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `{ token }` and `PublicSession` |
 | `client.password.signUp({ email, password, name? })` | `POST /password/sign-up` | `{ token }` and `PublicSession` |
 | `client.password.signIn({ email, password, trustDevice?, next? })` | `POST /password/sign-in` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |

@@ -35,11 +35,12 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/session/refresh` | cookie or bearer | `{ user, session }`, and the renewed cookie when the refresh was due; 401 (plan 12a) |
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
 | POST | `/passkey/register/options` | session (fresh) | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified`, `session_not_fresh` |
-| POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed` |
+| POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body` (also a `name` that breaks the passkey name rule, see "Passkeys"), `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed` |
 | POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 `rate_limited` |
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
 | POST | `/passkeys/delete` | session (fresh), `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found`; 409 `last_credential` (the last way in, see "The last-credential guard"), `second_factor_last_method`, `conflict` |
+| POST | `/passkeys/rename` | session, `{ id, name }` | `{ passkey }` in the shape of `GET /passkeys` (plan 12a). No fresh rule: a name is no way in. 400 `invalid_body` (a `name` that breaks the passkey name rule, or any other field); 401; 404 `not_found` (an unknown id, or an id of another user); 429 `rate_limited` |
 | POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
@@ -380,6 +381,15 @@ as `response`. Plan 5's client package wraps this.
 `@authtempo/core/testing` exports `SoftAuthenticator`, a software
 authenticator on Web Crypto that produces both responses, so an app's
 tests prove the whole flow without a browser.
+
+The passkey name rule holds at the registration and at the rename (plan
+12a). A name is a string of 1 to 64 code units, under the character rule of
+a user name (see "Account"). A bidi override or a zero-width space must not
+make one passkey read as another in a device list. The rename
+(`POST /passkeys/rename`, `api.renamePasskey`) needs a session, not a fresh
+session. It sends no notice, because a name is not a credential. The id of
+another user's passkey answers `not_found`, as an unknown id does, by the
+same calls. Its limit is `passkey-rename:user:<userId>` (see "Account").
 
 `webauthn` in the config replaces the seam. The default is
 @simplewebauthn/server 14.0.3, which runs on Workers without
@@ -971,6 +981,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
 | `user-update:user:<userId>` | 15 minutes | 30 | `POST /user/update`, also when a hook refuses it. A refused body and an unverified user count no try |
+| `passkey-rename:user:<userId>` | 15 minutes | 30 | `POST /passkeys/rename`, also for an unknown id or another user's id. A refused name counts no try |
 | `email-change:user:<userId>` | 1 hour | 5 | `POST /user/change-email`. A refused body, a stale session, and an unverified user count no try |
 | `email-change:email:<new address>` | 15 minutes | 3 | `POST /user/change-email`, after the per-user key |
 | `email-change-confirm:ip:<ip>` | 15 minutes | 20 | `POST /user/change-email/confirm`. A malformed token counts no try |

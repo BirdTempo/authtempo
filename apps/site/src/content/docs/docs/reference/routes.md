@@ -274,7 +274,7 @@ These routes exist when the config sets `passkey`.
 | Field | Value |
 | --- | --- |
 | Needs | A session and a verified address |
-| Input | JSON `{ response, name? }` |
+| Input | JSON `{ response, name? }`. `name` follows the rule of [`POST /passkeys/rename`](#post-passkeys-rename) |
 | Answer | `{ passkey }` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified) |
 
@@ -313,6 +313,15 @@ These routes exist when the config sets `passkey`.
 | Input | JSON `{ id }` |
 | Answer | `{ ok: true }` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`not_found`](/docs/reference/errors/#not_found), [`second_factor_last_method`](/docs/reference/errors/#second_factor_last_method), [`last_credential`](/docs/reference/errors/#last_credential), [`conflict`](/docs/reference/errors/#conflict) |
+
+<h3 id="post-passkeys-rename"><code>POST /passkeys/rename</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session. A fresh session is not needed: a name is no way in |
+| Input | JSON `{ id, name }`. `name` has 1 to 64 characters, with no control or format character except the zero-width joiners |
+| Answer | `{ passkey }`, in the shape of an item of `GET /passkeys`. No notice mail goes |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found) (an unknown id, or the id of another user's passkey), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## Passwords
 
