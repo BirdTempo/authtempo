@@ -35,7 +35,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/session/refresh` | cookie or bearer | `{ user, session }`, and the renewed cookie when the refresh was due; 401 (plan 12a) |
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
 | POST | `/passkey/register/options` | session (fresh) | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified`, `session_not_fresh` |
-| POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body` (also a `name` that breaks the passkey name rule, see "Passkeys"), `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed` |
+| POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed`. A `name` that is blank after the trim, or that breaks the passkey name rule, is stored as no name (see "Passkeys") |
 | POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 `rate_limited` |
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
@@ -382,10 +382,13 @@ as `response`. Plan 5's client package wraps this.
 authenticator on Web Crypto that produces both responses, so an app's
 tests prove the whole flow without a browser.
 
-The passkey name rule holds at the registration and at the rename (plan
-12a). A name is a string of 1 to 64 code units, under the character rule of
-a user name (see "Account"). A bidi override or a zero-width space must not
-make one passkey read as another in a device list. The rename
+The passkey name rule (plan 12a): a name is a string of 1 to 64 code
+units, under the character rule of a user name (see "Account"). A bidi
+override or a zero-width space must not make one passkey read as another in
+a device list. The rename refuses a name that breaks the rule. The
+registration never refuses a credential for its name, because the device
+has made the credential by then. It stores a name that is blank after the
+trim, or that breaks the rule, as no name. The rename
 (`POST /passkeys/rename`, `api.renamePasskey`) needs a session, not a fresh
 session. It sends no notice, because a name is not a credential. The id of
 another user's passkey answers `not_found`, as an unknown id does, by the

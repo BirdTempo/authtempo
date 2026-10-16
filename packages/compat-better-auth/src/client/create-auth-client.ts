@@ -752,7 +752,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     passkey: {
       addPasskey(input) {
         // Better Auth 1.7.2 trims the name and keeps an empty one (@better-auth/passkey
-        // dist/index.mjs:306). Core's name rule needs one character, so an empty name goes as none.
+        // dist/index.mjs:306). Core stores a blank name as none, so it goes as none.
         const name = input?.name?.trim();
         return run((c) => c.passkey.register(name ? { name } : {}), passkeyOf);
       },

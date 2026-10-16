@@ -38,10 +38,22 @@ const PASSKEY_NAME_MAX = 64;
  * The passkey name rule: the character rule of a user name, with at most 64
  * code units (plan 12a Task 19). The device list and the notices show the
  * name, so a bidi override must not make one passkey read as another. The
- * registration and the rename apply it.
+ * rename refuses a name that breaks it; the registration stores no name.
  */
 function validPasskeyName(name: string): boolean {
   return validShownName(name, PASSKEY_NAME_MAX);
+}
+
+/**
+ * The stored name of a registration (plan 12a Task 19, review M2). The device
+ * has made its credential before the server sees the name, so a name never
+ * refuses the credential. A name that is blank after the trim, or that breaks
+ * the passkey name rule, is stored as no name, as the social fill does. Only
+ * the rename refuses such a name.
+ */
+function registeredName(name: string | undefined): string | null {
+  if (name === undefined || name.trim() === "") return null;
+  return validPasskeyName(name) ? name : null;
 }
 
 /**
@@ -186,8 +198,6 @@ export async function verifyPasskeyRegistration(
 ): Promise<Result<PasskeySummary>> {
   if (!config.passkey) return fail("not_found");
   if (!input.user.emailVerified) return fail("email_unverified");
-  // Before the consume, so a bad name does not spend the ceremony's challenge.
-  if (input.name !== undefined && !validPasskeyName(input.name)) return fail("invalid_body");
   const challenge = challengeFromResponse(input.response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, input.user.id, "registration");
@@ -219,7 +229,7 @@ export async function verifyPasskeyRegistration(
       transports: registered.transports ? registered.transports.join(",") : null,
       deviceType: registered.deviceType,
       backedUp: registered.backedUp,
-      name: input.name ?? null,
+      name: registeredName(input.name),
       createdAt: now,
       updatedAt: now,
     });

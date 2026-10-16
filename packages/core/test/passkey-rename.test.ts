@@ -296,10 +296,12 @@ describe("POST /passkeys/rename (plan 12a Task 19)", () => {
   });
 });
 
-describe("the passkey name at the registration (plan 12a Task 19)", () => {
-  it("applies the rename's name rule before the challenge is spent", async () => {
+describe("the passkey name at the registration (plan 12a Task 19, review M2)", () => {
+  /** A register ceremony through the route, with the body's name. */
+  async function register(name: string | undefined) {
     const auth = totpAuth({ passkey: RP });
     const s = await verifiedSession(auth);
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: BASE_URL });
     const options = await passkeyRegistrationOptions(auth.config, { user: s.user });
     if (!options.ok) throw new Error(options.code);
@@ -307,18 +309,43 @@ describe("the passkey name at the registration (plan 12a Task 19)", () => {
       options.value.challenge,
       new TextEncoder().encode(s.user.id),
     );
-    for (const [, name] of REFUSED)
-      expect(
-        await verifyPasskeyRegistration(auth.config, { user: s.user, response, name }),
-        JSON.stringify(name),
-      ).toMatchObject({ ok: false, code: "invalid_body" });
-    expect(await auth.storage.findMany("passkey", [])).toEqual([]);
-    // The challenge is not spent: the same ceremony passes with a name of the rule.
-    const added = await verifyPasskeyRegistration(auth.config, {
-      user: s.user,
-      response,
-      name: "\u{1f469}‍\u{1f4bb} key",
-    });
-    expect(added.ok && added.value.name).toBe("\u{1f469}‍\u{1f4bb} key");
+    const res = await handle(
+      post(
+        "/auth/passkey/register/verify",
+        { response, ...(name !== undefined ? { name } : {}) },
+        { cookie: `${auth.config.cookieName}=${s.token}` },
+      ),
+    );
+    return { res, rows: await auth.storage.findMany("passkey", []) };
+  }
+
+  /** Names that registered before Task 19, and the other names that the rename refuses. */
+  const STORED_AS_NONE: [string, string][] = [
+    ["an empty name", ""],
+    ["a blank name", "   "],
+    [
+      "the England flag (tag characters)",
+      "\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f} key",
+    ],
+    ["a soft hyphen", "caf\u00ade"],
+    ["a right-to-left override", "Phone\u202egnp.exe"],
+    ["65 code units", "x".repeat(65)],
+  ];
+
+  it.each(STORED_AS_NONE)("keeps the credential for %s, and stores no name", async (_, name) => {
+    const { res, rows } = await register(name);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { passkey: { name: unknown } }).passkey.name).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.name).toBeNull();
+  });
+
+  it("stores a name of the rule as given, and no name when the body has none", async () => {
+    const given = await register("\u{1f469}\u200d\u{1f4bb} key");
+    expect(given.res.status).toBe(200);
+    expect(given.rows.map((r) => r.name)).toEqual(["\u{1f469}\u200d\u{1f4bb} key"]);
+    const none = await register(undefined);
+    expect(none.res.status).toBe(200);
+    expect(none.rows.map((r) => r.name)).toEqual([null]);
   });
 });

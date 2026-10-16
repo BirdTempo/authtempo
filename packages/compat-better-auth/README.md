@@ -392,7 +392,7 @@ no `auth.api.updatePasskey`, as it has no other passkey call.
 | The id of another user's passkey answers `PASSKEY_NOT_FOUND` (404), as an unknown id does. Better Auth answers 401 `YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY` | The answer must tell nothing about the passkeys of another user |
 | A name has 1 to 64 characters after the trim, with no control or format character except the zero-width joiners. Else `VALIDATION_ERROR` (400) | Core's passkey name rule. A bidi override must not make one passkey read as another |
 | The answer's passkey has no `publicKey`, `counter`, `transports`, or `aaguid` | Core keeps them out of its answers |
-| `passkey.addPasskey` sends a name that is empty after the trim as no name, so the passkey has the name `null` | Better Auth keeps an empty name. Core's name rule needs one character |
+| `passkey.addPasskey` sends a name that is empty after the trim as no name, so the passkey has the name `null`. Core also stores a name that breaks its rule as `null` | Better Auth keeps an empty name. Core never refuses a new credential for its name |
 | 30 renames per user in 15 minutes, then `TOO_MANY_REQUESTS` (429) | Core's limit `passkey-rename:user:<userId>` |
 
 ## Client
