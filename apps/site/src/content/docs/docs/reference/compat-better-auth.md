@@ -119,6 +119,7 @@ Where the shim differs from Better Auth:
 | `listSessions` answers the clear token of each session | It answers the row id of each session in `token`. The shim stores the hash of a token, never the token. `revokeSession` takes that id or a clear token. |
 | A revoke of the caller's own session keeps the cookie | Through the handler, core clears it. |
 | Only the list, the unlink, and the delete need a fresh session | A revoke, the change of address, the link, the unlink, and the delete need one. A stale session answers `SESSION_NOT_FRESH` with 403. The list needs none. |
+| `/two-factor/disable`, `/two-factor/get-totp-uri`, and `/two-factor/generate-backup-codes` ask for the password only | They also need a fresh session, checked before the password. A stale session answers `SESSION_NOT_FRESH` with 403. |
 | A core route answers `{ error: "session_not_fresh" }` | Through the handler, the answer also carries `code: "SESSION_NOT_FRESH"`. |
 | `deleteUser({ password })` skips `freshAge` | It re-authenticates first. A wrong password answers `INVALID_EMAIL_OR_PASSWORD`, not `INVALID_PASSWORD`. |
 | `deleteUser` can mail a link with `token` and `callbackURL` | Each answers `NOT_SUPPORTED` with 501. The fresh session is the proof. |

@@ -202,6 +202,12 @@ export async function twoFactorRoute(
       backupCodes: r.value.backupCodes,
     });
   }
+  // Plan 12a (Task 12 review M1): the disable, the URI, and the backup codes
+  // take a user id, so core applies no fresh rule there. The shim applies it,
+  // before the password check, as core's own routes do (spec 8.15 item 1).
+  // A stale session then counts no password try.
+  const fresh = auth.api.session.requireFresh(session);
+  if (!fresh.ok) return failure(BETTER_AUTH_CODES.session_not_fresh, fresh.status);
   const proved = await pw.verify({ userId, password: body.password, ip });
   if (!proved.ok) return failure(codeFor(proved.code, path), statusFor(proved.code, proved.status));
   if (path === DISABLE) {

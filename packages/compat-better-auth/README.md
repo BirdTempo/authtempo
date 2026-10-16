@@ -342,6 +342,7 @@ gains no account calls. A client app posts these paths, or calls
 | `listSessions` answers the session id in `token`. `revokeSession` takes that id or a clear token | The shim stores the hash of a token, never the token |
 | A revoke of the caller's own session through the handler clears the session cookie, as `revokeSessions` does | Core's rule for a request that ended its own session |
 | A revoke, the change of address, the link, the unlink, and the delete need a fresh session. A stale session answers `SESSION_NOT_FRESH` (403) | ASVS 5.0.0 7.5.1 and 7.5.2. `session.freshAge` sets the window: default one day, rounded up to whole minutes |
+| `/two-factor/disable`, `/two-factor/get-totp-uri`, and `/two-factor/generate-backup-codes` need a fresh session too, checked before the password. A stale session answers `SESSION_NOT_FRESH` (403) | A password and a stolen session must not turn the factor off. Better Auth asks for the password only |
 | `listSessions` needs no fresh session, where Better Auth asks for one | A person can always view the sessions (ASVS 5.0.0 7.5.2) |
 | A core route through the handler, such as `POST /password/change`, adds `code: "SESSION_NOT_FRESH"` to core's 403 answer | The caller reads Better Auth's code on every path |
 | `session.freshAge: 0` is refused | The fresh rule is a promise of core |

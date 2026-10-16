@@ -678,6 +678,66 @@ describe("the fresh rule under the shim (plan 12a)", () => {
   });
 });
 
+describe("the fresh rule on the shim's second-factor paths (plan 12a, Task 12 review M1)", () => {
+  it("answers SESSION_NOT_FRESH on the disable, the URI, and the backup codes from a stale session, changes no row, and passes after a re-authentication", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t = instance(
+      {
+        session: { freshAge: 60 },
+        emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
+        authtempo: { passwordHash: fast },
+      },
+      [twoFactor({ accountLockout: { enabled: false } })],
+    );
+    await t.post("/password/sign-up", { email: "pat@example.com", password: PASSWORD }, "");
+    await t.post("/password/verify", { token: t.verifyMails.at(-1)?.token }, "");
+    const cookie = sessionPair(
+      await t.post("/password/sign-in", { email: "pat@example.com", password: PASSWORD }, ""),
+    );
+    const enable = await t.post("/two-factor/enable", { password: PASSWORD }, cookie);
+    const uri = ((await enable.json()) as { totpURI: string }).totpURI;
+    const secret = base32Decode(new URL(uri).searchParams.get("secret") ?? "");
+    const code = async () => totpCode(secret, new Date());
+    expect((await t.post("/two-factor/verify-totp", { code: await code() }, cookie)).status).toBe(
+      200,
+    );
+    const rows = async () =>
+      JSON.stringify([
+        await t.storage.findMany("totp", []),
+        await t.storage.findMany("secondFactor", []),
+      ]);
+    const before = await rows();
+    stale();
+    const paths = [
+      "/two-factor/get-totp-uri",
+      "/two-factor/generate-backup-codes",
+      "/two-factor/disable",
+    ];
+    // The right password and a wrong one: the rule comes before the password check.
+    for (const path of paths)
+      for (const password of [PASSWORD, "wrong password here"]) {
+        const res = await t.post(path, { password }, cookie);
+        expect({ path, password, status: res.status, code: await codeOf(res) }).toEqual({
+          path,
+          password,
+          status: 403,
+          code: "SESSION_NOT_FRESH",
+        });
+      }
+    expect(await rows()).toBe(before);
+    // A re-authentication with the password and the code makes the session fresh again.
+    expect(
+      (await t.post("/reauth", { password: PASSWORD, code: await code() }, cookie)).status,
+    ).toBe(200);
+    expect((await t.post(paths[0] ?? "", { password: PASSWORD }, cookie)).status).toBe(200);
+    expect((await t.post(paths[1] ?? "", { password: PASSWORD }, cookie)).status).toBe(200);
+    expect(await (await t.post(paths[2] ?? "", { password: PASSWORD }, cookie)).json()).toEqual({
+      status: true,
+    });
+    expect(await t.storage.findMany("secondFactor", [])).toEqual([]);
+  });
+});
+
 describe("the user hooks of the shim (plan 12a)", () => {
   it("maps databaseHooks.user.create.before: { data: { name } } sets the name, another field is dropped with one line, and false refuses", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
