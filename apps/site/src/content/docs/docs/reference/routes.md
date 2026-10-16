@@ -91,7 +91,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A fresh session |
 | Input | JSON `{ id }` |
-| Answer | `{ ok: true }`. The caller's own id also clears the session cookie. A session JWT of that session lives to its `exp` |
+| Answer | `{ ok: true, current }`. `current` is true for the caller's own id, which also clears the session cookie. A session JWT of that session lives to its `exp` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`not_found`](/docs/reference/errors/#not_found), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-sessions-revoke-others"><code>POST /sessions/revoke-others</code></h3>

@@ -24,7 +24,7 @@ vi.mock("../src/calls.js", async (importOriginal) => {
 
 const BASE = "https://api.example.com";
 
-/** A fetch that answers `{}` to every request but the session read, and keeps the method and the path under basePath. */
+/** A fetch that answers `{}` to every request and keeps the method and the path under basePath. */
 function recording() {
   const seen: string[] = [];
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -34,9 +34,6 @@ function recording() {
       .replace(/^\/auth/, "")
       .replace(/^\/social\/[^/]+\/link$/, "/social/:provider/link");
     seen.push(`${req.method} ${path}`);
-    // A session read answers a session, so sessions.revoke reaches its revoke (plan 12a).
-    if (path === "/session")
-      return Response.json({ user: { id: "u" }, session: { id: "s", expiresAt: "e" } });
     return Response.json({});
   }) as typeof globalThis.fetch;
   return { seen, fetch };

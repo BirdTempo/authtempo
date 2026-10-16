@@ -474,9 +474,8 @@ export interface Client {
   sessions: {
     list(): Promise<ClientResult<SessionSummaryJSON[]>>;
     /**
-     * Ends one session. The route's answer does not tell whose session it
-     * was, so the client reads `GET /session` first. `current` is true when
-     * `id` is the caller's own session: that session has ended.
+     * Ends one session. `current` is true when `id` is the caller's own
+     * session: that session has ended, and a bearer app clears its token.
      */
     revoke(input: { id: string }): Promise<ClientResult<{ ok: true; current: boolean }>>;
     /** Ends every other session of the person. `ended` is the count. */
@@ -611,6 +610,8 @@ const isOkTrue = (v: unknown): v is { ok: true } => isRecord(v) && v.ok === true
 const isSent = (v: unknown): v is { sent: true } => isRecord(v) && v.sent === true;
 const isFresh = (v: unknown): v is FreshJSON => isRecord(v) && typeof v.freshUntil === "string";
 const isEnded = (v: unknown): v is { ended: number } => isRecord(v) && typeof v.ended === "number";
+const isRevoked = (v: unknown): v is { ok: true; current: boolean } =>
+  isRecord(v) && v.ok === true && typeof v.current === "boolean";
 const isUserAnswer = (v: unknown): v is { user: PublicUserJSON } =>
   isRecord(v) &&
   isRecord(v.user) &&
@@ -876,15 +877,16 @@ export function createClient(options: ClientOptions): Client {
       const r = await shaped(send<unknown>("sessions.list"), isSessionList);
       return r.ok ? ok(r.value.sessions) : r;
     },
-    // The store reads again: the caller's own revoke ends its session.
+    // The store reads again: the caller's own revoke ends its session. The answer's
+    // `current` tells whose session ended. One read of the token (plan 11d Task 12 review, J1).
     revoke: ({ id }) =>
       changes(
-        (async (): Promise<ClientResult<{ ok: true; current: boolean }>> => {
-          // The route answers `{ ok: true }` for every session, so the session read tells whose it is.
-          const own = await shaped(send<unknown>("session"), isPublicSession);
-          if (!own.ok) return own;
-          const r = await shaped(send<unknown>("sessions.revoke", { id }), isOkTrue);
-          return r.ok ? ok({ ok: true, current: own.value.session.id === id }) : r;
+        (async () => {
+          const token = options.token ? await options.token() : null;
+          return shaped(
+            send<unknown>("sessions.revoke", { id }, undefined, undefined, token),
+            isRevoked,
+          );
         })(),
       ),
     revokeOthers: () => shaped(send<unknown>("sessions.revokeOthers", {}), isEnded),

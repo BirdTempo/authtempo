@@ -28,8 +28,9 @@ export async function signedOut(
   config: ResolvedConfig,
   request: Request,
   token: string | null,
+  body: Readonly<Record<string, unknown>> = { ok: true },
 ): Promise<Response> {
-  const res = json({ ok: true }, 200, {
+  const res = json(body, 200, {
     "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite),
   });
   const legacy = config.legacyCookieName;
@@ -94,10 +95,14 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
         if (!r.ok) return sent(respond(r), s.renewed);
         // The caller ended its own session: answer as the sign-out does
         // (review M1). The router does not clear the old name when the
-        // request carries both names, so `signedOut` does it.
+        // request carries both names, so `signedOut` does it. `current`
+        // tells a bearer client that its token ended (plan 12a Task 13 L1).
         if (r.value.current)
-          return signedOut(config, ctx.request, readSessionToken(config, ctx.request));
-        return sent(json({ ok: true }), s.renewed);
+          return signedOut(config, ctx.request, readSessionToken(config, ctx.request), {
+            ok: true,
+            current: true,
+          });
+        return sent(json({ ok: true, current: false }), s.renewed);
       },
     },
     {

@@ -300,7 +300,7 @@ describe("the revoke of one session (plan 12a)", () => {
       ),
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json()).toEqual({ ok: true, current: true });
     expect(res.headers.getSetCookie().join("\n")).toContain(`${auth.config.cookieName}=;`);
     expect(await resolveSession(auth.config, me.token)).toBeNull();
   });
@@ -320,6 +320,7 @@ describe("the revoke of one session (plan 12a)", () => {
       ),
     );
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, current: true });
     // startsWith: a toContain of "tempo_session=;" also matches the new name.
     expect(res.headers.getSetCookie().some((c) => c.startsWith(`${legacy}=;`))).toBe(true);
     // As the sign-out does: the old token's session ends too (review M1).
@@ -341,6 +342,7 @@ describe("the revoke of one session (plan 12a)", () => {
       ),
     );
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, current: false });
     expect(res.headers.getSetCookie()).toEqual([]);
     expect(await resolveSession(auth.config, me.token)).not.toBeNull();
   });

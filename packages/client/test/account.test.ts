@@ -31,13 +31,6 @@ function scripted(answers: Response[]) {
 
 const notFresh = () => Response.json({ error: "session_not_fresh" }, { status: 403 });
 
-/** The answer of `GET /session` for the session `s1`. */
-const sessionOf = (id: string) =>
-  Response.json({
-    user: { id: "u1", email: "a@b.c", emailVerified: true, name: null, image: null },
-    session: { id, expiresAt: "2026-10-20T00:00:00.000Z", activeOrganizationId: null },
-  });
-
 describe("withFresh (plan 12a)", () => {
   it("re-authenticates once on session_not_fresh and sends the change again", async () => {
     const { seen, fetch } = scripted([
@@ -131,6 +124,19 @@ describe("the settings operations (plan 12a)", () => {
     expect(await c.identities.link({ provider: "Not A Name" })).toEqual({
       ok: false,
       code: "invalid_body",
+      status: 0,
+    });
+    expect(seen).toHaveLength(1);
+  });
+
+  it("answers unexpected with status 0 for a link when the default navigate finds no location", async () => {
+    // No `navigate` option, and the test runtime has no `location`, as in a server render.
+    expect((globalThis as { location?: unknown }).location).toBeUndefined();
+    const { seen, fetch } = scripted([Response.json({ url: "https://accounts.example/a" })]);
+    const c = createClient({ baseURL: BASE, fetch, broadcast: false });
+    expect(await c.identities.link({ provider: "google" })).toEqual({
+      ok: false,
+      code: "unexpected",
       status: 0,
     });
     expect(seen).toHaveLength(1);
@@ -233,56 +239,69 @@ describe("the settings operations (plan 12a)", () => {
 });
 
 describe("sessions.revoke and the caller's own session (plan 12a)", () => {
-  it("reads the caller's session first, and answers current true for its own id", async () => {
-    const { seen, fetch } = scripted([sessionOf("s1"), Response.json({ ok: true })]);
+  it("sends one revoke, and answers current true from the answer for its own session", async () => {
+    const { seen, fetch } = scripted([Response.json({ ok: true, current: true })]);
     const c = createClient({ baseURL: BASE, fetch, broadcast: false });
     expect(await c.sessions.revoke({ id: "s1" })).toEqual({
       ok: true,
       value: { ok: true, current: true },
     });
-    expect(seen).toEqual([
-      { method: "GET", path: "/session", body: undefined },
-      { method: "POST", path: "/sessions/revoke", body: { id: "s1" } },
-    ]);
+    expect(seen).toEqual([{ method: "POST", path: "/sessions/revoke", body: { id: "s1" } }]);
   });
 
-  it("answers current false for another session's id", async () => {
-    const { fetch } = scripted([sessionOf("s1"), Response.json({ ok: true })]);
+  it("answers current false from the answer for another session", async () => {
+    const { seen, fetch } = scripted([Response.json({ ok: true, current: false })]);
     const c = createClient({ baseURL: BASE, fetch, broadcast: false });
     expect(await c.sessions.revoke({ id: "s2" })).toEqual({
       ok: true,
       value: { ok: true, current: false },
     });
+    expect(seen).toHaveLength(1);
   });
 
-  it("answers the failure of the session read, and sends no revoke", async () => {
-    const dead = scripted([Response.json({ error: "unauthorized" }, { status: 401 })]);
-    const c1 = createClient({ baseURL: BASE, fetch: dead.fetch, broadcast: false });
-    expect(await c1.sessions.revoke({ id: "s1" })).toEqual({
+  it("answers the failure of the revoke as it is", async () => {
+    const { seen, fetch } = scripted([Response.json({ error: "unauthorized" }, { status: 401 })]);
+    const c = createClient({ baseURL: BASE, fetch, broadcast: false });
+    expect(await c.sessions.revoke({ id: "s1" })).toEqual({
       ok: false,
       code: "unauthorized",
       status: 401,
     });
-    expect(dead.seen).toHaveLength(1);
-    const odd = scripted([Response.json({ nope: 1 })]);
-    const c2 = createClient({ baseURL: BASE, fetch: odd.fetch, broadcast: false });
-    expect(await c2.sessions.revoke({ id: "s1" })).toEqual({
-      ok: false,
-      code: "unexpected",
-      status: 200,
+    expect(seen).toHaveLength(1);
+  });
+
+  it("reads the bearer token once per revoke", async () => {
+    // Each read answers another token, so a second read would show in the count or the header.
+    const tokens = ["tk1", "tk2"];
+    let reads = 0;
+    const sent: (string | null)[] = [];
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(new Request(input, init).headers.get("authorization"));
+      return Response.json({ ok: true, current: true });
+    }) as typeof globalThis.fetch;
+    const c = createClient({
+      baseURL: BASE,
+      fetch,
+      broadcast: false,
+      credentials: "omit",
+      token: () => tokens[reads++] ?? null,
     });
-    expect(odd.seen).toHaveLength(1);
+    expect(await c.sessions.revoke({ id: "s1" })).toEqual({
+      ok: true,
+      value: { ok: true, current: true },
+    });
+    expect(reads).toBe(1);
+    expect(sent).toEqual(["Bearer tk1"]);
   });
 });
 
-/** A fetch that answers 200 with `body` to every request but `GET /session`, which answers the session `s1`. */
+/** A fetch that answers 200 with `body` to every request. */
 function answering(body: string) {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const req = new Request(input, init);
-    if (req.method === "GET" && new URL(req.url).pathname === "/auth/session")
-      return sessionOf("s1");
-    return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
-  }) as typeof globalThis.fetch;
+  return (async () =>
+    new Response(body, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as typeof globalThis.fetch;
 }
 
 // Not objects, and objects of another shape (plan 11d rule: a 200 of another shape is `unexpected`).
@@ -298,7 +317,11 @@ describe("the shape of each 200 answer (plan 12a)", () => {
       (c) => c.sessions.list(),
       ["{}", '{"sessions":"x"}', '{"sessions":[null]}', '{"sessions":[{"id":"s1"}]}'],
     ],
-    ["sessions.revoke", (c) => c.sessions.revoke({ id: "s1" }), ["{}", '{"ok":false}']],
+    [
+      "sessions.revoke",
+      (c) => c.sessions.revoke({ id: "s1" }),
+      ["{}", '{"ok":false,"current":true}', '{"ok":true}', '{"ok":true,"current":"yes"}'],
+    ],
     ["sessions.revokeOthers", (c) => c.sessions.revokeOthers(), ["{}", '{"ended":"2"}']],
     ["reauth.password", (c) => c.reauth.password({ password: "p" }), ["{}", '{"freshUntil":1}']],
     ["reauth.requestEmailCode", (c) => c.reauth.requestEmailCode(), ["{}", '{"sent":"yes"}']],

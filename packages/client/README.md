@@ -325,7 +325,7 @@ Each one needs a session, except `user.confirmEmailChange`.
 | Operation | Route | Answer type |
 | --- | --- | --- |
 | `client.sessions.list()` | `GET /sessions` | `ClientResult<SessionSummaryJSON[]>`, newest first. `current` marks the caller's session |
-| `client.sessions.revoke({ id })` | `GET /session`, then `POST /sessions/revoke` | `ClientResult<{ ok: true, current }>`. See the rule below the table |
+| `client.sessions.revoke({ id })` | `POST /sessions/revoke` | `ClientResult<{ ok: true, current }>`. See the rule below the table |
 | `client.sessions.revokeOthers()` | `POST /sessions/revoke-others` | `ClientResult<{ ended }>`, the count of ended sessions |
 | `client.reauth.password({ password, code? })` | `POST /reauth` | `ClientResult<FreshJSON>`. `code` is the second factor, while it is on |
 | `client.reauth.requestEmailCode()` | `POST /reauth/email` | `ClientResult<{ sent: true }>`. The code goes to the account's address |
@@ -343,12 +343,10 @@ Each one needs a session, except `user.confirmEmailChange`.
 `GET /user/change-email/confirm` is the page of the mailed link. A
 browser opens it, so the client has no call for it.
 
-**The revoke of the caller's own session.** The route answers
-`{ ok: true }` for every session. So `sessions.revoke` reads
-`GET /session` first. `current` is true when `id` is the id of that
-session. Then the caller's session has ended. A browser loses the
-cookie, and a bearer app must clear its stored token. When the session
-read fails, its failure is the answer, and the client sends no revoke.
+**The revoke of the caller's own session.** The answer's `current` is
+true when `id` is the id of the caller's own session. Then that session
+has ended. A browser loses the cookie, and a bearer app must clear its
+stored token.
 
 **A fresh session.** Some changes need a fresh session: a sign-in or a
 re-authentication that is younger than `session.freshMinutes`. A stale
