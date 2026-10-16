@@ -6,6 +6,7 @@ import {
   type OrganizationSummary,
   readSessionToken,
   type SessionRow,
+  type SessionSummary,
   type UserRow,
 } from "@authtempo/core";
 import type { Invitation, Member, Organization, Session, User } from "../types.js";
@@ -35,6 +36,25 @@ export function toSession(s: SessionRow, token: string): Session {
     expiresAt: s.expiresAt,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
+    ipAddress: s.ip,
+    userAgent: s.userAgent,
+    activeOrganizationId: s.activeOrganizationId,
+  };
+}
+
+/**
+ * Better Auth's session of one entry of core's session list (plan 12a).
+ * Better Auth answers the clear token in `token`. The shim holds only its
+ * hash, so the id stands in.
+ */
+export function listedSession(s: SessionSummary, userId: string): Session {
+  return {
+    id: s.id,
+    token: s.id,
+    userId,
+    expiresAt: s.expiresAt,
+    createdAt: s.createdAt,
+    updatedAt: s.lastSeenAt,
     ipAddress: s.ip,
     userAgent: s.userAgent,
     activeOrganizationId: s.activeOrganizationId,

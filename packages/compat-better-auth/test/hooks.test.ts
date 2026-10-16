@@ -624,7 +624,10 @@ describe("databaseHooks.session.create (plan 9d)", () => {
     const f = async () => {};
     const c = checkOptions({
       databaseHooks: {
-        user: { create: { before: f } },
+        // Plan 12a maps user.create, user.update, user.delete, account.create, and account.delete.
+        user: { create: { before: f, other: f }, upsert: { before: f } },
+        account: { update: { before: f } },
+        verification: { create: { before: f } },
         session: { update: { before: f }, create: { before: "x", after: f, other: f } },
       },
       hooks: { before: f },
@@ -632,10 +635,13 @@ describe("databaseHooks.session.create (plan 9d)", () => {
     expect(
       c.refusals.filter((r) => r.startsWith("databaseHooks") || r.startsWith("hooks")),
     ).toEqual([
+      "databaseHooks.account.update: core has no row hook on account.update; see the plan index",
       "databaseHooks.session.create.before: expected a function",
       "databaseHooks.session.create.other: core has no row hook on session.create.other; see the plan index",
       "databaseHooks.session.update: core has no row hook on session.update; see the plan index",
-      "databaseHooks.user: core has no row hook on user; see the plan index",
+      "databaseHooks.user.create.other: core has no row hook on user.create.other; see the plan index",
+      "databaseHooks.user.upsert: core has no row hook on user.upsert; see the plan index",
+      "databaseHooks.verification: core has no row hook on verification; see the plan index",
       "hooks: core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe",
     ]);
   });

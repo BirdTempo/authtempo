@@ -133,9 +133,10 @@ describe("betterAuth", () => {
       emailOtpAllowedAttempts: 3,
       twoFactorBackupCodes: 10,
       trustDeviceMaxAge: 2592000,
+      freshAge: 86400,
       basePath: "/api/auth",
     });
-    expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1 });
+    expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1, freshMinutes: 1440 });
     expect(m.config.magicLink).toEqual({ ttlMinutes: 60 });
     expect(m.basePath).toBe("/api/auth");
     expect(m.config.basePath).toBe("/api/auth");
@@ -645,7 +646,9 @@ describe("withPolicyCode on the reset and change routes (M-7)", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "password_policy", code: "PASSWORD_TOO_LONG" });
   });
+});
 
+describe("the notices are off under the shim (plan 12a)", () => {
   it("sends no notice and logs no notice failure after a password change (plan 12a)", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -667,10 +670,11 @@ describe("withPolicyCode on the reset and change routes (M-7)", () => {
       expect(res.status).toBe(200);
       expect(sent.map((m) => m.kind)).toEqual(["verify"]);
       expect(log.mock.calls.filter((c) => c[0] === "authtempo: notice mail failed")).toEqual([]);
+      // The account section holds the delete and the mail too (plan 12a Task 14): read the one key.
       expect(
         mapOptions({ baseURL: BASE, secret: TEST_SECRET, database: memoryDatabase() }).config
-          .account,
-      ).toEqual({ notices: false });
+          .account?.notices,
+      ).toBe(false);
     } finally {
       log.mockRestore();
     }

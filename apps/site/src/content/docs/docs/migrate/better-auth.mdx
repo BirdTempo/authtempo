@@ -7,6 +7,7 @@ sources:
   - 'packages/compat-better-auth/README.md "Storage: in place on the Better Auth tables"'
   - packages/compat-better-auth/README.md "What fails at start"
   - packages/compat-better-auth/README.md "Plugins"
+  - packages/compat-better-auth/README.md "Account operations"
   - packages/compat-better-auth/README.md "JWT and the OAuth provider"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16
 sidebar:
@@ -53,6 +54,8 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 
 <Code code={server} lang="ts" title="A Better Auth server on authtempo" />
 
+The account operations of a settings page work on the shim. They need a fresh session for each sensitive change. [The account operations](/docs/reference/compat-better-auth/#the-account-operations) lists them and their options.
+
 5. Wrap the handler in place of `hooks`. Core has no request hooks.
 6. On Postgres, call `betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate()` once per deploy, before the first request.
 7. On D1, copy each compat file of the table below into the app's `migrations_dir`, in order, with the next number.
@@ -96,7 +99,10 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 - Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The callback URL at each provider is `<baseURL><basePath>/social/<provider>/callback`, not `/api/auth/callback/<provider>`.
 - The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.
-- A Better Auth path that the app calls with its own `fetch` answers 404. Call the client method instead.
+- A Better Auth path that the app calls with its own `fetch` answers 404. Call the client method instead. The account paths and the email code paths are served in Better Auth's shapes.
+- A revoke, the change of address, the link, the unlink, and the delete need a fresh session. `session.freshAge` sets the window, and `0` is refused. A stale session answers `SESSION_NOT_FRESH` with 403.
+- A social link needs the provider's verified address, equal to the account's. Better Auth also links an unverified address of a trusted provider, and a different address with `allowDifferentEmails`. On authtempo the callback answers `email_mismatch` for a different address, and both options are refused at start.
+- `user.deleteUser.enabled` stays off by default, as in Better Auth. An organization where the user is the last owner and other members remain stops the delete with `SOLE_OWNER`.
 
 :::caution
 Warning: a `secret` other than the app's value locks every user with the second factor out of it. Keep the `secret` that the app has. Change it later with the steps on [Secrets](/docs/operations/secrets/).

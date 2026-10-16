@@ -291,9 +291,6 @@ These rules come from plan 12b.
   for Better Auth's `{ token, user }`. So a caller can learn that an address
   has an account, as with Better Auth. Use core's `createAuth` for the
   uniform answer.
-- Better Auth sends no mail after a password, passkey, or second-factor
-  change, and has no callback for one. The shim sets core's
-  `account.notices: false`. Use core's `createAuth` for the notice mails.
 - A sign-up of a new address writes rows and sends the verify mail. A taken
   address does neither, so the answer time can show that the address has an
   account, as in Better Auth.
@@ -314,6 +311,54 @@ Errors: `APIError` on the server and `error` on the client carry Better Auth's
 code (`body.code`, `error.code`) and core's HTTP status. The table is
 `BETTER_AUTH_CODES`.
 
+## Account operations
+
+Plan 12a serves Better Auth 1.7.2's account operations in Better Auth's
+shapes. Each is a method of `auth.api` and a path of `auth.handler`.
+
+| Better Auth call | Path | Answer |
+| --- | --- | --- |
+| `listSessions` | `GET /list-sessions` | The live sessions; `token` holds the session id |
+| `revokeSession({ token })` | `POST /revoke-session` | `{ status: true }`, also for an unknown token |
+| `revokeSessions` | `POST /revoke-sessions` | `{ status: true }`; every session ends, the caller's too |
+| `revokeOtherSessions` | `POST /revoke-other-sessions` | `{ status: true }` |
+| `updateUser({ name, image })` | `POST /update-user` | `{ status: true }` |
+| `changeEmail({ newEmail, callbackURL })` | `POST /change-email` | `{ status: true }`, with `user.changeEmail.enabled` |
+| `deleteUser({ password })` | `POST /delete-user` | `{ success: true, message: "User deleted" }`, with `user.deleteUser.enabled` |
+| `listUserAccounts` | `GET /list-accounts` | The provider accounts and the credential account |
+| `linkSocial` (the handler only) | `POST /link-social` | `{ url, redirect }` |
+| `unlinkAccount({ accountId })` | `POST /unlink-account` | `{ status: true }` |
+
+The handler posts core's own route for each path, so core's Origin rule,
+its fetch-metadata rule, CORS, and the cookie renewals apply. `auth.api`
+calls core in process. Both run the same Better Auth checks. A refusal of
+such a check changes no row. It carries no CORS header, as on the email
+code and second-factor paths. The shim's own client
+gains no account calls. A client app posts these paths, or calls
+`@authtempo/client`.
+
+| Difference | Why |
+| --- | --- |
+| `listSessions` answers the session id in `token`. `revokeSession` takes that id or a clear token | The shim stores the hash of a token, never the token |
+| A revoke of the caller's own session through the handler clears the session cookie, as `revokeSessions` does | Core's rule for a request that ended its own session |
+| A revoke, the change of address, the link, the unlink, and the delete need a fresh session. A stale session answers `SESSION_NOT_FRESH` (403) | ASVS 5.0.0 7.5.1 and 7.5.2. `session.freshAge` sets the window: default one day, rounded up to whole minutes |
+| `listSessions` needs no fresh session, where Better Auth asks for one | A person can always view the sessions (ASVS 5.0.0 7.5.2) |
+| A core route through the handler, such as `POST /password/change`, adds `code: "SESSION_NOT_FRESH"` to core's 403 answer | The caller reads Better Auth's code on every path |
+| `session.freshAge: 0` is refused | The fresh rule is a promise of core |
+| `deleteUser({ password })` re-authenticates first. A wrong password answers `INVALID_EMAIL_OR_PASSWORD`, not `INVALID_PASSWORD` | Better Auth's password path skips `freshAge`. Core's re-authentication proves the password, and the code too when the second factor is on |
+| `deleteUser` with `token` or `callbackURL` answers `NOT_SUPPORTED` (501). `sendDeleteAccountVerification` is refused | Core mails no delete link: the fresh session is the proof |
+| An organization where the user is the last owner and other members remain stops the delete: `SOLE_OWNER` (409) | Better Auth keeps such an organization with no owner |
+| `updateUser` takes `name` and `image`, for a verified address only. `email` answers `EMAIL_CAN_NOT_BE_UPDATED`, and any other field `FIELD_NOT_ALLOWED` | Core keeps no other user field. Better Auth drops an unknown field |
+| The change of address mails the new address through `emailVerification.sendVerificationEmail`. A taken address gets no mail. The link opens core's confirm page | As Better Auth does. Core moves the address only after the proof. `sendChangeEmailConfirmation` is refused |
+| `changeEmail` with the option off answers `CHANGE_EMAIL_DISABLED` (400). Core's own `/user/change-email` routes answer 404 | Better Auth 1.7.2's answer |
+| A link needs the provider's verified address, equal to the account's. Else the callback answers `email_mismatch`. `allowDifferentEmails: true` and `trustedProviders` are refused | Better Auth also links an unverified address of a trusted provider, and a different address with `allowDifferentEmails`. A provider address must not take an account |
+| `unlinkAccount` keeps the last way in: `FAILED_TO_UNLINK_LAST_ACCOUNT` with 409, where Better Auth answers 400. `allowUnlinkingAll: true` is refused | The last-credential guard |
+| `unlinkAccount` of the credential account answers `NOT_SUPPORTED` (501) | Core has no password removal |
+| `linkSocial` takes `provider`, `callbackURL`, and `disableRedirect`. Each other field answers `NOT_SUPPORTED` (501) | Core starts a redirect link with its own scopes and its own error page |
+| Core's credential-change notices are off under the shim: `account.notices: false`. Use core's `createAuth` for the notice mails | Better Auth sends no mail after a password, passkey, or second-factor change, and has no callback for one |
+| `databaseHooks.user` and `databaseHooks.account` map (see "Hooks"). A credential account fires no account hook, and the user delete fires none | Core's password row is not an identity |
+| `POST /reauth/email` answers 404 | Better Auth has no re-authentication code |
+
 ## Client
 
 `createAuthClient` from `better-auth/react` or `better-auth/client` talks to
@@ -330,16 +375,17 @@ Auth request and answer shapes. It answers 404 for each, with two exceptions
 that are core's own routes (core `http/routes`, read 2026-10-10): `POST
 /sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
 core's magic link route. With the `magicLink` plugin, a Better Auth-era link
-answers `invalid_token`. Without the plugin, it answers 404.
+answers `invalid_token`. Without the plugin, it answers 404. The handler
+serves the ten account paths of plan 12a in Better Auth's shapes, so they are
+not in this list (see "Account operations"). The email code paths are not in
+it either (see "Email codes").
 
-- Core: `/account-info`, `/callback/:id`, `/change-email`, `/change-password`,
-  `/delete-user`, `/delete-user/callback`, `/error`, `/get-access-token`,
-  `/get-session`, `/link-social`, `/list-accounts`, `/list-sessions`, `/ok`,
-  `/refresh-token`, `/request-password-reset`, `/reset-password`,
-  `/reset-password/:token`, `/revoke-other-sessions`, `/revoke-session`,
-  `/revoke-sessions`, `/send-verification-email`, `/sign-in/email`,
-  `/sign-in/social`, `/sign-out`, `/sign-up/email`, `/unlink-account`,
-  `/update-session`, `/update-user`, `/verify-email`, `/verify-password`.
+- Core: `/account-info`, `/callback/:id`, `/change-password`,
+  `/delete-user/callback`, `/error`, `/get-access-token`, `/get-session`,
+  `/ok`, `/refresh-token`, `/request-password-reset`, `/reset-password`,
+  `/reset-password/:token`, `/send-verification-email`, `/sign-in/email`,
+  `/sign-in/social`, `/sign-out`, `/sign-up/email`, `/update-session`,
+  `/verify-email`, `/verify-password`.
 - Organization: `/organization/accept-invitation`, `/add-team-member`,
   `/cancel-invitation`, `/check-slug`, `/create`, `/create-role`,
   `/create-team`, `/delete`, `/delete-role`, `/get-active-member`,
@@ -446,6 +492,10 @@ checks each row here.
 | `INVITATION_NOT_FOUND` | 404 | `api.cancelInvitation` with an unknown row id |
 | `NOT_SUPPORTED` | 501 | An argument or call that core does not serve |
 | `BASE_URL_REQUIRED` | 0 | A client call with no `baseURL` and no page location; no request goes out |
+| `EMAIL_CAN_NOT_BE_UPDATED` | 400 | `updateUser` with `email` (plan 12a) |
+| `FIELD_NOT_ALLOWED` | 400 | `updateUser` with a field other than `name` and `image` (plan 12a) |
+| `ACCOUNT_NOT_FOUND` | 400 | `unlinkAccount` with an id that is not the caller's account (plan 12a) |
+| `CHANGE_EMAIL_DISABLED` | 400 | `changeEmail` without `user.changeEmail.enabled` (plan 12a) |
 
 On Expo, pass `expo-secure-store` as `storage`. The client accepts any object
 with `getItem` and `setItem`, as Better Auth does. With a plain store, such as
@@ -500,25 +550,28 @@ Only `auth.handler` keeps the plugin behavior in this table: the magic link 404,
   secret of the row id and the code either way. `plain`, `encrypted`, and an
   object are refused.
 - `disableSignUp` follows the one sign-up rule (see "Secrets and sign-up").
+- `changeEmail: { enabled: true }` serves the change of address by code
+  (plan 12a). `verifyCurrentEmail: true` is refused: core proves the new
+  address only.
 - Refused by name: `generateOTP`,
   `overrideDefaultEmailVerification: true`, `sendVerificationOnSignUp: true`,
-  `resendStrategy: "reuse"`, `changeEmail`, and `rateLimit`.
+  `resendStrategy: "reuse"`, and `rateLimit`.
 
-`auth.handler` serves these Better Auth paths in Better Auth's shapes. They
-are the one set of Better Auth paths that the handler serves in Better
-Auth's shapes, because apps post them by hand. An error answers `{ code,
-message }` with authtempo's status.
+`auth.handler` serves these Better Auth paths in Better Auth's shapes,
+because apps post them by hand. An error answers `{ code, message }` with
+authtempo's status.
 
 | Path | Body | Answer |
 | --- | --- | --- |
 | `/email-otp/send-verification-otp` | `{ email, type }` | `{ success: true }` for `sign-in` and `forget-password`; 400 `INVALID_EMAIL` for a malformed address, as Better Auth does; 501 `NOT_SUPPORTED` for `email-verification` and `change-email` |
 | `/sign-in/email-otp` | `{ email, otp }` | `{ token, user }` with the session cookie; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`; 501 `NOT_SUPPORTED` for `name`, `image`, or another user field |
 | `/forget-password/email-otp`, `/email-otp/request-password-reset` | `{ email }` | `{ success: true }` |
+| `/email-otp/request-email-change` | `{ newEmail }` | With `changeEmail.enabled`: `{ success: true }`. The code goes to the new address with the type `change-email`. A taken address gets no code, as in Better Auth. A stale session answers 403 `SESSION_NOT_FRESH` |
+| `/email-otp/change-email` | `{ newEmail, otp }` | With `changeEmail.enabled`: `{ success: true }`, and the address moves; 400 `INVALID_OTP` for a wrong code or a `newEmail` that differs from the request |
 | `/email-otp/reset-password` | `{ email, otp, password }` | `{ success: true }` with the session cookie of the new session; for a user with the second factor on, `{ success: true }` with no cookie unless the device is trusted, as Better Auth answers every reset, and the next sign-in asks for the factor (plan 12c); 400 `PASSWORD_TOO_SHORT` and `PASSWORD_TOO_LONG` before the code check, so the code stays usable, as in Better Auth; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`, `INVALID_PASSWORD`, `PASSWORD_COMPROMISED` |
 
-`/email-otp/verify-email`, `/email-otp/check-verification-otp`,
-`/email-otp/request-email-change`, and `/email-otp/change-email` answer 501
-`NOT_SUPPORTED`. A wrong, expired, or spent code answers `INVALID_OTP`:
+`/email-otp/verify-email` and `/email-otp/check-verification-otp` answer 501
+`NOT_SUPPORTED`, and so do the two change paths without `changeEmail.enabled`. A wrong, expired, or spent code answers `INVALID_OTP`:
 core does not tell expiry from a wrong code, so `OTP_EXPIRED` never
 appears. Better Auth answers `TOO_MANY_ATTEMPTS` with 403; authtempo with
 400. A password that the policy refuses for another reason than its length
@@ -584,7 +637,22 @@ README, "Hooks").
   another field is dropped, with one log line at the first call. `false`
   answers `HOOK_REFUSED`. `databaseHooks.session.create.after` gets the
   stored session; its `token` holds the token's SHA-256 hex, as the
-  `session.token` column does. Every other `databaseHooks` key is refused.
+  `session.token` column does.
+- `databaseHooks.user` (plan 12a): `create.before` gets the new user, and
+  its `{ data }` may set `name` and `image`. A change of another field is
+  dropped, with one log line at the first call. `update.before` gets the
+  changed fields; a `{ data }` answer is dropped with one log line, because
+  core's update hooks change no row. `false` refuses each before hook with
+  `HOOK_REFUSED`. The delete runs `user.deleteUser.beforeDelete`, then
+  `delete.before`. After the commit it runs `delete.after`, then
+  `user.deleteUser.afterDelete`, in Better Auth 1.7.2's order. The
+  `request` argument of `beforeDelete` and `afterDelete` is undefined.
+- `databaseHooks.account` (plan 12a): `create` runs at a provider link, and
+  `delete` at an unlink. Each gets `{ providerId, accountId, userId }`, with
+  no row id. A credential account fires none, because core's password row is
+  not an identity. The user delete fires no account hook, where Better Auth
+  runs the account delete hooks for each account of the user.
+- Every other `databaseHooks` key is refused.
 - `organizationLimit` as a number, `membershipLimit`, and `invitationLimit`
   map onto core's `organizations.limits`. With the option absent,
   `membershipLimit` and `invitationLimit` are 100, Better Auth's defaults. A
@@ -675,8 +743,8 @@ consumer-i (small edits):
 consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
-consumerd (follow-ups first): admin and impersonation, anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `freshAge`, `deferSessionRefresh`, the rate limit storage. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` (`ta_purpose` with snake-case names) instead; the row holds a keyed hash, never the code.
-The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`, `session.freshAge`.
+consumerd (follow-ups first): admin and impersonation, anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `deferSessionRefresh`, the rate limit storage. `freshAge: 600` runs unchanged since plan 12a: core's window is 10 minutes. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` (`ta_purpose` with snake-case names) instead; the row holds a keyed hash, never the code.
+The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`.
 
 consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, and `jwt` and JWKS (refused since plan 9g; see "JWT and the OAuth provider"), admin, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.

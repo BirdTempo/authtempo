@@ -118,6 +118,15 @@ export const COMPAT_CODES = {
   INVITATION_NOT_FOUND: 404,
   NOT_SUPPORTED: 501,
   BASE_URL_REQUIRED: 0,
+  // Plan 12a. Better Auth 1.7.2's names and statuses (@better-auth/core
+  // dist/error/codes.mjs:25, :46, :30, and :26, read 2026-10-17). Better Auth
+  // answers each with 400 BAD_REQUEST (better-auth dist/api/routes/update-user.mjs
+  // and account.mjs). Better Auth drops a field it does not know; the shim
+  // refuses it with FIELD_NOT_ALLOWED, because core keeps name and image only.
+  EMAIL_CAN_NOT_BE_UPDATED: 400,
+  FIELD_NOT_ALLOWED: 400,
+  ACCOUNT_NOT_FOUND: 400,
+  CHANGE_EMAIL_DISABLED: 400,
 } as const;
 
 export type CompatCode = keyof typeof COMPAT_CODES;

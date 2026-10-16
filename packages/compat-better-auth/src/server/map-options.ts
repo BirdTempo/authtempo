@@ -14,7 +14,7 @@ import {
 } from "../types.js";
 import { appSchemes, pluginOf, signUpClosed } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
-import { compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
+import { compatAccountMail, compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
 import { TRUST_DEVICE_COOKIE } from "./two-factor.js";
 
@@ -40,6 +40,8 @@ export const BETTER_AUTH_DEFAULTS = {
   // Better Auth's length of 10 is not mapped since plan 12c: core's codes hold 112 bits.
   twoFactorBackupCodes: 10,
   trustDeviceMaxAge: 2_592_000,
+  // context/create-context.mjs:148: 3600 * 24 (read 2026-10-17, plan 12a).
+  freshAge: 86_400,
   basePath: "/api/auth",
 } as const;
 
@@ -56,6 +58,8 @@ export interface Mapped {
   appOrigin: string;
   /** `emailAndPassword.minPasswordLength` or Better Auth's default, for the length codes. */
   minPasswordLength: number;
+  /** The account operations that the options turn on (plan 12a). */
+  account: { changeEmail: boolean; deleteUser: boolean; emailOtpChange: boolean };
 }
 
 /**
@@ -220,12 +224,22 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       ttlDays: (options.session?.expiresIn ?? BETTER_AUTH_DEFAULTS.sessionExpiresIn) / DAY,
       slidingRefreshDays:
         (options.session?.updateAge ?? BETTER_AUTH_DEFAULTS.sessionUpdateAge) / DAY,
+      // Better Auth's freshAge in seconds, rounded up to whole minutes (plan
+      // 12a): a window never shorter than the app asked. check-options keeps
+      // it from 1 to 86400 seconds, so 1 to 1440 minutes.
+      freshMinutes: Math.ceil((options.session?.freshAge ?? BETTER_AUTH_DEFAULTS.freshAge) / 60),
     },
-    // Better Auth sends no credential-change notice and has no callback for one.
-    // The shim's mail port routes a mail by its link and throws on a notice,
-    // which has none. So each notice would fail and log a line. Task 14 of
-    // plan 12a gives the shim its account mapping.
-    account: { notices: false },
+    account: {
+      // Better Auth's deleteUser is off by default; core's is on. The shim keeps Better Auth's default.
+      delete: options.user?.deleteUser?.enabled === true,
+      // Better Auth sends no credential-change notice and has no callback for one.
+      // The shim's mail port routes a mail by its link and throws on a notice,
+      // which has none. So each notice would fail and log a line. An app
+      // turns core's notices on when it moves to core's own config.
+      notices: false,
+      // The proof mails, each routed to a Better Auth callback (mail.ts).
+      mail: compatAccountMail,
+    },
     magicLink: { ttlMinutes: ttlSeconds / 60 },
     // Core turns email codes on by default; Better Auth serves them only with
     // its email-otp plugin (plan 9e).
@@ -326,5 +340,10 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     clientIp: clientIp ?? ((r) => r.headers.get("cf-connecting-ip") || null),
     appOrigin: options.authtempo?.appURL ?? origin,
     minPasswordLength: ep?.minPasswordLength ?? BETTER_AUTH_DEFAULTS.minPasswordLength,
+    account: {
+      changeEmail: options.user?.changeEmail?.enabled === true,
+      deleteUser: options.user?.deleteUser?.enabled === true,
+      emailOtpChange: otp?.options.changeEmail?.enabled === true,
+    },
   };
 }

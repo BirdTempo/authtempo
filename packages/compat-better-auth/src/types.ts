@@ -32,6 +32,29 @@ export interface Session {
   activeOrganizationId: string | null;
 }
 
+/**
+ * Better Auth 1.7.2's account row, as the shim answers it (plan 12a;
+ * better-auth dist/api/routes/account.mjs:21 to :75, read 2026-10-17). `id` is
+ * core's identity id, or the password row id for `credential`. The shim keeps
+ * no `issuer` in its answer.
+ */
+export interface Account {
+  id: string;
+  providerId: string;
+  accountId: string;
+  userId: string;
+  scopes: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** What an account hook of the shim gets. Core's identity hook carries no row id (plan 12a). */
+export interface AccountHookFields {
+  providerId: string;
+  accountId: string;
+  userId: string;
+}
+
 export interface Organization {
   id: string;
   name: string;
@@ -246,7 +269,7 @@ export interface MagicLinkOptions {
   storeToken?: unknown;
 }
 
-/** The types of Better Auth 1.7.2's `sendVerificationOTP` (dist/plugins/email-otp/types.d.mts, read 2026-10-13). Core sends `sign-in` and `forget-password` only. */
+/** The types of Better Auth 1.7.2's `sendVerificationOTP` (dist/plugins/email-otp/types.d.mts, read 2026-10-13). Core sends `sign-in`, `forget-password`, and, since plan 12a, `change-email`. */
 export type EmailOtpType = "sign-in" | "email-verification" | "forget-password" | "change-email";
 
 /**
@@ -268,7 +291,8 @@ export interface EmailOtpOptions {
   overrideDefaultEmailVerification?: boolean;
   sendVerificationOnSignUp?: boolean;
   resendStrategy?: unknown;
-  changeEmail?: unknown;
+  /** Plan 12a maps `enabled`; `verifyCurrentEmail: true` is refused. */
+  changeEmail?: { enabled?: boolean; verifyCurrentEmail?: boolean };
   rateLimit?: unknown;
 }
 
@@ -411,6 +435,34 @@ export interface BetterAuthOptions {
     updateAge?: number;
     cookieCache?: { enabled?: boolean; maxAge?: number };
     storeSessionInDatabase?: boolean;
+    /** Seconds, 1 to 86400. Core rounds up to whole minutes (plan 12a). */
+    freshAge?: number;
+  };
+  /** Better Auth 1.7.2's `user` options that the shim maps (plan 12a). */
+  user?: {
+    changeEmail?: {
+      enabled?: boolean;
+      sendChangeEmailConfirmation?: unknown;
+      updateEmailWithoutVerification?: boolean;
+    };
+    deleteUser?: {
+      enabled?: boolean;
+      beforeDelete?: (user: User, request?: Request) => HookResult<void>;
+      afterDelete?: (user: User, request?: Request) => HookResult<void>;
+      sendDeleteAccountVerification?: unknown;
+      deleteTokenExpiresIn?: number;
+    };
+  };
+  /** Better Auth 1.7.2's `account.accountLinking`, mapped onto core's link rule (plan 12a). */
+  account?: {
+    accountLinking?: {
+      enabled?: boolean;
+      allowDifferentEmails?: boolean;
+      trustedProviders?: string[];
+      allowUnlinkingAll?: boolean;
+      updateUserInfoOnLink?: boolean;
+      disableImplicitLinking?: boolean;
+    };
   };
   advanced?: {
     ipAddress?: {
@@ -424,10 +476,13 @@ export interface BetterAuthOptions {
   plugins?: readonly BetterAuthPlugin[];
   telemetry?: { enabled?: boolean };
   /**
-   * Plan 9d: `session.create.before` and `session.create.after` only
+   * Plan 9d: `session.create.before` and `session.create.after`
    * (@better-auth/core 1.7.2 dist/types/init-options.d.mts, the databaseHooks
    * type, read 2026-10-13). `before` may answer `{ data }` with `ipAddress`,
    * `userAgent`, or `activeOrganizationId` changed, or `false` to refuse.
+   * Plan 12a adds `user` and `account`. `user.create.before` may answer
+   * `{ data }` with `name` and `image`. An account hook fires for a provider
+   * account only: a credential account is core's password row.
    */
   databaseHooks?: {
     session?: {
@@ -437,6 +492,33 @@ export interface BetterAuthOptions {
           context: null,
         ) => HookResult<boolean | BeforeHookAnswer>;
         after?: (session: Session, context: null) => HookResult<void>;
+      };
+    };
+    user?: {
+      create?: {
+        before?: (user: User, context: null) => HookResult<boolean | BeforeHookAnswer>;
+        after?: (user: User, context: null) => HookResult<void>;
+      };
+      update?: {
+        before?: (data: Partial<User>, context: null) => HookResult<boolean | BeforeHookAnswer>;
+        after?: (user: User, context: null) => HookResult<void>;
+      };
+      delete?: {
+        // biome-ignore lint/suspicious/noConfusingVoidType: with undefined, a hook with no return statement does not type-check.
+        before?: (user: User, context: null) => HookResult<boolean | void>;
+        after?: (user: User, context: null) => HookResult<void>;
+      };
+    };
+    account?: {
+      create?: {
+        // biome-ignore lint/suspicious/noConfusingVoidType: with undefined, a hook with no return statement does not type-check.
+        before?: (account: AccountHookFields, context: null) => HookResult<boolean | void>;
+        after?: (account: AccountHookFields, context: null) => HookResult<void>;
+      };
+      delete?: {
+        // biome-ignore lint/suspicious/noConfusingVoidType: with undefined, a hook with no return statement does not type-check.
+        before?: (account: AccountHookFields, context: null) => HookResult<boolean | void>;
+        after?: (account: AccountHookFields, context: null) => HookResult<void>;
       };
     };
   };
@@ -542,6 +624,39 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
     body: { organizationId: string | null };
     headers: Headers;
   }): Promise<Organization | null>;
+  /**
+   * Plan 12a. The id answers in `token` too: the shim never holds a clear
+   * session token. No fresh rule, where Better Auth 1.7.2 asks for one.
+   */
+  listSessions(input: { headers: Headers }): Promise<Session[]>;
+  /** `token` is a session id from the list, or a clear session token. Always `{ status: true }`, as in Better Auth. Fresh rule. */
+  revokeSession(input: { body: { token: string }; headers: Headers }): Promise<{ status: true }>;
+  /** Every session of the user, the caller's too. Fresh rule. */
+  revokeSessions(input: { headers: Headers }): Promise<{ status: true }>;
+  /** Every other session of the user. Fresh rule. */
+  revokeOtherSessions(input: { headers: Headers }): Promise<{ status: true }>;
+  /** `name` and `image`. `email` throws EMAIL_CAN_NOT_BE_UPDATED, and any other field FIELD_NOT_ALLOWED. */
+  updateUser(input: { body: Record<string, unknown>; headers: Headers }): Promise<{ status: true }>;
+  /** With `user.changeEmail.enabled`; else CHANGE_EMAIL_DISABLED. Fresh rule. */
+  changeEmail(input: {
+    body: { newEmail: string; callbackURL?: string };
+    headers: Headers;
+  }): Promise<{ status: true }>;
+  /**
+   * With `user.deleteUser.enabled`; else 404. `password` re-authenticates
+   * first, as Better Auth's password path skips freshAge. `token` and
+   * `callbackURL` throw NOT_SUPPORTED. Fresh rule.
+   */
+  deleteUser(input: {
+    body: { password?: string; token?: string; callbackURL?: string };
+    headers: Headers;
+  }): Promise<{ success: true; message: "User deleted" }>;
+  listUserAccounts(input: { headers: Headers }): Promise<Account[]>;
+  /** `accountId` is an `id` from the list. A credential account throws NOT_SUPPORTED. Fresh rule. */
+  unlinkAccount(input: {
+    body: { accountId: string };
+    headers: Headers;
+  }): Promise<{ status: true }>;
 }
 
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {

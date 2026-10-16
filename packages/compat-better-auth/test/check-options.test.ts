@@ -111,7 +111,6 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "rateLimit.customStorage",
       "secret",
       "session.deferSessionRefresh",
-      "session.freshAge",
     ],
     consumerb: [
       "advanced.defaultCookieAttributes.secure",

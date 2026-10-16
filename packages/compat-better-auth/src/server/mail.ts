@@ -1,4 +1,4 @@
-import type { MailMessage, MailPort, StorageAdapter } from "@authtempo/core";
+import type { AccountMailInput, MailMessage, MailPort, StorageAdapter } from "@authtempo/core";
 import type {
   EmailOtpOptions,
   InvitationEmailData,
@@ -22,10 +22,18 @@ export const INVITATION_LINK_PREFIX = "tempo-compat-invitation:";
  */
 export const OTP_LINK_PREFIX = "tempo-compat-otp:";
 
-/** The mail that core's `emailOtp.mail` and `emailOtp.resetMail` answer here. */
+/**
+ * The marker of a mail that Better Auth never sends (plan 12a): the note to
+ * an address that an account holds. Better Auth 1.7.2 answers
+ * `{ status: true }` and mails nothing there (dist/api/routes/update-user.mjs:462
+ * to :466, read 2026-10-17), so the port drops it.
+ */
+export const DROP_LINK_PREFIX = "tempo-compat-drop:";
+
+/** The mail that core's `emailOtp.mail`, `emailOtp.resetMail`, and the change code answer here. */
 export function otpMail(
   to: string,
-  type: "sign-in" | "forget-password",
+  type: "sign-in" | "forget-password" | "change-email",
   code: string,
 ): MailMessage {
   return {
@@ -33,6 +41,29 @@ export function otpMail(
     subject: "authtempo compat email code",
     text: `\n\n${OTP_LINK_PREFIX}${type}:${code}\n\n`,
   };
+}
+
+/** Core's `account.mail` under the shim (plan 12a). Each mail carries its link on its own paragraph for the port. */
+export function compatAccountMail(input: AccountMailInput): MailMessage {
+  switch (input.kind) {
+    case "email_change_link":
+      return {
+        to: input.email,
+        subject: "authtempo compat change of address",
+        text: `\n\n${input.link}\n\n`,
+      };
+    case "email_change_code":
+      return otpMail(input.email, "change-email", input.code);
+    case "email_change_taken":
+      return {
+        to: input.email,
+        subject: "authtempo compat drop",
+        text: `\n\n${DROP_LINK_PREFIX}\n\n`,
+      };
+    case "reauth_code":
+      // The handler answers 404 on /reauth/email (better-auth.ts): Better Auth has no such code.
+      throw new Error("authtempo compat: the shim serves no re-authentication code");
+  }
 }
 
 export interface MailRoutes {
@@ -111,7 +142,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         const cb = routes.sendVerificationOTP;
         if (!cb) throw new Error("authtempo compat: no sendVerificationOTP");
         const [type, otp] = link.slice(OTP_LINK_PREFIX.length).split(":");
-        if ((type !== "sign-in" && type !== "forget-password") || !otp)
+        if ((type !== "sign-in" && type !== "forget-password" && type !== "change-email") || !otp)
           throw new Error("authtempo compat: the email code mail is malformed");
         // Better Auth sends a reset code only to an address with a user
         // (routes.mjs requestPasswordResetEmailOTP, read 2026-10-13). Send
@@ -121,6 +152,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         await cb({ email: message.to, otp, type });
         return;
       }
+      if (link.startsWith(DROP_LINK_PREFIX)) return;
       const token = new URL(link).searchParams.get("token") ?? "";
       if (link.startsWith(`${prefix}/password/verify?`)) {
         if (!routes.sendVerificationEmail)
@@ -146,6 +178,26 @@ export function compatMail(routes: MailRoutes): MailPort {
       if (link.startsWith(`${prefix}/magic-link/verify?`)) {
         if (!routes.sendMagicLink) throw new Error("authtempo compat: no sendMagicLink");
         await routes.sendMagicLink({ email: message.to, url: link, token });
+        return;
+      }
+      if (link.startsWith(`${prefix}/user/change-email/confirm?`)) {
+        if (!routes.sendVerificationEmail)
+          throw new Error("authtempo compat: no sendVerificationEmail");
+        // Better Auth 1.7.2 sends the change link through sendVerificationEmail,
+        // with the new address as the user's email (update-user.mjs:513 to :521).
+        const row = await routes.storage.findOne("verification", [
+          { field: "valueHash", op: "eq", value: await sha256Hex(token) },
+          { field: "purpose", op: "eq", value: "email-change" },
+        ]);
+        const owner = row
+          ? await routes.storage.findOne("user", [{ field: "id", op: "eq", value: row.identifier }])
+          : null;
+        if (!owner) throw new Error("authtempo compat: the user of this change is gone");
+        await routes.sendVerificationEmail({
+          user: { ...toUser(owner), email: message.to },
+          url: link,
+          token,
+        });
         return;
       }
       throw new Error(

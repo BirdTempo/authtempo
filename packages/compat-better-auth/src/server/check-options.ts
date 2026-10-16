@@ -111,21 +111,32 @@ function eachKey(
     if (value !== undefined) visit(key, value, `${p}.${key}`);
 }
 
-/** `databaseHooks`: only session.create.before and session.create.after map (plan 9d). */
+/**
+ * The row hooks that map: `session.create` (plan 9d), and `user.create`,
+ * `user.update`, `user.delete`, `account.create`, and `account.delete` (plan
+ * 12a). src/server/hooks.ts maps each one onto a core hook.
+ */
+const ROW_HOOKS: Record<string, readonly string[]> = {
+  session: ["create"],
+  user: ["create", "update", "delete"],
+  account: ["create", "delete"],
+};
+
 const databaseHooks: Rule = (v, p, out) =>
   eachKey(v, p, out, (model, ops, modelPath) => {
-    if (model !== "session") {
+    const allowed = ROW_HOOKS[model];
+    if (!allowed) {
       refuse(out, modelPath, noRowHook(model));
       return;
     }
     eachKey(ops, modelPath, out, (op, times, opPath) => {
-      if (op !== "create") {
-        refuse(out, opPath, noRowHook(`session.${op}`));
+      if (!allowed.includes(op)) {
+        refuse(out, opPath, noRowHook(`${model}.${op}`));
         return;
       }
       eachKey(times, opPath, out, (time, hook, timePath) => {
         if (time === "before" || time === "after") fn(hook, timePath, out);
-        else refuse(out, timePath, noRowHook(`session.create.${time}`));
+        else refuse(out, timePath, noRowHook(`${model}.${op}.${time}`));
       });
     });
   });
@@ -251,7 +262,14 @@ const PLUGIN_RULES: Record<string, Rule> = {
     ),
     sendVerificationOnSignUp: only(false, "core mails a verify link at sign-up, not a code"),
     resendStrategy: only("rotate", "core sends a new code at every request"),
-    changeEmail: refused("core has no change of address by code; see the plan index"),
+    // Plan 12a: the two change paths of Better Auth 1.7.2 map onto core's change by code.
+    changeEmail: object({
+      enabled: boolean,
+      verifyCurrentEmail: only(
+        false,
+        "core proves the new address; a code to the old address first is a later input (see the plan index)",
+      ),
+    }),
     rateLimit: refused("core's owned limiter has fixed limits per flow"),
   }),
   "two-factor": object({
@@ -511,6 +529,56 @@ const TOP: Record<string, Rule> = {
     updateAge: seconds(DAY, DAY, 3650 * DAY, "core takes whole days"),
     cookieCache: noted("accepted and has no effect: every request reads the session row"),
     storeSessionInDatabase: only(true, "core keeps every session in the session table"),
+    // Better Auth counts seconds (context/create-context.mjs:148, default
+    // 86400, read 2026-10-17). Core counts whole minutes from 1 to 1440, and
+    // the map rounds up (plan 12a).
+    freshAge: seconds(
+      1,
+      1,
+      86_400,
+      "core takes 1 to 86400 seconds, rounded up to whole minutes; 0 turns the check off and is refused: the fresh rule is a promise of core",
+    ),
+  }),
+  // Plan 12a. Better Auth 1.7.2's user options (dist/api/routes/update-user.mjs, read 2026-10-17).
+  user: object({
+    changeEmail: object({
+      enabled: boolean,
+      sendChangeEmailConfirmation: refused(
+        "core proves the new address and mails nothing to the old one first; a confirm by the old address is a later input (see the plan index)",
+      ),
+      updateEmailWithoutVerification: only(
+        false,
+        "core moves an address only after a proof of the new address",
+      ),
+    }),
+    deleteUser: object({
+      enabled: boolean,
+      beforeDelete: fn,
+      afterDelete: fn,
+      sendDeleteAccountVerification: refused(
+        "core asks for a fresh session, not a mailed link; a mailed confirm is a later input (see the plan index)",
+      ),
+      deleteTokenExpiresIn: refused("core mails no delete link"),
+    }),
+  }),
+  // Plan 12a. Better Auth 1.7.2 links on the provider's verified flag or a
+  // trusted provider, and an equal address unless allowDifferentEmails
+  // (dist/api/routes/callback.mjs:173 and :177, read 2026-10-17). Core links
+  // a verified equal address only.
+  account: object({
+    accountLinking: object({
+      enabled: only(true, "core links a verified equal address at sign-in"),
+      allowDifferentEmails: only(
+        false,
+        "core links a provider only with the account's own verified address; a different address answers email_mismatch",
+      ),
+      trustedProviders: refused(
+        "a trusted provider lets an unverified provider address take an account; core links on a verified address only",
+      ),
+      allowUnlinkingAll: only(false, "core keeps at least one way in (the last-credential guard)"),
+      updateUserInfoOnLink: refused("core fills a missing name and image at sign-in only"),
+      disableImplicitLinking: refused("core links a verified equal address at sign-in"),
+    }),
   }),
   advanced: object({
     ipAddress: object({
@@ -701,6 +769,22 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
   const otp = pluginOf(options, "email-otp")?.options;
   if (otp && typeof otp.sendVerificationOTP !== "function")
     refuse(out, "plugins[email-otp].sendVerificationOTP", "required");
+  // Plan 12a: the change link goes through sendVerificationEmail, as in Better Auth.
+  if (
+    options.user?.changeEmail?.enabled === true &&
+    typeof options.emailVerification?.sendVerificationEmail !== "function"
+  )
+    refuse(
+      out,
+      "emailVerification.sendVerificationEmail",
+      "required by user.changeEmail: the link to the new address goes through it",
+    );
+  if (options.account?.accountLinking !== undefined || options.databaseHooks?.account !== undefined)
+    note(
+      out,
+      "account",
+      "a credential account is core's password row, not an identity, so no account hook fires for it; the user delete fires no account hook either",
+    );
   const verifyTtl = options.emailVerification?.expiresIn;
   if (magic && verifyTtl !== undefined && verifyTtl !== (magic.expiresIn ?? 300)) {
     refuse(

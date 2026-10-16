@@ -118,6 +118,8 @@ describe("the email-otp options (plan 9e)", () => {
         overrideDefaultEmailVerification: false,
         sendVerificationOnSignUp: false,
         resendStrategy: "rotate",
+        // Plan 12a maps the change of address by code.
+        changeEmail: { enabled: true, verifyCurrentEmail: false },
       }),
     ).toEqual([]);
     expect(
@@ -132,13 +134,13 @@ describe("the email-otp options (plan 9e)", () => {
         overrideDefaultEmailVerification: true,
         sendVerificationOnSignUp: true,
         resendStrategy: "reuse",
-        changeEmail: { enabled: true },
+        changeEmail: { enabled: true, verifyCurrentEmail: true },
         rateLimit: { window: 60, max: 3 },
         other: 1,
       }),
     ).toEqual([
       "plugins[email-otp].allowedAttempts: core takes 3 to 10",
-      "plugins[email-otp].changeEmail: core has no change of address by code; see the plan index",
+      "plugins[email-otp].changeEmail.verifyCurrentEmail: core proves the new address; a code to the old address first is a later input (see the plan index)",
       "plugins[email-otp].disableSignUp: expected a boolean",
       "plugins[email-otp].expiresIn: core takes 60 to 3600 seconds, rounded up to whole minutes",
       "plugins[email-otp].generateOTP: core makes the code itself, from crypto.getRandomValues",

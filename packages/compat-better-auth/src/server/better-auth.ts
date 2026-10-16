@@ -1,7 +1,8 @@
 import { type Auth, ConfigError, createAuth } from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
-import { passwordPolicyCode } from "../errors.js";
+import { BETTER_AUTH_CODES, passwordPolicyCode } from "../errors.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
+import { accountRoute } from "./account.js";
 import { createApi } from "./api.js";
 import { checkOptions } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
@@ -47,6 +48,27 @@ export async function withPolicyCode(
   );
 }
 
+/**
+ * Core answers `{ "error": "session_not_fresh" }` (403) when a route needs a
+ * fresh session (plan 12a). This adds Better Auth's code, `SESSION_NOT_FRESH`,
+ * so a caller of a core route through the handler reads the code that
+ * Better Auth's own paths answer. The status and core's field stay.
+ */
+export async function withFreshCode(res: Response): Promise<Response> {
+  if (res.status !== 403) return res;
+  const body = (await res
+    .clone()
+    .json()
+    .catch(() => null)) as { error?: unknown } | null;
+  if (body?.error !== "session_not_fresh") return res;
+  const headers = new Headers(res.headers);
+  headers.delete("content-length");
+  return Response.json(
+    { ...body, code: BETTER_AUTH_CODES.session_not_fresh },
+    { status: 403, headers },
+  );
+}
+
 /** The non-empty session token a response sets, or null. */
 function sessionTokenOf(cookies: string[]): string | null {
   const prefix = `${COOKIE_NAME}=`;
@@ -61,6 +83,11 @@ function sessionTokenOf(cookies: string[]): string | null {
 /** Serves core's routes under basePath, with the behavior of the bearer, expo, and magicLink plugins. */
 export function createHandler(auth: Auth, mapped: Mapped): (request: Request) => Promise<Response> {
   const { basePath, plugins } = mapped;
+  // Core's own change routes follow Better Auth's option (plan 12a), as the
+  // magic link does. The email code paths reach them through auth.handle.
+  const changePath = `${basePath}/user/change-email`;
+  // Better Auth has no re-authentication code, and the shim maps no mail for it.
+  const reauthCodePath = `${basePath}/reauth/email`;
   const magicLinkPath = `${basePath}/magic-link/`;
   // Core serves API tokens in every deployment (plan 8b). This package maps
   // no `apiToken` row until its api-key plan (UNMAPPED_MODELS), and Better
@@ -76,6 +103,12 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
     if (pathname === tokensPath || pathname.startsWith(`${tokensPath}/`)) {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
+    if (
+      (!mapped.account.changeEmail &&
+        (pathname === changePath || pathname.startsWith(`${changePath}/`))) ||
+      pathname === reauthCodePath
+    )
+      return Response.json({ error: "not_found" }, { status: 404 });
     let req = request;
     // @better-auth/expo on the server: a native app sends its scheme as expo-origin.
     const expoOrigin = request.headers.get("expo-origin");
@@ -85,11 +118,15 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
       req = new Request(request, { headers });
     }
     const copy = req.method === "POST" ? req.clone() : null;
+    // Better Auth's account paths, in Better Auth's shapes (plan 12a). Null for every other request.
+    const account = await accountRoute(auth, mapped, req);
     // Better Auth's email OTP paths, in Better Auth's shapes (plan 9e). Null for every other request.
-    const otp = plugins.has("email-otp") ? await emailOtpRoute(auth, mapped, req) : null;
+    const otp =
+      account ?? (plugins.has("email-otp") ? await emailOtpRoute(auth, mapped, req) : null);
     // Better Auth's two-factor paths (plan 9f). Null for every other request.
     const tf = otp ?? (plugins.has("two-factor") ? await twoFactorRoute(auth, mapped, req) : null);
-    let res = tf ?? (await withPolicyCode(copy, await auth.handle(req), mapped));
+    let res =
+      tf ?? (await withFreshCode(await withPolicyCode(copy, await auth.handle(req), mapped)));
     if (!tf && plugins.has("two-factor")) res = await withTwoFactor(auth, mapped, req, res);
     if (!plugins.has("bearer")) return res;
     const token = sessionTokenOf(res.headers.getSetCookie());

@@ -2,11 +2,17 @@ import {
   HOOK_REFUSED_TEXT,
   type HooksConfig,
   hookRefusal,
+  type IdentityHooks,
+  type IdentitySummary,
   type OrganizationHooks,
   type SessionHooks,
   type SessionPatch,
+  type UserCreatePatch,
+  type UserHooks,
+  type UserRow,
 } from "@authtempo/core";
 import type {
+  AccountHookFields,
   BetterAuthOptions,
   OrganizationHookOptions,
   SessionDraftFields,
@@ -391,12 +397,148 @@ function sessionHooksOf(create: SessionCreateHooks | undefined): SessionHooks {
   return out;
 }
 
-/** Core's `hooks` from the Better Auth options (plan 9d). */
+/**
+ * Core's user hooks from `databaseHooks.user` and `user.deleteUser` (plan
+ * 12a). `create.before` may answer `{ data }` with `name` and `image`. A
+ * change of any other field is dropped, with one line per instance. `false`
+ * refuses, as in Better Auth. Core's update hooks change no row, so an
+ * update answer with `data` is dropped with one line. The delete runs
+ * `deleteUser.beforeDelete`, then `databaseHooks.user.delete.before`. After
+ * the delete it runs `databaseHooks.user.delete.after`, then
+ * `deleteUser.afterDelete`. Better Auth 1.7.2 runs the database hooks
+ * inside its deleteUser (dist/api/routes/update-user.mjs:340 to :346 and
+ * dist/db/with-hooks.mjs:115 to :145, read 2026-10-17). The `request`
+ * argument is undefined: core's hook carries no request.
+ */
+function userHooksOf(options: BetterAuthOptions): UserHooks {
+  const db = options.databaseHooks?.user;
+  const del = options.user?.deleteUser;
+  const out: UserHooks = {};
+  const createBefore = db?.create?.before;
+  if (createBefore) {
+    let warned = false;
+    out.beforeCreate = async (e) => {
+      const given = toUser(e.user);
+      const answer = await refusingApiErrors(() => createBefore({ ...given }, null));
+      if (answer === false) throw hookRefusal(HOOK_REFUSED_TEXT);
+      if (!isRecord(answer) || !isRecord(answer.data)) return undefined;
+      const patch: UserCreatePatch = {};
+      const dropped: string[] = [];
+      for (const [key, value] of Object.entries(answer.data)) {
+        if (Object.hasOwn(given, key) && Object.is(value, given[key as keyof User])) continue;
+        // Better Auth's names: an empty name for no name.
+        if (key === "name" && typeof value === "string") patch.name = value === "" ? null : value;
+        else if (key === "image" && (typeof value === "string" || value === null))
+          patch.image = value;
+        else dropped.push(key);
+      }
+      if (dropped.length > 0 && !warned) {
+        warned = true;
+        console.error(
+          `authtempo compat: databaseHooks.user.create.before changed ${dropped.join(", ")}; core takes name and image only and drops the rest (one line per instance)`,
+        );
+      }
+      return patch;
+    };
+  }
+  const createAfter = db?.create?.after;
+  if (createAfter) out.afterCreate = async (e) => createAfter(toUser(e.user), null);
+  const updateBefore = db?.update?.before;
+  if (updateBefore) {
+    let warned = false;
+    out.beforeUpdate = async (e) => {
+      // Better Auth passes the fields of the update, in its own names.
+      const data: Partial<User> = {};
+      if (e.patch.name !== undefined) data.name = e.patch.name ?? "";
+      if (e.patch.image !== undefined) data.image = e.patch.image;
+      if (e.patch.email !== undefined) data.email = e.patch.email;
+      const answer = await refusingApiErrors(() => updateBefore(data, null));
+      if (answer === false) throw hookRefusal(HOOK_REFUSED_TEXT);
+      if (isRecord(answer) && isRecord(answer.data) && !warned) {
+        warned = true;
+        console.error(
+          "authtempo compat: databaseHooks.user.update.before answered data; core's update hooks change no row, so it is dropped (one line per instance)",
+        );
+      }
+    };
+  }
+  const updateAfter = db?.update?.after;
+  if (updateAfter) out.afterUpdate = async (e) => updateAfter(toUser(e.user), null);
+  const beforeDeletes: ((u: User) => unknown)[] = [];
+  const dbBefore = db?.delete?.before;
+  if (del?.beforeDelete) beforeDeletes.push(del.beforeDelete);
+  if (dbBefore) beforeDeletes.push((u) => dbBefore(u, null));
+  if (beforeDeletes.length > 0)
+    out.beforeDelete = async (e) => {
+      const user = toUser(e.user);
+      for (const hook of beforeDeletes) {
+        const answer = await refusingApiErrors(() => hook({ ...user }));
+        if (answer === false) throw hookRefusal(HOOK_REFUSED_TEXT);
+      }
+    };
+  const afterDeletes: ((u: User) => unknown)[] = [];
+  const dbAfter = db?.delete?.after;
+  if (dbAfter) afterDeletes.push((u) => dbAfter(u, null));
+  if (del?.afterDelete) afterDeletes.push(del.afterDelete);
+  if (afterDeletes.length > 0)
+    out.afterDelete = async (e) => {
+      const user = toUser(e.user);
+      for (const hook of afterDeletes) await hook({ ...user });
+    };
+  return out;
+}
+
+type AccountHook = (account: AccountHookFields, context: null) => unknown;
+
+/** Better Auth's account fields of a core identity event. */
+function accountFields(e: { user: UserRow; identity: IdentitySummary }): AccountHookFields {
+  return { providerId: e.identity.provider, accountId: e.identity.subject, userId: e.user.id };
+}
+
+/** A before hook: `false` or a thrown APIError refuses. */
+function beforeAccount(hook: AccountHook | undefined) {
+  if (!hook) return undefined;
+  return async (e: { user: UserRow; identity: IdentitySummary }) => {
+    const answer = await refusingApiErrors(() => hook(accountFields(e), null));
+    if (answer === false) throw hookRefusal(HOOK_REFUSED_TEXT);
+  };
+}
+
+function afterAccount(hook: AccountHook | undefined) {
+  if (!hook) return undefined;
+  return async (e: { user: UserRow; identity: IdentitySummary }) => {
+    await hook(accountFields(e), null);
+  };
+}
+
+/**
+ * Core's identity hooks from `databaseHooks.account` (plan 12a): create maps
+ * to the link, and delete to the unlink. A credential account fires none: it
+ * is core's password row. Core's account delete fires no identity hook,
+ * where Better Auth's user delete runs the account delete hooks.
+ */
+function identityHooksOf(options: BetterAuthOptions): IdentityHooks {
+  const db = options.databaseHooks?.account;
+  const out: IdentityHooks = {};
+  const beforeLink = beforeAccount(db?.create?.before);
+  if (beforeLink) out.beforeLink = beforeLink;
+  const afterLink = afterAccount(db?.create?.after);
+  if (afterLink) out.afterLink = afterLink;
+  const beforeUnlink = beforeAccount(db?.delete?.before);
+  if (beforeUnlink) out.beforeUnlink = beforeUnlink;
+  const afterUnlink = afterAccount(db?.delete?.after);
+  if (afterUnlink) out.afterUnlink = afterUnlink;
+  return out;
+}
+
+/** Core's `hooks` from the Better Auth options (plan 9d; user and identity since plan 12a). */
 export function compatHooks(options: BetterAuthOptions): HooksConfig {
   const org = pluginOf(options, "organization")?.options;
   const limit = org && typeof org.organizationLimit === "function" ? org.organizationLimit : null;
   return {
     ...(org ? { organization: organizationHooksOf(org.organizationHooks ?? {}, limit) } : {}),
     session: sessionHooksOf(options.databaseHooks?.session?.create),
+    user: userHooksOf(options),
+    identity: identityHooksOf(options),
   };
 }
