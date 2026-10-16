@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "../../config.js";
 import type { Route } from "../router.js";
 import { emailOtpRoutes } from "./email-otp.js";
 import { handoffRoutes } from "./handoff.js";
+import { identityRoutes } from "./identities.js";
 import { jwtRoutes } from "./jwt.js";
 import { magicLinkRoutes } from "./magic-link.js";
 import { oauthRoutes } from "./oauth.js";
@@ -26,6 +27,7 @@ export function coreRoutes(config: ResolvedConfig): Route[] {
     ...sessionRoutes(config),
     ...reauthRoutes(config),
     ...userRoutes(config),
+    ...identityRoutes(config),
     ...magicLinkRoutes(config),
     ...socialRoutes(config),
     ...passkeyRoutes(config),

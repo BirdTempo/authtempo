@@ -65,6 +65,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
     "The password check is not available now. Wait a few minutes, then start again. A used email code does not work again.",
   session_not_fresh:
     "Confirm that it is you to continue: enter your password, or use your passkey.",
+  last_credential: "This is your last way to sign in. Add another one before you remove it.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

@@ -35,6 +35,7 @@ export {
   type AuthApi,
   createAuth,
   type EmailOtpApi,
+  type IdentitiesApi,
   type JwtApi,
   type OAuthApi,
   type PasswordApi,
@@ -85,6 +86,7 @@ export {
   type UserPatch,
   type UserUpdateVia,
 } from "./engine/hooks.js";
+export type { IdentityEntry, IdentityList, IdentityUnlink } from "./engine/identities.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";

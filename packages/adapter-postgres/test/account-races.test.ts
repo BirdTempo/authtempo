@@ -1,4 +1,5 @@
 import { createAuth, type MailMessage } from "@authtempo/core";
+import { SoftAuthenticator } from "@authtempo/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
@@ -462,3 +463,169 @@ interface MoveRow {
   name: string | null;
   updatedAt: Date;
 }
+
+describe("the last-credential guard on Postgres (plan 12a Task 9)", () => {
+  const RP = { rpID: "api.example.com", rpName: "Example", origins: [BASE] };
+  const NOTICE = "Security notice for your api.example.com account";
+
+  function guardWorld() {
+    const sent: MailMessage[] = [];
+    const unlinked: string[] = [];
+    // The claims of the next Google callback. The seam answers them for any token.
+    let claims: Record<string, unknown> = {};
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      passkey: RP,
+      social: {
+        google: { clientId: "gid", clientSecret: "gsecret" },
+        fetch: async () =>
+          Response.json({ id_token: "t", access_token: "at", token_type: "Bearer" }),
+      },
+      jwt: {
+        verifyIdToken: async () => claims,
+        signES256: async () => "unused",
+      },
+      hooks: {
+        identity: {
+          afterUnlink: ({ identity }) => {
+            unlinked.push(identity.subject);
+          },
+        },
+      },
+    });
+    async function google(email: string, sub: string, verified: boolean) {
+      const started = await auth.api.startSocial({ provider: "google", next: "/home", ip: null });
+      if (!started.ok) throw new Error(started.code);
+      const url = new URL(started.value.location);
+      claims = {
+        sub,
+        email,
+        email_verified: verified,
+        name: "Ada",
+        nonce: url.searchParams.get("nonce"),
+      };
+      const done = await auth.api.completeSocial({
+        provider: "google",
+        state: url.searchParams.get("state"),
+        code: "c",
+        error: null,
+        bindToken: started.value.bindToken,
+        ip: null,
+        userAgent: null,
+      });
+      if (!done.ok) throw new Error(done.code);
+      if (!("token" in done.value)) throw new Error("the sign-in answered a challenge");
+      const s = await auth.api.getSession(done.value.token);
+      if (!s) throw new Error("no session");
+      return s;
+    }
+    async function addPasskey(
+      user: Parameters<typeof auth.api.passkeyRegistrationOptions>[0]["user"],
+    ) {
+      const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: BASE });
+      const options = await auth.api.passkeyRegistrationOptions({ user });
+      if (!options.ok) throw new Error(options.code);
+      const added = await auth.api.verifyPasskeyRegistration({
+        user,
+        response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
+      });
+      if (!added.ok) throw new Error(added.code);
+      return added.value.id;
+    }
+    const notices = (to: string) => sent.filter((m) => m.to === to && m.subject === NOTICE);
+    return { auth, sent, unlinked, google, addPasskey, notices };
+  }
+
+  const delayed = <T>(ms: number, run: () => Promise<T>) =>
+    new Promise<T>((done, failed) => {
+      setTimeout(() => run().then(done, failed), ms);
+    });
+
+  it("parallel removals of a verified user's ways in, a delay sweep: each answers ok, and each notice goes once", async () => {
+    // A verified user: the proved address is a way in, so every removal may
+    // pass. The second and third removals wait for the lock, read the row
+    // again, and take the lock on the new row: no false conflict.
+    const w = guardWorld();
+    for (let delay = 0; delay < 12; delay++) {
+      const email = `sweep-${delay}@example.com`;
+      await w.auth.api.requestMagicLink({ email, ip: null });
+      const link = /token=([A-Za-z0-9_%-]+)/.exec(
+        [...w.sent].reverse().find((m) => m.to === email)?.text ?? "",
+      )?.[1];
+      if (!link) throw new Error("no link");
+      const signed = await w.auth.api.verifyMagicLink({
+        token: decodeURIComponent(link),
+        ip: null,
+        userAgent: null,
+      });
+      if (!signed.ok) throw new Error(signed.code);
+      // The verified address links Google to the same user.
+      const me = await w.google(email, `g-sweep-${delay}`, true);
+      const [identity] = await db.sql<{ id: string }[]>`
+        SELECT id FROM ta_identity WHERE user_id = ${me.user.id} AND provider = 'google'`;
+      if (!identity) throw new Error("no google identity");
+      const one = await w.addPasskey(me.user);
+      const two = await w.addPasskey(me.user);
+      w.unlinked.length = 0;
+      const answers = await Promise.all([
+        w.auth.api.identities.unlink({ session: me, id: identity.id, ip: null, userAgent: null }),
+        delayed(delay >> 1, () => w.auth.api.deletePasskey({ user: me.user, id: one })),
+        delayed(delay, () => w.auth.api.deletePasskey({ user: me.user, id: two })),
+      ]);
+      expect(answers.map((a) => (a.ok ? "ok" : a.code))).toEqual(["ok", "ok", "ok"]);
+      const identities =
+        await db.sql`SELECT provider FROM ta_identity WHERE user_id = ${me.user.id}`;
+      expect(identities.map((r) => r.provider)).toEqual(["email"]);
+      const passkeys = await db.sql`SELECT id FROM ta_passkey WHERE user_id = ${me.user.id}`;
+      expect(passkeys).toHaveLength(0);
+      expect(w.unlinked).toEqual([`g-sweep-${delay}`]);
+      expect(
+        w
+          .notices(email)
+          .map((m) => m.text.split("\n")[0])
+          .filter((line) => line?.includes("removed")),
+      ).toHaveLength(3);
+    }
+  }, 60_000);
+
+  it("parallel unlinks of an unverified user's only identity: each answers last_credential, and the identity stays", async () => {
+    // A Google sign-in with an unproved address: the identity is the one way in (spec 8.3).
+    const w = guardWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const me = await w.google(`claim-${round}@example.com`, `g-claim-${round}`, false);
+      expect(me.user.emailVerified).toBe(false);
+      const [identity] = await db.sql<{ id: string }[]>`
+        SELECT id FROM ta_identity WHERE user_id = ${me.user.id}`;
+      if (!identity) throw new Error("no identity");
+      const answers = await Promise.all(
+        [0, 1, 2].map((ms) =>
+          delayed(ms, () =>
+            w.auth.api.identities.unlink({
+              session: me,
+              id: identity.id,
+              ip: null,
+              userAgent: null,
+            }),
+          ),
+        ),
+      );
+      expect(answers.map((a) => (a.ok ? "ok" : a.code))).toEqual([
+        "last_credential",
+        "last_credential",
+        "last_credential",
+      ]);
+      const left = await db.sql`SELECT id FROM ta_identity WHERE user_id = ${me.user.id}`;
+      expect(left).toHaveLength(1);
+      expect(w.unlinked).toEqual([]);
+    }
+  }, 60_000);
+});

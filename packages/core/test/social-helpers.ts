@@ -1,5 +1,6 @@
 import type { AuthConfig } from "../src/config.js";
-import { startSocial } from "../src/engine/social.js";
+import { resolveSession } from "../src/engine/sessions.js";
+import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { JwtSeam } from "../src/seams/jwt.js";
 import { makeAuth } from "./helpers.js";
@@ -92,7 +93,10 @@ export async function stateRow(storage: ReturnType<typeof makeAuth>["storage"], 
 }
 
 /** Starts a Google flow; the callback needs the state, the nonce, and the binding value. */
-export async function startGoogle(auth: ReturnType<typeof socialAuth>, next = "/home") {
+export async function startGoogle(
+  auth: Pick<ReturnType<typeof socialAuth>, "config">,
+  next = "/home",
+) {
   const r = await startSocial(auth.config, { provider: "google", next, ip: "1.1.1.1" });
   if (!r.ok) throw new Error(`start failed: ${r.code}`);
   const url = new URL(r.value.location);
@@ -118,4 +122,31 @@ export function googleClaims(nonce: string, claims: Record<string, unknown>): Fa
       ...claims,
     },
   };
+}
+
+/**
+ * A Google sign-in to its end: the session token and the resolved session
+ * (plan 12a). A verified address that a user holds links Google to that
+ * user. An unverified address with no user makes an unverified user.
+ */
+export async function googleSignIn(
+  auth: Pick<ReturnType<typeof socialAuth>, "config">,
+  jwtTokens: Record<string, FakeIdToken>,
+  claims: Record<string, unknown> = {},
+) {
+  const s = await startGoogle(auth);
+  jwtTokens["idtok-default"] = googleClaims(s.nonce, claims);
+  const done = await completeSocial(auth.config, {
+    provider: "google",
+    state: s.state,
+    code: "c",
+    error: null,
+    bindToken: s.bindToken,
+    ip: null,
+    userAgent: null,
+  });
+  if (!done.ok || !("token" in done.value)) throw new Error("the social sign-in opened no session");
+  const resolved = await resolveSession(auth.config, done.value.token);
+  if (!resolved) throw new Error("no session");
+  return { ...resolved, token: done.value.token };
 }

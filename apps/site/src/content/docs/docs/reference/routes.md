@@ -148,6 +148,24 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Answer | `{ user }`, the same move as the link confirm. The caller's session stays |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`not_found`](/docs/reference/errors/#not_found), [`email_taken`](/docs/reference/errors/#email_taken), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
+<h3 id="get-identities"><code>GET /identities</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session |
+| Input | None |
+| Answer | `{ identities: [{ id, provider, email?, linkedAt, canUnlink }], password, passkeys }`, the oldest link first. The `email` identity carries the address and `canUnlink: false`. The provider's user id is not in the answer |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-identities-unlink"><code>POST /identities/unlink</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A fresh session |
+| Input | JSON `{ id }`, an id from the list. The `email` identity answers `invalid_body` |
+| Answer | `{ ok: true }`. No session ends, and a notice goes to the address |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`not_found`](/docs/reference/errors/#not_found), [`last_credential`](/docs/reference/errors/#last_credential), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
 ## Magic link
 
 These routes exist in every deployment.
@@ -267,7 +285,7 @@ These routes exist when the config sets `passkey`.
 | Needs | A session |
 | Input | JSON `{ id }` |
 | Answer | `{ ok: true }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`second_factor_last_method`](/docs/reference/errors/#second_factor_last_method), [`conflict`](/docs/reference/errors/#conflict) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`not_found`](/docs/reference/errors/#not_found), [`second_factor_last_method`](/docs/reference/errors/#second_factor_last_method), [`last_credential`](/docs/reference/errors/#last_credential), [`conflict`](/docs/reference/errors/#conflict) |
 
 ## Passwords
 

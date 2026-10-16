@@ -55,6 +55,8 @@ export const ERRORS = {
   breach_check_unavailable: 503,
   // plan 12a: a sensitive change needs a sign-in or a re-authentication within session.freshMinutes
   session_not_fresh: 403,
+  // plan 12a: the removal would leave the user with no way to sign in
+  last_credential: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

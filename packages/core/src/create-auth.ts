@@ -23,6 +23,12 @@ import {
   startHandoff,
 } from "./engine/handoff.js";
 import {
+  type IdentityList,
+  type IdentityUnlink,
+  listIdentities,
+  unlinkIdentity,
+} from "./engine/identities.js";
+import {
   acceptInvitation,
   declineInvitation,
   type InvitationSummary,
@@ -327,6 +333,14 @@ export interface UserApi {
   }): Promise<Result<{ user: PublicUser }>>;
 }
 
+/** The linked identities of a settings page (plan 12a). Present in every deployment. */
+export interface IdentitiesApi {
+  /** The identities with `canUnlink`, the password flag, and the passkey count. No fresh rule. */
+  list(input: { session: ResolvedSession }): Promise<Result<IdentityList>>;
+  /** Fresh rule; `last_credential` when the identity is the last way in. */
+  unlink(input: IdentityUnlink): Promise<Result<{ ok: true }>>;
+}
+
 export interface AuthApi {
   /** Deletes rows that no flow can use any more. Call it from a scheduled handler. */
   sweepExpired(): Promise<SweepResult>;
@@ -438,6 +452,7 @@ export interface AuthApi {
   tokens: TokensApi;
   session: SessionApi;
   user: UserApi;
+  identities: IdentitiesApi;
   secrets: SecretsApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
@@ -559,6 +574,10 @@ export function createAuth(input: AuthConfig): Auth {
         changeEmail: (i) => requestEmailChange(config, i),
         confirmEmailChange: (i) => confirmEmailChange(config, i),
         verifyEmailChange: (i) => verifyEmailChange(config, i),
+      },
+      identities: {
+        list: (i) => listIdentities(config, i),
+        unlink: (i) => unlinkIdentity(config, i),
       },
       secrets: {
         status: () => secretsStatus(config),

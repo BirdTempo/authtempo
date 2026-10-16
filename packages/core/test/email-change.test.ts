@@ -21,6 +21,14 @@ import type { StorageAdapter, Where } from "../src/storage/port.js";
 import { BASE_URL, get, post } from "./helpers.js";
 import { type Auth, EMAIL, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
+// One test fixes the mailed codes, so its wrong guess can never be the code
+// (review of plan 12a Task 8). Every other test gets real random codes.
+const codes = vi.hoisted(() => ({ fixed: null as string | null }));
+vi.mock("../src/primitives/crypto.js", async (load) => {
+  const real = await load<typeof import("../src/primitives/crypto.js")>();
+  return { ...real, randomDigits: (n: number) => codes.fixed ?? real.randomDigits(n) };
+});
+
 const NEW = "ada.new@example.com";
 const OTHER = "ada.other@example.com";
 const DAY = 86_400_000;
@@ -986,9 +994,15 @@ describe("no oracle for a taken address (plan 12a)", () => {
       const auth = totpAuth();
       const me = await verifiedSession(auth);
       if (taken) await verifiedSession(auth, NEW);
-      expect(
-        (await requestEmailChange(auth.config, { session: me, newEmail: NEW, method: "code" })).ok,
-      ).toBe(true);
+      codes.fixed = "444444";
+      try {
+        expect(
+          (await requestEmailChange(auth.config, { session: me, newEmail: NEW, method: "code" }))
+            .ok,
+        ).toBe(true);
+      } finally {
+        codes.fixed = null;
+      }
       const allow = vi.spyOn(auth.config.limiter, "allow");
       const answers: string[] = [];
       for (let i = 0; i < 6; i++) {

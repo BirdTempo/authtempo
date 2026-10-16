@@ -12,6 +12,7 @@ import type {
 } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
 import { hookGuard } from "./hooks.js";
+import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
 import { openSession, sessionOpened } from "./sessions.js";
@@ -459,19 +460,22 @@ class LastMethodError extends Error {
 }
 
 /**
- * Deletes one passkey of the user. While `passkey` is a second-factor method,
- * the last passkey stays: `second_factor_last_method` (plan 12c). The person
- * turns the method off first, or registers another passkey.
+ * Deletes one passkey of the user, under the last-credential guard (plan
+ * 12a): a user keeps at least one way in, else `last_credential`. While
+ * `passkey` is a second-factor method, the last passkey stays:
+ * `second_factor_last_method` (plan 12c). The person turns the method off
+ * first, or registers another passkey.
  *
- * The locks, on Postgres READ COMMITTED. With a factor row, the delete first
- * writes its `updatedAt` by a compare-and-set, which holds the factor row: of
- * two parallel deletes, the second waits for the first commit, and its
- * compare then matches no row (`conflict`). The delete statement holds the
- * passkey row; it waits for a parallel `enableMethod`, which holds every
- * passkey row of the user. After the delete, the factor row and the passkeys
- * left are read again. These reads see a factor row that a parallel first
- * enable committed, which the first read could not see. With the method on
- * and no passkey left, the throw undoes the delete.
+ * The locks, on Postgres READ COMMITTED. The guard first holds the user row
+ * (`guardedRemove`), as every removal of a way in does. With a factor row,
+ * the delete then writes its `updatedAt` by a compare-and-set, which holds
+ * the factor row. A parallel enable or disable that wrote it first answers
+ * `conflict`. The delete statement holds the passkey row; it waits for a
+ * parallel `enableMethod`, which holds every passkey row of the user. After
+ * the delete, the factor row and the passkeys left are read again. These
+ * reads see a factor row that a parallel first enable committed, which the
+ * first read could not see. With the method on and no passkey left, the
+ * throw undoes the delete.
  */
 export async function deletePasskey(
   config: ResolvedConfig,
@@ -479,9 +483,9 @@ export async function deletePasskey(
 ): Promise<Result<{ ok: true }>> {
   if (!config.passkey) return fail("not_found");
   const now = config.clock.now();
-  let removed: Result<{ ok: true }>;
+  let removed: Result<UserRow>;
   try {
-    removed = await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
+    removed = await guardedRemove(config, input.user.id, async (tx) => {
       const factor = await factorRow(tx, input.user.id);
       if (factor) {
         const held = await tx.update(
@@ -498,7 +502,8 @@ export async function deletePasskey(
         { field: "id", op: "eq", value: input.id },
         { field: "userId", op: "eq", value: input.user.id },
       ]);
-      if (deleted !== 1) return fail("not_found");
+      // Zero rows: the guard answers not_found and undoes the holds.
+      if (deleted !== 1) return deleted;
       const after = await factorRow(tx, input.user.id);
       if (after?.methods.includes("passkey")) {
         const left = await tx.findMany("passkey", [
@@ -506,21 +511,22 @@ export async function deletePasskey(
         ]);
         if (left.length === 0) throw new LastMethodError();
       }
-      return ok({ ok: true });
+      return deleted;
     });
   } catch (err) {
     if (err instanceof LastMethodError) return fail("second_factor_last_method");
-    // A parallel delete, enable, or disable wrote the row first. The person retries.
+    // A parallel enable or disable wrote the factor row first. The person retries.
     if (err instanceof FactorRaceError) return fail("conflict");
     throw err;
   }
-  // After the commit (plan 12a). A refused delete sends no notice.
-  if (removed.ok)
-    await sendNotice(config, {
-      event: "passkey_removed",
-      email: input.user.email,
-      ip: null,
-      userAgent: null,
-    });
-  return removed;
+  if (!removed.ok) return removed;
+  // After the commit (plan 12a). A refused delete sends no notice. The
+  // address is the one of the row that the guard held.
+  await sendNotice(config, {
+    event: "passkey_removed",
+    email: removed.value.email,
+    ip: null,
+    userAgent: null,
+  });
+  return ok({ ok: true });
 }

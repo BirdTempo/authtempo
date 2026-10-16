@@ -38,7 +38,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 `rate_limited` |
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
-| POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found` |
+| POST | `/passkeys/delete` | session, `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 404 `not_found`; 409 `last_credential` (the last way in, see "The last-credential guard"), `second_factor_last_method`, `conflict` |
 | POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
@@ -930,6 +930,8 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | GET | `/user/change-email/confirm` | `?token=` | 200 HTML confirm page (`account.confirmPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No storage read, no limit, no cookie |
 | POST | `/user/change-email/confirm` | form or JSON `token`, no session | form body: 302 to `next`, or to `/?auth_error=<code>` on a failure; JSON body: `{ user }`. The address moves and is verified. The `email` identity follows. The old address's live links and codes go. Every other session, challenge, handoff code, and OAuth grant ends. A notice goes to the old address. 400 `invalid_token`, `token_expired`; 403 `hook_refused`; 409 `email_taken` (a user took the address since the request), `conflict`; 429 `rate_limited`; 500 `hook_failed` |
 | POST | `/user/change-email/verify` | session, `{ code }` | `{ user }`, the same move by a code. The caller's session stays. 400 `invalid_body`, `invalid_code`, `too_many_attempts`; 401; 403 `hook_refused`; 409 `email_taken`, `conflict`; 404 with `emailOtp: false`; 429 `rate_limited`; 500 `hook_failed` |
+| GET | `/identities` | session | `{ identities: [{ id, provider, email?, linkedAt, canUnlink }], password, passkeys }`, oldest link first. The provider's subject is not in the answer. The `email` identity carries the address and `canUnlink: false`. No fresh rule and no limit; 401 |
+| POST | `/identities/unlink` | session (fresh), `{ id }` | `{ ok: true }`. No session ends. 400 `invalid_body` (the `email` identity, or any other field); 401; 403 `session_not_fresh`, `hook_refused`; 404 `not_found` (an unknown id, or an id of another user); 409 `last_credential`, `conflict`; 429 `rate_limited`; 500 `hook_failed` |
 
 The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it takes no `code`, whatever methods the user has on. After a password or an email code, `code` is the second factor. Item 2 says: "With the second factor on, the password and the email code need `code`, an authenticator code or a backup code." Item 12 lists "the email method of plan 12c as a re-authentication code" as a later input. So a user whose only method is the email method sends a backup code, or proves by a passkey. A user whose password row holds `LEGACY_VERIFY_HASH` proves by an email code or a passkey. The password proof refuses the marker, as the TOTP setup does.
 
@@ -944,6 +946,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `email-change:email:<new address>` | 15 minutes | 3 | `POST /user/change-email`, after the per-user key |
 | `email-change-confirm:ip:<ip>` | 15 minutes | 20 | `POST /user/change-email/confirm`. A malformed token counts no try |
 | `otp-verify:ip:<ip>`, `otp-verify:email:<new address>` | 15 minutes | 30, 10 | `POST /user/change-email/verify`, shared with every code verify. With no request, the IP key only |
+| `unlink:user:<userId>` | 15 minutes | 10 | `POST /identities/unlink`, also for an unknown id. A stale session counts no try |
 
 The profile update (`POST /user/update`, `api.user.update`) writes only the fields it gets. Null clears a field. It needs a verified address: a claim keeps the user row and its name, so a claimant must not set what the owner inherits. It has no fresh rule, because the name and the image do not affect a sign-in.
 
@@ -961,17 +964,22 @@ The link opens a confirm page that does nothing on load, so a mail scanner spend
 
 A change of address keeps the social identities: a later social sign-in finds the user by its subject. Pending invitations to the old address stay with that address. An authenticator app keeps the old address as its label.
 
+**The last-credential guard.** A user keeps at least one way in. The ways in are an active password, a passkey, an identity of a configured provider, and a verified address. The magic link signs in with a verified address in every deployment. The unlink and the passkey delete (`POST /passkeys/delete`) run the guard. They answer 409 `last_credential` when the removal would leave no way in, and remove nothing. The unlink checks the count before `identity.beforeUnlink`, so a refused unlink runs no hook.
+
+The guard holds the user row by a compare-and-set, then removes, then counts again, in one transaction. So two removals at the same moment cannot both take a way in. On Postgres the second waits, reads the row again, and counts again. A parallel write to the user row makes the guard read it again. After 5 lost rounds the answer is 409 `conflict`, and core logs `authtempo: credential removal gave up <user id>`; send it again. `identity.beforeUnlink` and `identity.afterUnlink` get the user row as the guard holds it and `{ provider, subject }`.
+
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
 - a password change, or a first password
 - a reset by link or by code, also when the reset answers a second-factor challenge
 - a passkey added or removed
+- a provider unlinked (`POST /identities/unlink`): the notice names the provider
 - a second-factor method turned on or off: TOTP, the passkey method, the email method, and `api.totp.disable`
 - a change of address, by link or by code: the notice goes to the old address, which the request read, and names the new one
 
-The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change, a reset, and a change of address pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
+The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change, a reset, a change of address, and an unlink pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
 
-`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names a provider link and unlink, and the account delete. No flow of this version sends those yet.
+`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names a provider link and the account delete. No flow of this version sends those yet.
 
 ## Hooks
 
@@ -1079,7 +1087,9 @@ const auth = createAuth({
   and `afterUnlink`. The `via` of a link is `sign_in` or `link`. `sign_in`
   is a social sign-in that creates a user or links a verified equal
   address. `link` is the link of a signed-in user. The `email` identity
-  fires no identity hook.
+  fires no identity hook. The unlink fires `beforeUnlink` after core's
+  checks and the guard's lock, and before the delete, with no `via`.
+  `afterUnlink` fires after the commit.
 - The order in one flow: `user.beforeCreate`, `identity.beforeLink`, and
   `session.beforeCreate`, each before the first write. After the commit:
   `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`. The

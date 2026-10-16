@@ -11,6 +11,7 @@ import {
   verifyEmailChange,
 } from "../src/engine/email-change.js";
 import { requestResetOtp, resetPasswordWithOtp } from "../src/engine/email-otp.js";
+import { unlinkIdentity } from "../src/engine/identities.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { defaultNoticeMail, type NoticeMailInput } from "../src/engine/notices.js";
 import {
@@ -38,6 +39,13 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { post, tokenFromMail } from "./helpers.js";
+import {
+  type FakeIdToken,
+  fakeJwt,
+  GOOGLE,
+  googleSignIn,
+  tokenEndpoint,
+} from "./social-helpers.js";
 import {
   type Auth,
   codeNow,
@@ -693,7 +701,13 @@ describe("defaultNoticeMail (plan 12a)", () => {
 function tracked() {
   const st = { depth: 0, failCommit: false };
   const sent: { m: MailMessage; depth: number }[] = [];
-  const auth = totpAuth({ passkey: RP });
+  // Google too, for the unlink path (plan 12a Task 9).
+  const jwtTokens: Record<string, FakeIdToken> = {};
+  const auth = totpAuth({
+    passkey: RP,
+    social: { google: GOOGLE, fetch: tokenEndpoint("idtok-default").fetchFn },
+    jwt: fakeJwt(jwtTokens),
+  });
   const store = auth.config.storage as StorageAdapter;
   const origTx = store.transaction.bind(store);
   (store as { transaction: StorageAdapter["transaction"] }).transaction = (async <R>(
@@ -718,7 +732,7 @@ function tracked() {
   };
   const mail = () => sent.map((x) => x.m);
   const noticesSent = () => sent.filter((x) => x.m.subject === SUBJECT);
-  return { auth, st, mail, noticesSent };
+  return { auth, st, mail, noticesSent, jwtTokens };
 }
 
 type Tracked = ReturnType<typeof tracked>;
@@ -836,6 +850,22 @@ const PATHS: {
       const code = /\b(\d{6})\b/.exec(mail().at(-1)?.text ?? "")?.[1] ?? "";
       return {
         act: () => verifyEmailChange(auth.config, { session: s, code, ip: null, userAgent: null }),
+      };
+    },
+  },
+  {
+    name: "identity unlink",
+    run: async ({ auth, jwtTokens }) => {
+      await verifiedSession(auth);
+      // A verified address that a user holds: the Google sign-in links Google.
+      const s = await googleSignIn(auth, jwtTokens);
+      const google = await auth.storage.findMany("identity", [
+        { field: "userId", op: "eq", value: s.user.id },
+        { field: "provider", op: "eq", value: "google" },
+      ]);
+      const id = google[0]?.id ?? "";
+      return {
+        act: () => unlinkIdentity(auth.config, { session: s, id, ip: null, userAgent: null }),
       };
     },
   },
