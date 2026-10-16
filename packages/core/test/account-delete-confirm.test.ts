@@ -509,9 +509,12 @@ describe("the mailed confirm of an account delete (plan 12a Task 20)", () => {
     expect(await userOf(w.auth, me.user.id)).not.toBeNull();
   });
 
-  it("ends a pending delete link at a change of address", async () => {
+  it("ends a pending delete link at a change of address, and only the mover's", async () => {
     const w = world();
     const me = await verifiedSession(w.auth);
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    await requestAccountDelete(w.auth.config, input(bob));
+    const bobToken = linkOf(w.auth, "bob@example.com");
     await requestAccountDelete(w.auth.config, input(me));
     const token = linkOf(w.auth);
     await requestEmailChange(w.auth.config, { session: me, newEmail: "ada.new@example.com" });
@@ -519,7 +522,8 @@ describe("the mailed confirm of an account delete (plan 12a Task 20)", () => {
     expect(
       (await confirmEmailChange(w.auth.config, { token: change, ip: null, userAgent: null })).ok,
     ).toBe(true);
-    expect(await deleteRows(w.auth)).toEqual([]);
+    // The move deletes the mover's link only (review m1).
+    expect((await deleteRows(w.auth)).map((r) => r.identifier)).toEqual([bob.user.id]);
     const moved = await resolveSession(w.auth.config, me.token);
     if (!moved) throw new Error("no session");
     expect(await confirmAccountDelete(w.auth.config, { ...input(moved), token })).toEqual({
@@ -528,6 +532,11 @@ describe("the mailed confirm of an account delete (plan 12a Task 20)", () => {
       status: 400,
     });
     expect(await userOf(w.auth, me.user.id)).not.toBeNull();
+    expect(await confirmAccountDelete(w.auth.config, { ...input(bob), token: bobToken })).toEqual({
+      ok: true,
+      value: { ok: true },
+    });
+    expect(await userOf(w.auth, bob.user.id)).toBeNull();
   });
 
   it("mails through account.mail with the kind delete_confirm, to the user's address", async () => {

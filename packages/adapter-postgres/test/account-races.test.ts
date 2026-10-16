@@ -1826,6 +1826,37 @@ describe("the mailed delete confirm on Postgres (plan 12a Task 20)", () => {
     }
   }, 60_000);
 
+  it("three parallel requests of one user leave one live link, the hash of a mailed token (review m3)", async () => {
+    const w = confirmWorld();
+    for (let round = 0; round < ROUNDS * 2; round++) {
+      const email = `three-${round}@example.com`;
+      const me = await w.signIn(email);
+      const before = w.sent.length;
+      const answers = await Promise.all(
+        [0, 1, 2].map(() => w.on.api.user.delete({ session: me, ip: null, userAgent: null })),
+      );
+      for (const a of answers) expect(a).toEqual({ ok: true, value: { sent: true } });
+      const tokens = w.sent
+        .slice(before)
+        .filter((m) => m.to === email && m.subject.startsWith("Confirm the delete"))
+        .map((m) => decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(m.text)?.[1] ?? ""));
+      // The stored form: the lowercase hex SHA-256 of the clear token.
+      const mailed = await Promise.all(
+        tokens.map(async (t) => {
+          const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+          return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, "0")).join("");
+        }),
+      );
+      expect(mailed).toHaveLength(3);
+      // The hold of the user row runs the three one at a time: the last one's row stays.
+      const live = await db.sql`
+        SELECT value_hash FROM ta_verification
+        WHERE purpose = 'account-delete' AND identifier = ${me.user.id} AND consumed_at IS NULL`;
+      expect(live, `round ${round}`).toHaveLength(1);
+      expect(mailed).toContain(live[0]?.value_hash);
+    }
+  }, 60_000);
+
   it("a confirm beside a change of address, a delay sweep: one wins, and the other answers invalid_token", async () => {
     const w = confirmWorld();
     const won = { delete: 0, move: 0 };
@@ -1853,7 +1884,7 @@ describe("the mailed delete confirm on Postgres (plan 12a Task 20)", () => {
       expect(await w.userLeft(me.user.id)).toBe(deleted.ok ? 0 : 1);
       won[deleted.ok ? "delete" : "move"]++;
     }
-    // A record of the orders met, for the reader of a failure.
-    expect(won.delete + won.move).toBe(delays.length);
+    // The sweep must meet the move-first order, the order of the move's rule (review L1).
+    expect(won.move, JSON.stringify(won)).toBeGreaterThan(0);
   }, 60_000);
 });

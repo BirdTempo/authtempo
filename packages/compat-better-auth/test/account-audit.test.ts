@@ -490,6 +490,57 @@ describe("Task 20 sendDeleteAccountVerification", () => {
     expect(await s.auth.api.getSession({ headers })).toBeNull();
   });
 
+  it("confirms the token from a stale session on both surfaces, as Better Auth spends it before its fresh check", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const tokens: string[] = [];
+    const s = instance({
+      session: { freshAge: 60 },
+      user: {
+        deleteUser: {
+          enabled: true,
+          sendDeleteAccountVerification: async ({ token }) => void tokens.push(token),
+        },
+      },
+    });
+    const request = (cookie: string) =>
+      s.auth.handler(
+        new Request(`${PATH}/delete-user`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE, cookie },
+          body: JSON.stringify({}),
+        }),
+      );
+    const a = await s.signedIn("ada@example.com");
+    const b = await s.signedIn("bo@example.com");
+    for (const x of [a, b]) expect((await request(x.cookie)).status).toBe(200);
+    const [aToken, bToken] = tokens;
+    // Past freshAge: the request itself would answer SESSION_NOT_FRESH now.
+    vi.setSystemTime(Date.now() + 120_000);
+    const staleRequest = await request(a.cookie);
+    expect(staleRequest.status).toBe(403);
+    expect(await staleRequest.json()).toMatchObject({ code: "SESSION_NOT_FRESH" });
+    // The handler: Better Auth 1.7.2 spends the token before its fresh check (update-user.mjs:307 to :335).
+    const byHandler = await s.auth.handler(
+      new Request(`${PATH}/delete-user`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, cookie: a.cookie },
+        body: JSON.stringify({ token: aToken }),
+      }),
+    );
+    expect(byHandler.status).toBe(200);
+    expect(await byHandler.json()).toEqual({ success: true, message: "User deleted" });
+    // auth.api.
+    const headers = new Headers({ cookie: b.cookie });
+    expect(await s.auth.api.deleteUser({ body: { token: bToken ?? "" }, headers })).toEqual({
+      success: true,
+      message: "User deleted",
+    });
+    for (const x of [a, b])
+      expect(
+        await s.auth.api.getSession({ headers: new Headers({ cookie: x.cookie }) }),
+      ).toBeNull();
+  });
+
   it("refuses a deleteTokenExpiresIn that is not a whole number of minutes from 300 to 86400 seconds", () => {
     const refusalsOf = (deleteTokenExpiresIn: unknown, send: unknown = async () => {}) =>
       checkOptions({

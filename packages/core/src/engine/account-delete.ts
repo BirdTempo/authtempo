@@ -26,6 +26,7 @@ import {
   sessionIsLive,
   sessionsEnded,
 } from "./sessions.js";
+import { holdUser } from "./user-hold.js";
 
 // Per hour, per user (plan 12a). A delete succeeds once. 5 lets a person
 // retry after a `conflict` or after a fix of `sole_owner`, and bounds a loop.
@@ -80,9 +81,10 @@ export function startAccountDelete(
 /**
  * The request of a mailed delete (plan 12a Task 20). Every check of the
  * direct delete runs first, in its order: `not_found` with `account.delete`
- * off, the fresh rule, the limit, and the sole-owner rule. Then the user's
- * earlier links go, one row holds the hash of a new `ad_` token, and the link
- * goes to the user's address. It deletes nothing.
+ * off, the fresh rule, the limit, and the sole-owner rule. Then, in one
+ * transaction that holds the user row, the user's earlier links go and one
+ * row holds the hash of a new `ad_` token. After the commit the link goes to
+ * the user's address. It deletes nothing.
  */
 export async function requestAccountDelete(
   config: ResolvedConfig,
@@ -95,30 +97,42 @@ export async function requestAccountDelete(
   const userId = input.session.user.id;
   if (!(await config.limiter.allow(`user-delete:user:${userId}`, DELETE_PER_USER)))
     return fail("rate_limited");
-  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  if (!user) return fail("not_found");
   // The rule runs again at the confirm: an owner can leave between the two.
   const plan = await organizationsOfDelete(config, config.storage, userId);
   if (!plan.ok) return plan;
   const now = config.clock.now();
-  // One live link per user: a new request ends the older ones.
-  await config.storage.delete("verification", [
-    { field: "purpose", op: "eq", value: "account-delete" },
-    { field: "identifier", op: "eq", value: userId },
-  ]);
   const token = randomToken(DELETE_TOKEN_PREFIX);
-  await config.storage.create("verification", {
-    id: newId(now),
-    purpose: "account-delete",
-    identifier: userId,
-    valueHash: await sha256Hex(token),
-    expiresAt: new Date(now.getTime() + confirm.ttlMinutes * 60_000),
-    consumedAt: null,
-    data: null,
-    createdAt: now,
-    updatedAt: now,
-    secretVersion: config.keyring.current,
-  });
+  const valueHash = await sha256Hex(token);
+  // The hold of the user row (Task 11's holdUser) runs parallel requests of
+  // one user one at a time on Postgres. A change of address holds the same
+  // row, so the address read here is the one the link goes to.
+  const held = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<UserRow>> => {
+      await holdUser(tx, userId);
+      const user = await tx.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+      if (!user) return fail("not_found");
+      // One live link per user: a new request ends the older ones.
+      await tx.delete("verification", [
+        { field: "purpose", op: "eq", value: "account-delete" },
+        { field: "identifier", op: "eq", value: userId },
+      ]);
+      await tx.create("verification", {
+        id: newId(now),
+        purpose: "account-delete",
+        identifier: userId,
+        valueHash,
+        expiresAt: new Date(now.getTime() + confirm.ttlMinutes * 60_000),
+        consumedAt: null,
+        data: null,
+        createdAt: now,
+        updatedAt: now,
+        secretVersion: config.keyring.current,
+      });
+      return ok(user);
+    }),
+  );
+  if (!held.ok) return held;
+  const user = held.value;
   const link = `${config.baseURL}${config.basePath}/user/delete/confirm?token=${encodeURIComponent(token)}`;
   await sendAccountMail(config, {
     kind: "delete_confirm",
