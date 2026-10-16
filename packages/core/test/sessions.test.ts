@@ -209,9 +209,13 @@ describe("session routes", () => {
       post("/auth/sign-out", {}, { cookie: `__Host-tempo_session=${token}` }),
     );
     expect(res.status).toBe(200);
+    // The exact body: { ok: true } and nothing else (plan 12a fix wave, Task 13 review info).
+    expect(await res.json()).toStrictEqual({ ok: true });
     expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(await resolveSession(config, token)).toBeNull();
-    expect((await handle(post("/auth/sign-out", {}))).status).toBe(200);
+    const again = await handle(post("/auth/sign-out", {}));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toStrictEqual({ ok: true });
   });
 
   it("GET /session renews the cookie after a sliding refresh and not before", async () => {

@@ -414,6 +414,27 @@ describe("the two-factor paths (plan 9f)", () => {
     ).toMatchObject({ code: "TWO_FACTOR_NOT_ENABLED" });
   });
 
+  it("reads the session with no refresh: a disable two days later leaves the session row, and core's next read slides it (Task 14 review R2-I1)", async () => {
+    const { post, get, session, storage } = await enrolled();
+    const expiry = async () => (await storage.findMany("session", []))[0]?.expiresAt.getTime();
+    const before = await expiry();
+    // Past Better Auth's sliding refresh of one day; the session lives seven.
+    vi.useFakeTimers({ now: Date.now() + 2 * 86_400_000, toFake: ["Date"] });
+    try {
+      // Two days is past the fresh window too, so the shim refuses after its read.
+      const off = await post("/two-factor/disable", { password: PASSWORD }, session);
+      expect(off.status).toBe(403);
+      expect(await json(off)).toMatchObject({ code: "SESSION_NOT_FRESH" });
+      // The shim's own answer sets no session cookie, so the row must not move.
+      expect(await expiry()).toBe(before);
+      // The control: core's route does the slide.
+      expect((await get("/get-session", session)).status).toBe(200);
+      expect(await expiry()).toBeGreaterThan(before ?? Number.POSITIVE_INFINITY);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("answers NOT_SUPPORTED (501) for the email and SMS code paths and for method otp, and 401 with no session", async () => {
     const { post, session } = await app();
     for (const path of TWO_FACTOR_NOT_SUPPORTED) {

@@ -59,7 +59,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - In one sign-in that creates a user, the order is `user.beforeCreate`, `identity.beforeLink`, and `session.beforeCreate`, all before the first write. After the commit, the order is `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`.
 - A flow that moves an existing user from `emailVerified: false` to true runs `user.beforeVerify` and `user.afterVerify` once. They take the place of `user.beforeCreate` and `user.afterCreate` in that order.
 - `user.beforeVerify` sees the stored row, still unverified. A refusal leaves the user unverified. The magic link, the email code, the verify link, and social spend their proof first, so a refusal spends it. The reset keeps its link.
-- Two proofs of one user at once both run `user.beforeVerify`. One claims the user and runs `user.afterVerify`. The other signs in the verified user. So a before can have no after.
+- Two proofs of one user at once both run `user.beforeVerify`. One claims the user and runs `user.afterVerify`. The other finds the user verified. The magic link, the email code, social, and the reset sign in that user. The verify link opens no session. It answers `invalid_token` when the claim deleted the user's password. So a before can have no after.
 - A user that a flow creates verified fires the create points, not the verify points. The change of address fires the update points.
 - The sign-up rule runs before `user.beforeCreate`. So no user hook sees a create that `signUp` refuses.
 - A claim fires the verify points only. The `email` identity, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.

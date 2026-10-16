@@ -317,7 +317,7 @@ Every call but `totp.verify`, `secondFactor.passkey.verify`, and `secondFactor.e
 | `secondFactor.email.send({ challenge })` | Mails a code; pass it as `totp.verify({ challenge, emailCode })`. |
 | `secondFactor.disable({ method, password })` | Turns the passkey or the email method off. |
 
-The calls of the second factor can answer these codes: `invalid_credentials`, `email_unverified` (403), `invalid_code`, `too_many_attempts`, `passkey_failed`, `invalid_body` (the challenge offers no such method), `invalid_token`, `totp_enabled`, `totp_not_enabled` (the method is off), `rate_limited`, `conflict`, `not_found`, and `unauthorized`. A dismissed passkey prompt answers `cancelled`.
+The calls of the second factor can answer these codes: `invalid_credentials`, `email_unverified` (403), `invalid_code`, `too_many_attempts`, `passkey_failed`, `invalid_body`, and `invalid_token`. They can also answer `totp_enabled`, `totp_not_enabled`, `rate_limited`, `conflict`, `not_found`, and `unauthorized`. `invalid_body` means that the challenge offers no such method. `totp_not_enabled` means that the method is off. A dismissed passkey prompt answers `cancelled`.
 
 ## Account settings
 

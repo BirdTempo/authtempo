@@ -306,6 +306,15 @@ describe("Task 18 email verification callbacks", () => {
     expect(calls).toEqual([["before", "ada.code@example.com", true, ""]]);
     const me = await auth.api.getSession({ headers: new Headers({ cookie }) });
     expect(me?.user.email).toBe("ada.code@example.com");
+    // A profile update is not a change of address, so neither callback runs
+    // (plan 12a fix wave, Task 18 review R2-L2: the via filter of the after map).
+    calls.length = 0;
+    refuse.on = false;
+    const named = await post("/update-user", { name: "Ada" }, cookie);
+    expect(named.status).toBe(200);
+    const renamed = await auth.api.getSession({ headers: new Headers({ cookie }) });
+    expect(renamed?.user.name).toBe("Ada");
+    expect(calls).toEqual([]);
   });
 });
 

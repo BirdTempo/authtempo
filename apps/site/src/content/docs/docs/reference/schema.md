@@ -46,7 +46,7 @@ Version 10 also adds five verification purposes. `purpose` is a text column, so 
 | `email-change` | The user id, so one user has one live request | A change-of-address link: the SHA-256 hex of the `ec_` token. |
 | `email-change-otp` | The user id | A change-of-address code: the data of `email-change`, with the code rules of `email-otp`. |
 | `oauth-link-state` | The provider name | The state of a link of a provider: the data of `oauth-state` and the user and session of the start. |
-| `account-delete` | The user id, so one user has one live link | The mailed confirm of an account delete: the SHA-256 hex of the `ad_` token. |
+| `account-delete` | The user id, so one user has one live link on Postgres and the memory store | The mailed confirm of an account delete: the SHA-256 hex of the `ad_` token. |
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 

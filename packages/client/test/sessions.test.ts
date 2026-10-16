@@ -5,9 +5,12 @@ import { BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.j
 const DAY = 86_400_000;
 
 /** A signed-in cookie session through the magic link, so the session tests start signed in. */
-async function signedIn(server: ReturnType<typeof makeServer>) {
+async function signedIn(
+  server: ReturnType<typeof makeServer>,
+  wrap: (f: typeof fetch) => typeof fetch = (f) => f,
+) {
   const { fetch, jar } = inProcessFetch(server.auth);
-  const client = createClient({ baseURL: BASE_URL, fetch });
+  const client = createClient({ baseURL: BASE_URL, fetch: wrap(fetch) });
   const req = await client.magicLink.request({ email: "ada@example.com" });
   if (!req.ok) throw new Error(req.code);
   const token = tokenFromMail(server.mail[0]?.text ?? "");
@@ -74,15 +77,30 @@ describe("session and sign-out", () => {
 
   it("keeps a session alive for ten days by the store's read alone, with one refresh per due day", async () => {
     const server = makeServer({ session: { deferRefresh: true } });
-    const { client } = await signedIn(server);
+    // Count the refresh posts: a store that posts on every read must fail (fix wave, Task 17 R2-L1).
+    let posts = 0;
+    const { client } = await signedIn(server, (f) => async (input, init) => {
+      const req = new Request(input, init);
+      if (req.method === "POST" && new URL(req.url).pathname === "/auth/session/refresh") posts++;
+      return f(req);
+    });
     const slid: boolean[] = [];
     const stop = client.store.subscribe(() => {});
     await vi.waitFor(() => expect(client.store.get().isPending).toBe(false));
     const before = await server.storage.findMany("session", []);
     expect(before).toHaveLength(1);
     for (let day = 1; day <= 10; day++) {
-      server.clock.advance(8 * DAY);
+      // One read a day after the last slide: the refresh is not due, so no post and no slide.
+      const [held] = await server.storage.findMany("session", []);
+      server.clock.advance(DAY);
       await client.store.refetch();
+      expect(posts, `day ${day * 8 - 7}`).toBe(day - 1);
+      const [same] = await server.storage.findMany("session", []);
+      expect(same?.expiresAt, `day ${day * 8 - 7}`).toEqual(held?.expiresAt);
+      // Seven days later the refresh is due: one post.
+      server.clock.advance(7 * DAY);
+      await client.store.refetch();
+      expect(posts, `day ${day * 8}`).toBe(day);
       const state = client.store.get();
       expect(state.data?.user.email, `day ${day * 8}`).toBe("ada@example.com");
       // The store holds the refresh's answer, so no refresh is due.
@@ -91,8 +109,9 @@ describe("session and sign-out", () => {
       slid.push(row?.expiresAt.getTime() === server.clock.now().getTime() + 30 * DAY);
     }
     stop();
-    // Each read slid the row: 80 days past a 30-day session, the user is still in.
+    // Each due read slid the row: 80 days past a 30-day session, the user is still in.
     expect(slid).toEqual(Array(10).fill(true));
+    expect(posts).toBe(10);
   });
 
   it("keeps the GET answer in the store when the refresh fails", async () => {
