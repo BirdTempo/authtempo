@@ -119,7 +119,8 @@ export async function emailOtpRoute(
     // Better Auth keys the code by the old and the new address, so a code
     // for another address answers INVALID_OTP (routes.mjs:724). Core keys it
     // by the user and keeps the new address in the row: the shim compares.
-    const s = await auth.session(request);
+    // A read with no write: core's route does the one sliding refresh and sends its renewal cookie (Task 14 review L1).
+    const s = await auth.session(request, { refresh: false });
     if (s) {
       const live = await mapped.config.storage.findMany("verification", [
         { field: "purpose", op: "eq", value: "email-change-otp" },

@@ -104,7 +104,9 @@ export async function twoFactorRoute(
   const body = await readBody(request);
   if (!body) return failure(BETTER_AUTH_CODES.invalid_body, 400);
   const sameSite = mapped.config.cookie?.sameSite ?? "Lax";
-  const session = await auth.session(request);
+  // A read with no write (Task 14 review L1): the shim's own answer sets no
+  // cookie, so a slide here would move the row and leave the cookie's expiry old.
+  const session = await auth.session(request, { refresh: false });
   if (path === VERIFY_TOTP || path === VERIFY_BACKUP) {
     if (typeof body.code !== "string") return failure(BETTER_AUTH_CODES.invalid_body, 400);
     if (session) {

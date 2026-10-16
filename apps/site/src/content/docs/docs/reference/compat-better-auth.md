@@ -128,6 +128,7 @@ Where the shim differs from Better Auth:
 | The change link goes to `sendVerificationEmail` and changes the address at once | The link goes to the same callback, to the new address. It opens core's confirm page. A taken address gets no mail, as on Better Auth. |
 | A link needs the verified flag or a trusted provider, and an equal address unless `allowDifferentEmails` | A link needs the provider's verified address, equal to the account's. Else the callback answers `email_mismatch`. A provider address must not take an account. |
 | The unlink of the last account answers `FAILED_TO_UNLINK_LAST_ACCOUNT` with 400 | The same code with 409, by the last-credential guard. |
+| For a user with one account, an unknown id answers `FAILED_TO_UNLINK_LAST_ACCOUNT` | An unknown id answers `ACCOUNT_NOT_FOUND`. |
 | The credential account can be unlinked | Its unlink answers `NOT_SUPPORTED` with 501. Core has no password removal. |
 | No mail after a credential change | The same. The shim sets core's `account.notices: false`. Use core's `createAuth` for the notice mails. |
 | The user delete runs the account delete hooks | It runs none. A credential account fires no account hook, because core's password row is not an identity. |

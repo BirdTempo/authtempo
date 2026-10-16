@@ -1,4 +1,5 @@
 import {
+  createAuth,
   createMemoryAdapter,
   createMemoryLimiter,
   createPbkdf2PasswordHash,
@@ -48,7 +49,7 @@ function instance(
 ) {
   const links: string[] = [];
   const verifyMails: { email: string; url: string; token: string }[] = [];
-  const auth = betterAuth({
+  const options: BetterAuthOptions = {
     baseURL: BASE,
     secret: SECRET,
     database,
@@ -59,7 +60,8 @@ function instance(
     },
     plugins: [magicLink({ sendMagicLink: async ({ url }) => void links.push(url) }), ...more],
     ...extra,
-  });
+  };
+  const auth = betterAuth(options);
   /** A verified user and the cookie of its session, by the magic link. */
   async function signedIn(email: string) {
     await auth.api.signInMagicLink({ body: { email } });
@@ -85,8 +87,72 @@ function instance(
     );
   const get = (path: string, cookie: string) =>
     auth.handler(new Request(`${PATH}${path}`, { headers: { cookie } }));
-  return { auth, storage: database.storage, verifyMails, signedIn, post, get };
+  return { auth, options, storage: database.storage, verifyMails, signedIn, post, get };
 }
+
+/**
+ * Core on the shim's own mapped config, with core's social seams: a token
+ * endpoint and an ID token check that answer `claims` (as
+ * test/last-credential-postgres.test.ts does). It shares the storage and the
+ * hooks of the shim, so a Google sign-in or link here is one through the shim's config.
+ */
+function coreOf(options: BetterAuthOptions) {
+  let claims: Record<string, unknown> = {};
+  const config = mapOptions(options).config;
+  const auth = createAuth({
+    ...config,
+    social: {
+      ...config.social,
+      fetch: async () => Response.json({ id_token: "t", access_token: "at", token_type: "Bearer" }),
+    },
+    jwt: { verifyIdToken: async () => claims, signES256: async () => "unused" },
+  });
+  const nonceOf = (location: string) => new URL(location).searchParams.get("nonce");
+  const stateOf = (location: string) => new URL(location).searchParams.get("state");
+  /** A Google sign-in: the session token. */
+  async function googleSignIn(sub: string, email: string, verified: boolean) {
+    const started = await auth.api.startSocial({ provider: "google", next: "/", ip: null });
+    if (!started.ok) throw new Error(started.code);
+    claims = { sub, email, email_verified: verified, nonce: nonceOf(started.value.location) };
+    const done = await auth.api.completeSocial({
+      provider: "google",
+      state: stateOf(started.value.location),
+      code: "c",
+      error: null,
+      bindToken: started.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+    if (!done.ok || !("token" in done.value)) throw new Error("the Google sign-in failed");
+    return done.value.token;
+  }
+  /** A link of a Google identity to the session of `cookie`: core's answer. */
+  async function googleLink(cookie: string, sub: string, email: string) {
+    const token = cookie.slice(`${COOKIE_NAME}=`.length);
+    const session = await auth.session(new Request(BASE, { headers: { cookie } }));
+    if (!session) throw new Error("no session");
+    const started = await auth.api.startLink({ provider: "google", session, ip: null });
+    if (!started.ok) throw new Error(started.code);
+    claims = { sub, email, email_verified: true, nonce: nonceOf(started.value.location) };
+    return auth.api.completeSocial({
+      provider: "google",
+      state: stateOf(started.value.location),
+      code: "c",
+      error: null,
+      bindToken: started.value.bindToken,
+      sessionToken: token,
+      ip: null,
+      userAgent: null,
+    });
+  }
+  return { auth, googleSignIn, googleLink };
+}
+
+/** True when the answer renews the session cookie: a new value, not a clear. */
+const renews = (res: Response) =>
+  res.headers
+    .getSetCookie()
+    .some((c) => c.startsWith(`${COOKIE_NAME}=`) && !c.startsWith(`${COOKIE_NAME}=;`));
 
 const codeOf = async (res: Response) => ((await res.json()) as { code?: string }).code;
 
@@ -228,6 +294,11 @@ describe("the Better Auth account paths (plan 12a)", () => {
     expect(await (await t.post("/revoke-session", { token: "nope" }, b.cookie)).json()).toEqual({
       status: true,
     });
+    // An id that core's body rule refuses (empty, or over 64 characters) is a token Better Auth does not know.
+    for (const token of ["", "x".repeat(70)])
+      expect(await (await t.post("/revoke-session", { token }, b.cookie)).json()).toEqual({
+        status: true,
+      });
     expect(await t.auth.api.revokeSession({ body: { token: "nope" }, headers: b.headers })).toEqual(
       { status: true },
     );
@@ -295,6 +366,15 @@ describe("the Better Auth account paths (plan 12a)", () => {
     const t = instance({ user: { changeEmail: { enabled: true } } });
     const a = await t.signedIn("ada@example.com");
     await t.signedIn("bob@example.com");
+    // A callbackURL off the app origin answers Better Auth's code, and no mail goes out.
+    const foreign = await t.post(
+      "/change-email",
+      { newEmail: "ada.new@example.com", callbackURL: "https://evil.example.com/x" },
+      a.cookie,
+    );
+    expect(foreign.status).toBe(403);
+    expect(await codeOf(foreign)).toBe("INVALID_CALLBACK_URL");
+    expect(t.verifyMails.filter((m) => m.email === "ada.new@example.com")).toEqual([]);
     expect(
       await (await t.post("/change-email", { newEmail: "ada.new@example.com" }, a.cookie)).json(),
     ).toEqual({ status: true });
@@ -487,6 +567,15 @@ describe("the Better Auth account paths (plan 12a)", () => {
       code: "NOT_SUPPORTED",
       message: "core takes no idToken, scopes at the link",
     });
+    const error = await t.post(
+      "/link-social",
+      { provider: "google", errorCallbackURL: "/oops" },
+      a.cookie,
+    );
+    expect(await error.json()).toEqual({
+      code: "NOT_SUPPORTED",
+      message: "core takes no errorCallbackURL at the link",
+    });
   });
 
   it("changes the address by an email code with emailOTP changeEmail on, and refuses a code for another address", async () => {
@@ -550,6 +639,7 @@ describe("the fresh rule under the shim (plan 12a)", () => {
     const t = instance({
       session: { freshAge: 60 },
       user: { changeEmail: { enabled: true }, deleteUser: { enabled: true } },
+      socialProviders: { google: { clientId: "gid", clientSecret: "gs" } },
     });
     const a = await t.signedIn("ada@example.com");
     stale();
@@ -561,6 +651,7 @@ describe("the fresh rule under the shim (plan 12a)", () => {
       // An unknown id answers SESSION_NOT_FRESH first, as in Better Auth 1.7.2.
       ["/unlink-account", { accountId: "missing" }],
       ["/delete-user", {}],
+      ["/link-social", { provider: "google" }],
     ];
     for (const [path, body] of cases) {
       const res = await t.post(path, body, a.cookie);
@@ -856,6 +947,14 @@ describe("the accounts on Better Auth rows (plan 12a)", () => {
       ["era-google", "google"],
       ["era-cred", "credential"],
     ]);
+    // Another user's password row id answers as an unknown id: the shim tells no one which ids are password rows.
+    const bob = await t.signedIn("bob@example.com");
+    expect(
+      await codeOf(await t.post("/unlink-account", { accountId: "era-cred" }, bob.cookie)),
+    ).toBe("ACCOUNT_NOT_FOUND");
+    await expect(
+      t.auth.api.unlinkAccount({ body: { accountId: "era-cred" }, headers: bob.headers }),
+    ).rejects.toMatchObject({ statusCode: 400, body: { code: "ACCOUNT_NOT_FOUND" } });
     const cred = await t.post("/unlink-account", { accountId: "era-cred" }, a.cookie);
     expect(cred.status).toBe(501);
     expect(await codeOf(cred)).toBe("NOT_SUPPORTED");
@@ -874,5 +973,107 @@ describe("the accounts on Better Auth rows (plan 12a)", () => {
         (x) => x.id,
       ),
     ).toEqual(["era-cred"]);
+  });
+});
+
+describe("the renewal cookie through the shim's own session reads (Task 14 review L1)", () => {
+  it("renews the session cookie on the revoke, the unlink, and the email code change after two days", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t = instance({}, [
+      emailOTP({ sendVerificationOTP: async () => {}, changeEmail: { enabled: true } }),
+    ]);
+    const a = await t.signedIn("ada@example.com");
+    const b = await t.signedIn("ada@example.com");
+    const c = await t.signedIn("ada@example.com");
+    // Past the sliding refresh of one day; the session lives seven.
+    vi.setSystemTime(Date.now() + 2 * 86_400_000);
+    const cases: [string, unknown, string][] = [
+      ["/revoke-session", { token: "nope" }, a.cookie],
+      ["/unlink-account", { accountId: "missing" }, b.cookie],
+      ["/email-otp/change-email", { newEmail: "n@example.com", otp: "000000" }, c.cookie],
+    ];
+    for (const [path, body, cookie] of cases) {
+      const res = await t.post(path, body, cookie);
+      expect({ path, renewed: renews(res) }).toEqual({ path, renewed: true });
+    }
+  });
+});
+
+describe("the account create hooks at a link (Task 14 review L4)", () => {
+  it("runs databaseHooks.account.create before and after a link, and a false before refuses it", async () => {
+    const seen: unknown[] = [];
+    let refuse = false;
+    const t = instance({
+      socialProviders: { google: { clientId: "gid", clientSecret: "gs" } },
+      databaseHooks: {
+        account: {
+          create: {
+            before: async (x) => {
+              seen.push({ before: x });
+              return refuse ? false : undefined;
+            },
+            after: async (x) => void seen.push({ after: x }),
+          },
+        },
+      },
+    });
+    const core = coreOf(t.options);
+    const a = await t.signedIn("ada@example.com");
+    const userId = (await t.auth.api.getSession({ headers: a.headers }))?.user.id;
+    const linked = await core.googleLink(a.cookie, "g-ada", "ada@example.com");
+    expect(linked.ok).toBe(true);
+    const fields = { providerId: "google", accountId: "g-ada", userId };
+    expect(seen).toEqual([{ before: fields }, { after: fields }]);
+    expect(
+      (await t.auth.api.listUserAccounts({ headers: a.headers })).map((x) => x.accountId),
+    ).toEqual(["g-ada"]);
+    refuse = true;
+    seen.length = 0;
+    const b = await t.signedIn("bob@example.com");
+    const refused = await core.googleLink(b.cookie, "g-bob", "bob@example.com");
+    expect(refused).toMatchObject({ ok: false, code: "hook_refused" });
+    expect(seen).toHaveLength(1);
+    expect(await t.auth.api.listUserAccounts({ headers: b.headers })).toEqual([]);
+  });
+});
+
+describe("the last way in through the shim (Task 14 review L3)", () => {
+  let pg: { sql: Sql; close(): Promise<void> } | null = null;
+  afterEach(async () => {
+    await pg?.close();
+    pg = null;
+  });
+
+  it("answers FAILED_TO_UNLINK_LAST_ACCOUNT with 409 on both surfaces, and the account stays", async () => {
+    // Rows as Better Auth 1.7 writes them, before the migration: a user who never
+    // proved the address, with one Google account. Core's writers give no such
+    // user a second way in, so the Google account is the last one.
+    pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    await pg.sql.unsafe(
+      [
+        `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES ('lone','Lone','lone@example.com',false,NULL,'${AT}','${AT}');`,
+        `INSERT INTO "account" ("id","issuer","accountId","providerId","userId","password","createdAt","updatedAt") VALUES ('lone-google','${issuerFor("google")}','g-lone','google','lone',NULL,'${AT}','${AT}');`,
+      ].join("\n"),
+    );
+    const db = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+    await db.migrate();
+    const t = instance(
+      { socialProviders: { google: { clientId: "gid", clientSecret: "gs" } } },
+      [],
+      db,
+    );
+    // The session that core's Google sign-in writes for that user.
+    const token = await coreOf(t.options).googleSignIn("g-lone", "lone@example.com", false);
+    const cookie = `${COOKIE_NAME}=${token}`;
+    const res = await t.post("/unlink-account", { accountId: "lone-google" }, cookie);
+    expect(res.status).toBe(409);
+    expect(await codeOf(res)).toBe("FAILED_TO_UNLINK_LAST_ACCOUNT");
+    await expect(
+      t.auth.api.unlinkAccount({
+        body: { accountId: "lone-google" },
+        headers: new Headers({ cookie }),
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, body: { code: "FAILED_TO_UNLINK_LAST_ACCOUNT" } });
+    expect(await pg.sql`SELECT id FROM "account" WHERE "userId" = 'lone'`).toHaveLength(1);
   });
 });

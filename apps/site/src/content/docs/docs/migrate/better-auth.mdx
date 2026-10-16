@@ -101,6 +101,7 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 - The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.
 - A Better Auth path that the app calls with its own `fetch` answers 404. Call the client method instead. The account paths and the email code paths are served in Better Auth's shapes.
 - A revoke, the change of address, the link, the unlink, and the delete need a fresh session. `session.freshAge` sets the window, and `0` is refused. A stale session answers `SESSION_NOT_FRESH` with 403.
+- `/two-factor/disable`, `/two-factor/get-totp-uri`, and `/two-factor/generate-backup-codes` need a fresh session too, checked before the password.
 - Better Auth's `list-sessions` needs a fresh session. On authtempo the list needs a session only, as core's `GET /sessions` does.
 - A social link needs the provider's verified address, equal to the account's. Better Auth also links an unverified address of a trusted provider, and a different address with `allowDifferentEmails`. On authtempo the callback answers `email_mismatch` for a different address, and both options are refused at start.
 - `user.deleteUser.enabled` stays off by default, as in Better Auth. An organization where the user is the last owner and other members remain stops the delete with `SOLE_OWNER`.

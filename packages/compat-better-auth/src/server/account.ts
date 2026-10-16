@@ -144,7 +144,7 @@ export async function accountRoute(
   const status = () => ({ status: true });
   /** The caller, after core's route proved the session. */
   const caller = async () => {
-    const s = await auth.session(request);
+    const s = await auth.session(request, { refresh: false });
     if (!s) throw new Error("authtempo compat: the session of an answered request is gone");
     return s;
   };
@@ -164,7 +164,8 @@ export async function accountRoute(
     switch (path) {
       case "/revoke-session": {
         const token = required(body, "token");
-        const s = await auth.session(request);
+        // A read with no write: core's route does the one sliding refresh and sends its renewal cookie (Task 14 review L1).
+        const s = await auth.session(request, { refresh: false });
         // With no session, core's route answers 401.
         const id = s ? await sessionIdOf(mapped.config.storage, s.user.id, token) : token;
         // Better Auth 1.7.2 answers status true for a token it does not know
@@ -201,7 +202,8 @@ export async function accountRoute(
       }
       case "/unlink-account": {
         const accountId = required(body, "accountId");
-        const s = await auth.session(request);
+        // A read with no write: core's route does the one sliding refresh and sends its renewal cookie (Task 14 review L1).
+        const s = await auth.session(request, { refresh: false });
         if (s && (await isCredential(mapped.config.storage, s.user.id, accountId))) {
           // Better Auth 1.7.2 checks the fresh rule first (account.mjs:266).
           const fresh = auth.api.session.requireFresh(s);
