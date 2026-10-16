@@ -21,6 +21,19 @@ import type {
 import { pluginOf } from "./check-options.js";
 import { toInvitation, toMember, toOrganization, toSession, toUser } from "./shapes.js";
 
+/**
+ * Where Better Auth 1.7.2 calls `emailVerification.beforeEmailVerification`
+ * and `afterEmailVerification` (read 2026-10-17). `null` is no call. The
+ * shim calls them at core's claim points and at both changes of address. Better Auth's
+ * `/email-otp/verify-email` answers NOT_SUPPORTED in the shim.
+ */
+export const VERIFY_CALLBACK_PLACES = {
+  verifyLink: { before: "dist/api/routes/email-verification.mjs:294", after: ":296" },
+  changeLink: { before: null, after: "dist/api/routes/email-verification.mjs:229" },
+  otpVerifyEmail: { before: "dist/plugins/email-otp/routes.mjs:327", after: ":332" },
+  otpChangeEmail: { before: "dist/plugins/email-otp/routes.mjs:736", after: ":741" },
+} as const;
+
 /** Better Auth 1.7.2's text for the limit (dist/plugins/organization/error-codes.mjs:5, read 2026-10-13). */
 export const ORGANIZATION_LIMIT_TEXT = "You have reached the maximum number of organizations";
 
@@ -410,11 +423,14 @@ function sessionHooksOf(create: SessionCreateHooks | undefined): SessionHooks {
  * dist/db/with-hooks.mjs:115 to :145, read 2026-10-17). The `request`
  * argument is undefined: core's hook carries no request.
  * `emailVerification.beforeEmailVerification` and `afterEmailVerification`
- * map to `user.beforeVerify` and `user.afterVerify`. Better Auth 1.7.2
- * calls them at its verify link only (dist/api/routes/email-verification.mjs
- * lines 294 and 296, read 2026-10-17). Core calls them on each path that
- * proves the address of an unverified user. A throw in the after hook is
- * logged, and the verify stands; Better Auth answers the error.
+ * map to `user.beforeVerify` and `user.afterVerify`, on each path that
+ * proves the address of an unverified user. Better Auth 1.7.2 also calls
+ * them at a change of address (VERIFY_CALLBACK_PLACES). So
+ * `afterEmailVerification` runs from `user.afterUpdate` with the via
+ * `email_change` too, after `databaseHooks.user.update.after`, as Better
+ * Auth's update runs its database hooks first. The code path calls
+ * `beforeEmailVerification` itself (email-otp.ts). A throw in an after
+ * hook is logged, and the answer stands; Better Auth answers the error.
  */
 function userHooksOf(options: BetterAuthOptions): UserHooks {
   const db = options.databaseHooks?.user;
@@ -469,7 +485,16 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
     };
   }
   const updateAfter = db?.update?.after;
-  if (updateAfter) out.afterUpdate = async (e) => updateAfter(toUser(e.user), null);
+  const changeAfter = options.emailVerification?.afterEmailVerification;
+  if (updateAfter || changeAfter)
+    out.afterUpdate = async (e) => {
+      try {
+        await updateAfter?.(toUser(e.user), null);
+      } finally {
+        // Better Auth 1.7.2 calls it after each change of address (VERIFY_CALLBACK_PLACES).
+        if (changeAfter && e.via === "email_change") await changeAfter(toUser(e.user));
+      }
+    };
   const verifyBefore = options.emailVerification?.beforeEmailVerification;
   if (verifyBefore)
     out.beforeVerify = async (e) => {

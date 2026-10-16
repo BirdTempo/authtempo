@@ -504,8 +504,8 @@ const TOP: Record<string, Rule> = {
     ),
     autoSignInAfterVerification: only(true, "core signs the person in at the verify link"),
     expiresIn: MINUTES,
-    // Plan 12a: core's user.beforeVerify and user.afterVerify
-    // (dist/api/routes/email-verification.mjs lines 294 and 296, read 2026-10-17).
+    // Plan 12a: core's user.beforeVerify and user.afterVerify, and the change
+    // of address. VERIFY_CALLBACK_PLACES in hooks.ts lists Better Auth's lines.
     beforeEmailVerification: fn,
     afterEmailVerification: fn,
   }),

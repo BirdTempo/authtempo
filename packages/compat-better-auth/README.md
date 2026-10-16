@@ -681,13 +681,21 @@ README, "Hooks").
 - `emailVerification.beforeEmailVerification` and `afterEmailVerification`
   (plan 12a) map to core's `user.beforeVerify` and `user.afterVerify`. Each
   gets Better Auth's user shape, and the `request` argument is undefined.
-  Better Auth 1.7.2 calls them at its verify link only. Core calls them on
-  each path that proves the address of an unverified user. These paths are
-  the verify link, the magic link, the email code, the reset, and a social
-  sign-in with a verified provider address. A thrown `APIError` in the before hook
-  answers `HOOK_REFUSED`, and the user stays unverified. A throw in the
-  after hook writes one log line, and the verify stands. Better Auth answers
-  that error to the caller. The change of address fires neither hook.
+  Core calls them on each path that proves the address of an unverified
+  user. These paths are the verify link, the magic link, the email code, the
+  reset, and a social sign-in with a verified provider address. Better Auth
+  1.7.2 calls them at its verify link (`email-verification.mjs:294` and
+  `:296`) and at `/email-otp/verify-email` (`routes.mjs:327` and `:332`).
+  The shim answers that path `NOT_SUPPORTED`. Better Auth also calls them at
+  a change of address, and so does the shim. The change link calls the after
+  hook only (`email-verification.mjs:229`). `/email-otp/change-email` calls
+  both (`routes.mjs:736` and `:741`). The after hook gets the moved user,
+  after core's commit. One timing differs: Better Auth calls the before hook
+  of the change by code after its code check. The shim calls it before
+  core's route, so a wrong code still calls it. A thrown `APIError` in a
+  before hook answers `HOOK_REFUSED`, and nothing changes. A throw in an
+  after hook writes one log line, and the answer stands. Better Auth answers
+  that error to the caller.
 - `databaseHooks.account` (plan 12a): `create` runs at a provider link, and
   `delete` at an unlink. Each gets `{ providerId, accountId, userId }`, with
   no row id. A credential account fires none, because core's password row is

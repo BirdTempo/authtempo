@@ -11,6 +11,7 @@ import {
   COMPAT_PLUGIN,
   type CompatDatabase,
   type CompatPlugin,
+  type User,
 } from "../types.js";
 import { appSchemes, pluginOf, signUpClosed } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
@@ -60,6 +61,12 @@ export interface Mapped {
   minPasswordLength: number;
   /** The account operations that the options turn on (plan 12a). */
   account: { changeEmail: boolean; deleteUser: boolean; emailOtpChange: boolean };
+  /**
+   * `emailVerification.beforeEmailVerification`, which the change of
+   * address by code calls before core's route (VERIFY_CALLBACK_PLACES in
+   * hooks.ts), or null.
+   */
+  changeVerifyBefore: ((user: User) => unknown) | null;
 }
 
 /**
@@ -349,5 +356,6 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       deleteUser: options.user?.deleteUser?.enabled === true,
       emailOtpChange: otp?.options.changeEmail?.enabled === true,
     },
+    changeVerifyBefore: options.emailVerification?.beforeEmailVerification ?? null,
   };
 }

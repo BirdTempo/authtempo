@@ -44,16 +44,23 @@ const EMAIL = "ada@example.com";
  * `refuse` makes `beforeVerify` refuse.
  */
 function recorded() {
-  const flag = { refuse: false };
+  /** `parallel` runs once from `beforeVerify`, as a parallel request on another connection. */
+  const flag: { refuse: boolean; parallel: (() => Promise<void>) | null } = {
+    refuse: false,
+    parallel: null,
+  };
   const verify: string[] = [];
   const all: string[] = [];
   const afterUsers: UserRow[] = [];
   const hooks: HooksConfig = {
     user: {
-      beforeVerify: (e) => {
+      beforeVerify: async (e) => {
         verify.push(`before:${e.via}:${e.user.emailVerified}`);
         all.push(`user.beforeVerify:${e.via}`);
         if (flag.refuse) throw hookRefusal("no");
+        const parallel = flag.parallel;
+        flag.parallel = null;
+        if (parallel) await parallel();
       },
       afterVerify: (e) => {
         verify.push(`after:${e.via}:${e.user.emailVerified}`);
@@ -340,19 +347,129 @@ describe("user.beforeVerify and user.afterVerify (plan 12a, Task 18)", () => {
     expect(created.verify).toEqual([]);
   });
 
-  it("runs the points in the order of rule 4 at a Google sign-in that links and verifies", async () => {
+  for (const path of PATHS)
+    it(`retries once and fires no afterVerify when a parallel proof claims first at ${path.name} (review M1)`, async () => {
+      // The parallel flow's claim lands between this flow's read and its
+      // claim: its first statement, the conditional flip of the flag, commits
+      // on another connection. This flow's conditional flip then finds no
+      // unverified row. It undoes its attempt, and the retry finds a verified user.
+      const w = world();
+      await path.setup(w);
+      const user = await userRow(w);
+      w.flag.parallel = async () => {
+        await w.auth.storage.update(
+          "user",
+          [
+            { field: "id", op: "eq", value: user.id },
+            { field: "emailVerified", op: "eq", value: false },
+          ],
+          { emailVerified: true, updatedAt: new Date(user.updatedAt.getTime() + 1) },
+        );
+      };
+      expect((await path.run(w)).ok).toBe(true);
+      expect(w.verify).toEqual([`before:${path.via}:false`]);
+      expect(w.afterUsers).toEqual([]);
+      expect((await userRow(w)).emailVerified).toBe(true);
+    });
+
+  const ORDER: {
+    name: string;
+    setup: (w: World) => Promise<unknown>;
+    run: (w: World) => Promise<Result<unknown>>;
+    events: string[];
+  }[] = [
+    {
+      name: "a Google sign-in that links and verifies",
+      setup: signUp,
+      run: (w) => google(w),
+      events: [
+        "user.beforeVerify:social",
+        "identity.beforeLink:sign_in",
+        "session.beforeCreate",
+        "user.afterVerify:social",
+        "identity.afterLink:sign_in",
+        "session.afterEnd:claim",
+        "session.afterCreate",
+      ],
+    },
+    {
+      name: "a Google sign-in through a linked identity that now proves the address",
+      setup: (w) => google(w, { email_verified: false }),
+      run: (w) => google(w),
+      events: [
+        "user.beforeVerify:social",
+        "session.beforeCreate",
+        "user.afterVerify:social",
+        "session.afterEnd:claim",
+        "session.afterCreate",
+      ],
+    },
+    {
+      name: "a magic link of an unverified user",
+      setup: signUp,
+      run: magicLink,
+      events: [
+        "user.beforeVerify:magic_link",
+        "session.beforeCreate",
+        "user.afterVerify:magic_link",
+        "session.afterEnd:claim",
+        "session.afterCreate",
+      ],
+    },
+    {
+      name: "the password verify link",
+      setup: signUp,
+      run: verifyLink,
+      events: [
+        "user.beforeVerify:password_verify",
+        "session.beforeCreate",
+        "user.afterVerify:password_verify",
+        "session.afterEnd:claim",
+        "session.afterCreate",
+      ],
+    },
+  ];
+  for (const path of ORDER)
+    it(`runs the points in the order of rule 4 at ${path.name}`, async () => {
+      const w = world();
+      await path.setup(w);
+      w.all.length = 0;
+      expect((await path.run(w)).ok).toBe(true);
+      expect(w.all).toEqual(path.events);
+    });
+
+  it("runs no verify point at the verify link of a user that a reset already verified (review L2)", async () => {
     const w = world();
     await signUp(w);
-    w.all.length = 0;
-    expect((await google(w)).ok).toBe(true);
-    expect(w.all).toEqual([
-      "user.beforeVerify:social",
-      "identity.beforeLink:sign_in",
-      "session.beforeCreate",
-      "user.afterVerify:social",
-      "identity.afterLink:sign_in",
-      "session.afterEnd:claim",
-      "session.afterCreate",
+    expect((await resetLink(w)).ok).toBe(true);
+    expect((await userRow(w)).emailVerified).toBe(true);
+    w.verify.length = 0;
+    // The reset keeps the password row id, so the old verify link still answers ok.
+    expect(await verifyLink(w)).toMatchObject({ ok: true, value: { signedIn: null } });
+    expect(w.verify).toEqual([]);
+  });
+
+  it("keeps the reset link after a refusal in beforeVerify: the same link passes once the app allows it (review L3)", async () => {
+    const w = world();
+    await signUp(w);
+    await requestPasswordReset(w.auth.config, { email: EMAIL, ip: null });
+    const input = {
+      token: tokenFromMail(w.auth.mail.at(-1)?.text ?? ""),
+      password: "a new long password",
+      ip: null,
+      userAgent: null,
+    };
+    w.flag.refuse = true;
+    expect(await resetPassword(w.auth.config, input)).toMatchObject({
+      ok: false,
+      code: "hook_refused",
+    });
+    w.flag.refuse = false;
+    expect((await resetPassword(w.auth.config, input)).ok).toBe(true);
+    expect(w.verify).toEqual([
+      "before:password_reset:false",
+      "before:password_reset:false",
+      "after:password_reset:true",
     ]);
   });
 

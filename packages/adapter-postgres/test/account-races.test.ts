@@ -1011,6 +1011,79 @@ describe("the link of a social identity on Postgres (plan 12a Task 10)", () => {
   }, 60_000);
 });
 
+describe("two claims of one user on Postgres (plan 12a Task 18, review M1)", () => {
+  it("two magic links of one unverified user at once: one claim, one afterVerify, and two live sessions", async () => {
+    // A barrier in user.beforeVerify lets both flows read the unverified row
+    // before either claims. The claim flips the flag only on an unverified
+    // row, so the second flow finds none and undoes its attempt. Its retry
+    // signs in the verified user. Without the condition, both claim:
+    // the pair fires twice, and the second claim ends the first session.
+    let arrived = 0;
+    let release: () => void = () => {};
+    let together = Promise.resolve();
+    const before: string[] = [];
+    const after: string[] = [];
+    const sent: MailMessage[] = [];
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      password: { uniformSignUp: false },
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      hooks: {
+        user: {
+          beforeVerify: async ({ user }) => {
+            before.push(user.id);
+            arrived += 1;
+            if (arrived === 2) release();
+            // A flow that waits more than 2 s goes on alone: the test then fails on its counts.
+            await Promise.race([together, new Promise((r) => setTimeout(r, 2_000))]);
+          },
+          afterVerify: ({ user }) => {
+            after.push(user.id);
+          },
+        },
+      },
+    });
+    const linkTo = async (email: string) => {
+      await auth.api.requestMagicLink({ email, ip: null });
+      const m = [...sent].reverse().find((x) => x.to === email && /token=/.test(x.text));
+      return decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1] ?? "");
+    };
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `twice-${round}@example.com`;
+      const up = await auth.api.password?.signUp({
+        email,
+        password: "correct horse battery",
+        ip: null,
+        userAgent: null,
+      });
+      if (!up?.ok || !("session" in up.value)) throw new Error("no sign-up session");
+      const userId = up.value.user.id;
+      const links = [await linkTo(email), await linkTo(email)];
+      arrived = 0;
+      together = new Promise<void>((r) => {
+        release = r;
+      });
+      const answers = await Promise.all(
+        links.map((token) => auth.api.verifyMagicLink({ token, ip: null, userAgent: null })),
+      );
+      expect(before.filter((id) => id === userId)).toHaveLength(2);
+      expect(after.filter((id) => id === userId)).toEqual([userId]);
+      for (const a of answers) {
+        if (!a.ok || !("token" in a.value)) throw new Error("a claim answered no session");
+        expect((await auth.api.getSession(a.value.token))?.user.emailVerified).toBe(true);
+      }
+    }
+  }, 60_000);
+});
+
 describe("the account delete on Postgres (plan 12a Task 11)", () => {
   /** The rows that name `userId` in the tables a sign-in writes, and the user row. */
   async function rowsOf(userId: string) {

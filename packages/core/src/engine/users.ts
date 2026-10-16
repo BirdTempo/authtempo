@@ -148,7 +148,12 @@ export async function claimEmail(
     ],
     { emailVerified: true, updatedAt: now },
   );
-  if (flipped === 0) throw new ClaimLostError();
+  if (flipped === 0) {
+    // An account delete took the row: `conflict`, as the read after a session insert answers (user-hold.ts).
+    if (!(await tx.findOne("user", [{ field: "id", op: "eq", value: userId }])))
+      stopWith("conflict");
+    throw new ClaimLostError();
+  }
   const where: Where<"identity">[] = [
     { field: "userId", op: "eq", value: userId },
     { field: "provider", op: "ne", value: "email" },
@@ -204,9 +209,9 @@ export type BeforeResolveWrite = (
 /**
  * Thrown by `claimEmail` when another flow verified the user after this
  * transaction read it as unverified (plan 12a Task 18, review M1). The throw
- * undoes this transaction. Each flow catches it outside, and runs once more:
- * the retry finds a verified user and claims nothing, so the pair of verify
- * hooks fires once, for the flow that claimed.
+ * undoes this transaction. Each flow catches it outside and runs once more.
+ * The retry finds a verified user and claims nothing. So the verify pair
+ * fires once, for the flow that claimed.
  */
 export class ClaimLostError extends Error {
   constructor() {

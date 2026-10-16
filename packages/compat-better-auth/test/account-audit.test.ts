@@ -230,6 +230,83 @@ describe("Task 18 email verification callbacks", () => {
     await expect(s.signedIn("cy@example.com")).rejects.toThrow("the magic link answered 403");
     expect(calls).toEqual([["before", "cy@example.com", false, "", undefined]]);
   });
+
+  it("calls the two callbacks at a change of address as Better Auth 1.7.2 does (review M2)", async () => {
+    // Better Auth calls afterEmailVerification at the change link
+    // (email-verification.mjs:229), and both at /email-otp/change-email
+    // (routes.mjs:736 and :741).
+    const { emailOTP } = await import("../src/plugins.js");
+    const calls: unknown[][] = [];
+    const links: string[] = [];
+    const verifyMails: { token: string }[] = [];
+    const codes: { otp: string }[] = [];
+    const refuse = { on: false };
+    const auth = betterAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      database: memoryDatabase(),
+      trustedOrigins: [BASE],
+      user: { changeEmail: { enabled: true } },
+      emailVerification: {
+        sendVerificationEmail: async ({ token }) => void verifyMails.push({ token }),
+        beforeEmailVerification: async (user) => {
+          calls.push(["before", user.email, user.emailVerified, user.name]);
+          if (refuse.on) throw new APIError("FORBIDDEN", { message: "Not yet." });
+        },
+        afterEmailVerification: async (user) => {
+          calls.push(["after", user.email, user.emailVerified, user.name]);
+        },
+      },
+      plugins: [
+        magicLink({ sendMagicLink: async ({ url }) => void links.push(url) }),
+        emailOTP({
+          sendVerificationOTP: async (d) => void codes.push(d),
+          changeEmail: { enabled: true },
+        }),
+      ],
+    });
+    const post = (path: string, body: unknown, cookie = "") =>
+      auth.handler(
+        new Request(`${PATH}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE, cookie },
+          body: JSON.stringify(body),
+        }),
+      );
+    await auth.api.signInMagicLink({ body: { email: "ada@example.com" } });
+    const signIn = await post("/magic-link/verify", {
+      token: new URL(links.at(-1) ?? "").searchParams.get("token"),
+    });
+    const cookie = sessionPair(signIn);
+    // The change link: the after call only, with the moved user.
+    await post("/change-email", { newEmail: "ada.link@example.com" }, cookie);
+    const confirmed = await post("/user/change-email/confirm", {
+      token: verifyMails.at(-1)?.token,
+    });
+    expect(confirmed.status).toBeLessThan(400);
+    // Better Auth's user shape: an empty name for no name.
+    expect(calls).toEqual([["after", "ada.link@example.com", true, ""]]);
+    // The change by code: the before call with the user before the move, then the after call.
+    calls.length = 0;
+    const byCode = async (newEmail: string) => {
+      await post("/email-otp/request-email-change", { newEmail }, cookie);
+      return post("/email-otp/change-email", { newEmail, otp: codes.at(-1)?.otp }, cookie);
+    };
+    expect(await (await byCode("ada.code@example.com")).json()).toEqual({ success: true });
+    expect(calls).toEqual([
+      ["before", "ada.link@example.com", true, ""],
+      ["after", "ada.code@example.com", true, ""],
+    ]);
+    // A thrown APIError in the before call refuses, and the address stays.
+    calls.length = 0;
+    refuse.on = true;
+    const refused = await byCode("ada.no@example.com");
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ code: "HOOK_REFUSED", message: "Not yet." });
+    expect(calls).toEqual([["before", "ada.code@example.com", true, ""]]);
+    const me = await auth.api.getSession({ headers: new Headers({ cookie }) });
+    expect(me?.user.email).toBe("ada.code@example.com");
+  });
 });
 
 describe("Task 19 update-passkey", () => {

@@ -1,6 +1,7 @@
 import type { ClientCode } from "@authtempo/client";
 import { type Auth, normalizeEmail } from "@authtempo/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED, passwordPolicyCode } from "../errors.js";
+import type { User } from "../types.js";
 import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
 import { toUser } from "./shapes.js";
@@ -45,6 +46,24 @@ async function readBody(request: Request): Promise<Body | null> {
     .json()
     .catch(() => null);
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Body) : null;
+}
+
+/**
+ * Runs `beforeEmailVerification` at the change of address by code. A thrown
+ * APIError answers HOOK_REFUSED (403) with its message, as core's before
+ * hooks do in the shim. Any other throw answers HOOK_FAILED (500) with one
+ * log line that holds no value.
+ */
+async function callBefore(hook: (user: User) => unknown, user: User): Promise<Response | null> {
+  try {
+    await hook(user);
+    return null;
+  } catch (e) {
+    if (e instanceof Error && e.name === "APIError")
+      return failure(BETTER_AUTH_CODES.hook_refused, 403, e.message);
+    console.error("authtempo compat: emailVerification.beforeEmailVerification failed");
+    return failure(BETTER_AUTH_CODES.hook_failed, 500);
+  }
 }
 
 /** Better Auth's shape of one core answer. The headers stay core's: the session cookie and the CORS headers. */
@@ -130,6 +149,13 @@ export async function emailOtpRoute(
       const asked = normalizeEmail(body.newEmail);
       if (live.some((r) => r.data?.newEmail !== asked))
         return failure(BETTER_AUTH_CODES.invalid_code, 400);
+      // Better Auth 1.7.2 calls it here with the user before the move
+      // (routes.mjs:736), after its code check. The shim calls it before
+      // core's route, so before core's code check. A thrown APIError refuses.
+      if (mapped.changeVerifyBefore) {
+        const refused = await callBefore(mapped.changeVerifyBefore, toUser(s.user));
+        if (refused) return refused;
+      }
     }
     return translate(await forward("/user/change-email/verify", { code: body.otp }), success);
   }

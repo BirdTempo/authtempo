@@ -35,6 +35,7 @@ import {
 } from "./totp.js";
 import { holdUser, userStays } from "./user-hold.js";
 import {
+  ClaimLostError,
   claimEmail,
   ensureEmailIdentity,
   mayCreateUser,
@@ -872,44 +873,59 @@ export async function verifyPasswordEmail(
   const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
   if (typeof passwordId !== "string") return fail("invalid_token");
   const ended = endedList(config);
-  // The verify hooks of the claim (plan 12a, Task 18). The flow has no retry.
+  // The verify hooks of the claim (plan 12a, Task 18).
   const verify = verifySteps(config, "password_verify");
-  const verified = await hookGuard(() =>
-    config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
-      const user = await tx.findOne("user", [{ field: "email", op: "eq", value: row.identifier }]);
-      if (!user) return fail("invalid_token");
-      const claimed = { ...user, emailVerified: true, updatedAt: now };
-      // `user.beforeVerify`, then the session hook, before the first write,
-      // for the D1 undo (see `insertSignUp`). A verified user gets no
-      // session and no verify, so no hook.
-      if (!user.emailVerified) await verify.before(user);
-      const prepared = user.emailVerified
-        ? null
-        : await prepareSession(
-            config,
-            { user: claimed, ip: input.ip, userAgent: input.userAgent, via: "password" },
-            tx,
-          );
-      // A conditional update, not a read, so that it sees a claim's
-      // statements on D1. It is the first write: zero rows refuses with no
-      // change. The row must also belong to this user: a user deleted and
-      // made again under the address does not inherit the link.
-      const kept = await tx.update(
-        "password",
-        [
-          { field: "id", op: "eq", value: passwordId },
-          { field: "userId", op: "eq", value: user.id },
-        ],
-        { updatedAt: now },
-      );
-      if (kept === 0) return fail("invalid_token");
-      if (prepared === null) return ok({ user, signedIn: null });
-      await claimEmail(tx, user.id, { passwordId }, now, verify, ended);
-      await ensureEmailIdentity(tx, user.id, user.email, now);
-      const s = await writeSession(config, prepared, tx);
-      return ok({ user: claimed, signedIn: s });
-    }),
-  );
+  const run = () =>
+    hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
+        // A retry runs the claim again. The rows of an attempt that rolled back did not end.
+        if (ended) ended.length = 0;
+        verify.begin();
+        const user = await tx.findOne("user", [
+          { field: "email", op: "eq", value: row.identifier },
+        ]);
+        if (!user) return fail("invalid_token");
+        const claimed = { ...user, emailVerified: true, updatedAt: now };
+        // `user.beforeVerify`, then the session hook, before the first write,
+        // for the D1 undo (see `insertSignUp`). A verified user gets no
+        // session and no verify, so no hook.
+        if (!user.emailVerified) await verify.before(user);
+        const prepared = user.emailVerified
+          ? null
+          : await prepareSession(
+              config,
+              { user: claimed, ip: input.ip, userAgent: input.userAgent, via: "password" },
+              tx,
+            );
+        // A conditional update, not a read, so that it sees a claim's
+        // statements on D1. It is the first write: zero rows refuses with no
+        // change. The row must also belong to this user: a user deleted and
+        // made again under the address does not inherit the link.
+        const kept = await tx.update(
+          "password",
+          [
+            { field: "id", op: "eq", value: passwordId },
+            { field: "userId", op: "eq", value: user.id },
+          ],
+          { updatedAt: now },
+        );
+        if (kept === 0) return fail("invalid_token");
+        if (prepared === null) return ok({ user, signedIn: null });
+        await claimEmail(tx, user.id, { passwordId }, now, verify, ended);
+        await ensureEmailIdentity(tx, user.id, user.email, now);
+        const s = await writeSession(config, prepared, tx);
+        return ok({ user: claimed, signedIn: s });
+      }),
+    );
+  let verified: Result<PasswordVerified>;
+  try {
+    verified = await run();
+  } catch (err) {
+    // Another proof claimed the user first (review M1). The retry finds a
+    // verified user: it answers as for a verified user and fires no pair.
+    if (!(err instanceof ClaimLostError)) throw err;
+    verified = await run();
+  }
   if (verified.ok) {
     // After the commit, before the session hooks (plan 12a).
     await verify.after(verified.value.user);
@@ -1100,6 +1116,9 @@ export async function runReset(
         (err.model === "user" || err.model === "identity" || err.model === "password")
       )
         continue;
+      // Another proof claimed the user first (review M1). The rollback undid
+      // the consume, so the retry spends the link again and finds a verified user.
+      if (attempt === 0 && err instanceof ClaimLostError) continue;
       throw err;
     }
   }
