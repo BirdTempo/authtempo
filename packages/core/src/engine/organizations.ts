@@ -418,13 +418,7 @@ export async function deleteOrganization(
         organization,
         user: input.user,
       });
-      await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
-      await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
-      // A session that points at a deleted organization would make every later rank check read a missing row.
-      await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
-        activeOrganizationId: null,
-      });
-      await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+      await deleteOrganizationRows(tx, id);
       return ok(true);
     }),
   );
@@ -437,6 +431,85 @@ export async function deleteOrganization(
     id,
   );
   return ok({ ok: true });
+}
+
+/**
+ * The rows of one organization, in the caller's transaction: the members,
+ * the invitations, the active pointers of the sessions, and the row. One
+ * copy for the organization delete and the account delete (plan 12a).
+ */
+export async function deleteOrganizationRows(tx: StorageAdapter, id: string): Promise<void> {
+  await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
+  // A session that points at a deleted organization would make every later rank check read a missing row.
+  await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
+    activeOrganizationId: null,
+  });
+  await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+}
+
+/** What an account delete does to the organizations of the user (plan 12a). */
+export interface AccountOrganizations {
+  /** The user is the only member: the organization goes with the account. */
+  going: OrganizationRow[];
+  /**
+   * The user is an owner, and another owner stays. The member row goes. The
+   * delete takes the owner lock of `ownerWrite` on each, so a parallel owner
+   * removal cannot leave the organization with no owner.
+   */
+  owned: OrganizationRow[];
+}
+
+/**
+ * The organization rule of an account delete (plan 12a, owner decision 3).
+ * An organization where the user is the only member goes with the account.
+ * The last owner of an organization with other members answers
+ * `sole_owner`: the person makes another member an owner first. The
+ * platform organization never goes, because no route can create it again.
+ * So its last owner answers `sole_owner`, also as its only member. Any other
+ * membership goes with no check. It reads through `storage`, the delete's
+ * transaction, after the lock of the user row.
+ */
+export async function organizationsOfDelete(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  userId: string,
+): Promise<Result<AccountOrganizations>> {
+  const plan: AccountOrganizations = { going: [], owned: [] };
+  const o = on(config);
+  // With organizations off, the engine has no ranks. The member rows still go.
+  if (!o) return ok(plan);
+  for (const m of await storage.findMany("member", [
+    { field: "userId", op: "eq", value: userId },
+  ])) {
+    const organization = await storage.findOne("organization", [
+      { field: "id", op: "eq", value: m.organizationId },
+    ]);
+    if (!organization) continue;
+    const members = await storage.findMany("member", [
+      { field: "organizationId", op: "eq", value: organization.id },
+    ]);
+    const platform = organization.slug === o.platformOrganization;
+    if (!platform && members.every((x) => x.userId === userId)) {
+      plan.going.push(organization);
+      continue;
+    }
+    if (!isOwner(o, rankOf(o.ranks, m.role))) continue;
+    const owners = members.filter((x) => isOwner(o, rankOf(o.ranks, x.role))).length;
+    if (owners <= 1) return fail("sole_owner");
+    plan.owned.push(organization);
+  }
+  return ok(plan);
+}
+
+/** The number of owners of one organization, read through `storage` (the account delete's recount). */
+export async function ownersOf(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  organizationId: string,
+): Promise<number> {
+  const o = on(config);
+  return o ? ownerCount(storage, o, organizationId) : 0;
 }
 
 async function summaries(config: ResolvedConfig, members: MemberRow[]): Promise<MemberSummary[]> {

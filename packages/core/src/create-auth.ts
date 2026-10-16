@@ -1,4 +1,5 @@
 import { type AuthConfig, resolveConfig } from "./config.js";
+import { type AccountDelete, deleteAccount } from "./engine/account-delete.js";
 import {
   confirmEmailChange,
   type EmailChangeRequest,
@@ -334,6 +335,8 @@ export interface UserApi {
     ip: string | null;
     userAgent: string | null;
   }): Promise<Result<{ user: PublicUser }>>;
+  /** Deletes the account. Fresh rule; `sole_owner`; `not_found` with `account.delete: false`. */
+  delete(input: AccountDelete): Promise<Result<{ ok: true }>>;
 }
 
 /** The linked identities of a settings page (plan 12a). Present in every deployment. */
@@ -583,6 +586,7 @@ export function createAuth(input: AuthConfig): Auth {
         changeEmail: (i) => requestEmailChange(config, i),
         confirmEmailChange: (i) => confirmEmailChange(config, i),
         verifyEmailChange: (i) => verifyEmailChange(config, i),
+        delete: (i) => deleteAccount(config, i),
       },
       identities: {
         list: (i) => listIdentities(config, i),

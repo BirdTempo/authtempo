@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { deleteAccount } from "../../engine/account-delete.js";
 import {
   confirmEmailChange,
   EMAIL_CHANGE_TOKEN_RE,
@@ -7,6 +8,7 @@ import {
   verifyEmailChange,
 } from "../../engine/email-change.js";
 import { updateProfile } from "../../engine/profile.js";
+import { readSessionToken } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
@@ -14,6 +16,7 @@ import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
+import { signedOut } from "./sessions.js";
 
 const updateBody = z.strictObject({
   // The engine applies the name and image rules; these caps bound the body.
@@ -29,8 +32,14 @@ const changeBody = z.strictObject({
 // Not strict: a form may carry the name of its button.
 const confirmBody = z.object({ token: z.string().max(64) });
 const verifyBody = z.strictObject({ code: z.string().min(1).max(16) });
+// No field: the fresh session is the proof. Strict, so a client that sends a password learns that core reads none.
+const deleteBody = z.strictObject({});
 
-/** The user routes of a settings page (plan 12a). They exist in every deployment, except the code verify. */
+/**
+ * The user routes of a settings page (plan 12a). They exist in every
+ * deployment, except the code verify (`emailOtp`) and the delete
+ * (`account.delete`).
+ */
 export function userRoutes(config: ResolvedConfig): Route[] {
   const confirmPath = `${config.basePath}/user/change-email/confirm`;
   const failed = (code: string) => redirect(authErrorUrl(config, code));
@@ -121,6 +130,25 @@ export function userRoutes(config: ResolvedConfig): Route[] {
           ),
           s.renewed,
         );
+      },
+    });
+  if (config.account.delete)
+    routes.push({
+      method: "POST",
+      path: "/user/delete",
+      async handler(ctx) {
+        const s = await withSession(config, ctx.request);
+        if (!s) return unauthorized();
+        const body = await readJson(ctx.request, deleteBody);
+        if (!body.ok) return sent(respond(body), s.renewed);
+        const r = await deleteAccount(config, {
+          session: s.resolved,
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+        });
+        if (!r.ok) return sent(respond(r), s.renewed);
+        // The session is gone: answer as the sign-out does, with no renewed cookie.
+        return signedOut(config, ctx.request, readSessionToken(config, ctx.request));
       },
     });
   return routes;

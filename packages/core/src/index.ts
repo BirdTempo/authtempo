@@ -45,6 +45,7 @@ export {
   type TotpApi,
   type UserApi,
 } from "./create-auth.js";
+export type { AccountDelete } from "./engine/account-delete.js";
 export { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
 export type { EmailChangeRequest } from "./engine/email-change.js";
 export type {

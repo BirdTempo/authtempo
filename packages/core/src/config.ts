@@ -109,6 +109,12 @@ export interface AccountConfig {
    * and a policy with no script. Default `defaultEmailChangePage`.
    */
   confirmPage?: (input: EmailChangePageInput) => string;
+  /**
+   * `POST /user/delete` and `api.user.delete` (plan 12a). Default true: the
+   * right to delete the account is the person's. `false` removes the route,
+   * and the engine answers `not_found`. Better Auth's default is off.
+   */
+  delete?: boolean;
 }
 
 export interface AccountNoticesConfig {
@@ -121,6 +127,7 @@ export interface ResolvedAccount {
   /** Null when `account.notices` is `false`. */
   notices: { mail: (input: NoticeMailInput) => MailMessage } | null;
   confirmPage: (input: EmailChangePageInput) => string;
+  delete: boolean;
 }
 
 export interface AuthConfig {
@@ -1169,6 +1176,7 @@ const ACCOUNT_KEYS: Readonly<Record<keyof AccountConfig, true>> = {
   mail: true,
   notices: true,
   confirmPage: true,
+  delete: true,
 };
 
 /** `account` (plan 12a). Absent: the defaults. A key that core does not know is refused by name. */
@@ -1185,10 +1193,13 @@ function resolveAccount(input: AccountConfig | undefined): ResolvedAccount {
     throw new ConfigError("account.mail must be a function");
   if (o.confirmPage !== undefined && typeof o.confirmPage !== "function")
     throw new ConfigError("account.confirmPage must be a function");
+  if (o.delete !== undefined && typeof o.delete !== "boolean")
+    throw new ConfigError("account.delete must be a boolean");
   return {
     mail: o.mail ?? defaultAccountMail,
     notices: resolveNotices(o.notices),
     confirmPage: o.confirmPage ?? defaultEmailChangePage,
+    delete: o.delete ?? true,
   };
 }
 

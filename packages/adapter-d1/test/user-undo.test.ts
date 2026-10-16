@@ -364,8 +364,12 @@ describe("a password sign-up on D1 while the owner resets the password (plan 8 I
       ok: false,
       code: "invalid_credentials",
     });
-    // The claimant got no verify mail: the reset mail is the only one.
-    expect(h.sent).toHaveLength(1);
+    // The claimant got no verify mail. The reset mail and its notice (plan
+    // 12a Task 6) are the only ones.
+    expect(h.sent.map((m) => m.subject)).toEqual([
+      "Reset your password for api.example.com",
+      "Security notice for your api.example.com account",
+    ]);
   });
 
   it("keeps the owner's new password when the reset lands after the password create", async () => {

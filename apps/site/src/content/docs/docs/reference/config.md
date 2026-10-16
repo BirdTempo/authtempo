@@ -266,6 +266,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `account.notices` | object or `false` | on | The notice mails after a change of a way in. `false` turns them off. |
 | `account.notices.mail` | function of `NoticeMailInput` | `defaultNoticeMail` | Answers a notice. Core sends it to the input's address. |
 | `account.confirmPage` | function of `EmailChangePageInput` | `defaultEmailChangePage` | Answers the markup of the page a change-of-address link opens. It must post `token` to `action`. Core sets the headers. |
+| `account.delete` | boolean | `true` | Turns on `POST /user/delete`. The right to delete the account is the person's, so it is on by default. `false` removes the route. |
 
 ## Next
 

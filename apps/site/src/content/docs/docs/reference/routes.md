@@ -166,6 +166,15 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Answer | `{ ok: true }`. No session ends, and a notice goes to the address |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`not_found`](/docs/reference/errors/#not_found), [`last_credential`](/docs/reference/errors/#last_credential), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
+<h3 id="post-user-delete"><code>POST /user/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A fresh session, and `account.delete` on (the default) |
+| Input | JSON `{}`. Any field answers `invalid_body` |
+| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
 ## Magic link
 
 These routes exist in every deployment.

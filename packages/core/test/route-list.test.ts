@@ -24,12 +24,20 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(93);
+    expect(listed.length).toBe(94);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
     const served = coreRoutes(resolveConfig(base)).map(templated).sort();
-    const always = new Set(["session", "account", "magicLink", "emailOtp", "tokens", "jwtMint"]);
+    const always = new Set([
+      "session",
+      "account",
+      "accountDelete",
+      "magicLink",
+      "emailOtp",
+      "tokens",
+      "jwtMint",
+    ]);
     const listed = ROUTES.filter((r) => always.has(r.feature)).map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual(listed.sort());
   });
@@ -103,6 +111,12 @@ describe("ROUTES (plan 11a)", () => {
     },
     { name: "emailOtp off", delta: { emailOtp: false }, features: ["emailOtp"], off: true },
     { name: "jwtMint off", delta: { jwtMint: false }, features: ["jwtMint"], off: true },
+    {
+      name: "account delete off",
+      delta: { account: { delete: false } },
+      features: ["accountDelete"],
+      off: true,
+    },
     {
       name: "operator",
       delta: { operator: { secretHash: "0".repeat(64) } },

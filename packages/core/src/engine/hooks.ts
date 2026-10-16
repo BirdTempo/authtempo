@@ -35,7 +35,9 @@ export type SessionEndReason =
   // plan 12a: a revoke of one session or of the others from a settings page.
   | "revoked"
   // plan 12a: a change of address ends every other session and grant.
-  | "email_change";
+  | "email_change"
+  // plan 12a: the account delete ends every session of the user.
+  | "account_deleted";
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {

@@ -59,6 +59,8 @@ export const ERRORS = {
   last_credential: 409,
   // plan 12a: the provider account is linked to another user; core never moves an identity
   identity_taken: 409,
+  // plan 12a: the account is the last owner of an organization with other members
+  sole_owner: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

@@ -17,14 +17,14 @@ import { sent, unauthorized, withSession } from "../session-route.js";
 const revokeBody = z.strictObject({ id: z.string().min(1).max(64) });
 
 /**
- * The answer of a request that ended the caller's session: the sign-out, and
- * the revoke of the caller's own id. `token` is the session that the request
+ * The answer of a request that ended the caller's session: the sign-out, the
+ * revoke of the caller's own id, and the account delete (plan 12a). `token` is the session that the request
  * ended. It clears the cookie. The cookie move of plan 12b needs more: with
  * both names, the router keeps the old cookie, and `token` is the new one. So
  * the old token's session ends too, and the old name is cleared. Else the next
  * request signs in again under it. A sibling subdomain can set `tempo_session` too.
  */
-async function signedOut(
+export async function signedOut(
   config: ResolvedConfig,
   request: Request,
   token: string | null,

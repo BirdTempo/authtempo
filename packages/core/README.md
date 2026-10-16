@@ -935,6 +935,7 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | GET | `/identities` | session | `{ identities: [{ id, provider, email?, linkedAt, canUnlink }], password, passkeys }`, oldest link first. The provider's subject is not in the answer. The `email` identity carries the address and `canUnlink: false`. No fresh rule and no limit; 401 |
 | POST | `/identities/unlink` | session (fresh), `{ id }` | `{ ok: true }`. No session ends. 400 `invalid_body` (the `email` identity, or any other field); 401; 403 `session_not_fresh`, `hook_refused`; 404 `not_found` (an unknown id, or an id of another user); 409 `last_credential`, `conflict`; 429 `rate_limited`; 500 `hook_failed` |
 | POST | `/social/:provider/link` | session (fresh), JSON or form `{ next? }` | JSON: `{ url }` and the binding cookie; the client navigates to `url`. Form: 303 to the provider, and a failure redirects to `/?auth_error=<code>`. The callback links the provider identity to the session's user, and redirects to `next` with no new session cookie. 400 `invalid_body`; 401; 403 `email_unverified`, `session_not_fresh`; 404 `not_found` (no such provider); 429 `rate_limited`. "The link of a provider" below gives the codes of the callback |
+| POST | `/user/delete` | session (fresh), `{}` | `{ ok: true }`, and the session cookie is cleared. The user goes with every row that names it. "The account delete" below gives the rows and the organization rule. 400 `invalid_body` (any field); 401 (also when the session of the proof ended); 403 `session_not_fresh`, `hook_refused`; 404 with `account.delete: false`; 409 `sole_owner` (the last owner of an organization with other members), `conflict`; 429 `rate_limited`; 500 `hook_failed` |
 
 The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it takes no `code`, whatever methods the user has on. After a password or an email code, `code` is the second factor. Item 2 says: "With the second factor on, the password and the email code need `code`, an authenticator code or a backup code." Item 12 lists "the email method of plan 12c as a re-authentication code" as a later input. So a user whose only method is the email method sends a backup code, or proves by a passkey. A user whose password row holds `LEGACY_VERIFY_HASH` proves by an email code or a passkey. The password proof refuses the marker, as the TOTP setup does.
 
@@ -951,6 +952,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `otp-verify:ip:<ip>`, `otp-verify:email:<new address>` | 15 minutes | 30, 10 | `POST /user/change-email/verify`, shared with every code verify. With no request, the IP key only |
 | `unlink:user:<userId>` | 15 minutes | 10 | `POST /identities/unlink`, also for an unknown id. A stale session counts no try |
 | `social-link:user:<userId>` | 15 minutes | 10 | `POST /social/:provider/link`, after `social-start:ip`. An unverified user, a stale session, and an unknown provider count no try |
+| `user-delete:user:<userId>` | 1 hour | 5 | `POST /user/delete`, also when it answers `sole_owner`. A stale session and `account.delete: false` count no try |
 
 The profile update (`POST /user/update`, `api.user.update`) writes only the fields it gets. Null clears a field. It needs a verified address: a claim keeps the user row and its name, so a claimant must not set what the owner inherits. It has no fresh rule, because the name and the image do not affect a sign-in.
 
@@ -981,6 +983,16 @@ The guard holds the user row by a compare-and-set, then removes, then counts aga
 
 The link writes no user row, and fills no name and no image. No session opens and no session ends. A second link of a provider account that the user holds answers the link and writes nothing. Of two callbacks of one state, one links, and the other answers `invalid_token`. Of two users who link one provider account at once, one links, and the other answers `identity_taken`. A sign-out during the link undoes it. `identity.beforeLink` runs inside the transaction, before the identity write, with `via: "link"`. `identity.afterLink` runs after the commit.
 
+**The account delete.** `POST /user/delete` (`api.user.delete`) needs a fresh session. No mail confirms it: the fresh session is the proof. `account.delete: false` removes the route, and the engine answers 404. Better Auth's default is off. Core's default is on, because the right to delete the account is the person's.
+
+The organization rule (owner decision 3). An organization where the user is the only member goes with the account, with its invitations. Any other membership of the user goes, and the organization stays. When the user is the last owner of an organization with other members, the delete answers 409 `sole_owner` and deletes nothing. Make another member an owner first, then delete again. The platform organization never goes. So its last owner answers `sole_owner`, also as its only member.
+
+One transaction removes the user row, every session, the identities, the password, and the passkeys. The second factor, the trusted devices, the API tokens, the OAuth consents, and the refresh tokens go too. The member rows and the invitations that the user sent go too. After the commit, the mailed proofs of the user id and of the address go. Invitations to the address stay, because they belong to the organizations.
+
+The delete holds the user row by a compare-and-set, the rule of the profile update. A parallel change of address commits first, and the delete then reads the moved row. A parallel write makes the delete read the row again. After 5 lost rounds the answer is 409 `conflict`, and core logs `authtempo: account delete gave up <user id>`. A sign-in of a verified user holds the same row. So the session of such a sign-in ends with the account, or never commits. A sign-in that loses the race answers 409 `conflict`. For each organization that keeps another owner, the delete takes the owner lock of that organization. A parallel removal of the other owner then answers `conflict`.
+
+`organization.beforeDelete` runs for each organization that goes, then `user.beforeDelete` with `organizations`, the ids of those organizations. Both run inside the transaction, after core's checks and the lock, before the first delete. After the commit, `session.afterEnd` fires once per session with `account_deleted`. Then `organization.afterDelete` fires for each organization, and `user.afterDelete` with the row as the delete held it. The member rows and the identities fire no member or identity hook.
+
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
 - a password change, or a first password
@@ -989,10 +1001,11 @@ A notice mail goes to the user's address after each change of a way in (ASVS 5.0
 - a provider linked (`POST /social/:provider/link`) or unlinked (`POST /identities/unlink`): the notice names the provider
 - a second-factor method turned on or off: TOTP, the passkey method, the email method, and `api.totp.disable`
 - a change of address, by link or by code: the notice goes to the old address, which the request read, and names the new one
+- the account delete: the notice goes to the address of the row that the delete held, after the commit. The address is read before the delete, because the row is gone after it
 
-The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change, a reset, a change of address, a link, and an unlink pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
+The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change, a reset, and a change of address pass the client IP and the user agent to the builder. A link, an unlink, and the account delete pass them too. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
 
-`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names the account delete. No flow of this version sends it yet.
+`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers.
 
 ## Hooks
 
@@ -1077,7 +1090,7 @@ const auth = createAuth({
   `magic_link`, `social`, `passkey`, `handoff`, or `email_otp`; a reset by
   code is `password`), and `afterEnd`
   (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`,
-  `expired`, `two_factor`, `revoked`, or `email_change` since plan 12a), once per ended
+  `expired`, `two_factor`, `revoked`, `email_change`, or `account_deleted` since plan 12a), once per ended
   row. `sweepExpired` deletes expired rows in bulk and fires no hook, so
   `expired` fires only when a request presents the token after its expiry. A claim ends a claimant's sessions with
   `claim` in every flow that proves the address: the magic link, the
@@ -1089,7 +1102,9 @@ const auth = createAuth({
   the sign-in's `via`, or `password_reset` for a reset that creates the
   user. The `via` of an update is `profile` or `email_change`, and `patch`
   holds the fields the flow writes. `beforeDelete` gets the ids of the
-  organizations that go with the account. The magic link, the email code,
+  organizations that go with the account. The account delete runs
+  `beforeDelete` and `afterDelete`, and no member or identity hook for the
+  rows it removes. The magic link, the email code,
   social, the password sign-up, the reset link, and the reset code run the
   create points. `user.beforeCreate` may answer
   `{ name?, image? }`, each a string or null. A name follows the name

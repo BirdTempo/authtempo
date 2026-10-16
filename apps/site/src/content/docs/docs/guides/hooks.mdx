@@ -47,7 +47,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `via` of a user create | the `via` of the sign-in, or `password_reset` for a reset that creates the user |
 | `via` of a user update | `profile`, `email_change` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
-| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change` |
+| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted` |
 
 ## How it behaves
 
@@ -58,6 +58,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - In one sign-in that creates a user, the order is `user.beforeCreate`, `identity.beforeLink`, and `session.beforeCreate`, all before the first write. After the commit, the order is `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`.
 - The sign-up rule runs before `user.beforeCreate`. So no user hook sees a create that `signUp` refuses.
 - The `email` identity, a claim, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.
+- The account delete runs `organization.beforeDelete` for each organization that goes, then `user.beforeDelete` with the ids of those organizations. The rows it removes fire no member or identity hook.
 - A refusal message of 1 to 200 characters with no control character reaches the caller. Any other message becomes "The app refused this request.".
 - Hooks have no timeout. A hook that never settles holds the request, and a before hook holds the transaction.
 - The sweep fires no hook. `expired` fires only when a request presents a token after its expiry.

@@ -68,6 +68,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   last_credential: "This is your last way to sign in. Add another one before you remove it.",
   identity_taken:
     "This provider account belongs to another account. Sign in to that account to use it.",
+  sole_owner: "You are the only owner of a team. Make another member an owner first.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

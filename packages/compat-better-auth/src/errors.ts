@@ -95,6 +95,10 @@ export const BETTER_AUTH_CODES = {
   // dist/error/codes.mjs:13, read 2026-10-17). Better Auth answers 409 CONFLICT
   // with it (better-auth dist/api/routes/account.mjs:208), as core does.
   identity_taken: "SOCIAL_ACCOUNT_ALREADY_LINKED",
+  // Plan 12a. Better Auth 1.7.2 has no such refusal: its deleteUser deletes the
+  // sessions, the accounts, and the user, and keeps the organizations
+  // (better-auth dist/db/internal-adapter.mjs:233, read 2026-10-17). Core's own name.
+  sole_owner: "SOLE_OWNER",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

@@ -7,6 +7,7 @@ import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primi
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
+import { ROUNDS } from "./rounds.js";
 import { endSessions, type PreparedSession, prepareSession, writeSession } from "./sessions.js";
 
 /**
@@ -19,13 +20,9 @@ import { endSessions, type PreparedSession, prepareSession, writeSession } from 
 
 /** The version of a new backup code list: codes of 112 bits or more (ASVS 5.0 6.5.2). */
 export const BACKUP_CODES_VERSION = 2;
-/**
- * The rounds of a compare-and-set on the row. Each lost round means that a
- * parallel write landed first. An adapter whose `eq` on a date never matches
- * loses every round; the bound stops the loop then. The profile update
- * (plan 12a) reads the same bound.
- */
-export const ROUNDS = 5;
+// The bound of a compare-and-set loop. One copy, in rounds.ts; the old
+// importers read it here.
+export { ROUNDS };
 
 // Per 15 minutes, for the password check of the TOTP setup and of every
 // method's enable and disable (plan 9h, owner decision 3a; plan 12c). Its own

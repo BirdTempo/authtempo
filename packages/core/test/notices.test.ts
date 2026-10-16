@@ -5,6 +5,7 @@ import {
   ConfigError,
   type MailMessage,
 } from "../src/config.js";
+import { deleteAccount } from "../src/engine/account-delete.js";
 import {
   confirmEmailChange,
   requestEmailChange,
@@ -892,6 +893,13 @@ const PATHS: {
             userAgent: null,
           }),
       };
+    },
+  },
+  {
+    name: "account delete",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      return { act: () => deleteAccount(auth.config, { session: s, ip: null, userAgent: null }) };
     },
   },
   {

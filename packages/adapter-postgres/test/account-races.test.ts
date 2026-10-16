@@ -1,4 +1,4 @@
-import { createAuth, type MailMessage } from "@authtempo/core";
+import { createAuth, type MailMessage, type StorageAdapter } from "@authtempo/core";
 import { SoftAuthenticator } from "@authtempo/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
@@ -15,6 +15,8 @@ const SECRET = "0123456789abcdef0123456789abcdef";
 /** Every request passes: the race, not the limit, is under test. */
 const OPEN = { allow: async () => true };
 const ROUNDS = 5;
+/** The pause of a probe: long enough for a flow that waits on no lock to commit (plan 12a Task 11). */
+const HOLD_MS = 400;
 
 let db: Awaited<ReturnType<typeof freshDatabase>>;
 beforeEach(async () => {
@@ -165,6 +167,36 @@ describe("account races on Postgres (plan 12a)", () => {
       expect(rows.length).toBe(0);
     }
   });
+
+  it("a delete beside a change of address: one order wins, no deadlock, and no row of a deleted user stays", async () => {
+    const w = world();
+    for (let round = 0; round < 8; round++) {
+      const email = `del-${round}@example.com`;
+      const target = `moved-${round}@example.com`;
+      const me = await w.signIn(email);
+      expect((await w.auth.api.user.changeEmail({ session: me, newEmail: target })).ok).toBe(true);
+      const token = w.tokenOf([...w.sent].reverse().find((m) => m.to === target));
+      const before = w.sent.length;
+      const [deleted, moved] = await Promise.all([
+        w.auth.api.user.delete({ session: me, ip: null, userAgent: null }),
+        w.auth.api.user.confirmEmailChange({ token, ip: null, userAgent: null }),
+      ]);
+      // The delete holds the user row as the change does: the later one waits, then reads the row again.
+      expect(deleted).toEqual({ ok: true, value: { ok: true } });
+      const left = await db.sql`SELECT id FROM ta_user WHERE id = ${me.user.id}`;
+      expect(left).toHaveLength(0);
+      for (const table of ["ta_identity", "ta_session", "ta_member"]) {
+        const rows = await db.sql`SELECT id FROM ${db.sql(table)} WHERE user_id = ${me.user.id}`;
+        expect(rows, table).toHaveLength(0);
+      }
+      const deletedNotice = w.sent
+        .slice(before)
+        .filter((m) => m.text.startsWith("Your account was deleted."));
+      // The move committed first: the delete read the moved row, and its notice goes to the new address.
+      expect(deletedNotice.map((m) => m.to)).toEqual([moved.ok ? target : email]);
+      if (!moved.ok) expect(["invalid_token", "token_expired"]).toContain(moved.code);
+    }
+  }, 60_000);
 });
 
 describe("user hook races on Postgres (plan 12a Task 5, review M3)", () => {
@@ -634,8 +666,15 @@ describe("the link of a social identity on Postgres (plan 12a Task 10)", () => {
   const NOTICE = "Security notice for your api.example.com account";
   const LINKED = "A sign-in provider was linked to your account.";
 
-  /** `inLink` runs inside each link's transaction, from `identity.beforeLink`. */
-  function linkWorld(inLink?: () => Promise<void>) {
+  /**
+   * `inLink` runs inside each link's transaction, from `identity.beforeLink`.
+   * `probe.afterLinkWrite` runs once, inside the next link's transaction,
+   * after its last statement (plan 12a Task 11: the delete beside a link).
+   */
+  function linkWorld(
+    inLink?: () => Promise<void>,
+    probe: { afterLinkWrite: (() => Promise<void>) | null } = { afterLinkWrite: null },
+  ) {
     const sent: MailMessage[] = [];
     const linked: string[] = [];
     // The token endpoint answers the code as the ID token, and the seam
@@ -662,6 +701,27 @@ describe("the link of a social identity on Postgres (plan 12a Task 10)", () => {
         }
         return adapter.findOne(model, where);
       }) as typeof adapter.findOne,
+      transaction: ((fn: (tx: StorageAdapter) => Promise<unknown>) =>
+        adapter.transaction((tx) => {
+          let linked = false;
+          return fn({
+            ...tx,
+            create: (async (model, data) => {
+              const row = await tx.create(model, data);
+              if (model === "identity") linked = true;
+              return row;
+            }) as typeof tx.create,
+            update: (async (model, where, data) => {
+              const n = await tx.update(model, where, data);
+              const after = probe.afterLinkWrite;
+              if (model === "session" && linked && after) {
+                probe.afterLinkWrite = null;
+                await after();
+              }
+              return n;
+            }) as typeof tx.update,
+          });
+        })) as typeof adapter.transaction,
     };
     const auth = createAuth({
       baseURL: BASE,
@@ -892,6 +952,332 @@ describe("the link of a social identity on Postgres (plan 12a Task 10)", () => {
       expect(await db.sql`SELECT id FROM ta_session WHERE id = ${me.session.id}`).toEqual([]);
       expect(w.linked).toEqual([]);
       expect(w.linkNotices(email)).toEqual([]);
+    }
+  }, 60_000);
+
+  it("a delete beside a link that wrote its last statement: the delete waits, then the identity goes too", async () => {
+    // The link holds its session row until the commit. The delete removes
+    // the sessions before the identities, so it waits at the session, and
+    // its identity delete then sees the committed link.
+    const probe: { afterLinkWrite: (() => Promise<void>) | null } = { afterLinkWrite: null };
+    const w = linkWorld(undefined, probe);
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `link-del-${round}@example.com`;
+      const sub = `g-link-del-${round}`;
+      const me = await w.signIn(email);
+      const s = await w.begin(me);
+      let deleting: ReturnType<typeof w.auth.api.user.delete> | null = null;
+      probe.afterLinkWrite = async () => {
+        deleting = w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+        await new Promise((r) => setTimeout(r, HOLD_MS));
+      };
+      expect(await w.finish(me, s, `link-del-${round}`, sub, email)).toBe("linked");
+      expect(await deleting).toEqual({ ok: true, value: { ok: true } });
+      expect(await w.rowsOf(sub)).toEqual([]);
+      expect(await db.sql`SELECT id FROM ta_identity WHERE user_id = ${me.user.id}`).toEqual([]);
+      expect(await db.sql`SELECT id FROM ta_session WHERE user_id = ${me.user.id}`).toEqual([]);
+    }
+  }, 60_000);
+
+  it("a delete that commits inside the link's transaction undoes the link", async () => {
+    let current: Awaited<ReturnType<ReturnType<typeof linkWorld>["signIn"]>> | null = null;
+    const w = linkWorld(async () => {
+      if (!current) return;
+      const me = current;
+      current = null;
+      expect(await w.auth.api.user.delete({ session: me, ip: null, userAgent: null })).toEqual({
+        ok: true,
+        value: { ok: true },
+      });
+    });
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `link-in-${round}@example.com`;
+      const sub = `g-link-in-${round}`;
+      const me = await w.signIn(email);
+      const s = await w.begin(me);
+      current = me;
+      expect(await w.finish(me, s, `link-in-${round}`, sub, email)).toBe("invalid_token");
+      expect(await w.rowsOf(sub)).toEqual([]);
+      expect(await db.sql`SELECT id FROM ta_user WHERE id = ${me.user.id}`).toEqual([]);
+      expect(await db.sql`SELECT id FROM ta_identity WHERE user_id = ${me.user.id}`).toEqual([]);
+    }
+  }, 60_000);
+});
+
+describe("the account delete on Postgres (plan 12a Task 11)", () => {
+  /** The rows that name `userId` in the tables a sign-in writes, and the user row. */
+  async function rowsOf(userId: string) {
+    const count = async (table: string, column: string) =>
+      (await db.sql`SELECT 1 FROM ${db.sql(table)} WHERE ${db.sql(column)} = ${userId}`).length;
+    return {
+      user: await count("ta_user", "id"),
+      session: await count("ta_session", "user_id"),
+      identity: await count("ta_identity", "user_id"),
+      member: await count("ta_member", "user_id"),
+    };
+  }
+  const NONE = { user: 0, session: 0, identity: 0, member: 0 };
+
+  /**
+   * Probes inside the engine's transactions, on the real adapter, each one
+   * shot. `inSignIn` runs from `session.beforeCreate`, before the sign-in's
+   * first write. `afterSessionCheck` runs after a sign-in's read of the user
+   * row that follows its session insert. `afterRecount` runs after the
+   * delete's recount of the owners.
+   */
+  function deleteWorld() {
+    const sent: MailMessage[] = [];
+    const ended: string[] = [];
+    const probes: Record<
+      "inSignIn" | "afterSessionCheck" | "afterRecount",
+      (() => Promise<void>) | null
+    > = {
+      inSignIn: null,
+      afterSessionCheck: null,
+      afterRecount: null,
+    };
+    const take = (name: keyof typeof probes) => {
+      const p = probes[name];
+      probes[name] = null;
+      return p;
+    };
+    const adapter = createPostgresAdapter(db.sql);
+    const wrap = (tx: StorageAdapter): StorageAdapter => {
+      let wroteSession = false;
+      let droppedMembers = false;
+      return {
+        ...tx,
+        create: (async (model, data) => {
+          const row = await tx.create(model, data);
+          if (model === "session") wroteSession = true;
+          return row;
+        }) as typeof tx.create,
+        findOne: (async (model, where) => {
+          const row = await tx.findOne(model, where);
+          const p = model === "user" && wroteSession ? take("afterSessionCheck") : null;
+          if (p) await p();
+          return row;
+        }) as typeof tx.findOne,
+        delete: (async (model, where) => {
+          const n = await tx.delete(model, where);
+          if (model === "member" && where[0]?.field === "userId") droppedMembers = true;
+          return n;
+        }) as typeof tx.delete,
+        findMany: (async (model, where, opts) => {
+          const rows = await tx.findMany(model, where, opts);
+          const p = model === "member" && droppedMembers ? take("afterRecount") : null;
+          if (p) await p();
+          return rows;
+        }) as typeof tx.findMany,
+      };
+    };
+    const storage: StorageAdapter = {
+      ...adapter,
+      transaction: ((fn: (tx: StorageAdapter) => Promise<unknown>) =>
+        adapter.transaction((tx) => fn(wrap(tx)))) as typeof adapter.transaction,
+    };
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage,
+      limiter: OPEN,
+      organizations: {},
+      password: {},
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      hooks: {
+        session: {
+          beforeCreate: async () => {
+            await take("inSignIn")?.();
+          },
+          afterEnd: ({ session, reason }) => {
+            ended.push(`${session.id}:${reason}`);
+          },
+        },
+      },
+    });
+    const linkFor = async (email: string) => {
+      await auth.api.requestMagicLink({ email, ip: null });
+      const m = [...sent].reverse().find((x) => x.to === email && /token=/.test(x.text));
+      const token = /token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1];
+      if (!token) throw new Error("no link");
+      return decodeURIComponent(token);
+    };
+    async function signIn(email: string) {
+      const r = await auth.api.verifyMagicLink({
+        token: await linkFor(email),
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+      if (!("token" in r.value)) throw new Error("the link answered a challenge");
+      const s = await auth.api.getSession(r.value.token);
+      if (!s) throw new Error("no session");
+      return { ...s, token: r.value.token };
+    }
+    const codeOf = (email: string) =>
+      /\b(\d{6})\b/.exec([...sent].reverse().find((x) => x.to === email)?.text ?? "")?.[1] ?? "";
+    /** The token of the newest mail to `email` that carries a link. */
+    const linkTo = (email: string) => {
+      const m = [...sent].reverse().find((x) => x.to === email && /token=/.test(x.text));
+      return decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1] ?? "");
+    };
+    return { auth, sent, ended, probes, linkFor, linkTo, signIn, codeOf };
+  }
+
+  it("a delete that commits inside a sign-in's transaction undoes the session and the identity", async () => {
+    // The hook runs before the sign-in's first write, on another connection.
+    // The sign-in then writes a session and an email identity for a user
+    // that is gone. Its read of the user row after the insert undoes both.
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `inside-${round}@example.com`;
+      const me = await w.signIn(email);
+      const link = await w.linkFor(email);
+      let deleted: Awaited<ReturnType<typeof w.auth.api.user.delete>> | null = null;
+      w.probes.inSignIn = async () => {
+        deleted = await w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+      };
+      expect(await w.auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null })).toEqual({
+        ok: false,
+        code: "conflict",
+        status: 409,
+      });
+      expect(deleted).toEqual({ ok: true, value: { ok: true } });
+      expect(await rowsOf(me.user.id)).toEqual(NONE);
+    }
+  }, 60_000);
+
+  it("a sign-in that holds the user row: a delete that starts after its session check waits, then ends the session", async () => {
+    // Without the hold, the delete commits during the pause, before the
+    // sign-in's commit, and the session of a gone user stays.
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `held-${round}@example.com`;
+      const me = await w.signIn(email);
+      const link = await w.linkFor(email);
+      w.ended.length = 0;
+      let deleting: ReturnType<typeof w.auth.api.user.delete> | null = null;
+      w.probes.afterSessionCheck = async () => {
+        deleting = w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+        await new Promise((r) => setTimeout(r, HOLD_MS));
+      };
+      const r = await w.auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+      expect(r.ok).toBe(true);
+      expect(await deleting).toEqual({ ok: true, value: { ok: true } });
+      expect(await rowsOf(me.user.id)).toEqual(NONE);
+      // The first sign-in's session and the held one: each ends once, by the delete.
+      expect(w.ended.filter((e) => e.endsWith(":account_deleted"))).toHaveLength(2);
+    }
+  }, 60_000);
+
+  it("an owner leaves beside the delete of the other owner: the organization keeps an owner", async () => {
+    // The pause comes after the delete's recount. The leave then waits at
+    // the owner lock, and answers conflict after the delete commits.
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const me = await w.signIn(`own-a-${round}@example.com`);
+      const carol = await w.signIn(`own-c-${round}@example.com`);
+      const made = await w.auth.api.createOrganization({
+        user: me.user,
+        slug: `team-${round}`,
+        name: "Team",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const id = made.value.organization.id;
+      const added = await w.auth.api.addMember({
+        user: me.user,
+        organizationId: id,
+        userId: carol.user.id,
+        role: "owner",
+      });
+      if (!added.ok) throw new Error(added.code);
+      let leaving: ReturnType<typeof w.auth.api.removeMember> | null = null;
+      w.probes.afterRecount = async () => {
+        leaving = w.auth.api.removeMember({
+          user: carol.user,
+          organizationId: id,
+          userId: carol.user.id,
+        });
+        await new Promise((r) => setTimeout(r, HOLD_MS));
+      };
+      expect(await w.auth.api.user.delete({ session: me, ip: null, userAgent: null })).toEqual({
+        ok: true,
+        value: { ok: true },
+      });
+      expect(await leaving).toEqual({ ok: false, code: "conflict", status: 409 });
+      const owners = await db.sql<{ user_id: string }[]>`
+        SELECT user_id FROM ta_member WHERE organization_id = ${id} AND role = 'owner'`;
+      expect(owners.map((o) => o.user_id)).toEqual([carol.user.id]);
+    }
+  }, 60_000);
+
+  it("a delete beside a reset that holds its link row: no deadlock, and the reset undoes", async () => {
+    // The reset spends its link row before its session hook, then holds the
+    // user row. The delete holds the user row first. So the delete must not
+    // wait for that link row before its commit: it deletes the proofs after.
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `reset-${round}@example.com`;
+      const me = await w.signIn(email);
+      const password = w.auth.api.password;
+      if (!password) throw new Error("no password config");
+      expect((await password.requestReset({ email, ip: null })).ok).toBe(true);
+      const token = w.linkTo(email);
+      let deleting: ReturnType<typeof w.auth.api.user.delete> | null = null;
+      w.probes.inSignIn = async () => {
+        deleting = w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+        await new Promise((r) => setTimeout(r, HOLD_MS));
+      };
+      const reset = await password.reset({
+        token,
+        password: "a reset long password",
+        ip: null,
+        userAgent: null,
+      });
+      expect(await deleting).toEqual({ ok: true, value: { ok: true } });
+      expect(reset).toEqual({ ok: false, code: "conflict", status: 409 });
+      expect(await rowsOf(me.user.id)).toEqual(NONE);
+      expect(await db.sql`SELECT id FROM ta_password WHERE user_id = ${me.user.id}`).toEqual([]);
+      expect(await db.sql`SELECT id FROM ta_verification WHERE identifier = ${email}`).toEqual([]);
+    }
+  }, 60_000);
+
+  it("a delete beside a sign-in, a re-authentication, and a revoke, a delay sweep: no row of the deleted user stays", async () => {
+    const w = deleteWorld();
+    for (let delay = 0; delay < 12; delay++) {
+      const email = `sweep-${delay}@example.com`;
+      const me = await w.signIn(email);
+      const other = await w.signIn(email);
+      const third = await w.signIn(email);
+      const link = await w.linkFor(email);
+      expect((await w.auth.api.session.requestReauthCode({ session: other })).ok).toBe(true);
+      const code = w.codeOf(email);
+      w.ended.length = 0;
+      const [deleted, signedIn, reauthed, revoked] = await Promise.all([
+        new Promise<Awaited<ReturnType<typeof w.auth.api.user.delete>>>((done, failed) => {
+          setTimeout(() => {
+            w.auth.api.user.delete({ session: me, ip: null, userAgent: null }).then(done, failed);
+          }, delay);
+        }),
+        w.auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null }),
+        w.auth.api.session.reauthenticate({ session: other, proof: { emailCode: code }, ip: null }),
+        w.auth.api.session.revoke({ session: me, id: third.session.id }),
+      ]);
+      expect(deleted).toEqual({ ok: true, value: { ok: true } });
+      expect(await rowsOf(me.user.id)).toEqual(NONE);
+      // A sign-in after the commit finds no user and makes a new one, a
+      // sign-up. A sign-in before it is ended by the delete (the row check above).
+      if (!signedIn.ok) expect(signedIn.code).toBe("conflict");
+      if (!reauthed.ok) expect(["unauthorized", "invalid_token"]).toContain(reauthed.code);
+      if (!revoked.ok) expect(revoked.code).toBe("not_found");
+      // Each ended row fires one event.
+      const ids = w.ended.map((e) => e.split(":")[0]);
+      expect(new Set(ids).size).toBe(ids.length);
     }
   }, 60_000);
 });

@@ -9,6 +9,7 @@
 export type RouteFeature =
   | "session"
   | "account"
+  | "accountDelete"
   | "magicLink"
   | "social"
   | "passkey"
@@ -33,7 +34,8 @@ export interface RouteEntry {
    * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
    * `oauthRegistration` needs `oauth` with `registration.dynamic`; `operator`
    * needs `operator.secretHash` (plan 11c). `account` (plan 12a) is in every
-   * deployment.
+   * deployment. `accountDelete` (plan 12a) is on by default; `account.delete:
+   * false` turns it off.
    */
   readonly feature: RouteFeature;
 }
@@ -53,6 +55,7 @@ export const ROUTES = Object.freeze([
   { method: "GET", path: "/user/change-email/confirm", feature: "account" },
   { method: "POST", path: "/user/change-email/confirm", feature: "account" },
   { method: "POST", path: "/user/change-email/verify", feature: "emailOtp" },
+  { method: "POST", path: "/user/delete", feature: "accountDelete" },
   { method: "GET", path: "/identities", feature: "account" },
   { method: "POST", path: "/identities/unlink", feature: "account" },
   { method: "POST", path: "/magic-link/request", feature: "magicLink" },

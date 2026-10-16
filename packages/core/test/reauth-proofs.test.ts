@@ -381,7 +381,9 @@ describe("the account config (plan 12a)", () => {
 
   it("refuses an unknown account key and a mail that is no function", () => {
     expect(() => totpAuth({ account: { mail: defaultAccountMail, notice: {} } as never })).toThrow(
-      new ConfigError("account.notice is not an option; core has mail, notices, confirmPage"),
+      new ConfigError(
+        "account.notice is not an option; core has mail, notices, confirmPage, delete",
+      ),
     );
     expect(() => totpAuth({ account: { mail: "x" } as never })).toThrow(
       new ConfigError("account.mail must be a function"),
