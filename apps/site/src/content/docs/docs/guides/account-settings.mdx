@@ -25,7 +25,7 @@ import test from "../../../../../samples/guides/account-settings.test.ts?raw";
 
 ## Steps
 
-1. Show the sessions with `client.sessions.list()`. Each row has `current`, the device, and the last activity.
+1. Show the sessions with `client.sessions.list()`. Each row has `current`, the device, and the time of the last refresh.
 2. End one session with `client.sessions.revoke({ id })`, or all the others with `client.sessions.revokeOthers()`.
 3. Wrap each sensitive change in `client.withFresh(change, prove)`. `prove` asks for the password, an email code, or a passkey.
 4. Change the name and the picture with `client.user.update({ name, image })`.
@@ -44,7 +44,8 @@ import test from "../../../../../samples/guides/account-settings.test.ts?raw";
 
 - A sign-in makes a session fresh for `session.freshMinutes`, 1440 by default. A re-authentication makes it fresh again. The session token and the expiry stay the same.
 - These client calls can answer `session_not_fresh`: `sessions.revoke`, `sessions.revokeOthers`, `user.changeEmail`, `user.delete`, `identities.unlink`, and `identities.link`.
-- The calls of the other guides can answer it too: `passkey.register`, `passkeys.delete`, `tokens.create`, and `password.change`.
+- The calls of the other guides can answer it too: `passkey.register`, `passkeys.delete`, and `tokens.create`.
+- `password.change` can answer it while the second factor is on, and for a first password.
 - The second factor calls can answer it: `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`, `secondFactor.passkey.enable`, `secondFactor.email.enable`, and `secondFactor.disable`.
 - `withFresh` runs the change. On `session_not_fresh` it runs your re-authentication, then the change once more.
 - A failed re-authentication is the answer, and the change does not run again. A second `session_not_fresh` is the answer too, so `withFresh` never loops.
@@ -55,6 +56,7 @@ import test from "../../../../../samples/guides/account-settings.test.ts?raw";
 ## How it behaves
 
 - `GET /sessions` and `GET /identities` need a session only.
+- `lastSeenAt` of a session moves only at the sliding refresh, at most once per `session.slidingRefreshDays`. Do not show it as the last activity.
 - The profile update needs no fresh session, because a name and a picture do not sign anyone in.
 - `client.sessions.revoke({ id })` answers `current` from the server. When `current` is true, the caller's own session ended. A bearer app clears its stored token then.
 - A change of address sends a link to the new address. `method: "code"` sends a code in place of the link.

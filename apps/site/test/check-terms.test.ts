@@ -41,6 +41,23 @@ describe("checkTerms", () => {
     ]);
   });
 
+  it("refuses a glossary word that FORBIDDEN_TERMS lacks", () => {
+    const more = { ...glossary, source: `${glossary.source}| x | \`re-auth\` |\n` };
+    expect(checkTerms([more, body("Sign in.")]).failures).toEqual([
+      "the glossary forbids `re-auth`, which FORBIDDEN_TERMS lacks",
+    ]);
+  });
+
+  it("reads only the last column, so a forbidden term in a meaning cell does not count", () => {
+    const moved = {
+      ...glossary,
+      source: glossary.source.replace("| x | `OTP` |", "| `OTP` | x |"),
+    };
+    expect(checkTerms([moved, body("Sign in.")]).failures).toEqual([
+      "the glossary lacks the forbidden term `OTP`",
+    ]);
+  });
+
   it("ignores link targets, bare URLs, and autolinks", () => {
     const r = checkTerms([
       glossary,

@@ -48,6 +48,18 @@ function readable(text: string): string {
 
 const GLOSSARY = "docs/reference/glossary.md";
 
+/** The code spans of the last cell of each glossary table row: the "Do not write" column. */
+function doNotWrite(source: string): Set<string> {
+  const words = new Set<string>();
+  for (const line of source.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("|")) continue;
+    const last = t.split("|").slice(1, -1).at(-1) ?? "";
+    for (const m of last.matchAll(/`([^`]+)`/g)) words.add(m[1] ?? "");
+  }
+  return words;
+}
+
 export function checkTerms(pages: readonly Page[]): CheckReport {
   const r: CheckReport = {
     name: "check-terms",
@@ -56,11 +68,19 @@ export function checkTerms(pages: readonly Page[]): CheckReport {
   };
   const glossary = pages.find((p) => p.path === GLOSSARY);
   if (!glossary) r.failures.push(`${GLOSSARY} is missing`);
-  else
+  else {
+    // The two lists must hold the same words, in both directions. A glossary
+    // word with no row here would be a rule that no machine enforces.
+    const listed = doNotWrite(glossary.source);
+    const known = new Set(FORBIDDEN_TERMS.map((t) => t.term));
     for (const t of FORBIDDEN_TERMS) {
-      if (glossary.source.includes(`\`${t.term}\``)) r.counts.terms = (r.counts.terms ?? 0) + 1;
+      if (listed.has(t.term)) r.counts.terms = (r.counts.terms ?? 0) + 1;
       else r.failures.push(`the glossary lacks the forbidden term \`${t.term}\``);
     }
+    for (const word of listed)
+      if (!known.has(word))
+        r.failures.push(`the glossary forbids \`${word}\`, which FORBIDDEN_TERMS lacks`);
+  }
   for (const p of pages) {
     const fm = parseFrontmatter(p.source);
     if (!fm) continue;
