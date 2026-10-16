@@ -87,9 +87,9 @@ export const BETTER_AUTH_CODES = {
   // 2026-10-14). Better Auth answers 403 on a list and SESSION_EXPIRED 400 on a delete; the
   // status stays core's, 403, on every route.
   session_not_fresh: "SESSION_NOT_FRESH",
-  // Plan 12a. Better Auth's name for the same refusal (@better-auth/core 1.7.7
-  // dist/error/codes.mjs:29, read 2026-10-17; the store holds no 1.7.2). The status
-  // stays core's, 409.
+  // Plan 12a. Better Auth 1.7.2's name for the same refusal (@better-auth/core
+  // dist/error/codes.mjs:29, read 2026-10-17). Better Auth answers 400 BAD_REQUEST
+  // with it; the status stays core's, 409.
   last_credential: "FAILED_TO_UNLINK_LAST_ACCOUNT",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",

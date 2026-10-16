@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MailMessage } from "../src/config.js";
+import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { hookRefusal } from "../src/engine/hooks.js";
 import { listIdentities, unlinkIdentity } from "../src/engine/identities.js";
 import type { NoticeMailInput } from "../src/engine/notices.js";
@@ -15,7 +16,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { get, post } from "./helpers.js";
+import { get, post, tokenFromMail } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, googleSignIn, socialAuth } from "./social-helpers.js";
 import { PASSWORD, verifiedSession } from "./totp-helpers.js";
@@ -706,6 +707,14 @@ describe("the passkey delete through the guard (plan 12a)", () => {
     const w = world();
     const me = await verifiedSession(w.auth);
     const id = await addPasskey(w.auth, me.user);
+    // The request resolved its session, then a confirm moved the address
+    // first (review m2): the held row has the new address, me.user the old one.
+    const NEW = "ada.new@example.com";
+    expect((await requestEmailChange(w.auth.config, { session: me, newEmail: NEW })).ok).toBe(true);
+    const token = tokenFromMail(w.auth.mail.findLast((m) => m.to === NEW)?.text ?? "");
+    expect((await confirmEmailChange(w.auth.config, { token, ip: null, userAgent: null })).ok).toBe(
+      true,
+    );
     w.auth.clock.advance(1000);
     expect(await deletePasskey(w.auth.config, { user: me.user, id })).toEqual({
       ok: true,
@@ -715,7 +724,8 @@ describe("the passkey delete through the guard (plan 12a)", () => {
     const sent = notices(w.auth.mail);
     expect(sent.map((m) => [m.to, m.text.split("\n")[0]])).toEqual([
       ["ada@example.com", "A passkey was added to your account."],
-      ["ada@example.com", "A passkey was removed from your account."],
+      ["ada@example.com", "The email address of your account was changed."],
+      [NEW, "A passkey was removed from your account."],
     ]);
     // A delete that finds no passkey changes no row and sends no notice.
     const before = await userRow(w.auth, me.user.id);
@@ -726,7 +736,7 @@ describe("the passkey delete through the guard (plan 12a)", () => {
       status: 404,
     });
     expect(await userRow(w.auth, me.user.id)).toEqual(before);
-    expect(notices(w.auth.mail)).toHaveLength(2);
+    expect(notices(w.auth.mail)).toHaveLength(3);
   });
 });
 

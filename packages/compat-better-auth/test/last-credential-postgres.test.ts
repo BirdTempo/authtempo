@@ -219,6 +219,31 @@ describe("the last-credential guard on Better Auth rows (plan 12a Task 9)", () =
     );
     const googleOnly = authOn(storage);
     const me = await googleOnly.signIn("nogh");
+    // GitHub is not configured: its identity is no way in, so its unlink
+    // takes nothing, and Google is the one way in (review m1).
+    const listed = await googleOnly.auth.api.identities.list({ session: me });
+    expect(
+      listed.ok && listed.value.identities.map((i) => [i.provider, i.canUnlink]).sort(),
+    ).toEqual([
+      ["github", true],
+      ["google", false],
+    ]);
+    const github = await storage.findOne("identity", [
+      { field: "userId", op: "eq", value: me.user.id },
+      { field: "provider", op: "eq", value: "github" },
+    ]);
+    if (!github) throw new Error("no github identity");
+    expect(
+      await googleOnly.auth.api.identities.unlink({
+        session: me,
+        id: github.id,
+        ip: null,
+        userAgent: null,
+      }),
+    ).toEqual({ ok: true, value: { ok: true } });
+    expect(
+      await storage.findOne("identity", [{ field: "id", op: "eq", value: github.id }]),
+    ).toBeNull();
     expect(
       await googleOnly.auth.api.identities.unlink({
         session: me,

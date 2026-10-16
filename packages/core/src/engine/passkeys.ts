@@ -487,6 +487,10 @@ export async function deletePasskey(
   try {
     removed = await guardedRemove(config, input.user.id, async (tx) => {
       const factor = await factorRow(tx, input.user.id);
+      // A second guard. The user lock now orders two deletes, and the reads
+      // after the delete see a parallel first enable. The hold still stops a
+      // parallel enable or disable that wrote the factor row first. No
+      // Postgres test fails without it (review L1, break O7, 2026-10-17).
       if (factor) {
         const held = await tx.update(
           "secondFactor",
