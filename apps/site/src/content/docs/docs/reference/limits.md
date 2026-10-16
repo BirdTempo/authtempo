@@ -43,8 +43,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `otp:ip:<ip>` | 15 minutes | 20 | Email code request, both purposes |
 | `otp:email:<email>` | 15 minutes | 3 | Email code request, both purposes, and the re-authentication code |
 | `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes, and the re-authentication code |
-| `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify, reset, and re-authentication code |
-| `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify, reset, and re-authentication code |
+| `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify, reset, re-authentication code, and change-of-address code |
+| `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify, reset, re-authentication code, and change-of-address code |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
 | `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |
@@ -60,6 +60,9 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke and revoke-others together |
 | `user-update:user:<userId>` | 15 minutes | 30 | Profile update |
+| `email-change:user:<userId>` | 1 hour | 5 | Change of address request |
+| `email-change:email:<email>` | 15 minutes | 3 | Change of address request, per new address |
+| `email-change-confirm:ip:<ip>` | 15 minutes | 20 | Change of address link confirm |
 | `token-live:session:<sessionId>` | 1 minute | 120 | The live check of a session JWT |
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |

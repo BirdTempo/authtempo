@@ -44,6 +44,17 @@ function signUp(
 }
 
 describe("passwordSignUp", () => {
+  // The name rule refuses format characters (plan 12a Task 7 review R2-L1).
+  it("answers 400 invalid_body at the sign-up route for a name with a right-to-left override", async () => {
+    const { auth, storage } = pwHandle({ hash: FAST });
+    const res = await auth.handle(
+      post("/auth/password/sign-up", { email: EMAIL, password: PW, name: "Ada\u202Eevil" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_body" });
+    expect(await storage.findMany("user", [])).toEqual([]);
+  });
+
   it("creates an unverified user, the password row, a session, and mails a verify link", async () => {
     const auth = pwAuth();
     const r = await signUp(auth, { email: " Ada@Example.com ", name: "Ada" });

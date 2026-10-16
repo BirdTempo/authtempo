@@ -265,6 +265,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `account.mail` | function of `AccountMailInput` | `defaultAccountMail` | Answers the proof mails: the re-authentication code, the change-of-address link and code, and the note to a taken address. Core sends each to its address. |
 | `account.notices` | object or `false` | on | The notice mails after a change of a way in. `false` turns them off. |
 | `account.notices.mail` | function of `NoticeMailInput` | `defaultNoticeMail` | Answers a notice. Core sends it to the input's address. |
+| `account.confirmPage` | function of `EmailChangePageInput` | `defaultEmailChangePage` | Answers the markup of the page a change-of-address link opens. It must post `token` to `action`. Core sets the headers. |
 
 ## Next
 

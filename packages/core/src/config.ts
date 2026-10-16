@@ -34,6 +34,7 @@ import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+import { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
 import {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,
@@ -102,6 +103,12 @@ export interface AccountConfig {
    * `mail` replaces the default text. Core sends it to the input's address.
    */
   notices?: AccountNoticesConfig | false;
+  /**
+   * The HTML of the page a change-of-address link opens (plan 12a). The page
+   * must post `token` to `action` by `method="post"`. Core sets the headers
+   * and a policy with no script. Default `defaultEmailChangePage`.
+   */
+  confirmPage?: (input: EmailChangePageInput) => string;
 }
 
 export interface AccountNoticesConfig {
@@ -113,6 +120,7 @@ export interface ResolvedAccount {
   mail: (input: AccountMailInput) => MailMessage;
   /** Null when `account.notices` is `false`. */
   notices: { mail: (input: NoticeMailInput) => MailMessage } | null;
+  confirmPage: (input: EmailChangePageInput) => string;
 }
 
 export interface AuthConfig {
@@ -1157,7 +1165,11 @@ function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEma
 }
 
 /** The keys of `account`. A Record, so a key added to `AccountConfig` and not listed here fails the compile. */
-const ACCOUNT_KEYS: Readonly<Record<keyof AccountConfig, true>> = { mail: true, notices: true };
+const ACCOUNT_KEYS: Readonly<Record<keyof AccountConfig, true>> = {
+  mail: true,
+  notices: true,
+  confirmPage: true,
+};
 
 /** `account` (plan 12a). Absent: the defaults. A key that core does not know is refused by name. */
 function resolveAccount(input: AccountConfig | undefined): ResolvedAccount {
@@ -1171,7 +1183,13 @@ function resolveAccount(input: AccountConfig | undefined): ResolvedAccount {
       );
   if (o.mail !== undefined && typeof o.mail !== "function")
     throw new ConfigError("account.mail must be a function");
-  return { mail: o.mail ?? defaultAccountMail, notices: resolveNotices(o.notices) };
+  if (o.confirmPage !== undefined && typeof o.confirmPage !== "function")
+    throw new ConfigError("account.confirmPage must be a function");
+  return {
+    mail: o.mail ?? defaultAccountMail,
+    notices: resolveNotices(o.notices),
+    confirmPage: o.confirmPage ?? defaultEmailChangePage,
+  };
 }
 
 /** The keys of `account.notices`. A Record, so a key added to `AccountNoticesConfig` and not listed here fails the compile. */

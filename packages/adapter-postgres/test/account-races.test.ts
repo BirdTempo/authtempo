@@ -311,3 +311,154 @@ describe("the profile update races on Postgres (plan 12a Task 7)", () => {
     expect(Math.max(...raced)).toBeGreaterThan(0);
   }, 60000);
 });
+
+describe("the change of address races on Postgres (plan 12a Task 8)", () => {
+  it("two users confirm one new address at once: one moves, one answers email_taken", async () => {
+    const w = world();
+    const ada = await w.signIn("ada@example.com");
+    const bob = await w.signIn("bob@example.com");
+    for (let round = 0; round < ROUNDS; round++) {
+      const target = `shared${round}@example.com`;
+      const sessions = [ada, bob].map((s) => w.auth.api.getSession(s.token));
+      const [a, b] = await Promise.all(sessions);
+      if (!a || !b) throw new Error("no session");
+      expect((await w.auth.api.user.changeEmail({ session: a, newEmail: target })).ok).toBe(true);
+      expect((await w.auth.api.user.changeEmail({ session: b, newEmail: target })).ok).toBe(true);
+      const tokens = w.sent
+        .filter((m) => m.to === target)
+        .map((m) => decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(m.text)?.[1] ?? ""));
+      expect(tokens).toHaveLength(2);
+      const answers = await Promise.all(
+        tokens.map((token) =>
+          w.auth.api.user.confirmEmailChange({ token, ip: null, userAgent: null }),
+        ),
+      );
+      expect(answers.map((x) => (x.ok ? "ok" : x.code)).sort()).toEqual(["email_taken", "ok"]);
+      const rows = await db.sql<{ id: string }[]>`SELECT id FROM ta_user WHERE email = ${target}`;
+      expect(rows).toHaveLength(1);
+      const ids = await db.sql<
+        { user_id: string }[]
+      >`SELECT user_id FROM ta_identity WHERE provider = 'email' AND subject = ${target}`;
+      expect(ids.map((r) => r.user_id)).toEqual([rows[0]?.id]);
+      // One notice, to the old address of the winner.
+      const winner = rows[0]?.id === ada.user.id ? a : b;
+      expect(w.sent.filter((m) => m.subject.startsWith("Security notice")).at(-1)?.to).toBe(
+        winner.user.email,
+      );
+    }
+  }, 60_000);
+
+  it("two confirms of one link at once: one moves, one answers invalid_token", async () => {
+    const w = world();
+    let s = await w.signIn("ada@example.com");
+    for (let round = 0; round < ROUNDS; round++) {
+      const target = `ada${round}@example.com`;
+      expect((await w.auth.api.user.changeEmail({ session: s, newEmail: target })).ok).toBe(true);
+      const token = w.tokenOf([...w.sent].reverse().find((m) => m.to === target));
+      const before = w.sent.filter((m) => m.subject.startsWith("Security notice")).length;
+      const answers = await Promise.all(
+        [0, 1].map(() => w.auth.api.user.confirmEmailChange({ token, ip: null, userAgent: null })),
+      );
+      expect(answers.map((x) => (x.ok ? "ok" : x.code)).sort()).toEqual(["invalid_token", "ok"]);
+      expect(w.sent.filter((m) => m.subject.startsWith("Security notice")).length).toBe(before + 1);
+      const next = await w.auth.api.getSession(s.token);
+      if (!next) throw new Error("the requesting session ended");
+      expect(next.user.email).toBe(target);
+      s = { ...next, token: s.token };
+    }
+  }, 60_000);
+
+  it("a confirm beside profile updates of the same user: each afterUpdate gets the row its write replaced", async () => {
+    const sent: MailMessage[] = [];
+    const after: { previous: MoveRow; user: MoveRow }[] = [];
+    let befores = 0;
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      hooks: {
+        user: {
+          beforeUpdate: async () => {
+            befores++;
+            // Hold the round open, so a parallel write can land first.
+            await new Promise((r) => setTimeout(r, 5));
+          },
+          afterUpdate: (e) => {
+            after.push({ previous: e.previous, user: e.user });
+          },
+        },
+      },
+    });
+    await auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
+    const link = /token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1)?.text ?? "")?.[1];
+    if (!link) throw new Error("no link");
+    const v = await auth.api.verifyMagicLink({
+      token: decodeURIComponent(link),
+      ip: null,
+      userAgent: null,
+    });
+    if (!v.ok || !("token" in v.value)) throw new Error("no session");
+    const raced: number[] = [];
+    let email = "ada@example.com";
+    for (let round = 0; round < 6; round++) {
+      const s = await auth.api.getSession(v.value.token);
+      if (!s) throw new Error("no session");
+      const target = `moved${round}@example.com`;
+      expect((await auth.api.user.changeEmail({ session: s, newEmail: target })).ok).toBe(true);
+      const token = decodeURIComponent(
+        /token=([A-Za-z0-9_%-]+)/.exec(sent.findLast((m) => m.to === target)?.text ?? "")?.[1] ??
+          "",
+      );
+      after.length = 0;
+      befores = 0;
+      const [initial] = await db.sql<
+        MoveRow[]
+      >`SELECT email, name, updated_at AS "updatedAt" FROM ta_user WHERE id = ${s.user.id}`;
+      const [moved, ...updates] = await Promise.all([
+        auth.api.user.confirmEmailChange({ token, ip: null, userAgent: null }),
+        auth.api.user.update({ session: s, name: `N${round}a` }),
+        auth.api.user.update({ session: s, name: `N${round}b` }),
+      ]);
+      expect(moved?.ok || moved?.code === "conflict").toBe(true);
+      for (const x of updates) expect(x.ok || x.code === "conflict").toBe(true);
+      raced.push(befores - 3);
+      const chain = [...after].sort(
+        (a, b) => a.user.updatedAt.getTime() - b.user.updatedAt.getTime(),
+      );
+      let prev: MoveRow | undefined = initial;
+      for (const e of chain) {
+        expect({
+          email: e.previous.email,
+          name: e.previous.name,
+          at: e.previous.updatedAt.getTime(),
+        }).toEqual({ email: prev?.email, name: prev?.name ?? null, at: prev?.updatedAt.getTime() });
+        prev = e.user;
+      }
+      const [final] = await db.sql<
+        MoveRow[]
+      >`SELECT email, name, updated_at AS "updatedAt" FROM ta_user WHERE id = ${s.user.id}`;
+      expect({ email: final?.email, name: final?.name, at: final?.updatedAt.getTime() }).toEqual({
+        email: prev?.email,
+        name: prev?.name,
+        at: prev?.updatedAt.getTime(),
+      });
+      if (moved?.ok) email = target;
+      expect(final?.email).toBe(email);
+    }
+    // The race must show: some round ran user.beforeUpdate more than once for one call.
+    expect(Math.max(...raced)).toBeGreaterThan(0);
+  }, 60_000);
+});
+
+interface MoveRow {
+  email: string;
+  name: string | null;
+  updatedAt: Date;
+}

@@ -1,5 +1,11 @@
 import { type AuthConfig, resolveConfig } from "./config.js";
 import {
+  confirmEmailChange,
+  type EmailChangeRequest,
+  requestEmailChange,
+  verifyEmailChange,
+} from "./engine/email-change.js";
+import {
   type EmailOtpRequest,
   type EmailOtpReset,
   type EmailOtpSession,
@@ -304,6 +310,21 @@ export interface SessionApi {
 export interface UserApi {
   /** Writes `name` and `image`. Needs a verified email. No fresh rule. */
   update(input: ProfileUpdate): Promise<Result<{ user: PublicUser }>>;
+  /** Sends a proof to the new address, or a note when any user holds it. Fresh rule, verified email. */
+  changeEmail(input: EmailChangeRequest): Promise<Result<{ sent: true }>>;
+  /** The confirm by link. No session: the token is the proof. */
+  confirmEmailChange(input: {
+    token: string;
+    ip: string | null;
+    userAgent: string | null;
+  }): Promise<Result<{ user: PublicUser; next: string }>>;
+  /** The confirm by code, with a session of the same user. `not_found` with `emailOtp: false`. */
+  verifyEmailChange(input: {
+    session: ResolvedSession;
+    code: string;
+    ip: string | null;
+    userAgent: string | null;
+  }): Promise<Result<{ user: PublicUser }>>;
 }
 
 export interface AuthApi {
@@ -535,6 +556,9 @@ export function createAuth(input: AuthConfig): Auth {
       },
       user: {
         update: (i) => updateProfile(config, i),
+        changeEmail: (i) => requestEmailChange(config, i),
+        confirmEmailChange: (i) => confirmEmailChange(config, i),
+        verifyEmailChange: (i) => verifyEmailChange(config, i),
       },
       secrets: {
         status: () => secretsStatus(config),

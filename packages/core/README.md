@@ -926,6 +926,10 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | POST | `/sessions/revoke` | session (fresh), `{ id }` | `{ ok: true }`; the caller's own id clears the cookie; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found` (another user's, an unknown, or an ended id); 429 `rate_limited`. A session JWT of that session lives to its `exp` |
 | POST | `/sessions/revoke-others` | session (fresh) | `{ ended }`, the count of live sessions it ended: every other session, the second-factor challenges, and the handoff codes go. An ended row goes too, with no count and no `revoked` event. The trusted devices, the API tokens, and the OAuth grants stay; 401; 403 `session_not_fresh`; 429 `rate_limited` |
 | POST | `/user/update` | session, `{ name?, image? }` | `{ user }`. `name`: a name by the name rule below, or null. `image`: an image URL by the image rule below, or null. 400 `invalid_body` (no field, a bad value, or any other field, the address too); 401 (also when the user row goes during the update); 403 `email_unverified`, `hook_refused`; 409 `conflict`; 429 `rate_limited`; 500 `hook_failed`. No fresh rule |
+| POST | `/user/change-email` | session (fresh), `{ newEmail, method?, next? }` | `{ sent: true }`. `method` is `link` (default) or `code` (needs `emailOtp`). A proof goes to the new address. When any user holds it, a note goes there in place of the proof, with the same answer. 400 `invalid_body` (a malformed address, the same address, or any other field); 401; 403 `email_unverified`, `session_not_fresh`; 404 `not_found` (`code` with `emailOtp: false`); 429 `rate_limited` |
+| GET | `/user/change-email/confirm` | `?token=` | 200 HTML confirm page (`account.confirmPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No storage read, no limit, no cookie |
+| POST | `/user/change-email/confirm` | form or JSON `token`, no session | form body: 302 to `next`, or to `/?auth_error=<code>` on a failure; JSON body: `{ user }`. The address moves and is verified. The `email` identity follows. The old address's live links and codes go. Every other session, challenge, handoff code, and OAuth grant ends. A notice goes to the old address. 400 `invalid_token`, `token_expired`; 403 `hook_refused`; 409 `email_taken` (a user took the address since the request), `conflict`; 429 `rate_limited`; 500 `hook_failed` |
+| POST | `/user/change-email/verify` | session, `{ code }` | `{ user }`, the same move by a code. The caller's session stays. 400 `invalid_body`, `invalid_code`, `too_many_attempts`; 401; 403 `hook_refused`; 409 `email_taken`, `conflict`; 404 with `emailOtp: false`; 429 `rate_limited`; 500 `hook_failed` |
 
 The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it takes no `code`, whatever methods the user has on. After a password or an email code, `code` is the second factor. Item 2 says: "With the second factor on, the password and the email code need `code`, an authenticator code or a backup code." Item 12 lists "the email method of plan 12c as a re-authentication code" as a later input. So a user whose only method is the email method sends a backup code, or proves by a passkey. A user whose password row holds `LEGACY_VERIFY_HASH` proves by an email code or a passkey. The password proof refuses the marker, as the TOTP setup does.
 
@@ -936,6 +940,10 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
 | `user-update:user:<userId>` | 15 minutes | 30 | `POST /user/update`, also when a hook refuses it. A refused body and an unverified user count no try |
+| `email-change:user:<userId>` | 1 hour | 5 | `POST /user/change-email`. A refused body, a stale session, and an unverified user count no try |
+| `email-change:email:<new address>` | 15 minutes | 3 | `POST /user/change-email`, after the per-user key |
+| `email-change-confirm:ip:<ip>` | 15 minutes | 20 | `POST /user/change-email/confirm`. A malformed token counts no try |
+| `otp-verify:ip:<ip>`, `otp-verify:email:<new address>` | 15 minutes | 30, 10 | `POST /user/change-email/verify`, shared with every code verify. With no request, the IP key only |
 
 The profile update (`POST /user/update`, `api.user.update`) writes only the fields it gets. Null clears a field. It needs a verified address: a claim keeps the user row and its name, so a claimant must not set what the owner inherits. It has no fresh rule, because the name and the image do not affect a sign-in.
 
@@ -945,16 +953,25 @@ The image rule (`validImageUrl`) holds for the profile update, the `user.beforeC
 
 `user.beforeUpdate` gets the stored row, the patch, and `via: "profile"`. It runs before the write, so a refusal or a throw leaves the row as it was. The write is a compare-and-set on the row that the hook saw. A parallel write that lands first makes the update read the row again and run `user.beforeUpdate` again. After 5 lost rounds the answer is 409 `conflict`, and core logs `authtempo: profile update gave up <user id>`. `user.afterUpdate` gets the stored row after the write and, as `previous`, the row that the write replaced.
 
+The change of address (`POST /user/change-email`, `api.user.changeEmail`) needs a fresh session of a verified user. The proof goes to the new address: a link (the magic link's life) or a code (the email code rules). One request per user is live: a new request spends the earlier link or code. An address that any user holds gets a note with no proof. The caller gets the same answer, so the answer does not tell that the address is taken. Both paths count the same keys in the same order.
+
+The link opens a confirm page that does nothing on load, so a mail scanner spends nothing. Its button posts the token, with no session: the person may open the mail on another device. The code needs a session of the same user, because a 6-digit code is not a bearer proof. The move is one transaction: the user row, the `email` identity, the old address's proofs, and the other sessions. A spent, old, or replaced proof undoes it. Of two confirms of one link, one moves and one answers `invalid_token`. Of two users who confirm one address, one moves and one answers 409 `email_taken`.
+
+`user.beforeUpdate` gets the stored row, `patch: { email }`, and `via: "email_change"`. It runs before the write, so a refusal or a throw leaves both rows as they were. The move is a compare-and-set on the row that the hook saw, the rule of the profile update. A parallel profile update makes the move read the row again and run the hook again. After 5 lost rounds the answer is 409 `conflict`, and core logs `authtempo: email change gave up <user id>`. Each ended session fires `session.afterEnd` with `email_change`.
+
+A change of address keeps the social identities: a later social sign-in finds the user by its subject. Pending invitations to the old address stay with that address. An authenticator app keeps the old address as its label.
+
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
 - a password change, or a first password
 - a reset by link or by code, also when the reset answers a second-factor challenge
 - a passkey added or removed
 - a second-factor method turned on or off: TOTP, the passkey method, the email method, and `api.totp.disable`
+- a change of address, by link or by code: the notice goes to the old address, which the request read, and names the new one
 
-The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change and a reset pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
+The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change, a reset, and a change of address pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
 
-`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names the change of address, a provider link and unlink, and the account delete. No flow of this version sends those yet.
+`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names a provider link and unlink, and the account delete. No flow of this version sends those yet.
 
 ## Hooks
 
@@ -1039,7 +1056,7 @@ const auth = createAuth({
   `magic_link`, `social`, `passkey`, `handoff`, or `email_otp`; a reset by
   code is `password`), and `afterEnd`
   (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`,
-  `expired`, `two_factor`, or `revoked` since plan 12a), once per ended
+  `expired`, `two_factor`, `revoked`, or `email_change` since plan 12a), once per ended
   row. `sweepExpired` deletes expired rows in bulk and fires no hook, so
   `expired` fires only when a request presents the token after its expiry. A claim ends a claimant's sessions with
   `claim` in every flow that proves the address: the magic link, the

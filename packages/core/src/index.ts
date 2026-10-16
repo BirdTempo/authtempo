@@ -45,6 +45,7 @@ export {
   type UserApi,
 } from "./create-auth.js";
 export { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
+export type { EmailChangeRequest } from "./engine/email-change.js";
 export type {
   EmailOtpRequest,
   EmailOtpReset,
@@ -155,6 +156,7 @@ export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./err
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 export { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+export { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
 export {
   defaultHandoffConfirmPage,
   type HandoffConfirmPageInput,

@@ -49,7 +49,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | Organizations | `createOrganization`, `listOrganizations`, `updateOrganization`, `deleteOrganization`, `listMembers`, `addMember`, `updateMemberRole`, `removeMember`, `inviteMember`, `listInvitations`, `revokeInvitation`, `acceptInvitation`, `declineInvitation` |
 | `api.tokens` | `create`, `list`, `revoke`, `current` |
 | `api.session` | `requireFresh(resolved)`, `reauthenticate`, `requestReauthCode`, `reauthPasskeyOptions`, `list`, `revoke`, `revokeOthers`; present in every deployment |
-| `api.user` | `update`; present in every deployment |
+| `api.user` | `update`, `changeEmail`, `confirmEmailChange`, `verifyEmailChange`; present in every deployment. `verifyEmailChange` answers `not_found` with `emailOtp: false` |
 | `api.password` | `signUp`, `signIn`, `verify`, `verifyEmail`, `resendVerification`, `requestReset`, `reset`, `change`; present when `password` is set |
 | `api.emailOtp` | `request`, `verify`, `requestReset`, `reset`; present unless `emailOtp` is `false` |
 | `api.totp` | `setup`, `enable`, `verify`, `disable`, `disableWithCode`, `regenerateBackupCodes`, `regenerateBackupCodesWithCode`, `status`, `uri`, `revokeTrustedDevices`; present when the second factor is on. `disable` turns every method off |
@@ -71,7 +71,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `hookRefusal` | Makes the error that a before hook throws to refuse a flow with a message. |
 | `systemClock` | The clock of the system. |
 | `schema` | The models and the fields of the storage port. |
-| `defaultConfirmPage`, `defaultSignInPage`, `defaultHandoffConfirmPage`, `defaultResetPage`, `defaultPasswordVerifyPage`, `defaultTotpPage`, `defaultConsentPage` | The default pages. [Replace the default pages](/docs/guides/pages/) tells how to replace one. |
+| `defaultConfirmPage`, `defaultSignInPage`, `defaultHandoffConfirmPage`, `defaultResetPage`, `defaultPasswordVerifyPage`, `defaultTotpPage`, `defaultConsentPage`, `defaultEmailChangePage` | The default pages. [Replace the default pages](/docs/guides/pages/) tells how to replace one. |
 | `defaultEmailOtpMail`, `defaultResetOtpMail`, `defaultSecondFactorMail`, `defaultAccountMail`, `defaultNoticeMail` | The default mails of the email codes and of the settings page. `defaultSecondFactorMail` is the mail of a second-factor email code. `defaultNoticeMail` is the notice after a change of a way in. |
 | `defaultExistingAccountMail` | The default mail to a known address at a uniform sign-up. `password.existingAccountMail` replaces it. |
 | `limiterKey` | Joins a key, the seconds, and the maximum into the stored key of the owned limiters. |
@@ -122,7 +122,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
 | Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `SecondFactorRow`, `SecondFactorMethod`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow` |
 | Errors | `ErrorCode`, `OAuthErrorCode` |
-| Pages and mails | `ConfirmPageInput`, `SignInPageInput`, `HandoffConfirmPageInput`, `ResetPageInput`, `PasswordVerifyPageInput`, `TotpChallengePageInput`, `ConsentPageInput`, `EmailOtpMailInput`, `ExistingAccountMailInput`, `AccountMailInput`, `NoticeEvent`, `NoticeMailInput` |
+| Pages and mails | `ConfirmPageInput`, `SignInPageInput`, `HandoffConfirmPageInput`, `ResetPageInput`, `PasswordVerifyPageInput`, `TotpChallengePageInput`, `ConsentPageInput`, `EmailOtpMailInput`, `ExistingAccountMailInput`, `AccountMailInput`, `NoticeEvent`, `NoticeMailInput`, `EmailChangePageInput` |
 | Magic link and social | `MagicLinkRequest`, `MagicLinkVerify`, `SocialStart`, `SocialStarted`, `SocialComplete`, `SocialProfile`, `SocialProviderName` |
 | Passkeys | `PasskeySummary`, `RegisteredPasskey`, `AuthenticatedPasskey`, `PublicKeyCredentialCreationOptionsJSON`, `PublicKeyCredentialRequestOptionsJSON`, `RegistrationResponseJSON`, `AuthenticationResponseJSON` |
 | Handoff | `HandoffStart` |
@@ -130,7 +130,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Email codes | `EmailOtpApi`, `EmailOtpRequest`, `EmailOtpVerify`, `EmailOtpReset`, `EmailOtpSession`, `ResolvedEmailOtp` |
 | Second factor | `TotpApi`, `TotpSetup`, `TotpSetupInput`, `TotpStatus`, `TwoFactorPending`, `TwoFactorSession`, `TwoFactorVerify`, `ChallengeMethod`, `SignInChallenge`, `MethodEnabled`, `ChallengeView` |
 | API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary` |
-| Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate` |
+| Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest` |
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthAccess`, `OAuthGrantSummary` |
 | Organizations | `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |

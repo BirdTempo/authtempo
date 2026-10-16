@@ -112,6 +112,42 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Answer | `{ user }`: the `id`, `email`, `emailVerified`, `name`, and `image` of the stored row. Only the given fields change |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
+<h3 id="post-user-change-email"><code>POST /user/change-email</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A fresh session of a verified user |
+| Input | JSON `{ newEmail, method?, next? }`. `method` is `link` (the default) or `code`, which needs `emailOtp`. Any other field is refused |
+| Answer | `{ sent: true }`. A proof goes to the new address. When any user holds that address, a note goes there in place of the proof, with the same answer. A new request spends the earlier proof |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`not_found`](/docs/reference/errors/#not_found), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="get-user-change-email-confirm"><code>GET /user/change-email/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | Query `token` |
+| Answer | The confirm page, which posts the token. It reads nothing and spends nothing, so a mail scanner changes nothing. A malformed token answers 302 to `?auth_error=invalid_token` |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token) |
+
+<h3 id="post-user-change-email-confirm"><code>POST /user/change-email/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The token of the link. No session |
+| Input | Form or JSON `token` |
+| Answer | A form: 302 to `next`, or to `?auth_error=<code>` on a failure. JSON: `{ user }`. The address moves and is verified. Every other session and grant ends, and a notice goes to the old address |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`email_taken`](/docs/reference/errors/#email_taken), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
+<h3 id="post-user-change-email-verify"><code>POST /user/change-email/verify</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session of the same user, and `emailOtp` on |
+| Input | JSON `{ code }` |
+| Answer | `{ user }`, the same move as the link confirm. The caller's session stays |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`not_found`](/docs/reference/errors/#not_found), [`email_taken`](/docs/reference/errors/#email_taken), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
 ## Magic link
 
 These routes exist in every deployment.

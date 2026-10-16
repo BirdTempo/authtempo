@@ -435,6 +435,21 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
     ]);
   });
 
+  it("answers hook_failed for a patch name with a right-to-left override (plan 12a Task 7 review R2-L1)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = makeAuth({ hooks: recorded({ name: "Ada\u202Eevil" }).hooks });
+    expect(await magicLink(auth, "rlo@example.com")).toEqual({
+      ok: false,
+      code: "hook_failed",
+      status: 500,
+    });
+    expect(log.mock.calls).toEqual([
+      ["authtempo: user patch refused", "a name that breaks the name rule"],
+    ]);
+    expect(await allRows(auth.storage)).toEqual({ users: [], identities: [], sessions: [] });
+    log.mockRestore();
+  });
+
   it("a patch with another field or a bad image answers hook_failed with one line", async () => {
     for (const patch of [{ email: "x@example.com" }, { image: "data:image/png;base64,AAAA" }]) {
       const log = vi.spyOn(console, "error").mockImplementation(() => {});

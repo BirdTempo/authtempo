@@ -347,6 +347,33 @@ describe("the races of the profile update (plan 12a)", () => {
     },
   );
 
+  // No writer in the tree writes the address with an equal updatedAt: the change of
+  // address moves it by later(). The clauses guard the next writer (plan 12a Task 8).
+  it.each([
+    ["the address", { email: "ada.moved@example.com" }],
+    ["the verified flag", { emailVerified: false }],
+  ] as const)("sees a parallel write of %s in the same millisecond", async (_, write) => {
+    const after: { previous: UserRow }[] = [];
+    let rounds = 0;
+    const auth = hooked((get) => ({
+      beforeUpdate: async (e) => {
+        rounds++;
+        if (rounds > 1) return;
+        await get().storage.update("user", byId(e.user.id), {
+          ...write,
+          updatedAt: e.user.updatedAt,
+        });
+      },
+      afterUpdate: (e) => {
+        after.push(e);
+      },
+    }));
+    const s = await verifiedSession(auth);
+    expect((await updateProfile(auth.config, { session: s, name: "Ada" })).ok).toBe(true);
+    expect(rounds).toBe(2);
+    expect(after[0]?.previous).toMatchObject(write);
+  });
+
   it("sees a parallel update that writes the same value, by updatedAt alone", async () => {
     const after: { previous: UserRow }[] = [];
     let rounds = 0;

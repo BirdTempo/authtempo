@@ -213,7 +213,7 @@ export const CONFIG_KEYS = {
     user: true,
     identity: true,
   } satisfies Keys<HooksConfig>,
-  account: { mail: true, notices: true } satisfies Keys<AccountConfig>,
+  account: { mail: true, notices: true, confirmPage: true } satisfies Keys<AccountConfig>,
   "account.notices": { mail: true } satisfies Keys<AccountNoticesConfig>,
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
 } as const;

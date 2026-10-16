@@ -33,7 +33,9 @@ export type SessionEndReason =
   // plan 9f: the enable of a second factor ends the user's other sessions.
   | "two_factor"
   // plan 12a: a revoke of one session or of the others from a settings page.
-  | "revoked";
+  | "revoked"
+  // plan 12a: a change of address ends every other session and grant.
+  | "email_change";
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {

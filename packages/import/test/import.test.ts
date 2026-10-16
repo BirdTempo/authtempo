@@ -352,6 +352,18 @@ describe("importUsers", () => {
     expect((await db.findMany("user", [])).map((u) => u.id)).toEqual(["app-1"]);
   });
 
+  // plan 12a Task 7 review R2-L1: a right-to-left override is a format character.
+  it("drops a user name with a right-to-left override, by core's name rule", async () => {
+    const db = createMemoryAdapter();
+    const r = await importUsers(db, listSource([user("d", { name: "Ada\u202Eevil" })]), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    const id = await importId("user", "supabase", "d");
+    expect((await db.findOne("user", [{ field: "id", op: "eq", value: id }]))?.name).toBeNull();
+    expect(r.dropped).toEqual([{ sourceId: "d", item: "name:invalid" }]);
+  });
+
   it("keeps names inside core's rules: drops an invalid user name, skips an invalid organization name", async () => {
     const db = createMemoryAdapter();
     const r = await importUsers(

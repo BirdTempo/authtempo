@@ -158,6 +158,15 @@ describe("completeSocial", () => {
     expect(await auth.storage.findMany("session", [])).toHaveLength(1);
   });
 
+  it("fills no name from a profile name with a right-to-left override (plan 12a Task 7 review R2-L1)", async () => {
+    const jwtTokens: Record<string, ReturnType<typeof googleToken>> = {};
+    const auth = socialAuth({}, fakeJwt(jwtTokens));
+    const s = await started(auth);
+    jwtTokens["idtok-default"] = googleToken(s.nonce, { name: "Ada\u202Eevil" });
+    const r = await complete(auth, s);
+    expect(r.ok && r.value.user).toMatchObject({ name: null, image: "https://p/a.png" });
+  });
+
   it("drops a name with a control character, a 3000-character picture, and a picture that is not https (final review I-2)", async () => {
     const cases: Array<Record<string, unknown>> = [
       { name: "Ada\nX", picture: `https://p/${"a".repeat(3000)}` },

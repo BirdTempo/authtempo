@@ -22,12 +22,16 @@ export interface ProfileUpdate {
  * The row as `previous` holds it, so `previous` is the row that the update
  * replaced. The social fill writes `name` or `image` with `updatedAt: now`,
  * which equals the old value in the same millisecond, so those fields are
- * matched too. No writer changes `email` or `emailVerified` of a verified
- * user today; a writer of the address must move `updatedAt` by `later`.
+ * matched too. The address and its flag are matched as well (plan 12a Task
+ * 8): `later` of a stale read can repeat the `updatedAt` of a newer write.
+ * The profile update and the change of address both write through this one
+ * compare-and-set, so each sees every write of the other.
  */
-function unchanged(previous: UserRow): Where<"user">[] {
+export function unchanged(previous: UserRow): Where<"user">[] {
   return [
     { field: "id", op: "eq", value: previous.id },
+    { field: "email", op: "eq", value: previous.email },
+    { field: "emailVerified", op: "eq", value: previous.emailVerified },
     { field: "name", op: "eq", value: previous.name },
     { field: "image", op: "eq", value: previous.image },
     { field: "updatedAt", op: "eq", value: previous.updatedAt },

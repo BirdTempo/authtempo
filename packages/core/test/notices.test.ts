@@ -5,6 +5,11 @@ import {
   ConfigError,
   type MailMessage,
 } from "../src/config.js";
+import {
+  confirmEmailChange,
+  requestEmailChange,
+  verifyEmailChange,
+} from "../src/engine/email-change.js";
 import { requestResetOtp, resetPasswordWithOtp } from "../src/engine/email-otp.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { defaultNoticeMail, type NoticeMailInput } from "../src/engine/notices.js";
@@ -807,6 +812,30 @@ const PATHS: {
       return {
         act: () =>
           disableMethod(auth.config, { user: s.user, method: "email", password: PASSWORD }),
+      };
+    },
+  },
+  {
+    name: "change of address by link",
+    run: async ({ auth, mail }) => {
+      const s = await verifiedSession(auth);
+      await requestEmailChange(auth.config, { session: s, newEmail: "ada.new@example.com" });
+      const token = tokenFromMail(mail().at(-1)?.text ?? "");
+      return { act: () => confirmEmailChange(auth.config, { token, ip: null, userAgent: null }) };
+    },
+  },
+  {
+    name: "change of address by code",
+    run: async ({ auth, mail }) => {
+      const s = await verifiedSession(auth);
+      await requestEmailChange(auth.config, {
+        session: s,
+        newEmail: "ada.new@example.com",
+        method: "code",
+      });
+      const code = /\b(\d{6})\b/.exec(mail().at(-1)?.text ?? "")?.[1] ?? "";
+      return {
+        act: () => verifyEmailChange(auth.config, { session: s, code, ip: null, userAgent: null }),
       };
     },
   },
