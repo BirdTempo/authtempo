@@ -4,8 +4,15 @@ import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
-import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { hookGuard, type OrganizationPatch, type RemoveVia, runAfter, runBefore } from "./hooks.js";
+import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import {
+  hookGuard,
+  type OrganizationPatch,
+  type RemoveVia,
+  runAfter,
+  runBefore,
+  stopWith,
+} from "./hooks.js";
 import {
   needs,
   normalizeSlug,
@@ -15,6 +22,7 @@ import {
   rankOf,
   roleAllowedIn,
 } from "./ranks.js";
+import { holdUser, userStays } from "./user-hold.js";
 
 export interface Caller {
   user: UserRow;
@@ -252,8 +260,12 @@ export async function createOrganization(
           via: "create",
           invitation: null,
         });
+        // After the hooks (the D1 undo), and before the writes. A member row
+        // of a deleted user would count as an owner (plan 12a Task 11).
+        await holdUser(tx, input.user.id);
         await tx.create("organization", organization);
         await tx.create("member", member);
+        await userStays(tx, input.user.id);
         return ok(true);
       }),
     );
@@ -434,18 +446,36 @@ export async function deleteOrganization(
 }
 
 /**
- * The rows of one organization, in the caller's transaction: the members,
- * the invitations, the active pointers of the sessions, and the row. One
- * copy for the organization delete and the account delete (plan 12a).
+ * The rows of one organization, in the caller's transaction. One copy for
+ * the organization delete and the account delete (plan 12a).
+ *
+ * The order closes the gap of an accept in flight (plan 12a Task 11). The
+ * invitations go first. On Postgres an accept holds its invitation row
+ * until its commit. So this delete waits, and the member read below sees
+ * that member. An accept that starts later finds no invitation. The row goes
+ * before the members: D1 has no lock, and an accept reads the organization
+ * after its member insert. With `alone`, the organization goes with that
+ * user's account, so any other member answers `conflict`: the organization
+ * is no longer one the user alone holds.
  */
-export async function deleteOrganizationRows(tx: StorageAdapter, id: string): Promise<void> {
-  await tx.delete("member", [{ field: "organizationId", op: "eq", value: id }]);
+export async function deleteOrganizationRows(
+  tx: StorageAdapter,
+  id: string,
+  alone: string | null = null,
+): Promise<void> {
+  const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "eq", value: id }];
   await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+  if (
+    alone !== null &&
+    (await tx.findMany("member", byOrganization)).some((m) => m.userId !== alone)
+  )
+    stopWith("conflict");
+  await tx.delete("member", byOrganization);
   // A session that points at a deleted organization would make every later rank check read a missing row.
   await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
     activeOrganizationId: null,
   });
-  await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
 }
 
 /** What an account delete does to the organizations of the user (plan 12a). */
@@ -499,6 +529,10 @@ export async function organizationsOfDelete(
     if (owners <= 1) return fail("sole_owner");
     plan.owned.push(organization);
   }
+  // One lock order for every delete (review m1): two co-owners of two
+  // organizations who delete at once would else wait on each other, and
+  // Postgres would abort one with a deadlock in place of `conflict`.
+  plan.owned.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return ok(plan);
 }
 
@@ -624,7 +658,10 @@ export async function addMember(
           via: "add",
           invitation: null,
         });
+        // The added user, for the reason of the create (plan 12a Task 11).
+        await holdUser(tx, target.id);
         await tx.create("member", member);
+        await userStays(tx, target.id);
         return ok(true);
       }),
     );

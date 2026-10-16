@@ -5,7 +5,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { InvitationRow, MemberRow, OrganizationRow, UserRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
-import { HookStop, hookGuard, runAfter, runBefore } from "./hooks.js";
+import { HookStop, hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
   type Caller,
   type MemberSummary,
@@ -15,6 +15,7 @@ import {
 } from "./organizations.js";
 import { needs, type ResolvedOrganizations, ROLE_RE, rankOf, roleAllowedIn } from "./ranks.js";
 import { publicSession, type ResolvedSession } from "./sessions.js";
+import { holdUser, userStays } from "./user-hold.js";
 import { normalizeEmail } from "./users.js";
 
 export const INVITATION_PREFIX = "inv_";
@@ -335,6 +336,9 @@ export async function acceptInvitation(
           by: raisedBy,
         });
       }
+      // After the hooks (the D1 undo), and before the consume. A member row
+      // of a deleted user would count as an owner (plan 12a Task 11).
+      await holdUser(tx, input.user.id);
       // One conditional update consumes the token: two accepts race for one row and only one wins.
       const n = await tx.update(
         "invitation",
@@ -368,6 +372,14 @@ export async function acceptInvitation(
         updatedAt: now,
       };
       await tx.create("member", row);
+      await userStays(tx, row.userId);
+      // D1 has no lock. An account delete removes a solo organization's row
+      // before its members. So this read sees it gone, or that delete sees
+      // the new member and answers conflict (plan 12a Task 11).
+      if (
+        !(await tx.findOne("organization", [{ field: "id", op: "eq", value: row.organizationId }]))
+      )
+        stopWith("conflict");
       return { row, created: true, raised: null };
     });
   } catch (err) {

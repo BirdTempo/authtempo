@@ -1169,6 +1169,8 @@ describe("changePassword", () => {
       ).ok,
     ).toBe(true);
     expect(writes).toEqual([
+      // The hold of the user row, before the password row (plan 12a Task 11).
+      "update:user",
       "update:password",
       // The second-factor challenges, before the session delete (plan 9f).
       "delete:verification",

@@ -392,7 +392,14 @@ describe("the change of address races on Postgres (plan 12a Task 8)", () => {
       const answers = await Promise.all(
         [0, 1].map(() => w.auth.api.user.confirmEmailChange({ token, ip: null, userAgent: null })),
       );
-      expect(answers.map((x) => (x.ok ? "ok" : x.code)).sort()).toEqual(["invalid_token", "ok"]);
+      // The loser answers by its timing (review-12a-task11 L4). A confirm that
+      // reads the token after the winner's commit finds it spent. One that
+      // read it before checks the new address after that commit, and finds
+      // it taken. Both leave one move and one notice.
+      expect([
+        ["invalid_token", "ok"],
+        ["email_taken", "ok"],
+      ]).toContainEqual(answers.map((x) => (x.ok ? "ok" : x.code)).sort());
       expect(w.sent.filter((m) => m.subject.startsWith("Security notice")).length).toBe(before + 1);
       const next = await w.auth.api.getSession(s.token);
       if (!next) throw new Error("the requesting session ended");
@@ -1023,18 +1030,29 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
    * shot. `inSignIn` runs from `session.beforeCreate`, before the sign-in's
    * first write. `afterSessionCheck` runs after a sign-in's read of the user
    * row that follows its session insert. `afterRecount` runs after the
-   * delete's recount of the owners.
+   * delete's recount of the owners. `afterOwnMembers` runs after the delete
+   * of the user's member rows. `afterOrganizationMembers` runs after the
+   * first member delete of an organization that goes. `inDelete` runs from
+   * `user.beforeDelete` (plan 12a Task 11 round 2).
    */
   function deleteWorld() {
     const sent: MailMessage[] = [];
     const ended: string[] = [];
     const probes: Record<
-      "inSignIn" | "afterSessionCheck" | "afterRecount",
+      | "inSignIn"
+      | "afterSessionCheck"
+      | "afterRecount"
+      | "afterOwnMembers"
+      | "afterOrganizationMembers"
+      | "inDelete",
       (() => Promise<void>) | null
     > = {
       inSignIn: null,
       afterSessionCheck: null,
       afterRecount: null,
+      afterOwnMembers: null,
+      afterOrganizationMembers: null,
+      inDelete: null,
     };
     const take = (name: keyof typeof probes) => {
       const p = probes[name];
@@ -1060,7 +1078,12 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
         }) as typeof tx.findOne,
         delete: (async (model, where) => {
           const n = await tx.delete(model, where);
-          if (model === "member" && where[0]?.field === "userId") droppedMembers = true;
+          if (model === "member" && where[0]?.field === "userId") {
+            droppedMembers = true;
+            await take("afterOwnMembers")?.();
+          }
+          if (model === "member" && where[0]?.field === "organizationId")
+            await take("afterOrganizationMembers")?.();
           return n;
         }) as typeof tx.delete,
         findMany: (async (model, where, opts) => {
@@ -1096,6 +1119,11 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
           },
           afterEnd: ({ session, reason }) => {
             ended.push(`${session.id}:${reason}`);
+          },
+        },
+        user: {
+          beforeDelete: async () => {
+            await take("inDelete")?.();
           },
         },
       },
@@ -1278,6 +1306,309 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
       // Each ended row fires one event.
       const ids = w.ended.map((e) => e.split(":")[0]);
       expect(new Set(ids).size).toBe(ids.length);
+    }
+  }, 60_000);
+  /** A delete of `me` that pauses inside its transaction while `writer` starts on another connection. */
+  async function writerDuring<T>(
+    w: ReturnType<typeof deleteWorld>,
+    probe: "afterOwnMembers" | "afterOrganizationMembers",
+    me: Awaited<ReturnType<ReturnType<typeof deleteWorld>["signIn"]>>,
+    writer: () => Promise<T>,
+  ) {
+    let writing: Promise<T> | null = null;
+    w.probes[probe] = async () => {
+      writing = writer();
+      await new Promise((r) => setTimeout(r, HOLD_MS));
+    };
+    const deleted = await w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+    if (!writing) throw new Error("the probe did not run");
+    return { deleted, written: await (writing as Promise<T>) };
+  }
+  const CONFLICT = { ok: false, code: "conflict", status: 409 };
+  const DELETED = { ok: true, value: { ok: true } };
+  const invitationOf = (w: ReturnType<typeof deleteWorld>, email: string) => {
+    const m = [...w.sent].reverse().find((x) => x.to === email && /invitation=/.test(x.text));
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(m?.text ?? "")?.[1];
+    if (!token) throw new Error("no invitation mail");
+    return token;
+  };
+  const membersOf = (organizationId: string) =>
+    db.sql<{ user_id: string }[]>`
+      SELECT user_id FROM ta_member WHERE organization_id = ${organizationId}`;
+
+  it("two deletes of the co-owners of two organizations: one passes, one answers conflict, no deadlock (review m1)", async () => {
+    // A joined O1 first and C joined O2 first, so their member rows list the
+    // two organizations in opposite orders. Both reach user.beforeDelete
+    // before either takes an owner lock.
+    const w = deleteWorld();
+    for (let round = 0; round < 3; round++) {
+      const a = await w.signIn(`m1-a-${round}@example.com`);
+      const c = await w.signIn(`m1-c-${round}@example.com`);
+      const o1 = await w.auth.api.createOrganization({
+        user: a.user,
+        slug: `o1-${round}`,
+        name: "O1",
+      });
+      const o2 = await w.auth.api.createOrganization({
+        user: c.user,
+        slug: `o2-${round}`,
+        name: "O2",
+      });
+      if (!o1.ok || !o2.ok) throw new Error("no organizations");
+      for (const [by, id, userId] of [
+        [a.user, o1.value.organization.id, c.user.id],
+        [c.user, o2.value.organization.id, a.user.id],
+      ] as const) {
+        const added = await w.auth.api.addMember({
+          user: by,
+          organizationId: id,
+          userId,
+          role: "owner",
+        });
+        if (!added.ok) throw new Error(added.code);
+      }
+      let arrived = 0;
+      let open: () => void = () => {};
+      const both = new Promise<void>((go) => {
+        open = go;
+      });
+      // A probe runs once, so the first arrival sets it again for the second.
+      const meet = async () => {
+        arrived++;
+        if (arrived === 1) w.probes.inDelete = meet;
+        if (arrived === 2) open();
+        await both;
+      };
+      w.probes.inDelete = meet;
+      const first = w.auth.api.user.delete({ session: a, ip: null, userAgent: null });
+      const second = w.auth.api.user.delete({ session: c, ip: null, userAgent: null });
+      const answers = await Promise.all([first, second]);
+      expect(answers.map((x) => (x.ok ? "ok" : x.code)).sort()).toEqual(["conflict", "ok"]);
+      const users = await db.sql`SELECT id FROM ta_user WHERE id IN (${a.user.id}, ${c.user.id})`;
+      expect(users).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it("an owner write that commits between the delete's rule and its owner lock makes the delete answer conflict (review L1)", async () => {
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const me = await w.signIn(`l1-a-${round}@example.com`);
+      const carol = await w.signIn(`l1-c-${round}@example.com`);
+      const team = await w.auth.api.createOrganization({
+        user: me.user,
+        slug: `l1-${round}`,
+        name: "Team",
+      });
+      if (!team.ok) throw new Error(team.code);
+      const id = team.value.organization.id;
+      const added = await w.auth.api.addMember({
+        user: me.user,
+        organizationId: id,
+        userId: carol.user.id,
+        role: "owner",
+      });
+      if (!added.ok) throw new Error(added.code);
+      let renamed: unknown = null;
+      w.probes.inDelete = async () => {
+        await new Promise((r) => setTimeout(r, 2));
+        renamed = await w.auth.api.updateOrganization({
+          user: carol.user,
+          organizationId: id,
+          name: "Renamed",
+        });
+      };
+      expect(await w.auth.api.user.delete({ session: me, ip: null, userAgent: null })).toEqual(
+        CONFLICT,
+      );
+      expect(renamed).toMatchObject({ ok: true });
+      expect((await membersOf(id)).map((m) => m.user_id).sort()).toEqual(
+        [me.user.id, carol.user.id].sort(),
+      );
+    }
+  }, 60_000);
+
+  it("an organization create that starts during the delete waits, then answers conflict (review m2, Q2)", async () => {
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const me = await w.signIn(`q2-create-${round}@example.com`);
+      const r = await writerDuring(w, "afterOwnMembers", me, () =>
+        w.auth.api.createOrganization({ user: me.user, slug: `ghost-${round}`, name: "Ghost" }),
+      );
+      expect(r.deleted).toEqual(DELETED);
+      expect(r.written).toEqual(CONFLICT);
+      expect(await db.sql`SELECT id FROM ta_organization WHERE slug = ${`ghost-${round}`}`).toEqual(
+        [],
+      );
+      expect(await rowsOf(me.user.id)).toEqual(NONE);
+    }
+  }, 60_000);
+
+  it("a member add of the user that starts during the delete waits, then answers conflict", async () => {
+    const w = deleteWorld();
+    const bob = await w.signIn("q2-add-bob@example.com");
+    for (let round = 0; round < ROUNDS; round++) {
+      const team = await w.auth.api.createOrganization({
+        user: bob.user,
+        slug: `add-${round}`,
+        name: "Team",
+      });
+      if (!team.ok) throw new Error(team.code);
+      const me = await w.signIn(`q2-add-${round}@example.com`);
+      const r = await writerDuring(w, "afterOwnMembers", me, () =>
+        w.auth.api.addMember({
+          user: bob.user,
+          organizationId: team.value.organization.id,
+          userId: me.user.id,
+          role: "member",
+        }),
+      );
+      expect(r.deleted).toEqual(DELETED);
+      expect(r.written).toEqual(CONFLICT);
+      expect((await membersOf(team.value.organization.id)).map((m) => m.user_id)).toEqual([
+        bob.user.id,
+      ]);
+    }
+  }, 60_000);
+
+  it("an accept by the user that starts during the delete waits, then answers conflict", async () => {
+    const w = deleteWorld();
+    const bob = await w.signIn("q2-accept-bob@example.com");
+    for (let round = 0; round < ROUNDS; round++) {
+      const club = await w.auth.api.createOrganization({
+        user: bob.user,
+        slug: `club-${round}`,
+        name: "Club",
+      });
+      if (!club.ok) throw new Error(club.code);
+      const email = `q2-accept-${round}@example.com`;
+      const me = await w.signIn(email);
+      const sent = await w.auth.api.inviteMember({
+        user: bob.user,
+        organizationId: club.value.organization.id,
+        email,
+        role: "member",
+      });
+      if (!sent.ok) throw new Error(sent.code);
+      const token = invitationOf(w, email);
+      const r = await writerDuring(w, "afterOwnMembers", me, () =>
+        w.auth.api.acceptInvitation({ user: me.user, token, ip: null }),
+      );
+      expect(r.deleted).toEqual(DELETED);
+      expect(r.written).toEqual(CONFLICT);
+      expect((await membersOf(club.value.organization.id)).map((m) => m.user_id)).toEqual([
+        bob.user.id,
+      ]);
+    }
+  }, 60_000);
+
+  it("an accept into an organization that goes, after the delete took its invitations: invalid_token", async () => {
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const me = await w.signIn(`solo-late-${round}@example.com`);
+      const solo = await w.auth.api.createOrganization({
+        user: me.user,
+        slug: `late-${round}`,
+        name: "Solo",
+      });
+      if (!solo.ok) throw new Error(solo.code);
+      const carolEmail = `solo-late-carol-${round}@example.com`;
+      const carol = await w.signIn(carolEmail);
+      const sent = await w.auth.api.inviteMember({
+        user: me.user,
+        organizationId: solo.value.organization.id,
+        email: carolEmail,
+        role: "member",
+      });
+      if (!sent.ok) throw new Error(sent.code);
+      const token = invitationOf(w, carolEmail);
+      const r = await writerDuring(w, "afterOrganizationMembers", me, () =>
+        w.auth.api.acceptInvitation({ user: carol.user, token, ip: null }),
+      );
+      expect(r.deleted).toEqual(DELETED);
+      expect(r.written).toMatchObject({ ok: false, code: "invalid_token" });
+      expect(await membersOf(solo.value.organization.id)).toEqual([]);
+      expect(
+        await db.sql`SELECT id FROM ta_organization WHERE id = ${solo.value.organization.id}`,
+      ).toEqual([]);
+    }
+  }, 60_000);
+
+  it("an accept that commits during the delete's hooks makes the delete answer conflict, and the organization stays", async () => {
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const me = await w.signIn(`solo-early-${round}@example.com`);
+      const solo = await w.auth.api.createOrganization({
+        user: me.user,
+        slug: `early-${round}`,
+        name: "Solo",
+      });
+      if (!solo.ok) throw new Error(solo.code);
+      const carolEmail = `solo-early-carol-${round}@example.com`;
+      const carol = await w.signIn(carolEmail);
+      const sent = await w.auth.api.inviteMember({
+        user: me.user,
+        organizationId: solo.value.organization.id,
+        email: carolEmail,
+        role: "member",
+      });
+      if (!sent.ok) throw new Error(sent.code);
+      const token = invitationOf(w, carolEmail);
+      let accepted: unknown = null;
+      w.probes.inDelete = async () => {
+        accepted = await w.auth.api.acceptInvitation({ user: carol.user, token, ip: null });
+      };
+      expect(await w.auth.api.user.delete({ session: me, ip: null, userAgent: null })).toEqual(
+        CONFLICT,
+      );
+      expect(accepted).toMatchObject({ ok: true });
+      expect((await membersOf(solo.value.organization.id)).map((m) => m.user_id).sort()).toEqual(
+        [me.user.id, carol.user.id].sort(),
+      );
+      expect(await rowsOf(me.user.id)).toMatchObject({ user: 1 });
+    }
+  }, 60_000);
+
+  it("a gated reset that starts during the delete waits, then answers conflict and writes no identity", async () => {
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `gated-${round}@example.com`;
+      const me = await w.signIn(email);
+      const password = w.auth.api.password;
+      if (!password) throw new Error("no password config");
+      const first = await password.change({ session: me, newPassword: "a first long password" });
+      if (!first.ok) throw new Error(first.code);
+      const on = await w.auth.handle(
+        new Request(`${BASE}/auth/second-factor/email/enable`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${me.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ password: "a first long password" }),
+        }),
+      );
+      expect(on.status).toBe(200);
+      expect((await password.requestReset({ email, ip: null })).ok).toBe(true);
+      const token = w.linkTo(email);
+      const r = await writerDuring(w, "afterOwnMembers", me, () =>
+        password.reset({ token, password: "a reset long password", ip: null, userAgent: null }),
+      );
+      expect(r.deleted).toEqual(DELETED);
+      expect(r.written).toEqual(CONFLICT);
+      expect(await rowsOf(me.user.id)).toEqual(NONE);
+      expect(await db.sql`SELECT id FROM ta_password WHERE user_id = ${me.user.id}`).toEqual([]);
+    }
+  }, 60_000);
+
+  it("a first password that starts during the delete waits, then answers conflict", async () => {
+    const w = deleteWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const me = await w.signIn(`first-pw-${round}@example.com`);
+      const password = w.auth.api.password;
+      if (!password) throw new Error("no password config");
+      const r = await writerDuring(w, "afterOwnMembers", me, () =>
+        password.change({ session: me, newPassword: "a first long password" }),
+      );
+      expect(r.deleted).toEqual(DELETED);
+      expect(r.written).toEqual(CONFLICT);
+      expect(await db.sql`SELECT id FROM ta_password WHERE user_id = ${me.user.id}`).toEqual([]);
     }
   }, 60_000);
 });

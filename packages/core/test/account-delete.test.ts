@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { requestEmailChange } from "../src/engine/email-change.js";
 import { hookRefusal } from "../src/engine/hooks.js";
-import { inviteMember } from "../src/engine/invitations.js";
+import { acceptInvitation, inviteMember } from "../src/engine/invitations.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import type { NoticeMailInput } from "../src/engine/notices.js";
 import {
@@ -10,10 +10,17 @@ import {
   createOrganization,
   removeMember,
   updateMemberRole,
+  updateOrganization,
 } from "../src/engine/organizations.js";
 import { passkeyRegistrationOptions, verifyPasskeyRegistration } from "../src/engine/passkeys.js";
-import { passwordSignIn } from "../src/engine/password.js";
+import {
+  changePassword,
+  passwordSignIn,
+  requestPasswordReset,
+  resetPassword,
+} from "../src/engine/password.js";
 import { reauthenticate } from "../src/engine/reauth.js";
+import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { destroySession, type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
 import { createApiToken } from "../src/engine/tokens.js";
 import { enableTotp, setupTotp, verifyTwoFactor } from "../src/engine/totp.js";
@@ -969,7 +976,344 @@ describe("the hold of the user row at a sign-in (plan 12a Task 11)", () => {
       status: 409,
     });
     expect(n).toBe(5);
-    expect(log.mock.calls).toEqual([["authtempo: session hold gave up", me.user.id]]);
+    expect(log.mock.calls).toEqual([["authtempo: user hold gave up", me.user.id]]);
     expect(await childRows(w, "session", me.user.id)).toHaveLength(before);
+  });
+});
+
+/** The token of the newest invitation mail. */
+function invitationToken(w: World): string {
+  const m = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(
+    [...w.auth.mail].reverse().find((x) => /invitation=/.test(x.text))?.text ?? "",
+  );
+  if (!m?.[1]) throw new Error("no invitation mail");
+  return m[1];
+}
+
+/**
+ * A writer's config whose next transaction runs the delete of `proof` on a
+ * D1-like view, inside the writer's open transaction, just before its first
+ * `op` of `model`. D1 has no lock, so only the writer's read after its insert
+ * can see that the user is gone. Both run on D1-like views: the memory undo
+ * puts back a whole row, which D1 never does.
+ */
+function deleteBefore(w: World, proof: ResolvedSession, op: "create" | "update", model: string) {
+  const d1 = d1Like(w.auth.config);
+  const raw = d1.storage;
+  const state: { deleted: Awaited<ReturnType<typeof deleteAccount>> | null } = { deleted: null };
+  const run = async (m: string, o: "create" | "update") => {
+    if (o === op && m === model && state.deleted === null)
+      state.deleted = await deleteAccount(d1, input(proof));
+  };
+  const storage: StorageAdapter = {
+    ...raw,
+    transaction: (fn) =>
+      raw.transaction((tx) =>
+        fn({
+          ...tx,
+          create: async (m, data) => {
+            await run(m, "create");
+            return tx.create(m, data);
+          },
+          update: async (m, where, data) => {
+            await run(m, "update");
+            return tx.update(m, where, data);
+          },
+        }),
+      ),
+  };
+  return { config: { ...d1, storage }, state };
+}
+
+const CONFLICT = { ok: false, code: "conflict", status: 409 };
+const DELETED = { ok: true, value: { ok: true } };
+
+describe("the writers of a row that names a user, beside the delete on D1 (review m2)", () => {
+  it("an organization create that inserts after the delete is undone by its read of the user", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const d = deleteBefore(w, await live(w, me.token), "create", "organization");
+    expect(
+      await createOrganization(d.config, { user: me.user, slug: "ghost", name: "Ghost" }),
+    ).toEqual(CONFLICT);
+    expect(d.state.deleted).toEqual(DELETED);
+    expect(await w.auth.storage.findMany("organization", [])).toEqual([]);
+    expect(await childRows(w, "member", me.user.id)).toEqual([]);
+  });
+
+  it("a member add of the deleted user is undone by its read of the user", async () => {
+    const w = world();
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    const team = await organization(w, bob.user, "team");
+    const me = await verifiedSession(w.auth);
+    const d = deleteBefore(w, await live(w, me.token), "create", "member");
+    expect(
+      await addMember(d.config, {
+        user: bob.user,
+        organizationId: team.id,
+        userId: me.user.id,
+        role: "member",
+      }),
+    ).toEqual(CONFLICT);
+    expect(d.state.deleted).toEqual(DELETED);
+    expect((await membersOf(w, team.id)).map((m) => m.userId)).toEqual([bob.user.id]);
+  });
+
+  it("an accept by the deleted user is undone by its read of the user", async () => {
+    const w = world();
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    const club = await organization(w, bob.user, "club");
+    const sent = await inviteMember(w.auth.config, {
+      user: bob.user,
+      organizationId: club.id,
+      email: EMAIL,
+      role: "member",
+    });
+    if (!sent.ok) throw new Error(sent.code);
+    const me = await verifiedSession(w.auth);
+    const d = deleteBefore(w, await live(w, me.token), "create", "member");
+    expect(
+      await acceptInvitation(d.config, { user: me.user, token: invitationToken(w), ip: null }),
+    ).toEqual(CONFLICT);
+    expect(d.state.deleted).toEqual(DELETED);
+    expect((await membersOf(w, club.id)).map((m) => m.userId)).toEqual([bob.user.id]);
+  });
+
+  it("an accept into an organization that goes is undone by its read of the organization", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const solo = await organization(w, me.user, "ada-solo");
+    const sent = await inviteMember(w.auth.config, {
+      user: me.user,
+      organizationId: solo.id,
+      email: "carol@example.com",
+      role: "member",
+    });
+    if (!sent.ok) throw new Error(sent.code);
+    const carol = await verifiedSession(w.auth, "carol@example.com");
+    const token = invitationToken(w);
+    const d = deleteBefore(w, await live(w, me.token), "create", "member");
+    expect(await acceptInvitation(d.config, { user: carol.user, token, ip: null })).toEqual(
+      CONFLICT,
+    );
+    expect(d.state.deleted).toEqual(DELETED);
+    expect(await organizationOf(w, solo.id)).toBeNull();
+    expect(await membersOf(w, solo.id)).toEqual([]);
+  });
+
+  it("a gated reset of the deleted user writes no password and no email identity", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const on = await enableEmailMethod(w.auth.config, { session: me, password: PASSWORD });
+    if (!on.ok) throw new Error(on.code);
+    expect((await requestPasswordReset(w.auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+    const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+    const d = deleteBefore(w, await live(w, me.token), "update", "password");
+    expect(
+      await resetPassword(d.config, {
+        token,
+        password: "a reset long password",
+        ip: null,
+        userAgent: null,
+      }),
+    ).toEqual(CONFLICT);
+    expect(d.state.deleted).toEqual(DELETED);
+    expect(await childRows(w, "password", me.user.id)).toEqual([]);
+    expect(await childRows(w, "identity", me.user.id)).toEqual([]);
+  });
+
+  it("a first password of the deleted user is undone by its read of the user", async () => {
+    const w = world();
+    const me = await googleSignIn(w.auth, w.jwtTokens);
+    expect(await childRows(w, "password", me.user.id)).toEqual([]);
+    const d = deleteBefore(w, await live(w, me.token), "create", "password");
+    expect(
+      await changePassword(d.config, {
+        session: await live(w, me.token),
+        newPassword: "a first long password",
+      }),
+    ).toEqual(CONFLICT);
+    expect(d.state.deleted).toEqual(DELETED);
+    expect(await childRows(w, "password", me.user.id)).toEqual([]);
+  });
+});
+
+describe("the delete's own order and rows (review L1 to L3)", () => {
+  it("on D1 the organization row goes before its members, so an accept that inserts between is undone", async () => {
+    // D1 has no lock. Carol's accept spends its invitation, then the delete
+    // runs up to the member delete of the solo organization and pauses.
+    // Then the accept inserts its member row and reads the organization,
+    // which is gone already. Then the delete goes on.
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const solo = await organization(w, me.user, "ada-solo");
+    const sent = await inviteMember(w.auth.config, {
+      user: me.user,
+      organizationId: solo.id,
+      email: "carol@example.com",
+      role: "member",
+    });
+    if (!sent.ok) throw new Error(sent.code);
+    const carol = await verifiedSession(w.auth, "carol@example.com");
+    const token = invitationToken(w);
+    const proof = await live(w, me.token);
+    const d1 = d1Like(w.auth.config);
+    const raw = d1.storage;
+    let paused: () => void = () => {};
+    const atMembers = new Promise<void>((go) => {
+      paused = go;
+    });
+    let resume: () => void = () => {};
+    const goOn = new Promise<void>((go) => {
+      resume = go;
+    });
+    const deleteView: StorageAdapter = {
+      ...raw,
+      transaction: (fn) =>
+        raw.transaction((tx) =>
+          fn({
+            ...tx,
+            delete: async (model, where) => {
+              const n = await tx.delete(model, where);
+              if (model === "member" && where[0]?.field === "organizationId") {
+                paused();
+                await goOn;
+              }
+              return n;
+            },
+          }),
+        ),
+    };
+    let deleting: Promise<Awaited<ReturnType<typeof deleteAccount>>> | null = null;
+    const acceptView: StorageAdapter = {
+      ...raw,
+      transaction: (fn) =>
+        raw.transaction((tx) =>
+          fn({
+            ...tx,
+            create: async (model, data) => {
+              if (model === "member" && deleting === null) {
+                deleting = deleteAccount({ ...d1, storage: deleteView }, input(proof));
+                await atMembers;
+              }
+              return tx.create(model, data);
+            },
+          }),
+        ),
+    };
+    const accepted = await acceptInvitation(
+      { ...d1, storage: acceptView },
+      { user: carol.user, token, ip: null },
+    );
+    resume();
+    expect(await deleting).toEqual(DELETED);
+    expect(accepted).toEqual(CONFLICT);
+    expect(await organizationOf(w, solo.id)).toBeNull();
+    expect(await membersOf(w, solo.id)).toEqual([]);
+  });
+
+  it("answers conflict when an owner write moves the organization between the rule's read and the owner lock", async () => {
+    // D1 has no lock: Carol renames the team inside the delete's open
+    // transaction. The owner lock then matches no row.
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const team = await organization(w, me.user, "team");
+    const carol = await verifiedSession(w.auth, "carol@example.com");
+    await member(w, me.user, team.id, carol.user.id, "owner");
+    const d1 = d1Like(w.auth.config);
+    const raw = d1.storage;
+    let renamed: Awaited<ReturnType<typeof updateOrganization>> | null = null;
+    const view: StorageAdapter = {
+      ...raw,
+      transaction: (fn) =>
+        raw.transaction((tx) =>
+          fn({
+            ...tx,
+            update: async (model, where, data) => {
+              if (model === "organization" && renamed === null) {
+                w.auth.clock.advance(1);
+                renamed = await updateOrganization(d1, {
+                  user: carol.user,
+                  organizationId: team.id,
+                  name: "Renamed",
+                });
+              }
+              return tx.update(model, where, data);
+            },
+          }),
+        ),
+    };
+    expect(await deleteAccount({ ...d1, storage: view }, input(await live(w, me.token)))).toEqual(
+      CONFLICT,
+    );
+    expect(renamed).toMatchObject({ ok: true });
+    expect(await userOf(w, me.user.id)).not.toBeNull();
+    expect((await membersOf(w, team.id)).length).toBe(2);
+  });
+
+  it("runs every before hook ahead of the first delete", async () => {
+    const order: string[] = [];
+    const w = world({
+      hooks: {
+        user: { beforeDelete: () => void order.push("user.beforeDelete") },
+        organization: { beforeDelete: () => void order.push("organization.beforeDelete") },
+      },
+    });
+    const me = await verifiedSession(w.auth);
+    await organization(w, me.user, "ada-solo");
+    const store = w.auth.config.storage as StorageAdapter;
+    const original = store.transaction.bind(store);
+    (store as { transaction: StorageAdapter["transaction"] }).transaction = ((fn) =>
+      original((tx) =>
+        fn({
+          ...tx,
+          delete: async (model, where) => {
+            order.push(`delete:${model}`);
+            return tx.delete(model, where);
+          },
+        }),
+      )) as StorageAdapter["transaction"];
+    expect(await deleteAccount(w.auth.config, input(await live(w, me.token)))).toEqual(DELETED);
+    const first = order.findIndex((x) => x.startsWith("delete:"));
+    expect(first).toBeGreaterThan(0);
+    expect(order.slice(0, first)).toEqual(["organization.beforeDelete", "user.beforeDelete"]);
+  });
+
+  it("deletes the member rows of an earlier config with organizations off", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const team = await organization(w, me.user, "team");
+    // The deployment turns organizations off after the rows were made.
+    const off = { ...w.auth.config, organizations: null };
+    expect(await deleteAccount(off, input(await live(w, me.token)))).toEqual(DELETED);
+    expect(await membersOf(w, team.id)).toEqual([]);
+    expect(await organizationOf(w, team.id)).not.toBeNull();
+  });
+
+  it("deletes the invitations of an organization that goes, also those of a former member", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const solo = await organization(w, me.user, "ada-solo");
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    await member(w, me.user, solo.id, bob.user.id, "admin");
+    const sent = await inviteMember(w.auth.config, {
+      user: bob.user,
+      organizationId: solo.id,
+      email: "carol@example.com",
+      role: "member",
+    });
+    if (!sent.ok) throw new Error(sent.code);
+    const gone = await removeMember(w.auth.config, {
+      user: me.user,
+      organizationId: solo.id,
+      userId: bob.user.id,
+    });
+    expect(gone.ok).toBe(true);
+    expect(await deleteAccount(w.auth.config, input(await live(w, me.token)))).toEqual(DELETED);
+    expect(
+      await w.auth.storage.findMany("invitation", [
+        { field: "organizationId", op: "eq", value: solo.id },
+      ]),
+    ).toEqual([]);
   });
 });

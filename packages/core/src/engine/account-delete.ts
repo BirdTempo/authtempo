@@ -124,7 +124,7 @@ export async function deleteAccount(
         if (held === 0) stopWith("conflict");
       }
       await tx.delete("user", byId);
-      for (const organization of going) await deleteOrganizationRows(tx, organization.id);
+      for (const organization of going) await deleteOrganizationRows(tx, organization.id, user.id);
       await tx.delete("member", [{ field: "userId", op: "eq", value: user.id }]);
       // D1 has no lock: the recount catches an owner removal that passed the lock.
       for (const organization of owned)

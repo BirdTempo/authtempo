@@ -19,7 +19,7 @@ import {
   type SessionVia,
   stopWith,
 } from "./hooks.js";
-import { ROUNDS } from "./rounds.js";
+import { holdUser, userStays } from "./user-hold.js";
 
 // The credential facts moved to primitives/credentials.ts (plan 11d). They stay exported here, so no importer changes.
 export { readBearer, readSessionToken, SESSION_TOKEN_PREFIX, sessionCookieToken };
@@ -219,37 +219,6 @@ async function patchedInput(
   return input;
 }
 
-/**
- * Takes the lock of the user row for a sign-in (plan 12a Task 11). Then an
- * account delete cannot pass a session that this transaction writes. The
- * write sets `updatedAt` to the value it read, so it changes nothing, and a
- * parallel compare-and-set still matches. On Postgres it holds the row lock
- * until the commit, so a delete that starts later waits and then sees the
- * session. `prepareSession` runs before the other writes of a flow, so the
- * lock order is the same for all. One kind of write comes first: the reset
- * spends its link and deletes older proofs. So the account delete removes
- * the proofs after its commit, and no deadlock forms. No row: a user that
- * the flow writes later, or a user that a delete took. `writeSession` reads
- * the row after the insert and tells the two apart. After `ROUNDS` lost
- * rounds the answer is `conflict`.
- */
-async function holdUser(storage: StorageAdapter, userId: string): Promise<void> {
-  const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
-  let row = await storage.findOne("user", byId);
-  for (let round = 0; round < ROUNDS; round++) {
-    if (!row) return;
-    const where: Where<"user">[] = [
-      ...byId,
-      { field: "updatedAt", op: "eq", value: row.updatedAt },
-    ];
-    if ((await storage.update("user", where, { updatedAt: row.updatedAt })) === 1) return;
-    // A parallel write moved the row first. Read it again.
-    row = await storage.findOne("user", byId);
-  }
-  console.error("authtempo: session hold gave up", userId);
-  stopWith("conflict");
-}
-
 /** The session fields after `session.beforeCreate` and its patch check, not yet written (plan 9d). */
 export interface PreparedSession {
   readonly input: SessionInput;
@@ -303,8 +272,7 @@ export async function writeSession(
   storage: StorageAdapter = config.storage,
 ): Promise<{ token: string; session: SessionRow }> {
   const written = await createSession(config, prepared.input, storage);
-  const byId: Where<"user">[] = [{ field: "id", op: "eq", value: prepared.input.userId }];
-  if (!(await storage.findOne("user", byId))) stopWith("conflict");
+  await userStays(storage, prepared.input.userId);
   return written;
 }
 

@@ -4,20 +4,20 @@ import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { undoCreateWhere } from "../src/storage/sql.js";
 
 /**
- * The config with a storage whose transactions are not isolated, as on D1:
- * each statement of the transaction function runs at once on the shared
- * rows, and a throw runs this transaction's own undo log in reverse, as the
- * D1 adapter does. The undo of a create deletes `undoCreateWhere(...)`, the
- * D1 adapter's rule: a user created unverified only while it is still
+ * The config with a storage whose transactions are not isolated, as on D1.
+ * Each statement of the transaction function runs at once on the shared
+ * rows. A throw runs this transaction's own undo log in reverse, as the D1
+ * adapter does. The undo of a create deletes `undoCreateWhere(...)`, the D1
+ * adapter's rule: a user created unverified goes only while it is still
  * unverified. The undo of an update writes back only the fields the update
- * set, the D1 adapter's rule too. A nested call shares the log and a throw reverses only its own
- * entries. A failed entry does not stop the rest. When any entry fails, the
- * throw is one rollback_failed error with `{ original, failures }` as its
- * cause and `<model>:<op>` for each failed entry, as the D1 adapter's
- * `rethrowAfterUndo` throws, so a core test sees the error that real D1
- * answers (plan 9 Task 4 review M-1). A flow on this view does
- * not wait for the memory adapter's transaction lock, so it can run inside
- * another flow's open transaction.
+ * set, the D1 adapter's rule too. A nested call shares the log, and a throw
+ * reverses only its own entries. A failed entry does not stop the rest.
+ * When any entry fails, the throw is one rollback_failed error. Its cause is
+ * `{ original, failures }`, and it names `<model>:<op>` for each failed
+ * entry, as the D1 adapter's `rethrowAfterUndo` throws. So a core test sees
+ * the error that real D1 answers (plan 9 Task 4 review M-1). A flow on this
+ * view does not wait for the memory adapter's transaction lock, so it can
+ * run inside another flow's open transaction.
  */
 export function d1Like(config: ResolvedConfig): ResolvedConfig {
   const raw = config.storage;

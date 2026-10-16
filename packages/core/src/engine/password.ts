@@ -9,7 +9,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { type CreateSteps, createSteps } from "./create-steps.js";
-import { hookGuard } from "./hooks.js";
+import { HookStop, hookGuard } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
@@ -27,6 +27,7 @@ import {
   writeSession,
 } from "./sessions.js";
 import { deleteTwoFactorChallenges, type TwoFactorPending, twoFactorGate } from "./totp.js";
+import { holdUser, userStays } from "./user-hold.js";
 import {
   claimEmail,
   ensureEmailIdentity,
@@ -1263,6 +1264,12 @@ function applyReset(
           { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
           tx,
         );
+    // A gated reset opens no session, so `prepareSession` holds no row. The
+    // hold of the user row stays (plan 12a Task 11). Else a delete that
+    // commits first leaves the `email` identity of a gone user. That row
+    // locks the address out of every mailbox sign-up. The hold also takes
+    // the user row before the password row, the lock order of every reset.
+    if (gatedRow) await holdUser(tx, user.id);
     if (minted) await tx.create("user", minted);
     // The new password row before any session delete. A password sign-in
     // in flight re-checks its row by id and by the hash it verified as its
@@ -1312,6 +1319,8 @@ function applyReset(
         },
         now,
       );
+      // The read after the last insert, for D1 (user-hold.ts).
+      await userStays(tx, user.id);
       return ok({ ...pending, next, user });
     }
     if (!prepared) throw new Error("authtempo: the session hook step did not run");
@@ -1415,6 +1424,11 @@ export async function changePassword(
           { field: "id", op: "eq", value: id },
           { field: "consumedAt", op: "eq", value: null },
         ]);
+      // The user row after the reset rows and before the password row, the
+      // order of a reset (plan 12a Task 11). A first password of a deleted
+      // user must not stay. Not for an unverified user: a claim may verify
+      // that row now (sessions-claim.test.ts, re-review finding B).
+      if (user.emailVerified) await holdUser(tx, user.id);
       if (row) {
         // Conditional on the hash this call verified, so two changes do not
         // both win. Zero rows throws, so the deletes above are undone.
@@ -1435,6 +1449,8 @@ export async function changePassword(
           createdAt: now,
           updatedAt: now,
         });
+        // The read after the insert, for D1 (user-hold.ts).
+        await userStays(tx, user.id);
       }
       // The challenges, the other sessions, the handoff codes, and the OAuth
       // refresh tokens and codes, in one function with the change of
@@ -1453,6 +1469,8 @@ export async function changePassword(
     });
   } catch (err) {
     if (err instanceof ChangeRaceError) return fail("conflict");
+    // The stop of the hold (user-hold.ts).
+    if (err instanceof HookStop) return err.result;
     // A concurrent first password (a reset) won the unique key. Caught
     // here, outside: inside, Postgres has already aborted the transaction.
     if (err instanceof StorageError && err.code === "unique_violation" && err.model === "password")
