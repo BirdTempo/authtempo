@@ -51,7 +51,7 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(72);
+    expect(CLIENT_CALLS).toHaveLength(73);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -69,6 +69,7 @@ describe("the call table of the client (plan 11d)", () => {
     });
     const org = { organizationId: "o1" };
     await c.session();
+    await c.session.refresh();
     await c.signOut();
     await c.magicLink.request({ email: "a@b.c" });
     await c.magicLink.verify({ token: "t" });

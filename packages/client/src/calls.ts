@@ -18,6 +18,7 @@ export type ClientCall = {
  */
 export const CLIENT_CALLS = [
   { operation: "session", method: "GET", path: "/session" },
+  { operation: "session.refresh", method: "POST", path: "/session/refresh" },
   { operation: "signOut", method: "POST", path: "/sign-out" },
   { operation: "magicLink.request", method: "POST", path: "/magic-link/request" },
   { operation: "magicLink.verify", method: "POST", path: "/magic-link/verify" },

@@ -319,6 +319,11 @@ export interface SessionApi {
   revoke(input: { session: ResolvedSession; id: string }): Promise<Result<{ current: boolean }>>;
   /** Ends every other session and the sessions in waiting. Fresh rule. */
   revokeOthers(input: { session: ResolvedSession }): Promise<Result<{ ended: number }>>;
+  /**
+   * Resolves `token` in the write mode, as `POST /session/refresh` does: a
+   * due sliding refresh moves the expiry (plan 12a). Null for no live session.
+   */
+  refresh(token: string): Promise<ResolvedSession | null>;
 }
 
 /** The user operations of a settings page (plan 12a). Present in every deployment. */
@@ -499,6 +504,7 @@ export interface Auth {
    * With `{ refresh: false }` it is a read with no write: no sliding refresh
    * and no delete of an ended row. A server render that cannot set a cookie
    * reads this way, so the browser's `GET /session` still gets the renewed cookie.
+   * With `session.deferRefresh` on, a GET request reads this way too (plan 12a).
    */
   session(request: Request, options?: SessionReadOptions): Promise<ResolvedSession | null>;
   /**
@@ -587,6 +593,7 @@ export function createAuth(input: AuthConfig): Auth {
         list: (i) => listSessions(config, i),
         revoke: (i) => revokeSession(config, i),
         revokeOthers: (i) => revokeOtherSessions(config, i),
+        refresh: (token) => resolveSession(config, token, "write"),
       },
       user: {
         update: (i) => updateProfile(config, i),

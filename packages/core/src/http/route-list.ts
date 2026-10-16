@@ -43,6 +43,7 @@ export interface RouteEntry {
 // No annotation on the constant: the type stays the literal tuple, so an SDK's path is checked at compile time (plan 11d).
 export const ROUTES = Object.freeze([
   { method: "GET", path: "/session", feature: "session" },
+  { method: "POST", path: "/session/refresh", feature: "session" },
   { method: "POST", path: "/sign-out", feature: "session" },
   { method: "POST", path: "/reauth", feature: "account" },
   { method: "POST", path: "/reauth/passkey/options", feature: "passkey" },

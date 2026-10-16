@@ -179,7 +179,7 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
         const user = await auth.seedUser("edge@example.com");
         // The target opens under the default config: its expiry is 30 days, past the cap of 1 day.
         const t = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
-        const target = await resolveSession(auth.config, t.token, { refresh: false });
+        const target = await resolveSession(auth.config, t.token, "read-only");
         if (!target) throw new Error("no target");
         auth.clock.advance(DAY / 2);
         const m = await createSession(config, { userId: user.id, ip: null, userAgent: null });
@@ -190,7 +190,7 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
             ? target.session.createdAt.getTime() + DAY
             : target.session.expiresAt.getTime();
         auth.clock.advance(end + offset - auth.clock.now().getTime());
-        const live = (await resolveSession(config, t.token, { refresh: false })) !== null;
+        const live = (await resolveSession(config, t.token, "read-only")) !== null;
         expect(live).toBe(offset < 0);
         const listed = await listSessions(config, { session: me });
         if (!listed.ok) throw new Error(listed.code);

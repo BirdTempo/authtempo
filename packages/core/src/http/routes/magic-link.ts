@@ -2,7 +2,12 @@ import { z } from "zod";
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
-import { publicSession, resolveSession, sessionMaxAgeSeconds } from "../../engine/sessions.js";
+import {
+  publicSession,
+  readModeOf,
+  resolveSession,
+  sessionMaxAgeSeconds,
+} from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { sessionCookie } from "../cookies.js";
@@ -95,7 +100,11 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         if (jsonCaller) {
           // One extra read, on the JSON path only. verifyMagicLink does not return the row.
           // The session row was created a moment ago; a null here is a storage failure, and the token is spent. The caller asks for a new link.
-          const resolved = await resolveSession(config, result.value.token);
+          const resolved = await resolveSession(
+            config,
+            result.value.token,
+            readModeOf(config, ctx.request),
+          );
           if (!resolved) return respond(fail("invalid_token"));
           return json(publicSession(resolved), 200, { "set-cookie": cookie });
         }

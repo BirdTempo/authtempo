@@ -31,7 +31,8 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/social/google/callback` | `?code&state` | 302 to `next` with the session cookie; for a user with the second factor on, 302 to the challenge page with no cookie (plan 12c); 302 to `/?auth_error=<code>` on failure |
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
 | GET | `/social/<name>/start`, `/social/<name>/callback` | `?next=`; `?code&state` | the same answers as the Google routes, for `github`, `linkedin`, and each `social.oidc` and `social.oauth2` entry |
-| GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401 |
+| GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401. With `session.deferRefresh` on, also `needsRefresh`, and no renewed cookie |
+| POST | `/session/refresh` | cookie or bearer | `{ user, session }`, and the renewed cookie when the refresh was due; 401 (plan 12a) |
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
 | POST | `/passkey/register/options` | session (fresh) | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified`, `session_not_fresh` |
 | POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed` |
@@ -135,6 +136,25 @@ only; core sets `cache-control`, `referrer-policy`, `x-robots-tag`, and a
 content security policy that permits inline style, no script, and a form
 post to this origin only. A page that needs script or a remote stylesheet
 needs its own route in the app, because the policy header is fixed.
+
+## Sessions
+
+A use of a session after `session.slidingRefreshDays` moves its expiry
+forward by `session.ttlDays`, under the cap of `session.absoluteDays`. The
+refresh never moves `freshAt`.
+
+`session.deferRefresh: true` (plan 12a, Better Auth's
+`deferSessionRefresh`) moves that write from a GET request to a POST. Use
+it when a GET reads from a replica or must not write.
+
+- A GET request writes no session row: no sliding refresh, and no delete of an ended row, which the sweep deletes later.
+- `GET /session` answers `needsRefresh: true` when the refresh is due, and it sends no renewed cookie.
+- `POST /session/refresh` slides the expiry, renews the cookie, and answers the session or 401, with the key on or off.
+
+The key is off by default. With it on, a client that never posts the
+refresh lets an active session end at its old expiry. The client calls
+`client.session.refresh()`. In process, `auth.api.session.refresh(token)`
+does the same write.
 
 ## Entries for SDKs
 
@@ -760,6 +780,7 @@ return res;
 - `auth.session(request, { refresh: false })` is a read with no write: no
   sliding refresh and no delete of an ended row. A server render reads this
   way, so the browser's own `GET /auth/session` still gets the renewed cookie.
+  With `session.deferRefresh` on, every GET request reads this way (see Sessions).
 - `auth.session(request)` resolves sessions only. Every route that calls
   it, core's and the app's, answers 401 to a `tk_` bearer. Core's own
   routes call it, except `GET /tokens/current`. So a token cannot create a

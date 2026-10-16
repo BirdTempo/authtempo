@@ -33,7 +33,16 @@ These routes exist in every deployment.
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token |
 | Input | None |
-| Answer | `{ user, session }`; a sliding refresh renews the cookie |
+| Answer | `{ user, session }`; a sliding refresh renews the cookie. With `session.deferRefresh` on, the answer adds `needsRefresh`, and the route writes nothing and renews no cookie |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-session-refresh"><code>POST /session/refresh</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token |
+| Input | None |
+| Answer | `{ user, session }`; when the refresh is due, the expiry moves and the cookie is renewed. It serves with `session.deferRefresh` on or off |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-sign-out"><code>POST /sign-out</code></h3>

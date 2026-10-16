@@ -156,8 +156,19 @@ export type PasswordSignIn =
     };
 
 export interface Client {
-  /** The caller's session, or null when the API answers 401. A null is a normal state, not a failure. */
-  session(): Promise<ClientResult<PublicSession | null>>;
+  session: {
+    /**
+     * The caller's session, or null when the API answers 401. A null is a normal state, not a failure.
+     * With core's `session.deferRefresh` on, the answer holds `needsRefresh` (plan 12a).
+     */
+    (): Promise<ClientResult<PublicSession | null>>;
+    /**
+     * `POST /session/refresh` (plan 12a): slides the expiry when the refresh is
+     * due, and renews the cookie. Call it when `session()` answers
+     * `needsRefresh: true`. It answers as `session()` does, and the store reads again.
+     */
+    refresh(): Promise<ClientResult<PublicSession | null>>;
+  };
   signOut(): Promise<ClientResult<{ ok: true }>>;
   /**
    * The error code of a URL that a browser flow failure landed on
@@ -576,7 +587,9 @@ function isPublicSession(v: unknown): v is PublicSession {
     isRecord(v.user) &&
     typeof v.user.id === "string" &&
     isRecord(v.session) &&
-    typeof v.session.id === "string"
+    typeof v.session.id === "string" &&
+    // Present with core's session.deferRefresh on only (plan 12a).
+    (v.needsRefresh === undefined || typeof v.needsRefresh === "boolean")
   );
 }
 
@@ -667,14 +680,18 @@ export function createClient(options: ClientOptions): Client {
     const c = filled(callOf(operation), params);
     return call<T>(c.method, c.path, body, query, headers, token);
   };
-  async function session(): Promise<ClientResult<PublicSession | null>> {
+  /** `session()` and `session.refresh()`: one read rule for the GET and the POST (plan 12a). */
+  async function readSession(
+    operation: "session" | "session.refresh",
+  ): Promise<ClientResult<PublicSession | null>> {
     // The token this read sends. `options.token` is a function and is always set, so the end
     // handler keys on its answer: after the app clears the token, a 401 runs no handler, and a
     // sign-out or a refetch inside the handler ends (plan 11d Task 5 review, J2).
     // One read of the token for the header and for the handler: two reads could answer two
     // different tokens (plan 11d Task 12 review, J1).
     const sent = options.token ? await options.token() : null;
-    const r = await send<PublicSession>("session", undefined, undefined, undefined, sent);
+    const body = operation === "session" ? undefined : {};
+    const r = await send<PublicSession>(operation, body, undefined, undefined, sent);
     if (!r.ok && r.code === "unauthorized") {
       // A bearer client's token is dead: the app clears it (the client README rule, plan 11d).
       // A store that fails to clear must not turn an answer into a throw.
@@ -691,7 +708,7 @@ export function createClient(options: ClientOptions): Client {
   }
   const inner = createSessionStore<PublicSession, ClientFailure>({
     read: async () => {
-      const r = await session();
+      const r = await readSession("session");
       return r.ok ? { data: r.value, error: null } : { data: null, error: r };
     },
     onThrow: () => ({ ok: false, code: "unexpected", status: 0 }),
@@ -740,6 +757,10 @@ export function createClient(options: ClientOptions): Client {
     }
     return r;
   };
+  // The refresh moves the expiry, so the store reads again and the other tabs hear it.
+  const session: Client["session"] = Object.assign(() => readSession("session"), {
+    refresh: () => changes(readSession("session.refresh")),
+  });
   const webauthn = options.webauthn ?? browserWebAuthn();
   /** Runs one ceremony; a dismissed prompt is `cancelled`, any other throw is `unexpected`. */
   async function ceremony<T>(run: () => Promise<T>): Promise<ClientResult<T>> {

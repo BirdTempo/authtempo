@@ -73,7 +73,8 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 
 | Operation | Route | Value |
 | --- | --- | --- |
-| `client.session()` | `GET /session` | `PublicSession` or `null`. A 401 gives `null`, not a failure. |
+| `client.session()` | `GET /session` | `PublicSession` or `null`. A 401 gives `null`, not a failure. With core's `session.deferRefresh` on, the session holds `needsRefresh`. |
+| `client.session.refresh()` | `POST /session/refresh` | As `session()`. It slides the expiry and renews the cookie when the refresh is due. Call it when `needsRefresh` is true. The store reads again. |
 | `client.signOut()` | `POST /sign-out` | `{ ok: true }` |
 | `client.readRedirectError(url)` | none | The code of `?auth_error=<code>`: an `ErrorCode` or an `OAuthErrorCode`, because core's OAuth sign-in route sends a code of `OAUTH_ERRORS`. `unexpected` for a code that neither table has, or `null` |
 | `client.social.startURL({ provider, next? })` | `GET /social/:provider/start` (built, not fetched) | `string`; `invalid_body` with status 0 for a name that core refuses |

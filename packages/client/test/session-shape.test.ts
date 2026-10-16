@@ -23,6 +23,23 @@ describe("the shape of a session answer (plan 11d)", () => {
       );
   });
 
+  it("answers unexpected with status 200 for a refresh of the wrong shape (plan 12a)", async () => {
+    const badFlag = '{"user":{"id":"u1"},"session":{"id":"s1"},"needsRefresh":"yes"}';
+    for (const body of [...WRONG, "1", "true", badFlag]) {
+      const c = createClient({ baseURL: BASE, fetch: answering(body) });
+      expect(await c.session.refresh(), body).toEqual({
+        ok: false,
+        code: "unexpected",
+        status: 200,
+      });
+      expect(await c.session(), body).toEqual({ ok: false, code: "unexpected", status: 200 });
+    }
+    const good = { user: { id: "u1" }, session: { id: "s1" }, needsRefresh: true };
+    expect(
+      await createClient({ baseURL: BASE, fetch: answering(JSON.stringify(good)) }).session(),
+    ).toEqual({ ok: true, value: good });
+  });
+
   it("answers the session for a body of the right shape, and null for a 200 null", async () => {
     const good = { user: { id: "u1", email: "a@b.c" }, session: { id: "s1" } };
     expect(

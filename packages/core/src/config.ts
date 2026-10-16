@@ -203,6 +203,16 @@ export interface AuthConfig {
      * `freshAge`. A shorter window asks a person to prove it again sooner.
      */
     freshMinutes?: number;
+    /**
+     * Defer the sliding refresh of a GET to `POST /session/refresh` (plan
+     * 12a, Better Auth's `deferSessionRefresh`). With it on, a GET request
+     * writes no session row: it does not slide the expiry and it does not
+     * delete an ended row. `GET /session` answers `needsRefresh`. Use it
+     * when a GET reads from a replica or must not write. Default false. A
+     * client that never posts the refresh would let an active session end
+     * at its old expiry. The default keeps today's refresh for every client.
+     */
+    deferRefresh?: boolean;
   };
   magicLink?: {
     ttlMinutes?: number;
@@ -616,6 +626,7 @@ export interface ResolvedConfig {
     slidingRefreshDays: number;
     absoluteDays: number | null;
     freshMinutes: number;
+    deferRefresh: boolean;
   };
   magicLink: {
     ttlMinutes: number;
@@ -1083,18 +1094,20 @@ const SESSION_KEYS: Readonly<Record<keyof NonNullable<AuthConfig["session"]>, tr
   slidingRefreshDays: true,
   absoluteDays: true,
   freshMinutes: true,
+  deferRefresh: true,
 };
 
 /**
  * `session`. ttlDays and slidingRefreshDays keep the defaults of version 1;
- * absoluteDays is off by default (plan 12b); freshMinutes is 1440 by default (plan 12a).
+ * absoluteDays is off by default (plan 12b); freshMinutes is 1440 by default (plan 12a);
+ * deferRefresh is off by default (plan 12a, see `AuthConfig.session.deferRefresh`).
  */
 function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["session"] {
   const o = input ?? {};
   for (const [key, value] of Object.entries(o))
     if (value !== undefined && !Object.hasOwn(SESSION_KEYS, key))
       throw new ConfigError(
-        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, absoluteDays, and freshMinutes`,
+        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, absoluteDays, freshMinutes, and deferRefresh`,
       );
   const { absoluteDays } = o;
   if (
@@ -1105,11 +1118,14 @@ function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["ses
       absoluteDays > 365)
   )
     throw new ConfigError("session.absoluteDays must be an integer from 1 to 365");
+  if (o.deferRefresh !== undefined && typeof o.deferRefresh !== "boolean")
+    throw new ConfigError("session.deferRefresh must be a boolean");
   return {
     ttlDays: o.ttlDays ?? 30,
     slidingRefreshDays: o.slidingRefreshDays ?? 7,
     absoluteDays: absoluteDays ?? null,
     freshMinutes: integerIn("session.freshMinutes", o.freshMinutes ?? 1440, 1, 1440),
+    deferRefresh: o.deferRefresh ?? false,
   };
 }
 

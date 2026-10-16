@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client.js";
 import { BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.js";
+
+const DAY = 86_400_000;
 
 /** A signed-in cookie session through the magic link, so the session tests start signed in. */
 async function signedIn(server: ReturnType<typeof makeServer>) {
@@ -42,6 +44,57 @@ describe("session and sign-out", () => {
     });
     const s = await native.session();
     expect(s.ok && s.value?.user.email).toBe("ada@example.com");
+  });
+
+  it("reads needsRefresh with session.deferRefresh on, and slides the expiry by session.refresh", async () => {
+    const server = makeServer({ session: { deferRefresh: true } });
+    const { client, jar } = await signedIn(server);
+    const first = await client.session();
+    expect(first.ok && first.value?.needsRefresh).toBe(false);
+    const before = first.ok ? first.value?.session.expiresAt : undefined;
+    server.clock.advance(8 * DAY);
+    const due = await client.session();
+    expect(due.ok && due.value?.needsRefresh).toBe(true);
+    expect(due.ok && due.value?.session.expiresAt).toBe(before);
+    const cookie = [...jar.values()][0];
+    const stop = client.store.subscribe(() => {});
+    await vi.waitFor(() => expect(client.store.get().data?.needsRefresh).toBe(true));
+    const r = await client.session.refresh();
+    expect(r.ok && r.value?.session.expiresAt).toBe(
+      new Date(server.clock.now().getTime() + 30 * DAY).toISOString(),
+    );
+    // The refresh renews the cookie; the token stays the same.
+    expect([...jar.values()]).toEqual([cookie]);
+    // The store reads again after the refresh.
+    await vi.waitFor(() => expect(client.store.get().data?.needsRefresh).toBe(false));
+    stop();
+    const after = await client.session();
+    expect(after.ok && after.value?.needsRefresh).toBe(false);
+  });
+
+  it("reads the bearer token once per refresh, and ends a dead token as session() does", async () => {
+    let reads = 0;
+    const ended: string[] = [];
+    const headers: (string | null)[] = [];
+    const client = createClient({
+      baseURL: BASE_URL,
+      credentials: "omit",
+      token: () => `st_token${++reads}`,
+      onSessionEnd: (sent) => {
+        ended.push(sent);
+      },
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const req = new Request(input, init);
+        headers.push(
+          `${req.method} ${new URL(req.url).pathname} ${req.headers.get("authorization")}`,
+        );
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }) as typeof fetch,
+    });
+    expect(await client.session.refresh()).toEqual({ ok: true, value: null });
+    expect(reads).toBe(1);
+    expect(headers).toEqual(["POST /auth/session/refresh Bearer st_token1"]);
+    expect(ended).toEqual(["st_token1"]);
   });
 
   it("answers unexpected with the status for an answer that is not JSON (Review Focus 1)", async () => {

@@ -4,6 +4,7 @@ import { listSessions, revokeOtherSessions, revokeSession } from "../../engine/s
 import {
   destroySession,
   publicSession,
+  readModeOf,
   readSessionToken,
   renewedSessionCookie,
   resolveSession,
@@ -42,27 +43,45 @@ export async function signedOut(
   return res;
 }
 
+/**
+ * The answer of `GET /session` and `POST /session/refresh` (plan 12a).
+ * `readModeOf` decides the mode: with `session.deferRefresh` on, the GET
+ * writes nothing and answers `needsRefresh`, and the POST slides the expiry.
+ */
+async function sessionAnswer(config: ResolvedConfig, request: Request): Promise<Response> {
+  const token = readSessionToken(config, request);
+  const resolved = token ? await resolveSession(config, token, readModeOf(config, request)) : null;
+  if (!resolved) {
+    // A dead cookie is cleared, so the browser stops sending it.
+    const hadCookie = readCookie(request, config.cookieName) !== null;
+    const headers: Record<string, string> = hadCookie
+      ? { "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite) }
+      : {};
+    return json({ error: "unauthorized" }, 401, headers);
+  }
+  // A sliding refresh moved the expiry. Renew the cookie, or the
+  // browser drops it at its old Max-Age. A read-only read renews nothing.
+  const renewed = renewedSessionCookie(config, request, resolved);
+  // Only a read-only read sets needsRefresh, so the key off keeps the old answer.
+  const body =
+    resolved.needsRefresh === undefined
+      ? publicSession(resolved)
+      : { ...publicSession(resolved), needsRefresh: resolved.needsRefresh };
+  return json(body, 200, renewed ? { "set-cookie": renewed } : {});
+}
+
 export function sessionRoutes(config: ResolvedConfig): Route[] {
   return [
     {
       method: "GET",
       path: "/session",
-      async handler(ctx) {
-        const token = readSessionToken(config, ctx.request);
-        const resolved = token ? await resolveSession(config, token) : null;
-        if (!resolved) {
-          // A dead cookie is cleared, so the browser stops sending it.
-          const hadCookie = readCookie(ctx.request, config.cookieName) !== null;
-          const headers: Record<string, string> = hadCookie
-            ? { "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite) }
-            : {};
-          return json({ error: "unauthorized" }, 401, headers);
-        }
-        // A sliding refresh moved the expiry. Renew the cookie, or the
-        // browser drops it at its old Max-Age.
-        const renewed = renewedSessionCookie(config, ctx.request, resolved);
-        return json(publicSession(resolved), 200, renewed ? { "set-cookie": renewed } : {});
-      },
+      handler: (ctx) => sessionAnswer(config, ctx.request),
+    },
+    {
+      // On with the key on or off (plan 12a): a client may post it in any deployment.
+      method: "POST",
+      path: "/session/refresh",
+      handler: (ctx) => sessionAnswer(config, ctx.request),
     },
     {
       method: "POST",

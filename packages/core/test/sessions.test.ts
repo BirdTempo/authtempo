@@ -119,7 +119,7 @@ describe("sessions engine", () => {
     clock.advance(8 * DAY);
     const update = vi.spyOn(storage, "update");
     const remove = vi.spyOn(storage, "delete");
-    const peek = await resolveSession(config, token, { refresh: false });
+    const peek = await resolveSession(config, token, "read-only");
     expect(peek?.user.email).toBe("a@example.com");
     expect(peek?.refreshed).toBe(false);
     expect(peek?.session.expiresAt.getTime()).toBe(session.expiresAt.getTime());
@@ -137,7 +137,7 @@ describe("sessions engine", () => {
     const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
     clock.advance(31 * DAY);
     const remove = vi.spyOn(storage, "delete");
-    expect(await resolveSession(config, token, { refresh: false })).toBeNull();
+    expect(await resolveSession(config, token, "read-only")).toBeNull();
     expect(remove).not.toHaveBeenCalled();
     expect(await storage.findMany("session", [])).toHaveLength(1);
   });

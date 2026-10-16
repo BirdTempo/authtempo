@@ -11,6 +11,7 @@ import { membership } from "./organizations.js";
 import {
   type ResolvedSession,
   readBearer,
+  readModeOf,
   resolveSession,
   sessionCookieToken,
 } from "./sessions.js";
@@ -235,7 +236,7 @@ export async function callerFromRequest(
 ): Promise<Caller | null> {
   const cookie = sessionCookieToken(config, request);
   if (cookie) {
-    const s = await resolveSession(config, cookie);
+    const s = await resolveSession(config, cookie, readModeOf(config, request));
     return s ? { kind: "session", ...s } : null;
   }
   const bearer = readBearer(request);
@@ -254,6 +255,6 @@ export async function callerFromRequest(
       ? { kind: "oauth", ...access }
       : null;
   }
-  const s = await resolveSession(config, bearer);
+  const s = await resolveSession(config, bearer, readModeOf(config, request));
   return s ? { kind: "session", ...s } : null;
 }

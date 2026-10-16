@@ -133,6 +133,11 @@ export interface ResolvedSession {
   session: SessionRow;
   /** True when this call moved the expiry forward. A cookie must then be set again, or it expires at its old Max-Age. */
   refreshed: boolean;
+  /**
+   * Set by a read-only resolve only (plan 12a): true when the sliding
+   * refresh is due and this read did not do it. `POST /session/refresh` does it.
+   */
+  needsRefresh?: boolean;
 }
 
 /**
@@ -370,17 +375,39 @@ export interface SessionReadOptions {
 }
 
 /**
+ * How `resolveSession` runs. `"write"` slides the expiry and deletes an
+ * ended row. `"read-only"` writes nothing (plan 12a). `readModeOf` decides it.
+ */
+export type SessionReadMode = "write" | "read-only";
+
+/**
+ * The one place that decides the read mode of a request (plan 12a, plan
+ * 11d ruling 8). `refresh: false` reads with no write. With
+ * `session.deferRefresh` on, a GET reads with no write too, and
+ * `POST /session/refresh` slides the expiry. Every other request writes.
+ */
+export function readModeOf(
+  config: ResolvedConfig,
+  request: Pick<Request, "method">,
+  options: SessionReadOptions = {},
+): SessionReadMode {
+  if (options.refresh === false) return "read-only";
+  return config.session.deferRefresh && request.method === "GET" ? "read-only" : "write";
+}
+
+/**
  * Null for an unknown, malformed, or expired token. An expired row is
  * deleted on the way out. After `slidingRefreshDays` the expiry moves
- * forward by a full ttl. With `refresh: false`, see `SessionReadOptions`.
+ * forward by a full ttl. In `"read-only"` mode the call writes nothing: an
+ * ended row answers null and stays for the sweep, and a due refresh sets
+ * `needsRefresh`. No mode changes `freshAt`.
  */
-
 export async function resolveSession(
   config: ResolvedConfig,
   token: string,
-  options: SessionReadOptions = {},
+  mode: SessionReadMode = "write",
 ): Promise<ResolvedSession | null> {
-  const write = options.refresh !== false;
+  const write = mode === "write";
   if (!TOKEN_RE.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const now = config.clock.now();
@@ -404,7 +431,9 @@ export async function resolveSession(
   ]);
   if (!user) return null;
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
-  if (write && sinceSeen >= config.session.slidingRefreshDays * DAY_MS) {
+  const due = sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
+  if (!write) return { user, session, refreshed: false, needsRefresh: due };
+  if (due) {
     const expiresAt = sessionExpiry(config, session.createdAt, now);
     await config.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
       expiresAt,
@@ -452,7 +481,7 @@ export async function sessionFromRequest(
   options: SessionReadOptions = {},
 ): Promise<ResolvedSession | null> {
   const token = readSessionToken(config, request);
-  return token ? resolveSession(config, token, options) : null;
+  return token ? resolveSession(config, token, readModeOf(config, request, options)) : null;
 }
 
 /**
@@ -515,5 +544,9 @@ export function publicSession(resolved: ResolvedSession): {
   };
 }
 
-/** The JSON shape of a session answer: `GET /session`, the verify routes, and the redeem. */
-export type PublicSession = ReturnType<typeof publicSession>;
+/**
+ * The JSON shape of a session answer: `GET /session`, the verify routes, and
+ * the redeem. `needsRefresh` is in the answer of `GET /session` with
+ * `session.deferRefresh` on only (plan 12a).
+ */
+export type PublicSession = ReturnType<typeof publicSession> & { needsRefresh?: boolean };

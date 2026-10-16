@@ -70,6 +70,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `session.slidingRefreshDays` | number | 7 | A session older than this moves its expiry forward when it is used. |
 | `session.absoluteDays` | number | none | 1 to 365. A session ends this many days after it opened, whatever its sliding refresh. |
 | `session.freshMinutes` | number | 1440 | The fresh window in minutes, 1 to 1440. A sensitive change needs a sign-in or a re-authentication within it. [Fresh sessions](/docs/concepts/fresh-sessions/) tells which changes. |
+| `session.deferRefresh` | boolean | `false` | With `true`, a GET request writes no session row, and `POST /session/refresh` slides the expiry. `GET /session` answers `needsRefresh`. Use it when a GET reads from a replica. Off by default: a client that never posts the refresh lets an active session end at its old expiry. |
 
 ## Magic link
 

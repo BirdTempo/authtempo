@@ -81,6 +81,7 @@ export const CONFIG_KEYS = {
     slidingRefreshDays: true,
     absoluteDays: true,
     freshMinutes: true,
+    deferRefresh: true,
   } satisfies Keys<Part<"session">>,
   magicLink: {
     ttlMinutes: true,
