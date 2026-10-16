@@ -199,24 +199,34 @@ describe("the change of address by link (plan 12a, spec 8.15)", () => {
     expect((await resolveSession(auth.config, me.token))?.user.email).toBe(NEW);
   });
 
-  it("sends a note and no link to an address that an unverified user holds", async () => {
+  it("sends a note and no proof to an address that an unverified user holds, and writes a decoy row", async () => {
     const auth = totpAuth();
     const me = await verifiedSession(auth);
     // An unverified user at the new address: a sign-up whose verify link nobody opened.
     await unverifiedUser(auth, NEW);
-    expect(await requestEmailChange(auth.config, { session: me, newEmail: NEW })).toEqual({
-      ok: true,
-      value: { sent: true },
-    });
-    const mail = auth.mail.at(-1);
-    expect(mail?.to).toBe(NEW);
-    expect(mail?.subject).toBe("An account uses this address on api.example.com");
-    expect(mail?.text).not.toContain("token=");
+    for (const method of ["link", "code"] as const) {
+      expect(await requestEmailChange(auth.config, { session: me, newEmail: NEW, method })).toEqual(
+        { ok: true, value: { sent: true } },
+      );
+      const mail = auth.mail.at(-1);
+      expect(mail?.to).toBe(NEW);
+      expect(mail?.subject).toBe("An account uses this address on api.example.com");
+      expect(mail?.text).not.toContain("token=");
+      expect(mail?.text).not.toMatch(/\d{6}/);
+    }
+    // The decoy rows: the same purposes and writes as a free address, marked taken (review M1).
+    const rows = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "in", value: ["email-change", "email-change-otp"] },
+    ]);
     expect(
-      await auth.storage.findMany("verification", [
-        { field: "purpose", op: "in", value: ["email-change", "email-change-otp"] },
+      rows.map((r) => [r.purpose, r.identifier, (r.data as { taken?: unknown }).taken]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["email-change", me.user.id, true],
+        ["email-change-otp", me.user.id, true],
       ]),
-    ).toEqual([]);
+    );
+    expect(rows).toHaveLength(2);
   });
 
   it("answers email_taken at the confirm when another user took the address after the request", async () => {
@@ -563,6 +573,10 @@ describe("the races of the change of address (plan 12a)", () => {
     expect(notices(auth)).toEqual([]);
   });
 
+  // On memory the second confirm meets consumedAt before the transaction, so
+  // this test proves that check only. The race inside the transaction is
+  // proved on Postgres: "two confirms of one link at once" in
+  // adapter-postgres/test/account-races.test.ts (review L2).
   it("two confirms of one link at once: one moves, one answers invalid_token, and one notice goes", async () => {
     const auth = totpAuth();
     const me = await verifiedSession(auth);
@@ -914,30 +928,93 @@ describe("the limits of the change of address (plan 12a)", () => {
 });
 
 describe("no oracle for a taken address (plan 12a)", () => {
-  it("answers a taken address as an untaken one: the status, the body, the keys, and one mail to it", async () => {
-    const answer = async (taken: boolean) => {
+  it.each(["link", "code"] as const)(
+    "answers a taken address as an untaken one by %s: the status, the body, the keys, the writes, and one mail to it",
+    async (method) => {
+      const answer = async (taken: boolean) => {
+        const auth = totpAuth();
+        const handle = createRouter(auth.config, coreRoutes(auth.config));
+        const me = await verifiedSession(auth);
+        if (taken) await verifiedSession(auth, NEW);
+        const before = auth.mail.length;
+        const allow = vi.spyOn(auth.config.limiter, "allow");
+        const writes: string[] = [];
+        for (const op of ["create", "update", "delete"] as const) {
+          const orig = auth.config.storage[op].bind(auth.config.storage);
+          vi.spyOn(auth.config.storage, op).mockImplementation(((
+            model: string,
+            ...rest: never[]
+          ) => {
+            writes.push(`${op}:${model}`);
+            return (orig as (...a: unknown[]) => unknown)(model, ...rest);
+          }) as never);
+        }
+        const res = await handle(
+          post(
+            "/auth/user/change-email",
+            { newEmail: NEW, method },
+            { authorization: `Bearer ${me.token}` },
+          ),
+        );
+        const keys = allow.mock.calls.map((c) => c[0].replace(me.user.id, "<id>"));
+        vi.restoreAllMocks();
+        const mails = auth.mail.slice(before);
+        return {
+          status: res.status,
+          body: await res.json(),
+          keys,
+          writes,
+          to: mails.map((m) => m.to),
+        };
+      };
+      const free = await answer(false);
+      const taken = await answer(true);
+      expect(free).toMatchObject({
+        status: 200,
+        body: { sent: true },
+        keys: ["email-change:user:<id>", `email-change:email:${NEW}`],
+        to: [NEW],
+      });
+      expect(free.writes).toContain("create:verification");
+      expect(taken).toEqual(free);
+    },
+  );
+
+  // The reviewer's probe P1 (review M1): the verify after the request must not tell either.
+  it("answers the code verify of a taken address as a free one: the answers and the limiter keys of six wrong guesses", async () => {
+    const run = async (taken: boolean) => {
       const auth = totpAuth();
-      const handle = createRouter(auth.config, coreRoutes(auth.config));
       const me = await verifiedSession(auth);
       if (taken) await verifiedSession(auth, NEW);
-      const before = auth.mail.length;
+      expect(
+        (await requestEmailChange(auth.config, { session: me, newEmail: NEW, method: "code" })).ok,
+      ).toBe(true);
       const allow = vi.spyOn(auth.config.limiter, "allow");
-      const res = await handle(
-        post("/auth/user/change-email", { newEmail: NEW }, { authorization: `Bearer ${me.token}` }),
-      );
-      const keys = allow.mock.calls.map((c) => c[0].replace(me.user.id, "<id>"));
+      const answers: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        const v = await verifyEmailChange(auth.config, {
+          session: me,
+          code: "000001",
+          ip: "7.7.7.7",
+          userAgent: null,
+        });
+        answers.push(v.ok ? "ok" : v.code);
+      }
+      const keys = allow.mock.calls.map((c) => c[0]);
       allow.mockRestore();
-      const mails = auth.mail.slice(before);
-      return { status: res.status, body: await res.json(), keys, to: mails.map((m) => m.to) };
+      return { answers, keys };
     };
-    const free = await answer(false);
-    const taken = await answer(true);
-    expect(free).toEqual({
-      status: 200,
-      body: { sent: true },
-      keys: ["email-change:user:<id>", `email-change:email:${NEW}`],
-      to: [NEW],
-    });
+    const free = await run(false);
+    const taken = await run(true);
+    expect(free.answers).toEqual([
+      "invalid_code",
+      "invalid_code",
+      "invalid_code",
+      "invalid_code",
+      "too_many_attempts",
+      "too_many_attempts",
+    ]);
+    expect(free.keys).toContain(`otp-verify:email:${NEW}`);
     expect(taken).toEqual(free);
   });
 });

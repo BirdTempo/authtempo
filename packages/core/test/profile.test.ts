@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/create-auth.js";
 import { hookRefusal, type UserHooks } from "../src/engine/hooks.js";
-import { type ProfileUpdate, updateProfile } from "../src/engine/profile.js";
+import { type ProfileUpdate, unchanged, updateProfile } from "../src/engine/profile.js";
 import { later } from "../src/engine/second-factor.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial } from "../src/engine/social.js";
@@ -347,31 +347,23 @@ describe("the races of the profile update (plan 12a)", () => {
     },
   );
 
-  // No writer in the tree writes the address with an equal updatedAt: the change of
-  // address moves it by later(). The clauses guard the next writer (plan 12a Task 8).
-  it.each([
-    ["the address", { email: "ada.moved@example.com" }],
-    ["the verified flag", { emailVerified: false }],
-  ] as const)("sees a parallel write of %s in the same millisecond", async (_, write) => {
-    const after: { previous: UserRow }[] = [];
-    let rounds = 0;
-    const auth = hooked((get) => ({
-      beforeUpdate: async (e) => {
-        rounds++;
-        if (rounds > 1) return;
-        await get().storage.update("user", byId(e.user.id), {
-          ...write,
-          updatedAt: e.user.updatedAt,
-        });
-      },
-      afterUpdate: (e) => {
-        after.push(e);
-      },
-    }));
+  // The change of address and the profile update both write through this one
+  // compare-and-set. The address and the flag clauses guard the next writer of
+  // them (plan 12a Task 8). No writer today makes a race that only they decide:
+  // the move writes a strictly newer updatedAt, and no flow clears the flag. So
+  // this test reads the clauses of a reachable row and seeds no state (review m1).
+  it("matches the six fields of the row it read: id, email, emailVerified, name, image, and updatedAt", async () => {
+    const auth = totpAuth();
     const s = await verifiedSession(auth);
-    expect((await updateProfile(auth.config, { session: s, name: "Ada" })).ok).toBe(true);
-    expect(rounds).toBe(2);
-    expect(after[0]?.previous).toMatchObject(write);
+    const row = await userRow(auth, s.user.id);
+    expect(unchanged(row)).toEqual([
+      { field: "id", op: "eq", value: row.id },
+      { field: "email", op: "eq", value: row.email },
+      { field: "emailVerified", op: "eq", value: row.emailVerified },
+      { field: "name", op: "eq", value: row.name },
+      { field: "image", op: "eq", value: row.image },
+      { field: "updatedAt", op: "eq", value: row.updatedAt },
+    ]);
   });
 
   it("sees a parallel update that writes the same value, by updatedAt alone", async () => {

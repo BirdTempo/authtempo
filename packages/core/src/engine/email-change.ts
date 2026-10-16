@@ -1,21 +1,13 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
-import { randomDigits, randomToken, sha256Hex } from "../primitives/crypto.js";
+import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
-import { currentSecret } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { AccountMailInput } from "./account-mail.js";
-import {
-  checkCode,
-  codeHash,
-  consumeCode,
-  issueCode,
-  newestCode,
-  verifyGate,
-} from "./email-otp.js";
+import { checkCode, consumeCode, issueCode, newestCode, verifyGate } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -72,6 +64,11 @@ interface ChangeData {
   oldEmail: string;
   sessionId: string;
   next: string;
+  /**
+   * True on a decoy row: a user held the new address at the request. Its
+   * proof was never mailed, and it never moves the address (review M1).
+   */
+  taken: boolean;
 }
 
 function changeData(row: VerificationRow): ChangeData | null {
@@ -88,6 +85,7 @@ function changeData(row: VerificationRow): ChangeData | null {
     oldEmail: d.oldEmail,
     sessionId: d.sessionId,
     next: safeNext(d.next),
+    taken: d.taken === true,
   };
 }
 
@@ -110,7 +108,8 @@ export interface EmailChangeRequest {
  * Sends a proof to the new address, or, when any user holds it, a note with
  * no proof. Both answer `{ sent: true }`: the note reaches the owner of the
  * mailbox only, so the requester learns nothing. Both paths count the same
- * keys, spend the earlier proofs, and make a token, in the same order.
+ * keys, spend the earlier proofs, and write a row, in the same order. The
+ * row of a taken address is a decoy that never moves the address.
  */
 export async function requestEmailChange(
   config: ResolvedConfig,
@@ -142,35 +141,34 @@ export async function requestEmailChange(
     ],
     { consumedAt: now, updatedAt: now },
   );
-  // Before the branch, so the taken path does the same work as the link path.
   const token = randomToken(EMAIL_CHANGE_PREFIX);
   const valueHash = await sha256Hex(token);
   const appName = config.appName;
-  if (await config.storage.findOne("user", [{ field: "email", op: "eq", value: newEmail }])) {
-    // The read and the keyed hash of a code write, so a taken address takes the
-    // time of a free one. Only the insert of the row is left out.
-    if (method === "code" && otp) {
-      await newestCode(config.storage, "email-change-otp", user.id);
-      await codeHash(currentSecret(config.keyring), newId(now), randomDigits(otp.length));
-    }
-    await mailTo(config, { kind: "email_change_taken", email: newEmail, appName });
-    return ok({ sent: true });
-  }
+  // A taken address gets a decoy row: the same writes in the same order, so
+  // the time, the later verify answers, and the verify keys tell nothing
+  // (review M1 and m2). Only the mail differs, and the owner of the mailbox reads it.
+  const taken =
+    (await config.storage.findOne("user", [{ field: "email", op: "eq", value: newEmail }])) !==
+    null;
   const data = {
     newEmail,
     oldEmail: user.email,
     sessionId: session.id,
     next: safeNext(input.next),
+    taken,
   };
+  const note = () => mailTo(config, { kind: "email_change_taken", email: newEmail, appName });
   if (method === "code" && otp) {
     const code = await issueCode(config, otp, "email-change-otp", user.id, data);
-    await mailTo(config, {
-      kind: "email_change_code",
-      email: newEmail,
-      code,
-      ttlMinutes: otp.ttlMinutes,
-      appName,
-    });
+    if (taken) await note();
+    else
+      await mailTo(config, {
+        kind: "email_change_code",
+        email: newEmail,
+        code,
+        ttlMinutes: otp.ttlMinutes,
+        appName,
+      });
     return ok({ sent: true });
   }
   const ttlMinutes = config.magicLink.ttlMinutes;
@@ -186,6 +184,10 @@ export async function requestEmailChange(
     updatedAt: now,
     secretVersion: config.keyring.current,
   });
+  if (taken) {
+    await note();
+    return ok({ sent: true });
+  }
   const link = `${config.baseURL}${config.basePath}/user/change-email/confirm?token=${encodeURIComponent(token)}`;
   await mailTo(config, { kind: "email_change_link", email: newEmail, link, ttlMinutes, appName });
   return ok({ sent: true });
@@ -278,8 +280,11 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
     );
   } catch (err) {
     // Two users confirm one new address at once: the loser breaks the unique
-    // key of `user.email` or of the `email` identity. It is caught here,
-    // outside: inside, Postgres has already aborted the transaction.
+    // key of `user.email`. It is caught here, outside: inside, Postgres has
+    // already aborted the transaction. The move writes the user row first, so
+    // the user key fails first. The `identity` branch is a second guard: only
+    // an `email` identity of another user at the new address, with no user
+    // row there, reaches it, and no flow leaves that state (review L3).
     if (
       err instanceof StorageError &&
       err.code === "unique_violation" &&
@@ -338,7 +343,8 @@ export async function confirmEmailChange(
   if (row.consumedAt !== null) return fail("invalid_token");
   if (row.expiresAt.getTime() <= now.getTime()) return fail("token_expired");
   const data = changeData(row);
-  if (!data) return fail("invalid_token");
+  // A decoy row answers as an unknown link. Its token was never mailed.
+  if (!data || data.taken) return fail("invalid_token");
   const move: Move = {
     row,
     data,
@@ -374,7 +380,8 @@ export async function verifyEmailChange(
   const checked = await checkCode(config, "email-change-otp", user.id, input.code, now);
   if (!checked.ok) return checked;
   const data = changeData(checked.value);
-  if (!data) return fail("invalid_code");
+  // A decoy row answers as a wrong code. Wrong guesses counted on it, as on a real row.
+  if (!data || data.taken) return fail("invalid_code");
   const row = checked.value;
   const move: Move = {
     row,
