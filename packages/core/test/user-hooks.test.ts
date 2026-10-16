@@ -759,6 +759,8 @@ describe("the hook groups in the config (plan 12a)", () => {
       afterUpdate: fn,
       beforeDelete: fn,
       afterDelete: fn,
+      beforeVerify: fn,
+      afterVerify: fn,
     };
     const identity = { beforeLink: fn, afterLink: fn, beforeUnlink: fn, afterUnlink: fn };
     const hooks = makeAuth({ hooks: { user, identity } }).config.hooks;
@@ -769,6 +771,8 @@ describe("the hook groups in the config (plan 12a)", () => {
       "afterUpdate",
       "beforeDelete",
       "afterDelete",
+      "beforeVerify",
+      "afterVerify",
     ]);
     expect(Object.keys(hooks.identity)).toEqual([
       "beforeLink",

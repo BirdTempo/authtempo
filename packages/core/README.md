@@ -1138,6 +1138,21 @@ const auth = createAuth({
   rule of "Account", and an image follows the image rule there. Any other key or value answers 500
   `hook_failed` and logs `authtempo: user patch refused` with the reason,
   never the value.
+- Verify points (plan 12a): `user.beforeVerify` and `user.afterVerify`,
+  with `user` and `via` (`UserVerifyVia`). They fire once when a flow moves
+  an existing user from `emailVerified: false` to true. The `via` is
+  `password_verify` (the verify link), `magic_link`, `email_otp`, `social`,
+  or `password_reset`. `social` is a sign-in with a verified provider
+  address. `password_reset` is the reset link or the reset code. `beforeVerify` sees the stored row,
+  still unverified, before the first write of the flow. A refusal answers
+  403 `hook_refused` and the flow writes nothing: the user stays unverified.
+  The magic link, the email code, the verify link, and social spend their
+  proof before the transaction, so a refusal spends it. The reset keeps its
+  link. `afterVerify` fires once after the commit with the stored row, now
+  verified. A throw there logs one line, and the answer stays. A user that
+  a flow creates verified fires `beforeCreate` and `afterCreate`, not these
+  points. The change of address fires `beforeUpdate` and `afterUpdate`. A
+  verify is not a change of a credential, so it sends no notice mail.
 - Identity points (plan 12a): `beforeLink`, `afterLink`, `beforeUnlink`,
   and `afterUnlink`. The `via` of a link is `sign_in` or `link`. `sign_in`
   is a social sign-in that creates a user or links a verified equal
@@ -1146,12 +1161,14 @@ const auth = createAuth({
   fires no identity hook. The unlink fires `beforeUnlink` after core's
   checks and the guard's lock, and before the delete, with no `via`.
   `afterUnlink` fires after the commit.
-- The order in one flow: `user.beforeCreate`, `identity.beforeLink`, and
-  `session.beforeCreate`, each before the first write. After the commit:
-  `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`. The
+- The order in one flow: `user.beforeCreate` or `user.beforeVerify`, then
+  `identity.beforeLink`, then `session.beforeCreate`, each before the
+  first write. After the commit: `user.afterCreate` or `user.afterVerify`,
+  then `identity.afterLink`, then `session.afterCreate`. The
   sign-up rule (`signUp`) runs before `user.beforeCreate`, so no hook sees
-  a create that the rule refuses. A claim, the social fill of the name and
-  the image, the sweep, and the importer fire no user or identity hook.
+  a create that the rule refuses. A claim fires the verify points only.
+  The social fill of the name and the image, the sweep, and the importer
+  fire no user or identity hook.
 - The uniform sign-up answers `{ sent: true }` for a new and a known
   address. `user.beforeCreate` runs only for a new address. When it refuses
   or throws, the sign-up writes no row, sends no mail, and still answers

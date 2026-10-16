@@ -193,6 +193,17 @@ export type UserCreateVia = SessionVia | "password_reset";
 /** The profile update, or the change of address (plan 12a). */
 export type UserUpdateVia = "profile" | "email_change";
 /**
+ * The flow that proves the address of an existing unverified user (plan
+ * 12a). `social` is a sign-in with a verified provider address.
+ * `password_reset` is the reset link or the reset code.
+ */
+export type UserVerifyVia =
+  | "password_verify"
+  | "magic_link"
+  | "email_otp"
+  | "social"
+  | "password_reset";
+/**
  * How an identity came (plan 12a). `sign_in` is a social sign-in that
  * creates a user or links a verified equal address. `link` is the link of
  * a signed-in user.
@@ -231,9 +242,9 @@ export interface UserCreatePatch {
 type UserCreatePatchAnswer = UserCreatePatch | void;
 
 /**
- * The user points (plan 12a, spec 8.9). A claim's flip of `emailVerified`,
- * the social fill of the name and the image, the sweep, and the importer
- * fire no user hook.
+ * The user points (plan 12a, spec 8.9). The social fill of the name and the
+ * image, the sweep, and the importer fire no user hook. A claim's flip of
+ * `emailVerified` fires `beforeVerify` and `afterVerify` only.
  */
 export interface UserHooks {
   /**
@@ -251,6 +262,15 @@ export interface UserHooks {
   beforeDelete?(e: { user: UserRow; organizations: string[] }): Awaitable<void>;
   /** `user` is the row as it was before the delete. */
   afterDelete?(e: { user: UserRow }): Awaitable<void>;
+  /**
+   * Before a flow moves an existing user from `emailVerified: false` to
+   * true, and before the flow's first write. `user` is the stored row, still
+   * unverified. A user that a flow creates verified fires `beforeCreate`, not
+   * this point. The change of address fires `beforeUpdate`, not this point.
+   */
+  beforeVerify?(e: { user: UserRow; via: UserVerifyVia }): Awaitable<void>;
+  /** Once after the commit. `user` is the stored row, now verified. */
+  afterVerify?(e: { user: UserRow; via: UserVerifyVia }): Awaitable<void>;
 }
 
 /** The identity points (plan 12a, spec 8.9). A claim's identity deletes and the account delete fire none. */
@@ -325,6 +345,8 @@ export const USER_HOOK_POINTS: Readonly<Record<keyof UserHooks, true>> = {
   afterUpdate: true,
   beforeDelete: true,
   afterDelete: true,
+  beforeVerify: true,
+  afterVerify: true,
 };
 
 export const IDENTITY_HOOK_POINTS: Readonly<Record<keyof IdentityHooks, true>> = {

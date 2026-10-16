@@ -11,7 +11,7 @@ import { socialRoutes } from "../src/http/routes/social.js";
 import { sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, get } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, noVerifyHooks } from "./helpers.js";
 import {
   type FakeIdToken,
   fakeFetch,
@@ -363,7 +363,13 @@ describe("resolveSocialUser", () => {
   it("links to an existing user with the same verified email and repairs a missing email identity", async () => {
     const auth = socialAuth();
     const existing = await auth.seedUser("ada@example.com");
-    const r = await resolveSocialUser(auth.storage, "google", profile, now);
+    const r = await resolveSocialUser(
+      auth.storage,
+      "google",
+      profile,
+      now,
+      noVerifyHooks("social"),
+    );
     expect(r.ok && r.value.id).toBe(existing.id);
     const identities = await auth.storage.findMany("identity", [], {
       sort: { field: "provider", dir: "asc" },
@@ -382,6 +388,7 @@ describe("resolveSocialUser", () => {
       "google",
       { ...profile, emailVerified: false },
       now,
+      noVerifyHooks("social"),
     );
     expect(r).toMatchObject({ ok: false, code: "email_taken_unverified" });
     expect(await auth.storage.findMany("identity", [])).toHaveLength(0);
@@ -397,6 +404,7 @@ describe("resolveSocialUser", () => {
       "google",
       { ...profile, emailVerified: false },
       now,
+      noVerifyHooks("social"),
     );
     expect(r.ok && r.value).toMatchObject({ email: "ada@example.com", emailVerified: false });
     expect((await auth.storage.findMany("identity", [])).map((i) => i.provider)).toEqual([
@@ -411,8 +419,15 @@ describe("resolveSocialUser", () => {
       "google",
       { ...profile, emailVerified: false, name: null },
       now,
+      noVerifyHooks("social"),
     );
-    const second = await resolveSocialUser(auth.storage, "google", profile, now);
+    const second = await resolveSocialUser(
+      auth.storage,
+      "google",
+      profile,
+      now,
+      noVerifyHooks("social"),
+    );
     expect(first.ok && second.ok && first.value.id === second.value.id).toBe(true);
     expect(second.ok && second.value.name).toBe("Ada");
     expect(await auth.storage.findMany("user", [])).toHaveLength(1);
@@ -449,7 +464,7 @@ describe("resolveSocialUser", () => {
       delete: (m, w) => a.delete(m, w),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
-    const r = await resolveSocialUser(wrap(inner), "google", profile, now);
+    const r = await resolveSocialUser(wrap(inner), "google", profile, now, noVerifyHooks("social"));
     expect(r.ok && r.value.id).toBe("01WINNER");
     expect(await inner.findMany("user", [])).toHaveLength(1);
     expect((await inner.findMany("identity", [])).map((i) => i.provider).sort()).toEqual([
@@ -466,6 +481,7 @@ describe("resolveSocialUser", () => {
       "google",
       { ...profile, subject: "attacker", emailVerified: false, name: null },
       now,
+      noVerifyHooks("social"),
     );
     expect(claim.ok && claim.value.emailVerified).toBe(false);
     const claimant = claim.ok ? claim.value : null;
@@ -489,6 +505,7 @@ describe("resolveSocialUser", () => {
       "apple",
       { ...profile, subject: "owner" },
       now,
+      noVerifyHooks("social"),
     );
     expect(owner.ok && owner.value.id).toBe(claimant.id);
     expect(owner.ok && owner.value.emailVerified).toBe(true);
@@ -509,8 +526,14 @@ describe("resolveSocialUser", () => {
       "google",
       { ...profile, subject: "attacker", emailVerified: false },
       now,
+      noVerifyHooks("social"),
     );
-    const { user } = await findOrCreateUserByEmail(auth.storage, "ada@example.com", now);
+    const { user } = await findOrCreateUserByEmail(
+      auth.storage,
+      "ada@example.com",
+      now,
+      noVerifyHooks("magic_link"),
+    );
     expect(user.emailVerified).toBe(true);
     expect((await auth.storage.findMany("identity", [])).map((i) => i.provider)).toEqual(["email"]);
   });
@@ -523,6 +546,7 @@ describe("resolveSocialUser", () => {
       "google",
       { ...profile, subject: "attacker", emailVerified: false },
       now,
+      noVerifyHooks("social"),
     );
     // The attacker's provider account now reports a verified address of their own.
     const r = await resolveSocialUser(
@@ -530,6 +554,7 @@ describe("resolveSocialUser", () => {
       "google",
       { ...profile, subject: "attacker", email: "attacker@evil.example", emailVerified: true },
       now,
+      noVerifyHooks("social"),
     );
     expect(r.ok && r.value.emailVerified).toBe(false);
     expect(r.ok && r.value.email).toBe("ada@example.com");
@@ -542,6 +567,7 @@ describe("resolveSocialUser", () => {
       "apple",
       { ...profile, subject: "owner" },
       now,
+      noVerifyHooks("social"),
     );
     expect(owner.ok && owner.value.emailVerified).toBe(true);
     expect(
@@ -554,8 +580,20 @@ describe("resolveSocialUser", () => {
 
   it("keeps the identity that carries the proof when the same identity returns verified", async () => {
     const auth = socialAuth();
-    await resolveSocialUser(auth.storage, "google", { ...profile, emailVerified: false }, now);
-    const r = await resolveSocialUser(auth.storage, "google", profile, now);
+    await resolveSocialUser(
+      auth.storage,
+      "google",
+      { ...profile, emailVerified: false },
+      now,
+      noVerifyHooks("social"),
+    );
+    const r = await resolveSocialUser(
+      auth.storage,
+      "google",
+      profile,
+      now,
+      noVerifyHooks("social"),
+    );
     expect(r.ok && r.value.emailVerified).toBe(true);
     expect((await auth.storage.findMany("identity", [])).map((i) => i.provider).sort()).toEqual([
       "email",

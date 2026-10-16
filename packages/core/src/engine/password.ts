@@ -8,7 +8,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { type CreateSteps, createSteps } from "./create-steps.js";
+import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -872,13 +872,17 @@ export async function verifyPasswordEmail(
   const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
   if (typeof passwordId !== "string") return fail("invalid_token");
   const ended = endedList(config);
+  // The verify hooks of the claim (plan 12a, Task 18). The flow has no retry.
+  const verify = verifySteps(config, "password_verify");
   const verified = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<PasswordVerified>> => {
       const user = await tx.findOne("user", [{ field: "email", op: "eq", value: row.identifier }]);
       if (!user) return fail("invalid_token");
       const claimed = { ...user, emailVerified: true, updatedAt: now };
-      // The session hook before the first write, for the D1 undo (see `insertSignUp`).
-      // A verified user gets no session, so no hook.
+      // `user.beforeVerify`, then the session hook, before the first write,
+      // for the D1 undo (see `insertSignUp`). A verified user gets no
+      // session and no verify, so no hook.
+      if (!user.emailVerified) await verify.before(user);
       const prepared = user.emailVerified
         ? null
         : await prepareSession(
@@ -900,13 +904,15 @@ export async function verifyPasswordEmail(
       );
       if (kept === 0) return fail("invalid_token");
       if (prepared === null) return ok({ user, signedIn: null });
-      await claimEmail(tx, user.id, { passwordId }, now, ended);
+      await claimEmail(tx, user.id, { passwordId }, now, verify, ended);
       await ensureEmailIdentity(tx, user.id, user.email, now);
       const s = await writeSession(config, prepared, tx);
       return ok({ user: claimed, signedIn: s });
     }),
   );
   if (verified.ok) {
+    // After the commit, before the session hooks (plan 12a).
+    await verify.after(verified.value.user);
     await sessionsEnded(config, ended, "claim");
     if (verified.value.signedIn)
       await sessionOpened(config, verified.value.signedIn.session, verified.value.user, "password");
@@ -1068,11 +1074,13 @@ export async function runReset(
   // The user hooks of a user that the reset creates (plan 12a). The
   // transaction runs the sign-up rule itself.
   const made = createSteps(config, "password_reset", { signUpRule: false });
+  // The verify hooks of an unverified user that the reset claims (plan 12a, Task 18).
+  const verify = verifySteps(config, "password_reset");
   let reset: Result<ResetResult> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
       reset = await hookGuard(() =>
-        applyReset(config, input, proof, consume, hash, now, ended, trust, made),
+        applyReset(config, input, proof, consume, hash, now, ended, trust, made, verify),
       );
     } catch (err) {
       // Caught outside the transaction, so its deletes are undone.
@@ -1097,6 +1105,7 @@ export async function runReset(
   }
   if (reset.ok) {
     // After the commit, before the session hooks and before a challenge answer (plan 12a).
+    await verify.after(reset.value.user);
     await made.after(reset.value.user);
     // One reason for one cause: the claim's rows end with `claim`, the
     // verified user's own rows with `password_reset` (fix round 1).
@@ -1181,6 +1190,7 @@ function applyReset(
   ended: ResetEnded,
   trust: { id: string | null },
   made: CreateSteps,
+  verify: VerifySteps,
 ): Promise<Result<ResetResult>> {
   return config.storage.transaction(async (tx): Promise<Result<ResetResult>> => {
     // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
@@ -1188,6 +1198,7 @@ function applyReset(
     if (ended.reset) ended.reset.length = 0;
     trust.id = null;
     made.begin();
+    verify.begin();
     // The lock order (plan 12c, Task 12): every reset takes the pending reset
     // rows of its address in id order, then the password row. So the older
     // rows go first, one delete per row in sorted order, then the consume of
@@ -1262,7 +1273,9 @@ function applyReset(
     // the older rows above also come before the hook: their undo is exact too.
     // The user the hook sees is the user this reset leaves: found, claimed, or minted.
     // A gated reset opens no session here, so no hook runs: the verify of
-    // its challenge runs it through `openSession`.
+    // its challenge runs it through `openSession`. `user.beforeVerify` of a
+    // claimant goes before the session hook (plan 12a, Task 18).
+    if (found && !found.emailVerified) await verify.before(found);
     const prepared: PreparedSession | null = gatedRow
       ? null
       : await prepareSession(
@@ -1290,7 +1303,7 @@ function applyReset(
     if (found && !found.emailVerified) {
       // The claim deletes the claimant's sessions, identities, passkeys,
       // handoff codes, and every other password row, and keeps the new password.
-      await claimEmail(tx, user.id, { passwordId }, now, ended.claim);
+      await claimEmail(tx, user.id, { passwordId }, now, verify, ended.claim);
     } else {
       await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended.reset ?? null);
       await deleteHandoffCodes(tx, user.id);

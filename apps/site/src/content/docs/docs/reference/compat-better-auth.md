@@ -112,6 +112,7 @@ The options of these operations:
 | `account.accountLinking` | `enabled: true`, `allowDifferentEmails: false`, and `allowUnlinkingAll: false` are accepted. `trustedProviders`, `updateUserInfoOnLink`, and `disableImplicitLinking` are refused. |
 | `emailOTP({ changeEmail })` | `enabled` serves `/email-otp/request-email-change` and `/email-otp/change-email`. `verifyCurrentEmail: true` is refused. |
 | `databaseHooks.user`, `databaseHooks.account` | `create`, `update`, and `delete` of a user, and `create` and `delete` of an account, map onto core's hooks. |
+| `emailVerification.beforeEmailVerification`, `afterEmailVerification` | Map to `user.beforeVerify` and `user.afterVerify`. Core calls them on each path that proves an unverified address, not at the verify link only. |
 
 Where the shim differs from Better Auth:
 

@@ -664,6 +664,16 @@ README, "Hooks").
   `delete.before`. After the commit it runs `delete.after`, then
   `user.deleteUser.afterDelete`, in Better Auth 1.7.2's order. The
   `request` argument of `beforeDelete` and `afterDelete` is undefined.
+- `emailVerification.beforeEmailVerification` and `afterEmailVerification`
+  (plan 12a) map to core's `user.beforeVerify` and `user.afterVerify`. Each
+  gets Better Auth's user shape, and the `request` argument is undefined.
+  Better Auth 1.7.2 calls them at its verify link only. Core calls them on
+  each path that proves the address of an unverified user. These paths are
+  the verify link, the magic link, the email code, the reset, and a social
+  sign-in with a verified provider address. A thrown `APIError` in the before hook
+  answers `HOOK_REFUSED`, and the user stays unverified. A throw in the
+  after hook writes one log line, and the verify stands. Better Auth answers
+  that error to the caller. The change of address fires neither hook.
 - `databaseHooks.account` (plan 12a): `create` runs at a provider link, and
   `delete` at an unlink. Each gets `{ providerId, accountId, userId }`, with
   no row id. A credential account fires none, because core's password row is

@@ -6,7 +6,7 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
-import { createSteps } from "./create-steps.js";
+import { createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
@@ -118,12 +118,15 @@ export async function verifyMagicLink(
   );
   // The user hooks of a new user, with the sign-up rule first (plan 12a).
   const made = createSteps(config, "magic_link", { signUpRule: true });
+  // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
+  const verified = verifySteps(config, "magic_link");
   const resolved = await hookGuard(async () =>
     ok(
       await findOrCreateUserByEmail(
         config.storage,
         row.identifier,
         now,
+        verified,
         (tx) => steps.write(tx),
         ended,
         steps.before,
@@ -134,6 +137,7 @@ export async function verifyMagicLink(
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
   // After the commit, before the session hook and before a challenge answer (plan 12a).
+  await verified.after(user);
   await made.after(user);
   await sessionsEnded(config, ended, "claim");
   if (after.kind === "challenge") return ok({ ...after.pending, next, user });

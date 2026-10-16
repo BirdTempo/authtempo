@@ -124,9 +124,11 @@ describe("hooks config (plan 9d)", () => {
       "afterCreate",
       "afterDelete",
       "afterUpdate",
+      "afterVerify",
       "beforeCreate",
       "beforeDelete",
       "beforeUpdate",
+      "beforeVerify",
     ]);
     expect(Object.keys(IDENTITY_HOOK_POINTS).sort()).toEqual([
       "afterLink",

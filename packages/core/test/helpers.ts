@@ -1,4 +1,6 @@
 import { type AuthConfig, type MailMessage, resolveConfig } from "../src/config.js";
+import { type VerifySteps, verifySteps } from "../src/engine/create-steps.js";
+import type { UserVerifyVia } from "../src/engine/hooks.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -94,4 +96,12 @@ export async function seedPlatform(auth: ReturnType<typeof makeAuth>) {
     updatedAt: now,
   });
   return { root, platformOrg };
+}
+
+/**
+ * The verify steps of a flow with no hook set (plan 12a, Task 18), for a
+ * test that calls a resolver directly. The resolver runs `before` itself.
+ */
+export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
+  return verifySteps({ hooks: { organization: {}, session: {}, user: {}, identity: {} } }, via);
 }

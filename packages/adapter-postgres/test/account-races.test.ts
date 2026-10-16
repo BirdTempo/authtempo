@@ -1033,18 +1033,22 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
    * delete's recount of the owners. `afterOwnMembers` runs after the delete
    * of the user's member rows. `afterOrganizationMembers` runs after the
    * first member delete of an organization that goes. `inDelete` runs from
-   * `user.beforeDelete` (plan 12a Task 11 round 2).
+   * `user.beforeDelete` (plan 12a Task 11 round 2). `inVerify` runs from
+   * `user.beforeVerify`, and `verified` holds the user ids of
+   * `user.afterVerify` (plan 12a Task 18).
    */
-  function deleteWorld() {
+  function deleteWorld(uniformSignUp = true) {
     const sent: MailMessage[] = [];
     const ended: string[] = [];
+    const verified: string[] = [];
     const probes: Record<
       | "inSignIn"
       | "afterSessionCheck"
       | "afterRecount"
       | "afterOwnMembers"
       | "afterOrganizationMembers"
-      | "inDelete",
+      | "inDelete"
+      | "inVerify",
       (() => Promise<void>) | null
     > = {
       inSignIn: null,
@@ -1053,6 +1057,7 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
       afterOwnMembers: null,
       afterOrganizationMembers: null,
       inDelete: null,
+      inVerify: null,
     };
     const take = (name: keyof typeof probes) => {
       const p = probes[name];
@@ -1106,7 +1111,7 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
       storage,
       limiter: OPEN,
       organizations: {},
-      password: {},
+      password: { uniformSignUp },
       mail: {
         send: async (m) => {
           sent.push(m);
@@ -1124,6 +1129,12 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
         user: {
           beforeDelete: async () => {
             await take("inDelete")?.();
+          },
+          beforeVerify: async () => {
+            await take("inVerify")?.();
+          },
+          afterVerify: ({ user }) => {
+            verified.push(user.id);
           },
         },
       },
@@ -1154,7 +1165,7 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
       const m = [...sent].reverse().find((x) => x.to === email && /token=/.test(x.text));
       return decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1] ?? "");
     };
-    return { auth, sent, ended, probes, linkFor, linkTo, signIn, codeOf };
+    return { auth, sent, ended, verified, probes, linkFor, linkTo, signIn, codeOf };
   }
 
   it("a delete that commits inside a sign-in's transaction undoes the session and the identity", async () => {
@@ -1176,6 +1187,44 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
         status: 409,
       });
       expect(deleted).toEqual({ ok: true, value: { ok: true } });
+      expect(await rowsOf(me.user.id)).toEqual(NONE);
+    }
+  }, 60_000);
+
+  it("a delete that commits inside user.beforeVerify undoes the claim: conflict, no afterVerify, and no row of the user stays (plan 12a Task 18)", async () => {
+    // The hook runs before the claim's first write, so the claim holds no
+    // lock, and the delete on another connection commits. The claim's read
+    // of the user row after its session insert then undoes the claim. A
+    // hook after the hold of the user row would make the delete wait for
+    // the claim's commit: the claim would answer ok.
+    const w = deleteWorld(false);
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `claim-${round}@example.com`;
+      const up = await w.auth.api.password?.signUp({
+        email,
+        password: "correct horse battery",
+        ip: null,
+        userAgent: null,
+      });
+      if (!up?.ok || !("token" in up.value)) throw new Error("no sign-up session");
+      const me = await w.auth.api.getSession(up.value.token);
+      if (!me) throw new Error("no session");
+      expect(me.user.emailVerified).toBe(false);
+      const link = await w.linkFor(email);
+      let deleting: ReturnType<typeof w.auth.api.user.delete> | null = null;
+      let deleted: unknown = null;
+      w.probes.inVerify = async () => {
+        deleting = w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+        deleted = await Promise.race([
+          deleting,
+          new Promise((r) => setTimeout(() => r("the delete waited"), HOLD_MS * 5)),
+        ]);
+      };
+      const claim = await w.auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+      expect(deleted).toEqual({ ok: true, value: { ok: true } });
+      expect(claim).toEqual({ ok: false, code: "conflict", status: 409 });
+      await deleting;
+      expect(w.verified).toEqual([]);
       expect(await rowsOf(me.user.id)).toEqual(NONE);
     }
   }, 60_000);

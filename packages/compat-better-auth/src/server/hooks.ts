@@ -409,6 +409,12 @@ function sessionHooksOf(create: SessionCreateHooks | undefined): SessionHooks {
  * inside its deleteUser (dist/api/routes/update-user.mjs:340 to :346 and
  * dist/db/with-hooks.mjs:115 to :145, read 2026-10-17). The `request`
  * argument is undefined: core's hook carries no request.
+ * `emailVerification.beforeEmailVerification` and `afterEmailVerification`
+ * map to `user.beforeVerify` and `user.afterVerify`. Better Auth 1.7.2
+ * calls them at its verify link only (dist/api/routes/email-verification.mjs
+ * lines 294 and 296, read 2026-10-17). Core calls them on each path that
+ * proves the address of an unverified user. A throw in the after hook is
+ * logged, and the verify stands; Better Auth answers the error.
  */
 function userHooksOf(options: BetterAuthOptions): UserHooks {
   const db = options.databaseHooks?.user;
@@ -464,6 +470,16 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
   }
   const updateAfter = db?.update?.after;
   if (updateAfter) out.afterUpdate = async (e) => updateAfter(toUser(e.user), null);
+  const verifyBefore = options.emailVerification?.beforeEmailVerification;
+  if (verifyBefore)
+    out.beforeVerify = async (e) => {
+      await refusingApiErrors(() => verifyBefore(toUser(e.user)));
+    };
+  const verifyAfter = options.emailVerification?.afterEmailVerification;
+  if (verifyAfter)
+    out.afterVerify = async (e) => {
+      await verifyAfter(toUser(e.user));
+    };
   const beforeDeletes: ((u: User) => unknown)[] = [];
   const dbBefore = db?.delete?.before;
   if (del?.beforeDelete) beforeDeletes.push(del.beforeDelete);

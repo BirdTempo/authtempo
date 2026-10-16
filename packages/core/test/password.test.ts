@@ -16,7 +16,7 @@ import { resolveSocialUser } from "../src/engine/social.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "../src/seams/password-hash.js";
 import type { StorageAdapter, Where } from "../src/storage/port.js";
-import { makeAuth, post, tokenFromMail } from "./helpers.js";
+import { makeAuth, noVerifyHooks, post, tokenFromMail } from "./helpers.js";
 import {
   FAST,
   pwAuth,
@@ -106,6 +106,7 @@ describe("passwordSignUp", () => {
       "google",
       { subject: "g-1", email: EMAIL, emailVerified: false, name: null, image: null },
       auth.clock.now(),
+      noVerifyHooks("social"),
     );
     if (!social.ok) throw new Error(social.code);
     expect(social.value.emailVerified).toBe(false);
@@ -908,6 +909,7 @@ describe("requestPasswordReset and resetPassword", () => {
       "google",
       { subject: "g-1", email: EMAIL, emailVerified: false, name: null, image: null },
       auth.clock.now(),
+      noVerifyHooks("social"),
     );
     if (!social.ok) throw new Error(social.code);
     const claimant = await auth.storage.findOne("user", [

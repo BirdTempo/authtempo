@@ -17,7 +17,7 @@ import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/c
 import type { ModelName, UserRow } from "../src/schema.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { d1Like } from "./d1-like.js";
-import { makeAuth, tokenFromMail } from "./helpers.js";
+import { makeAuth, noVerifyHooks, tokenFromMail } from "./helpers.js";
 import { FAST, sessionOnly, upSession } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, socialAuth } from "./social-helpers.js";
 
@@ -321,6 +321,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
         image: null,
       },
       now,
+      noVerifyHooks("social"),
     );
     if (!claim.ok) throw new Error("no claimant");
     const userId = claim.value.id;
@@ -419,6 +420,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       "google",
       { subject: "attacker", email: EMAIL, emailVerified: false, name: null, image: null },
       now,
+      noVerifyHooks("social"),
     );
     if (!claim.ok) throw new Error("no claimant");
     const userId = claim.value.id;
@@ -636,8 +638,12 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       delete: (m, w) => a.delete(m, w),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
-    const r = await findOrCreateUserByEmail(wrap(inner), EMAIL, now, (tx, u) =>
-      createSession(auth.config, { userId: u.id, ip: null, userAgent: null }, tx),
+    const r = await findOrCreateUserByEmail(
+      wrap(inner),
+      EMAIL,
+      now,
+      noVerifyHooks("magic_link"),
+      (tx, u) => createSession(auth.config, { userId: u.id, ip: null, userAgent: null }, tx),
     );
     expect(missed).toBe(true);
     expect(r.created).toBe(false);
@@ -659,6 +665,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       "google",
       { subject: "attacker", email: EMAIL, emailVerified: false, name: null, image: null },
       now,
+      noVerifyHooks("social"),
     );
     if (!claim.ok) throw new Error("no claimant");
     const userId = claim.value.id;
@@ -723,6 +730,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       "google",
       { subject: "attacker", email: EMAIL, emailVerified: false, name: null, image: null },
       now,
+      noVerifyHooks("social"),
     );
     if (!claim.ok) throw new Error("no claimant");
     const s = await started(auth);
@@ -994,6 +1002,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
             "google",
             { subject: "g-1", email: EMAIL, emailVerified: false, name: null, image: null },
             auth.clock.now(),
+            noVerifyHooks("social"),
           );
           if (!social.ok) throw new Error(social.code);
           return null;

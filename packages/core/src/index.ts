@@ -86,6 +86,7 @@ export {
   type UserHooks,
   type UserPatch,
   type UserUpdateVia,
+  type UserVerifyVia,
 } from "./engine/hooks.js";
 export type { IdentityEntry, IdentityList, IdentityUnlink } from "./engine/identities.js";
 export type { InvitationSummary } from "./engine/invitations.js";

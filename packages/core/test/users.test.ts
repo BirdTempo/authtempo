@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { VerifySteps } from "../src/engine/create-steps.js";
 import {
   claimEmail,
   findOrCreateUserByEmail,
@@ -8,6 +9,7 @@ import {
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
+import { noVerifyHooks } from "./helpers.js";
 
 /**
  * A wrapper whose first user read inside a transaction misses. On that miss
@@ -59,10 +61,20 @@ describe("findOrCreateUserByEmail", () => {
   it("creates a verified user with an email identity, once", async () => {
     const db = createMemoryAdapter();
     const now = new Date("2026-01-01T00:00:00Z");
-    const first = await findOrCreateUserByEmail(db, "ada@example.com", now);
+    const first = await findOrCreateUserByEmail(
+      db,
+      "ada@example.com",
+      now,
+      noVerifyHooks("magic_link"),
+    );
     expect(first.created).toBe(true);
     expect(first.user.emailVerified).toBe(true);
-    const second = await findOrCreateUserByEmail(db, "ada@example.com", now);
+    const second = await findOrCreateUserByEmail(
+      db,
+      "ada@example.com",
+      now,
+      noVerifyHooks("magic_link"),
+    );
     expect(second.created).toBe(false);
     expect(second.user.id).toBe(first.user.id);
     expect(await db.findMany("user", [])).toHaveLength(1);
@@ -85,7 +97,12 @@ describe("findOrCreateUserByEmail", () => {
       createdAt: now,
       updatedAt: now,
     });
-    const { user, created } = await findOrCreateUserByEmail(db, "ada@example.com", now);
+    const { user, created } = await findOrCreateUserByEmail(
+      db,
+      "ada@example.com",
+      now,
+      noVerifyHooks("magic_link"),
+    );
     expect(created).toBe(false);
     expect(user.emailVerified).toBe(true);
     expect(user.name).toBe("Ada");
@@ -95,8 +112,8 @@ describe("findOrCreateUserByEmail", () => {
     const db = createMemoryAdapter();
     const now = new Date("2026-01-01T00:00:00Z");
     const [a, b] = await Promise.all([
-      findOrCreateUserByEmail(db, "ada@example.com", now),
-      findOrCreateUserByEmail(db, "ada@example.com", now),
+      findOrCreateUserByEmail(db, "ada@example.com", now, noVerifyHooks("magic_link")),
+      findOrCreateUserByEmail(db, "ada@example.com", now, noVerifyHooks("magic_link")),
     ]);
     expect(a.user.id).toBe(b.user.id);
     expect([a.created, b.created].sort()).toEqual([false, true]);
@@ -120,6 +137,7 @@ describe("findOrCreateUserByEmail", () => {
       concurrentWinner(real, winner),
       "ada@example.com",
       now,
+      noVerifyHooks("magic_link"),
     );
     expect(created).toBe(false);
     expect(user.id).toBe("u-winner");
@@ -155,7 +173,12 @@ describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input
       updatedAt: now,
     });
     expect(await storage.findMany("identity", [])).toHaveLength(0);
-    const { user, created } = await findOrCreateUserByEmail(storage, "ada@example.com", now);
+    const { user, created } = await findOrCreateUserByEmail(
+      storage,
+      "ada@example.com",
+      now,
+      noVerifyHooks("magic_link"),
+    );
     expect(created).toBe(false);
     expect(user.id).toBe("01USER");
     const identities = await storage.findMany("identity", []);
@@ -165,10 +188,19 @@ describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input
       provider: "email",
       subject: "ada@example.com",
     });
-    await findOrCreateUserByEmail(storage, "ada@example.com", now);
+    await findOrCreateUserByEmail(storage, "ada@example.com", now, noVerifyHooks("magic_link"));
     expect(await storage.findMany("identity", [])).toHaveLength(1);
   });
 });
+
+/** The verify steps after `user.beforeVerify` ran for the user, as each flow runs it before its claim. */
+async function checkedFor(storage: StorageAdapter, userId: string): Promise<VerifySteps> {
+  const user = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+  if (!user) throw new Error(`no user ${userId}`);
+  const verified = noVerifyHooks("magic_link");
+  await verified.before(user);
+  return verified;
+}
 
 describe("claimEmail covers passkeys (plan 4 input)", () => {
   it("deletes the user's passkeys and pending passkey challenges", async () => {
@@ -238,7 +270,8 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       ...row,
       secretVersion: 1,
     });
-    await storage.transaction((tx) => claimEmail(tx, "U1", null, now));
+    const verified = await checkedFor(storage, "U1");
+    await storage.transaction((tx) => claimEmail(tx, "U1", null, now, verified));
     expect((await storage.findMany("passkey", [])).map((p) => p.id)).toEqual(["P2"]);
     expect((await storage.findMany("verification", [])).map((v) => v.id)).toEqual(["V2"]);
     expect(
@@ -288,7 +321,8 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
       ...row,
       secretVersion: 1,
     });
-    await storage.transaction((tx) => claimEmail(tx, "U1", null, now));
+    const verified = await checkedFor(storage, "U1");
+    await storage.transaction((tx) => claimEmail(tx, "U1", null, now, verified));
     expect((await storage.findMany("verification", [])).map((v) => v.id).sort()).toEqual([
       "H2",
       "H3",
@@ -322,13 +356,15 @@ describe("claimEmail and the password row (plan 8)", () => {
 
   it("deletes the user's password row when nothing is kept", async () => {
     const { storage, now } = await unverifiedWithPassword();
-    await storage.transaction((tx) => claimEmail(tx, "u1", null, now));
+    const verified = await checkedFor(storage, "u1");
+    await storage.transaction((tx) => claimEmail(tx, "u1", null, now, verified));
     expect(await storage.findMany("password", [...ofUser])).toEqual([]);
   });
 
   it("keeps the password row that keep.passwordId names", async () => {
     const { storage, now } = await unverifiedWithPassword();
-    await storage.transaction((tx) => claimEmail(tx, "u1", { passwordId: "p1" }, now));
+    const verified = await checkedFor(storage, "u1");
+    await storage.transaction((tx) => claimEmail(tx, "u1", { passwordId: "p1" }, now, verified));
     expect(
       await storage.findOne("password", [{ field: "id", op: "eq", value: "p1" }]),
     ).not.toBeNull();
@@ -337,6 +373,7 @@ describe("claimEmail and the password row (plan 8)", () => {
   it("deletes the password rows before the sessions", async () => {
     const { storage, now } = await unverifiedWithPassword();
     const order: string[] = [];
+    const verified = await checkedFor(storage, "u1");
     await storage.transaction((tx) => {
       const recording: StorageAdapter = {
         ...tx,
@@ -345,7 +382,7 @@ describe("claimEmail and the password row (plan 8)", () => {
           return tx.delete(m, w);
         },
       };
-      return claimEmail(recording, "u1", null, now);
+      return claimEmail(recording, "u1", null, now, verified);
     });
     expect(order.indexOf("password")).toBeGreaterThanOrEqual(0);
     expect(order.indexOf("password")).toBeLessThan(order.indexOf("session"));
@@ -357,6 +394,7 @@ describe("claimEmail and the password row (plan 8)", () => {
     // passes them; this test records each statement.
     const { storage, now } = await unverifiedWithPassword();
     const order: string[] = [];
+    const verified = await checkedFor(storage, "u1");
     await storage.transaction((tx) => {
       const recording: StorageAdapter = {
         ...tx,
@@ -381,7 +419,7 @@ describe("claimEmail and the password row (plan 8)", () => {
           return tx.delete(m, w);
         },
       };
-      return claimEmail(recording, "u1", null, now);
+      return claimEmail(recording, "u1", null, now, verified);
     });
     expect(order[0]).toBe(`update:user:["emailVerified","updatedAt"]`);
     expect(order.filter((x) => x.startsWith("update:"))).toHaveLength(1);
@@ -459,5 +497,48 @@ describe("validUserName (exported for the importer, plan 9b)", () => {
     ["an object", { length: 3 }],
   ])("refuses %s, which is not a string", (_, value) => {
     expect(validUserName(value as unknown as string)).toBe(false);
+  });
+});
+
+describe("claimEmail needs user.beforeVerify first (plan 12a, Task 18)", () => {
+  async function unverified() {
+    const storage = createMemoryAdapter();
+    const now = new Date("2026-01-01T00:00:00.000Z");
+    for (const id of ["u1", "u2"])
+      await storage.create("user", {
+        id,
+        email: `${id}@example.com`,
+        emailVerified: false,
+        name: null,
+        image: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    return { storage, now };
+  }
+
+  it("throws and writes nothing when before did not run, or ran for another user", async () => {
+    const { storage, now } = await unverified();
+    const message = "authtempo: user.beforeVerify did not run before the claim";
+    await expect(
+      storage.transaction((tx) => claimEmail(tx, "u1", null, now, noVerifyHooks("magic_link"))),
+    ).rejects.toThrow(message);
+    const other = await checkedFor(storage, "u2");
+    await expect(
+      storage.transaction((tx) => claimEmail(tx, "u1", null, now, other)),
+    ).rejects.toThrow(message);
+    expect((await storage.findMany("user", [])).map((u) => u.emailVerified)).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  it("throws after begin, which forgets the user of an attempt that rolled back", async () => {
+    const { storage, now } = await unverified();
+    const verified = await checkedFor(storage, "u1");
+    verified.begin();
+    await expect(
+      storage.transaction((tx) => claimEmail(tx, "u1", null, now, verified)),
+    ).rejects.toThrow("authtempo: user.beforeVerify did not run before the claim");
   });
 });

@@ -2,7 +2,7 @@ import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
-import type { CreateSteps } from "./create-steps.js";
+import type { CreateSteps, VerifySteps } from "./create-steps.js";
 import { stopWith } from "./hooks.js";
 import { endSessions } from "./sessions.js";
 
@@ -115,15 +115,19 @@ export interface ClaimKeep {
  * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
- * session.afterEnd after the commit (plan 9d).
+ * session.afterEnd after the commit (plan 9d). `verified` is required, so
+ * the type check finds each caller. It throws when the caller did not run
+ * `user.beforeVerify` for this user (plan 12a, Task 18).
  */
 export async function claimEmail(
   tx: StorageAdapter,
   userId: string,
   keep: ClaimKeep | null,
   now: Date,
+  verified: VerifySteps,
   ended?: SessionRow[],
 ): Promise<void> {
+  verified.claimed(userId);
   // First, so a concurrent session insert for this user sees the verified flag and undoes itself (see the conditional update after each session insert).
   await tx.update("user", [{ field: "id", op: "eq", value: userId }], {
     emailVerified: true,
@@ -262,11 +266,13 @@ export function findOrCreateUserByEmail(
   storage: StorageAdapter,
   email: string,
   now: Date,
+  verified: VerifySteps,
 ): Promise<{ user: UserRow; created: boolean }>;
 export function findOrCreateUserByEmail<T>(
   storage: StorageAdapter,
   email: string,
   now: Date,
+  verified: VerifySteps,
   after: AfterResolve<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
@@ -276,6 +282,7 @@ export async function findOrCreateUserByEmail<T>(
   storage: StorageAdapter,
   email: string,
   now: Date,
+  verified: VerifySteps,
   after?: AfterResolve<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
@@ -283,7 +290,16 @@ export async function findOrCreateUserByEmail<T>(
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await createOrFindInTransaction(storage, email, now, after, ended, before, steps);
+      return await createOrFindInTransaction(
+        storage,
+        email,
+        now,
+        verified,
+        after,
+        ended,
+        before,
+        steps,
+      );
     } catch (err) {
       // A concurrent call created the user between our read and our create.
       // Run the resolution once more, outside the failed transaction, so it
@@ -306,6 +322,7 @@ function createOrFindInTransaction<T>(
   storage: StorageAdapter,
   email: string,
   now: Date,
+  verified: VerifySteps,
   after: AfterResolve<T> | undefined,
   ended: SessionRow[] | undefined,
   before: BeforeResolveWrite | undefined,
@@ -316,7 +333,16 @@ function createOrFindInTransaction<T>(
     if (ended) ended.length = 0;
     // A retry forgets the user and the identity of the attempt that rolled back.
     steps?.begin();
-    const { user, created } = await resolveInTransaction(tx, email, now, ended, before, steps);
+    verified.begin();
+    const { user, created } = await resolveInTransaction(
+      tx,
+      email,
+      now,
+      verified,
+      ended,
+      before,
+      steps,
+    );
     if (!after) return { user, created };
     return { user, created, after: await after(tx, user, created) };
   });
@@ -326,6 +352,7 @@ async function resolveInTransaction(
   tx: StorageAdapter,
   email: string,
   now: Date,
+  verified: VerifySteps,
   ended: SessionRow[] | undefined,
   before: BeforeResolveWrite | undefined,
   steps: CreateSteps | undefined,
@@ -335,7 +362,9 @@ async function resolveInTransaction(
     const resolved = existing.emailVerified
       ? existing
       : { ...existing, emailVerified: true, updatedAt: now };
-    // Before the identity repair and the claim: the D1 undo (`BeforeResolveWrite`).
+    // `user.beforeVerify`, then the session hook, before the identity repair
+    // and the claim: the D1 undo (`BeforeResolveWrite`).
+    if (!existing.emailVerified) await verified.before(existing);
     if (before) await before(tx, resolved, false);
     // An isolate that died between the user create and the identity
     // create left a user with no email identity. Repair it here. A
@@ -343,7 +372,7 @@ async function resolveInTransaction(
     // outside this transaction.
     await ensureEmailIdentity(tx, existing.id, email, now);
     if (!existing.emailVerified) {
-      await claimEmail(tx, existing.id, null, now, ended);
+      await claimEmail(tx, existing.id, null, now, verified, ended);
     }
     return { user: resolved, created: false };
   }

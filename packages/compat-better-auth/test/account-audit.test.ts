@@ -1,5 +1,12 @@
-import { createMemoryAdapter, createMemoryLimiter, systemClock } from "@authtempo/core";
+import {
+  createMemoryAdapter,
+  createMemoryLimiter,
+  createPbkdf2PasswordHash,
+  systemClock,
+} from "@authtempo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { APIError } from "../src/errors.js";
+import { betterAuthPasswordHash } from "../src/hash.js";
 import { magicLink } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
@@ -148,5 +155,77 @@ describe("Task 17 deferSessionRefresh", () => {
     expect(Object.keys((await read.json()) as object).sort()).toEqual(["session", "user"]);
     expect(await off.expiry()).toBe(Date.now() + 7 * DAY_MS);
     expect(await (await off.get("/get-session", "")).json()).toBeNull();
+  });
+});
+
+describe("Task 18 email verification callbacks", () => {
+  it("maps beforeEmailVerification and afterEmailVerification to the two points", async () => {
+    const options = { baseURL: BASE, secret: SECRET, database: memoryDatabase() };
+    expect(
+      checkOptions({
+        ...options,
+        emailVerification: {
+          beforeEmailVerification: "x" as never,
+          afterEmailVerification: 1 as never,
+        },
+      }).refusals.sort(),
+    ).toEqual([
+      "emailVerification.afterEmailVerification: expected a function",
+      "emailVerification.beforeEmailVerification: expected a function",
+    ]);
+    const calls: unknown[][] = [];
+    const verifyLinks: string[] = [];
+    const refuse = { on: false };
+    const s = instance({
+      emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
+      emailVerification: {
+        sendVerificationEmail: async ({ url }) => void verifyLinks.push(url),
+        beforeEmailVerification: async (user, request) => {
+          calls.push(["before", user.email, user.emailVerified, user.name, request]);
+          if (refuse.on) throw new APIError("FORBIDDEN", { message: "Not yet." });
+        },
+        afterEmailVerification: async (user, request) => {
+          calls.push(["after", user.email, user.emailVerified, user.name, request]);
+        },
+      },
+      authtempo: {
+        passwordHash: betterAuthPasswordHash({
+          pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }),
+        }),
+      },
+    });
+    const signUp = (email: string) =>
+      s.auth.api.signUpEmail({ body: { email, password: "correct horse battery", name: "" } });
+    // Better Auth's user shape: an empty name for no name.
+    // Better Auth's own place: the verify link. The GET page changes
+    // nothing; its button posts the token. Core's hook carries no request.
+    await signUp("ada@example.com");
+    const link = new URL(verifyLinks.at(-1) ?? "");
+    const verified = await s.auth.handler(
+      new Request(`${link.origin}${link.pathname}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ token: link.searchParams.get("token") }),
+      }),
+    );
+    expect(await verified.json()).toEqual({ verified: true });
+    expect(calls).toEqual([
+      ["before", "ada@example.com", false, "", undefined],
+      ["after", "ada@example.com", true, "", undefined],
+    ]);
+    // Core calls them on each path that proves the address, the magic link too.
+    calls.length = 0;
+    await signUp("bob@example.com");
+    await s.signedIn("bob@example.com");
+    expect(calls).toEqual([
+      ["before", "bob@example.com", false, "", undefined],
+      ["after", "bob@example.com", true, "", undefined],
+    ]);
+    // A thrown APIError refuses with core's hook_refused, and no after call follows.
+    calls.length = 0;
+    refuse.on = true;
+    await signUp("cy@example.com");
+    await expect(s.signedIn("cy@example.com")).rejects.toThrow("the magic link answered 403");
+    expect(calls).toEqual([["before", "cy@example.com", false, "", undefined]]);
   });
 });

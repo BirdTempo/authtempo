@@ -415,6 +415,13 @@ export interface BetterAuthOptions {
     sendOnSignIn?: boolean;
     autoSignInAfterVerification?: boolean;
     expiresIn?: number;
+    /**
+     * Core's `user.beforeVerify` and `user.afterVerify` (plan 12a). Better
+     * Auth 1.7.2 calls them at its verify link only. Core calls them on each
+     * path that proves the address of an unverified user.
+     */
+    beforeEmailVerification?: (user: User, request?: Request) => HookResult<void>;
+    afterEmailVerification?: (user: User, request?: Request) => HookResult<void>;
   };
   socialProviders?: {
     google?: { clientId: string; clientSecret: string } & ProviderSignUp;

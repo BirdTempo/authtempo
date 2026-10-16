@@ -504,6 +504,10 @@ const TOP: Record<string, Rule> = {
     ),
     autoSignInAfterVerification: only(true, "core signs the person in at the verify link"),
     expiresIn: MINUTES,
+    // Plan 12a: core's user.beforeVerify and user.afterVerify
+    // (dist/api/routes/email-verification.mjs lines 294 and 296, read 2026-10-17).
+    beforeEmailVerification: fn,
+    afterEmailVerification: fn,
   }),
   socialProviders: (v, p, out) => {
     if (typeof v !== "object" || v === null) {

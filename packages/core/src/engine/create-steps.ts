@@ -8,6 +8,7 @@ import {
   runBefore,
   stopWith,
   type UserCreateVia,
+  type UserVerifyVia,
 } from "./hooks.js";
 import { signUpRule, validImageUrl, validUserName } from "./users.js";
 
@@ -105,6 +106,55 @@ export function createSteps(
           { user, identity: linked.identity, via: "sign_in" },
           user.id,
         );
+    },
+  };
+}
+
+/**
+ * The verify hooks of a flow that can prove the address of an existing
+ * unverified user (plan 12a, Task 18). The flow makes one object before its
+ * retry loop. The transaction calls `begin` at each attempt. The flow calls
+ * `before` with the stored, unverified row before its first write, and
+ * before `identity.beforeLink` and the session hook. `claimEmail` calls
+ * `claimed`. The flow calls `after` after its commit, with the user it
+ * answers, before `identity.afterLink` and the session hook.
+ */
+export interface VerifySteps {
+  begin(): void;
+  before(user: UserRow): Promise<void>;
+  /**
+   * Called by `claimEmail`. Throws when `before` did not run for this user
+   * in this attempt, so a test of each path finds a flow that skipped it.
+   */
+  claimed(userId: string): void;
+  /** Fires `afterVerify` once, when this attempt claimed `user`. */
+  after(user: UserRow): Promise<void>;
+}
+
+export function verifySteps(
+  config: Pick<ResolvedConfig, "hooks">,
+  via: UserVerifyVia,
+): VerifySteps {
+  const hooks = config.hooks;
+  let checked: string | null = null;
+  let claimed: string | null = null;
+  return {
+    begin() {
+      checked = null;
+      claimed = null;
+    },
+    async before(user) {
+      await runBefore("user.beforeVerify", hooks.user.beforeVerify, { user, via });
+      checked = user.id;
+    },
+    claimed(userId) {
+      if (checked !== userId)
+        throw new Error("authtempo: user.beforeVerify did not run before the claim");
+      claimed = userId;
+    },
+    async after(user) {
+      if (claimed === user.id)
+        await runAfter("user.afterVerify", hooks.user.afterVerify, { user, via }, user.id);
     },
   };
 }

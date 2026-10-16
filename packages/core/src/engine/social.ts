@@ -24,7 +24,7 @@ import {
   stringClaim,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
-import { type CreateSteps, createSteps } from "./create-steps.js";
+import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, type IdentitySummary, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -327,12 +327,15 @@ export async function completeSocial(
   );
   // The user and identity hooks, with the sign-up rule first (plan 12a).
   const made = createSteps(config, "social", { signUpRule: true });
+  // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
+  const verified = verifySteps(config, "social");
   const resolved = await hookGuard(() =>
     resolveSocialUser(
       config.storage,
       provider.name,
       bounded,
       now,
+      verified,
       (tx) => steps.write(tx),
       ended,
       steps.before,
@@ -342,6 +345,7 @@ export async function completeSocial(
   if (!resolved.ok) return resolved;
   const { user, after } = resolved.value;
   // After the commit, before the session hook and before a challenge answer (plan 12a).
+  await verified.after(user);
   await made.after(user);
   await sessionsEnded(config, ended, "claim");
   if (after.kind === "challenge") return ok({ ...after.pending, next, user });
@@ -662,12 +666,14 @@ export function resolveSocialUser(
   provider: string,
   profile: SocialProfile,
   now: Date,
+  verified: VerifySteps,
 ): Promise<Result<UserRow>>;
 export function resolveSocialUser<T extends AfterWrite>(
   storage: StorageAdapter,
   provider: string,
   profile: SocialProfile,
   now: Date,
+  verified: VerifySteps,
   after: (tx: StorageAdapter, user: UserRow) => Promise<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
@@ -678,6 +684,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
   provider: string,
   profile: SocialProfile,
   now: Date,
+  verified: VerifySteps,
   after?: (tx: StorageAdapter, user: UserRow) => Promise<T>,
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
@@ -691,11 +698,13 @@ export async function resolveSocialUser<T extends AfterWrite>(
           if (ended) ended.length = 0;
           // A retry forgets the user and the identity of the attempt that rolled back.
           steps?.begin();
+          verified.begin();
           const linked = await linkInTransaction(
             tx,
             provider,
             profile,
             now,
+            verified,
             ended,
             before ? (user, created) => before(tx, user, created) : undefined,
             steps,
@@ -764,6 +773,7 @@ async function linkInTransaction(
   provider: string,
   profile: SocialProfile,
   now: Date,
+  verified: VerifySteps,
   ended: SessionRow[] | undefined,
   before: ((user: UserRow, created: boolean) => Promise<void>) | undefined,
   steps: CreateSteps | undefined,
@@ -787,8 +797,10 @@ async function linkInTransaction(
     if (!user.emailVerified && proved) {
       const claimed = { ...user, emailVerified: true, updatedAt: now };
       const filled = filledUser(claimed, profile, now);
+      // `user.beforeVerify`, then the session hook, before the first write (plan 12a).
+      await verified.before(user);
       if (before) await before(filled, false);
-      await claimEmail(tx, user.id, { identityId: identity.id }, now, ended);
+      await claimEmail(tx, user.id, { identityId: identity.id }, now, verified, ended);
       await ensureEmailIdentity(tx, user.id, user.email, now);
       await writeFill(tx, claimed, filled);
       return ok({ user: filled, trustedIdentityId: null, created: false });
@@ -817,10 +829,12 @@ async function linkInTransaction(
       : { ...existing, emailVerified: true, updatedAt: now };
     const filled = filledUser(current, profile, now);
     const linking: IdentitySummary = { provider, subject: profile.subject };
-    // `identity.beforeLink`, then the session hook, before the first write (plan 12a).
+    // `user.beforeVerify`, `identity.beforeLink`, then the session hook,
+    // before the first write (plan 12a).
+    if (!existing.emailVerified) await verified.before(existing);
     if (steps) await steps.identity(filled, linking);
     if (before) await before(filled, false);
-    if (!existing.emailVerified) await claimEmail(tx, existing.id, null, now, ended);
+    if (!existing.emailVerified) await claimEmail(tx, existing.id, null, now, verified, ended);
     await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
     await ensureEmailIdentity(tx, existing.id, email, now);
     await writeFill(tx, current, filled);
