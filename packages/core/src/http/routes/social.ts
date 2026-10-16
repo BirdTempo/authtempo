@@ -43,7 +43,9 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
   const bindPath = `${config.basePath}/social`;
   const failed = (code: string) => {
     const res = redirect(authErrorUrl(config, code));
-    // An invalid_token answer means no row was consumed for this browser.
+    // An invalid_token answer keeps the binding cookie: a state of another
+    // tab, or no state, consumes no row of this browser's flow. A link
+    // refused for its session spent its state, and the cookie expires.
     // An in-flight flow in another tab keeps its cookie.
     if (code !== "invalid_token") {
       res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));

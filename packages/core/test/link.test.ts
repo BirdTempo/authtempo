@@ -44,7 +44,7 @@ afterEach(() => {
  */
 function world(extra: Partial<AuthConfig> = {}) {
   const jwtTokens: Record<string, FakeIdToken> = {};
-  const { fetchFn } = fakeFetch((call) =>
+  const { fetchFn, calls: tokenCalls } = fakeFetch((call) =>
     Response.json({
       id_token: call.form.code === "c" ? "idtok-default" : `idtok-${call.form.code}`,
       access_token: "at",
@@ -65,7 +65,7 @@ function world(extra: Partial<AuthConfig> = {}) {
   );
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const notices = () => auth.mail.filter((m) => m.subject === NOTICE);
-  return { auth, jwtTokens, handle, notices };
+  return { auth, jwtTokens, handle, notices, tokenCalls };
 }
 type World = ReturnType<typeof world>;
 type Session = ResolvedSession & { token: string };
@@ -198,6 +198,12 @@ describe("the link of a social identity (plan 12a, spec 8.15)", () => {
     events.length = 0;
     const me = await verifiedSession(w.auth);
     expect(await link(w, me)).toEqual({ ok: false, code: "identity_taken", status: 409 });
+    // The held identity answers before the address checks: a mismatched address too.
+    expect(await link(w, me, { email: "other@example.com" })).toEqual({
+      ok: false,
+      code: "identity_taken",
+      status: 409,
+    });
     expect((await googleOf(w, bob.user.id)).map((i) => i.subject)).toEqual(["g-1"]);
     expect(await googleOf(w, me.user.id)).toEqual([]);
     expect(events).toEqual([]);
@@ -270,8 +276,11 @@ describe("the link of a social identity (plan 12a, spec 8.15)", () => {
     await w.auth.storage.transaction((tx) =>
       endSessions(tx, [{ field: "id", op: "eq", value: me.session.id }], null),
     );
+    const calls = w.tokenCalls.length;
     expect(await finish(w, s, me.token)).toMatchObject({ ok: false, code: "invalid_token" });
     expect(await googleOf(w, me.user.id)).toEqual([]);
+    // The session check runs before the code exchange: no token call.
+    expect(w.tokenCalls.length).toBe(calls);
   });
 
   it("ends the link when the absolute cap ends the session during the provider step", async () => {
@@ -701,6 +710,20 @@ describe("the link routes (plan 12a)", () => {
     expect(res.headers.getSetCookie().some((c) => c.startsWith(`${COOKIE}=${me.token};`))).toBe(
       true,
     );
+  });
+
+  it("refuses a GET callback that carries a bearer header and no session cookie", async () => {
+    // A bearer must not stand in for the cookie: a provider's redirect carries none.
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const start = await w.handle(post("/auth/social/google/link", {}, cookie(me.token)));
+    const { url } = (await start.json()) as { url: string };
+    const done = await callback(w, url, {
+      cookie: `${BIND}=${bindOf(start)}`,
+      authorization: `Bearer ${me.token}`,
+    });
+    expect(done.headers.get("location")).toBe(`${BASE_URL}/?auth_error=invalid_token`);
+    expect(await googleOf(w, me.user.id)).toEqual([]);
   });
 
   it("redirects a refused link callback to auth_error, and clears the binding cookie as a sign-in does", async () => {
