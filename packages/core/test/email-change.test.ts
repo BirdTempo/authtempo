@@ -1375,7 +1375,9 @@ describe("the logs of the change of address (plan 12a)", () => {
     const s = await verifiedSession(auth, NEW);
     await requestEmailChange(auth.config, { session: s, newEmail: OTHER, method: "code" });
     const code = codeTo(auth, OTHER);
-    await verifyEmailChange(auth.config, { session: s, code: "000001", ip: null, userAgent: null });
+    // A guess that is wrong for every code (plan 12a final review L5): "000001" alone is right once in a million runs.
+    const wrong = code === "000001" ? "000002" : "000001";
+    await verifyEmailChange(auth.config, { session: s, code: wrong, ip: null, userAgent: null });
     await verifyEmailChange(auth.config, { session: s, code, ip: null, userAgent: null });
     const lines = log.mock.calls.map((c) => c.map(String).join(" "));
     expect(lines.length).toBeGreaterThanOrEqual(5);

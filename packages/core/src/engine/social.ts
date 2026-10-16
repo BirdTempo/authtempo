@@ -898,15 +898,23 @@ function filledUser(user: UserRow, profile: SocialProfile, now: Date): UserRow {
   return { ...user, ...patch, updatedAt: now };
 }
 
-/** Writes the fill of `filledUser`, or nothing when it filled nothing. */
+/**
+ * Writes the fill of `filledUser`, or nothing when it filled nothing. Each
+ * field is written only while it is still null (plan 12a fix wave, final
+ * review m1; spec 8.15 item 10): a profile update that commits between the
+ * flow's read and this write keeps its value. One write per field, so an
+ * update of the name does not stop the fill of an empty image.
+ */
 async function writeFill(tx: StorageAdapter, user: UserRow, filled: UserRow): Promise<void> {
-  // Only the fields the fill changed, as before plan 9d: the other field may hold a concurrent write.
-  const patch: Partial<Pick<UserRow, "name" | "image">> = {};
-  if (filled.name !== user.name) patch.name = filled.name;
-  if (filled.image !== user.image) patch.image = filled.image;
-  if (Object.keys(patch).length === 0) return;
-  await tx.update("user", [{ field: "id", op: "eq", value: user.id }], {
-    ...patch,
-    updatedAt: filled.updatedAt,
-  });
+  const byId = { field: "id", op: "eq", value: user.id } as const;
+  if (filled.name !== user.name)
+    await tx.update("user", [byId, { field: "name", op: "eq", value: null }], {
+      name: filled.name,
+      updatedAt: filled.updatedAt,
+    });
+  if (filled.image !== user.image)
+    await tx.update("user", [byId, { field: "image", op: "eq", value: null }], {
+      image: filled.image,
+      updatedAt: filled.updatedAt,
+    });
 }

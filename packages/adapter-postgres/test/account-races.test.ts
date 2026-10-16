@@ -1888,3 +1888,132 @@ describe("the mailed delete confirm on Postgres (plan 12a Task 20)", () => {
     expect(won.move, JSON.stringify(won)).toBeGreaterThan(0);
   }, 60_000);
 });
+
+describe("the social fill beside a profile update on Postgres (plan 12a fix wave, final review m1)", () => {
+  const UPDATE = { name: "Ada Lovelace", image: "https://img.example.com/ada.png" };
+  const FILL = { name: "Google Ada", picture: "https://lh3.example.com/ada.png" };
+
+  /** A verified user with a Google identity and no name or image; `inHook` runs in session.beforeCreate. */
+  async function fillWorld(inHook: { run: (() => Promise<void>) | null } = { run: null }) {
+    const sent: MailMessage[] = [];
+    const claims = new Map<string, Record<string, unknown>>();
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      social: {
+        google: { clientId: "gid", clientSecret: "gsecret" },
+        fetch: async (_url, init) =>
+          Response.json({
+            id_token: new URLSearchParams(String(init?.body ?? "")).get("code"),
+            access_token: "at",
+            token_type: "Bearer",
+          }),
+      },
+      jwt: {
+        verifyIdToken: async ({ token }) => claims.get(token) ?? {},
+        signES256: async () => "unused",
+      },
+      hooks: {
+        session: {
+          // Between the flow's read of the user and its hold of the row.
+          beforeCreate: async () => {
+            const run = inHook.run;
+            inHook.run = null;
+            await run?.();
+          },
+        },
+      },
+    });
+    let n = 0;
+    /** A Google sign-in of `email`; the provider answers `extra` beside the address. */
+    async function google(email: string, extra: Record<string, unknown>) {
+      const started = await auth.api.startSocial({ provider: "google", ip: null });
+      if (!started.ok) throw new Error(started.code);
+      const url = new URL(started.value.location);
+      const code = `code-${++n}`;
+      claims.set(code, {
+        sub: `g-${email}`,
+        email,
+        email_verified: true,
+        nonce: url.searchParams.get("nonce"),
+        ...extra,
+      });
+      const r = await auth.api.completeSocial({
+        provider: "google",
+        state: url.searchParams.get("state"),
+        code,
+        error: null,
+        bindToken: started.value.bindToken,
+        sessionToken: null,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+      if (!("token" in r.value)) throw new Error("the callback opened no session");
+      const s = await auth.api.getSession(r.value.token);
+      if (!s) throw new Error("no session");
+      return s;
+    }
+    const row = async (id: string) =>
+      (
+        await db.sql<{ name: string | null; image: string | null }[]>`
+        SELECT name, image FROM ta_user WHERE id = ${id}`
+      )[0];
+    const empty = (id: string) =>
+      db.sql`UPDATE ta_user SET name = NULL, image = NULL WHERE id = ${id}`;
+    return { auth, google, row, empty };
+  }
+
+  it("a profile update that commits between the fill's read and its write keeps its values", async () => {
+    const inHook: { run: (() => Promise<void>) | null } = { run: null };
+    const w = await fillWorld(inHook);
+    // The first sign-in creates the user with no name and no image.
+    const me = await w.google("ada@example.com", {});
+    expect(await w.row(me.user.id)).toEqual({ name: null, image: null });
+    let updated: unknown = null;
+    inHook.run = async () => {
+      updated = await w.auth.api.user.update({ session: me, ...UPDATE });
+    };
+    await w.google("ada@example.com", FILL);
+    expect(updated).toMatchObject({ ok: true });
+    expect(await w.row(me.user.id)).toEqual(UPDATE);
+  });
+
+  it("an update of the name alone keeps the name, and the fill still writes the empty image", async () => {
+    const inHook: { run: (() => Promise<void>) | null } = { run: null };
+    const w = await fillWorld(inHook);
+    const me = await w.google("ada@example.com", {});
+    inHook.run = async () => {
+      const r = await w.auth.api.user.update({ session: me, name: UPDATE.name });
+      if (!r.ok) throw new Error(r.code);
+    };
+    await w.google("ada@example.com", FILL);
+    expect(await w.row(me.user.id)).toEqual({ name: UPDATE.name, image: FILL.picture });
+  });
+
+  it("a profile update beside a social fill, a delay sweep: the update's values survive", async () => {
+    const w = await fillWorld();
+    const me = await w.google("ada@example.com", {});
+    const delayed = <T>(ms: number, run: () => Promise<T>) =>
+      new Promise<T>((done, failed) => {
+        setTimeout(() => run().then(done, failed), ms);
+      });
+    for (let delay = 0; delay < 12; delay++) {
+      await w.empty(me.user.id);
+      const [, updated] = await Promise.all([
+        w.google("ada@example.com", FILL),
+        delayed(delay, () => w.auth.api.user.update({ session: me, ...UPDATE })),
+      ]);
+      expect(updated.ok, `delay ${delay}`).toBe(true);
+      expect(await w.row(me.user.id), `delay ${delay}`).toEqual(UPDATE);
+    }
+  }, 60_000);
+});

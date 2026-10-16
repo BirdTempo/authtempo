@@ -115,7 +115,7 @@ Warning: a `secret` other than the app's value locks every user with the second 
 - `BetterAuthCompatError` at start: change each option in its list.
 - `relation "ta_limit" already exists`: the schema holds the tables of the Postgres adapter. Run the compatibility storage on a schema without them.
 - `no such column: issuer` on D1: the 1.7 file ran on older tables. Use the `d1-before-1.7` file.
-- [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link or an invitation from before the cutover. Send it again.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link, an invitation, or a delete link from before the cutover. Send it again.
 
 ## Next
 
