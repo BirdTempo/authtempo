@@ -12,7 +12,7 @@ import {
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { SessionRow, UserRow } from "../schema.js";
+import type { SessionRow, UserRow, VerificationPurpose } from "../schema.js";
 import {
   buildQuery,
   type ConfiguredProvider,
@@ -23,11 +23,19 @@ import {
   type SocialProfile,
   stringClaim,
 } from "../social/provider.js";
-import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { type CreateSteps, createSteps } from "./create-steps.js";
-import { hookGuard, type IdentitySummary } from "./hooks.js";
+import { requireFresh } from "./fresh.js";
+import { hookGuard, type IdentitySummary, runAfter, runBefore, stopWith } from "./hooks.js";
+import { sendNotice } from "./notices.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
-import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
+import {
+  endedList,
+  type ResolvedSession,
+  sessionIsLive,
+  sessionOpened,
+  sessionsEnded,
+} from "./sessions.js";
 import {
   type BeforeResolveWrite,
   ClaimRacedError,
@@ -44,6 +52,16 @@ export const OAUTH_STATE_PREFIX = "os_";
 const STATE_RE = /^os_[A-Za-z0-9_-]{43}$/;
 const STATE_TTL_MS = 10 * 60_000;
 const START_LIMIT = { seconds: 15 * 60, max: 30 };
+// Per 15 minutes, per user, after `social-start:ip` (plan 12a). A settings
+// page links one or two providers; 10 bounds a stolen fresh session.
+export const LINK_PER_USER = { seconds: 900, max: 10 };
+/**
+ * The state row of a link has its own purpose (plan 12a), as the codes of
+ * plan 12a Task 3 do. The purpose alone picks the branch of the callback,
+ * so a link state never opens a session, and a sign-in state never links.
+ */
+const LINK_STATE = "oauth-link-state";
+const STATE_PURPOSES: readonly VerificationPurpose[] = ["oauth-state", LINK_STATE];
 
 export interface SocialStart {
   provider: string;
@@ -72,6 +90,13 @@ export interface SocialComplete {
   userAgent: string | null;
   /** The clear `td_` token of a trusted device (plan 12c). Apple's form post carries no `Lax` cookie; the challenge page offers the device then. */
   trustDevice?: string | undefined;
+  /**
+   * The session token of the callback request's cookie, or null (plan 12a).
+   * A link callback needs the cookie of the session that started the link:
+   * a browser that signed out, or that signed in as another account, must
+   * not take the link. A sign-in callback does not read it.
+   */
+  sessionToken?: string | null | undefined;
 }
 
 interface StateData {
@@ -79,6 +104,13 @@ interface StateData {
   nonceHash: string;
   bindHash: string;
   next: string;
+  /** Set by `startLink` (plan 12a): the callback links to this user and this session, and opens no session. */
+  link?: LinkTarget;
+}
+
+interface LinkTarget {
+  userId: string;
+  sessionId: string;
 }
 
 function findProvider(config: ResolvedConfig, name: string): ConfiguredProvider | undefined {
@@ -101,16 +133,20 @@ function callbackUrl(config: ResolvedConfig, provider: { name: string }): string
  * Writes one verification row that holds everything the callback needs,
  * then builds the authorize URL. The row's hash fields let the callback
  * check the nonce and the binding cookie without storing their clear values.
+ * A link (plan 12a) writes its target into the row, under the link purpose.
  */
-export async function startSocial(
+async function beginSocial(
   config: ResolvedConfig,
   input: SocialStart,
+  link: LinkTarget | null,
 ): Promise<Result<SocialStarted>> {
   const entry = findProvider(config, input.provider);
   if (!entry) return fail("not_found");
   if (!(await config.limiter.allow(`social-start:ip:${ipKey(input.ip)}`, START_LIMIT))) {
     return fail("rate_limited");
   }
+  if (link && !(await config.limiter.allow(`social-link:user:${link.userId}`, LINK_PER_USER)))
+    return fail("rate_limited");
   // After the limit, so the limit bounds the discovery reads.
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
@@ -124,10 +160,11 @@ export async function startSocial(
     nonceHash: await sha256Hex(nonce),
     bindHash: await sha256Hex(bindToken),
     next: safeNext(input.next),
+    ...(link ? { link } : {}),
   };
   await config.storage.create("verification", {
     id: newId(now),
-    purpose: "oauth-state",
+    purpose: link ? LINK_STATE : "oauth-state",
     identifier: provider.name,
     valueHash: await sha256Hex(state),
     expiresAt: new Date(now.getTime() + STATE_TTL_MS),
@@ -152,6 +189,50 @@ export async function startSocial(
   return ok({ location: `${provider.authorizeUrl}?${query}`, bindToken });
 }
 
+/** The start of a social sign-in. */
+export function startSocial(
+  config: ResolvedConfig,
+  input: SocialStart,
+): Promise<Result<SocialStarted>> {
+  return beginSocial(config, input, null);
+}
+
+export interface SocialLinkStart {
+  provider: string;
+  session: ResolvedSession;
+  next?: string | undefined;
+  ip: string | null;
+}
+
+/**
+ * The start of a link (plan 12a, spec 8.15): a fresh session of a verified
+ * user adds a provider identity. An unverified user is a claim, and a claim
+ * deletes identities, so a claimant has nothing to keep. PKCE, the nonce,
+ * and the binding cookie are those of a sign-in. The checks run before the
+ * limits, so a refused start counts no try.
+ */
+export async function startLink(
+  config: ResolvedConfig,
+  input: SocialLinkStart,
+): Promise<Result<SocialStarted>> {
+  const { user, session } = input.session;
+  if (!user.emailVerified) return fail("email_unverified");
+  const fresh = requireFresh(config, session);
+  if (!fresh.ok) return fresh;
+  return beginSocial(
+    config,
+    { provider: input.provider, next: input.next, ip: input.ip },
+    { userId: user.id, sessionId: session.id },
+  );
+}
+
+/** The answer of a link callback: the identity is linked, and no session opened. */
+export interface SocialLinked {
+  linked: true;
+  next: string;
+  user: UserRow;
+}
+
 /**
  * Consumes the state row first, so a replayed callback fails before any
  * network call. Then binds the browser, exchanges the code, verifies the
@@ -160,7 +241,9 @@ export async function startSocial(
 export async function completeSocial(
   config: ResolvedConfig,
   input: SocialComplete,
-): Promise<Result<{ token: string; next: string; user: UserRow } | SignInChallenge>> {
+): Promise<
+  Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
+> {
   const entry = findProvider(config, input.provider);
   if (!entry) return fail("not_found");
   const state = input.state ?? "";
@@ -168,7 +251,7 @@ export async function completeSocial(
   const now = config.clock.now();
   const row = await config.storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: await sha256Hex(state) },
-    { field: "purpose", op: "eq", value: "oauth-state" },
+    { field: "purpose", op: "in", value: STATE_PURPOSES },
   ]);
   if (!row) return fail("invalid_token");
   const consumed = await config.storage.update(
@@ -194,6 +277,10 @@ export async function completeSocial(
   }
   if (input.error) return fail("oauth_denied");
   if (!input.code) return fail("oauth_failed");
+  // A link checks its session before any network call (plan 12a).
+  const link =
+    row.purpose === LINK_STATE ? await linkSession(config, entry, data, input, now) : null;
+  if (link && !link.ok) return link;
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
 
@@ -205,6 +292,17 @@ export async function completeSocial(
       : await userinfoProfile(config, provider, token);
   const bounded = profile ? boundProfile(profile, provider.name) : null;
   if (!bounded) return fail("oauth_failed");
+  // A link (plan 12a): no session opens, and no sign-in gate applies.
+  if (link)
+    return completeLink(
+      config,
+      provider.name,
+      bounded,
+      link.value,
+      safeNext(data.next),
+      input,
+      now,
+    );
 
   // The session or the challenge commits with the claim in one transaction,
   // so a claimant's in-flight callback cannot keep a session the claim deleted.
@@ -250,6 +348,132 @@ export async function completeSocial(
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "social");
   return ok({ token: after.token, next, user });
+}
+
+/** The session of a link's start, as `linkSession` read it. */
+interface HeldLink {
+  userId: string;
+  session: SessionRow;
+}
+
+/**
+ * The session of a link's start, read before the provider step's network
+ * call (plan 12a). The row must be live: a sign-out or a revoke since the
+ * start ends the link. The callback must carry the cookie of that session.
+ * Apple's callback is a cross-site form post, and a browser sends no `Lax`
+ * cookie with it, so with `cookie.sameSite: "Lax"` the binding cookie alone
+ * ties that callback to the browser.
+ */
+async function linkSession(
+  config: ResolvedConfig,
+  entry: ConfiguredProvider,
+  data: StateData,
+  input: SocialComplete,
+  now: Date,
+): Promise<Result<HeldLink>> {
+  const target = data.link;
+  // `beginSocial` writes a target into every link row; the check narrows the type.
+  if (!target) return fail("invalid_token");
+  const session = await config.storage.findOne("session", [
+    { field: "id", op: "eq", value: target.sessionId },
+  ]);
+  if (!session || !sessionIsLive(config, session, now)) return fail("invalid_token");
+  if (input.sessionToken) {
+    if (!constantTimeEqual(await sha256Hex(input.sessionToken), session.tokenHash))
+      return fail("invalid_token");
+  } else if (entry.callbackMethod === "GET" || config.cookie.sameSite === "None") {
+    return fail("invalid_token");
+  }
+  return ok({ userId: target.userId, session });
+}
+
+/**
+ * The link branch of the callback (plan 12a). A provider account that a
+ * user holds stays with that user: core never moves an identity. The
+ * provider address must be present, verified by the provider, and equal to
+ * the user's address (owner decision 4). No user row is written: a link
+ * fills no name and no image.
+ */
+async function completeLink(
+  config: ResolvedConfig,
+  provider: string,
+  profile: SocialProfile,
+  held: HeldLink,
+  next: string,
+  input: SocialComplete,
+  now: Date,
+): Promise<Result<SocialLinked>> {
+  const user = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: held.userId },
+  ]);
+  if (!user) return fail("invalid_token");
+  const byKey: Where<"identity">[] = [
+    { field: "provider", op: "eq", value: provider },
+    { field: "subject", op: "eq", value: profile.subject },
+  ];
+  // The caller proved this provider account at the provider. A social
+  // sign-in with it opens the account that holds it, so the answer tells
+  // the caller nothing that the provider account does not give.
+  const found = await config.storage.findOne("identity", byKey);
+  if (found)
+    return found.userId === user.id ? ok({ linked: true, next, user }) : fail("identity_taken");
+  const email = profile.email ? normalizeEmail(profile.email) : null;
+  if (email === null) return fail("email_required");
+  if (!profile.emailVerified || email !== user.email) return fail("email_mismatch");
+  const identity: IdentitySummary = { provider, subject: profile.subject };
+  try {
+    const linked = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<true>> => {
+        await runBefore("identity.beforeLink", config.hooks.identity.beforeLink, {
+          user,
+          identity,
+          via: "link",
+        });
+        await tx.create("identity", identityRow(user.id, provider, profile.subject, now));
+        // The last statement: a sign-out or a revoke since the read deletes
+        // the row, and the link undoes. A session ends only by its delete,
+        // and the read saw the row live at `now`, so the id alone decides.
+        const live = await tx.update(
+          "session",
+          [{ field: "id", op: "eq", value: held.session.id }],
+          {
+            updatedAt: now,
+          },
+        );
+        if (live !== 1) stopWith("invalid_token");
+        return ok(true);
+      }),
+    );
+    if (!linked.ok) return linked;
+  } catch (err) {
+    // Another callback linked the provider account first. Caught outside
+    // the transaction: inside, Postgres has already aborted it. The
+    // winner's row decides: the same user is linked, another user holds it.
+    if (
+      err instanceof StorageError &&
+      err.code === "unique_violation" &&
+      err.model === "identity"
+    ) {
+      const winner = await config.storage.findOne("identity", byKey);
+      return winner?.userId === user.id ? ok({ linked: true, next, user }) : fail("identity_taken");
+    }
+    throw err;
+  }
+  await runAfter(
+    "identity.afterLink",
+    config.hooks.identity.afterLink,
+    { user, identity, via: "link" },
+    user.id,
+  );
+  // After the commit, never inside the transaction (plan 12a Task 6).
+  await sendNotice(config, {
+    event: "identity_linked",
+    email: user.email,
+    provider,
+    ip: input.ip,
+    userAgent: input.userAgent,
+  });
+  return ok({ linked: true, next, user });
 }
 
 /**

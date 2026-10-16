@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
-import { sessionMaxAgeSeconds } from "../../engine/sessions.js";
-import { completeSocial, startSocial } from "../../engine/social.js";
-import { readBody } from "../body.js";
+import { sessionCookieToken, sessionMaxAgeSeconds } from "../../engine/sessions.js";
+import { completeSocial, startLink, startSocial } from "../../engine/social.js";
+import type { Result } from "../../result.js";
+import { isJsonRequest, readBody } from "../body.js";
 import {
   bindingCookieName,
   clearOauthCookie,
@@ -10,9 +11,11 @@ import {
   readCookie,
   sessionCookie,
 } from "../cookies.js";
+import { json, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import { challengePageUrl, trustTokenOf } from "../session-answer.js";
+import { sent, unauthorized, withSession } from "../session-route.js";
 
 const BIND_MAX_AGE_SECONDS = 600;
 
@@ -24,6 +27,9 @@ const callbackBody = z.object({
   user: z.string().max(4096).optional(),
   id_token: z.string().max(8192).optional(),
 });
+
+// Not strict: a form may carry the name of its button.
+const linkBody = z.object({ next: z.string().max(2048).optional() });
 
 interface CallbackParams {
   code: string | null;
@@ -64,6 +70,39 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
       },
     },
     {
+      // A POST, so the router's Origin rule applies: a link changes the account (plan 12a).
+      method: "POST",
+      path: `/social/${provider.name}/link`,
+      async handler(ctx) {
+        const s = await withSession(config, ctx.request);
+        if (!s) return unauthorized();
+        const jsonCaller = isJsonRequest(ctx.request);
+        const failure = (r: Extract<Result<unknown>, { ok: false }>) =>
+          sent(jsonCaller ? respond(r) : redirect(authErrorUrl(config, r.code)), s.renewed);
+        const body = await readBody(ctx.request, linkBody);
+        if (!body.ok) return failure(body);
+        const r = await startLink(config, {
+          provider: provider.name,
+          session: s.resolved,
+          next: body.value.next,
+          ip: ctx.ip,
+        });
+        if (!r.ok) return failure(r);
+        // JSON: the client navigates to `url`. A form: 303, so the browser follows with a GET.
+        const res = jsonCaller
+          ? json({ url: r.value.location })
+          : new Response(null, {
+              status: 303,
+              headers: { location: r.value.location, "cache-control": "no-store" },
+            });
+        res.headers.append(
+          "set-cookie",
+          oauthCookie(bindName, r.value.bindToken, bindPath, BIND_MAX_AGE_SECONDS),
+        );
+        return sent(res, s.renewed);
+      },
+    },
+    {
       method: provider.callbackMethod,
       path: `/social/${provider.name}/callback`,
       // Apple posts from appleid.apple.com. The state row and the binding
@@ -81,8 +120,17 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           // comes with it. Apple's cross-site form post carries none; the
           // challenge page then offers the trusted device (plan 12c).
           trustDevice: trustTokenOf(config, ctx.request, undefined),
+          // The cookie only: a provider's redirect carries no bearer header (plan 12a).
+          sessionToken: sessionCookieToken(config, ctx.request),
         });
         if (!r.ok) return failed(r.code);
+        if ("linked" in r.value) {
+          // A link (plan 12a): the session does not change, so no session cookie.
+          // The state is spent, so the binding cookie goes.
+          const res = redirect(resolveNext(config, r.value.next));
+          res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
+          return res;
+        }
         if ("twoFactor" in r.value) {
           // A user with the second factor on (plan 12c): no session cookie.
           // The state is spent, so the binding cookie goes.

@@ -246,6 +246,8 @@ A provider that expects `client_secret_basic` answers `invalid_client`.
 
 Linking: a social identity links to an existing user only when the
 provider reports the email as verified and it equals the user's email.
+A signed-in user links a provider with `POST /social/:provider/link`
+(see "Account").
 Otherwise core creates a new user, or answers `email_taken_unverified`
 when the address is in use. A profile with no email answers
 `email_required`.
@@ -932,6 +934,7 @@ The routes of a settings page (plan 12a, spec 8.15). Each needs a session: a `tk
 | POST | `/user/change-email/verify` | session, `{ code }` | `{ user }`, the same move by a code. The caller's session stays. 400 `invalid_body`, `invalid_code`, `too_many_attempts`; 401; 403 `hook_refused`; 409 `email_taken`, `conflict`; 404 with `emailOtp: false`; 429 `rate_limited`; 500 `hook_failed` |
 | GET | `/identities` | session | `{ identities: [{ id, provider, email?, linkedAt, canUnlink }], password, passkeys }`, oldest link first. The provider's subject is not in the answer. The `email` identity carries the address and `canUnlink: false`. No fresh rule and no limit; 401 |
 | POST | `/identities/unlink` | session (fresh), `{ id }` | `{ ok: true }`. No session ends. 400 `invalid_body` (the `email` identity, or any other field); 401; 403 `session_not_fresh`, `hook_refused`; 404 `not_found` (an unknown id, or an id of another user); 409 `last_credential`, `conflict`; 429 `rate_limited`; 500 `hook_failed` |
+| POST | `/social/:provider/link` | session (fresh), JSON or form `{ next? }` | JSON: `{ url }` and the binding cookie; the client navigates to `url`. Form: 303 to the provider, and a failure redirects to `/?auth_error=<code>`. The callback links the provider identity to the session's user, and redirects to `next` with no new session cookie. 400 `invalid_body`; 401; 403 `email_unverified`, `session_not_fresh`; 404 `not_found` (no such provider); 429 `rate_limited`. "The link of a provider" below gives the codes of the callback |
 
 The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it takes no `code`, whatever methods the user has on. After a password or an email code, `code` is the second factor. Item 2 says: "With the second factor on, the password and the email code need `code`, an authenticator code or a backup code." Item 12 lists "the email method of plan 12c as a re-authentication code" as a later input. So a user whose only method is the email method sends a backup code, or proves by a passkey. A user whose password row holds `LEGACY_VERIFY_HASH` proves by an email code or a passkey. The password proof refuses the marker, as the TOTP setup does.
 
@@ -947,6 +950,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `email-change-confirm:ip:<ip>` | 15 minutes | 20 | `POST /user/change-email/confirm`. A malformed token counts no try |
 | `otp-verify:ip:<ip>`, `otp-verify:email:<new address>` | 15 minutes | 30, 10 | `POST /user/change-email/verify`, shared with every code verify. With no request, the IP key only |
 | `unlink:user:<userId>` | 15 minutes | 10 | `POST /identities/unlink`, also for an unknown id. A stale session counts no try |
+| `social-link:user:<userId>` | 15 minutes | 10 | `POST /social/:provider/link`, after `social-start:ip`. An unverified user, a stale session, and an unknown provider count no try |
 
 The profile update (`POST /user/update`, `api.user.update`) writes only the fields it gets. Null clears a field. It needs a verified address: a claim keeps the user row and its name, so a claimant must not set what the owner inherits. It has no fresh rule, because the name and the image do not affect a sign-in.
 
@@ -968,18 +972,27 @@ A change of address keeps the social identities: a later social sign-in finds th
 
 The guard holds the user row by a compare-and-set, then removes, then counts again, in one transaction. So two removals at the same moment cannot both take a way in. On Postgres the second waits, reads the row again, and counts again. A parallel write to the user row makes the guard read it again. After 5 lost rounds the answer is 409 `conflict`, and core logs `authtempo: credential removal gave up <user id>`; send it again. `identity.beforeUnlink` and `identity.afterUnlink` get the user row as the guard holds it and `{ provider, subject }`.
 
+**The link of a provider.** A signed-in user adds a provider at `POST /social/:provider/link` (`api.startLink`). The start needs a fresh session of a verified user. A claimant has nothing to link: a claim deletes the identities. The flow is the social sign-in: the state, PKCE, the nonce, and the binding cookie. The state row has its own purpose, `oauth-link-state`, so a link state never opens a session, and a sign-in state never links. The callback answers these codes on `/?auth_error=<code>`:
+
+- `invalid_token`: the session of the start ended, or the callback carries no session cookie, or the cookie of another session. A browser signed in as another account cannot take the link. Apple's callback is a cross-site form post, and a browser sends no `Lax` cookie with it. So with `cookie.sameSite: "Lax"`, Apple's callback needs the binding cookie only. A state is spent once.
+- `email_required`, `email_mismatch`: the provider address must be present, verified by the provider, and equal to the account's address (owner decision 4).
+- `identity_taken` (409): another user holds the provider account. Core never moves an identity. A social sign-in with that provider account opens the account that holds it, so the answer tells the caller nothing new.
+- `hook_refused`, `hook_failed`, and the codes of the sign-in callback: `oauth_denied`, `oauth_failed`, `token_expired`.
+
+The link writes no user row, and fills no name and no image. No session opens and no session ends. A second link of a provider account that the user holds answers the link and writes nothing. Of two callbacks of one state, one links, and the other answers `invalid_token`. Of two users who link one provider account at once, one links, and the other answers `identity_taken`. A sign-out during the link undoes it. `identity.beforeLink` runs inside the transaction, before the identity write, with `via: "link"`. `identity.afterLink` runs after the commit.
+
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
 - a password change, or a first password
 - a reset by link or by code, also when the reset answers a second-factor challenge
 - a passkey added or removed
-- a provider unlinked (`POST /identities/unlink`): the notice names the provider
+- a provider linked (`POST /social/:provider/link`) or unlinked (`POST /identities/unlink`): the notice names the provider
 - a second-factor method turned on or off: TOTP, the passkey method, the email method, and `api.totp.disable`
 - a change of address, by link or by code: the notice goes to the old address, which the request read, and names the new one
 
-The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change, a reset, a change of address, and an unlink pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
+The notice holds the event, the time, the IP address when core has it, and what to do. It holds no link and no code. A password change, a reset, a change of address, a link, and an unlink pass the client IP and the user agent to the builder. The passkey and second-factor changes pass neither. The default text prints the IP only when it is a bare IPv4 or IPv6 literal (`isIpLiteral`). On a host with no `clientIp` of its own, the caller writes the header. Core sends the notice after the commit, never inside a transaction. A refused change, a change that rolls back, and an enable of a method that is on already send none. A notice that fails writes `authtempo: notice mail failed <event> <error name>`, and the change stays. The line holds no address and no error message.
 
-`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names a provider link and the account delete. No flow of this version sends those yet.
+`account.notices: false` turns every notice off. The proof mails of `account.mail` stay on. `account.notices.mail` replaces the text, and core sends it to the input's address, whatever `to` the builder answers. `NoticeEvent` also names the account delete. No flow of this version sends it yet.
 
 ## Hooks
 
@@ -1086,7 +1099,8 @@ const auth = createAuth({
 - Identity points (plan 12a): `beforeLink`, `afterLink`, `beforeUnlink`,
   and `afterUnlink`. The `via` of a link is `sign_in` or `link`. `sign_in`
   is a social sign-in that creates a user or links a verified equal
-  address. `link` is the link of a signed-in user. The `email` identity
+  address. `link` is the link of a signed-in user: `beforeLink` runs
+  inside its transaction, before the identity write. The `email` identity
   fires no identity hook. The unlink fires `beforeUnlink` after core's
   checks and the guard's lock, and before the delete, with no `via`.
   `afterUnlink` fires after the commit.

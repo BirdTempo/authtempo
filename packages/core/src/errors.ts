@@ -57,6 +57,8 @@ export const ERRORS = {
   session_not_fresh: 403,
   // plan 12a: the removal would leave the user with no way to sign in
   last_credential: 409,
+  // plan 12a: the provider account is linked to another user; core never moves an identity
+  identity_taken: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

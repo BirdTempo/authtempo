@@ -66,6 +66,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   session_not_fresh:
     "Confirm that it is you to continue: enter your password, or use your passkey.",
   last_credential: "This is your last way to sign in. Add another one before you remove it.",
+  identity_taken:
+    "This provider account belongs to another account. Sign in to that account to use it.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

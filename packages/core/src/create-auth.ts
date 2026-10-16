@@ -129,8 +129,11 @@ import {
 import {
   completeSocial,
   type SocialComplete,
+  type SocialLinked,
+  type SocialLinkStart,
   type SocialStart,
   type SocialStarted,
+  startLink,
   startSocial,
 } from "./engine/social.js";
 import { type SweepResult, sweepExpired } from "./engine/sweep.js";
@@ -349,9 +352,14 @@ export interface AuthApi {
     input: MagicLinkVerify,
   ): Promise<Result<{ token: string; next: string; user: UserRow } | SignInChallenge>>;
   startSocial(input: SocialStart): Promise<Result<SocialStarted>>;
+  /** The start of a link to the session's user (plan 12a). Fresh rule, verified email. */
+  startLink(input: SocialLinkStart): Promise<Result<SocialStarted>>;
+  /** A link state answers `SocialLinked` and opens no session (plan 12a). */
   completeSocial(
     input: SocialComplete,
-  ): Promise<Result<{ token: string; next: string; user: UserRow } | SignInChallenge>>;
+  ): Promise<
+    Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
+  >;
   passkeyRegistrationOptions(input: {
     user: UserRow;
   }): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;
@@ -528,6 +536,7 @@ export function createAuth(input: AuthConfig): Auth {
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),
       startSocial: (i) => startSocial(config, i),
+      startLink: (i) => startLink(config, i),
       completeSocial: (i) => completeSocial(config, i),
       passkeyRegistrationOptions: (i) => passkeyRegistrationOptions(config, i),
       verifyPasskeyRegistration: (i) => verifyPasskeyRegistration(config, i),

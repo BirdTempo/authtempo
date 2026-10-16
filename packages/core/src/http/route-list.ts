@@ -59,6 +59,7 @@ export const ROUTES = Object.freeze([
   { method: "GET", path: "/magic-link/verify", feature: "magicLink" },
   { method: "POST", path: "/magic-link/verify", feature: "magicLink" },
   { method: "GET", path: "/social/:provider/start", feature: "social" },
+  { method: "POST", path: "/social/:provider/link", feature: "social" },
   { method: "GET", path: "/social/:provider/callback", feature: "social" },
   { method: "POST", path: "/social/apple/callback", feature: "social" },
   { method: "POST", path: "/passkey/register/options", feature: "passkey" },

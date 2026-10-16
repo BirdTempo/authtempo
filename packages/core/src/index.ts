@@ -132,7 +132,13 @@ export {
   type ResolvedSession,
   readSessionToken,
 } from "./engine/sessions.js";
-export type { SocialComplete, SocialStart, SocialStarted } from "./engine/social.js";
+export type {
+  SocialComplete,
+  SocialLinked,
+  SocialLinkStart,
+  SocialStart,
+  SocialStarted,
+} from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
 export {
   API_TOKEN_PREFIX,

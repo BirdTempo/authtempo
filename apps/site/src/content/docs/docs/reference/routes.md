@@ -211,6 +211,15 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Answer | 302 to the provider, with the binding cookie `__Secure-tempo_session_oauth`. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed) |
 
+<h3 id="post-social-provider-link"><code>POST /social/:provider/link</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A fresh session of a verified user. The callback needs the binding cookie and the session cookie of that session. Apple's form post needs no session cookie while it is `Lax` |
+| Input | JSON or form `{ next? }` |
+| Answer | JSON: `{ url }` and the binding cookie; the client navigates to `url`. A form: 303 to the provider. The callback links the identity to the session's user and redirects to `next`. It sets no session cookie. A failure at the callback redirects to `/?auth_error=<code>` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`not_found`](/docs/reference/errors/#not_found), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed). At the callback: [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
 <h3 id="get-social-provider-callback"><code>GET /social/:provider/callback</code></h3>
 
 | Field | Value |

@@ -43,7 +43,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | Rows | `sweepExpired()`, which answers a `SweepResult` |
 | Sessions | `getSession(token)`, `signOut(token)`, `setActiveOrganization` |
 | Magic link | `requestMagicLink`, `verifyMagicLink` |
-| Social sign-in | `startSocial`, `completeSocial` |
+| Social sign-in | `startSocial`, `startLink`, `completeSocial` |
 | Passkeys | `passkeyRegistrationOptions`, `verifyPasskeyRegistration`, `passkeyAuthenticationOptions`, `verifyPasskeyAuthentication`, `listPasskeys`, `deletePasskey` |
 | Handoff | `startHandoff`, `continueHandoff`, `redeemHandoff` |
 | Organizations | `createOrganization`, `listOrganizations`, `updateOrganization`, `deleteOrganization`, `listMembers`, `addMember`, `updateMemberRole`, `removeMember`, `inviteMember`, `listInvitations`, `revokeInvitation`, `acceptInvitation`, `declineInvitation` |
@@ -131,7 +131,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Email codes | `EmailOtpApi`, `EmailOtpRequest`, `EmailOtpVerify`, `EmailOtpReset`, `EmailOtpSession`, `ResolvedEmailOtp` |
 | Second factor | `TotpApi`, `TotpSetup`, `TotpSetupInput`, `TotpStatus`, `TwoFactorPending`, `TwoFactorSession`, `TwoFactorVerify`, `ChallengeMethod`, `SignInChallenge`, `MethodEnabled`, `ChallengeView` |
 | API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary` |
-| Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest`, `IdentityEntry`, `IdentityList`, `IdentityUnlink` |
+| Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest`, `IdentityEntry`, `IdentityList`, `IdentityUnlink`, `SocialLinked`, `SocialLinkStart` |
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthAccess`, `OAuthGrantSummary` |
 | Organizations | `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |

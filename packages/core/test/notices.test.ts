@@ -33,6 +33,7 @@ import {
   enablePasskeyMethod,
 } from "../src/engine/second-factor-methods.js";
 import { resolveSession } from "../src/engine/sessions.js";
+import { completeSocial, startLink } from "../src/engine/social.js";
 import { disableTotp, disableTotpWithCode } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
@@ -43,6 +44,7 @@ import {
   type FakeIdToken,
   fakeJwt,
   GOOGLE,
+  googleClaims,
   googleSignIn,
   tokenEndpoint,
 } from "./social-helpers.js";
@@ -866,6 +868,29 @@ const PATHS: {
       const id = google[0]?.id ?? "";
       return {
         act: () => unlinkIdentity(auth.config, { session: s, id, ip: null, userAgent: null }),
+      };
+    },
+  },
+  {
+    name: "identity link",
+    run: async ({ auth, jwtTokens }) => {
+      const s = await verifiedSession(auth);
+      const started = await startLink(auth.config, { provider: "google", session: s, ip: null });
+      if (!started.ok) throw new Error(started.code);
+      const url = new URL(started.value.location);
+      jwtTokens["idtok-default"] = googleClaims(url.searchParams.get("nonce") ?? "", {});
+      return {
+        act: () =>
+          completeSocial(auth.config, {
+            provider: "google",
+            state: url.searchParams.get("state"),
+            code: "c",
+            error: null,
+            bindToken: started.value.bindToken,
+            sessionToken: s.token,
+            ip: null,
+            userAgent: null,
+          }),
       };
     },
   },

@@ -25,7 +25,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | --- | --- | --- | --- |
 | `magic-link:ip:<ip>` | 15 minutes | 20 | Magic link request |
 | `magic-link:email:<email>` | 15 minutes | 5 | Magic link request |
-| `social-start:ip:<ip>` | 15 minutes | 30 | Social start, for every provider |
+| `social-start:ip:<ip>` | 15 minutes | 30 | Social start and link start, for every provider |
+| `social-link:user:<userId>` | 15 minutes | 10 | Link start of a provider, after the start key |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | Passkey sign-in options and re-authentication options |
 | `passkey-verify:ip:<ip>` | 15 minutes | 20 | Passkey sign-in verify |
 | `handoff-start:ip:<ip>` | 15 minutes | 30 | Handoff start |

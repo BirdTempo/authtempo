@@ -629,3 +629,269 @@ describe("the last-credential guard on Postgres (plan 12a Task 9)", () => {
     }
   }, 60_000);
 });
+
+describe("the link of a social identity on Postgres (plan 12a Task 10)", () => {
+  const NOTICE = "Security notice for your api.example.com account";
+  const LINKED = "A sign-in provider was linked to your account.";
+
+  /** `inLink` runs inside each link's transaction, from `identity.beforeLink`. */
+  function linkWorld(inLink?: () => Promise<void>) {
+    const sent: MailMessage[] = [];
+    const linked: string[] = [];
+    // The token endpoint answers the code as the ID token, and the seam
+    // answers the claims of that code. So each callback has its own claims.
+    const claims = new Map<string, Record<string, unknown>>();
+    // `meet` holds the next two identity reads of the outer store until both
+    // wait. So both checks pass before either write, and the identity's
+    // unique key decides: the order that a sweep meets only in some rounds.
+    const adapter = createPostgresAdapter(db.sql);
+    let gate: { left: number; held: (() => void)[] } | null = null;
+    const meet = () => {
+      gate = { left: 2, held: [] };
+    };
+    const storage: typeof adapter = {
+      ...adapter,
+      findOne: (async (model, where) => {
+        const g = gate;
+        if (model === "identity" && g && g.left > 0) {
+          g.left--;
+          await new Promise<void>((go) => {
+            g.held.push(go);
+            if (g.held.length === 2) for (const release of g.held) release();
+          });
+        }
+        return adapter.findOne(model, where);
+      }) as typeof adapter.findOne,
+    };
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage,
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      social: {
+        google: { clientId: "gid", clientSecret: "gsecret" },
+        fetch: async (_url, init) =>
+          Response.json({
+            id_token: new URLSearchParams(String(init?.body ?? "")).get("code"),
+            access_token: "at",
+            token_type: "Bearer",
+          }),
+      },
+      jwt: {
+        verifyIdToken: async ({ token }) => claims.get(token) ?? {},
+        signES256: async () => "unused",
+      },
+      hooks: {
+        identity: {
+          beforeLink: async () => {
+            await inLink?.();
+          },
+          afterLink: ({ user, identity }) => {
+            linked.push(`${identity.subject}:${user.id}`);
+          },
+        },
+      },
+    });
+    async function signIn(email: string) {
+      await auth.api.requestMagicLink({ email, ip: null });
+      const link = /token=([A-Za-z0-9_%-]+)/.exec(
+        [...sent].reverse().find((m) => m.to === email)?.text ?? "",
+      )?.[1];
+      if (!link) throw new Error("no link");
+      const r = await auth.api.verifyMagicLink({
+        token: decodeURIComponent(link),
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+      if (!("token" in r.value)) throw new Error("the link answered a challenge");
+      const s = await auth.api.getSession(r.value.token);
+      if (!s) throw new Error("no session");
+      return { ...s, token: r.value.token };
+    }
+    type Me = Awaited<ReturnType<typeof signIn>>;
+    async function begin(me: Me) {
+      const r = await auth.api.startLink({ provider: "google", session: me, ip: null });
+      if (!r.ok) throw new Error(r.code);
+      const url = new URL(r.value.location);
+      return {
+        state: url.searchParams.get("state"),
+        nonce: url.searchParams.get("nonce"),
+        bindToken: r.value.bindToken,
+      };
+    }
+    /** The callback of `s` in the browser of `me`; the provider answers `sub` with `email`. */
+    async function finish(
+      me: Me,
+      s: Awaited<ReturnType<typeof begin>>,
+      code: string,
+      sub: string,
+      email: string,
+    ) {
+      claims.set(code, { sub, email, email_verified: true, nonce: s.nonce });
+      const r = await auth.api.completeSocial({
+        provider: "google",
+        state: s.state,
+        code,
+        error: null,
+        bindToken: s.bindToken,
+        sessionToken: me.token,
+        ip: null,
+        userAgent: null,
+      });
+      return r.ok ? ("linked" in r.value ? "linked" : "signed_in") : r.code;
+    }
+    const linkNotices = (to: string) =>
+      sent.filter((m) => m.to === to && m.subject === NOTICE && m.text.startsWith(LINKED));
+    const rowsOf = (sub: string) =>
+      db.sql<{ user_id: string }[]>`
+        SELECT user_id FROM ta_identity WHERE provider = 'google' AND subject = ${sub}`;
+    return { auth, linked, meet, signIn, begin, finish, linkNotices, rowsOf };
+  }
+
+  const delayed = <T>(ms: number, run: () => Promise<T>) =>
+    new Promise<T>((done, failed) => {
+      setTimeout(() => run().then(done, failed), ms);
+    });
+
+  it("three callbacks of one link state at once, a delay sweep: one links, and two answer invalid_token", async () => {
+    const w = linkWorld();
+    for (let delay = 0; delay < 12; delay++) {
+      const email = `state-${delay}@example.com`;
+      const sub = `g-state-${delay}`;
+      const me = await w.signIn(email);
+      const s = await w.begin(me);
+      w.linked.length = 0;
+      const answers = await Promise.all([
+        w.finish(me, s, `a-${delay}`, sub, email),
+        delayed(delay >> 1, () => w.finish(me, s, `b-${delay}`, sub, email)),
+        delayed(delay, () => w.finish(me, s, `c-${delay}`, sub, email)),
+      ]);
+      expect(answers.sort()).toEqual(["invalid_token", "invalid_token", "linked"]);
+      expect((await w.rowsOf(sub)).map((r) => r.user_id)).toEqual([me.user.id]);
+      expect(w.linked).toEqual([`${sub}:${me.user.id}`]);
+      expect(w.linkNotices(email)).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it("two users link one provider account at once, a delay sweep: one links, and the other answers identity_taken", async () => {
+    // The provider moved the account's address between the two
+    // authorizations, so each callback carries its own user's address. Both
+    // checks can pass, and then the identity's unique key decides.
+    const w = linkWorld();
+    for (let delay = 0; delay < 12; delay++) {
+      const sub = `g-pair-${delay}`;
+      const ada = await w.signIn(`ada-${delay}@example.com`);
+      const bob = await w.signIn(`bob-${delay}@example.com`);
+      const a = await w.begin(ada);
+      const b = await w.begin(bob);
+      w.linked.length = 0;
+      const answers = await Promise.all([
+        w.finish(ada, a, `ada-${delay}`, sub, ada.user.email),
+        delayed(delay, () => w.finish(bob, b, `bob-${delay}`, sub, bob.user.email)),
+      ]);
+      expect([...answers].sort()).toEqual(["identity_taken", "linked"]);
+      const winner = answers[0] === "linked" ? ada : bob;
+      expect((await w.rowsOf(sub)).map((r) => r.user_id)).toEqual([winner.user.id]);
+      expect(w.linked).toEqual([`${sub}:${winner.user.id}`]);
+      expect(w.linkNotices(ada.user.email).length + w.linkNotices(bob.user.email).length).toBe(1);
+      expect(w.linkNotices(winner.user.email)).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it("two link states of one user, called back at once, a delay sweep: both link, and one identity, afterLink, and notice", async () => {
+    const w = linkWorld();
+    for (let delay = 0; delay < 12; delay++) {
+      const email = `tabs-${delay}@example.com`;
+      const sub = `g-tabs-${delay}`;
+      const me = await w.signIn(email);
+      const one = await w.begin(me);
+      const two = await w.begin(me);
+      w.linked.length = 0;
+      const answers = await Promise.all([
+        w.finish(me, one, `one-${delay}`, sub, email),
+        delayed(delay, () => w.finish(me, two, `two-${delay}`, sub, email)),
+      ]);
+      expect(answers).toEqual(["linked", "linked"]);
+      expect((await w.rowsOf(sub)).map((r) => r.user_id)).toEqual([me.user.id]);
+      expect(w.linked).toEqual([`${sub}:${me.user.id}`]);
+      expect(w.linkNotices(email)).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it("two users link one provider account, both checks first: one links, and the other answers identity_taken", async () => {
+    const w = linkWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const sub = `g-met-${round}`;
+      const ada = await w.signIn(`ada-met-${round}@example.com`);
+      const bob = await w.signIn(`bob-met-${round}@example.com`);
+      const a = await w.begin(ada);
+      const b = await w.begin(bob);
+      w.linked.length = 0;
+      w.meet();
+      const answers = await Promise.all([
+        w.finish(ada, a, `ada-met-${round}`, sub, ada.user.email),
+        w.finish(bob, b, `bob-met-${round}`, sub, bob.user.email),
+      ]);
+      expect([...answers].sort()).toEqual(["identity_taken", "linked"]);
+      const winner = answers[0] === "linked" ? ada : bob;
+      expect((await w.rowsOf(sub)).map((r) => r.user_id)).toEqual([winner.user.id]);
+      expect(w.linked).toEqual([`${sub}:${winner.user.id}`]);
+      expect(w.linkNotices(ada.user.email).length + w.linkNotices(bob.user.email).length).toBe(1);
+    }
+  }, 60_000);
+
+  it("two link states of one user, both checks first: both link, and one identity, afterLink, and notice", async () => {
+    const w = linkWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `tabs-met-${round}@example.com`;
+      const sub = `g-tabs-met-${round}`;
+      const me = await w.signIn(email);
+      const one = await w.begin(me);
+      const two = await w.begin(me);
+      w.linked.length = 0;
+      w.meet();
+      const answers = await Promise.all([
+        w.finish(me, one, `one-met-${round}`, sub, email),
+        w.finish(me, two, `two-met-${round}`, sub, email),
+      ]);
+      expect(answers).toEqual(["linked", "linked"]);
+      expect((await w.rowsOf(sub)).map((r) => r.user_id)).toEqual([me.user.id]);
+      expect(w.linked).toEqual([`${sub}:${me.user.id}`]);
+      expect(w.linkNotices(email)).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it("a sign-out that commits inside the link's transaction undoes the link", async () => {
+    // The hook runs between the session read and the last statement, on
+    // another connection: the window of a parallel sign-out.
+    let token = "";
+    const w = linkWorld(async () => {
+      const out = await w.auth.handle(
+        new Request(`${BASE}/auth/sign-out`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      );
+      expect(out.status).toBe(200);
+    });
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `out-${round}@example.com`;
+      const sub = `g-out-${round}`;
+      const me = await w.signIn(email);
+      token = me.token;
+      const s = await w.begin(me);
+      expect(await w.finish(me, s, `out-${round}`, sub, email)).toBe("invalid_token");
+      expect(await w.rowsOf(sub)).toEqual([]);
+      expect(await db.sql`SELECT id FROM ta_session WHERE id = ${me.session.id}`).toEqual([]);
+      expect(w.linked).toEqual([]);
+      expect(w.linkNotices(email)).toEqual([]);
+    }
+  }, 60_000);
+});

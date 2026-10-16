@@ -6,8 +6,9 @@ import { BASE, base, everyFeature, SOCIAL } from "./every-feature.js";
 
 /** A provider route as ROUTES writes it: one template for every provider, except Apple's POST callback. */
 function templated(r: { method: string; path: string }): string {
-  const social = /^\/social\/([a-z][a-z0-9-]*)\/(start|callback)$/.exec(r.path);
-  if (social && !(r.method === "POST" && social[1] === "apple"))
+  const social = /^\/social\/([a-z][a-z0-9-]*)\/(start|callback|link)$/.exec(r.path);
+  // Apple's POST callback is its own entry; its link is not.
+  if (social && !(r.method === "POST" && social[1] === "apple" && social[2] === "callback"))
     return `${r.method} /social/:provider/${social[2]}`;
   return `${r.method} ${r.path}`;
 }
@@ -23,7 +24,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(92);
+    expect(listed.length).toBe(93);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {

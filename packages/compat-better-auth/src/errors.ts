@@ -91,6 +91,10 @@ export const BETTER_AUTH_CODES = {
   // dist/error/codes.mjs:29, read 2026-10-17). Better Auth answers 400 BAD_REQUEST
   // with it; the status stays core's, 409.
   last_credential: "FAILED_TO_UNLINK_LAST_ACCOUNT",
+  // Plan 12a. Better Auth 1.7.2's name for the same refusal (@better-auth/core
+  // dist/error/codes.mjs:13, read 2026-10-17). Better Auth answers 409 CONFLICT
+  // with it (better-auth dist/api/routes/account.mjs:208), as core does.
+  identity_taken: "SOCIAL_ACCOUNT_ALREADY_LINKED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

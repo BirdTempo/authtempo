@@ -39,6 +39,12 @@ export interface SessionRow extends BaseRow {
 export type VerificationPurpose =
   | "magic-link"
   | "oauth-state"
+  /**
+   * The state of a link (plan 12a). identifier: the provider name; data:
+   * the data of `oauth-state` and `link: { userId, sessionId }`. Its own
+   * purpose, so a link state never signs in and a sign-in state never links.
+   */
+  | "oauth-link-state"
   | "handoff-code"
   | "passkey-challenge"
   /** data: { passwordId: string } */
