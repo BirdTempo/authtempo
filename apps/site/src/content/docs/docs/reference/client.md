@@ -6,6 +6,7 @@ sources:
   - packages/client/README.md "Create a client"
   - packages/client/README.md "Operations"
   - packages/client/README.md "Results"
+  - packages/client/README.md "Account settings"
   - packages/client/src/client.ts
   - packages/client/src/index.ts
 ---
@@ -48,7 +49,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | Code | When it appears |
 | --- | --- |
 | `network` | The fetch rejected. The device is offline, the host is not reachable, or the browser blocked the answer. |
-| `unexpected` | The answer is not JSON, or its error code is not in the core table. A session read or a handoff redeem that answers 200 with a body of another shape gives `unexpected` with status 200. |
+| `unexpected` | The answer is not JSON, or its error code is not in the core table. A session read, a handoff redeem, or an [account settings](#account-settings) operation that answers 200 with a body of another shape gives `unexpected` with status 200. |
 | `cancelled` | The person dismissed the passkey prompt, or no authenticator matched. |
 
 `client.errors` and the export `ERRORS` are the error table of core.
@@ -63,6 +64,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 - The store reads again after each sign-in and after the sign-out.
 - It reads again after the second factor verify and enable, a password reset or change, and the address verify.
 - It reads again after the active organization changes, after an organization delete or a member remove, and after the handoff redeem.
+- It reads again after the revoke of a session, a profile update, an address change confirm, and the account delete.
 - It reads again when another tab of the origin changes the session, and when the page becomes visible. It does not poll.
 
 `createSessionStore` makes the same store over a read of your own.
@@ -134,6 +136,51 @@ The password, email code, and second factor operations answer `not_found` when t
 
 For passkey autofill, start the autofill when the page loads, before a passkey button can run. A new passkey ceremony ends a waiting one, also a register.
 
+## Account settings
+
+These operations serve the settings page of the signed-in person. Each one needs a session, except `user.confirmEmailChange`.
+
+| Operation | Route | Value |
+| --- | --- | --- |
+| `client.sessions.list()` | `GET /sessions` | `SessionSummaryJSON[]`, newest first. `current` marks the caller's session |
+| `client.sessions.revoke({ id })` | `GET /session`, then `POST /sessions/revoke` | `{ ok: true, current }`. See the rule below the table |
+| `client.sessions.revokeOthers()` | `POST /sessions/revoke-others` | `{ ended }`, the count of ended sessions |
+| `client.reauth.password({ password, code? })` | `POST /reauth` | `FreshJSON`. `code` is the second factor, while it is on |
+| `client.reauth.requestEmailCode()` | `POST /reauth/email` | `{ sent: true }`. The code goes to the account's address |
+| `client.reauth.emailCode({ emailCode, code? })` | `POST /reauth` | `FreshJSON` |
+| `client.reauth.passkey()` | `POST /reauth/passkey/options`, then `POST /reauth` | `FreshJSON`. A dismissed prompt answers `cancelled` |
+| `client.user.update({ name?, image? })` | `POST /user/update` | `{ user: PublicUserJSON }`. `null` clears a field |
+| `client.user.changeEmail({ newEmail, method?, next? })` | `POST /user/change-email` | `{ sent: true }`. `method` is `link` (default) or `code` |
+| `client.user.confirmEmailChange({ token })` | `POST /user/change-email/confirm` | `{ user: PublicUserJSON }`, for an app that serves its own confirm page |
+| `client.user.verifyEmailChange({ code })` | `POST /user/change-email/verify` | `{ user: PublicUserJSON }` |
+| `client.user.delete()` | `POST /user/delete` | `{ ok: true }`. The account and the caller's session end |
+| `client.identities.list()` | `GET /identities` | `IdentityListJSON`: `identities`, `password`, `passkeys` |
+| `client.identities.unlink({ id })` | `POST /identities/unlink` | `{ ok: true }` |
+| `client.identities.link({ provider, next? })` | `POST /social/:provider/link`, then a navigation | `{ url }`; `invalid_body` with status 0 for a name that core refuses |
+
+`GET /user/change-email/confirm` is the page of the mailed link. A browser opens it, so the client has no call for it.
+
+**The revoke of the caller's own session.** The route answers `{ ok: true }` for every session. So `sessions.revoke` reads `GET /session` first. `current` is true when `id` is the id of that session. Then the caller's session has ended. A browser loses the cookie, and a bearer app must clear its stored token. When the session read fails, its failure is the answer, and the client sends no revoke.
+
+**A fresh session.** Some changes need a fresh session: a sign-in or a re-authentication that is younger than `session.freshMinutes`. A stale session gets `session_not_fresh` (403), and nothing changes. These calls can answer it:
+
+- `sessions.revoke`, `sessions.revokeOthers`
+- `user.changeEmail`, `user.delete`
+- `identities.unlink`, `identities.link`
+- `passkey.register`, `passkeys.delete`
+- `tokens.create`
+- `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`
+- `secondFactor.passkey.enable`, `secondFactor.email.enable`, `secondFactor.disable`
+- `password.change` while the second factor is on, and for a first password
+
+`withFresh(op, reauth)` gives the path. It runs `op`, the change. On `session_not_fresh`, it runs `reauth`, the re-authentication of your page, then `op` once more. An example is `client.withFresh(() => client.user.delete(), () => client.reauth.password({ password }))`.
+
+A failed re-authentication is the answer, and the change does not run again. A second `session_not_fresh` is the answer too, so `withFresh` never loops. A re-authentication keeps the session token. Core checks the rule of `secondFactor.passkey.enable` after its passkey prompt. So under `withFresh`, that call can show the prompt two times.
+
+**The link of a provider.** `identities.link` posts the start. Then it sends the browser to the provider through `navigate`. The client navigates only to an `http:` or an `https:` URL. The provider sends the browser back to `next`. A failure lands on `?auth_error=<code>`, for example `identity_taken`, `email_mismatch`, or `email_required`. Read the code with `readRedirectError`.
+
+**Error codes.** [Routes](/docs/reference/routes/) gives every error of each route. The codes of these operations include `session_not_fresh`, `last_credential`, `identity_taken`, `sole_owner`, `email_taken`, and `conflict`. [Error codes](/docs/reference/errors/) explains each one, and `errorText` has a sentence for each.
+
 ## Error texts and links
 
 `errorText(code)` answers one sentence for a code, for an app to show to a person. `errorDocsURL(code)` answers the docs page of the code: its anchor on [Error codes](/docs/reference/errors/), or the [Results](#results) section for `network`, `unexpected`, and `cancelled`. `redirect_mismatch` links to the [failure codes of the handoff](/docs/reference/handoff/#failure-codes). Pass `"oauth"` as the second argument for a code of the OAuth client, because `invalid_token` and `rate_limited` are in both tables. `ERROR_TEXT` holds every text, by table.
@@ -174,6 +221,7 @@ The types of the package:
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
 | Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
+| Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
 
 ## Next
 

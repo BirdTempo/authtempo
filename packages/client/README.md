@@ -73,6 +73,8 @@ more request headers go in the fifth.
   reset or change, and the address verify.
 - It reads again after the active organization changes, after an
   organization delete or a member remove, and after the handoff redeem.
+- It reads again after the revoke of a session, a profile update, an
+  address change confirm, and the account delete.
 - It reads again when another tab of the origin changes the session, and
   when the page becomes visible. It does not poll.
 
@@ -113,7 +115,7 @@ client can see:
 | Code | When it appears |
 | --- | --- |
 | `network` | The fetch rejected. The device is offline, or the host is not reachable. |
-| `unexpected` | The answer is not JSON, or its error code is not in the core table. A session read or a handoff redeem that answers 200 with a body of another shape gives `unexpected` with status 200. |
+| `unexpected` | The answer is not JSON, or its error code is not in the core table. A session read, a handoff redeem, or an account settings operation that answers 200 with a body of another shape gives `unexpected` with status 200. |
 | `cancelled` | The person dismissed the passkey prompt, or no authenticator matched. |
 
 ## Error texts
@@ -314,6 +316,84 @@ Every call but `totp.verify`, `secondFactor.passkey.verify`, and `secondFactor.e
 | `secondFactor.disable({ method, password })` | Turns the passkey or the email method off. |
 
 The calls of the second factor can answer these codes: `invalid_credentials`, `email_unverified` (403), `invalid_code`, `too_many_attempts`, `passkey_failed`, `invalid_body` (the challenge offers no such method), `invalid_token`, `totp_enabled`, `totp_not_enabled` (the method is off), `rate_limited`, `conflict`, `not_found`, and `unauthorized`. A dismissed passkey prompt answers `cancelled`.
+
+## Account settings
+
+These operations serve the settings page of the signed-in person (plan 12a).
+Each one needs a session, except `user.confirmEmailChange`.
+
+| Operation | Route | Answer type |
+| --- | --- | --- |
+| `client.sessions.list()` | `GET /sessions` | `ClientResult<SessionSummaryJSON[]>`, newest first. `current` marks the caller's session |
+| `client.sessions.revoke({ id })` | `GET /session`, then `POST /sessions/revoke` | `ClientResult<{ ok: true, current }>`. See the rule below the table |
+| `client.sessions.revokeOthers()` | `POST /sessions/revoke-others` | `ClientResult<{ ended }>`, the count of ended sessions |
+| `client.reauth.password({ password, code? })` | `POST /reauth` | `ClientResult<FreshJSON>`. `code` is the second factor, while it is on |
+| `client.reauth.requestEmailCode()` | `POST /reauth/email` | `ClientResult<{ sent: true }>`. The code goes to the account's address |
+| `client.reauth.emailCode({ emailCode, code? })` | `POST /reauth` | `ClientResult<FreshJSON>` |
+| `client.reauth.passkey()` | `POST /reauth/passkey/options`, then `POST /reauth` | `ClientResult<FreshJSON>`. A dismissed prompt answers `cancelled` |
+| `client.user.update({ name?, image? })` | `POST /user/update` | `ClientResult<{ user: PublicUserJSON }>`. `null` clears a field |
+| `client.user.changeEmail({ newEmail, method?, next? })` | `POST /user/change-email` | `ClientResult<{ sent: true }>`. `method` is `link` (default) or `code` |
+| `client.user.confirmEmailChange({ token })` | `POST /user/change-email/confirm` | `ClientResult<{ user: PublicUserJSON }>`, for an app that serves its own confirm page |
+| `client.user.verifyEmailChange({ code })` | `POST /user/change-email/verify` | `ClientResult<{ user: PublicUserJSON }>` |
+| `client.user.delete()` | `POST /user/delete` | `ClientResult<{ ok: true }>`. The account and the caller's session end |
+| `client.identities.list()` | `GET /identities` | `ClientResult<IdentityListJSON>`: `identities`, `password`, `passkeys` |
+| `client.identities.unlink({ id })` | `POST /identities/unlink` | `ClientResult<{ ok: true }>` |
+| `client.identities.link({ provider, next? })` | `POST /social/:provider/link`, then a navigation | `ClientResult<{ url }>`; `invalid_body` with status 0 for a name that core refuses |
+
+`GET /user/change-email/confirm` is the page of the mailed link. A
+browser opens it, so the client has no call for it.
+
+**The revoke of the caller's own session.** The route answers
+`{ ok: true }` for every session. So `sessions.revoke` reads
+`GET /session` first. `current` is true when `id` is the id of that
+session. Then the caller's session has ended. A browser loses the
+cookie, and a bearer app must clear its stored token. When the session
+read fails, its failure is the answer, and the client sends no revoke.
+
+**A fresh session.** Some changes need a fresh session: a sign-in or a
+re-authentication that is younger than `session.freshMinutes`. A stale
+session gets `session_not_fresh` (403), and nothing changes. These calls
+can answer it:
+
+- `sessions.revoke`, `sessions.revokeOthers`
+- `user.changeEmail`, `user.delete`
+- `identities.unlink`, `identities.link`
+- `passkey.register`, `passkeys.delete`
+- `tokens.create`
+- `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`
+- `secondFactor.passkey.enable`, `secondFactor.email.enable`,
+  `secondFactor.disable`
+- `password.change` while the second factor is on, and for a first password
+
+`withFresh` gives the path. It runs the change. On `session_not_fresh`,
+it runs the re-authentication of your page, then the change once more:
+
+```ts
+const r = await client.withFresh(
+  () => client.user.delete(),
+  () => client.reauth.password({ password: await askPassword() }),
+);
+```
+
+A failed re-authentication is the answer, and the change does not run
+again. A second `session_not_fresh` is the answer too, so `withFresh`
+never loops. A re-authentication keeps the session token. Core checks
+the rule of `secondFactor.passkey.enable` after its passkey prompt. So
+under `withFresh`, that call can show the prompt two times.
+
+**The link of a provider.** `identities.link` posts the start. Then it
+sends the browser to the provider through `navigate`. The client
+navigates only to an `http:` or an `https:` URL. The provider sends the
+browser back to `next`. A failure lands on `?auth_error=<code>`, for
+example `identity_taken`, `email_mismatch`, or `email_required`. Read
+the code with `readRedirectError`.
+
+**Error codes.** The routes page gives every error of each route. The
+codes of these operations include `session_not_fresh`,
+`last_credential`, `identity_taken`, `sole_owner`, `email_taken`, and
+`conflict`. `last_credential` refuses the unlink of the last way in.
+`sole_owner` refuses the delete of the last owner of an organization
+with other members. `errorText` has a sentence for each code.
 
 ## Show the signed-in email
 

@@ -1,5 +1,6 @@
 import type {
   ApiTokenSummary,
+  IdentityEntry,
   InvitationSummary,
   MemberSummary,
   OAuthGrantSummary,
@@ -8,9 +9,11 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   PublicSession,
+  PublicUser,
+  SessionSummary,
 } from "@authtempo/core";
 import { ERRORS, type ErrorCode, type OAuthErrorCode } from "@authtempo/core/errors";
-import { PROVIDER_NAME_RE } from "@authtempo/core/routes";
+import { PROVIDER_NAME_RE, type RouteMethod } from "@authtempo/core/routes";
 import { type ClientOperation, callOf } from "./calls.js";
 import { readRedirectError } from "./redirect-error.js";
 import { type ClientFailure, type ClientResult, fail, ok } from "./result.js";
@@ -84,6 +87,26 @@ export type TwoFactorSessionJSON = { token: string } & PublicSession & {
     /** Set when the verify asked for it. A native app sends `token` as `trustDevice` at the next sign-in. */
     trustDevice: { token: string; expiresAt: string } | null;
   };
+
+/** One live session of the signed-in person (plan 12a). It holds no token. */
+export type SessionSummaryJSON = Omit<
+  SessionSummary,
+  "createdAt" | "lastSeenAt" | "expiresAt" | "freshAt"
+> & { createdAt: string; lastSeenAt: string; expiresAt: string; freshAt: string | null };
+/** The user of a profile or address answer (plan 12a). */
+export type PublicUserJSON = PublicUser;
+/** One linked identity (plan 12a). `email` is set for the `email` identity only. */
+export type IdentityEntryJSON = Omit<IdentityEntry, "linkedAt"> & { linkedAt: string };
+/** The ways in of the signed-in person (plan 12a). */
+export interface IdentityListJSON {
+  identities: IdentityEntryJSON[];
+  password: boolean;
+  passkeys: number;
+}
+/** The answer of a re-authentication: the end of the fresh window. The session token stays. */
+export interface FreshJSON {
+  freshUntil: string;
+}
 
 export interface ClientOptions extends TransportOptions {
   /** The browser WebAuthn seam. Default `browserWebAuthn()`. Tests inject a soft one. */
@@ -167,7 +190,9 @@ export interface Client {
    * the second factor verify and enable, a password reset or change, the
    * address verify, the active organization, an organization delete or a
    * member remove, and the handoff redeem), after
-   * another tab's change, and when the page becomes visible. No poll.
+   * another tab's change, and when the page becomes visible. No poll. The
+   * revoke of a session, a profile update, an address change confirm, and
+   * the account delete change the session too (plan 12a).
    */
   store: SessionStore<PublicSession, ClientFailure>;
   magicLink: {
@@ -442,6 +467,85 @@ export interface Client {
       password: string;
     }): Promise<ClientResult<{ ok: true; methods: ("totp" | "passkey" | "email")[] }>>;
   };
+  /**
+   * The sessions of the signed-in person (plan 12a). The two revokes need a
+   * fresh session, else they answer `session_not_fresh`.
+   */
+  sessions: {
+    list(): Promise<ClientResult<SessionSummaryJSON[]>>;
+    /**
+     * Ends one session. The route's answer does not tell whose session it
+     * was, so the client reads `GET /session` first. `current` is true when
+     * `id` is the caller's own session: that session has ended.
+     */
+    revoke(input: { id: string }): Promise<ClientResult<{ ok: true; current: boolean }>>;
+    /** Ends every other session of the person. `ended` is the count. */
+    revokeOthers(): Promise<ClientResult<{ ended: number }>>;
+  };
+  /** The re-authentication (plan 12a). Each proof makes the session fresh and keeps its token. */
+  reauth: {
+    /** `code` is the authenticator code or a backup code. It is necessary while the second factor is on. */
+    password(input: {
+      password: string;
+      code?: string | undefined;
+    }): Promise<ClientResult<FreshJSON>>;
+    /** Mails a code to the account's address. `not_found` when the server sets `emailOtp: false`. */
+    requestEmailCode(): Promise<ClientResult<{ sent: true }>>;
+    emailCode(input: {
+      emailCode: string;
+      code?: string | undefined;
+    }): Promise<ClientResult<FreshJSON>>;
+    /** The options, the browser prompt, and the proof. A dismissed prompt is `cancelled`. */
+    passkey(): Promise<ClientResult<FreshJSON>>;
+  };
+  /** The profile, the address, and the delete of the signed-in person (plan 12a). */
+  user: {
+    /** `null` clears a field. A field that the caller leaves out stays. */
+    update(input: {
+      name?: string | null | undefined;
+      image?: string | null | undefined;
+    }): Promise<ClientResult<{ user: PublicUserJSON }>>;
+    /**
+     * Needs a fresh session. A proof goes to the new address. The answer is
+     * the same when another account holds that address.
+     */
+    changeEmail(input: {
+      newEmail: string;
+      method?: "link" | "code" | undefined;
+      next?: string | undefined;
+    }): Promise<ClientResult<{ sent: true }>>;
+    /** The token of the mailed link, for an app that serves its own confirm page. Needs no session. */
+    confirmEmailChange(input: { token: string }): Promise<ClientResult<{ user: PublicUserJSON }>>;
+    /** The mailed code of `changeEmail({ method: "code" })`. */
+    verifyEmailChange(input: { code: string }): Promise<ClientResult<{ user: PublicUserJSON }>>;
+    /** Needs a fresh session. The account and the caller's session end. */
+    delete(): Promise<ClientResult<{ ok: true }>>;
+  };
+  /** The linked identities of the signed-in person (plan 12a). */
+  identities: {
+    list(): Promise<ClientResult<IdentityListJSON>>;
+    /** Needs a fresh session. `last_credential` when the identity is the last way in. */
+    unlink(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    /**
+     * Needs a fresh session. Posts the start, then sends the browser to the
+     * provider through `navigate`. `invalid_body` with status 0 for a name
+     * that core refuses.
+     */
+    link(input: {
+      provider: string;
+      next?: string | undefined;
+    }): Promise<ClientResult<{ url: string }>>;
+  };
+  /**
+   * Runs `op`. On `session_not_fresh` it runs `reauth`, a prompt of the app's
+   * own page, and after its success it runs `op` once more. A second
+   * `session_not_fresh` is the answer: the function never loops. A failed
+   * `reauth` is the answer, and `op` does not run again.
+   */
+  withFresh<T>(
+    op: () => Promise<ClientResult<T>>,
+    reauth: () => Promise<ClientResult<unknown>>,
+  ): Promise<ClientResult<T>>;
   errors: typeof ERRORS;
 }
 
@@ -477,17 +581,89 @@ function isPublicSession(v: unknown): v is PublicSession {
   );
 }
 
+/**
+ * The row with each `:name` of its path filled from `params` (plan 12a). The
+ * link start's path names the provider. A name that `params` lacks stays.
+ */
+function filled(
+  row: { method: RouteMethod; path: string },
+  params: Readonly<Record<string, string>> | undefined,
+): { method: RouteMethod; path: string } {
+  if (!params) return row;
+  const path = row.path.replace(/:([A-Za-z]+)/g, (name, key: string) => {
+    const value = params[key];
+    return value === undefined ? name : encodeURIComponent(value);
+  });
+  return { method: row.method, path };
+}
+
+/** A 200 that fails `is` answers `unexpected` with status 200 (the plan 11d rule). */
+async function shaped<T>(
+  p: Promise<ClientResult<unknown>>,
+  is: (v: unknown) => v is T,
+): Promise<ClientResult<T>> {
+  const r = await p;
+  if (!r.ok) return r;
+  return is(r.value) ? ok(r.value) : fail("unexpected", 200);
+}
+
+const isOkTrue = (v: unknown): v is { ok: true } => isRecord(v) && v.ok === true;
+const isSent = (v: unknown): v is { sent: true } => isRecord(v) && v.sent === true;
+const isFresh = (v: unknown): v is FreshJSON => isRecord(v) && typeof v.freshUntil === "string";
+const isEnded = (v: unknown): v is { ended: number } => isRecord(v) && typeof v.ended === "number";
+const isUserAnswer = (v: unknown): v is { user: PublicUserJSON } =>
+  isRecord(v) &&
+  isRecord(v.user) &&
+  typeof v.user.id === "string" &&
+  typeof v.user.email === "string";
+const isSessionList = (v: unknown): v is { sessions: SessionSummaryJSON[] } =>
+  isRecord(v) &&
+  Array.isArray(v.sessions) &&
+  v.sessions.every(
+    (s) => isRecord(s) && typeof s.id === "string" && typeof s.current === "boolean",
+  );
+const isIdentityList = (v: unknown): v is IdentityListJSON =>
+  isRecord(v) &&
+  Array.isArray(v.identities) &&
+  v.identities.every(
+    (e) =>
+      isRecord(e) &&
+      typeof e.id === "string" &&
+      typeof e.provider === "string" &&
+      typeof e.canUnlink === "boolean",
+  ) &&
+  typeof v.password === "boolean" &&
+  typeof v.passkeys === "number";
+const isRequestOptions = (v: unknown): v is PublicKeyCredentialRequestOptionsJSON =>
+  isRecord(v) && typeof v.challenge === "string";
+
+/** An `http:` or `https:` URL. The client navigates to no other scheme, such as `javascript:`. */
+function isWebURL(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  try {
+    const { protocol } = new URL(v);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+const isLinkStart = (v: unknown): v is { url: string } => isRecord(v) && isWebURL(v.url);
+
 export function createClient(options: ClientOptions): Client {
   const call = createRawTransport(options);
-  /** One operation of `CLIENT_CALLS`: its method and path come from the table (plan 11d). */
+  /**
+   * One operation of `CLIENT_CALLS`: its method and path come from the table
+   * (plan 11d). `params` fills a template path, such as the provider of a link.
+   */
   const send = <T>(
     operation: ClientOperation,
     body?: unknown,
     query?: Query,
     headers?: Readonly<Record<string, string>>,
     token?: string | null,
+    params?: Readonly<Record<string, string>>,
   ) => {
-    const c = callOf(operation);
+    const c = filled(callOf(operation), params);
     return call<T>(c.method, c.path, body, query, headers, token);
   };
   async function session(): Promise<ClientResult<PublicSession | null>> {
@@ -695,6 +871,104 @@ export function createClient(options: ClientOptions): Client {
     status: () => send<TotpStatusJSON>("totp.status"),
     revokeTrustedDevices: () => send<{ ok: true }>("totp.revokeTrustedDevices", {}),
   };
+  const sessions: Client["sessions"] = {
+    list: async () => {
+      const r = await shaped(send<unknown>("sessions.list"), isSessionList);
+      return r.ok ? ok(r.value.sessions) : r;
+    },
+    // The store reads again: the caller's own revoke ends its session.
+    revoke: ({ id }) =>
+      changes(
+        (async (): Promise<ClientResult<{ ok: true; current: boolean }>> => {
+          // The route answers `{ ok: true }` for every session, so the session read tells whose it is.
+          const own = await shaped(send<unknown>("session"), isPublicSession);
+          if (!own.ok) return own;
+          const r = await shaped(send<unknown>("sessions.revoke", { id }), isOkTrue);
+          return r.ok ? ok({ ok: true, current: own.value.session.id === id }) : r;
+        })(),
+      ),
+    revokeOthers: () => shaped(send<unknown>("sessions.revokeOthers", {}), isEnded),
+  };
+  const reauth: Client["reauth"] = {
+    password: ({ password, code }) =>
+      shaped(
+        send<unknown>("reauth", { password, ...(code !== undefined ? { code } : {}) }),
+        isFresh,
+      ),
+    requestEmailCode: () => shaped(send<unknown>("reauth.email.request", {}), isSent),
+    emailCode: ({ emailCode, code }) =>
+      shaped(
+        send<unknown>("reauth", { emailCode, ...(code !== undefined ? { code } : {}) }),
+        isFresh,
+      ),
+    async passkey() {
+      // The shared get ceremony: it ends a waiting autofill first, as a browser refuses two.
+      const response = await assertion(() =>
+        shaped(send<unknown>("reauth.passkey.options", {}), isRequestOptions),
+      );
+      if (!response.ok) return response;
+      return shaped(send<unknown>("reauth", { passkey: response.value }), isFresh);
+    },
+  };
+  // The profile, the two confirms, and the delete change the session's user or end the
+  // session, so the store reads again.
+  const user: Client["user"] = {
+    update: ({ name, image }) =>
+      changes(
+        shaped(
+          send<unknown>("user.update", {
+            ...(name !== undefined ? { name } : {}),
+            ...(image !== undefined ? { image } : {}),
+          }),
+          isUserAnswer,
+        ),
+      ),
+    changeEmail: ({ newEmail, method, next }) =>
+      shaped(
+        send<unknown>("user.changeEmail", {
+          newEmail,
+          ...(method !== undefined ? { method } : {}),
+          ...(next !== undefined ? { next } : {}),
+        }),
+        isSent,
+      ),
+    confirmEmailChange: ({ token }) =>
+      changes(shaped(send<unknown>("user.confirmEmailChange", { token }), isUserAnswer)),
+    verifyEmailChange: ({ code }) =>
+      changes(shaped(send<unknown>("user.verifyEmailChange", { code }), isUserAnswer)),
+    delete: () => changes(shaped(send<unknown>("user.delete", {}), isOkTrue)),
+  };
+  const identities: Client["identities"] = {
+    list: () => shaped(send<unknown>("identities.list"), isIdentityList),
+    unlink: ({ id }) => shaped(send<unknown>("identities.unlink", { id }), isOkTrue),
+    async link({ provider, next }) {
+      if (!PROVIDER_NAME_RE.test(provider)) return fail("invalid_body", 0);
+      const r = await shaped(
+        send<unknown>(
+          "identities.link",
+          next !== undefined ? { next } : {},
+          undefined,
+          undefined,
+          undefined,
+          { provider },
+        ),
+        isLinkStart,
+      );
+      if (!r.ok) return r;
+      if (!navigate(r.value.url)) return fail("unexpected", 0);
+      return ok({ url: r.value.url });
+    },
+  };
+  async function withFresh<T>(
+    op: () => Promise<ClientResult<T>>,
+    again: () => Promise<ClientResult<unknown>>,
+  ): Promise<ClientResult<T>> {
+    const first = await op();
+    if (first.ok || first.code !== "session_not_fresh") return first;
+    const proved = await again();
+    if (!proved.ok) return proved;
+    return op();
+  }
   return {
     session,
     store,
@@ -975,6 +1249,11 @@ export function createClient(options: ClientOptions): Client {
           password,
         }),
     },
+    sessions,
+    reauth,
+    user,
+    identities,
+    withFresh,
     errors: ERRORS,
   };
 }

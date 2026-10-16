@@ -24,12 +24,19 @@ vi.mock("../src/calls.js", async (importOriginal) => {
 
 const BASE = "https://api.example.com";
 
-/** A fetch that answers `{}` to every request and keeps the method and the path under basePath. */
+/** A fetch that answers `{}` to every request but the session read, and keeps the method and the path under basePath. */
 function recording() {
   const seen: string[] = [];
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init);
-    seen.push(`${req.method} ${new URL(req.url).pathname.replace(/^\/auth/, "")}`);
+    // A link start names its provider in the path; the table writes the template.
+    const path = new URL(req.url).pathname
+      .replace(/^\/auth/, "")
+      .replace(/^\/social\/[^/]+\/link$/, "/social/:provider/link");
+    seen.push(`${req.method} ${path}`);
+    // A session read answers a session, so sessions.revoke reaches its revoke (plan 12a).
+    if (path === "/session")
+      return Response.json({ user: { id: "u" }, session: { id: "s", expiresAt: "e" } });
     return Response.json({});
   }) as typeof globalThis.fetch;
   return { seen, fetch };
@@ -47,7 +54,7 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(58);
+    expect(CLIENT_CALLS).toHaveLength(72);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -113,6 +120,20 @@ describe("the call table of the client (plan 11d)", () => {
     await c.totp.regenerateBackupCodes({ code: "1" });
     await c.totp.status();
     await c.totp.revokeTrustedDevices();
+    await c.sessions.list();
+    await c.sessions.revoke({ id: "s" });
+    await c.sessions.revokeOthers();
+    await c.reauth.password({ password: "p" });
+    await c.reauth.requestEmailCode();
+    await c.reauth.passkey();
+    await c.user.update({ name: "n" });
+    await c.user.changeEmail({ newEmail: "a@b.c" });
+    await c.user.confirmEmailChange({ token: "t" });
+    await c.user.verifyEmailChange({ code: "1" });
+    await c.user.delete();
+    await c.identities.list();
+    await c.identities.unlink({ id: "i" });
+    await c.identities.link({ provider: "google" });
     await c.secondFactor.passkey.enable({ password: "p" });
     await c.secondFactor.passkey.verify({ challenge: "c" });
     await c.secondFactor.email.enable({ password: "p" });

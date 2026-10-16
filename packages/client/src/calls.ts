@@ -110,6 +110,26 @@ export const CLIENT_CALLS = [
   { operation: "secondFactor.email.enable", method: "POST", path: "/second-factor/email/enable" },
   { operation: "secondFactor.email.send", method: "POST", path: "/second-factor/email/send" },
   { operation: "secondFactor.disable", method: "POST", path: "/second-factor/disable" },
+  // Plan 12a: the settings page. `reauth.password`, `reauth.emailCode`, and
+  // `reauth.passkey` send their proof to one route, so they share the row
+  // "reauth". `GET /user/change-email/confirm` is the page of the mailed
+  // link, not a client call.
+  { operation: "sessions.list", method: "GET", path: "/sessions" },
+  { operation: "sessions.revoke", method: "POST", path: "/sessions/revoke" },
+  { operation: "sessions.revokeOthers", method: "POST", path: "/sessions/revoke-others" },
+  { operation: "reauth", method: "POST", path: "/reauth" },
+  { operation: "reauth.email.request", method: "POST", path: "/reauth/email" },
+  { operation: "reauth.passkey.options", method: "POST", path: "/reauth/passkey/options" },
+  { operation: "user.update", method: "POST", path: "/user/update" },
+  { operation: "user.changeEmail", method: "POST", path: "/user/change-email" },
+  { operation: "user.confirmEmailChange", method: "POST", path: "/user/change-email/confirm" },
+  { operation: "user.verifyEmailChange", method: "POST", path: "/user/change-email/verify" },
+  { operation: "user.delete", method: "POST", path: "/user/delete" },
+  { operation: "identities.list", method: "GET", path: "/identities" },
+  { operation: "identities.unlink", method: "POST", path: "/identities/unlink" },
+  // A POST, not a navigation: the start needs the session. client.identities.link
+  // puts the provider's name in the template, then navigates to the answer's URL.
+  { operation: "identities.link", method: "POST", path: "/social/:provider/link" },
 ] as const satisfies readonly ClientCall[];
 
 /** The name of one row of `CLIENT_CALLS`. */

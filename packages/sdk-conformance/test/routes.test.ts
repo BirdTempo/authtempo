@@ -53,6 +53,11 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     path: "/operator/keys/rotate",
     reason: "the keys rotate command of the CLI calls it (plan 11c)",
   },
+  {
+    method: "GET",
+    path: "/user/change-email/confirm",
+    reason: "the confirm page of the mailed change-of-address link; a browser opens it (plan 12a)",
+  },
 ];
 
 const TABLES = {
