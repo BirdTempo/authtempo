@@ -538,6 +538,10 @@ const TOP: Record<string, Rule> = {
       86_400,
       "core takes 1 to 86400 seconds, rounded up to whole minutes; 0 turns the check off and is refused: the fresh rule is a promise of core",
     ),
+    // Better Auth 1.7.2 (dist/api/routes/session.mjs:35 to :37 and :178 to
+    // :190, read 2026-10-17): a GET writes nothing and a POST refreshes.
+    // Core's session.deferRefresh has the same rule (plan 12a).
+    deferSessionRefresh: boolean,
   }),
   // Plan 12a. Better Auth 1.7.2's user options (dist/api/routes/update-user.mjs, read 2026-10-17).
   user: object({

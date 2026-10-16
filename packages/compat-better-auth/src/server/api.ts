@@ -168,6 +168,32 @@ export async function isCredential(
   return pw !== null;
 }
 
+/**
+ * Better Auth's get-session answer of a resolved session (plan 12a). Both
+ * `auth.api.getSession` and the handler's `/get-session` answer it, so the
+ * two answer alike. `needsRefresh` is there only when core's read set it:
+ * a read-only read with `session.deferSessionRefresh` on.
+ */
+export async function sessionAnswerOf(
+  auth: Auth,
+  mapped: Mapped,
+  s: ResolvedSession,
+  token: string,
+): Promise<NonNullable<Awaited<ReturnType<CompatServerApi["getSession"]>>>> {
+  // Computed from core's row (plan 9f): the Better Auth twoFactor table is not read.
+  const factor = mapped.plugins.has("two-factor")
+    ? await auth.api.totp?.status({ userId: s.user.id })
+    : undefined;
+  return {
+    session: toSession(s.session, token),
+    user: {
+      ...toUser(s.user),
+      ...(factor?.ok ? { twoFactorEnabled: factor.value.enabled } : {}),
+    },
+    ...(s.needsRefresh !== undefined ? { needsRefresh: s.needsRefresh } : {}),
+  };
+}
+
 /** Better Auth unlinks a credential account; core has no password removal. */
 export const CREDENTIAL_UNLINK = "core has no password removal; the credential account stays";
 
@@ -183,19 +209,10 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
   };
   return {
     async getSession({ headers }) {
+      // A GET request: with session.deferSessionRefresh on, core reads with no write (plan 12a).
       const s = await auth.session(reqOf(headers));
       if (!s) return null;
-      // Computed from core's row (plan 9f): the Better Auth twoFactor table is not read.
-      const factor = plugins.has("two-factor")
-        ? await auth.api.totp?.status({ userId: s.user.id })
-        : undefined;
-      return {
-        session: toSession(s.session, readToken(headers) ?? ""),
-        user: {
-          ...toUser(s.user),
-          ...(factor?.ok ? { twoFactorEnabled: factor.value.enabled } : {}),
-        },
-      };
+      return sessionAnswerOf(auth, mapped, s, readToken(headers) ?? "");
     },
     async signUpEmail({ body, headers }) {
       if (body.image !== undefined)

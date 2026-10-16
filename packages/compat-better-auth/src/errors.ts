@@ -127,6 +127,9 @@ export const COMPAT_CODES = {
   FIELD_NOT_ALLOWED: 400,
   ACCOUNT_NOT_FOUND: 400,
   CHANGE_EMAIL_DISABLED: 400,
+  // Plan 12a. POST /get-session with deferSessionRefresh off (@better-auth/core
+  // dist/error/codes.mjs:50 and better-auth dist/api/routes/session.mjs:37, read 2026-10-17).
+  METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED: 405,
 } as const;
 
 export type CompatCode = keyof typeof COMPAT_CODES;
@@ -139,6 +142,7 @@ const STATUS_NAMES: Record<number, string> = {
   401: "UNAUTHORIZED",
   403: "FORBIDDEN",
   404: "NOT_FOUND",
+  405: "METHOD_NOT_ALLOWED",
   409: "CONFLICT",
   429: "TOO_MANY_REQUESTS",
   500: "INTERNAL_SERVER_ERROR",
@@ -161,6 +165,7 @@ const REASONS: Record<number, string> = {
   401: "Unauthorized",
   403: "Forbidden",
   404: "Not Found",
+  405: "Method Not Allowed",
   409: "Conflict",
   429: "Too Many Requests",
   500: "Internal Server Error",

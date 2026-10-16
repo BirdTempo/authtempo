@@ -110,7 +110,6 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "plugins[passkey].origin",
       "rateLimit.customStorage",
       "secret",
-      "session.deferSessionRefresh",
     ],
     consumerb: [
       "advanced.defaultCookieAttributes.secure",

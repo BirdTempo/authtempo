@@ -106,6 +106,7 @@ The options of these operations:
 | Option | Rule |
 | --- | --- |
 | `session.freshAge` | 1 to 86400 seconds, rounded up to whole minutes. Default one day. `0` is refused: the fresh rule is a promise of core. |
+| `session.deferSessionRefresh` | Maps to core's `session.deferRefresh`. A GET writes no session row, and `GET /get-session` answers `needsRefresh`. `POST /get-session` slides the expiry and renews the cookie. |
 | `user.changeEmail` | `enabled` turns the change on. It needs `emailVerification.sendVerificationEmail`. `sendChangeEmailConfirmation` and `updateEmailWithoutVerification: true` are refused. |
 | `user.deleteUser` | `enabled` turns the delete on, off by default as in Better Auth. `beforeDelete` and `afterDelete` map. `sendDeleteAccountVerification` and `deleteTokenExpiresIn` are refused. |
 | `account.accountLinking` | `enabled: true`, `allowDifferentEmails: false`, and `allowUnlinkingAll: false` are accepted. `trustedProviders`, `updateUserInfoOnLink`, and `disableImplicitLinking` are refused. |
@@ -134,6 +135,8 @@ Where the shim differs from Better Auth:
 | The user delete runs the account delete hooks | It runs none. A credential account fires no account hook, because core's password row is not an identity. |
 
 The shim's own codes `EMAIL_CAN_NOT_BE_UPDATED`, `FIELD_NOT_ALLOWED`, `ACCOUNT_NOT_FOUND`, and `CHANGE_EMAIL_DISABLED` answer 400, as on Better Auth.
+
+`GET /get-session` answers `{ session, user }`, or `null` with no session, as on Better Auth. With `session.deferSessionRefresh` off, `POST /get-session` answers `METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED` with 405, as on Better Auth.
 
 ## Next
 

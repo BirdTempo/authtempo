@@ -311,6 +311,19 @@ Errors: `APIError` on the server and `error` on the client carry Better Auth's
 code (`body.code`, `error.code`) and core's HTTP status. The table is
 `BETTER_AUTH_CODES`.
 
+## The session read
+
+`auth.api.getSession` and `GET /get-session` answer `{ session, user }`, or
+`null` with no session (plan 12a). `session.deferSessionRefresh: true` maps
+to core's `session.deferRefresh`.
+
+- A GET request writes no session row. `GET /get-session` and `api.getSession` answer `needsRefresh` beside the session.
+- `POST /get-session` slides the expiry and renews the cookie through core's `POST /session/refresh`.
+- With the option off, `POST /get-session` answers `METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED` (405), as Better Auth 1.7.2 does.
+
+The handler forwards each request to core's own route, so core's rules
+apply. The shim's client reads core's `GET /session` and has no refresh call.
+
 ## Account operations
 
 Plan 12a serves Better Auth 1.7.2's account operations in Better Auth's
@@ -377,13 +390,13 @@ that are core's own routes (core `http/routes`, read 2026-10-10): `POST
 /sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
 core's magic link route. With the `magicLink` plugin, a Better Auth-era link
 answers `invalid_token`. Without the plugin, it answers 404. The handler
-serves the ten account paths of plan 12a in Better Auth's shapes, so they are
-not in this list (see "Account operations"). The email code paths are not in
+serves `/get-session` and the ten account paths of plan 12a in Better Auth's
+shapes, so they are not in this list. See "The session read" and "Account operations". The email code paths are not in
 it either (see "Email codes").
 
 - Core: `/account-info`, `/callback/:id`, `/change-password`,
-  `/delete-user/callback`, `/error`, `/get-access-token`, `/get-session`,
-  `/ok`, `/refresh-token`, `/request-password-reset`, `/reset-password`,
+  `/delete-user/callback`, `/error`, `/get-access-token`, `/ok`,
+  `/refresh-token`, `/request-password-reset`, `/reset-password`,
   `/reset-password/:token`, `/send-verification-email`, `/sign-in/email`,
   `/sign-in/social`, `/sign-out`, `/sign-up/email`, `/update-session`,
   `/verify-email`, `/verify-password`.
@@ -497,6 +510,7 @@ checks each row here.
 | `FIELD_NOT_ALLOWED` | 400 | `updateUser` with a field other than `name` and `image` (plan 12a) |
 | `ACCOUNT_NOT_FOUND` | 400 | `unlinkAccount` with an id that is not the caller's account (plan 12a) |
 | `CHANGE_EMAIL_DISABLED` | 400 | `changeEmail` without `user.changeEmail.enabled` (plan 12a) |
+| `METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED` | 405 | `POST /get-session` without `session.deferSessionRefresh` (plan 12a) |
 
 On Expo, pass `expo-secure-store` as `storage`. The client accepts any object
 with `getItem` and `setItem`, as Better Auth does. With a plain store, such as
@@ -744,8 +758,8 @@ consumer-i (small edits):
 consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
-consumerd (follow-ups first): admin and impersonation, anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, `deferSessionRefresh`, the rate limit storage. `freshAge: 600` runs unchanged since plan 12a: core's window is 10 minutes. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` (`ta_purpose` with snake-case names) instead; the row holds a keyed hash, never the code.
-The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`, `session.deferSessionRefresh`.
+consumerd (follow-ups first): admin and impersonation, anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, the rate limit storage. `freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and core defers the refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` (`ta_purpose` with snake-case names) instead; the row holds a keyed hash, never the code.
+The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`.
 
 consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, and `jwt` and JWKS (refused since plan 9g; see "JWT and the OAuth provider"), admin, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.

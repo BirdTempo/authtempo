@@ -7,6 +7,7 @@ import { createApi } from "./api.js";
 import { checkOptions } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
 import { type Mapped, mapOptions } from "./map-options.js";
+import { getSessionRoute } from "./session.js";
 import { COOKIE_NAME } from "./shapes.js";
 import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
@@ -118,8 +119,9 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
       req = new Request(request, { headers });
     }
     const copy = req.method === "POST" ? req.clone() : null;
-    // Better Auth's account paths, in Better Auth's shapes (plan 12a). Null for every other request.
-    const account = await accountRoute(auth, mapped, req);
+    // Better Auth's get-session and account paths, in Better Auth's shapes (plan 12a). Null for every other request.
+    const account =
+      (await getSessionRoute(auth, mapped, req)) ?? (await accountRoute(auth, mapped, req));
     // Better Auth's email OTP paths, in Better Auth's shapes (plan 9e). Null for every other request.
     const otp =
       account ?? (plugins.has("email-otp") ? await emailOtpRoute(auth, mapped, req) : null);

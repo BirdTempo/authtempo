@@ -228,6 +228,10 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       // 12a): a window never shorter than the app asked. check-options keeps
       // it from 1 to 86400 seconds, so 1 to 1440 minutes.
       freshMinutes: Math.ceil((options.session?.freshAge ?? BETTER_AUTH_DEFAULTS.freshAge) / 60),
+      // Better Auth's deferSessionRefresh is core's deferRefresh (plan 12a). Both are off by default.
+      ...(options.session?.deferSessionRefresh !== undefined
+        ? { deferRefresh: options.session.deferSessionRefresh }
+        : {}),
     },
     account: {
       // Better Auth's deleteUser is off by default; core's is on. The shim keeps Better Auth's default.

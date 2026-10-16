@@ -437,6 +437,11 @@ export interface BetterAuthOptions {
     storeSessionInDatabase?: boolean;
     /** Seconds, 1 to 86400. Core rounds up to whole minutes (plan 12a). */
     freshAge?: number;
+    /**
+     * Core's `session.deferRefresh` (plan 12a). A GET writes no session row,
+     * `GET /get-session` answers `needsRefresh`, and `POST /get-session` slides the expiry.
+     */
+    deferSessionRefresh?: boolean;
   };
   /** Better Auth 1.7.2's `user` options that the shim maps (plan 12a). */
   user?: {
@@ -582,9 +587,12 @@ interface SignUpTokenOf {
 
 export interface CompatServerApi<TF extends boolean = false, RV extends boolean = false> {
   /** `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f). */
-  getSession(input: {
-    headers: Headers;
-  }): Promise<{ session: Session; user: User & { twoFactorEnabled?: boolean } } | null>;
+  getSession(input: { headers: Headers }): Promise<{
+    session: Session;
+    user: User & { twoFactorEnabled?: boolean };
+    /** With `session.deferSessionRefresh` on only (plan 12a): the refresh is due. */
+    needsRefresh?: boolean;
+  } | null>;
   /**
    * `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither.
    * `token` is null with `emailAndPassword.requireEmailVerification` (plan 12b): no session opens.
