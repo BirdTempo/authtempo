@@ -43,6 +43,8 @@ export const BETTER_AUTH_DEFAULTS = {
   trustDeviceMaxAge: 2_592_000,
   // context/create-context.mjs:148: 3600 * 24 (read 2026-10-17, plan 12a).
   freshAge: 86_400,
+  // dist/api/routes/update-user.mjs:322: `deleteTokenExpiresIn || 3600 * 24` (read 2026-10-17, plan 12a Task 20).
+  deleteTokenExpiresIn: 86_400,
   basePath: "/api/auth",
 } as const;
 
@@ -193,6 +195,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const github = options.socialProviders?.github;
   const linkedin = options.socialProviders?.linkedin;
   const ep = options.emailAndPassword;
+  const deleteUser = options.user?.deleteUser;
   const config: AuthConfig = {
     baseURL: origin,
     basePath,
@@ -222,6 +225,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       sendMagicLink: magic?.options.sendMagicLink,
       sendVerificationOTP: otp?.options.sendVerificationOTP,
       sendInvitationEmail: org?.options.sendInvitationEmail,
+      sendDeleteAccountVerification: deleteUser?.sendDeleteAccountVerification,
     }),
     ...(clientIp ? { clientIp } : {}),
     ...(sameSite
@@ -242,7 +246,17 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     },
     account: {
       // Better Auth's deleteUser is off by default; core's is on. The shim keeps Better Auth's default.
-      delete: options.user?.deleteUser?.enabled === true,
+      delete: deleteUser?.enabled === true,
+      // The mail callback turns on core's mailed confirm, with Better Auth's
+      // default life of the link (plan 12a Task 20).
+      ...(deleteUser?.sendDeleteAccountVerification
+        ? {
+            deleteConfirm: {
+              ttlMinutes:
+                (deleteUser.deleteTokenExpiresIn ?? BETTER_AUTH_DEFAULTS.deleteTokenExpiresIn) / 60,
+            },
+          }
+        : {}),
       // Better Auth sends no credential-change notice and has no callback for one.
       // The shim's mail port routes a mail by its link and throws on a notice,
       // which has none. So each notice would fail and log a line. An app

@@ -66,7 +66,8 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `email-change:email:<email>` | 15 minutes | 3 | Change of address request, per new address |
 | `email-change-confirm:ip:<ip>` | 15 minutes | 20 | Change of address link confirm |
 | `unlink:user:<userId>` | 15 minutes | 10 | Unlink of a provider, also for an unknown id |
-| `user-delete:user:<userId>` | 1 hour | 5 | Account delete, also when it answers `sole_owner`. A stale session counts no try |
+| `user-delete:user:<userId>` | 1 hour | 5 | Account delete and the request of its mailed link, also when it answers `sole_owner`. A stale session counts no try |
+| `user-delete-confirm:ip:<ip>` | 15 minutes | 20 | Account delete link confirm. A malformed token counts no try |
 | `token-live:session:<sessionId>` | 1 minute | 120 | The live check of a session JWT |
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |

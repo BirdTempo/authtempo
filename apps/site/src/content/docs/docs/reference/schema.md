@@ -38,7 +38,7 @@ Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verificati
 
 Core at version 10 needs the `0010_schema_v10` migration in both adapters, and the compatibility package needs `0007_compat_schema_v10`. Version 10 adds `ta_session.fresh_at`, the field `freshAt` (plan 12a). It has no default and no fill. A session of version 9 holds null and re-authenticates once before its first sensitive change.
 
-Version 10 also adds four verification purposes. `purpose` is a text column, so they need no DDL.
+Version 10 also adds five verification purposes. `purpose` is a text column, so they need no DDL.
 
 | Purpose | Identifier | What it holds |
 | --- | --- | --- |
@@ -46,6 +46,7 @@ Version 10 also adds four verification purposes. `purpose` is a text column, so 
 | `email-change` | The user id, so one user has one live request | A change-of-address link: the SHA-256 hex of the `ec_` token. |
 | `email-change-otp` | The user id | A change-of-address code: the data of `email-change`, with the code rules of `email-otp`. |
 | `oauth-link-state` | The provider name | The state of a link of a provider: the data of `oauth-state` and the user and session of the start. |
+| `account-delete` | The user id, so one user has one live link | The mailed confirm of an account delete: the SHA-256 hex of the `ad_` token. |
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 

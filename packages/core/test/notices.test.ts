@@ -5,7 +5,11 @@ import {
   ConfigError,
   type MailMessage,
 } from "../src/config.js";
-import { deleteAccount } from "../src/engine/account-delete.js";
+import {
+  confirmAccountDelete,
+  deleteAccount,
+  requestAccountDelete,
+} from "../src/engine/account-delete.js";
 import {
   confirmEmailChange,
   requestEmailChange,
@@ -900,6 +904,23 @@ const PATHS: {
     run: async ({ auth }) => {
       const s = await verifiedSession(auth);
       return { act: () => deleteAccount(auth.config, { session: s, ip: null, userAgent: null }) };
+    },
+  },
+  {
+    name: "account delete confirm",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      // The same store and mail port with the mailed confirm on (plan 12a Task 20).
+      const on = {
+        ...auth.config,
+        account: { ...auth.config.account, deleteConfirm: { ttlMinutes: 60 } },
+      };
+      const asked = await requestAccountDelete(on, { session: s, ip: null, userAgent: null });
+      if (!asked.ok) throw new Error(asked.code);
+      const token = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+      return {
+        act: () => confirmAccountDelete(on, { session: s, token, ip: null, userAgent: null }),
+      };
     },
   },
   {

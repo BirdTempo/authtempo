@@ -1,5 +1,6 @@
 import type {
   AccountConfig,
+  AccountDeleteConfirmConfig,
   AccountNoticesConfig,
   AppleConfig,
   AuthConfig,
@@ -219,8 +220,10 @@ export const CONFIG_KEYS = {
     notices: true,
     confirmPage: true,
     delete: true,
+    deleteConfirm: true,
   } satisfies Keys<AccountConfig>,
   "account.notices": { mail: true } satisfies Keys<AccountNoticesConfig>,
+  "account.deleteConfirm": { ttlMinutes: true } satisfies Keys<AccountDeleteConfirmConfig>,
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
 } as const;
 

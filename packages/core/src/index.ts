@@ -13,6 +13,7 @@ export {
 } from "./captcha.js";
 export type {
   AccountConfig,
+  AccountDeleteConfirmConfig,
   AccountNoticesConfig,
   AuthConfig,
   EmailOtpConfig,
@@ -29,7 +30,12 @@ export type {
   TotpConfig,
   TotpGateConfig,
 } from "./config.js";
-export { ConfigError, DEFAULT_RESERVED_SLUGS, isAppScheme } from "./config.js";
+export {
+  ConfigError,
+  DEFAULT_RESERVED_SLUGS,
+  DELETE_CONFIRM_TTL_MINUTES,
+  isAppScheme,
+} from "./config.js";
 export {
   type Auth,
   type AuthApi,
@@ -163,6 +169,10 @@ export type {
 export { TWO_FACTOR_TOKEN_RE } from "./engine/totp.js";
 export { normalizeEmail, validImageUrl, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./errors.js";
+export {
+  type AccountDeletePageInput,
+  defaultAccountDeletePage,
+} from "./http/account-delete-page.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 export { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";

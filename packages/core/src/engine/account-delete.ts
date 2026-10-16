@@ -1,8 +1,13 @@
 import type { ResolvedConfig } from "../config.js";
+import { ipKey } from "../limiter/ip-key.js";
+import { randomToken, sha256Hex } from "../primitives/crypto.js";
+import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { OrganizationRow, UserRow } from "../schema.js";
-import type { Where } from "../storage/port.js";
+import type { OrganizationRow, SessionRow, UserRow } from "../schema.js";
+import type { StorageAdapter, Where } from "../storage/port.js";
 import { USER_CHILD_MODELS } from "../storage/sql.js";
+import { sendAccountMail } from "./account-mail.js";
+import { CONFIRM_PER_IP } from "./email-change.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -26,6 +31,10 @@ import {
 // retry after a `conflict` or after a fix of `sole_owner`, and bounds a loop.
 export const DELETE_PER_USER = { seconds: 3600, max: 5 };
 
+/** The prefix of the mailed confirm's token (plan 12a Task 20). */
+export const DELETE_TOKEN_PREFIX = "ad_";
+export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
+
 export interface AccountDelete {
   session: ResolvedSession;
   ip: string | null;
@@ -38,30 +47,9 @@ interface Deleted {
 }
 
 /**
- * Deletes the account (plan 12a, spec 8.15). The fresh rule applies, and no
- * mail confirms the delete: the fresh session is the proof.
- *
- * One transaction. First the lock of the user row through `unchanged()`
- * (profile.ts), in a loop of `ROUNDS`. A parallel change of address, a
- * profile update, or a removal of a way in then commits first or waits.
- * A sign-in of a verified user holds the same row (`prepareSession`). So its
- * session commits before the delete reads the sessions, or it sees the user
- * gone. Then the session of the proof is read again, the organization rule
- * runs, and the before hooks run. The owner lock of each organization that
- * keeps another owner comes next.
- *
- * The deletes come in this order. First the user row, the solo
- * organizations, the member rows of the user, and the invitations the user
- * sent. Then the sessions, and every other row of `USER_CHILD_MODELS`. The
- * user row goes before the sessions: D1 has no lock, and a sign-in reads the
- * user row after its session insert. The sessions go before the
- * identities: a link in flight updates its session as its last statement,
- * so it undoes or commits first.
- *
- * After the commit: the verification rows of the user id and the address.
- * A reset holds its link row before the user row, so a delete inside the
- * transaction could deadlock with it on Postgres. Invitations to the
- * address stay: they belong to the organizations.
+ * Deletes the account (plan 12a, spec 8.15). The fresh rule applies. With
+ * `account.deleteConfirm` off, the fresh session is the proof, and the
+ * delete runs at once.
  */
 export async function deleteAccount(
   config: ResolvedConfig,
@@ -70,13 +58,139 @@ export async function deleteAccount(
   if (!config.account.delete) return fail("not_found");
   const fresh = requireFresh(config, input.session.session);
   if (!fresh.ok) return fresh;
+  if (!(await config.limiter.allow(`user-delete:user:${input.session.user.id}`, DELETE_PER_USER)))
+    return fail("rate_limited");
+  return runDelete(config, input, null);
+}
+
+/**
+ * `POST /user/delete` and `api.user.delete` (plan 12a Task 20). With
+ * `account.deleteConfirm` on, the request mails a link and deletes nothing.
+ * Else the delete runs at once. This is the one place of that choice.
+ */
+export function startAccountDelete(
+  config: ResolvedConfig,
+  input: AccountDelete,
+): Promise<Result<{ ok: true } | { sent: true }>> {
+  return config.account.deleteConfirm
+    ? requestAccountDelete(config, input)
+    : deleteAccount(config, input);
+}
+
+/**
+ * The request of a mailed delete (plan 12a Task 20). Every check of the
+ * direct delete runs first, in its order: `not_found` with `account.delete`
+ * off, the fresh rule, the limit, and the sole-owner rule. Then the user's
+ * earlier links go, one row holds the hash of a new `ad_` token, and the link
+ * goes to the user's address. It deletes nothing.
+ */
+export async function requestAccountDelete(
+  config: ResolvedConfig,
+  input: AccountDelete,
+): Promise<Result<{ sent: true }>> {
+  const confirm = config.account.deleteConfirm;
+  if (!config.account.delete || !confirm) return fail("not_found");
+  const fresh = requireFresh(config, input.session.session);
+  if (!fresh.ok) return fresh;
   const userId = input.session.user.id;
   if (!(await config.limiter.allow(`user-delete:user:${userId}`, DELETE_PER_USER)))
     return fail("rate_limited");
+  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+  if (!user) return fail("not_found");
+  // The rule runs again at the confirm: an owner can leave between the two.
+  const plan = await organizationsOfDelete(config, config.storage, userId);
+  if (!plan.ok) return plan;
+  const now = config.clock.now();
+  // One live link per user: a new request ends the older ones.
+  await config.storage.delete("verification", [
+    { field: "purpose", op: "eq", value: "account-delete" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
+  const token = randomToken(DELETE_TOKEN_PREFIX);
+  await config.storage.create("verification", {
+    id: newId(now),
+    purpose: "account-delete",
+    identifier: userId,
+    valueHash: await sha256Hex(token),
+    expiresAt: new Date(now.getTime() + confirm.ttlMinutes * 60_000),
+    consumedAt: null,
+    data: null,
+    createdAt: now,
+    updatedAt: now,
+    secretVersion: config.keyring.current,
+  });
+  const link = `${config.baseURL}${config.basePath}/user/delete/confirm?token=${encodeURIComponent(token)}`;
+  await sendAccountMail(config, {
+    kind: "delete_confirm",
+    email: user.email,
+    link,
+    ttlMinutes: confirm.ttlMinutes,
+    appName: config.appName,
+  });
+  return ok({ sent: true });
+}
+
+/**
+ * The confirm of a mailed delete (plan 12a Task 20). It needs a session of
+ * the user who asked. The session need not be fresh: the request checked
+ * that. In one transaction: the lock of the user row, the spend of the link
+ * by one conditional update, then `deleteAccountRows`. The update matches
+ * the hash, the user, no spend, and a live expiry. So a spent, expired, or
+ * unknown link, and the link of another user, answer `invalid_token`.
+ */
+export async function confirmAccountDelete(
+  config: ResolvedConfig,
+  input: AccountDelete & { token: string },
+): Promise<Result<{ ok: true }>> {
+  if (!config.account.delete) return fail("not_found");
+  if (typeof input.token !== "string" || !DELETE_TOKEN_RE.test(input.token))
+    return fail("invalid_token");
+  if (!(await config.limiter.allow(`user-delete-confirm:ip:${ipKey(input.ip)}`, CONFIRM_PER_IP)))
+    return fail("rate_limited");
+  const valueHash = await sha256Hex(input.token);
+  return runDelete(config, input, async (tx, user, now) => {
+    const spent = await tx.update(
+      "verification",
+      [
+        { field: "valueHash", op: "eq", value: valueHash },
+        { field: "purpose", op: "eq", value: "account-delete" },
+        { field: "identifier", op: "eq", value: user.id },
+        { field: "consumedAt", op: "eq", value: null },
+        { field: "expiresAt", op: "gt", value: now },
+      ],
+      { consumedAt: now, updatedAt: now },
+    );
+    // The lock wrote, so the refusal throws to undo it.
+    if (spent !== 1) stopWith("invalid_token");
+  });
+}
+
+/** A step between the lock of the user row and the deletes: the spend of the confirm. */
+type Spend = (tx: StorageAdapter, user: UserRow, now: Date) => Promise<void>;
+
+/**
+ * The delete, in one transaction (plan 12a Task 11). First the lock of the
+ * user row through `unchanged()` (profile.ts), in a loop of `ROUNDS`. A
+ * parallel change of address, a profile update, or a removal of a way in
+ * then commits first or waits. A sign-in of a verified user holds the same
+ * row (`prepareSession`). So its session commits before the delete reads
+ * the sessions, or it sees the user gone. Then `spend`, then
+ * `deleteAccountRows`.
+ *
+ * After the commit: the verification rows of the user id and the address.
+ * A reset holds its link row before the user row, so a delete inside the
+ * transaction could deadlock with it on Postgres. Invitations to the
+ * address stay: they belong to the organizations.
+ */
+async function runDelete(
+  config: ResolvedConfig,
+  input: AccountDelete,
+  spend: Spend | null,
+): Promise<Result<{ ok: true }>> {
+  const userId = input.session.user.id;
   const now = config.clock.now();
   const ended = endedList(config);
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
-  const proof: Where<"session">[] = [{ field: "id", op: "eq", value: input.session.session.id }];
   const done = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<Deleted>> => {
       if (ended) ended.length = 0;
@@ -94,49 +208,11 @@ export async function deleteAccount(
         console.error("authtempo: account delete gave up", userId);
         return fail("conflict");
       }
-      // The proof must still be live: a session that ended proves nothing.
-      // The lock wrote, so each refusal from here throws to undo it.
-      const session = await tx.findOne("session", proof);
-      if (!session || !sessionIsLive(config, session, now)) stopWith("unauthorized");
-      const plan = await organizationsOfDelete(config, tx, user.id);
-      if (!plan.ok) stopWith(plan.code);
-      const { going, owned } = plan.value;
-      for (const organization of going)
-        await runBefore("organization.beforeDelete", config.hooks.organization.beforeDelete, {
-          organization: publicOrganization(organization),
-          user,
-        });
-      await runBefore("user.beforeDelete", config.hooks.user.beforeDelete, {
-        user,
-        organizations: going.map((x) => x.id),
+      if (spend) await spend(tx, user, now);
+      const going = await deleteAccountRows(tx, config, user, now, {
+        sessionId: input.session.session.id,
+        ended: ended ?? null,
       });
-      // The lock of `ownerWrite`: a parallel owner removal holds it first,
-      // or waits and then matches no row.
-      for (const organization of owned) {
-        const held = await tx.update(
-          "organization",
-          [
-            { field: "id", op: "eq", value: organization.id },
-            { field: "updatedAt", op: "eq", value: organization.updatedAt },
-          ],
-          { updatedAt: later(now, organization.updatedAt) },
-        );
-        if (held === 0) stopWith("conflict");
-      }
-      await tx.delete("user", byId);
-      for (const organization of going) await deleteOrganizationRows(tx, organization.id, user.id);
-      await tx.delete("member", [{ field: "userId", op: "eq", value: user.id }]);
-      // D1 has no lock: the recount catches an owner removal that passed the lock.
-      for (const organization of owned)
-        if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
-      await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
-      await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], ended ?? null);
-      for (const model of USER_CHILD_MODELS) {
-        if (model === "session" || model === "member") continue;
-        // Each model of the list has a `userId` field: USER_CHILD_MODELS reads
-        // the schema. The port's types cannot see that over a union of models.
-        await tx.delete(model, [{ field: "userId", op: "eq", value: user.id }] as never);
-      }
       return ok({ user, going });
     }),
   );
@@ -162,4 +238,74 @@ export async function deleteAccount(
     userAgent: input.userAgent,
   });
   return ok({ ok: true });
+}
+
+/**
+ * The rows of an account delete, after the lock of the user row (plan 12a
+ * Tasks 11 and 20). The direct delete and the confirm share it, so the rows
+ * of a delete have one list. Each refusal throws (`stopWith`), because the
+ * lock wrote. It answers the organizations that go.
+ *
+ * The session of the proof is read again: a session that ended proves
+ * nothing. Then the organization rule runs, and the before hooks. The owner
+ * lock of each organization that keeps another owner comes next.
+ *
+ * The deletes come in this order. First the user row, the solo
+ * organizations, the member rows of the user, and the invitations the user
+ * sent. Then the sessions, and every other row of `USER_CHILD_MODELS`. The
+ * user row goes before the sessions: D1 has no lock, and a sign-in reads the
+ * user row after its session insert. The sessions go before the
+ * identities: a link in flight updates its session as its last statement,
+ * so it undoes or commits first.
+ */
+export async function deleteAccountRows(
+  tx: StorageAdapter,
+  config: ResolvedConfig,
+  user: UserRow,
+  now: Date,
+  proof: { sessionId: string; ended: SessionRow[] | null },
+): Promise<OrganizationRow[]> {
+  const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
+  const session = await tx.findOne("session", [{ field: "id", op: "eq", value: proof.sessionId }]);
+  if (!session || !sessionIsLive(config, session, now)) stopWith("unauthorized");
+  const plan = await organizationsOfDelete(config, tx, user.id);
+  if (!plan.ok) stopWith(plan.code);
+  const { going, owned } = plan.value;
+  for (const organization of going)
+    await runBefore("organization.beforeDelete", config.hooks.organization.beforeDelete, {
+      organization: publicOrganization(organization),
+      user,
+    });
+  await runBefore("user.beforeDelete", config.hooks.user.beforeDelete, {
+    user,
+    organizations: going.map((x) => x.id),
+  });
+  // The lock of `ownerWrite`: a parallel owner removal holds it first,
+  // or waits and then matches no row.
+  for (const organization of owned) {
+    const held = await tx.update(
+      "organization",
+      [
+        { field: "id", op: "eq", value: organization.id },
+        { field: "updatedAt", op: "eq", value: organization.updatedAt },
+      ],
+      { updatedAt: later(now, organization.updatedAt) },
+    );
+    if (held === 0) stopWith("conflict");
+  }
+  await tx.delete("user", byId);
+  for (const organization of going) await deleteOrganizationRows(tx, organization.id, user.id);
+  await tx.delete("member", [{ field: "userId", op: "eq", value: user.id }]);
+  // D1 has no lock: the recount catches an owner removal that passed the lock.
+  for (const organization of owned)
+    if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
+  await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
+  await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], proof.ended);
+  for (const model of USER_CHILD_MODELS) {
+    if (model === "session" || model === "member") continue;
+    // Each model of the list has a `userId` field: USER_CHILD_MODELS reads
+    // the schema. The port's types cannot see that over a union of models.
+    await tx.delete(model, [{ field: "userId", op: "eq", value: user.id }] as never);
+  }
+  return going;
 }

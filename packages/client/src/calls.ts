@@ -114,8 +114,8 @@ export const CLIENT_CALLS = [
   { operation: "secondFactor.disable", method: "POST", path: "/second-factor/disable" },
   // Plan 12a: the settings page. `reauth.password`, `reauth.emailCode`, and
   // `reauth.passkey` send their proof to one route, so they share the row
-  // "reauth". `GET /user/change-email/confirm` is the page of the mailed
-  // link, not a client call.
+  // "reauth". `GET /user/change-email/confirm` and `GET /user/delete/confirm`
+  // are the pages of the mailed links, not client calls.
   { operation: "sessions.list", method: "GET", path: "/sessions" },
   { operation: "sessions.revoke", method: "POST", path: "/sessions/revoke" },
   { operation: "sessions.revokeOthers", method: "POST", path: "/sessions/revoke-others" },
@@ -127,6 +127,7 @@ export const CLIENT_CALLS = [
   { operation: "user.confirmEmailChange", method: "POST", path: "/user/change-email/confirm" },
   { operation: "user.verifyEmailChange", method: "POST", path: "/user/change-email/verify" },
   { operation: "user.delete", method: "POST", path: "/user/delete" },
+  { operation: "user.confirmDelete", method: "POST", path: "/user/delete/confirm" },
   { operation: "identities.list", method: "GET", path: "/identities" },
   { operation: "identities.unlink", method: "POST", path: "/identities/unlink" },
   // A POST, not a navigation: the start needs the session. client.identities.link

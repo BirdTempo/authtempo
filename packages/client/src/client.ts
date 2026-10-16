@@ -534,8 +534,17 @@ export interface Client {
     confirmEmailChange(input: { token: string }): Promise<ClientResult<{ user: PublicUserJSON }>>;
     /** The mailed code of `changeEmail({ method: "code" })`. */
     verifyEmailChange(input: { code: string }): Promise<ClientResult<{ user: PublicUserJSON }>>;
-    /** Needs a fresh session. The account and the caller's session end. */
-    delete(): Promise<ClientResult<{ ok: true }>>;
+    /**
+     * Needs a fresh session. The account and the caller's session end:
+     * `{ ok: true }`. With the server's `account.deleteConfirm` on, it mails
+     * a link, deletes nothing, and answers `{ sent: true }` (plan 12a Task 20).
+     */
+    delete(): Promise<ClientResult<{ ok: true } | { sent: true }>>;
+    /**
+     * The token of the mailed delete link, for an app that serves its own
+     * confirm page. Needs a session of the same user, not a fresh one.
+     */
+    confirmDelete(input: { token: string }): Promise<ClientResult<{ ok: true }>>;
   };
   /** The linked identities of the signed-in person (plan 12a). */
   identities: {
@@ -627,6 +636,7 @@ async function shaped<T>(
 
 const isOkTrue = (v: unknown): v is { ok: true } => isRecord(v) && v.ok === true;
 const isSent = (v: unknown): v is { sent: true } => isRecord(v) && v.sent === true;
+const isDeleteAnswer = (v: unknown): v is { ok: true } | { sent: true } => isOkTrue(v) || isSent(v);
 const isFresh = (v: unknown): v is FreshJSON => isRecord(v) && typeof v.freshUntil === "string";
 const isEnded = (v: unknown): v is { ended: number } => isRecord(v) && typeof v.ended === "number";
 const isRevoked = (v: unknown): v is { ok: true; current: boolean } =>
@@ -984,7 +994,13 @@ export function createClient(options: ClientOptions): Client {
       changes(shaped(send<unknown>("user.confirmEmailChange", { token }), isUserAnswer)),
     verifyEmailChange: ({ code }) =>
       changes(shaped(send<unknown>("user.verifyEmailChange", { code }), isUserAnswer)),
-    delete: () => changes(shaped(send<unknown>("user.delete", {}), isOkTrue)),
+    async delete() {
+      const r = await shaped(send<unknown>("user.delete", {}), isDeleteAnswer);
+      // A mailed link changes no session: only a delete tells the store.
+      return r.ok && "ok" in r.value ? changes(Promise.resolve(r)) : r;
+    },
+    confirmDelete: ({ token }) =>
+      changes(shaped(send<unknown>("user.confirmDelete", { token }), isOkTrue)),
   };
   const identities: Client["identities"] = {
     list: () => shaped(send<unknown>("identities.list"), isIdentityList),

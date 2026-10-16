@@ -267,7 +267,9 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `account.notices` | object or `false` | on | The notice mails after a change of a way in. `false` turns them off. |
 | `account.notices.mail` | function of `NoticeMailInput` | `defaultNoticeMail` | Answers a notice. Core sends it to the input's address. |
 | `account.confirmPage` | function of `EmailChangePageInput` | `defaultEmailChangePage` | Answers the markup of the page a change-of-address link opens. It must post `token` to `action`. Core sets the headers. |
-| `account.delete` | boolean | `true` | Turns on `POST /user/delete`. The right to delete the account is the person's, so it is on by default. `false` removes the route. |
+| `account.delete` | boolean | `true` | Turns on `POST /user/delete` and the two routes of its mailed confirm. The right to delete the account is the person's, so it is on by default. `false` removes the routes. |
+| `account.deleteConfirm` | `AccountDeleteConfirmConfig` or `false` | `false` | A mailed link before the delete. The default is off: the fresh session already proves the person (ASVS 5.0.0 7.5.1), and Better Auth deletes at once unless an app sets `sendDeleteAccountVerification`. The link adds a proof of the mailbox, for an app whose sessions live on shared devices. `{}` turns it on. |
+| `account.deleteConfirm.ttlMinutes` | number | 60 | An integer from 5 to 1440. A delete is not undone, and a short window lowers the risk of a link in an old mailbox. Better Auth's default is 24 hours. |
 
 ## Next
 

@@ -134,6 +134,7 @@ describe("betterAuth", () => {
       twoFactorBackupCodes: 10,
       trustDeviceMaxAge: 2592000,
       freshAge: 86400,
+      deleteTokenExpiresIn: 86400,
       basePath: "/api/auth",
     });
     expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1, freshMinutes: 1440 });

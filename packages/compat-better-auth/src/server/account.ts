@@ -37,6 +37,7 @@ export const ACCOUNT_PATHS: readonly string[] = [
   "/revoke-other-sessions",
   "/update-user",
   "/delete-user",
+  "/delete-user/callback",
   "/change-email",
   "/list-accounts",
   "/link-social",
@@ -45,7 +46,7 @@ export const ACCOUNT_PATHS: readonly string[] = [
 ];
 
 /** The GET paths. Every other path is a POST. */
-const GET_PATHS: readonly string[] = ["/list-sessions", "/list-accounts"];
+const GET_PATHS: readonly string[] = ["/list-sessions", "/list-accounts", "/delete-user/callback"];
 
 /**
  * Better Auth 1.7.2's link-social fields that core cannot keep
@@ -160,6 +161,13 @@ export async function accountRoute(
         // Core's JSON holds each date as text, and the answer writes it back as the same text.
         return (b.sessions as SessionSummary[]).map((x) => listedSession(x, userId));
       });
+    if (path === "/delete-user/callback") {
+      // Better Auth 1.7.2 deletes at this GET (update-user.mjs:352 to :405).
+      // A mail scanner fetches links, so core's confirm page answers here,
+      // and the page posts the token (plan 12a Task 20).
+      const token = new URL(request.url).searchParams.get("token") ?? "";
+      return core("GET", `/user/delete/confirm?token=${encodeURIComponent(token)}`);
+    }
     if (path === "/list-accounts")
       return answer(await core("GET", "/identities"), async () =>
         accountsOf(mapped.config.storage, (await caller()).user.id),
@@ -234,9 +242,19 @@ export async function accountRoute(
           if (!reauth.ok) return answer(reauth, status);
         }
         // Core's delete ends the session and clears the cookie by core's rule.
-        return answer(await core("POST", "/user/delete", {}), () => ({
+        // Better Auth 1.7.2 spends a token before any other step (update-user.mjs:307 to :315).
+        if (fields.token !== undefined)
+          return answer(
+            await core("POST", "/user/delete/confirm", { token: fields.token }),
+            () => ({
+              success: true,
+              message: "User deleted",
+            }),
+          );
+        // With sendDeleteAccountVerification, core mails the link and answers { sent: true }.
+        return answer(await core("POST", "/user/delete", {}), (b) => ({
           success: true,
-          message: "User deleted",
+          message: b.sent === true ? "Verification email sent" : "User deleted",
         }));
       }
       case "/passkey/update-passkey": {

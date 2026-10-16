@@ -339,7 +339,9 @@ shapes. Each is a method of `auth.api` and a path of `auth.handler`.
 | `revokeOtherSessions` | `POST /revoke-other-sessions` | `{ status: true }` |
 | `updateUser({ name, image })` | `POST /update-user` | `{ status: true }` |
 | `changeEmail({ newEmail, callbackURL })` | `POST /change-email` | `{ status: true }`, with `user.changeEmail.enabled` |
-| `deleteUser({ password })` | `POST /delete-user` | `{ success: true, message: "User deleted" }`, with `user.deleteUser.enabled` |
+| `deleteUser({ password })` | `POST /delete-user` | `{ success: true, message: "User deleted" }`, with `user.deleteUser.enabled`. With `sendDeleteAccountVerification`: `{ success: true, message: "Verification email sent" }` |
+| `deleteUser({ token })` | `POST /delete-user` | `{ success: true, message: "User deleted" }`: the confirm of the mailed link |
+| The mailed link (the handler only) | `GET /delete-user/callback` | Core's confirm page. It deletes nothing; its button posts the token |
 | `listUserAccounts` | `GET /list-accounts` | The provider accounts and the credential account |
 | `linkSocial` (the handler only) | `POST /link-social` | `{ url, redirect }` |
 | `unlinkAccount({ accountId })` | `POST /unlink-account` | `{ status: true }` |
@@ -362,7 +364,11 @@ gains no account calls. A client app posts these paths, or calls
 | A core route through the handler, such as `POST /password/change`, adds `code: "SESSION_NOT_FRESH"` to core's 403 answer | The caller reads Better Auth's code on every path |
 | `session.freshAge: 0` is refused | The fresh rule is a promise of core |
 | `deleteUser({ password })` re-authenticates first. A wrong password answers `INVALID_EMAIL_OR_PASSWORD`, not `INVALID_PASSWORD` | Better Auth's password path skips `freshAge`. Core's re-authentication proves the password, and the code too when the second factor is on |
-| `deleteUser` with `token` or `callbackURL` answers `NOT_SUPPORTED` (501). `sendDeleteAccountVerification` is refused | Core mails no delete link: the fresh session is the proof |
+| `GET /delete-user/callback` serves core's confirm page and deletes nothing. The page posts the token with the session cookie. `url` of `sendDeleteAccountVerification` opens that page on core's path, and `request` is undefined | A mail scanner fetches links, so a GET that deletes lets it delete the account |
+| With `sendDeleteAccountVerification`, the request needs a fresh session, as the direct delete does. The organization rule runs at the request and again at the confirm | Core keeps every check of the delete. Better Auth mails the link with no check |
+| `deleteTokenExpiresIn` is a whole number of minutes from 300 to 86400 seconds. Else the option is refused | Core keeps the life of the link in whole minutes, from 5 to 1440 |
+| A spent, expired, unknown, or foreign token answers `INVALID_TOKEN` with 400, not 404. A confirm after a change of address answers it too | Core's status. The link went to the old mailbox |
+| `deleteUser` with `callbackURL` answers `NOT_SUPPORTED` (501). The confirm page lands on the app | Core lands a form post on `appURL` |
 | An organization where the user is the last owner and other members remain stops the delete: `SOLE_OWNER` (409) | Better Auth keeps such an organization with no owner |
 | `updateUser` takes `name` and `image`, for a verified address only. `email` answers `EMAIL_CAN_NOT_BE_UPDATED`, and any other field `FIELD_NOT_ALLOWED` | Core keeps no other user field. Better Auth drops an unknown field |
 | The change of address mails the new address through `emailVerification.sendVerificationEmail`. A taken address gets no mail. The link opens core's confirm page | As Better Auth does. Core moves the address only after the proof. `sendChangeEmailConfirmation` is refused |
@@ -406,12 +412,11 @@ that are core's own routes (core `http/routes`, read 2026-10-10): `POST
 /sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
 core's magic link route. With the `magicLink` plugin, a Better Auth-era link
 answers `invalid_token`. Without the plugin, it answers 404. The handler
-serves `/get-session`, the ten account paths of plan 12a, and
+serves `/get-session`, the eleven account paths of plan 12a, and
 `/passkey/update-passkey` in Better Auth's shapes, so they are not in this list. See "The session read" and "Account operations". The email code paths are not in
 it either (see "Email codes").
 
-- Core: `/account-info`, `/callback/:id`, `/change-password`,
-  `/delete-user/callback`, `/error`, `/get-access-token`, `/ok`,
+- Core: `/account-info`, `/callback/:id`, `/change-password`, `/error`, `/get-access-token`, `/ok`,
   `/refresh-token`, `/request-password-reset`, `/reset-password`,
   `/reset-password/:token`, `/send-verification-email`, `/sign-in/email`,
   `/sign-in/social`, `/sign-out`, `/sign-up/email`, `/update-session`,

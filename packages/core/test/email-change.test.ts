@@ -1313,7 +1313,7 @@ describe("api.user and the config of the change of address (plan 12a)", () => {
     );
     expect(() => totpAuth({ account: { confirm: () => "" } as never })).toThrow(
       new ConfigError(
-        "account.confirm is not an option; core has mail, notices, confirmPage, delete",
+        "account.confirm is not an option; core has mail, notices, confirmPage, delete, deleteConfirm",
       ),
     );
   });

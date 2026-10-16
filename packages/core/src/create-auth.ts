@@ -1,5 +1,9 @@
 import { type AuthConfig, resolveConfig } from "./config.js";
-import { type AccountDelete, deleteAccount } from "./engine/account-delete.js";
+import {
+  type AccountDelete,
+  confirmAccountDelete,
+  startAccountDelete,
+} from "./engine/account-delete.js";
 import {
   confirmEmailChange,
   type EmailChangeRequest,
@@ -346,8 +350,18 @@ export interface UserApi {
     ip: string | null;
     userAgent: string | null;
   }): Promise<Result<{ user: PublicUser }>>;
-  /** Deletes the account. Fresh rule; `sole_owner`; `not_found` with `account.delete: false`. */
-  delete(input: AccountDelete): Promise<Result<{ ok: true }>>;
+  /**
+   * Deletes the account. Fresh rule; `sole_owner`; `not_found` with
+   * `account.delete: false`. With `account.deleteConfirm` on, it mails a
+   * link, deletes nothing, and answers `{ sent: true }` (plan 12a Task 20).
+   */
+  delete(input: AccountDelete): Promise<Result<{ ok: true } | { sent: true }>>;
+  /**
+   * The confirm of the mailed link, with a session of the user who asked.
+   * No fresh rule. `invalid_token` for a spent, expired, unknown, or
+   * foreign link; `sole_owner` again.
+   */
+  confirmDelete(input: AccountDelete & { token: string }): Promise<Result<{ ok: true }>>;
 }
 
 /** The linked identities of a settings page (plan 12a). Present in every deployment. */
@@ -608,7 +622,8 @@ export function createAuth(input: AuthConfig): Auth {
         changeEmail: (i) => requestEmailChange(config, i),
         confirmEmailChange: (i) => confirmEmailChange(config, i),
         verifyEmailChange: (i) => verifyEmailChange(config, i),
-        delete: (i) => deleteAccount(config, i),
+        delete: (i) => startAccountDelete(config, i),
+        confirmDelete: (i) => confirmAccountDelete(config, i),
       },
       identities: {
         list: (i) => listIdentities(config, i),

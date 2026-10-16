@@ -173,7 +173,12 @@ describe("the account options (plan 12a)", () => {
       session: { freshAge: 0 },
       user: {
         changeEmail: { enabled: true, sendChangeEmailConfirmation: async () => {} },
-        deleteUser: { enabled: true, sendDeleteAccountVerification: async () => {} },
+        // Mapped since plan 12a Task 20; the life of its link is checked.
+        deleteUser: {
+          enabled: true,
+          sendDeleteAccountVerification: async () => {},
+          deleteTokenExpiresIn: 30,
+        },
       },
       account: {
         accountLinking: {
@@ -189,7 +194,7 @@ describe("the account options (plan 12a)", () => {
       expect.arrayContaining([
         "session.freshAge",
         "user.changeEmail.sendChangeEmailConfirmation",
-        "user.deleteUser.sendDeleteAccountVerification",
+        "user.deleteUser.deleteTokenExpiresIn",
         "account.accountLinking.allowDifferentEmails",
         "account.accountLinking.trustedProviders",
         "account.accountLinking.allowUnlinkingAll",
@@ -198,6 +203,7 @@ describe("the account options (plan 12a)", () => {
         "emailVerification.sendVerificationEmail",
       ]),
     );
+    expect(paths).not.toContain("user.deleteUser.sendDeleteAccountVerification");
     expect(refusals.find((r) => r.startsWith("session.freshAge"))).toContain(
       "the fresh rule is a promise of core",
     );
@@ -465,17 +471,19 @@ describe("the Better Auth account paths (plan 12a)", () => {
     ).toBeNull();
   });
 
-  it("refuses the mailed delete's token and callbackURL with NOT_SUPPORTED, and deletes nothing", async () => {
+  it("answers a token with no mailed link INVALID_TOKEN, refuses callbackURL with NOT_SUPPORTED, and deletes nothing", async () => {
     const t = instance({ user: { deleteUser: { enabled: true } } });
     const a = await t.signedIn("ada@example.com");
-    for (const body of [{ token: "t" }, { callbackURL: "/bye" }]) {
-      const res = await t.post("/delete-user", body, a.cookie);
-      expect(res.status).toBe(501);
-      expect(await codeOf(res)).toBe("NOT_SUPPORTED");
-    }
+    // Since plan 12a Task 20 a token is the confirm of a mailed link. With no link it is unknown.
+    const token = await t.post("/delete-user", { token: "t" }, a.cookie);
+    expect(token.status).toBe(400);
+    expect(await codeOf(token)).toBe("INVALID_TOKEN");
+    const callback = await t.post("/delete-user", { callbackURL: "/bye" }, a.cookie);
+    expect(callback.status).toBe(501);
+    expect(await codeOf(callback)).toBe("NOT_SUPPORTED");
     await expect(
       t.auth.api.deleteUser({ body: { token: "t" }, headers: a.headers }),
-    ).rejects.toMatchObject({ statusCode: 501, body: { code: "NOT_SUPPORTED" } });
+    ).rejects.toMatchObject({ statusCode: 400, body: { code: "INVALID_TOKEN" } });
     expect(await t.auth.api.getSession({ headers: a.headers })).not.toBeNull();
     expect(await t.auth.api.deleteUser({ body: {}, headers: a.headers })).toEqual({
       success: true,

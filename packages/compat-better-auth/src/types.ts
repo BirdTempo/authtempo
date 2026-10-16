@@ -666,13 +666,16 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
   }): Promise<{ status: true }>;
   /**
    * With `user.deleteUser.enabled`; else 404. `password` re-authenticates
-   * first, as Better Auth's password path skips freshAge. `token` and
-   * `callbackURL` throw NOT_SUPPORTED. Fresh rule.
+   * first, as Better Auth's password path skips freshAge. Fresh rule. With
+   * `sendDeleteAccountVerification`, it mails the link and answers
+   * "Verification email sent" (plan 12a Task 20). `token` is the confirm of
+   * that link, with a session of the same user and no fresh rule.
+   * `callbackURL` throws NOT_SUPPORTED.
    */
   deleteUser(input: {
     body: { password?: string; token?: string; callbackURL?: string };
     headers: Headers;
-  }): Promise<{ success: true; message: "User deleted" }>;
+  }): Promise<{ success: true; message: "User deleted" | "Verification email sent" }>;
   listUserAccounts(input: { headers: Headers }): Promise<Account[]>;
   /** `accountId` is an `id` from the list. A credential account throws NOT_SUPPORTED. Fresh rule. */
   unlinkAccount(input: {

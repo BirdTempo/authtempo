@@ -6,7 +6,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
-import type { AccountMailInput } from "./account-mail.js";
+import { sendAccountMail } from "./account-mail.js";
 import { checkCode, consumeCode, issueCode, newestCode, verifyGate } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
@@ -89,12 +89,6 @@ function changeData(row: VerificationRow): ChangeData | null {
   };
 }
 
-/** A proof mail to its own address, whatever `to` the builder answers. */
-async function mailTo(config: ResolvedConfig, input: AccountMailInput): Promise<void> {
-  const message = config.account.mail(input);
-  await config.mail.send({ ...message, to: input.email });
-}
-
 export interface EmailChangeRequest {
   session: ResolvedSession;
   newEmail: string;
@@ -157,12 +151,13 @@ export async function requestEmailChange(
     next: safeNext(input.next),
     taken,
   };
-  const note = () => mailTo(config, { kind: "email_change_taken", email: newEmail, appName });
+  const note = () =>
+    sendAccountMail(config, { kind: "email_change_taken", email: newEmail, appName });
   if (method === "code" && otp) {
     const code = await issueCode(config, otp, "email-change-otp", user.id, data);
     if (taken) await note();
     else
-      await mailTo(config, {
+      await sendAccountMail(config, {
         kind: "email_change_code",
         email: newEmail,
         code,
@@ -189,7 +184,13 @@ export async function requestEmailChange(
     return ok({ sent: true });
   }
   const link = `${config.baseURL}${config.basePath}/user/change-email/confirm?token=${encodeURIComponent(token)}`;
-  await mailTo(config, { kind: "email_change_link", email: newEmail, link, ttlMinutes, appName });
+  await sendAccountMail(config, {
+    kind: "email_change_link",
+    email: newEmail,
+    link,
+    ttlMinutes,
+    appName,
+  });
   return ok({ sent: true });
 }
 
@@ -264,6 +265,11 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
             await tx.delete("verification", [
               { field: "purpose", op: "in", value: OLD_ADDRESS_PROOFS },
               { field: "identifier", op: "eq", value: data.oldEmail },
+            ]);
+            // A delete link went to the old mailbox: it ends with the move (plan 12a Task 20).
+            await tx.delete("verification", [
+              { field: "purpose", op: "eq", value: "account-delete" },
+              { field: "identifier", op: "eq", value: previous.id },
             ]);
             await endOtherAccess(tx, previous.id, move.keep, move.ended ?? null);
             return ok({

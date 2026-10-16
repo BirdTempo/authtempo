@@ -24,7 +24,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(96);
+    expect(listed.length).toBe(98);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -114,6 +114,15 @@ describe("ROUTES (plan 11a)", () => {
     {
       name: "account delete off",
       delta: { account: { delete: false } },
+      features: ["accountDelete"],
+      off: true,
+    },
+    // The mailed confirm adds no route: its two routes come with the delete (plan 12a Task 20).
+    { name: "account delete confirm on", delta: { account: { deleteConfirm: {} } }, features: [] },
+    {
+      name: "account delete off with the confirm on",
+      start: { account: { deleteConfirm: {} } },
+      delta: { account: { delete: false, deleteConfirm: {} } },
       features: ["accountDelete"],
       off: true,
     },

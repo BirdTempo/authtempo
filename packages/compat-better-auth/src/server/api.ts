@@ -65,16 +65,12 @@ export interface DeleteUserBody {
 
 /**
  * Better Auth's delete-user checks before core's delete. 404 with the
- * option off (dist/api/routes/update-user.mjs:294, read 2026-10-17). Core
- * mails no delete link, so `token` and `callbackURL` answer NOT_SUPPORTED.
+ * option off (dist/api/routes/update-user.mjs:294, read 2026-10-17).
+ * `token` is the confirm of a mailed link (plan 12a Task 20). Core's page
+ * lands on the app after a delete, so `callbackURL` answers NOT_SUPPORTED.
  */
 export function deleteUserChecks(mapped: Mapped, body: DeleteUserBody): void {
   if (!mapped.account.deleteUser) throw apiError("not_found", 404);
-  if (body.token !== undefined)
-    throw compatApiError(
-      "NOT_SUPPORTED",
-      "core mails no delete link; the fresh session is the proof",
-    );
   if (body.callbackURL !== undefined)
     throw compatApiError(
       "NOT_SUPPORTED",
@@ -450,14 +446,14 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
         // The session row now holds the new freshAt.
         s = await caller(headers);
       }
-      unwrap(
-        await auth.api.user.delete({
-          session: s,
-          ip: clientIp(req),
-          userAgent: req.headers.get("user-agent"),
-        }),
-      );
-      return { success: true, message: "User deleted" };
+      const who = { session: s, ip: clientIp(req), userAgent: req.headers.get("user-agent") };
+      // Better Auth 1.7.2 spends the token before any other step (update-user.mjs:307 to :315).
+      if (body.token !== undefined) {
+        unwrap(await auth.api.user.confirmDelete({ ...who, token: body.token }));
+        return { success: true, message: "User deleted" };
+      }
+      const r = unwrap(await auth.api.user.delete(who));
+      return { success: true, message: "sent" in r ? "Verification email sent" : "User deleted" };
     },
     async listUserAccounts({ headers }) {
       const s = await caller(headers);

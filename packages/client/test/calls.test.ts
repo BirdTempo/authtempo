@@ -51,7 +51,7 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(74);
+    expect(CLIENT_CALLS).toHaveLength(75);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -130,6 +130,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.user.confirmEmailChange({ token: "t" });
     await c.user.verifyEmailChange({ code: "1" });
     await c.user.delete();
+    await c.user.confirmDelete({ token: "t" });
     await c.identities.list();
     await c.identities.unlink({ id: "i" });
     await c.identities.link({ provider: "google" });

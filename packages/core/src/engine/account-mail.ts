@@ -1,4 +1,4 @@
-import type { MailMessage } from "../config.js";
+import type { MailMessage, ResolvedConfig } from "../config.js";
 import { minutesText } from "./email-otp-mail.js";
 
 /**
@@ -9,7 +9,17 @@ export type AccountMailInput =
   | { kind: "reauth_code"; email: string; code: string; ttlMinutes: number; appName: string }
   | { kind: "email_change_link"; email: string; link: string; ttlMinutes: number; appName: string }
   | { kind: "email_change_code"; email: string; code: string; ttlMinutes: number; appName: string }
-  | { kind: "email_change_taken"; email: string; appName: string };
+  | { kind: "email_change_taken"; email: string; appName: string }
+  | { kind: "delete_confirm"; email: string; link: string; ttlMinutes: number; appName: string };
+
+/** A proof mail to its own address, whatever `to` the builder answers. */
+export async function sendAccountMail(
+  config: ResolvedConfig,
+  input: AccountMailInput,
+): Promise<void> {
+  const message = config.account.mail(input);
+  await config.mail.send({ ...message, to: input.email });
+}
 
 /** The default proof mails. `account.mail` replaces them. */
 export function defaultAccountMail(input: AccountMailInput): MailMessage {
@@ -37,6 +47,12 @@ export function defaultAccountMail(input: AccountMailInput): MailMessage {
         to: input.email,
         subject: `An account uses this address on ${input.appName}`,
         text: `Someone asked to move an account of ${input.appName} to this address. An account already uses this address, so nothing changed. To use that account, sign in to it. If you did not ask for it, ignore this message.`,
+      };
+    case "delete_confirm":
+      return {
+        to: input.email,
+        subject: `Confirm the delete of your ${input.appName} account`,
+        text: `Open this link to delete your ${input.appName} account. You must be signed in on that device. It is valid for ${minutesText(input.ttlMinutes)}.\n\n${input.link}\n\nThe delete cannot be undone. If you did not ask for it, ignore this message and change your password.`,
       };
   }
 }

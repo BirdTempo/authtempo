@@ -68,6 +68,7 @@ import test from "../../../../../samples/guides/account-settings.test.ts?raw";
 - The unlink and the passkey delete keep at least one way in. The last one answers `last_credential`.
 - The delete takes each organization where the person is the only member. Another membership goes, and its organization stays.
 - The last owner of an organization with other members gets `sole_owner`, and nothing goes. `account.delete: false` removes the delete route.
+- With `account.deleteConfirm` on, `client.user.delete()` answers `{ sent: true }`, mails a link, and deletes nothing. The link opens a page whose button deletes the account, with a session of the same person. The link lives 60 minutes by default, and a new request ends the older link.
 - The [limits](/docs/reference/limits/) of the routes: `reauth:user:<userId>` allows 10 per 15 minutes, and `session-revoke:user:<userId>` allows 30 per 15 minutes.
 - More limits: `email-change:user:<userId>` allows 5 per hour, `unlink:user:<userId>` 10 per 15 minutes, and `user-delete:user:<userId>` 5 per hour.
 

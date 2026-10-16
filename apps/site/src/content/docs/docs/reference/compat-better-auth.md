@@ -96,7 +96,8 @@ The shim serves Better Auth 1.7.2's account operations in Better Auth's shapes. 
 | `revokeOtherSessions` | `POST /revoke-other-sessions` | `{ status: true }` |
 | `updateUser({ name, image })` | `POST /update-user` | `{ status: true }` |
 | `changeEmail({ newEmail, callbackURL })` | `POST /change-email` | `{ status: true }` |
-| `deleteUser({ password })` | `POST /delete-user` | `{ success: true, message: "User deleted" }` |
+| `deleteUser({ password })` | `POST /delete-user` | `{ success: true, message: "User deleted" }`. With `sendDeleteAccountVerification`: `{ success: true, message: "Verification email sent" }` |
+| `deleteUser({ token })` | `POST /delete-user` | `{ success: true, message: "User deleted" }`, the confirm of the mailed link |
 | `listUserAccounts` | `GET /list-accounts` | The provider accounts and the credential account |
 | `linkSocial`, through the handler only | `POST /link-social` | `{ url, redirect }` |
 | `unlinkAccount({ accountId })` | `POST /unlink-account` | `{ status: true }` |
@@ -108,7 +109,7 @@ The options of these operations:
 | `session.freshAge` | 1 to 86400 seconds, rounded up to whole minutes. Default one day. `0` is refused: the fresh rule is a promise of core. |
 | `session.deferSessionRefresh` | Maps to core's `session.deferRefresh`. A GET writes no session row, and `GET /get-session` answers `needsRefresh`. `POST /get-session` slides the expiry and renews the cookie. |
 | `user.changeEmail` | `enabled` turns the change on. It needs `emailVerification.sendVerificationEmail`. `sendChangeEmailConfirmation` and `updateEmailWithoutVerification: true` are refused. |
-| `user.deleteUser` | `enabled` turns the delete on, off by default as in Better Auth. `beforeDelete` and `afterDelete` map. `sendDeleteAccountVerification` and `deleteTokenExpiresIn` are refused. |
+| `user.deleteUser` | `enabled` turns the delete on, off by default as in Better Auth. `beforeDelete` and `afterDelete` map. `sendDeleteAccountVerification` turns on core's `account.deleteConfirm`, and gets `{ user, url, token }`. `deleteTokenExpiresIn` is a whole number of minutes from 300 to 86400 seconds, default 86400 as in Better Auth. |
 | `account.accountLinking` | `enabled: true`, `allowDifferentEmails: false`, and `allowUnlinkingAll: false` are accepted. `trustedProviders`, `updateUserInfoOnLink`, and `disableImplicitLinking` are refused. |
 | `emailOTP({ changeEmail })` | `enabled` serves `/email-otp/request-email-change` and `/email-otp/change-email`. `verifyCurrentEmail: true` is refused. |
 | `databaseHooks.user`, `databaseHooks.account` | `create`, `update`, and `delete` of a user, and `create` and `delete` of an account, map onto core's hooks. |
@@ -124,7 +125,10 @@ Where the shim differs from Better Auth:
 | `/two-factor/disable`, `/two-factor/get-totp-uri`, and `/two-factor/generate-backup-codes` ask for the password only | They also need a fresh session, checked before the password. A stale session answers `SESSION_NOT_FRESH` with 403. |
 | A core route answers `{ error: "session_not_fresh" }` | Through the handler, the answer also carries `code: "SESSION_NOT_FRESH"`. |
 | `deleteUser({ password })` skips `freshAge` | It re-authenticates first. A wrong password answers `INVALID_EMAIL_OR_PASSWORD`, not `INVALID_PASSWORD`. |
-| `deleteUser` can mail a link with `token` and `callbackURL` | Each answers `NOT_SUPPORTED` with 501. The fresh session is the proof. |
+| `GET /delete-user/callback` deletes the account | It serves core's confirm page and deletes nothing, because a mail scanner fetches links. The page posts the token with the session cookie. |
+| The request of the mailed link needs no fresh session | It needs one, as the direct delete does. The organization rule runs at the request and again at the confirm. |
+| A bad token answers `INVALID_TOKEN` with 404 | It answers `INVALID_TOKEN` with 400. A change of address ends a pending link. |
+| `deleteUser` takes a `callbackURL` | It answers `NOT_SUPPORTED` with 501. The confirm page lands on the app. |
 | The delete keeps an organization with no owner | An organization where the user is the last owner and other members remain stops the delete: `SOLE_OWNER`, 409. |
 | `updateUser` drops a field it does not know | It takes `name` and `image`, for a verified address only. `email` answers `EMAIL_CAN_NOT_BE_UPDATED`. Any other field answers `FIELD_NOT_ALLOWED`. |
 | The change link goes to `sendVerificationEmail` and changes the address at once | The link goes to the same callback, to the new address. It opens core's confirm page. A taken address gets no mail, as on Better Auth. |

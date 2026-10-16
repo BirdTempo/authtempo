@@ -181,8 +181,26 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A fresh session, and `account.delete` on (the default) |
 | Input | JSON `{}`. Any field answers `invalid_body` |
-| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address |
+| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
+<h3 id="get-user-delete-confirm"><code>GET /user/delete/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | `account.delete` on (the default) |
+| Input | Query `token` |
+| Answer | The confirm page of the mailed delete link, which posts the token. It reads nothing and spends nothing, so a mail scanner deletes nothing. A malformed token answers 302 to `?auth_error=invalid_token` |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token) |
+
+<h3 id="post-user-delete-confirm"><code>POST /user/delete/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session of the user who asked for the link. It need not be fresh |
+| Input | Form or JSON `token` |
+| Answer | A form: 302 to the app, or to `?auth_error=<code>` on a failure. JSON: `{ ok: true }`. Both clear the session cookie. The delete of `POST /user/delete` runs |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 ## Magic link
 

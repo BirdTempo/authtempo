@@ -193,6 +193,7 @@ describe("the settings operations (plan 12a)", () => {
       Response.json({ user: { id: "u1", email: "n@b.c" } }),
       Response.json({ ok: true }),
       Response.json({ ok: true }),
+      Response.json({ ok: true }),
       Response.json({ url: "https://accounts.example/a" }),
     ]);
     const c = createClient({ baseURL: BASE, fetch, broadcast: false, navigate: () => {} });
@@ -208,6 +209,7 @@ describe("the settings operations (plan 12a)", () => {
       await c.user.confirmEmailChange({ token: "ec_t" }),
       await c.user.verifyEmailChange({ code: "111222" }),
       await c.user.delete(),
+      await c.user.confirmDelete({ token: "ad_t" }),
       await c.identities.unlink({ id: "i1" }),
       await c.identities.link({ provider: "github" }),
     ];
@@ -232,6 +234,7 @@ describe("the settings operations (plan 12a)", () => {
       { method: "POST", path: "/user/change-email/confirm", body: { token: "ec_t" } },
       { method: "POST", path: "/user/change-email/verify", body: { code: "111222" } },
       { method: "POST", path: "/user/delete", body: {} },
+      { method: "POST", path: "/user/delete/confirm", body: { token: "ad_t" } },
       { method: "POST", path: "/identities/unlink", body: { id: "i1" } },
       { method: "POST", path: "/social/github/link", body: {} },
     ]);
@@ -308,6 +311,31 @@ function answering(body: string) {
 const NOT_OBJECTS = ["null", "[]", '"x"', "1", "true"];
 const UNEXPECTED = { ok: false, code: "unexpected", status: 200 };
 
+describe("the delete's two answers (plan 12a Task 20)", () => {
+  it("reads the session again after { ok: true }, and not after { sent: true }", async () => {
+    const session = () =>
+      Response.json({
+        user: { id: "u1", email: "a@b.c" },
+        session: { id: "s1", expiresAt: "2026-10-20T00:00:00.000Z" },
+      });
+    for (const [answer, reads] of [
+      [{ sent: true }, 1],
+      [{ ok: true }, 2],
+    ] as const) {
+      const { seen, fetch } = scripted([session(), Response.json(answer), session()]);
+      const c = createClient({ baseURL: BASE, fetch, broadcast: false });
+      const stop = c.store.subscribe(() => {});
+      await vi.waitFor(() => expect(c.store.get().data).not.toBeNull());
+      expect(await c.user.delete()).toEqual({ ok: true, value: answer });
+      // Let a read that the answer started reach the fetch.
+      await new Promise((r) => setTimeout(r, 20));
+      const sessionReads = seen.filter((x) => x.path === "/session").length;
+      expect(sessionReads, JSON.stringify(answer)).toBe(reads);
+      stop();
+    }
+  });
+});
+
 describe("the shape of each 200 answer (plan 12a)", () => {
   type Run = (c: ReturnType<typeof createClient>) => Promise<ClientResult<unknown>>;
   /** Each new operation, with bodies of a wrong shape beside the five that are not objects. */
@@ -354,7 +382,12 @@ describe("the shape of each 200 answer (plan 12a)", () => {
       (c) => c.user.verifyEmailChange({ code: "1" }),
       ["{}", '{"user":[]}'],
     ],
-    ["user.delete", (c) => c.user.delete(), ["{}", '{"ok":1}']],
+    ["user.delete", (c) => c.user.delete(), ["{}", '{"ok":1}', '{"sent":1}', '{"sent":false}']],
+    [
+      "user.confirmDelete",
+      (c) => c.user.confirmDelete({ token: "t" }),
+      ["{}", '{"ok":1}', '{"sent":true}'],
+    ],
     [
       "identities.list",
       (c) => c.identities.list(),
@@ -565,5 +598,22 @@ describe("the settings operations against core (plan 12a)", () => {
     stop();
     expect(await browser.session()).toEqual({ ok: true, value: null });
     expect(await app.session()).toEqual({ ok: true, value: null });
+  });
+
+  it("answers { sent: true } to the delete with account.deleteConfirm on, and deletes at confirmDelete (plan 12a Task 20)", async () => {
+    const { server, browser, app } = await signedIn({ account: { deleteConfirm: {} } });
+    const stop = browser.store.subscribe(() => {});
+    await vi.waitFor(() => expect(browser.store.get().data).not.toBeNull());
+    expect(await browser.user.delete()).toEqual({ ok: true, value: { sent: true } });
+    // Nothing is deleted yet: the session stays in the store.
+    expect(await browser.session()).toMatchObject({ ok: true, value: { user: { email: EMAIL } } });
+    const token = tokenFromMail(server.mail.at(-1)?.text ?? "");
+    expect(token.startsWith("ad_")).toBe(true);
+    // The native app's session is of the same user, and need not be fresh.
+    server.clock.advance(11 * MINUTE);
+    expect(await app.user.confirmDelete({ token })).toEqual({ ok: true, value: { ok: true } });
+    expect(await app.session()).toEqual({ ok: true, value: null });
+    expect(await browser.session()).toEqual({ ok: true, value: null });
+    stop();
   });
 });

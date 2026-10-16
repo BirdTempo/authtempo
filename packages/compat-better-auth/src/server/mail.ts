@@ -54,6 +54,12 @@ export function compatAccountMail(input: AccountMailInput): MailMessage {
       };
     case "email_change_code":
       return otpMail(input.email, "change-email", input.code);
+    case "delete_confirm":
+      return {
+        to: input.email,
+        subject: "authtempo compat delete confirm",
+        text: `\n\n${input.link}\n\n`,
+      };
     case "email_change_taken":
       return {
         to: input.email,
@@ -75,6 +81,7 @@ export interface MailRoutes {
   sendMagicLink?: MagicLinkOptions["sendMagicLink"] | undefined;
   sendVerificationOTP?: EmailOtpOptions["sendVerificationOTP"] | undefined;
   sendInvitationEmail?: OrganizationOptions["sendInvitationEmail"] | undefined;
+  sendDeleteAccountVerification?: SendEmail | undefined;
 }
 
 /** Core writes the link on its own paragraph in every mail (engine/password.ts, magic-link.ts, invitations.ts). */
@@ -198,6 +205,22 @@ export function compatMail(routes: MailRoutes): MailPort {
           url: link,
           token,
         });
+        return;
+      }
+      if (link.startsWith(`${prefix}/user/delete/confirm?`)) {
+        const cb = routes.sendDeleteAccountVerification;
+        if (!cb) throw new Error("authtempo compat: no sendDeleteAccountVerification");
+        // Better Auth 1.7.2 passes the session's user (update-user.mjs:325 to :329).
+        // The row's identifier is the user id (core's `account-delete` purpose).
+        const row = await routes.storage.findOne("verification", [
+          { field: "valueHash", op: "eq", value: await sha256Hex(token) },
+          { field: "purpose", op: "eq", value: "account-delete" },
+        ]);
+        const owner = row
+          ? await routes.storage.findOne("user", [{ field: "id", op: "eq", value: row.identifier }])
+          : null;
+        if (!owner) throw new Error("authtempo compat: the user of this delete is gone");
+        await cb({ user: toUser(owner), url: link, token });
         return;
       }
       throw new Error(

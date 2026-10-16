@@ -58,6 +58,11 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     path: "/user/change-email/confirm",
     reason: "the confirm page of the mailed change-of-address link; a browser opens it (plan 12a)",
   },
+  {
+    method: "GET",
+    path: "/user/delete/confirm",
+    reason: "the confirm page of the mailed delete link; a browser opens it (plan 12a Task 20)",
+  },
 ];
 
 const TABLES = {

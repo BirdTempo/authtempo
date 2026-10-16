@@ -1734,3 +1734,126 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
     }
   }, 60_000);
 });
+
+describe("the mailed delete confirm on Postgres (plan 12a Task 20)", () => {
+  /**
+   * Two instances on one database: `on` with `account.deleteConfirm`, and
+   * `off` without it, as during a deploy that turns the key on.
+   */
+  function confirmWorld() {
+    const sent: MailMessage[] = [];
+    const make = (deleteConfirm: false | { ttlMinutes: number }) =>
+      createAuth({
+        baseURL: BASE,
+        secret: SECRET,
+        trustedOrigins: [],
+        storage: createPostgresAdapter(db.sql),
+        limiter: OPEN,
+        mail: {
+          send: async (m) => {
+            sent.push(m);
+          },
+        },
+        account: { deleteConfirm },
+      });
+    const on = make({ ttlMinutes: 60 });
+    const off = make(false);
+    const linkTo = (email: string, subject: string) => {
+      const m = [...sent].reverse().find((x) => x.to === email && x.subject.startsWith(subject));
+      const token = /token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1];
+      if (!token) throw new Error("no link");
+      return decodeURIComponent(token);
+    };
+    async function signIn(email: string) {
+      await on.api.requestMagicLink({ email, ip: null });
+      const r = await on.api.verifyMagicLink({
+        token: linkTo(email, "Sign in"),
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok || !("token" in r.value)) throw new Error("no session");
+      const s = await on.api.getSession(r.value.token);
+      if (!s) throw new Error("no session");
+      return s;
+    }
+    async function asked(email: string) {
+      const me = await signIn(email);
+      const r = await on.api.user.delete({ session: me, ip: null, userAgent: null });
+      expect(r).toEqual({ ok: true, value: { sent: true } });
+      return { me, token: linkTo(email, "Confirm the delete") };
+    }
+    const userLeft = async (id: string) =>
+      (await db.sql`SELECT id FROM ta_user WHERE id = ${id}`).length;
+    return { on, off, sent, signIn, asked, linkTo, userLeft };
+  }
+
+  it("two confirms of one link from two sessions at once: one deletes, the other answers not_found", async () => {
+    const w = confirmWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `twice-${round}@example.com`;
+      const { me, token } = await w.asked(email);
+      const other = await w.signIn(email);
+      const answers = await Promise.all(
+        [me, other].map((session) =>
+          w.on.api.user.confirmDelete({ session, token, ip: null, userAgent: null }),
+        ),
+      );
+      // The user row is the lock: the second waits, then finds no user.
+      expect(answers.filter((a) => a.ok)).toHaveLength(1);
+      expect(answers.filter((a) => !a.ok)).toEqual([{ ok: false, code: "not_found", status: 404 }]);
+      expect(await w.userLeft(me.user.id)).toBe(0);
+      const sessions = await db.sql`SELECT id FROM ta_session WHERE user_id = ${me.user.id}`;
+      expect(sessions).toHaveLength(0);
+    }
+  }, 60_000);
+
+  it("a confirm beside a direct delete of an instance with the key off: one deletes, the other answers not_found", async () => {
+    const w = confirmWorld();
+    for (let round = 0; round < ROUNDS; round++) {
+      const email = `both-${round}@example.com`;
+      const { me, token } = await w.asked(email);
+      const answers = await Promise.all([
+        w.on.api.user.confirmDelete({ session: me, token, ip: null, userAgent: null }),
+        w.off.api.user.delete({ session: me, ip: null, userAgent: null }),
+      ]);
+      expect(answers.filter((a) => a.ok)).toHaveLength(1);
+      expect(answers.filter((a) => !a.ok)).toEqual([{ ok: false, code: "not_found", status: 404 }]);
+      expect(await w.userLeft(me.user.id)).toBe(0);
+      const notices = w.sent.filter(
+        (m) => m.to === email && m.text.startsWith("Your account was deleted."),
+      );
+      expect(notices).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it("a confirm beside a change of address, a delay sweep: one wins, and the other answers invalid_token", async () => {
+    const w = confirmWorld();
+    const won = { delete: 0, move: 0 };
+    // The move starts first, and the confirm after a delay: the sweep meets both orders of the lock.
+    const delays = [0, 0, 1, 2, 3, 5, 8, 13, 21, 34];
+    for (const [round, delay] of delays.entries()) {
+      const email = `race-${round}@example.com`;
+      const target = `race-moved-${round}@example.com`;
+      const { me, token } = await w.asked(email);
+      expect((await w.on.api.user.changeEmail({ session: me, newEmail: target })).ok).toBe(true);
+      const change = w.linkTo(target, "Confirm your new email address");
+      const moving = w.on.api.user.confirmEmailChange({ token: change, ip: null, userAgent: null });
+      await new Promise((r) => setTimeout(r, delay));
+      const deleted = await w.on.api.user.confirmDelete({
+        session: me,
+        token,
+        ip: null,
+        userAgent: null,
+      });
+      const moved = await moving;
+      // The move ends the delete link: it went to the old mailbox.
+      expect([deleted.ok, moved.ok].filter(Boolean)).toHaveLength(1);
+      const loser = deleted.ok ? moved : deleted;
+      expect(loser).toMatchObject({ ok: false, code: "invalid_token" });
+      expect(await w.userLeft(me.user.id)).toBe(deleted.ok ? 0 : 1);
+      won[deleted.ok ? "delete" : "move"]++;
+    }
+    // A record of the orders met, for the reader of a failure.
+    expect(won.delete + won.move).toBe(delays.length);
+  }, 60_000);
+});

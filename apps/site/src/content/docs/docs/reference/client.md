@@ -155,7 +155,8 @@ These operations serve the settings page of the signed-in person. Each one needs
 | `client.user.changeEmail({ newEmail, method?, next? })` | `POST /user/change-email` | `{ sent: true }`. `method` is `link` (default) or `code` |
 | `client.user.confirmEmailChange({ token })` | `POST /user/change-email/confirm` | `{ user: PublicUserJSON }`, for an app that serves its own confirm page |
 | `client.user.verifyEmailChange({ code })` | `POST /user/change-email/verify` | `{ user: PublicUserJSON }` |
-| `client.user.delete()` | `POST /user/delete` | `{ ok: true }`. The account and the caller's session end |
+| `client.user.delete()` | `POST /user/delete` | `{ ok: true }`: the account and the caller's session end. `{ sent: true }`: the server's `account.deleteConfirm` is on, a link went to the address, and nothing is deleted yet |
+| `client.user.confirmDelete({ token })` | `POST /user/delete/confirm` | `{ ok: true }`, for an app that serves its own confirm page of the mailed delete link. It needs a session of the same user, not a fresh one |
 | `client.identities.list()` | `GET /identities` | `IdentityListJSON`: `identities`, `password`, `passkeys` |
 | `client.identities.unlink({ id })` | `POST /identities/unlink` | `{ ok: true }` |
 | `client.identities.link({ provider, next? })` | `POST /social/:provider/link`, then a navigation | `{ url }`; `invalid_body` with status 0 for a name that core refuses |

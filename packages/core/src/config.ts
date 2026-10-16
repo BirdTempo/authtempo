@@ -115,7 +115,28 @@ export interface AccountConfig {
    * and the engine answers `not_found`. Better Auth's default is off.
    */
   delete?: boolean;
+  /**
+   * A mailed link before the delete (plan 12a Task 20). Default `false`: the
+   * fresh session already proves the person (ASVS 5.0.0 7.5.1), and Better
+   * Auth deletes at once unless an app sets `sendDeleteAccountVerification`.
+   * The link adds a proof of the mailbox, for an app whose sessions live on
+   * shared devices. `{}` turns it on with the defaults.
+   */
+  deleteConfirm?: false | AccountDeleteConfirmConfig;
 }
+
+export interface AccountDeleteConfirmConfig {
+  /**
+   * The life of the link, 5 to 1440 minutes. Default 60: a delete is not
+   * undone, and a short window lowers the risk of a link in an old mailbox.
+   * Better Auth's default is 24 hours (`deleteTokenExpiresIn`,
+   * dist/api/routes/update-user.mjs:322, read 2026-10-14).
+   */
+  ttlMinutes?: number;
+}
+
+/** The bounds and the default of `account.deleteConfirm.ttlMinutes`. The shim reads them too. */
+export const DELETE_CONFIRM_TTL_MINUTES = { min: 5, max: 1440, default: 60 } as const;
 
 export interface AccountNoticesConfig {
   /** Default `defaultNoticeMail`. */
@@ -128,6 +149,8 @@ export interface ResolvedAccount {
   notices: { mail: (input: NoticeMailInput) => MailMessage } | null;
   confirmPage: (input: EmailChangePageInput) => string;
   delete: boolean;
+  /** Null when `account.deleteConfirm` is `false` or absent. */
+  deleteConfirm: { ttlMinutes: number } | null;
 }
 
 export interface AuthConfig {
@@ -1193,6 +1216,7 @@ const ACCOUNT_KEYS: Readonly<Record<keyof AccountConfig, true>> = {
   notices: true,
   confirmPage: true,
   delete: true,
+  deleteConfirm: true,
 };
 
 /** `account` (plan 12a). Absent: the defaults. A key that core does not know is refused by name. */
@@ -1216,6 +1240,36 @@ function resolveAccount(input: AccountConfig | undefined): ResolvedAccount {
     notices: resolveNotices(o.notices),
     confirmPage: o.confirmPage ?? defaultEmailChangePage,
     delete: o.delete ?? true,
+    deleteConfirm: resolveDeleteConfirm(o.deleteConfirm),
+  };
+}
+
+/** The keys of `account.deleteConfirm`. A Record, so a new key of `AccountDeleteConfirmConfig` fails the compile here. */
+const DELETE_CONFIRM_KEYS: Readonly<Record<keyof AccountDeleteConfirmConfig, true>> = {
+  ttlMinutes: true,
+};
+
+/** `account.deleteConfirm`. Absent or `false`: off. */
+function resolveDeleteConfirm(
+  input: AccountDeleteConfirmConfig | false | undefined,
+): ResolvedAccount["deleteConfirm"] {
+  if (input === undefined || input === false) return null;
+  // `as unknown`: the guard must not narrow `input`, or its fields lose their types.
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("account.deleteConfirm must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(DELETE_CONFIRM_KEYS, key))
+      throw new ConfigError(
+        `account.deleteConfirm.${key} is not an option; core has ${Object.keys(DELETE_CONFIRM_KEYS).join(", ")}`,
+      );
+  const t = DELETE_CONFIRM_TTL_MINUTES;
+  return {
+    ttlMinutes: integerIn(
+      "account.deleteConfirm.ttlMinutes",
+      input.ttlMinutes ?? t.default,
+      t.min,
+      t.max,
+    ),
   };
 }
 

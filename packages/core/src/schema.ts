@@ -88,7 +88,13 @@ export type VerificationPurpose =
    * A change-of-address code (plan 12a). identifier: the user id; data:
    * `email-change`'s data; the code rules of `email-otp`.
    */
-  | "email-change-otp";
+  | "email-change-otp"
+  /**
+   * The mailed confirm of an account delete (plan 12a Task 20). identifier:
+   * the user id, so one user has one live link; valueHash: the SHA-256 hex
+   * of the `ad_` token; data: null.
+   */
+  | "account-delete";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;

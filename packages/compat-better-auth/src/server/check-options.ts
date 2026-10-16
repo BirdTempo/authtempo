@@ -1,4 +1,4 @@
-import { isAppScheme } from "@authtempo/core";
+import { DELETE_CONFIRM_TTL_MINUTES, isAppScheme } from "@authtempo/core";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
 import {
   type BetterAuthOptions,
@@ -563,10 +563,18 @@ const TOP: Record<string, Rule> = {
       enabled: boolean,
       beforeDelete: fn,
       afterDelete: fn,
-      sendDeleteAccountVerification: refused(
-        "core asks for a fresh session, not a mailed link; a mailed confirm is a later input (see the plan index)",
+      // Core's account.deleteConfirm (plan 12a Task 20). Better Auth 1.7.2
+      // mails the link and deletes at GET /delete-user/callback
+      // (dist/api/routes/update-user.mjs:317 to :329 and :352 to :405, read
+      // 2026-10-17). Core serves a page there, and the page posts the token.
+      sendDeleteAccountVerification: fn,
+      // Core counts whole minutes in its own bounds; the shim reads them from core.
+      deleteTokenExpiresIn: seconds(
+        60,
+        DELETE_CONFIRM_TTL_MINUTES.min * 60,
+        DELETE_CONFIRM_TTL_MINUTES.max * 60,
+        `core takes a whole number of minutes from ${DELETE_CONFIRM_TTL_MINUTES.min * 60} to ${DELETE_CONFIRM_TTL_MINUTES.max * 60} seconds`,
       ),
-      deleteTokenExpiresIn: refused("core mails no delete link"),
     }),
   }),
   // Plan 12a. Better Auth 1.7.2 links on the provider's verified flag or a

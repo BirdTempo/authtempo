@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
-import { deleteAccount } from "../../engine/account-delete.js";
+import {
+  confirmAccountDelete,
+  DELETE_TOKEN_RE,
+  startAccountDelete,
+} from "../../engine/account-delete.js";
 import {
   confirmEmailChange,
   EMAIL_CHANGE_TOKEN_RE,
@@ -10,6 +14,7 @@ import {
 import { updateProfile } from "../../engine/profile.js";
 import { readSessionToken } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
+import { defaultAccountDeletePage } from "../account-delete-page.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
@@ -37,8 +42,8 @@ const deleteBody = z.strictObject({});
 
 /**
  * The user routes of a settings page (plan 12a). They exist in every
- * deployment, except the code verify (`emailOtp`) and the delete
- * (`account.delete`).
+ * deployment, except the code verify (`emailOtp`) and the three delete
+ * routes (`account.delete`).
  */
 export function userRoutes(config: ResolvedConfig): Route[] {
   const confirmPath = `${config.basePath}/user/change-email/confirm`;
@@ -132,24 +137,77 @@ export function userRoutes(config: ResolvedConfig): Route[] {
         );
       },
     });
-  if (config.account.delete)
-    routes.push({
-      method: "POST",
-      path: "/user/delete",
-      async handler(ctx) {
-        const s = await withSession(config, ctx.request);
-        if (!s) return unauthorized();
-        const body = await readJson(ctx.request, deleteBody);
-        if (!body.ok) return sent(respond(body), s.renewed);
-        const r = await deleteAccount(config, {
-          session: s.resolved,
-          ip: ctx.ip,
-          userAgent: ctx.request.headers.get("user-agent"),
-        });
-        if (!r.ok) return sent(respond(r), s.renewed);
-        // The session is gone: answer as the sign-out does, with no renewed cookie.
-        return signedOut(config, ctx.request, readSessionToken(config, ctx.request));
+  if (config.account.delete) {
+    const deleteConfirmPath = `${config.basePath}/user/delete/confirm`;
+    routes.push(
+      {
+        method: "POST",
+        path: "/user/delete",
+        async handler(ctx) {
+          const s = await withSession(config, ctx.request);
+          if (!s) return unauthorized();
+          const body = await readJson(ctx.request, deleteBody);
+          if (!body.ok) return sent(respond(body), s.renewed);
+          const r = await startAccountDelete(config, {
+            session: s.resolved,
+            ip: ctx.ip,
+            userAgent: ctx.request.headers.get("user-agent"),
+          });
+          if (!r.ok) return sent(respond(r), s.renewed);
+          // `account.deleteConfirm` on: a link went out, and the session stays.
+          if ("sent" in r.value) return sent(json(r.value), s.renewed);
+          // The session is gone: answer as the sign-out does, with no renewed cookie.
+          return signedOut(config, ctx.request, readSessionToken(config, ctx.request));
+        },
       },
-    });
+      {
+        // A mail scanner or a link preview fetches this. It must change
+        // nothing: no storage read, no limiter call, no cookie.
+        method: "GET",
+        path: "/user/delete/confirm",
+        async handler(ctx) {
+          const token = ctx.url.searchParams.get("token") ?? "";
+          if (!DELETE_TOKEN_RE.test(token)) return failed("invalid_token");
+          const html = defaultAccountDeletePage({
+            action: deleteConfirmPath,
+            token,
+            appName: config.appName,
+          });
+          return new Response(html, {
+            status: 200,
+            headers: pageHeaders(config, noScriptPagePolicy(config)),
+          });
+        },
+      },
+      {
+        method: "POST",
+        path: "/user/delete/confirm",
+        async handler(ctx) {
+          const jsonCaller = isJsonRequest(ctx.request);
+          const s = await withSession(config, ctx.request);
+          if (!s) return jsonCaller ? unauthorized() : failed("unauthorized");
+          const body = await readBody(ctx.request, confirmBody);
+          // A form with no token is a client bug. The person sees the page of a bad link.
+          const r = body.ok
+            ? await confirmAccountDelete(config, {
+                session: s.resolved,
+                token: body.value.token,
+                ip: ctx.ip,
+                userAgent: ctx.request.headers.get("user-agent"),
+              })
+            : fail("invalid_token");
+          if (!r.ok) return sent(jsonCaller ? respond(r) : failed(r.code), s.renewed);
+          // The session is gone: answer as the sign-out does, with no renewed cookie.
+          const out = await signedOut(config, ctx.request, readSessionToken(config, ctx.request));
+          if (jsonCaller) return out;
+          // A form lands on the app, with the same cleared cookies.
+          const landed = redirect(`${config.appURL}/`);
+          for (const cookie of out.headers.getSetCookie())
+            landed.headers.append("set-cookie", cookie);
+          return landed;
+        },
+      },
+    );
+  }
   return routes;
 }

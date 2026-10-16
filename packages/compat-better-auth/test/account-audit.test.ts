@@ -395,3 +395,118 @@ describe("Task 19 update-passkey", () => {
     expect(await none.json()).toEqual({ error: "not_found" });
   });
 });
+
+describe("Task 20 sendDeleteAccountVerification", () => {
+  it("maps sendDeleteAccountVerification; GET /delete-user/callback serves the page and deletes nothing", async () => {
+    const mails: { email: string; url: string; token: string; request: unknown }[] = [];
+    const order: string[] = [];
+    const s = instance({
+      user: {
+        deleteUser: {
+          enabled: true,
+          sendDeleteAccountVerification: async ({ user, url, token }, request) =>
+            void mails.push({ email: user.email, url, token, request }),
+          beforeDelete: async (u) => void order.push(`before:${u.email}`),
+          afterDelete: async (u) => void order.push(`after:${u.email}`),
+        },
+      },
+    });
+    // Better Auth's default life of the link, 24 hours, and a set one in minutes.
+    const at = (deleteUser: NonNullable<NonNullable<BetterAuthOptions["user"]>["deleteUser"]>) =>
+      mapOptions({
+        baseURL: BASE,
+        secret: SECRET,
+        database: memoryDatabase(),
+        user: { deleteUser },
+      });
+    const send = async () => {};
+    expect(
+      at({ enabled: true, sendDeleteAccountVerification: send }).config.account?.deleteConfirm,
+    ).toEqual({
+      ttlMinutes: 1440,
+    });
+    expect(
+      at({ enabled: true, sendDeleteAccountVerification: send, deleteTokenExpiresIn: 600 }).config
+        .account?.deleteConfirm,
+    ).toEqual({ ttlMinutes: 10 });
+    expect(at({ enabled: true }).config.account?.deleteConfirm).toBeUndefined();
+    const a = await s.signedIn("ada@example.com");
+    const post = (path: string, body: unknown, cookie: string) =>
+      s.auth.handler(
+        new Request(`${PATH}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE, cookie },
+          body: JSON.stringify(body),
+        }),
+      );
+    const asked = await post("/delete-user", {}, a.cookie);
+    expect(asked.status).toBe(200);
+    expect(await asked.json()).toEqual({ success: true, message: "Verification email sent" });
+    expect(mails).toHaveLength(1);
+    const [mail] = mails;
+    expect(mail?.email).toBe("ada@example.com");
+    expect(mail?.request).toBeUndefined();
+    expect(mail?.token).toMatch(/^ad_[A-Za-z0-9_-]{43}$/);
+    expect(mail?.url).toBe(`${PATH}/user/delete/confirm?token=${mail?.token}`);
+    expect(order).toEqual([]);
+    // A mail scanner fetches Better Auth's callback path: the page, no delete.
+    for (let i = 0; i < 2; i++) {
+      const page = await s.auth.handler(
+        new Request(`${PATH}/delete-user/callback?token=${mail?.token}&callbackURL=/bye`, {
+          headers: { cookie: a.cookie },
+        }),
+      );
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toContain("text/html");
+      const html = await page.text();
+      expect(html).toContain(`value="${mail?.token}"`);
+      expect(html).toContain('action="/api/auth/user/delete/confirm"');
+    }
+    expect(order).toEqual([]);
+    expect(
+      await s.auth.api.getSession({ headers: new Headers({ cookie: a.cookie }) }),
+    ).not.toBeNull();
+    // Another user's session cannot spend the link.
+    const b = await s.signedIn("bo@example.com");
+    const foreign = await post("/delete-user", { token: mail?.token }, b.cookie);
+    expect(foreign.status).toBe(400);
+    expect(await foreign.json()).toMatchObject({ code: "INVALID_TOKEN" });
+    // Better Auth's POST /delete-user { token } is the confirm.
+    const done = await post("/delete-user", { token: mail?.token }, a.cookie);
+    expect(done.status).toBe(200);
+    expect(await done.json()).toEqual({ success: true, message: "User deleted" });
+    expect(done.headers.getSetCookie().some((c) => c.startsWith(`${COOKIE_NAME}=;`))).toBe(true);
+    expect(order).toEqual(["before:ada@example.com", "after:ada@example.com"]);
+    expect(await s.auth.api.getSession({ headers: new Headers({ cookie: a.cookie }) })).toBeNull();
+    // auth.api: the request mails, and the token confirms.
+    const headers = new Headers({ cookie: b.cookie });
+    expect(await s.auth.api.deleteUser({ body: {}, headers })).toEqual({
+      success: true,
+      message: "Verification email sent",
+    });
+    expect(
+      await s.auth.api.deleteUser({ body: { token: mails.at(-1)?.token ?? "" }, headers }),
+    ).toEqual({ success: true, message: "User deleted" });
+    expect(await s.auth.api.getSession({ headers })).toBeNull();
+  });
+
+  it("refuses a deleteTokenExpiresIn that is not a whole number of minutes from 300 to 86400 seconds", () => {
+    const refusalsOf = (deleteTokenExpiresIn: unknown, send: unknown = async () => {}) =>
+      checkOptions({
+        baseURL: BASE,
+        secret: SECRET,
+        database: memoryDatabase(),
+        user: {
+          deleteUser: { enabled: true, sendDeleteAccountVerification: send, deleteTokenExpiresIn },
+        },
+      } as unknown as BetterAuthOptions).refusals.filter((r) => r.startsWith("user.deleteUser"));
+    for (const v of [240, 299, 330, 86_460, "600", 600.5])
+      expect(refusalsOf(v), String(v)).toEqual([
+        "user.deleteUser.deleteTokenExpiresIn: core takes a whole number of minutes from 300 to 86400 seconds",
+      ]);
+    for (const v of [300, 3600, 86_400, undefined]) expect(refusalsOf(v), String(v)).toEqual([]);
+    expect(refusalsOf(undefined, "a url")).toEqual([
+      "user.deleteUser.sendDeleteAccountVerification: expected a function",
+    ]);
+  });
+});
