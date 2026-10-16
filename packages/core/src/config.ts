@@ -1098,9 +1098,9 @@ const SESSION_KEYS: Readonly<Record<keyof NonNullable<AuthConfig["session"]>, tr
 };
 
 /**
- * `session`. ttlDays and slidingRefreshDays keep the defaults of version 1;
- * absoluteDays is off by default (plan 12b); freshMinutes is 1440 by default (plan 12a);
- * deferRefresh is off by default (plan 12a, see `AuthConfig.session.deferRefresh`).
+ * `session`. ttlDays and slidingRefreshDays keep the defaults of version 1.
+ * absoluteDays is off by default (plan 12b). freshMinutes is 1440 by default
+ * (plan 12a). deferRefresh is off by default (plan 12a, see `AuthConfig.session.deferRefresh`).
  */
 function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["session"] {
   const o = input ?? {};

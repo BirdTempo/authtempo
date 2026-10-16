@@ -29,6 +29,7 @@ function server(
     minPasswordLength?: number;
     plugins?: BetterAuthOptions["plugins"];
     requireEmailVerification?: boolean;
+    session?: BetterAuthOptions["session"];
   } = {},
 ) {
   const invitations: InvitationEmailData[] = [];
@@ -58,6 +59,7 @@ function server(
         void mails.push({ kind: "verify", email: d.user.email, token: d.token }),
     },
     socialProviders: { google: { clientId: "g", clientSecret: "s" } },
+    ...(o.session ? { session: o.session } : {}),
     plugins: [
       bearer(),
       organization({ sendInvitationEmail: async (d) => void invitations.push(d) }),
@@ -153,6 +155,82 @@ describe("createAuthClient", () => {
     );
     expect(session.data?.session.expiresAt).toBeInstanceOf(Date);
     expect(s.seen.at(-1)?.headers.get("authorization")).toBe(`Bearer ${signedIn.data?.token}`);
+  });
+
+  it("keeps a session alive for ten days under deferSessionRefresh, with one refresh per due day (plan 12a)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const s = server({ session: { deferSessionRefresh: true } });
+      const c = createAuthClient({
+        baseURL: BASE,
+        basePath: "/api/auth",
+        fetchOptions: { customFetchImpl: s.fetchImpl },
+      });
+      await c.signUp.email({ email: "pat@example.com", password: PASSWORD, name: "Pat" });
+      const signedIn = await c.signIn.email({ email: "pat@example.com", password: PASSWORD });
+      const native = createAuthClient({
+        baseURL: BASE,
+        basePath: "/api/auth",
+        fetchOptions: {
+          customFetchImpl: s.fetchImpl,
+          headers: { authorization: `Bearer ${signedIn.data?.token}` },
+        },
+      });
+      const days: { user: string | null; refreshes: number }[] = [];
+      for (let day = 0; day < 10; day++) {
+        if (day > 0) vi.setSystemTime(Date.now() + 86_400_000);
+        const from = s.seen.length;
+        const r = await native.getSession();
+        const refreshes = s.seen
+          .slice(from)
+          .filter((q) => q.method === "POST" && q.url.endsWith("/api/auth/session/refresh")).length;
+        days.push({ user: r.data?.user.email ?? null, refreshes });
+      }
+      // Better Auth's default updateAge is one day, so each later day is due once.
+      expect(days).toEqual(
+        Array.from({ length: 10 }, (_, d) => ({
+          user: "pat@example.com",
+          refreshes: d === 0 ? 0 : 1,
+        })),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the GET answer when the deferred refresh fails (plan 12a)", async () => {
+    const seen: string[] = [];
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: {
+        customFetchImpl: async (input, init) => {
+          const req = new Request(input, init);
+          seen.push(`${req.method} ${new URL(req.url).pathname}`);
+          if (req.method === "POST")
+            return new Response("<html>bad gateway</html>", { status: 502 });
+          return Response.json({
+            user: {
+              id: "u1",
+              email: "pat@example.com",
+              emailVerified: true,
+              name: null,
+              image: null,
+            },
+            session: {
+              id: "s1",
+              expiresAt: "2026-01-08T00:00:00.000Z",
+              activeOrganizationId: null,
+            },
+            needsRefresh: true,
+          });
+        },
+      },
+    });
+    const r = await c.getSession();
+    expect(r.error).toBeNull();
+    expect(r.data?.user.email).toBe("pat@example.com");
+    expect(seen).toEqual(["GET /api/auth/session", "POST /api/auth/session/refresh"]);
   });
 
   it("resends the verify mail through sendVerificationEmail (plan 8b)", async () => {

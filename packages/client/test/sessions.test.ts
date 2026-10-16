@@ -52,24 +52,66 @@ describe("session and sign-out", () => {
     const first = await client.session();
     expect(first.ok && first.value?.needsRefresh).toBe(false);
     const before = first.ok ? first.value?.session.expiresAt : undefined;
+    // The store reads once now, before the refresh is due.
+    const stop = client.store.subscribe(() => {});
+    await vi.waitFor(() => expect(client.store.get().data?.session.expiresAt).toBe(before));
     server.clock.advance(8 * DAY);
     const due = await client.session();
     expect(due.ok && due.value?.needsRefresh).toBe(true);
     expect(due.ok && due.value?.session.expiresAt).toBe(before);
     const cookie = [...jar.values()][0];
-    const stop = client.store.subscribe(() => {});
-    await vi.waitFor(() => expect(client.store.get().data?.needsRefresh).toBe(true));
     const r = await client.session.refresh();
-    expect(r.ok && r.value?.session.expiresAt).toBe(
-      new Date(server.clock.now().getTime() + 30 * DAY).toISOString(),
-    );
+    const moved = new Date(server.clock.now().getTime() + 30 * DAY).toISOString();
+    expect(r.ok && r.value?.session.expiresAt).toBe(moved);
     // The refresh renews the cookie; the token stays the same.
     expect([...jar.values()]).toEqual([cookie]);
     // The store reads again after the refresh.
-    await vi.waitFor(() => expect(client.store.get().data?.needsRefresh).toBe(false));
+    await vi.waitFor(() => expect(client.store.get().data?.session.expiresAt).toBe(moved));
     stop();
     const after = await client.session();
     expect(after.ok && after.value?.needsRefresh).toBe(false);
+  });
+
+  it("keeps a session alive for ten days by the store's read alone, with one refresh per due day", async () => {
+    const server = makeServer({ session: { deferRefresh: true } });
+    const { client } = await signedIn(server);
+    const slid: boolean[] = [];
+    const stop = client.store.subscribe(() => {});
+    await vi.waitFor(() => expect(client.store.get().isPending).toBe(false));
+    const before = await server.storage.findMany("session", []);
+    expect(before).toHaveLength(1);
+    for (let day = 1; day <= 10; day++) {
+      server.clock.advance(8 * DAY);
+      await client.store.refetch();
+      const state = client.store.get();
+      expect(state.data?.user.email, `day ${day * 8}`).toBe("ada@example.com");
+      // The store holds the refresh's answer, so no refresh is due.
+      expect(state.data?.needsRefresh, `day ${day * 8}`).toBeUndefined();
+      const [row] = await server.storage.findMany("session", []);
+      slid.push(row?.expiresAt.getTime() === server.clock.now().getTime() + 30 * DAY);
+    }
+    stop();
+    // Each read slid the row: 80 days past a 30-day session, the user is still in.
+    expect(slid).toEqual(Array(10).fill(true));
+  });
+
+  it("keeps the GET answer in the store when the refresh fails", async () => {
+    const due = { user: { id: "u1" }, session: { id: "s1" }, needsRefresh: true };
+    const seen: string[] = [];
+    const client = createClient({
+      baseURL: BASE_URL,
+      broadcast: false,
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const req = new Request(input, init);
+        seen.push(`${req.method} ${new URL(req.url).pathname}`);
+        return req.method === "GET"
+          ? Response.json(due)
+          : new Response("<html>bad gateway</html>", { status: 502 });
+      }) as typeof fetch,
+    });
+    await client.store.refetch();
+    expect(client.store.get()).toMatchObject({ data: due, error: null });
+    expect(seen).toEqual(["GET /auth/session", "POST /auth/session/refresh"]);
   });
 
   it("reads the bearer token once per refresh, and ends a dead token as session() does", async () => {

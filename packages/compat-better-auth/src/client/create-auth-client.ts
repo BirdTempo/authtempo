@@ -407,7 +407,16 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
 
   const readSession = (quiet: boolean) =>
     run(
-      (c) => c.session(),
+      // Under deferSessionRefresh, a due session is refreshed by a POST, as
+      // Better Auth 1.7.2's session atom does (dist/client/session-atom.mjs:66
+      // to :80, read 2026-10-17). A failed refresh keeps the GET answer
+      // (plan 12a Task 17 review, M1).
+      async (c) => {
+        const r = await c.session();
+        if (!r.ok || r.value?.needsRefresh !== true) return r;
+        const refreshed = await c.session.refresh();
+        return refreshed.ok ? refreshed : r;
+      },
       (v) => (v ? toClientSession(v) : null),
       undefined,
       quiet,

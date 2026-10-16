@@ -92,6 +92,11 @@ describe("session.deferRefresh (plan 12a Task 17)", () => {
     expect(read?.needsRefresh).toBe(true);
     const caller = await s.auth.caller(get("/auth/anything", s.cookie));
     expect(caller?.kind).toBe("session");
+    // The bearer path of auth.caller reads in the same mode (review L2).
+    const bearer = await s.auth.caller(
+      get("/auth/anything", { authorization: `Bearer ${s.token}` }),
+    );
+    expect(bearer?.kind).toBe("session");
     expect(times(await s.row())).toEqual(before);
   });
 

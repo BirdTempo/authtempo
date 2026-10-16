@@ -706,9 +706,22 @@ export function createClient(options: ClientOptions): Client {
     if (r.ok && r.value !== null && !isPublicSession(r.value)) return fail("unexpected", 200);
     return r;
   }
+  /**
+   * The store's read (plan 12a Task 17 review, L1). With core's
+   * `session.deferRefresh` on, a due session is refreshed here, so a page
+   * that only reads the store keeps an active session alive. A failed
+   * refresh keeps the GET answer. Better Auth 1.7.2's session atom does the
+   * same (dist/client/session-atom.mjs:66 to :80, read 2026-10-17).
+   */
+  async function readLive(): Promise<ClientResult<PublicSession | null>> {
+    const r = await readSession("session");
+    if (!r.ok || r.value?.needsRefresh !== true) return r;
+    const refreshed = await readSession("session.refresh");
+    return refreshed.ok ? refreshed : r;
+  }
   const inner = createSessionStore<PublicSession, ClientFailure>({
     read: async () => {
-      const r = await readSession("session");
+      const r = await readLive();
       return r.ok ? { data: r.value, error: null } : { data: null, error: r };
     },
     onThrow: () => ({ ok: false, code: "unexpected", status: 0 }),
