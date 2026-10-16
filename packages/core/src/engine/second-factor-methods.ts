@@ -7,6 +7,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
+import { requireFresh } from "./fresh.js";
 import { sendNotice } from "./notices.js";
 import {
   checkSecondFactorPasskey,
@@ -168,8 +169,12 @@ export async function enablePasskeyMethod(
   input: { session: ResolvedSession; password: string; response: unknown },
 ): Promise<Result<MethodEnabled>> {
   if (!config.totp || !config.passkey) return fail("not_found");
-  const { user } = input.session;
+  const { user, session } = input.session;
   if (!user.emailVerified) return fail("email_unverified");
+  // A change of the second factor needs a fresh session (ASVS 5.0.0 7.5.1;
+  // plan 12a). Before the password limit, so a stale session counts no try.
+  const fresh = requireFresh(config, session);
+  if (!fresh.ok) return fresh;
   const proved = await provePassword(config, user.id, input.password);
   if (!proved.ok) return proved;
   if (!(await checkSignInAssertionOf(config, { userId: user.id, response: input.response })))
@@ -277,8 +282,11 @@ export async function enableEmailMethod(
   input: { session: ResolvedSession; password: string },
 ): Promise<Result<MethodEnabled>> {
   if (!config.totp) return fail("not_found");
-  const { user } = input.session;
+  const { user, session } = input.session;
   if (!user.emailVerified) return fail("email_unverified");
+  // The rule of the passkey enable above (plan 12a).
+  const fresh = requireFresh(config, session);
+  if (!fresh.ok) return fresh;
   const proved = await provePassword(config, user.id, input.password);
   if (!proved.ok) return proved;
   return enableMethod(config, input.session, "email");

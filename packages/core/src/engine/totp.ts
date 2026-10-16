@@ -16,6 +16,7 @@ import type {
   UserRow,
 } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { checkUserPassword } from "./password.js";
@@ -415,6 +416,10 @@ export async function enableTotp(
   if (!totp) return fail("not_found");
   const { user, session } = input.session;
   if (!user.emailVerified) return fail("email_unverified");
+  // A change of the second factor needs a fresh session (ASVS 5.0.0 7.5.1;
+  // plan 12a). Before the code limit, so a stale session counts no try.
+  const fresh = requireFresh(config, session);
+  if (!fresh.ok) return fresh;
   if (!(await codeCheckAllowed(config, user.id))) return fail("rate_limited");
   const now = config.clock.now();
   const row = await config.storage.findOne("totp", [{ field: "userId", op: "eq", value: user.id }]);

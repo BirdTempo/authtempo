@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { requireFresh } from "../../engine/fresh.js";
 import {
   publicUser,
   readBearer,
@@ -35,7 +36,11 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
   const withSession = async (ctx: RouteContext) => {
     const resolved = await sessionFromRequest(config, ctx.request);
     if (!resolved) return null;
-    return { user: resolved.user, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+    return {
+      user: resolved.user,
+      session: resolved.session,
+      renewed: renewedSessionCookie(config, ctx.request, resolved),
+    };
   };
   const send = (res: Response, renewed: string | null) => {
     if (renewed) res.headers.append("set-cookie", renewed);
@@ -49,6 +54,11 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
+        // A token is a credential for its life (spec 8.8): a stolen session
+        // must not mint one (plan 12a). Before the engine's limit, so a stale
+        // session counts no try.
+        const fresh = requireFresh(config, s.session);
+        if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, createBody);
         if (!body.ok) return send(respond(body), s.renewed);
         const r = await createApiToken(config, {

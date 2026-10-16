@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { requireFresh } from "../../engine/fresh.js";
 import { sendSecondFactorEmail } from "../../engine/second-factor-methods.js";
 import {
   publicSession,
@@ -132,6 +133,11 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
+        // A change of the second factor needs a fresh session (ASVS 5.0.0
+        // 7.5.1; plan 12a). The engine takes a user, so the rule is here,
+        // before the engine's code limit.
+        const fresh = requireFresh(config, s.resolved.session);
+        if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, codeBody);
         if (!body.ok) return send(respond(body), s.renewed);
         const r = await disableTotpWithCode(config, {

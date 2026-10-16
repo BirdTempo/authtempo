@@ -294,8 +294,9 @@ export interface EmailOtpApi {
  * The fresh rule and the session operations of a settings page (plan 12a).
  * Present in every deployment. An app's own sensitive change calls
  * `requireFresh` first (ASVS 5.0.0 7.5.3); so does an app that calls
- * `api.tokens.create`, `api.passkeyRegistrationOptions`, or
- * `api.deletePasskey` in process, because those take a user, not a session.
+ * `api.tokens.create`, `api.passkeyRegistrationOptions`,
+ * `api.deletePasskey`, or `api.totp.disableWithCode` in process, because
+ * those take a user, not a session. Their routes apply the rule.
  */
 export interface SessionApi {
   /** `session_not_fresh` unless a sign-in or a re-authentication is younger than `session.freshMinutes`. */

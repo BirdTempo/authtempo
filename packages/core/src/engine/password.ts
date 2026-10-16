@@ -9,6 +9,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { type CreateSteps, createSteps } from "./create-steps.js";
+import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
@@ -26,7 +27,12 @@ import {
   sessionsEnded,
   writeSession,
 } from "./sessions.js";
-import { deleteTwoFactorChallenges, type TwoFactorPending, twoFactorGate } from "./totp.js";
+import {
+  deleteTwoFactorChallenges,
+  secondFactorOn,
+  type TwoFactorPending,
+  twoFactorGate,
+} from "./totp.js";
 import { holdUser, userStays } from "./user-hold.js";
 import {
   claimEmail,
@@ -1372,7 +1378,9 @@ export interface PasswordChange {
 /**
  * Needs a verified email: a claimant's new password row could otherwise
  * land after a claim deleted the passwords. The current password is
- * required when one exists. Every other session of the user ends.
+ * required when one exists. Every other session of the user ends. A first
+ * password, and a change while the second factor is on, need a fresh
+ * session (plan 12a).
  */
 export async function changePassword(
   config: ResolvedConfig,
@@ -1382,11 +1390,19 @@ export async function changePassword(
   if (!pw) return fail("not_found");
   const { user, session } = input.session;
   if (!user.emailVerified) return fail("email_unverified");
-  if (!(await config.limiter.allow(`password-change:user:${user.id}`, CHANGE_PER_USER)))
-    return fail("rate_limited");
   const row = await config.storage.findOne("password", [
     { field: "userId", op: "eq", value: user.id },
   ]);
+  // A first password is a new way in with no current password to prove.
+  // With the factor on, the password proves one factor only (ASVS 5.0.0
+  // 7.5.1). Both need a fresh session (plan 12a). The two reads come before
+  // the limit, so a stale session counts no try.
+  if (!row || (await secondFactorOn(config, user.id))) {
+    const fresh = requireFresh(config, session);
+    if (!fresh.ok) return fresh;
+  }
+  if (!(await config.limiter.allow(`password-change:user:${user.id}`, CHANGE_PER_USER)))
+    return fail("rate_limited");
   if (row) {
     const current = input.currentPassword;
     // The length is the caller's own input. The refusal bounds the CPU.

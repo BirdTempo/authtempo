@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { requireFresh } from "../../engine/fresh.js";
 import {
   deletePasskey,
   listPasskeys,
@@ -39,7 +40,11 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
   const withSession = async (ctx: RouteContext) => {
     const resolved = await sessionFromRequest(config, ctx.request);
     if (!resolved) return null;
-    return { user: resolved.user, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+    return {
+      user: resolved.user,
+      session: resolved.session,
+      renewed: renewedSessionCookie(config, ctx.request, resolved),
+    };
   };
   const send = (res: Response, renewed: string | null) => {
     if (renewed) res.headers.append("set-cookie", renewed);
@@ -53,6 +58,10 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
+        // A new way in: a stolen session must prove the person again (plan 12a).
+        // The engine takes a user, so the rule is here, before any write.
+        const fresh = requireFresh(config, s.session);
+        if (!fresh.ok) return send(respond(fresh), s.renewed);
         return send(respond(await passkeyRegistrationOptions(config, { user: s.user })), s.renewed);
       },
     },
@@ -122,6 +131,10 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
+        // The removal of a way in (plan 12a). Before the guard, so a stale
+        // session takes no lock and removes nothing.
+        const fresh = requireFresh(config, s.session);
+        if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, deleteBody);
         if (!body.ok) return send(respond(body), s.renewed);
         return send(
