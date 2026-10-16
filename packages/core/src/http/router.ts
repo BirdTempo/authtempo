@@ -128,6 +128,37 @@ async function moveLegacyCookie(
 }
 
 /**
+ * The Origin and Fetch Metadata rules of a POST, before any handler: the 403
+ * of the router, or null. A route with `allowCrossSiteForm` passes. An
+ * Origin on a `clientOrigin` route passes to the handler (plan 11d): a
+ * trusted Origin passes there as before plan 12b, and a foreign one passes
+ * only as a web origin of the named client. That route reads no cookie, so
+ * the Fetch Metadata rule protects nothing on it. No Origin keeps both rules.
+ * A path with no core route gets both rules. So a package that serves its
+ * own POST paths beside core (the Better Auth shim) checks them as core
+ * does, through `crossSiteRefusal` (plan 12a fix wave, final review F1).
+ */
+export function createPostGate(
+  config: ResolvedConfig,
+  routes: readonly Route[],
+): (request: Request) => Response | null {
+  const posts = new Map(
+    routes.filter((r) => r.method === "POST").map((r) => [`${config.basePath}${r.path}`, r]),
+  );
+  return (request) => {
+    if (request.method !== "POST") return null;
+    const route = posts.get(new URL(request.url).pathname);
+    if (route?.allowCrossSiteForm) return null;
+    const origin = request.headers.get("origin");
+    if (route?.clientOrigin && origin !== null) return null;
+    const trusted = origin !== null && originTrusted(config, origin);
+    if (origin !== null && !trusted) return json({ error: "origin_not_trusted" }, 403);
+    if (fetchMetadataRefuses(request, trusted)) return json({ error: "origin_not_trusted" }, 403);
+    return null;
+  };
+}
+
+/**
  * The client IP comes from `config.clientIp`. On Workers the platform sets
  * `cf-connecting-ip`, and the default reads it. On any other host a caller
  * can set that header, so a deployment there must pass its own `clientIp`
@@ -147,6 +178,7 @@ async function moveLegacyCookie(
 export function createRouter(
   config: ResolvedConfig,
   routes: Route[],
+  gate: (request: Request) => Response | null = createPostGate(config, routes),
 ): (request: Request) => Promise<Response> {
   const table = new Map(routes.map((r) => [`${r.method} ${config.basePath}${r.path}`, r]));
   // The routes that answer a foreign origin's preflight themselves (plan 11d).
@@ -204,21 +236,8 @@ export function createRouter(
     const url = new URL(request.url);
     const route = table.get(`${request.method} ${url.pathname}`);
     if (!route) return json({ error: "not_found" }, 404);
-    if (request.method === "POST" && !route.allowCrossSiteForm) {
-      const origin = request.headers.get("origin");
-      const trusted = origin !== null && originTrusted(config, origin);
-      // An Origin on a `clientOrigin` route goes to the handler (plan 11d). A
-      // trusted Origin passes there as before plan 12b; a foreign one passes
-      // only as a web origin of the named client. The route reads no cookie,
-      // so the Fetch Metadata rule protects nothing on it. No Origin keeps both rules.
-      if (route.clientOrigin && origin !== null) return run(route, request, url);
-      if (origin !== null && !trusted) {
-        return json({ error: "origin_not_trusted" }, 403);
-      }
-      if (fetchMetadataRefuses(request, trusted)) {
-        return json({ error: "origin_not_trusted" }, 403);
-      }
-    }
+    const refusal = gate(request);
+    if (refusal) return refusal;
     return run(route, request, url);
   }
 

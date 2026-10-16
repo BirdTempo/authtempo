@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ConfigError } from "../src/config.js";
 import { defaultAccountMail } from "../src/engine/account-mail.js";
 import { requestEmailOtp, verifyEmailOtp, verifyGate } from "../src/engine/email-otp.js";
@@ -221,6 +221,76 @@ describe("the order of the feature check and the limit (plan 12a)", () => {
       expect(
         await reauthenticate(auth.config, { session: s, proof: { passkey: {} }, ip: null }),
       ).toMatchObject({ ok: false, code: "not_found" });
+  });
+});
+
+describe("the windows of the re-authentication keys (plan 12a fix wave)", () => {
+  // The literals are the numbers that the README and the limits page promise.
+  it("allows 10 proofs per user in 15 minutes on reauth:user, right or wrong, and the 11th waits for the window", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    const allow = vi.spyOn(auth.config.limiter, "allow");
+    const prove = (password: string) =>
+      reauthenticate(auth.config, { session: s, proof: { password }, ip: null });
+    for (let i = 0; i < 10; i++) expect((await prove("wrong password")).ok).toBe(false);
+    expect(await prove(PASSWORD)).toEqual({ ok: false, code: "rate_limited", status: 429 });
+    expect(allow).toHaveBeenLastCalledWith(`reauth:user:${s.user.id}`, { seconds: 900, max: 10 });
+    auth.clock.advance(15 * MIN - 1);
+    expect(await prove(PASSWORD)).toEqual({ ok: false, code: "rate_limited", status: 429 });
+    auth.clock.advance(1);
+    expect((await prove(PASSWORD)).ok).toBe(true);
+  });
+
+  it("allows 3 code mails per user in 15 minutes on reauth-mail:user, and the 4th waits for the window", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    const allow = vi.spyOn(auth.config.limiter, "allow");
+    for (let i = 0; i < 3; i++)
+      expect(await requestReauthCode(auth.config, { session: s })).toEqual({
+        ok: true,
+        value: { sent: true },
+      });
+    const key = [`reauth-mail:user:${s.user.id}`, { seconds: 900, max: 3 }];
+    expect(await requestReauthCode(auth.config, { session: s })).toMatchObject({
+      code: "rate_limited",
+    });
+    expect(allow).toHaveBeenLastCalledWith(...key);
+    // 1 ms before the end: the per-user key refuses first, before the address keys.
+    auth.clock.advance(15 * MIN - 1);
+    expect(await requestReauthCode(auth.config, { session: s })).toMatchObject({
+      code: "rate_limited",
+    });
+    expect(allow).toHaveBeenLastCalledWith(...key);
+    auth.clock.advance(1);
+    expect((await requestReauthCode(auth.config, { session: s })).ok).toBe(true);
+  });
+
+  it("holds the owner's email code sign-in at rate_limited after ten wrong re-authentication codes (Task 3 review M7)", async () => {
+    const auth = totpAuth();
+    const s = await verifiedSession(auth);
+    expect((await requestReauthCode(auth.config, { session: s })).ok).toBe(true);
+    for (let i = 0; i < 10; i++)
+      expect(
+        (
+          await reauthenticate(auth.config, {
+            session: s,
+            proof: { emailCode: "000000" },
+            ip: `10.0.0.${i}`,
+          })
+        ).ok,
+      ).toBe(false);
+    // The owner asks for a sign-in code and types it right: otp-verify:email is full.
+    expect((await requestEmailOtp(auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+    const allow = vi.spyOn(auth.config.limiter, "allow");
+    expect(
+      await verifyEmailOtp(auth.config, {
+        email: EMAIL,
+        code: codeOf(auth),
+        ip: "10.0.1.1",
+        userAgent: null,
+      }),
+    ).toMatchObject({ ok: false, code: "rate_limited" });
+    expect(allow).toHaveBeenLastCalledWith(`otp-verify:email:${EMAIL}`, { seconds: 900, max: 10 });
   });
 });
 

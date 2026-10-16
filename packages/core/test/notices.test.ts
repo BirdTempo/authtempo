@@ -971,6 +971,40 @@ describe("the notice goes after the commit (plan 12a review M1, M2)", () => {
       expect(u.noticesSent().length, p.name).toBe(before);
     });
 
+  for (const name of ["account delete", "account delete confirm"])
+    it(`keeps the verification rows when the commit fails, and deletes them after the commit: ${name}`, async () => {
+      // account-delete.ts deletes the user's verification rows after the
+      // commit (plan 12a fix wave): a rolled-back delete keeps every live
+      // proof, and the delete runs outside the transaction (a reset holds its
+      // link row before the user row, so a delete inside could deadlock on Postgres).
+      const p = PATHS.find((x) => x.name === name);
+      if (!p) throw new Error(`no path ${name}`);
+      const u = tracked();
+      const { act } = await p.run(u);
+      expect((await requestMagicLink(u.auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+      const store = u.auth.config.storage as StorageAdapter;
+      const deletes: { where: unknown; depth: number }[] = [];
+      const orig = store.delete.bind(store);
+      (store as { delete: StorageAdapter["delete"] }).delete = (async (model, where) => {
+        if (model === "verification") deletes.push({ where, depth: u.st.depth });
+        return orig(model, where);
+      }) as StorageAdapter["delete"];
+      const rows = async () =>
+        (await store.findMany("verification", [])).sort((a, b) => a.id.localeCompare(b.id));
+      const before = await rows();
+      expect(before.some((r) => r.identifier === EMAIL)).toBe(true);
+      u.st.failCommit = true;
+      await expect(act()).rejects.toThrow("probe: the commit failed");
+      u.st.failCommit = false;
+      expect(await rows()).toEqual(before);
+      expect(deletes).toEqual([]);
+      // The control: the same call commits, then one delete outside any transaction.
+      expect((await act()).ok).toBe(true);
+      expect((await rows()).filter((r) => r.identifier === EMAIL)).toEqual([]);
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0]?.depth).toBe(0);
+    });
+
   it("sends no notice for an enable of a method that is already on", async () => {
     const u = tracked();
     const s = await verifiedSession(u.auth);

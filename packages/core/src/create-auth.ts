@@ -173,7 +173,7 @@ import {
   verifyTwoFactor,
 } from "./engine/totp.js";
 import { ERRORS } from "./errors.js";
-import { createRouter } from "./http/router.js";
+import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { createWellKnownHandler } from "./http/well-known.js";
 import type { PublicJwk } from "./primitives/jwk.js";
@@ -557,10 +557,30 @@ export interface Auth {
   errors: typeof ERRORS;
 }
 
+/** The POST gate of each Auth, for `crossSiteRefusal`. A WeakMap keeps it off the Auth type. */
+const gates = new WeakMap<Auth, (request: Request) => Response | null>();
+
+/**
+ * The 403 `origin_not_trusted` that `auth.handle` answers a POST before any
+ * handler, or null when the POST passes: the Origin rule and the Fetch
+ * Metadata rule, with the route exceptions of core. A path that core does not
+ * serve gets both rules. A package that answers its own POST paths beside
+ * `auth.handle` calls it first, so a cross-site post reaches none of them
+ * (plan 12a fix wave, final review F1; the Better Auth shim). Throws a
+ * TypeError for an object that `createAuth` did not make.
+ */
+export function crossSiteRefusal(auth: Auth, request: Request): Response | null {
+  const gate = gates.get(auth);
+  if (!gate) throw new TypeError("crossSiteRefusal takes an Auth from createAuth");
+  return gate(request);
+}
+
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
-  const handle = createRouter(config, coreRoutes(config));
-  return {
+  const routes = coreRoutes(config);
+  const gate = createPostGate(config, routes);
+  const handle = createRouter(config, routes, gate);
+  const auth: Auth = {
     basePath: config.basePath,
     baseURL: config.baseURL,
     handle,
@@ -695,4 +715,6 @@ export function createAuth(input: AuthConfig): Auth {
     },
     errors: ERRORS,
   };
+  gates.set(auth, gate);
+  return auth;
 }

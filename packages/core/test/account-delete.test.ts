@@ -418,6 +418,27 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     expect(await userOf(w, me.user.id)).not.toBeNull();
   });
 
+  it("passes the second press after a re-authentication with the same session token (Review Focus 1)", async () => {
+    // A two-day-old tab: the delete asks for a fresh session, the person
+    // proves the password on the same token, and the same press passes.
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    w.auth.clock.advance(2 * DAY);
+    const first = await w.handle(post("/auth/user/delete", {}, w.cookie(me.token)));
+    expect({ status: first.status, body: await first.json() }).toEqual({
+      status: 403,
+      body: { error: "session_not_fresh" },
+    });
+    const proved = await w.handle(post("/auth/reauth", { password: PASSWORD }, w.cookie(me.token)));
+    expect(proved.status).toBe(200);
+    const second = await w.handle(post("/auth/user/delete", {}, w.cookie(me.token)));
+    expect({ status: second.status, body: await second.json() }).toEqual({
+      status: 200,
+      body: { ok: true },
+    });
+    expect(await userOf(w, me.user.id)).toBeNull();
+  });
+
   it("answers not_found with account.delete false, counts no try, and serves no route", async () => {
     const w = world({ account: { delete: false } });
     const me = await verifiedSession(w.auth);

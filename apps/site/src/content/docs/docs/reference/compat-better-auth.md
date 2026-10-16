@@ -86,7 +86,7 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 
 ## The account operations
 
-The shim serves Better Auth 1.7.2's account operations in Better Auth's shapes. Each is a method of `auth.api` and a path of `auth.handler`. The handler posts core's own route for each path, so core's Origin rule, CORS, and cookie renewals apply.
+The shim serves Better Auth 1.7.2's account operations in Better Auth's shapes. Each is a method of `auth.api` and a path of `auth.handler`. The handler posts core's own route for each path, so core's Origin rule, CORS, and cookie renewals apply. The handler runs core's Origin and fetch-metadata rules on every POST first, also on the paths that the shim answers itself. A refused POST answers core's 403 `{ "error": "origin_not_trusted" }`.
 
 | Better Auth call | Path | Answer |
 | --- | --- | --- |

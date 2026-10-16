@@ -40,6 +40,7 @@ export {
   type Auth,
   type AuthApi,
   createAuth,
+  crossSiteRefusal,
   type EmailOtpApi,
   type IdentitiesApi,
   type JwtApi,

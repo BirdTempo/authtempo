@@ -1,4 +1,4 @@
-import { type Auth, ConfigError, createAuth } from "@authtempo/core";
+import { type Auth, ConfigError, createAuth, crossSiteRefusal } from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, passwordPolicyCode } from "../errors.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
@@ -118,6 +118,12 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
       headers.set("origin", expoOrigin);
       req = new Request(request, { headers });
     }
+    // Core's Origin and Fetch Metadata rules for every POST, before any shim
+    // route: the account, email OTP, and two-factor paths answer in the shim,
+    // so core's router alone would not see them (plan 12a fix wave, final
+    // review F1). After the expo-origin step, so a native app's scheme counts.
+    const refusal = crossSiteRefusal(auth, req);
+    if (refusal) return refusal;
     const copy = req.method === "POST" ? req.clone() : null;
     // Better Auth's get-session and account paths, in Better Auth's shapes (plan 12a). Null for every other request.
     const account =

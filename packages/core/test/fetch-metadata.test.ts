@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ROUTES } from "../src/http/route-list.js";
-import { createRouter, fetchMetadataRefuses } from "../src/http/router.js";
+import { createPostGate, createRouter, fetchMetadataRefuses } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { createAuth, createMemoryAdapter, crossSiteRefusal } from "../src/index.js";
 import { BASE, everyFeature } from "./every-feature.js";
 
 const TRUSTED = "https://app.example.com";
@@ -149,5 +150,68 @@ describe("the router refuses before any handler runs (plan 12b)", () => {
     // The same form from this origin reaches the handler: the stub route is mounted.
     const passed = await handle(request(path, "same-origin", form, null));
     expect({ status: passed.status, calls }).toEqual({ status: 204, calls: 1 });
+  });
+});
+
+describe("crossSiteRefusal: the router's gate for POST paths beside core (plan 12a fix wave, F1)", () => {
+  const config = { ...everyFeature(), trustedOrigins: new Set([TRUSTED]) };
+  const gate = createPostGate(config, coreRoutes(config));
+  const posts = ROUTES.filter((r) => r.method === "POST").map((r) =>
+    r.path.replace(":provider", "apple"),
+  );
+  const form = (path: string, origin: string | null = TRUSTED) =>
+    request(`${config.basePath}${path}`, "cross-site", "application/x-www-form-urlencoded", origin);
+
+  it("refuses a cross-site form post on every POST route but the two exceptions", async () => {
+    const passed: string[] = [];
+    for (const path of posts) {
+      const res = gate(form(path));
+      if (res === null) passed.push(path);
+      else
+        expect({ path, status: res.status, body: await res.json() }).toEqual({
+          path,
+          status: 403,
+          body: { error: "origin_not_trusted" },
+        });
+    }
+    // Apple's form callback (allowCrossSiteForm) and the token endpoint (clientOrigin) pass, as in the router.
+    expect(passed.sort()).toEqual(["/oauth/token", "/social/apple/callback"]);
+  });
+
+  it("refuses a path that core does not serve, and passes a GET and a same-origin post", async () => {
+    const shim = gate(form("/two-factor/enable", "https://evil.example"));
+    expect({ status: shim?.status, body: await shim?.json() }).toEqual({
+      status: 403,
+      body: { error: "origin_not_trusted" },
+    });
+    expect(gate(form("/two-factor/enable", null))?.status).toBe(403);
+    expect(gate(new Request(`${BASE}${config.basePath}/two-factor/enable`))).toBeNull();
+    expect(
+      gate(
+        request(`${config.basePath}/two-factor/enable`, "same-origin", "application/json", BASE),
+      ),
+    ).toBeNull();
+  });
+
+  it("is the gate of createAuth, and throws for an object that createAuth did not make", () => {
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [TRUSTED],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+    });
+    expect(crossSiteRefusal(auth, form("/two-factor/enable", "https://evil.example"))?.status).toBe(
+      403,
+    );
+    // This config serves no Apple provider, so its form callback is no exception here.
+    expect(crossSiteRefusal(auth, form("/social/apple/callback"))?.status).toBe(403);
+    expect(
+      crossSiteRefusal(
+        auth,
+        request("/auth/two-factor/enable", "same-origin", "application/json", BASE),
+      ),
+    ).toBeNull();
+    expect(() => crossSiteRefusal({ ...auth }, form("/x"))).toThrow(TypeError);
   });
 });

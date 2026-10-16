@@ -111,13 +111,16 @@ export async function requestEmailChange(
 ): Promise<Result<{ sent: true }>> {
   const { user, session } = input.session;
   // Every check that needs no count comes first, so a refused call fills no key.
+  // The settled order: the feature off, the session, the fresh rule, the limit
+  // (plan 12a fix wave). A deployment with emailOtp off answers the code
+  // method not_found before it asks for a fresh session.
+  const method = input.method ?? "link";
+  const otp = config.emailOtp;
+  if (method === "code" && !otp) return fail("not_found");
   if (!user.emailVerified) return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
-  const method = input.method ?? "link";
   if (method !== "link" && method !== "code") return fail("invalid_body");
-  const otp = config.emailOtp;
-  if (method === "code" && !otp) return fail("not_found");
   const newEmail = typeof input.newEmail === "string" ? normalizeEmail(input.newEmail) : null;
   if (newEmail === null || newEmail === user.email) return fail("invalid_body");
   if (!(await config.limiter.allow(`email-change:user:${user.id}`, CHANGE_PER_USER)))

@@ -795,9 +795,21 @@ describe("the change of address by code (plan 12a)", () => {
         userAgent: null,
       }),
     ).toEqual({ ok: false, code: "not_found", status: 404 });
+    // The feature check comes before the fresh rule (plan 12a fix wave): a stale
+    // session asks for the code method and gets not_found, not session_not_fresh.
+    auth.clock.advance(DAY);
+    const stale = await resolveSession(auth.config, me.token);
+    if (!stale) throw new Error("the session ended");
+    expect(
+      await requestEmailChange(auth.config, { session: stale, newEmail: NEW, method: "code" }),
+    ).toEqual({ ok: false, code: "not_found", status: 404 });
     expect(allow).not.toHaveBeenCalled();
-    // The link stays on.
-    expect((await requestEmailChange(auth.config, { session: me, newEmail: NEW })).ok).toBe(true);
+    // The link stays on: with the stale session it reaches the fresh rule.
+    expect(await requestEmailChange(auth.config, { session: stale, newEmail: NEW })).toEqual({
+      ok: false,
+      code: "session_not_fresh",
+      status: 403,
+    });
   });
 });
 

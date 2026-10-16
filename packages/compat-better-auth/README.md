@@ -347,8 +347,10 @@ shapes. Each is a method of `auth.api` and a path of `auth.handler`.
 | `unlinkAccount({ accountId })` | `POST /unlink-account` | `{ status: true }` |
 
 The handler posts core's own route for each path, so core's Origin rule,
-its fetch-metadata rule, CORS, and the cookie renewals apply. `auth.api`
-calls core in process. Both run the same Better Auth checks. A refusal of
+its fetch-metadata rule, CORS, and the cookie renewals apply. The handler
+runs core's Origin and fetch-metadata rules on every POST first, also on the
+paths that the shim answers itself. A refused POST answers core's 403
+`{ "error": "origin_not_trusted" }`. `auth.api` calls core in process. Both run the same Better Auth checks. A refusal of
 such a check changes no row. It carries no CORS header, as on the email
 code and second-factor paths. The shim's own client
 gains no account calls. A client app posts these paths, or calls
