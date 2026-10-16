@@ -1,0 +1,97 @@
+---
+title: Build an account settings page
+description: Let a signed-in person see and end sessions, prove it again, change the profile and the address, manage providers, and delete the account.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.15
+  - packages/core/README.md "Account"
+  - packages/client/README.md "Account settings"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import server from "../../../../../samples/guides/account-settings.ts?raw";
+import client from "../../../../../samples/guides/account-settings-client.ts?raw";
+import test from "../../../../../samples/guides/account-settings.test.ts?raw";
+
+**For:** an app developer who builds the settings page of a signed-in person.
+
+**What it does:** the page lists and ends the sessions, and asks for a re-authentication before a sensitive change. It changes the profile, the address, the providers, and the account.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- The [fresh rule](/docs/concepts/fresh-sessions/): read which changes need a fresh session.
+- Nothing in the config. The [account routes](/docs/reference/routes/#account) exist in every deployment.
+
+## Steps
+
+1. Show the sessions with `client.sessions.list()`. Each row has `current`, the device, and the last activity.
+2. End one session with `client.sessions.revoke({ id })`, or all the others with `client.sessions.revokeOthers()`.
+3. Wrap each sensitive change in `client.withFresh(change, prove)`. `prove` asks for the password, an email code, or a passkey.
+4. Change the name and the picture with `client.user.update({ name, image })`.
+5. Change the address with `client.user.changeEmail({ newEmail })`. The person opens the link in the new mailbox.
+6. List the providers with `client.identities.list()`.
+7. Link a provider with `client.identities.link({ provider })`. Unlink one with `client.identities.unlink({ id })`.
+8. Delete the account with `client.user.delete()`.
+
+<Code code={server} lang="ts" title="The config" />
+
+<Code code={client} lang="ts" title="The delete button with a re-authentication" />
+
+<Code code={test} lang="ts" title="The settings page as a test" />
+
+## The fresh rule
+
+- A sign-in makes a session fresh for `session.freshMinutes`, 1440 by default. A re-authentication makes it fresh again. The session token and the expiry stay the same.
+- These client calls can answer `session_not_fresh`: `sessions.revoke`, `sessions.revokeOthers`, `user.changeEmail`, `user.delete`, `identities.unlink`, and `identities.link`.
+- The calls of the other guides can answer it too: `passkey.register`, `passkeys.delete`, `tokens.create`, and `password.change`.
+- The second factor calls can answer it: `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`, `secondFactor.passkey.enable`, `secondFactor.email.enable`, and `secondFactor.disable`.
+- `withFresh` runs the change. On `session_not_fresh` it runs your re-authentication, then the change once more.
+- A failed re-authentication is the answer, and the change does not run again. A second `session_not_fresh` is the answer too, so `withFresh` never loops.
+- Core checks the rule of `secondFactor.passkey.enable` after its passkey prompt. So under `withFresh`, that call can show the prompt two times.
+- A stale session counts no try on a limit. The refusal changes no row.
+- A bearer app gives the client a `token` function. The client reads it once per call, so the change and its retry each read the token once.
+
+## How it behaves
+
+- `GET /sessions` and `GET /identities` need a session only.
+- The profile update needs no fresh session, because a name and a picture do not sign anyone in.
+- `client.sessions.revoke({ id })` answers `current` from the server. When `current` is true, the caller's own session ended. A bearer app clears its stored token then.
+- A change of address sends a link to the new address. `method: "code"` sends a code in place of the link.
+- The link opens a confirm page that does nothing on load, so a mail scanner changes nothing. Its button posts the token. `account.confirmPage` replaces the page.
+- The move happens at the confirm. Then every other session ends, and the old address gets a notice that names the new one.
+- By a link, the session that asked stays. By a code, the session that sends the code stays.
+- When an account holds the new address, the new address gets a note and no link. The answer is the same, so the page learns nothing.
+- A link needs the provider's address to be verified and equal to the account's address.
+- The unlink and the passkey delete keep at least one way in. The last one answers `last_credential`.
+- The delete takes each organization where the person is the only member. Another membership goes, and its organization stays.
+- The last owner of an organization with other members gets `sole_owner`, and nothing goes. `account.delete: false` removes the delete route.
+- The [limits](/docs/reference/limits/) of the routes: `reauth:user:<userId>` allows 10 per 15 minutes, and `session-revoke:user:<userId>` allows 30 per 15 minutes.
+- More limits: `email-change:user:<userId>` allows 5 per hour, `unlink:user:<userId>` 10 per 15 minutes, and `user-delete:user:<userId>` 5 per hour.
+
+## The notice mails
+
+- A notice goes to the address after each change of a way in. It holds the event, the time, the IP address when core has it, and what to do.
+- These changes send one: a password change or a first password, and a reset by link or by code.
+- These changes send one too: a passkey added or removed, a provider linked or unlinked, and a second factor method on or off.
+- A change of address sends one to the old address. The account delete sends one to the address of the deleted row.
+- A notice holds no link and no code. Core sends it after the commit. A refused change and a change that rolls back send none.
+- A notice that fails writes the line `authtempo: notice mail failed <event> <error name>`, and the change stays.
+- `account.notices: false` turns every notice off. `account.notices.mail` replaces the text. The proof mails stay on in both cases.
+
+## If it fails
+
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): the session is older than the fresh window. Re-authenticate, then send the change again.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): the profile, the address, and a link need a verified address.
+- [`last_credential`](/docs/reference/errors/#last_credential): add another way in first.
+- [`identity_taken`](/docs/reference/errors/#identity_taken): the provider account belongs to another account.
+- [`email_mismatch`](/docs/reference/errors/#email_mismatch): the provider's address differs from the account's address.
+- [`sole_owner`](/docs/reference/errors/#sole_owner): make another member an owner first.
+- [`email_taken`](/docs/reference/errors/#email_taken): an account took the new address before the confirm.
+- [`conflict`](/docs/reference/errors/#conflict): a parallel write won five rounds. Send the change again.
+
+## Next
+
+- [Fresh sessions](/docs/concepts/fresh-sessions/)
+- [Run your code at a flow point (hooks)](/docs/guides/hooks/)
+- [Sessions, API tokens, and JWTs](/docs/concepts/credentials/)

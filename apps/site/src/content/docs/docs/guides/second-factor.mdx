@@ -63,7 +63,10 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 - A trusted device skips the factor for `totp.trustDays`. Its cookie is `tempo_totp_trust` on the path `/auth/`.
 - The code checks share two [limits](/docs/reference/limits/): `totp-code:user:<userId>` 10 per 15 minutes, and `totp-code:user-day:<userId>` 30 per 24 hours.
 - The email sends have the [limits](/docs/reference/limits/) `second-factor-email:user:<userId>` 5 per 15 minutes, `totp:email-day:<email>` 20 per 24 hours, and 3 sends per challenge.
-- The passkey and the email method turn off with the password alone. TOTP turns off only with a code.
+- The passkey and the email method turn off with the password and a fresh session. TOTP turns off only with a code.
+- The factor on and off need a [fresh session](/docs/concepts/fresh-sessions/). New backup codes need one too. A stale one answers `session_not_fresh`.
+- Wrap these calls in `client.withFresh`. A stale session counts no try on the code limits.
+- `api.totp.disableWithCode` and `api.totp.regenerateBackupCodesWithCode` take a user, so they apply no fresh rule. Call `api.session.requireFresh` first.
 - No per-account lockout exists. [The threat model](/docs/concepts/threat-model/) gives the odds.
 
 :::caution
@@ -87,6 +90,7 @@ Warning: a reset does not turn the factor off. A person who lost every method ne
 - [`second_factor_last_method`](/docs/reference/errors/#second_factor_last_method): the passkey is the last passkey of the user, and the passkey method is on.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the code checks or of the sends is full.
 - [`conflict`](/docs/reference/errors/#conflict): two writes to the factor ran at the same time. Retry.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): the session is older than the fresh window. Re-authenticate, then send it again.
 
 ## Next
 

@@ -32,6 +32,8 @@ sources:
 | second factor | A second proof after the first sign-in method: a TOTP code, a passkey, an email code, or a backup code. | `2FA`, `MFA`, `two-factor` |
 | backup code | A single-use code that replaces a TOTP code once. | |
 | trusted device | A browser or an app that skips the second factor until its expiry. | |
+| fresh session | A session whose sign-in or re-authentication is younger than `session.freshMinutes`. A sensitive change needs one. | `fresh age` |
+| re-authentication | A new proof of a signed-in person: the password, an email code, or a passkey. It makes the session fresh and keeps its token. | `reauth`, `step-up` |
 | challenge | The `tf_` token of a sign-in or a reset that waits for the second factor. | |
 | provider | A service that signs a person in for the app, such as Google, Apple, or GitHub. | `IdP`, `identity provider` |
 | social sign-in | A sign-in through a provider. | |

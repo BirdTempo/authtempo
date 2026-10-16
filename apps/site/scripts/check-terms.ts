@@ -27,6 +27,10 @@ export const FORBIDDEN_TERMS: readonly { term: string; pattern: RegExp; use: str
   },
   { term: "IdP", pattern: /\bIdPs?\b/i, use: "provider" },
   { term: "identity provider", pattern: /\bidentity providers?\b/i, use: "provider" },
+  // Plan 12a: the glossary rows "fresh session" and "re-authentication".
+  { term: "fresh age", pattern: /\bfresh ages?\b/i, use: "fresh session" },
+  { term: "reauth", pattern: /\breauth(?:s|ed|ing)?\b/i, use: "re-authentication" },
+  { term: "step-up", pattern: /\bstep[- ]ups?\b/i, use: "re-authentication" },
 ];
 
 /**

@@ -48,6 +48,8 @@ import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
 - A user holds at most 50 tokens.
 - Create has one [limit](/docs/reference/limits/): `token-create:user:<userId>` 20 per hour.
 - A password reset, a password change, and a sign-out delete no token. The person revokes a token from the list.
+- The create needs a [fresh session](/docs/concepts/fresh-sessions/). A stale one answers `session_not_fresh`. Wrap the call in `client.withFresh`.
+- `api.tokens.create` takes a user, so it applies no fresh rule. Call `api.session.requireFresh` first.
 
 ## If it fails
 
@@ -56,6 +58,7 @@ import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
 - [`token_limit`](/docs/reference/errors/#token_limit): the user holds 50 tokens. Revoke one first.
 - [`not_found`](/docs/reference/errors/#not_found): the organization or the token does not belong to the caller.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): more than 20 creates in one hour.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): the session is older than the fresh window. Re-authenticate, then send it again.
 
 ## Next
 

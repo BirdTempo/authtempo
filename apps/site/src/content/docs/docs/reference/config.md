@@ -69,7 +69,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `session.ttlDays` | number | 30 | The life of a session in days. |
 | `session.slidingRefreshDays` | number | 7 | A session older than this moves its expiry forward when it is used. |
 | `session.absoluteDays` | number | none | 1 to 365. A session ends this many days after it opened, whatever its sliding refresh. |
-| `session.freshMinutes` | number | 1440 | The fresh window in minutes, 1 to 1440. A sensitive change needs a sign-in or a re-authentication within it. [Fresh sessions](/docs/reference/routes/#post-reauth) tells which changes. |
+| `session.freshMinutes` | number | 1440 | The fresh window in minutes, 1 to 1440. A sensitive change needs a sign-in or a re-authentication within it. [Fresh sessions](/docs/concepts/fresh-sessions/) tells which changes. |
 
 ## Magic link
 

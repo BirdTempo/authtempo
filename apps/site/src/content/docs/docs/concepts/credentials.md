@@ -29,6 +29,8 @@ sources:
 | Access token, `at+jwt` | An OAuth client, such as an MCP client | The bearer header | `oauth.accessTtlMinutes` | No |
 | Refresh token, `or_` | An OAuth client | The token endpoint only | 30 days by default, used once | No |
 
+A session is fresh for `session.freshMinutes` after its sign-in or a re-authentication. [Fresh sessions](/docs/concepts/fresh-sessions/) tells which changes need a fresh session.
+
 ## A session
 
 A session is a row. Its token is the person's key to the API. A browser sends it in the `HttpOnly` cookie, and a native app sends it as the bearer. Core stores its SHA-256 only.

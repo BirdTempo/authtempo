@@ -58,7 +58,15 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - In one sign-in that creates a user, the order is `user.beforeCreate`, `identity.beforeLink`, and `session.beforeCreate`, all before the first write. After the commit, the order is `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`.
 - The sign-up rule runs before `user.beforeCreate`. So no user hook sees a create that `signUp` refuses.
 - The `email` identity, a claim, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.
-- The account delete runs `organization.beforeDelete` for each organization that goes, then `user.beforeDelete` with the ids of those organizations. The rows it removes fire no member or identity hook.
+- `user.beforeUpdate` can run more than once for one change, with `via: "profile"` and with `via: "email_change"`.
+- A parallel write that lands first makes core read the user row again. Then `user.beforeUpdate` runs again on the new row. Write the hook so that a second call does no harm.
+- `identity.beforeLink` with `via: "link"` runs inside the transaction of the link, before the identity write.
+- It can run twice for one identity, when two link states of one user race. The second write then fails.
+- `identity.beforeUnlink` runs inside the transaction, after core counts the ways in and locks the user row, and before the first delete. It has no `via`.
+- An unlink that `last_credential` refuses runs no hook. `identity.afterUnlink` runs after the commit.
+- The account delete runs `organization.beforeDelete` for each organization that goes, then `user.beforeDelete` with the ids of those organizations. Both run inside the transaction, before the first delete.
+- After the commit of the delete, `session.afterEnd` fires once per session with `account_deleted`. Then `organization.afterDelete` and `user.afterDelete` fire.
+- The rows that the delete removes fire no member or identity hook.
 - A refusal message of 1 to 200 characters with no control character reaches the caller. Any other message becomes "The app refused this request.".
 - Hooks have no timeout. A hook that never settles holds the request, and a before hook holds the transaction.
 - The sweep fires no hook. `expired` fires only when a request presents a token after its expiry.
