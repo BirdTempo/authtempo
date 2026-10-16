@@ -211,8 +211,10 @@ export interface TotpApi {
   enable(input: { session: ResolvedSession; code: string }): Promise<Result<TotpStatus>>;
   verify(input: TwoFactorVerify): Promise<Result<TwoFactorSession>>;
   disable(input: { userId: string }): Promise<Result<{ ok: true }>>;
+  /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
   disableWithCode(input: { user: UserRow; code: string }): Promise<Result<{ ok: true }>>;
   regenerateBackupCodes(input: { userId: string }): Promise<Result<{ backupCodes: string[] }>>;
+  /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
   regenerateBackupCodesWithCode(input: {
     user: UserRow;
     code: string;
@@ -257,6 +259,7 @@ export interface OAuthApi {
 
 /** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
 export interface TokensApi {
+  /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
   create(input: ApiTokenCreate): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>>;
   list(input: { user: UserRow }): Promise<Result<ApiTokenSummary[]>>;
   revoke(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
@@ -295,8 +298,9 @@ export interface EmailOtpApi {
  * Present in every deployment. An app's own sensitive change calls
  * `requireFresh` first (ASVS 5.0.0 7.5.3); so does an app that calls
  * `api.tokens.create`, `api.passkeyRegistrationOptions`,
- * `api.deletePasskey`, or `api.totp.disableWithCode` in process, because
- * those take a user, not a session. Their routes apply the rule.
+ * `api.deletePasskey`, `api.totp.disableWithCode`, or
+ * `api.totp.regenerateBackupCodesWithCode` in process, because those take a
+ * user, not a session. Their routes apply the rule.
  */
 export interface SessionApi {
   /** `session_not_fresh` unless a sign-in or a re-authentication is younger than `session.freshMinutes`. */
@@ -364,6 +368,7 @@ export interface AuthApi {
   ): Promise<
     Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
   >;
+  /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
   passkeyRegistrationOptions(input: {
     user: UserRow;
   }): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;
@@ -381,6 +386,7 @@ export interface AuthApi {
     userAgent: string | null;
   }): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>>;
   listPasskeys(input: { user: UserRow }): Promise<Result<PasskeySummary[]>>;
+  /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
   deletePasskey(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
   startHandoff(input: HandoffStart): Promise<Result<{ handoffId: string }>>;
   continueHandoff(input: {

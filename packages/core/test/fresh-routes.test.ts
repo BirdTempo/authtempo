@@ -162,6 +162,18 @@ const CASES: Case[] = [
     after: 200,
   },
   {
+    // New codes are a lasting way past the factor, and they void the owner's list (review m1).
+    path: "/totp/backup-codes",
+    setup: async (w, me) => {
+      const on = await totpOn(w, me);
+      return {
+        backupCode: firstOf(on.backupCodes),
+        body: async () => ({ code: await codeNow(w.auth, on.secret) }),
+      };
+    },
+    after: 200,
+  },
+  {
     path: "/second-factor/passkey/enable",
     setup: async (w, me) => {
       const pk = await addPasskey(w, me.user);
@@ -257,6 +269,23 @@ describe("the fresh rule on the routes of other sections (plan 12a, ASVS 5.0.0 7
     ).toBe(true);
   });
 
+  it.each([
+    "/passkeys/delete",
+    "/tokens",
+    "/totp/disable",
+    "/totp/backup-codes",
+    "/second-factor/disable",
+  ])("POST %s: the route rule answers a stale session before the body read", async (path) => {
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    w.auth.clock.advance(STALE);
+    const res = await w.handle(post(`/auth${path}`, [], w.cookie(me.token)));
+    expect({ status: res.status, body: await res.json() }).toEqual({
+      status: 403,
+      body: { error: "session_not_fresh" },
+    });
+  });
+
   it("refuses every lockout change from a stale session, and a re-authentication lets them pass the rule", async () => {
     const w = world();
     const me = await verifiedSession(w.auth);
@@ -271,6 +300,7 @@ describe("the fresh rule on the routes of other sections (plan 12a, ASVS 5.0.0 7
       ["/passkeys/delete", { id: "pk-1" }],
       ["/totp/enable", { code: "123456" }],
       ["/totp/disable", { code: "123456" }],
+      ["/totp/backup-codes", { code: "123456" }],
       ["/second-factor/passkey/enable", { password: PASSWORD, response: {} }],
       ["/second-factor/email/enable", { password: PASSWORD }],
       ["/second-factor/disable", { method: "email", password: PASSWORD }],
@@ -411,6 +441,11 @@ describe("the in-process calls (plan 12a deviation 4)", () => {
     expect((await api.tokens.create({ user: old.user, name: "script" })).ok).toBe(true);
     const totp = api.totp;
     if (!totp) throw new Error("no totp api");
+    const codes = await totp.regenerateBackupCodesWithCode({
+      user: old.user,
+      code: firstOf(on.backupCodes),
+    });
+    expect(codes.ok && codes.value.backupCodes.length).toBe(10);
     expect(
       await totp.disableWithCode({ user: old.user, code: await codeNow(w.auth, on.secret) }),
     ).toEqual({ ok: true, value: { ok: true } });

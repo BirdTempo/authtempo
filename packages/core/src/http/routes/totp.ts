@@ -154,6 +154,10 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
+        // New backup codes are a lasting way past the factor, and they void
+        // the owner's list (ASVS 5.0.0 7.5.1; plan 12a). Before the code limit.
+        const fresh = requireFresh(config, s.resolved.session);
+        if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, codeBody);
         if (!body.ok) return send(respond(body), s.renewed);
         const r = await regenerateBackupCodesWithCode(config, {

@@ -428,10 +428,10 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 
 | Field | Value |
 | --- | --- |
-| Needs | A session |
+| Needs | A fresh session |
 | Input | JSON `{ code }` |
 | Answer | `{ backupCodes }`, a new list; the old codes stop |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="get-totp"><code>GET /totp</code></h3>
 
