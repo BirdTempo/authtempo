@@ -16,6 +16,7 @@ import { MCP_HELP } from "../help/mcp.js";
 import type { McpJson } from "../json.js";
 import { parseJsonc } from "../jsonc.js";
 import { type Ctx, printJson, sayer } from "../output.js";
+import { ENV_NAME } from "../secrets.js";
 import { UNPUBLISHED } from "../templates.js";
 import { CLI_VERSION } from "../version.js";
 
@@ -40,9 +41,6 @@ const IDS = Object.keys(EDITORS) as EditorId[];
  * from src/commands/ in a test) three folders up is packages/.
  */
 export const MCP_BIN_URL = new URL("../../../mcp/dist/bin/authtempo-mcp.js", import.meta.url);
-
-/** The name of an environment variable, as readSecret checks it (src/secrets.ts). */
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** The server name in every editor file. */
 const NAME = "authtempo";
@@ -78,6 +76,12 @@ function entryText(id: EditorId, entry: unknown): string {
 
 /** The commands of the two editors that have their own `mcp add`. */
 function addCommands(entry: McpEntry, o: { remote: boolean; urlEnv: string | null }): string[] {
+  // The two remote forms, read 2026-10-17: code.claude.com/docs/en/mcp gives
+  // `claude mcp add --transport http <name> <url>`. The Codex page
+  // (developers.openai.com/codex/mcp, which answers 308 to
+  // learn.chatgpt.com/docs/extend/mcp) gives `codex mcp add <name> --url <url>`
+  // with the optional --oauth-client-id; the remote server has no
+  // authentication, so the line drops that flag (plan 11e ruling 9).
   if (o.remote)
     return [
       `claude mcp add --transport http ${NAME} ${REMOTE_MCP_URL}`,
@@ -98,19 +102,15 @@ function inside(ctx: Ctx, root: string, path: string): void {
     }
 }
 
+/** What a merge gives: the new text, no change, or the reason to stop. */
+type Merge = { text: string } | { unchanged: true } | { stop: string };
+
 /**
  * The new text of a JSON file, or the reason to stop (plan 11e Task 2, the
  * merge rule). Every other key keeps its place and its value; authtempo goes
  * at the end of the server map.
  */
-function mergeJson(
-  ctx: Ctx,
-  file: string,
-  text: string,
-  key: string,
-  entry: unknown,
-  stop: (why: string) => never,
-): string | null {
+function mergeJson(ctx: Ctx, file: string, text: string, key: string, entry: unknown): Merge {
   let doc: unknown;
   try {
     doc = JSON.parse(text);
@@ -119,25 +119,98 @@ function mergeJson(
     try {
       parseJsonc(text);
     } catch {
-      stop(`${file} does not parse as JSON: fix the file, or add the entry by hand`);
+      return { stop: `${file} does not parse as JSON: fix the file, or add the entry by hand` };
     }
-    stop(`${file} holds comments, and a rewrite drops them: add the entry under "${key}" by hand`);
+    return {
+      stop: `${file} holds comments, and a rewrite drops them: add the entry under "${key}" by hand`,
+    };
   }
-  if (!isObject(doc)) stop(`${file} holds no JSON object: add the entry by hand`);
+  if (!isObject(doc)) return { stop: `${file} holds no JSON object: add the entry by hand` };
   const map = doc[key];
   if (map === undefined) {
     doc[key] = { [NAME]: entry };
   } else if (!isObject(map)) {
-    stop(`"${key}" in ${file} is not an object: add the entry by hand`);
+    return { stop: `"${key}" in ${file} is not an object: add the entry by hand` };
   } else if (Object.hasOwn(map, NAME)) {
-    if (same(map[NAME], entry)) return null;
+    if (same(map[NAME], entry)) return { unchanged: true };
     ctx.err(`${file} has: ${JSON.stringify(map[NAME])}`);
     ctx.err(`this command writes: ${JSON.stringify(entry)}`);
-    stop(`${file} holds another ${NAME} entry: edit it by hand, or remove it and run again`);
+    return {
+      stop: `${file} holds another ${NAME} entry: edit it by hand, or remove it and run again`,
+    };
   } else {
     map[NAME] = entry;
   }
-  return `${JSON.stringify(doc, null, 2)}\n`;
+  return { text: `${JSON.stringify(doc, null, 2)}\n` };
+}
+
+/** A TOML line without its comment: a # outside a string starts the comment. */
+function tomlCode(line: string): string {
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line.charAt(i);
+    if (quote !== null) {
+      if (c === "\\" && quote === '"') i++;
+      else if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "#") return line.slice(0, i);
+  }
+  return line;
+}
+
+/** A TOML key path with its spaces and quotes removed: `[ mcp_servers."authtempo" ]` gives mcp_servers.authtempo. */
+const tomlPath = (s: string) => s.replace(/["'\s]/g, "");
+const TAKEN = `mcp_servers.${NAME}`;
+const isTaken = (path: string) => path === TAKEN || path.startsWith(`${TAKEN}.`);
+
+/**
+ * True when the TOML text defines the authtempo server in any form: a table
+ * header `[mcp_servers.authtempo]` (with spaces or quotes), a key `authtempo`
+ * under `[mcp_servers]`, or a dotted or inline key at the root. TOML refuses
+ * a table that is defined two times, so an append would break the file.
+ */
+function codexTaken(text: string): boolean {
+  let table = "";
+  for (const raw of text.split("\n")) {
+    const line = tomlCode(raw).trim();
+    if (line === "") continue;
+    const header = /^\[\[?(.*?)\]\]?$/.exec(line);
+    if (header) {
+      table = tomlPath(header[1] ?? "");
+      if (isTaken(table)) return true;
+      continue;
+    }
+    const pair = /^([^=]+)=(.*)$/.exec(line);
+    if (!pair) continue;
+    const key = tomlPath(pair[1] ?? "");
+    const path = table === "" ? key : `${table}.${key}`;
+    if (isTaken(path)) return true;
+    // An inline table: mcp_servers = { authtempo = { ... } }.
+    if (path === "mcp_servers" && new RegExp(`["']?${NAME}["']?\\s*=`).test(pair[2] ?? ""))
+      return true;
+  }
+  return false;
+}
+
+/**
+ * The new text of a Codex file. The exact table that this command appends,
+ * with no key after it, is no change; any other authtempo server stops.
+ */
+function mergeToml(file: string, old: string, table: string): Merge {
+  const at = `\n${old}`.indexOf(`\n${table}`);
+  if (at >= 0) {
+    const next = old
+      .slice(at + table.length)
+      .split("\n")
+      .map((l) => tomlCode(l).trim())
+      .find((l) => l !== "");
+    if (next === undefined || next.startsWith("[")) return { unchanged: true };
+  }
+  if (codexTaken(old))
+    return {
+      stop: `${file} already defines the ${NAME} server: edit it by hand, or remove it and run again`,
+    };
+  return { text: `${old}\n${table}` };
 }
 
 /**
@@ -212,35 +285,37 @@ export const mcpCommand: Command = {
     const rendered = renderEntry(id, entry, opts);
     const file = join(root, spec.file);
     if (id === "codex") ctx.err("A Codex project file applies only in a trusted project.");
-    const stop = (why: string): never => {
+    // A merge stop returns 2 with the command's own document, as the import's
+    // runParsed does: the document keeps the file and the entry to add by hand
+    // (plan 11e ruling 11). A thrown Stop is for a stop before the merge.
+    const stopped = (why: string): number => {
       for (const line of entryText(id, rendered).split("\n")) if (line !== "") say(line);
+      ctx.err(`stopped: ${why}`);
       if (json)
         printJson(ctx, { editor: id, file, action: "stopped", entry: rendered } satisfies McpJson);
-      throw new Stop(why);
+      return 2;
     };
     // OpenCode also reads opencode.jsonc, and a rewrite drops its comments (plan 11e deviation 8).
     const jsonc = join(root, "opencode.jsonc");
     if (id === "opencode" && ctx.exists(jsonc))
-      stop(`${jsonc} holds comments, and a rewrite drops them: add the entry under "mcp" by hand`);
+      return stopped(
+        `${jsonc} holds comments, and a rewrite drops them: add the entry under "mcp" by hand`,
+      );
     inside(ctx, root, file);
 
     const exists = ctx.exists(file);
-    let text: string | null;
-    if (!exists) {
-      text =
-        spec.format === "toml"
-          ? entryText(id, rendered)
-          : `${JSON.stringify({ [spec.key]: { [NAME]: rendered } }, null, 2)}\n`;
-    } else if (spec.format === "toml") {
-      const old = ctx.readFile(file);
-      if (/^[ \t]*\[mcp_servers\.authtempo/m.test(old))
-        stop(
-          `${file} has a [mcp_servers.authtempo] table: edit it by hand, or remove it and run again`,
-        );
-      text = `${old}\n${entryText(id, rendered)}`;
-    } else {
-      text = mergeJson(ctx, file, ctx.readFile(file), spec.key, rendered, stop);
-    }
+    const merge: Merge = !exists
+      ? {
+          text:
+            spec.format === "toml"
+              ? entryText(id, rendered)
+              : `${JSON.stringify({ [spec.key]: { [NAME]: rendered } }, null, 2)}\n`,
+        }
+      : spec.format === "toml"
+        ? mergeToml(file, ctx.readFile(file), entryText(id, rendered))
+        : mergeJson(ctx, file, ctx.readFile(file), spec.key, rendered);
+    if ("stop" in merge) return stopped(merge.stop);
+    const text = "text" in merge ? merge.text : null;
 
     let action: McpJson["action"];
     if (text === null) {

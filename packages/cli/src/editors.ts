@@ -29,7 +29,7 @@ export interface EditorSpec {
 }
 
 export const EDITORS: Readonly<Record<EditorId, EditorSpec>> = {
-  // code.claude.com/docs/en/mcp, read 2026-10-14: ${VAR:-default} expands in
+  // code.claude.com/docs/en/mcp, read 2026-10-17: ${VAR:-default} expands in
   // command, args, env, url, and headers. An unset variable with no default
   // stays as the literal text, so the entry gives the empty default.
   "claude-code": {
@@ -38,18 +38,18 @@ export const EDITORS: Readonly<Record<EditorId, EditorSpec>> = {
     format: "json",
     key: "mcpServers",
     source: "https://code.claude.com/docs/en/mcp",
-    read: "2026-10-14",
+    read: "2026-10-17",
   },
-  // cursor.com/docs/context/mcp, read 2026-10-14: ${env:NAME} in env.
+  // cursor.com/docs/context/mcp, read 2026-10-17: ${env:NAME} in env.
   cursor: {
     flag: "--cursor",
     file: ".cursor/mcp.json",
     format: "json",
     key: "mcpServers",
     source: "https://cursor.com/docs/context/mcp",
-    read: "2026-10-14",
+    read: "2026-10-17",
   },
-  // The Codex MCP page, read 2026-10-14: env_vars names the variables to pass.
+  // The Codex MCP page, read 2026-10-17: env_vars names the variables to pass.
   // A project file applies only in a trusted project. On 2026-10-17 the old
   // address (developers.openai.com/codex/mcp) answers 308 to this page.
   codex: {
@@ -58,9 +58,9 @@ export const EDITORS: Readonly<Record<EditorId, EditorSpec>> = {
     format: "toml",
     key: "mcp_servers",
     source: "https://learn.chatgpt.com/docs/extend/mcp",
-    read: "2026-10-14",
+    read: "2026-10-17",
   },
-  // opencode.ai/docs/mcp-servers and opencode.ai/docs/config, read 2026-10-14:
+  // opencode.ai/docs/mcp-servers and opencode.ai/docs/config, read 2026-10-17:
   // {env:NAME} in environment; command is one array.
   opencode: {
     flag: "--opencode",
@@ -68,10 +68,10 @@ export const EDITORS: Readonly<Record<EditorId, EditorSpec>> = {
     format: "json",
     key: "mcp",
     source: "https://opencode.ai/docs/mcp-servers",
-    read: "2026-10-14",
+    read: "2026-10-17",
   },
   // code.visualstudio.com/docs/copilot/reference/mcp-configuration, read
-  // 2026-10-14: no ${env:NAME} in mcp.json (plan 11e deviation 7), so no env
+  // 2026-10-17: no ${env:NAME} in mcp.json (plan 11e deviation 7), so no env
   // line; the server reads the variable from the environment of VS Code.
   vscode: {
     flag: "--vscode",
@@ -79,7 +79,7 @@ export const EDITORS: Readonly<Record<EditorId, EditorSpec>> = {
     format: "json",
     key: "servers",
     source: "https://code.visualstudio.com/docs/copilot/reference/mcp-configuration",
-    read: "2026-10-14",
+    read: "2026-10-17",
   },
 };
 

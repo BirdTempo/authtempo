@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { ROOT_HELP } from "../src/help/authtempo.js";
 import { HELP } from "../src/help/index.js";
-import { pageUrl } from "../src/help/types.js";
+import { type HelpText, pageUrl, renderHelp } from "../src/help/types.js";
 import { VERSION_JSON_KEYS } from "../src/json.js";
 import { COMMANDS } from "../src/main.js";
 import { NAME_ONLY_FLAGS, SECRETISH_FLAG } from "../src/secrets.js";
@@ -22,6 +22,30 @@ describe("the common rules (spec 19)", () => {
   it("has the six commands, and one help text for each", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
     expect(HELP).toEqual([ROOT_HELP, ...Object.values(COMMANDS).map((c) => c.help)]);
+  });
+
+  it("prints a Notes block after the exit codes for a help with notes, and none without", () => {
+    const base: HelpText = {
+      command: "x",
+      page: "x",
+      purpose: "A test help.",
+      usage: ["authtempo x"],
+      examples: [{ line: "authtempo x", says: "Run x." }],
+      flags: [{ flag: "--json", says: "Print JSON." }],
+      exits: [{ code: 0, says: "Done." }],
+    };
+    const plain = renderHelp(base);
+    expect(plain).not.toContain("Notes:");
+    const noted = renderHelp({ ...base, notes: ["A first note.", "A second note."] });
+    const at = noted.indexOf("Notes:");
+    expect(at).toBeGreaterThan(noted.indexOf("Exit codes:"));
+    expect(noted.slice(at - 1, at + 3)).toEqual([
+      "",
+      "Notes:",
+      "  A first note.",
+      "  A second note.",
+    ]);
+    expect(noted.at(-1)).toBe(plain.at(-1));
   });
 
   it("prints the version of the CLI and the schema version of its core", () => {

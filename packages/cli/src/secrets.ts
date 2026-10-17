@@ -12,7 +12,7 @@ export const SECRETISH_FLAG = /secret|password|token|key|url|postgres|dsn/;
 export const NAME_ONLY_FLAGS: ReadonlySet<string> = new Set(["password-column"]);
 
 /** The name of an environment variable: a person who types a URL or a token here gets a usage error. */
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** The longest variable name that a message prints (review of plan 11c, m12). A secret is longer. */
 const MAX_SHOWN_NAME = 40;

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -8,6 +9,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
@@ -41,7 +43,7 @@ export interface Io {
   /** Makes the folders on the way, and refuses a file that exists. */
   writeNew(path: string, text: string): void;
   writePrivate(path: string, text: string): void;
-  /** The one write over a file that exists; only authtempo mcp calls it. Mode 0644. */
+  /** The one write over a file that exists; only authtempo mcp calls it. Mode 0644, or the old mode when it is narrower. */
   replaceFile(path: string, text: string): void;
   fetch(url: string, init: RequestInit): Promise<Response>;
   run(
@@ -70,15 +72,21 @@ export function writePrivate(path: string, text: string): void {
 }
 
 /**
- * Replaces a file that exists, with mode 0644: an editor config is shared by
- * the people and the tools of the project, so it must stay readable. The pattern of writePrivate: the text
- * goes to a new file in the same directory and is renamed over the target,
- * so a reader never sees half a file.
+ * Replaces a file that exists. An editor config is shared by the people and
+ * the tools of the project, so it must stay readable: mode 0644. A file that
+ * its owner made narrower, such as a 0600 .mcp.json with a token of another
+ * server, keeps its own mode (plan 11e ruling 5, amended). The pattern of
+ * writePrivate: the text goes to a new file in the same directory and is
+ * renamed over the target, so a reader never sees half a file.
  */
 export function replaceFile(path: string, text: string): void {
+  const old = statSync(path).mode & 0o777;
+  const mode = (old & ~0o644) === 0 ? old : 0o644;
   const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
   try {
-    writeFileSync(tmp, text, { mode: 0o644, flag: "wx" });
+    writeFileSync(tmp, text, { mode, flag: "wx" });
+    // The umask can take bits from the mode of a new file, so the mode is set again.
+    chmodSync(tmp, mode);
     renameSync(tmp, path);
   } catch (e) {
     rmSync(tmp, { force: true });

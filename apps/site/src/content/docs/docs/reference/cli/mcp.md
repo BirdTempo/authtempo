@@ -47,11 +47,15 @@ authtempo mcp --manual --remote
 | Exit code | What it means |
 | --- | --- |
 | 0 | The command wrote the entry, found the same entry, or printed it. |
-| 2 | A usage error, a file that does not parse, another authtempo entry, or a server that is not built. The test hook AUTHTEMPO_MCP_BIN names another server file. |
+| 2 | A usage error, or a stop that writes nothing. The command stops on another authtempo entry, a file that does not parse, or a file with comments. It also stops on a path outside the project folder, a missing folder, or a server that is not built. The command also stops when the file or its server map is not a JSON object. |
+
+## Notes
+
+AUTHTEMPO_MCP_BIN names another server file. It is for the tests of this repo.
 
 ## The targets
 
-Each shape comes from the docs of the editor, read on 2026-10-14. The command writes in the project folder only, never in your home folder.
+Each shape comes from the docs of the editor, read on 2026-10-17. The command writes in the project folder only, never in your home folder.
 
 | Target | File | Key |
 | --- | --- | --- |
@@ -66,19 +70,25 @@ The entry starts the local server with `--root` and the absolute path of the pro
 
 ## A file that exists
 
-The command adds one server, `authtempo`, and keeps every other key in its place.
+The command adds one server, `authtempo`, and keeps every other key in its place. A stop writes nothing and exits 2. With `--json`, a stop prints the document with `action: "stopped"`, the file, and the entry to add by hand.
 
 | Case | What the command does |
 | --- | --- |
 | No file | Writes the new file. |
 | A file with no server map | Adds the map at the end of the file. |
-| The same `authtempo` entry | Writes nothing, and says `already set`. Exit 0. |
-| Another `authtempo` entry | Prints both entries, writes nothing, and stops. Exit 2. |
 | No `authtempo` entry | Adds `authtempo` at the end of the server map. |
-| A JSON file with comments | Prints the entry to add by hand, and stops. A rewrite drops the comments. Exit 2. |
-| A file that does not parse | Writes nothing, and stops. Exit 2. |
-| A Codex file with a `[mcp_servers.authtempo` line | Writes nothing, and stops. Exit 2. |
-| A Codex file with no such line | Adds the table at the end. The old text stays as it is. |
+| The same `authtempo` entry | Writes nothing, and says `already set`. Exit 0. |
+| Another `authtempo` entry | Prints both entries, and stops. |
+| A JSON file with comments, or an `opencode.jsonc` | Prints the entry to add by hand, and stops. A rewrite drops the comments. |
+| A file that does not parse | Stops. Fix the file, or add the entry by hand. |
+| A file that is not a JSON object | Stops. |
+| A server map that is not a JSON object | Stops. |
+| A Codex file with the same `[mcp_servers.authtempo]` table at its end | Writes nothing, and says `already set`. Exit 0. |
+| A Codex file with another `authtempo` server | Stops. A table header, a key under `[mcp_servers]`, or a dotted key counts. |
+| A Codex file with no `authtempo` server | Adds the table at the end. The old text stays as it is. |
+| A file or a folder that resolves outside the project folder | Stops. |
+| A project folder that does not exist | Stops. |
+| A local server that is not built | Stops. The `--remote` entry needs no build. |
 
 ## Next
 

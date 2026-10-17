@@ -1,11 +1,15 @@
 import {
+  chmodSync,
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -109,6 +113,18 @@ function expected(id: EditorId, root: string, name = "DATABASE_URL"): unknown {
     case "vscode":
       return { type: "stdio", command, args: [...head, "--root", VS_FOLDER], cwd: VS_FOLDER };
   }
+}
+
+/** A Codex file that defines the authtempo server in another form: exit 2, and no byte changes. */
+function codexStops(text: string): void {
+  const dir = fresh();
+  mkdirSync(join(dir, ".codex"));
+  writeFileSync(join(dir, FILES.codex.file), text);
+  const before = snapshot(dir);
+  const r = mcp(dir, ["--codex"]);
+  expect(r.status, r.stderr).toBe(2);
+  expect(r.stderr).toContain("already defines the authtempo server");
+  expect(snapshot(dir)).toEqual(before);
 }
 
 describe("authtempo mcp (plan 11e Task 2)", () => {
@@ -331,6 +347,11 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("build @authtempo/mcp first: pnpm --filter @authtempo/mcp build");
     expect(readdirSync(dir)).toEqual([]);
+    // The help names the hook in its Notes block, not as a setting (plan 11e ruling 14).
+    const help = runBin(["mcp", "--help"]).stdout;
+    expect(help).toContain(
+      "Notes:\n  AUTHTEMPO_MCP_BIN names another server file. It is for the tests of this repo.\n",
+    );
   });
 
   it("prints one JSON document with --json", () => {
@@ -345,6 +366,119 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
       action: "written",
       entry: expected("cursor", dir),
     });
+  });
+
+  it("stops on a key authtempo under [mcp_servers]", () => {
+    codexStops('[mcp_servers]\nauthtempo = { command = "x" }\n');
+  });
+
+  it("stops on a quoted table header", () => {
+    codexStops('[mcp_servers."authtempo"]\ncommand = "x"\n');
+  });
+
+  it("stops on a table header with spaces", () => {
+    codexStops('[ mcp_servers.authtempo ]\ncommand = "x"\n');
+  });
+
+  it("answers unchanged on a second --codex run", () => {
+    for (const dir of [fresh(), project("codex-others")]) {
+      expect(mcp(dir, ["--codex"]).status).toBe(0);
+      const before = snapshot(dir);
+      const r = mcp(dir, ["--codex", "--json"]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).toContain("already set");
+      expect((JSON.parse(r.stdout) as { action: string }).action).toBe("unchanged");
+      expect(snapshot(dir)).toEqual(before);
+    }
+  });
+
+  it("keeps the mode of a file that its owner made narrower", () => {
+    const dir = project("claude-code-others");
+    const path = join(dir, ".mcp.json");
+    chmodSync(path, 0o600);
+    const r = mcp(dir, ["--claude-code"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(parsed(dir, "claude-code").mcpServers?.authtempo).toEqual(expected("claude-code", dir));
+    // A file with a wider mode becomes 0644.
+    const wide = project("cursor-others");
+    const widePath = join(wide, ".cursor/mcp.json");
+    chmodSync(widePath, 0o666);
+    expect(mcp(wide, ["--cursor"]).status).toBe(0);
+    expect(statSync(widePath).mode & 0o777).toBe(0o644);
+  });
+
+  it("stops on a folder that resolves outside the project", () => {
+    const dir = fresh();
+    const outside = fresh();
+    symlinkSync(outside, join(dir, ".cursor"));
+    const r = mcp(dir, ["--cursor"]);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("resolves outside the project folder");
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("writes no value of the variable that --url-env names", () => {
+    const env = { APP_DB: "postgres://u:app-secret-5@h/db" };
+    const runs = [...IDS.map((id) => [`--${id}`]), ["--manual"], ["--cursor", "--json", "-n"]];
+    for (const args of runs) {
+      const dir = fresh();
+      const r = mcp(dir, [...args, "--url-env", "APP_DB"], env);
+      expect(r.status, `${args.join(" ")}: ${r.stderr}`).toBe(0);
+      const bytes = [...snapshot(dir).values(), r.stdout, r.stderr].join("\n");
+      expect(bytes, args.join(" ")).toContain("APP_DB");
+      expect(bytes, args.join(" ")).not.toContain("app-secret-5");
+    }
+  });
+
+  it("refuses --url-env with --remote", () => {
+    const dir = fresh();
+    const r = mcp(dir, ["--cursor", "--remote", "--url-env", "APP_DB"]);
+    expect(r.status).toBe(2);
+    expect(linesOf(r.stderr)[0]).toBe(
+      "--url-env has no use with --remote: the remote server reads no database",
+    );
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it("writes the whole remote entry of each editor", () => {
+    const want: Record<string, unknown> = {
+      "claude-code": { type: "http", url: REMOTE },
+      cursor: { url: REMOTE },
+      opencode: { type: "remote", url: REMOTE, enabled: true },
+      vscode: { type: "http", url: REMOTE },
+    };
+    for (const id of JSON_IDS) {
+      const dir = fresh();
+      expect(mcp(dir, [`--${id}`, "--remote"]).status, id).toBe(0);
+      expect(parsed(dir, id), id).toEqual({ [FILES[id].key]: { authtempo: want[id] } });
+    }
+  });
+
+  it("prints the two remote mcp add lines with --manual --remote", () => {
+    const r = mcp(fresh(), ["--manual", "--remote"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(linesOf(r.stdout)).toContain(`claude mcp add --transport http authtempo ${REMOTE}`);
+    expect(linesOf(r.stdout)).toContain(`codex mcp add authtempo --url ${REMOTE}`);
+  });
+
+  it("prints one document and one stopped line on a stop with --json", () => {
+    for (const id of JSON_IDS) {
+      const dir = project(`${id}-other-authtempo`);
+      const r = mcp(dir, [`--${id}`, "--json"]);
+      expect(r.status, id).toBe(2);
+      expect(linesOf(r.stdout), id).toHaveLength(1);
+      expect(JSON.parse(r.stdout), id).toEqual({
+        editor: id,
+        file: join(dir, FILES[id].file),
+        action: "stopped",
+        entry: expected(id, dir),
+      });
+      expect(
+        linesOf(r.stderr).filter((l) => l.startsWith("stopped: ")),
+        id,
+      ).toHaveLength(1);
+    }
   });
 
   it("gives the published entry after a release", () => {

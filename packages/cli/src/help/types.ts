@@ -24,6 +24,8 @@ export interface HelpText {
   exits: readonly { code: 0 | 1 | 2; says: string }[];
   /** The root help only: the command table. */
   commands?: readonly { name: string; says: string }[];
+  /** Lines that are no flag and no exit code, such as a variable for tests (plan 11e ruling 14). */
+  notes?: readonly string[];
 }
 
 /** The two flags of every command. */
@@ -50,6 +52,7 @@ export function renderHelp(h: HelpText): string[] {
   for (const f of h.flags) out.push(`  ${f.flag.padEnd(width)}  ${f.says}`);
   out.push("", "Exit codes:");
   for (const x of h.exits) out.push(`  ${x.code}  ${x.says}`);
+  if (h.notes && h.notes.length > 0) out.push("", "Notes:", ...h.notes.map((n) => `  ${n}`));
   out.push("", `Docs: ${pageUrl(h)}`);
   return out;
 }
@@ -71,5 +74,6 @@ export function helpProse(h: HelpText): string[] {
     ...h.examples.map((e) => e.says),
     ...h.flags.map((f) => f.says),
     ...h.exits.map((x) => x.says),
+    ...(h.notes ?? []),
   ];
 }

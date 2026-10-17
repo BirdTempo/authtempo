@@ -1,3 +1,4 @@
+import { REMOTE_MCP_URL } from "../editors.js";
 import { COMMON_FLAGS, type HelpText } from "./types.js";
 
 export const MCP_HELP: HelpText = {
@@ -24,7 +25,7 @@ export const MCP_HELP: HelpText = {
   flags: [
     {
       flag: "--claude-code",
-      says: "Write .mcp.json. Claude Code asks for approval before it uses a project server from .mcp.json (code.claude.com/docs/en/mcp, read 2026-10-14).",
+      says: "Write .mcp.json. Claude Code asks for approval before it uses a project server from .mcp.json (code.claude.com/docs/en/mcp, read 2026-10-17).",
     },
     { flag: "--cursor", says: "Write .cursor/mcp.json." },
     {
@@ -46,7 +47,8 @@ export const MCP_HELP: HelpText = {
     },
     {
       flag: "--remote",
-      says: "Use the remote server at https://mcp.authtempo.com/mcp. It serves the docs tools only and is not live before publication.",
+      // One source for the URL: editors.ts. The page holds the literal.
+      says: `Use the remote server at ${REMOTE_MCP_URL}. It serves the docs tools only and is not live before publication.`,
     },
     {
       flag: "--url-env <NAME>",
@@ -59,7 +61,8 @@ export const MCP_HELP: HelpText = {
     { code: 0, says: "The command wrote the entry, found the same entry, or printed it." },
     {
       code: 2,
-      says: "A usage error, a file that does not parse, another authtempo entry, or a server that is not built. The test hook AUTHTEMPO_MCP_BIN names another server file.",
+      says: "A usage error, or a stop that writes nothing. The command stops on another authtempo entry, a file that does not parse, or a file with comments. It also stops on a path outside the project folder, a missing folder, or a server that is not built. The command also stops when the file or its server map is not a JSON object.",
     },
   ],
+  notes: ["AUTHTEMPO_MCP_BIN names another server file. It is for the tests of this repo."],
 };
