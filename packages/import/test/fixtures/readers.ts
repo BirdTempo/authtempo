@@ -3,9 +3,9 @@
 // Each export keeps the comment on its source and the read date.
 
 // Shapes: Clerk migration tool samples/clerk.csv and the Backend API spec 2026-05-12, read 2026-10-11.
-// Unverified, checked by owner runbook item 3: the unit of created_at (both
-// milliseconds and seconds are here), the password_hasher values of a real
-// export, and the banned field.
+// Unverified, checked by owner runbook item 3: the unit of created_at, the
+// password_hasher values of a real export, and the banned field. Both
+// milliseconds and seconds are here.
 export const CLERK_CSV = `id,first_name,last_name,username,primary_email_address,primary_phone_number,verified_email_addresses,unverified_email_addresses,verified_phone_numbers,unverified_phone_numbers,totp_secret,password_digest,password_hasher
 user_2a,Kim,Lee,,kim@example.com,,kim@example.com,,,,,$2b$10$U4C0ZY8OG8y41F9LusfKyu3HRMBL0rCZcKBVsXhgr.n8Ou6FPhzO2,bcrypt
 user_2b,Max,,,max@example.com,,,max@example.com,,,,abc,md5
@@ -71,9 +71,9 @@ export const CLERK_ORGS = JSON.stringify([
 ]);
 
 // Shapes: Auth0 user profile structure and the support article on the hash export, read 2026-10-11.
-// Unverified, checked by owner runbook item 4: the hash algorithm ($2b$10$ in
-// every sample, never in the official docs), the hash file's field list, and
-// whether user_id carries _id or alt_id.
+// Unverified, checked by owner runbook item 4: the hash algorithm, the hash
+// file's field list, and whether user_id carries _id or alt_id. Every sample
+// has $2b$10$, and the official docs never name it.
 export const AUTH0_USERS = [
   {
     user_id: "auth0|o7p6",
@@ -140,9 +140,9 @@ export const AUTH0_ORGS = JSON.stringify([
 ]);
 
 // Fields: firebase-tools src/accountExporter.ts, read 2026-10-11. The user is the firebase/scrypt README vector.
-// Unverified, checked by owner runbook item 5: the JSON type of createdAt (a
-// digit string and a number are both here) and the { "users": [...] } wrapper
-// (a bare array is tested too).
+// Unverified, checked by owner runbook item 5: the JSON type of createdAt and
+// the { "users": [...] } wrapper. A digit string and a number are both here,
+// and a bare array is tested too.
 export const FIREBASE_LIST = [
   {
     localId: "fbuid1",
@@ -221,9 +221,9 @@ export const AUTHJS_TABLES = JSON.stringify({
 
 // Fields: the ListUsers API reference, read 2026-10-11.
 // Unverified, checked by owner runbook item 6: that Cognito exports no
-// password hash (the reference shows none, so every password user gets the
-// marker), and the shape of the identities attribute (an unreadable one is
-// dropped and listed: user "fed-bad").
+// password hash, and the shape of the identities attribute. The reference
+// shows no hash, so every password user gets the marker. An unreadable
+// identities attribute is dropped and listed: user "fed-bad".
 export const COGNITO_USERS = JSON.stringify({
   Users: [
     {

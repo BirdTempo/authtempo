@@ -1,6 +1,14 @@
 import { csvRecords } from "../csv.js";
 import type { ImportOrganization, ImportUser, SkipReason, Source } from "../types.js";
-import { asArray, asRecord, LINKEDIN_LEGACY, noSourceIdUser, parseMillis, str } from "./common.js";
+import {
+  asArray,
+  asRecord,
+  LINKEDIN_LEGACY,
+  noSourceIdUser,
+  parseJson,
+  parseMillis,
+  str,
+} from "./common.js";
 
 /**
  * Clerk: two files, joined on the user id. The dashboard CSV (Settings,
@@ -62,7 +70,7 @@ function clerkTime(v: unknown): Date | null {
 
 /** The top-level JSON array of one input; any other value is an error, never an empty list. */
 function jsonArray(text: string, input: "users" | "organizations"): unknown[] {
-  const v = JSON.parse(text) as unknown;
+  const v = parseJson(text, `Clerk ${input}`);
   if (!Array.isArray(v))
     throw new Error(
       `authtempo import: the Clerk ${input} input is not a JSON array (save the data array of every page)`,

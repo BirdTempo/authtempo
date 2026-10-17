@@ -1,6 +1,6 @@
 import { firescryptParamsValid, SCRYPT_MAX_N_TIMES_R } from "@authtempo/legacy-hashes";
 import type { ImportUser, Source } from "../types.js";
-import { asArray, asRecord, noSourceIdUser, parseMillis, str } from "./common.js";
+import { asArray, asRecord, noSourceIdUser, parseJson, parseMillis, str } from "./common.js";
 
 /**
  * Firebase Auth: `firebase auth:export users.json --format=json`, and the
@@ -46,7 +46,7 @@ export function firebaseSource(input: FirebaseExport): Source {
     name: "firebase",
     roles: {},
     async *records() {
-      const parsed = JSON.parse(input.users) as unknown;
+      const parsed = parseJson(input.users, "firebase users");
       // The export is `{ "users": [...] }`; a bare array is accepted too.
       const wrapped = asRecord(parsed).users;
       if (!Array.isArray(parsed) && !Array.isArray(wrapped))

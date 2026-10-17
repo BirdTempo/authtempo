@@ -23,6 +23,130 @@ export function parseMillis(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * The offset of the first character that is not JSON, or -1 if the text
+ * parses. It runs only after JSON.parse throws, to place the fault.
+ */
+export function jsonFaultOffset(text: string): number {
+  const n = text.length;
+  let i = 0;
+  const ws = () => {
+    while (i < n && " \t\n\r".includes(text.charAt(i))) i++;
+  };
+  const word = (w: string): boolean => {
+    let k = 0;
+    while (k < w.length && text.charAt(i + k) === w.charAt(k)) k++;
+    i += k;
+    return k === w.length;
+  };
+  const string = (): boolean => {
+    i++;
+    while (i < n) {
+      const c = text.charAt(i);
+      if (c === '"') {
+        i++;
+        return true;
+      }
+      if (text.charCodeAt(i) < 0x20) return false;
+      if (c !== "\\") {
+        i++;
+        continue;
+      }
+      const e = text.charAt(i + 1);
+      i++;
+      if (e === "u") {
+        i++;
+        for (let k = 0; k < 4; k++, i++) if (!/[0-9a-fA-F]/.test(text.charAt(i))) return false;
+      } else if (e !== "" && '"\\/bfnrt'.includes(e)) i++;
+      else return false;
+    }
+    return false;
+  };
+  const digit = () => /[0-9]/.test(text.charAt(i));
+  const digits = (): boolean => {
+    if (!digit()) return false;
+    while (digit()) i++;
+    return true;
+  };
+  const number = (): boolean => {
+    if (text.charAt(i) === "-") i++;
+    if (text.charAt(i) === "0") i++;
+    else if (!digits()) return false;
+    if (text.charAt(i) === ".") {
+      i++;
+      if (!digits()) return false;
+    }
+    if (text.charAt(i) === "e" || text.charAt(i) === "E") {
+      i++;
+      if (text.charAt(i) === "+" || text.charAt(i) === "-") i++;
+      if (!digits()) return false;
+    }
+    return true;
+  };
+  const value = (): boolean => {
+    ws();
+    const c = text.charAt(i);
+    if (c === "{" || c === "[") {
+      const close = c === "{" ? "}" : "]";
+      i++;
+      ws();
+      if (text.charAt(i) === close) {
+        i++;
+        return true;
+      }
+      for (;;) {
+        if (c === "{") {
+          ws();
+          if (text.charAt(i) !== '"' || !string()) return false;
+          ws();
+          if (text.charAt(i) !== ":") return false;
+          i++;
+        }
+        if (!value()) return false;
+        ws();
+        if (text.charAt(i) === ",") i++;
+        else if (text.charAt(i) === close) {
+          i++;
+          return true;
+        } else return false;
+      }
+    }
+    if (c === '"') return string();
+    if (c === "t") return word("true");
+    if (c === "f") return word("false");
+    if (c === "n") return word("null");
+    return number();
+  };
+  try {
+    if (!value()) return i;
+  } catch {
+    // A nest deep enough to end the stack: no place to name.
+    return -1;
+  }
+  ws();
+  return i < n ? i : -1;
+}
+
+/**
+ * JSON.parse with a fixed fault text. V8's own text quotes up to 20
+ * characters of the input. An export path can name a secret file, such as
+ * .env, so the text names the input key and the place only (plan 11e).
+ */
+export function parseJson(text: string, input: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    const at = jsonFaultOffset(text);
+    if (at === -1) throw new Error(`authtempo import: the ${input} input is not JSON`);
+    const before = text.slice(0, at).split("\n");
+    const line = before.length;
+    const column = (before.at(-1) ?? "").length + 1;
+    throw new Error(
+      `authtempo import: the ${input} input is not JSON (the fault is at line ${line}, column ${column})`,
+    );
+  }
+}
+
 /** One JSON value per non-empty line. */
 export function ndjson(text: string): unknown[] {
   return text

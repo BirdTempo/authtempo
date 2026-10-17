@@ -1,6 +1,6 @@
 import { LEGACY_VERIFY_HASH } from "@authtempo/core";
 import type { ImportUser, SkipReason, Source } from "../types.js";
-import { asArray, asRecord, parseTime, str } from "./common.js";
+import { asArray, asRecord, parseJson, parseTime, str } from "./common.js";
 
 /**
  * Amazon Cognito: `aws cognito-idp list-users --user-pool-id <id> --output
@@ -82,7 +82,7 @@ export function cognitoSource(input: CognitoExport): Source {
       // A misshaped top level is an error, never an empty list. `aws
       // cognito-idp list-users --query Users` prints a bare array, and that
       // run would import nothing and exit 0.
-      const top = JSON.parse(input.users) as unknown;
+      const top = parseJson(input.users, "Cognito users");
       const users = asRecord(top).Users;
       if (Array.isArray(top) || !Array.isArray(users))
         throw new Error(

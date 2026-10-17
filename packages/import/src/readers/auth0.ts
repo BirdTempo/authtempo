@@ -7,6 +7,7 @@ import {
   LINKEDIN_LEGACY,
   ndjson,
   noSourceIdUser,
+  parseJson,
   parseTime,
   str,
 } from "./common.js";
@@ -69,7 +70,7 @@ export function auth0Source(input: Auth0Export): Source {
       // a saved `{ "organizations": [...] }` page would lose every organization.
       let organizations: unknown[] = [];
       if (input.organizations) {
-        const v = JSON.parse(input.organizations) as unknown;
+        const v = parseJson(input.organizations, "Auth0 organizations");
         if (!Array.isArray(v))
           throw new Error(
             "authtempo import: the Auth0 organizations input is not a JSON array (save the organizations array, not the page object)",

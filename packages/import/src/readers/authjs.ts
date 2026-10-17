@@ -5,6 +5,7 @@ import {
   asRecord,
   LINKEDIN_LEGACY,
   noSourceIdUser,
+  parseJson,
   parseTime,
   str,
   toBase64Url,
@@ -55,7 +56,7 @@ export function authjsSource(input: AuthjsExport): Source {
     async *records() {
       // A misshaped top level is an error, never an empty list: the run would
       // import nothing and exit 0.
-      const top = JSON.parse(input.tables) as unknown;
+      const top = parseJson(input.tables, "Auth.js tables");
       if (typeof top !== "object" || top === null || Array.isArray(top))
         throw new Error("authtempo import: the Auth.js tables input is not a JSON object");
       const t = top as Record<string, unknown>;
