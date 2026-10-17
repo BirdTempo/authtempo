@@ -36,7 +36,7 @@ authtempo keys rotate https://api.example.com --yes
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--yes` | Rotates with no question. A run with no terminal needs it. |
 | `--no-input` | Asks no question. Without `--yes`, the command stops. |
-| `--json` | Prints `{ kid }`. |
+| `--json` | Prints `{ kid, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
 | Exit code | What it means |

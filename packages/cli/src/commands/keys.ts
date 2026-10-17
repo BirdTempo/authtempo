@@ -125,7 +125,7 @@ export const keysCommand: Command = {
       ctx.err(
         `warning: the key set does not list ${kid} yet; a cache can hold the old set for 300 seconds`,
       );
-    if (values.json === true) printJson(ctx, { kid } satisfies KeysJson);
+    if (values.json === true) printJson(ctx, { kid, exit: 0, stopped: null } satisfies KeysJson);
     else ctx.out(`kid: ${kid}`);
     return 0;
   },

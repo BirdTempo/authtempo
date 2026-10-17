@@ -276,6 +276,8 @@ export const mcpCommand: Command = {
           file: null,
           action: "printed",
           entry: all,
+          exit: 0,
+          stopped: null,
         } satisfies McpJson);
       return 0;
     }
@@ -292,7 +294,14 @@ export const mcpCommand: Command = {
       for (const line of entryText(id, rendered).split("\n")) if (line !== "") say(line);
       ctx.err(`stopped: ${why}`);
       if (json)
-        printJson(ctx, { editor: id, file, action: "stopped", entry: rendered } satisfies McpJson);
+        printJson(ctx, {
+          editor: id,
+          file,
+          action: "stopped",
+          entry: rendered,
+          exit: 2,
+          stopped: why,
+        } satisfies McpJson);
       return 2;
     };
     // OpenCode also reads opencode.jsonc, and a rewrite drops its comments (plan 11e deviation 8).
@@ -334,7 +343,15 @@ export const mcpCommand: Command = {
         ctx.err("Claude Code asks for approval before it uses a project server from .mcp.json.");
       action = "written";
     }
-    if (json) printJson(ctx, { editor: id, file, action, entry: rendered } satisfies McpJson);
+    if (json)
+      printJson(ctx, {
+        editor: id,
+        file,
+        action,
+        entry: rendered,
+        exit: 0,
+        stopped: null,
+      } satisfies McpJson);
     return 0;
   },
 };

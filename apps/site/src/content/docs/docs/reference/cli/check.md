@@ -38,7 +38,7 @@ authtempo check https://api.example.com --target postgres --url-env DATABASE_URL
 | `--target postgres`, `--target d1` | Reads the schema version of the database. Without it, the schema check skips. |
 | `--url-env <NAME>`, `--url-file <path>` | Postgres: the connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--database <name>`, `--config <path>`, `--remote` | D1: the database of the wrangler config, as for `authtempo migrate`. |
-| `--json` | Prints `{ base, checks, warnings, summary }`. |
+| `--json` | Prints `{ base, checks, warnings, summary, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
 | Exit code | What it means |

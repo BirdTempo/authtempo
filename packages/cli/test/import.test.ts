@@ -100,7 +100,7 @@ describe("authtempo import (spec 19, the flag map)", () => {
     expect(io.stdout).toHaveLength(1);
     const doc = JSON.parse(io.stdout[0] ?? "") as Record<string, unknown>;
     expect(Object.keys(doc).sort()).toEqual(Object.keys(IMPORT_JSON_KEYS).sort());
-    expect(doc).toEqual({ report: null, stopped: null, bundle: "b.json" });
+    expect(doc).toEqual({ report: null, stopped: null, bundle: "b.json", exit: 0 });
     expect(io.stderr).toContain(
       "wrote b.json; run the D1 Worker script (packages/import/worker/README.md)",
     );

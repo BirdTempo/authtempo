@@ -67,7 +67,7 @@ authtempo import clerk --csv users.csv --users users.json --formats none --targe
 | `--repair` | Writes the missing rows of each `partial` record. |
 | `--report <file>` | Also writes the report as JSON, with mode 0600 and no hash. |
 | `-n`, `--dry-run` | Prints the report of a real run, and writes nothing. |
-| `--json` | Prints `{ report, stopped, bundle }`. The report is the JSON of `--report`. |
+| `--json` | Prints `{ report, stopped, bundle, exit }`. The report is the JSON of `--report`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
 ## The old flags

@@ -41,7 +41,7 @@ authtempo mcp --manual --remote
 | `--remote` | Uses the remote server at `https://mcp.authtempo.com/mcp`. It serves the docs tools only and is not live before publication. |
 | `--url-env <NAME>` | The variable that holds the connection string. The default is `DATABASE_URL`. The file holds the name, never the value. |
 | `-n`, `--dry-run` | Prints the file and its new text, and writes nothing. |
-| `--json` | Prints `{ editor, file, action, entry }`. |
+| `--json` | Prints `{ editor, file, action, entry, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
 | Exit code | What it means |
@@ -70,7 +70,7 @@ The entry starts the local server with `--root` and the absolute path of the pro
 
 ## A file that exists
 
-The command adds one server, `authtempo`, and keeps every other key in its place. A stop writes nothing and exits 2. With `--json`, a stop prints the document with `action: "stopped"`, the file, and the entry to add by hand.
+The command adds one server, `authtempo`, and keeps every other key in its place. A stop writes nothing and exits 2. With `--json`, a stop prints the document with `action: "stopped"`, `exit: 2`, the file, and the entry to add by hand.
 
 | Case | What the command does |
 | --- | --- |

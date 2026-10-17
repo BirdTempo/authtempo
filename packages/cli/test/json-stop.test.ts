@@ -1,0 +1,334 @@
+import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  CHECK_JSON_KEYS,
+  IMPORT_JSON_KEYS,
+  INIT_JSON_KEYS,
+  KEYS_JSON_KEYS,
+  MCP_JSON_KEYS,
+  MIGRATE_JSON_KEYS,
+  STOP_JSON,
+  VERSION_JSON_KEYS,
+} from "../src/json.js";
+import { assertFreshBuild, type BinRun, linesOf, PKG, runBin } from "./support/bin.js";
+import { freshDatabase } from "./support/pg.js";
+
+// The stop document of --json (plan 11e deviation 19). A usage error or a
+// stop with --json prints one document on stdout. It holds the empty shape
+// of the command, exit 2, and the reason in stopped. A success holds exit 0
+// or 1 and stopped null. One describe block for each command.
+
+beforeAll(() => {
+  assertFreshBuild();
+});
+
+const made: string[] = [];
+afterAll(() => {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+});
+/** A new empty folder, with each link of its path resolved. */
+const fresh = () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "authtempo-json-stop-")));
+  made.push(dir);
+  return dir;
+};
+
+/** The reason that stderr gives: the text of the stopped: line, or the first line of a usage error. */
+function stderrReason(r: BinRun, usage: boolean): string {
+  const lines = linesOf(r.stderr);
+  if (usage) return lines[0] ?? "";
+  const stopped = lines.filter((l) => l.startsWith("stopped: "));
+  expect(stopped, r.stderr).toHaveLength(1);
+  return (stopped[0] ?? "").slice("stopped: ".length);
+}
+
+/**
+ * The common assertions of a stop. The run exits 2 and prints one JSON line
+ * with the keys of the shape. The line holds exit 2 and the reason of stderr.
+ */
+function stopDoc(r: BinRun, keys: object, usage: boolean): Record<string, unknown> {
+  expect(r.status, r.stderr).toBe(2);
+  const lines = linesOf(r.stdout);
+  expect(lines, r.stderr).toHaveLength(1);
+  const doc = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
+  expect(Object.keys(doc).sort()).toEqual(Object.keys(keys).sort());
+  expect(doc.exit).toBe(2);
+  const reason = stderrReason(r, usage);
+  expect(reason.length).toBeGreaterThan(0);
+  expect(doc.stopped).toBe(reason);
+  return doc;
+}
+
+/** The success document: one JSON line, the exit code of the process, and stopped null. */
+function doneDoc(r: BinRun, keys: object, exit: number): Record<string, unknown> {
+  expect(r.status, r.stderr).toBe(exit);
+  const lines = linesOf(r.stdout);
+  expect(lines).toHaveLength(1);
+  const doc = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
+  expect(Object.keys(doc).sort()).toEqual(Object.keys(keys).sort());
+  expect(doc.exit).toBe(exit);
+  expect(doc.stopped).toBeNull();
+  return doc;
+}
+
+/** A port with no server: a server takes a free port, and closes it. */
+async function closedPort(): Promise<number> {
+  const s = createServer();
+  await new Promise<void>((done) => s.listen(0, "127.0.0.1", done));
+  const { port } = s.address() as AddressInfo;
+  await new Promise<void>((done) => s.close(() => done()));
+  return port;
+}
+
+/**
+ * runBin with no block of the event loop, so a server of this process can
+ * answer the command. The environment rule of runBin applies.
+ */
+function runBinAsync(args: readonly string[]): Promise<BinRun> {
+  return new Promise((done, fail) => {
+    const child = spawn(process.execPath, [join(PKG, "dist/bin/authtempo.js"), ...args], {
+      cwd: PKG,
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        TMPDIR: process.env.TMPDIR ?? "/tmp",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdin.end();
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (d: string) => {
+      stdout += d;
+    });
+    child.stderr.setEncoding("utf8").on("data", (d: string) => {
+      stderr += d;
+    });
+    child.on("error", fail);
+    child.on("close", (status) => done({ status: status ?? -1, stdout, stderr }));
+  });
+}
+
+describe("init --json", () => {
+  it("prints the stop document on a taken folder and on a usage error, and exit 0 on a success", () => {
+    const taken = fresh();
+    writeFileSync(join(taken, "package.json"), "{}\n");
+    const stop = runBin(["init", taken, "--stack", "node", "--json"]);
+    expect(stop.stderr).toContain(`exists: ${join(taken, "package.json")}`);
+    expect(stopDoc(stop, INIT_JSON_KEYS, false)).toMatchObject({
+      stack: "",
+      dir: "",
+      files: [],
+      next: [],
+    });
+    expect(readFileSync(join(taken, "package.json"), "utf8")).toBe("{}\n");
+
+    const usage = runBin(["init", join(fresh(), "app"), "--stack", "nowhere", "--json"]);
+    expect(stopDoc(usage, INIT_JSON_KEYS, true).files).toEqual([]);
+
+    const dir = join(fresh(), "app");
+    const done = doneDoc(runBin(["init", dir, "--stack", "node", "--json"]), INIT_JSON_KEYS, 0);
+    expect(done.dir).toBe(dir);
+    expect((done.files as string[]).length).toBeGreaterThan(0);
+  });
+});
+
+describe("migrate --json", () => {
+  it("prints the stop document on a database at a newer version and on a usage error", async () => {
+    const db = await freshDatabase();
+    try {
+      await applyPostgresMigrations(db.sql);
+      await db.sql.unsafe(
+        readFileSync(join(PKG, "test/fixtures/postgres/0011_future.sql"), "utf8"),
+      );
+      const stop = runBin(
+        ["migrate", "--target", "postgres", "--url-env", "TEST_DB_URL", "--json"],
+        { env: { TEST_DB_URL: db.url } },
+      );
+      const doc = stopDoc(stop, MIGRATE_JSON_KEYS, false);
+      expect(doc.stopped).toBe(
+        "the database is at version 11; this CLI knows version 10; use a newer CLI",
+      );
+      expect(doc).toMatchObject({ target: "", tables: "", applied: [], pending: [] });
+      // The stop document holds no part of the connection string.
+      expect(stop.stdout).not.toContain(db.url);
+    } finally {
+      await db.drop();
+    }
+    const usage = runBin(["migrate", "--target", "nowhere", "--json"]);
+    expect(stopDoc(usage, MIGRATE_JSON_KEYS, true).applied).toEqual([]);
+  });
+});
+
+describe("import --json", () => {
+  it("prints its own document on an export that does not parse, and the stop document on a usage error", () => {
+    const dir = fresh();
+    writeFileSync(join(dir, "users.csv"), "id,primary_email_address\n");
+    writeFileSync(join(dir, "users.json"), "{");
+    const args = ["--csv", join(dir, "users.csv"), "--users", join(dir, "users.json")];
+    const stop = runBin([
+      "import",
+      "clerk",
+      ...args,
+      "--formats",
+      "none",
+      "--target",
+      "memory",
+      "--dry-run",
+      "--json",
+    ]);
+    expect(stopDoc(stop, IMPORT_JSON_KEYS, false)).toMatchObject({ report: null, bundle: null });
+
+    const usage = runBin(["import", "clerk", ...args, "--target", "nowhere", "--json"]);
+    expect(stopDoc(usage, IMPORT_JSON_KEYS, true).report).toBeNull();
+  });
+
+  it("prints one document, not two, on the stop of a parsed run", () => {
+    // The files parse as flags, so the run reaches runParsed, which returns 2 with its own document.
+    const dir = fresh();
+    writeFileSync(join(dir, "users.csv"), "id,primary_email_address\n");
+    writeFileSync(join(dir, "users.json"), "{");
+    const r = runBin([
+      "import",
+      "clerk",
+      "--csv",
+      join(dir, "users.csv"),
+      "--users",
+      join(dir, "users.json"),
+      "--formats",
+      "none",
+      "--target",
+      "memory",
+      "--dry-run",
+      "--json",
+    ]);
+    expect(r.status).toBe(2);
+    expect(r.stdout.split("\n").filter((l) => l !== "")).toHaveLength(1);
+    // The stopped: line comes from runParsed, not from main: no usage text follows it.
+    expect(r.stderr).not.toContain("Usage:");
+  });
+});
+
+describe("check --json", () => {
+  let server: Server | undefined;
+  afterAll(async () => {
+    const s = server;
+    if (s) await new Promise<void>((done) => s.close(() => done()));
+  });
+
+  it("prints the stop document when the host gives no answer and on a usage error", async () => {
+    const port = await closedPort();
+    const stop = runBin(["check", `http://127.0.0.1:${port}`, "--json"]);
+    const doc = stopDoc(stop, CHECK_JSON_KEYS, false);
+    expect(doc).toMatchObject({
+      base: "",
+      checks: [],
+      warnings: [],
+      summary: { run: 0, pass: 0, fail: 0, skip: 0 },
+    });
+    expect(doc.stopped).toContain("no answer");
+
+    const usage = runBin(["check", "https://api.example.com", "--timeout", "x", "--json"]);
+    expect(stopDoc(usage, CHECK_JSON_KEYS, true).checks).toEqual([]);
+  });
+
+  it("gives exit 1 and stopped null for a run with a failed check", async () => {
+    // A host that answers 404 to each request: the mount check fails.
+    const s = createServer((_req, res) => {
+      res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+    });
+    server = s;
+    await new Promise<void>((done) => s.listen(0, "127.0.0.1", done));
+    const { port } = s.address() as AddressInfo;
+    const r = await runBinAsync(["check", `http://127.0.0.1:${port}`, "--json"]);
+    const doc = doneDoc(r, CHECK_JSON_KEYS, 1);
+    expect((doc.summary as { fail: number }).fail).toBeGreaterThan(0);
+  });
+});
+
+describe("keys rotate --json", () => {
+  it("prints the stop document with no secret in the environment and when the host gives no answer", async () => {
+    const usage = runBin(["keys", "rotate", "https://api.example.com", "--yes", "--json"]);
+    expect(stopDoc(usage, KEYS_JSON_KEYS, true).kid).toBe("");
+    expect(usage.stderr).toContain("set AUTHTEMPO_OPERATOR_SECRET");
+
+    const port = await closedPort();
+    const secret = "s".repeat(40);
+    const stop = runBin(["keys", "rotate", `http://127.0.0.1:${port}`, "--yes", "--json"], {
+      env: { AUTHTEMPO_OPERATOR_SECRET: secret },
+    });
+    const doc = stopDoc(stop, KEYS_JSON_KEYS, false);
+    expect(doc.kid).toBe("");
+    expect(doc.stopped).toContain("no answer");
+    expect(stop.stdout).not.toContain(secret);
+  });
+});
+
+describe("mcp --json", () => {
+  it("prints its own document on another authtempo entry, and the stop document on two editor flags", () => {
+    const dir = fresh();
+    const other = { mcpServers: { authtempo: { command: "other", args: [] } } };
+    writeFileSync(join(dir, ".mcp.json"), `${JSON.stringify(other, null, 2)}\n`);
+    const before = readFileSync(join(dir, ".mcp.json"), "utf8");
+    const bin = join(fresh(), "authtempo-mcp.js");
+    writeFileSync(bin, "");
+    const env = { AUTHTEMPO_MCP_BIN: bin };
+    const merge = runBin(["mcp", dir, "--claude-code", "--json"], { env });
+    // A merge stop keeps the file and the entry to add by hand (plan 11e ruling 11).
+    const doc = stopDoc(merge, MCP_JSON_KEYS, false);
+    expect(doc).toMatchObject({ editor: "claude-code", action: "stopped" });
+    expect(doc.file).toBe(join(dir, ".mcp.json"));
+    expect(doc.entry).not.toBeNull();
+    expect(readFileSync(join(dir, ".mcp.json"), "utf8")).toBe(before);
+
+    const usage = runBin(["mcp", dir, "--claude-code", "--cursor", "--json"], { env });
+    expect(stopDoc(usage, MCP_JSON_KEYS, true)).toMatchObject({
+      editor: "",
+      file: null,
+      action: "stopped",
+      entry: null,
+    });
+  });
+
+  it("prints the stop document on a thrown stop: a server that is not built", () => {
+    const dir = fresh();
+    const r = runBin(["mcp", dir, "--cursor", "--json"], {
+      env: { AUTHTEMPO_MCP_BIN: join(dir, "missing.js") },
+    });
+    const doc = stopDoc(r, MCP_JSON_KEYS, false);
+    expect(doc).toMatchObject({ editor: "", file: null, entry: null });
+    expect(doc.stopped).toContain("build @authtempo/mcp first");
+  });
+});
+
+describe("STOP_JSON", () => {
+  it("holds STOP_JSON to each key list", () => {
+    const lists: Record<keyof typeof STOP_JSON, object> = {
+      init: INIT_JSON_KEYS,
+      migrate: MIGRATE_JSON_KEYS,
+      import: IMPORT_JSON_KEYS,
+      check: CHECK_JSON_KEYS,
+      keys: KEYS_JSON_KEYS,
+      mcp: MCP_JSON_KEYS,
+    };
+    expect(Object.keys(STOP_JSON).sort()).toEqual(
+      ["check", "import", "init", "keys", "mcp", "migrate"].sort(),
+    );
+    for (const [name, list] of Object.entries(lists)) {
+      const shape = STOP_JSON[name as keyof typeof STOP_JSON];
+      expect(Object.keys(shape).sort(), name).toEqual(Object.keys(list).sort());
+      expect(Object.keys(list), name).toEqual(expect.arrayContaining(["exit", "stopped"]));
+      expect(shape.exit, name).toBe(2);
+      expect(shape.stopped, name).toBeNull();
+    }
+    // --version has no stop, so its shape has neither key.
+    expect(Object.keys(VERSION_JSON_KEYS)).not.toContain("exit");
+    expect(Object.keys(VERSION_JSON_KEYS)).not.toContain("stopped");
+  });
+});

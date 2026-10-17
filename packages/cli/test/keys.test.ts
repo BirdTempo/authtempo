@@ -56,7 +56,7 @@ describe("authtempo keys rotate (spec 19)", () => {
     expect(io.stdout).toHaveLength(1);
     const doc = JSON.parse(io.stdout[0] ?? "") as Record<string, unknown>;
     expect(Object.keys(doc).sort()).toEqual(Object.keys(KEYS_JSON_KEYS).sort());
-    expect(doc).toEqual({ kid: "K2" });
+    expect(doc).toEqual({ kid: "K2", exit: 0, stopped: null });
   });
 
   it("makes no request with no terminal and no --yes, or with --no-input", async () => {

@@ -365,6 +365,8 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
       file: join(dir, ".cursor/mcp.json"),
       action: "written",
       entry: expected("cursor", dir),
+      exit: 0,
+      stopped: null,
     });
   });
 
@@ -468,16 +470,20 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
       const r = mcp(dir, [`--${id}`, "--json"]);
       expect(r.status, id).toBe(2);
       expect(linesOf(r.stdout), id).toHaveLength(1);
+      // The stop text of mcp.ts for another entry, written out here (plan 11e ruling 11).
+      const why = `${join(dir, FILES[id].file)} holds another authtempo entry: edit it by hand, or remove it and run again`;
       expect(JSON.parse(r.stdout), id).toEqual({
         editor: id,
         file: join(dir, FILES[id].file),
         action: "stopped",
         entry: expected(id, dir),
+        exit: 2,
+        stopped: why,
       });
       expect(
         linesOf(r.stderr).filter((l) => l.startsWith("stopped: ")),
         id,
-      ).toHaveLength(1);
+      ).toEqual([`stopped: ${why}`]);
     }
   });
 

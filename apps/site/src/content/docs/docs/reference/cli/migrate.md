@@ -42,7 +42,7 @@ authtempo migrate --target d1 --database my-app --remote
 | `--remote` | D1: the database on Cloudflare. The default is the local database of `wrangler dev`. |
 | `--before-1.7` | D1 with `--tables compat`: the files for tables from before Better Auth 1.7. |
 | `-n`, `--dry-run` | Lists the migrations, and applies nothing. |
-| `--json` | Prints `{ target, tables, dryRun, before, after, pending, applied, copied }`. |
+| `--json` | Prints `{ target, tables, dryRun, before, after, pending, applied, copied, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
 | Exit code | What it means |

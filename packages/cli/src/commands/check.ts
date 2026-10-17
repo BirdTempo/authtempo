@@ -109,13 +109,14 @@ export const checkCommand: Command = {
       ...(readSchema ? { readSchema } : {}),
     });
     for (const w of report.warnings) ctx.err(`warning: ${w}`);
-    if (v.json === true) printJson(ctx, report satisfies CheckJson);
+    const exit = report.summary.fail > 0 ? 1 : 0;
+    if (v.json === true) printJson(ctx, { ...report, exit, stopped: null } satisfies CheckJson);
     else {
       for (const c of report.checks)
         ctx.out(`${c.status.padEnd(4)}  ${c.id}${c.code ? ` ${c.code}` : ""}: ${c.detail}`);
       const s = report.summary;
       ctx.out(`checks: ${s.run} run, ${s.pass} pass, ${s.fail} fail, ${s.skip} skip`);
     }
-    return report.summary.fail > 0 ? 1 : 0;
+    return exit;
   },
 };

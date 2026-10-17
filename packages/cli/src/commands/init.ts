@@ -79,7 +79,14 @@ export const initCommand: Command = {
     // On stderr, so stdout and the --json document stay the same at publication.
     if (UNPUBLISHED) ctx.err(UNPUBLISHED_NOTE);
     if (json)
-      printJson(ctx, { stack, dir, files: files.map((f) => f.path), next } satisfies InitJson);
+      printJson(ctx, {
+        stack,
+        dir,
+        files: files.map((f) => f.path),
+        next,
+        exit: 0,
+        stopped: null,
+      } satisfies InitJson);
     return 0;
   },
 };

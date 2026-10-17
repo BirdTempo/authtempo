@@ -127,6 +127,8 @@ describe("authtempo migrate --target postgres (spec 19)", () => {
       pending: CORE,
       applied: CORE,
       copied: [],
+      exit: 0,
+      stopped: null,
     });
     expect(linesOf(r.stderr)).toContain("version before: none; version after: 10");
   });

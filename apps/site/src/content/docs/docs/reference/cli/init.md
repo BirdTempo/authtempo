@@ -32,7 +32,7 @@ authtempo init my-app --stack workers-d1
 | --- | --- |
 | `[dir]` | The folder of the app. The default is the current folder. |
 | `--stack <stack>` | `workers-d1`, `workers-postgres`, `node`, `bun`, or `mcp-server`. It has no default. |
-| `--json` | Prints `{ stack, dir, files, next }`. |
+| `--json` | Prints `{ stack, dir, files, next, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
 | Exit code | What it means |

@@ -272,6 +272,8 @@ export const migrateCommand: Command = {
         pending: run.pending,
         applied: run.applied,
         copied: run.copied,
+        exit: 0,
+        stopped: null,
       } satisfies MigrateJson);
     return 0;
   },

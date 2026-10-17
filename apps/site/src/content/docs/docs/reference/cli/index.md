@@ -72,7 +72,8 @@ A stop prints its `stopped:` line on stderr.
 - stderr holds the usage errors, the warnings, the `stopped:` line, and each progress line that names what the command reads or connects to.
 - A result line on stdout can name a file or the base URL, such as `wrote <path>` of `init`.
 - `--json` prints one JSON document on stdout, and nothing else there. A script reads that document, not the human lines.
-- On a usage error or a stop, `--json` prints no document; the `stopped:` line on stderr is the result. Plan 11e adds `stopped` to each shape.
+- On a usage error or a stop, `--json` prints one document with `exit: 2` and the reason in `stopped`. Each other key holds its empty value, such as `""`, `[]`, or `null`.
+- Each document of `--json` holds `exit`, the exit code of the run, and `stopped`, which is null when the run did not stop. `--version --json` has neither key.
 - The human lines can change in a later version. A JSON document only gains keys, and a removal comes after a deprecation.
 - The CLI writes no color and no terminal control.
 

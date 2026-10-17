@@ -10,7 +10,7 @@ import { UsageError } from "./errors.js";
 import { ROOT_HELP } from "./help/authtempo.js";
 import { type HelpText, renderHelp, shortHelp } from "./help/types.js";
 import type { Io } from "./io.js";
-import type { VersionJson } from "./json.js";
+import { STOP_JSON, type VersionJson } from "./json.js";
 import { type Ctx, guarded, printJson } from "./output.js";
 import { CLI_VERSION, SCHEMA_VERSION } from "./version.js";
 
@@ -44,10 +44,21 @@ function unknown(ctx: Ctx, name: string): 2 {
 }
 
 /**
+ * The stop document of `--json` (plan 11e deviation 19): the empty shape of
+ * the command, exit 2, and the reason. A name with no shape prints nothing.
+ */
+function printStop(ctx: Ctx, name: string, reason: string): void {
+  if (!Object.hasOwn(STOP_JSON, name)) return;
+  const shape = STOP_JSON[name as keyof typeof STOP_JSON];
+  printJson(ctx, { ...shape, exit: 2, stopped: reason });
+}
+
+/**
  * The program (spec 19): `--version`, `help`, the command table, and the
  * exit codes. A usage error prints the short help of its command and exits
- * 2; any other error prints one `stopped:` line and exits 2. Every line
- * passes the scrub of `guarded`.
+ * 2; any other error prints one `stopped:` line and exits 2. With
+ * `--json`, both also print the stop document on stdout. Every line passes
+ * the scrub of `guarded`.
  */
 export async function main(argv: readonly string[], io: Io): Promise<number> {
   const ctx = guarded(io);
@@ -83,18 +94,26 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
     for (const line of renderHelp(command.help)) ctx.out(line);
     return 0;
   }
+  // A command that returns 2 with no throw prints its own document; only a throw gets this one.
+  const json = rest.includes("--json");
+  const name = first;
   try {
     return await command.run([...rest], ctx);
   } catch (e) {
+    let reason: string;
     if (e instanceof UsageError) {
       ctx.err(e.message);
       // Every usage line of the command: migrate has one line for each target.
       const [first, ...tail] = shortHelp(command.help);
       const usage = command.help.usage.map((u) => `Usage: ${u}`);
       for (const line of [...(usage.length > 0 ? usage : [first ?? ""]), ...tail]) ctx.err(line);
-      return 2;
+      // The reason is the first stderr line: the message of the usage error.
+      reason = e.message.split("\n")[0] ?? "";
+    } else {
+      reason = e instanceof Error ? e.message : String(e);
+      ctx.err(`stopped: ${reason}`);
     }
-    ctx.err(`stopped: ${e instanceof Error ? e.message : String(e)}`);
+    if (json) printStop(ctx, name, reason);
     return 2;
   }
 }

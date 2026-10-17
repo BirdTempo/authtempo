@@ -195,6 +195,7 @@ export const importCommand: Command = {
         report: outcome.report,
         stopped: outcome.stopped,
         bundle: outcome.bundle,
+        exit: outcome.code,
       } satisfies ImportJson);
     return outcome.code;
   },
