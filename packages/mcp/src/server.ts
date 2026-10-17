@@ -5,7 +5,7 @@ import { VERSION as CORE_VERSION, SCHEMA_VERSION } from "@authtempo/core";
 import { docsTools } from "./docs-tools.js";
 import type { AgentIndex } from "./index-format.js";
 import { docsResources } from "./resources.js";
-import type { ServerSpec, SkillSet, Surface } from "./spec.js";
+import type { ServerSpec, SkillSet, Surface, ToolImpl } from "./spec.js";
 
 /**
  * The version of this package. A Worker cannot read package.json, so the
@@ -33,6 +33,16 @@ export const INSTRUCTIONS: Record<Surface, string> = {
   remote: FIRST,
 };
 
+/** The default variable of the connection string (spec 21, the no-secret rule). */
+export const DEFAULT_URL_ENV = "DATABASE_URL";
+
+/** The facts of the server that a local tool reads (LocalContext of local-tools.ts). */
+export interface LocalFacts {
+  root: string;
+  env: Readonly<Record<string, string | undefined>>;
+  urlEnv: string;
+}
+
 export function createServer(opts: {
   surface: Surface;
   index: AgentIndex;
@@ -42,6 +52,11 @@ export function createServer(opts: {
   urlEnv?: string;
   /** The CLI version, which only the local binary can read; absent, the version tool answers null. */
   cli?: string;
+  /**
+   * The local tools, such as localTools of local-tools.ts. The binary passes
+   * them. This file imports no CLI module, so the remote Worker can load it.
+   */
+  local?: (facts: LocalFacts) => readonly ToolImpl[];
 }): ServerSpec {
   if (opts.urlEnv !== undefined && !URL_ENV_NAME.test(opts.urlEnv))
     throw new Error("--url-env takes the name of a variable, not a value");
@@ -52,6 +67,13 @@ export function createServer(opts: {
     schemaVersion: SCHEMA_VERSION,
     protocol: PROTOCOL_REVISION,
   }).filter((t) => t.row.surfaces.includes(opts.surface));
+  // The local tools run on the local surface only, and each one needs the root.
+  if (opts.surface === "local" && opts.local) {
+    if (opts.root === undefined || opts.env === undefined)
+      throw new Error("the local tools need the server root and the environment");
+    const facts = { root: opts.root, env: opts.env, urlEnv: opts.urlEnv ?? DEFAULT_URL_ENV };
+    tools.push(...opts.local(facts).filter((t) => t.row.surfaces.includes("local")));
+  }
   return {
     name: "authtempo",
     version: MCP_VERSION,

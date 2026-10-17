@@ -48,6 +48,24 @@ const docsVersion = z
   .default("latest")
   .describe('The docs version. One of header.versions of the index; "latest" by default.');
 
+/**
+ * The stacks of `authtempo init`. The Worker cannot import the CLI, so the
+ * list is a copy of STACKS of @authtempo/cli/program; scaffold.test.ts holds the two equal.
+ */
+export const SCAFFOLD_STACKS = [
+  "workers-d1",
+  "workers-postgres",
+  "node",
+  "bun",
+  "mcp-server",
+] as const;
+
+/**
+ * The keys of `authtempo init --json` (INIT_JSON_KEYS of the CLI): the
+ * document of a run, with its exit code and the reason of a stop.
+ */
+const INIT_KEYS = ["stack", "dir", "files", "next", "exit", "stopped"] as const;
+
 export const TOOLS: readonly ToolRow[] = [
   {
     name: "docs.search",
@@ -102,5 +120,36 @@ export const TOOLS: readonly ToolRow[] = [
     annotations: READ_ONLY,
     input: z.strictObject({}),
     outputKeys: ["core", "cli", "mcp", "schemaVersion", "protocol", "docsIndex"],
+  },
+  {
+    name: "scaffold",
+    title: "Write a new authtempo app",
+    description:
+      "Writes the files of a new app into dir, inside the server root, and overwrites no file. It runs authtempo init with the stack, and answers each file it wrote and the next steps. It runs no install.",
+    surfaces: ["local"],
+    wraps: {
+      command: "init",
+      positional: ["dir"],
+      flags: { stack: "stack" },
+      fixed: ["--json"],
+      toolOnly: [],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    input: z.strictObject({
+      // A dash at the start would read as a flag of the CLI, such as --help.
+      dir: z
+        .string()
+        .min(1)
+        .max(200)
+        .regex(/^[^-]/)
+        .describe("A relative path of a new folder inside the server root, such as apps/web."),
+      stack: z.enum(SCAFFOLD_STACKS).describe("The stack of the app."),
+    }),
+    outputKeys: INIT_KEYS,
   },
 ];

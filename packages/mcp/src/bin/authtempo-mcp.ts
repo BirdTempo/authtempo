@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { CLI_VERSION } from "@authtempo/cli/program";
 import { readIndexFile, readSkills } from "../index-reader.js";
+import { localTools } from "../local-tools.js";
 import { serveStdio } from "../protocol.js";
 import { createServer, URL_ENV_NAME } from "../server.js";
 
@@ -108,6 +109,7 @@ async function main(): Promise<void> {
       root,
       env: process.env,
       cli: CLI_VERSION,
+      local: localTools,
       ...(urlEnv === undefined ? {} : { urlEnv }),
     }),
     {

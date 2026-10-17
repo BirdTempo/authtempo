@@ -1,0 +1,124 @@
+import { existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { confinedIo, insideRoot, RootError } from "../src/cli-io.js";
+import { localTools } from "../src/local-tools.js";
+import { createServer } from "../src/server.js";
+import { connect } from "./support/client.js";
+import { type FixtureRoot, fixtureRoot } from "./support/fixture-root.js";
+import { assertFreshIndex, siteIndex } from "./support/index.js";
+
+// The root rule (plan 11e): every path of a tool resolves, with each link
+// resolved by realpath, inside the server root. A path outside it is a tool
+// fault, and nothing is written.
+
+let fx: FixtureRoot | undefined;
+beforeAll(() => {
+  assertFreshIndex();
+});
+afterEach(() => {
+  fx?.remove();
+  fx = undefined;
+});
+
+const env = { PATH: process.env.PATH ?? "" };
+
+describe("the root rule", () => {
+  it("refuses a folder outside the root, by .. and by a symbolic link", async () => {
+    const f = fixtureRoot();
+    fx = f;
+    const s = await connect(
+      createServer({
+        surface: "local",
+        index: siteIndex(),
+        skills: [],
+        root: f.root,
+        env,
+        local: localTools,
+      }),
+    );
+    try {
+      for (const dir of ["../x", "link/app", join(f.outside, "app"), "../root2/app"]) {
+        const r = await s.call("scaffold", { dir, stack: "node" });
+        expect(r.isError, dir).toBe(true);
+        expect(r.texts.join("\n"), dir).toContain("outside the server root");
+      }
+    } finally {
+      await s.close();
+    }
+    // No new file anywhere: the base holds the root and the outside folder, and the root its link.
+    expect(f.around()).toEqual({ base: ["outside", "root"], outside: [] });
+    expect(readdirSync(f.root)).toEqual(["link"]);
+  });
+
+  it("answers the path inside the root, at a / boundary", () => {
+    const f = fixtureRoot();
+    fx = f;
+    expect(insideRoot(f.root, ".")).toBe(f.root);
+    expect(insideRoot(f.root, "a/b/c")).toBe(join(f.root, "a/b/c"));
+    // base/root2 starts with the text of base/root, but it is not under it.
+    expect(() => insideRoot(f.root, "../root2")).toThrow(RootError);
+    expect(() => insideRoot(f.root, "link")).toThrow("outside the server root");
+  });
+
+  it("refuses a write through a link that a step makes during the run", () => {
+    const f = fixtureRoot();
+    fx = f;
+    const { io } = confinedIo({ root: f.root, env, allowFetch: false });
+    // The check before the run passes: the folder does not exist yet.
+    expect(insideRoot(f.root, "made/app")).toBe(join(f.root, "made/app"));
+    // A step of the run puts a link to the outside folder at that name.
+    symlinkSync(f.outside, join(f.root, "made"));
+    expect(() => io.writeNew(join(f.root, "made/app/package.json"), "{}\n")).toThrow(
+      "outside the server root",
+    );
+    expect(() => io.writePrivate(join(f.root, "made/app/.env"), "x\n")).toThrow(
+      "outside the server root",
+    );
+    expect(f.around().outside).toEqual([]);
+  });
+
+  it("writes a new file inside the root, and refuses a file that exists", () => {
+    const f = fixtureRoot();
+    fx = f;
+    const { io } = confinedIo({ root: f.root, env, allowFetch: false });
+    io.writeNew(join(f.root, "a/b.txt"), "one\n");
+    expect(io.readFile("a/b.txt")).toBe("one\n");
+    expect(() => io.writeNew(join(f.root, "a/b.txt"), "two\n")).toThrow("exists");
+    expect(() => io.replaceFile(join(f.root, "a/b.txt"), "two\n")).toThrow(
+      "no tool rewrites a file",
+    );
+    expect(io.readFile("a/b.txt")).toBe("one\n");
+  });
+
+  it("reads, lists, and tests no path outside the root", () => {
+    const f = fixtureRoot();
+    fx = f;
+    mkdirSync(join(f.outside, "secret"));
+    const { io } = confinedIo({ root: f.root, env, allowFetch: false });
+    expect(() => io.readFile(join(f.outside, "x"))).toThrow(RootError);
+    expect(() => io.exists("link/secret")).toThrow(RootError);
+    expect(() => io.listDir("link")).toThrow(RootError);
+    expect(() => io.realpath("link")).toThrow(RootError);
+    expect(existsSync(join(f.outside, "secret"))).toBe(true);
+  });
+
+  it("runs no child process and makes no fetch", async () => {
+    const f = fixtureRoot();
+    fx = f;
+    const { io, lines } = confinedIo({ root: f.root, env, allowFetch: false });
+    await expect(io.run("node", ["--version"], { cwd: f.root })).rejects.toThrow(
+      "this tool runs no child process",
+    );
+    await expect(io.fetch("https://example.com/", {})).rejects.toThrow(
+      "this tool makes no network call",
+    );
+    expect(() => io.readStdin()).toThrow("no stdin in the MCP server");
+    expect(await io.confirm("Go on?")).toBe(false);
+    expect(io.stdinIsTTY).toBe(false);
+    expect(io.cwd).toBe(f.root);
+    io.out("a line");
+    io.err("a note");
+    expect(lines()).toEqual({ out: ["a line"], err: ["a note"] });
+  });
+});

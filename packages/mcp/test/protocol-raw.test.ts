@@ -71,6 +71,8 @@ const SCHEMA_FILE_VERSION = Math.max(
 
 /** The tool names of plan 11e Task 5, typed here: the test does not read the table it pins. */
 const DOCS_TOOLS = ["docs.search", "docs.read", "version"];
+/** The tools of the local binary: the docs tools and the local tools of plan 11e Task 7. */
+const LOCAL_TOOLS = [...DOCS_TOOLS, "scaffold"];
 
 const version = (path: string) =>
   (JSON.parse(readFileSync(join(REPO, path), "utf8")) as { version: string }).version;
@@ -150,7 +152,7 @@ describe("the stdio server on the wire", () => {
     expect(found.capabilities).toEqual(CAPABILITIES);
     expect(found.instructions).toBe(INSTRUCTIONS.local);
     const tools = result(run, 2).tools as { name: string }[];
-    expect(tools.map((t) => t.name).sort()).toEqual([...DOCS_TOOLS].sort());
+    expect(tools.map((t) => t.name).sort()).toEqual([...LOCAL_TOOLS].sort());
     for (const l of linesOf(run.stdout)) expect((JSON.parse(l) as Message).jsonrpc, l).toBe("2.0");
   });
 
@@ -163,12 +165,14 @@ describe("the stdio server on the wire", () => {
       annotations: Record<string, boolean>;
       inputSchema: Record<string, unknown>;
     }[];
-    expect(tools.map((t) => t.name).sort()).toEqual([...DOCS_TOOLS].sort());
+    expect(tools.map((t) => t.name).sort()).toEqual([...LOCAL_TOOLS].sort());
     for (const t of tools) {
+      // The docs tools read the index only; scaffold writes new files and overwrites none.
+      const docs = DOCS_TOOLS.includes(t.name);
       expect(t.annotations, t.name).toEqual({
-        readOnlyHint: true,
+        readOnlyHint: docs,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: docs,
         openWorldHint: false,
       });
       expect(t.inputSchema.additionalProperties, t.name).toBe(false);
