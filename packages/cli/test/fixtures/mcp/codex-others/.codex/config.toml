@@ -1,0 +1,4 @@
+# The project config of Codex.
+[mcp_servers.alpha]
+command = "alpha-server"
+args = ["--port", "4000"]

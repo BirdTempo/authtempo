@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "alpha": {
+      "type": "stdio",
+      "command": "alpha-server",
+      "args": ["--port", "4000"]
+    },
+    "zeta": {
+      "type": "stdio",
+      "command": "zeta-server",
+      "args": ["--port", "4000"]
+    }
+  },
+  "x-note": "kept by the merge"
+}

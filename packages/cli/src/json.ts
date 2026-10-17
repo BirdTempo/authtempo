@@ -76,3 +76,21 @@ export const CHECK_JSON_KEYS = {
   warnings: true,
   summary: true,
 } as const satisfies Record<keyof import("./checks.js").CheckReport, true>;
+
+/**
+ * `authtempo mcp --json`: the target, the file (null for --manual), what the
+ * run did, and the entry: an object, the TOML lines for Codex, or for
+ * --manual the entry of each editor by its id.
+ */
+export interface McpJson {
+  editor: string;
+  file: string | null;
+  action: "written" | "unchanged" | "printed" | "stopped";
+  entry: unknown;
+}
+export const MCP_JSON_KEYS = {
+  editor: true,
+  file: true,
+  action: true,
+  entry: true,
+} as const satisfies Record<keyof McpJson, true>;

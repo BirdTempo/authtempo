@@ -16,10 +16,10 @@ const helpFlags = (flags: readonly { flag: string }[]) =>
   flags.flatMap((f) => [...f.flag.matchAll(/--([a-z0-9.-]+)/g)].map((m) => m[1] ?? ""));
 
 /** The command table in the order of the root help. Each task of plan 11c adds its command. */
-const NAMES = ["init", "migrate", "import", "check", "keys"];
+const NAMES = ["init", "migrate", "import", "check", "keys", "mcp"];
 
 describe("the common rules (spec 19)", () => {
-  it("has the five commands, and one help text for each", () => {
+  it("has the six commands, and one help text for each", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
     expect(HELP).toEqual([ROOT_HELP, ...Object.values(COMMANDS).map((c) => c.help)]);
   });

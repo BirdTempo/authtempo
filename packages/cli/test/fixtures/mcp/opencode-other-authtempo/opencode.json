@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "authtempo": {
+      "type": "local",
+      "command": ["bunx", "@authtempo/mcp"],
+      "enabled": true
+    }
+  }
+}

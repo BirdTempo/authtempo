@@ -70,6 +70,10 @@ export function fakeIo(
     writePrivate(path, text) {
       files.set(path, text);
     },
+    replaceFile(path, text) {
+      if (!files.has(path)) throw new Error(`ENOENT: ${path}`);
+      files.set(path, text);
+    },
     async fetch(url, init) {
       requests.push({ url, method: init.method ?? "GET", headers: new Headers(init.headers) });
       if (!o.fetch) throw new TypeError("fetch failed");

@@ -13,6 +13,7 @@ export {
   type CheckStatus,
   runChecks,
 } from "./checks.js";
+export { EDITORS, type EditorId, type EditorSpec, REMOTE_MCP_URL } from "./editors.js";
 export { HELP } from "./help/index.js";
 export { type HelpFlag, type HelpText, helpProse, pageUrl, renderHelp } from "./help/types.js";
 export * from "./json.js";

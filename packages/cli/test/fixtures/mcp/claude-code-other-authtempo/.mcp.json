@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "authtempo": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["@authtempo/mcp"]
+    }
+  }
+}

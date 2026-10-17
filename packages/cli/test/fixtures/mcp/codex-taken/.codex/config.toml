@@ -1,0 +1,3 @@
+[mcp_servers.authtempo]
+command = "npx"
+args = ["-y", "@authtempo/mcp@0.0.1"]

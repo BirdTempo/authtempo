@@ -41,6 +41,8 @@ export interface Io {
   /** Makes the folders on the way, and refuses a file that exists. */
   writeNew(path: string, text: string): void;
   writePrivate(path: string, text: string): void;
+  /** The one write over a file that exists; only authtempo mcp calls it. Mode 0644. */
+  replaceFile(path: string, text: string): void;
   fetch(url: string, init: RequestInit): Promise<Response>;
   run(
     command: string,
@@ -60,6 +62,23 @@ export function writePrivate(path: string, text: string): void {
   const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
   try {
     writeFileSync(tmp, text, { mode: 0o600, flag: "wx" });
+    renameSync(tmp, path);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+/**
+ * Replaces a file that exists, with mode 0644: an editor config is shared by
+ * the people and the tools of the project, so it must stay readable. The pattern of writePrivate: the text
+ * goes to a new file in the same directory and is renamed over the target,
+ * so a reader never sees half a file.
+ */
+export function replaceFile(path: string, text: string): void {
+  const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmp, text, { mode: 0o644, flag: "wx" });
     renameSync(tmp, path);
   } catch (e) {
     rmSync(tmp, { force: true });
@@ -89,6 +108,7 @@ export function nodeIo(): Io {
       writeFileSync(path, text, { flag: "wx" });
     },
     writePrivate,
+    replaceFile,
     fetch: (url, init) => fetch(url, init),
     run: (command, args, options) =>
       new Promise((done, fail) => {

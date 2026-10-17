@@ -1,0 +1,265 @@
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+import { COMMON_OPTIONS, parseOrUsage } from "../args.js";
+import type { Command } from "../command.js";
+import {
+  EDITORS,
+  type EditorId,
+  type McpEntry,
+  mcpEntry,
+  REMOTE_MCP_URL,
+  renderEntry,
+} from "../editors.js";
+import { Stop, UsageError } from "../errors.js";
+import { MCP_HELP } from "../help/mcp.js";
+import type { McpJson } from "../json.js";
+import { parseJsonc } from "../jsonc.js";
+import { type Ctx, printJson, sayer } from "../output.js";
+import { UNPUBLISHED } from "../templates.js";
+import { CLI_VERSION } from "../version.js";
+
+const OPTIONS = {
+  ...COMMON_OPTIONS,
+  "claude-code": { type: "boolean" },
+  cursor: { type: "boolean" },
+  codex: { type: "boolean" },
+  opencode: { type: "boolean" },
+  vscode: { type: "boolean" },
+  manual: { type: "boolean" },
+  remote: { type: "boolean" },
+  "url-env": { type: "string" },
+  "dry-run": { type: "boolean", short: "n" },
+} as const;
+
+const TARGETS = ["claude-code", "cursor", "codex", "opencode", "vscode", "manual"] as const;
+const IDS = Object.keys(EDITORS) as EditorId[];
+
+/**
+ * The binary of @authtempo/mcp in the workspace: from dist/commands/ (and
+ * from src/commands/ in a test) three folders up is packages/.
+ */
+export const MCP_BIN_URL = new URL("../../../mcp/dist/bin/authtempo-mcp.js", import.meta.url);
+
+/** The name of an environment variable, as readSecret checks it (src/secrets.ts). */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** The server name in every editor file. */
+const NAME = "authtempo";
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Deep equality of two parsed JSON values; the key order of an object does not count. */
+function same(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => same(v, b[i]));
+  }
+  if (isObject(a) && isObject(b)) {
+    const ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length) return false;
+    return ka.every((k) => Object.hasOwn(b, k) && same(a[k], b[k]));
+  }
+  return a === b;
+}
+
+/** An argument as a POSIX shell reads it: a word with no special character stays as it is. */
+const shellWord = (s: string) =>
+  /^[A-Za-z0-9_./:@=+-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** The text of one entry as a person adds it by hand. */
+function entryText(id: EditorId, entry: unknown): string {
+  const spec = EDITORS[id];
+  return spec.format === "toml"
+    ? `[${spec.key}.${NAME}]\n${String(entry)}`
+    : `"${NAME}": ${JSON.stringify(entry, null, 2)}`;
+}
+
+/** The commands of the two editors that have their own `mcp add`. */
+function addCommands(entry: McpEntry, o: { remote: boolean; urlEnv: string | null }): string[] {
+  if (o.remote)
+    return [
+      `claude mcp add --transport http ${NAME} ${REMOTE_MCP_URL}`,
+      `codex mcp add ${NAME} --url ${REMOTE_MCP_URL}`,
+    ];
+  const args = o.urlEnv === null ? entry.args : [...entry.args, "--url-env", o.urlEnv];
+  const line = [entry.command, ...args].map(shellWord).join(" ");
+  return [`claude mcp add ${NAME} -- ${line}`, `codex mcp add ${NAME} -- ${line}`];
+}
+
+/** Stops when a path that exists resolves outside the project folder: the command writes there only. */
+function inside(ctx: Ctx, root: string, path: string): void {
+  for (const p of [dirname(path), path])
+    if (ctx.exists(p)) {
+      const real = ctx.realpath(p);
+      if (real !== root && !real.startsWith(`${root}${sep}`))
+        throw new Stop(`${path} resolves outside the project folder ${root}`);
+    }
+}
+
+/**
+ * The new text of a JSON file, or the reason to stop (plan 11e Task 2, the
+ * merge rule). Every other key keeps its place and its value; authtempo goes
+ * at the end of the server map.
+ */
+function mergeJson(
+  ctx: Ctx,
+  file: string,
+  text: string,
+  key: string,
+  entry: unknown,
+  stop: (why: string) => never,
+): string | null {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch (e) {
+    if (!(e instanceof SyntaxError)) throw e;
+    try {
+      parseJsonc(text);
+    } catch {
+      stop(`${file} does not parse as JSON: fix the file, or add the entry by hand`);
+    }
+    stop(`${file} holds comments, and a rewrite drops them: add the entry under "${key}" by hand`);
+  }
+  if (!isObject(doc)) stop(`${file} holds no JSON object: add the entry by hand`);
+  const map = doc[key];
+  if (map === undefined) {
+    doc[key] = { [NAME]: entry };
+  } else if (!isObject(map)) {
+    stop(`"${key}" in ${file} is not an object: add the entry by hand`);
+  } else if (Object.hasOwn(map, NAME)) {
+    if (same(map[NAME], entry)) return null;
+    ctx.err(`${file} has: ${JSON.stringify(map[NAME])}`);
+    ctx.err(`this command writes: ${JSON.stringify(entry)}`);
+    stop(`${file} holds another ${NAME} entry: edit it by hand, or remove it and run again`);
+  } else {
+    map[NAME] = entry;
+  }
+  return `${JSON.stringify(doc, null, 2)}\n`;
+}
+
+/**
+ * `authtempo mcp [dir] --<editor>` (plan 11e, owner decision 4): adds the
+ * authtempo MCP server to the project file of one editor, or prints every
+ * entry with --manual. It writes in the project folder only, reads no
+ * secret, and writes no value of the environment: each entry names the
+ * variable, and the editor expands it.
+ */
+export const mcpCommand: Command = {
+  help: MCP_HELP,
+  options: OPTIONS,
+  async run(argv, ctx) {
+    const { values, positionals } = parseOrUsage(
+      () => parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true }),
+      Object.keys(OPTIONS),
+    );
+    if (positionals.length > 1) throw new UsageError(`unexpected argument ${positionals[1]}`);
+    const chosen = TARGETS.filter((t) => values[t] === true);
+    const [target] = chosen;
+    if (target === undefined)
+      throw new UsageError(
+        "name one target: --claude-code, --cursor, --codex, --opencode, --vscode, or --manual",
+      );
+    if (chosen.length > 1)
+      throw new UsageError(`name one target, not ${chosen.map((t) => `--${t}`).join(" and ")}`);
+    const remote = values.remote === true;
+    const urlEnvFlag = values["url-env"];
+    if (urlEnvFlag !== undefined && !ENV_NAME.test(urlEnvFlag))
+      throw new UsageError("--url-env takes the name of a variable, not a value");
+    if (remote && urlEnvFlag !== undefined)
+      throw new UsageError(
+        "--url-env has no use with --remote: the remote server reads no database",
+      );
+    const urlEnv = urlEnvFlag ?? null;
+    const json = values.json === true;
+    const dryRun = values["dry-run"] === true;
+    const say = sayer(ctx, json);
+
+    const dir = resolve(ctx.cwd, positionals[0] ?? ".");
+    if (!ctx.exists(dir)) throw new Stop(`the folder ${dir} does not exist`);
+    const root = ctx.realpath(dir);
+    const hook = ctx.env.AUTHTEMPO_MCP_BIN;
+    const bin = hook ? resolve(ctx.cwd, hook) : fileURLToPath(MCP_BIN_URL);
+    // Only the workspace binary runs before publication; after it, npx fetches the release.
+    if (!remote && UNPUBLISHED && !ctx.exists(bin))
+      throw new Stop("build @authtempo/mcp first: pnpm --filter @authtempo/mcp build");
+    const entry = mcpEntry({ unpublished: UNPUBLISHED, version: CLI_VERSION, bin, root });
+    const opts = { remote, urlEnv };
+
+    if (target === "manual") {
+      const all = Object.fromEntries(IDS.map((id) => [id, renderEntry(id, entry, opts)]));
+      for (const id of IDS) {
+        const spec = EDITORS[id];
+        say(`${spec.flag.slice(2)}: ${spec.file}, under "${spec.key}"`);
+        for (const line of entryText(id, all[id]).split("\n")) if (line !== "") say(line);
+        say("");
+      }
+      for (const line of addCommands(entry, opts)) say(line);
+      if (json)
+        printJson(ctx, {
+          editor: "manual",
+          file: null,
+          action: "printed",
+          entry: all,
+        } satisfies McpJson);
+      return 0;
+    }
+
+    const id: EditorId = target;
+    const spec = EDITORS[id];
+    const rendered = renderEntry(id, entry, opts);
+    const file = join(root, spec.file);
+    if (id === "codex") ctx.err("A Codex project file applies only in a trusted project.");
+    const stop = (why: string): never => {
+      for (const line of entryText(id, rendered).split("\n")) if (line !== "") say(line);
+      if (json)
+        printJson(ctx, { editor: id, file, action: "stopped", entry: rendered } satisfies McpJson);
+      throw new Stop(why);
+    };
+    // OpenCode also reads opencode.jsonc, and a rewrite drops its comments (plan 11e deviation 8).
+    const jsonc = join(root, "opencode.jsonc");
+    if (id === "opencode" && ctx.exists(jsonc))
+      stop(`${jsonc} holds comments, and a rewrite drops them: add the entry under "mcp" by hand`);
+    inside(ctx, root, file);
+
+    const exists = ctx.exists(file);
+    let text: string | null;
+    if (!exists) {
+      text =
+        spec.format === "toml"
+          ? entryText(id, rendered)
+          : `${JSON.stringify({ [spec.key]: { [NAME]: rendered } }, null, 2)}\n`;
+    } else if (spec.format === "toml") {
+      const old = ctx.readFile(file);
+      if (/^[ \t]*\[mcp_servers\.authtempo/m.test(old))
+        stop(
+          `${file} has a [mcp_servers.authtempo] table: edit it by hand, or remove it and run again`,
+        );
+      text = `${old}\n${entryText(id, rendered)}`;
+    } else {
+      text = mergeJson(ctx, file, ctx.readFile(file), spec.key, rendered, stop);
+    }
+
+    let action: McpJson["action"];
+    if (text === null) {
+      ctx.err(`${NAME} is already set in ${file}`);
+      action = "unchanged";
+    } else if (dryRun) {
+      say(`would write ${file}:`);
+      for (const line of text.replace(/\n$/, "").split("\n")) say(line);
+      action = "printed";
+    } else {
+      // The one write over a file that exists goes through replaceFile (src/io.ts).
+      if (exists) ctx.replaceFile(file, text);
+      else ctx.writeNew(file, text);
+      ctx.err(`wrote ${file}`);
+      if (id === "claude-code")
+        ctx.err("Claude Code asks for approval before it uses a project server from .mcp.json.");
+      action = "written";
+    }
+    if (json) printJson(ctx, { editor: id, file, action, entry: rendered } satisfies McpJson);
+    return 0;
+  },
+};
