@@ -117,3 +117,63 @@ reads the key set and sends each bearer over plain HTTP. Core accepts an
 - `unauthorizedResponse`, `insufficientScopeResponse`, and `bearerChallenge`
   do the same with no verifier, for a server that checks the caller with
   `auth.caller` of core.
+
+## Protect an MCP server
+
+The entry `@authtempo/verify/mcp` wraps the handler of an app's own MCP
+route. The handler runs only for an OAuth access token of the route's
+resource that holds every scope of the route.
+
+```ts
+import { createVerifier } from "@authtempo/verify";
+import { McpScopeError, requireMcpAuth } from "@authtempo/verify/mcp";
+
+const verifier = createVerifier({
+  issuer: "https://api.example.com/auth",
+  resources: ["https://api.example.com/mcp"],
+  accept: ["oauth"],
+});
+
+export const mcp = requireMcpAuth(
+  verifier,
+  async (request, caller) => {
+    // A tool that needs more: throw, and the wrapper answers 403 for these scopes.
+    if (!caller.scopes.includes("mcp:write")) throw new McpScopeError(["mcp:tools", "mcp:write"]);
+    return Response.json({ user: caller.userId });
+  },
+  { resource: "https://api.example.com/mcp", scopes: ["mcp:tools"] },
+);
+```
+
+The source is one of two:
+
+- A `Verifier` of this package, for a server that is not the auth app. The
+  wrapper uses it when the source has `verifyRequest`.
+- Core's `auth`, for an MCP route in the same Worker or process as the auth
+  app. The wrapper calls `auth.caller`. This source fetches no key set, so no
+  Worker must fetch its own JWKS on its own host.
+
+The rules:
+
+- Construction throws for a `resource` that is not `https:`, or `http:` on
+  `127.0.0.1` or `localhost`. It also throws for a query, a fragment, or user
+  info in it.
+- Construction throws for a scope that the challenge refuses:
+  `offline_access`, a quote, a space, or an empty list.
+- No bearer gives 401 with the challenge of `resource` and
+  `challengeScopes`, or `scopes` when `challengeScopes` is not set. A session
+  cookie is no credential here.
+- A bearer that is not an OAuth access token gives the same 401 with
+  `error="invalid_token"`. A session, a session JWT, and an API token are not.
+- A token for another resource of the same issuer gives the 401 of
+  `error="invalid_token"`.
+- A caller without every entry of `scopes` gives 403 `insufficient_scope`.
+  The challenge names every scope of the route, not only the missing ones.
+- A source that fails gives 503 with no body, never 401. A failure is a
+  `Verifier` answer of `network` or `unexpected`, or a throw of `caller`.
+- A `McpScopeError` of the handler gives 403 for its scopes. Any other throw
+  passes through.
+- A caller that passes gets the handler's answer, unchanged.
+
+DPoP and token introspection come with row 12e, through the `Verifier`, with
+no new call.

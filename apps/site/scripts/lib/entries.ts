@@ -79,6 +79,15 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     page: "/docs/reference/verify/",
     headings: ["Exports"],
   },
+  // The MCP guard of plan 11e Task 11, on its own page.
+  {
+    label: "verify-mcp",
+    pkg: "@authtempo/verify",
+    entry: "./mcp",
+    source: "packages/verify/src/mcp.ts",
+    page: "/docs/reference/verify-mcp/",
+    headings: ["Exports"],
+  },
   {
     label: "react",
     pkg: "@authtempo/react",
