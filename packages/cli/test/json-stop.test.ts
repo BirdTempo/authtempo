@@ -16,7 +16,10 @@ import {
   STOP_JSON,
   VERSION_JSON_KEYS,
 } from "../src/json.js";
+import { COMMANDS } from "../src/main.js";
+import { guarded, printJson } from "../src/output.js";
 import { assertFreshBuild, type BinRun, linesOf, PKG, runBin } from "./support/bin.js";
+import { fakeIo } from "./support/fake-io.js";
 import { freshDatabase } from "./support/pg.js";
 
 // The stop document of --json (plan 11e deviation 19). A usage error or a
@@ -330,5 +333,29 @@ describe("STOP_JSON", () => {
     // --version has no stop, so its shape has neither key.
     expect(Object.keys(VERSION_JSON_KEYS)).not.toContain("exit");
     expect(Object.keys(VERSION_JSON_KEYS)).not.toContain("stopped");
+  });
+});
+
+describe("STOP_JSON and the commands", () => {
+  it("has a stop document for each command of COMMANDS", () => {
+    // A new command with no entry would print no document on a stop.
+    expect(Object.keys(STOP_JSON).sort()).toEqual(Object.keys(COMMANDS).sort());
+  });
+});
+
+describe("the scrub of a --json document", () => {
+  it("holds no part of a secret that has a quote or a backslash", () => {
+    const io = fakeIo();
+    const ctx = guarded(io);
+    const secret = 'pa"ss\\word-0123456789';
+    ctx.addSecret(secret);
+    // The stop document of main: the reason can hold any text of an error.
+    printJson(ctx, { ...STOP_JSON.keys, exit: 2, stopped: `the deployment said ${secret}` });
+    expect(io.stdout).toHaveLength(1);
+    const line = io.stdout[0] ?? "";
+    expect(line).not.toContain(secret);
+    expect(line).not.toContain(JSON.stringify(secret).slice(1, -1));
+    const doc = JSON.parse(line) as { stopped: string };
+    expect(doc.stopped).toBe("the deployment said ***");
   });
 });

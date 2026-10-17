@@ -39,9 +39,11 @@ for `--help` only. After the first release, install the CLI with
   and each progress line that names what the command reads or connects to
   go to stderr. A result line may name a file or the base URL, such as
   `wrote <path>` of `init`. `--json` prints one JSON document on stdout;
-  `src/json.ts` exports each shape. On a usage error or a stop, `--json`
-  prints no document; the `stopped:` line on stderr is the result. Plan 11e
-  adds `stopped` to each shape.
+  `src/json.ts` exports each shape. Each document holds `exit`, the exit
+  code of the run, and `stopped`, the reason of a stop or null. On a usage
+  error or a stop, `--json` prints one document with `exit: 2`, the reason
+  in `stopped`, and the empty value of each other key. `--version --json`
+  has neither key.
 - No flag takes a secret as its value. A connection string comes from
   `--url-env <NAME>` (default `DATABASE_URL`) or `--url-file <path>`; the
   operator secret from `--token-env <NAME>` (default

@@ -52,7 +52,13 @@ export function guarded(io: Io): Ctx {
     out: (line) => io.out(clean(line, secrets)),
     err: (line) => io.err(clean(line, secrets)),
     addSecret(value) {
-      for (const p of secretParts(value)) secrets.add(p);
+      for (const p of secretParts(value)) {
+        secrets.add(p);
+        // A --json line holds the JSON form of a string: a " or a \ of the
+        // secret is escaped there, so the scrub also needs that form.
+        const escaped = JSON.stringify(p).slice(1, -1);
+        if (escaped !== p) secrets.add(escaped);
+      }
     },
   };
 }
