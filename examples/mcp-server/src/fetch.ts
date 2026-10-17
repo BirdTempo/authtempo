@@ -40,8 +40,9 @@ export interface GuardDeps {
 }
 
 /**
- * The private IPv4 classes: the blocks of RFC 6890 section 2.2.2 with "Global: False"
- * (read 2026-10-17), and multicast (RFC 5771), which RFC 6890 does not list.
+ * The private IPv4 classes. They are the blocks of RFC 6890 section 2.2.2 with
+ * "Global: False" (read 2026-10-17). Multicast (RFC 5771) is one too, and
+ * RFC 6890 does not list it.
  * The 6to4 relay 192.88.99.0/24 is the one RFC 6890 block with "Global: True".
  * One line for each class.
  */

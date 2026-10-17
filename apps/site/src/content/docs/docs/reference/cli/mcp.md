@@ -16,7 +16,7 @@ sidebar:
 
 ## Before you start
 
-- The server package, built in this repo with `pnpm --filter @authtempo/mcp build`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The `--remote` entry needs no build.
+- The server package and its docs index. In this repo, build them with `pnpm --filter @authtempo/mcp build`, then `pnpm turbo run index --filter=@authtempo/mcp`. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The `--remote` entry needs no build.
 - [The CLI](/docs/reference/cli/) lists the exit codes and the output.
 
 ## The command

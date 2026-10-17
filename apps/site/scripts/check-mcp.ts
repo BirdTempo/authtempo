@@ -1,6 +1,6 @@
-// check-mcp (plan 11e Task 17): the MCP reference page against what the
-// built server answers on the wire, as check-cli holds the CLI pages to
-// `--help` (deviation 15). The tool table, the inputs, the annotations, the
+// check-mcp (plan 11e Task 17) holds the MCP reference page to what the
+// built server answers on the wire. check-cli holds the CLI pages to `--help`
+// in the same way (deviation 15). The tool table, the inputs, the annotations, the
 // prompts, the template, and the owned limits each have one source: the
 // server. The page must match it in both directions.
 import { tableRows } from "./lib/cli-help.ts";
@@ -158,7 +158,7 @@ function compareTool(tool: WireTool, text: string, remote: readonly string[]): s
 
 /**
  * Three keys of LIMITS are copies of values that other code applies. Each copy
- * must equal what the server answers on the wire, so a page that states a
+ * must equal what the server answers on the wire. So a page that states a
  * copy states what the server does (review 17 m-1).
  */
 function appliedLimits(wire: WireLists): string[] {

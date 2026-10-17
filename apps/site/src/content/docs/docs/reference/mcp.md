@@ -294,8 +294,9 @@ The Worker checks each limit before the SDK reads the body. The values are in `p
 | `resourcePage` | `100` | The resources of one `resources/list` page. |
 | `callsPerMinute` | `120` | The calls of one client IP in one isolate. The next call answers 429 with `retry-after: 60`. |
 | `windowMs` | `60000` | The window of `callsPerMinute`, in milliseconds. |
+| `bindingPerMinute` | `60` | The calls of one client IP a minute through a Workers rate limiting binding. The binding in `wrangler.jsonc` holds the same value. |
 
-A Workers rate limiting binding also allows 60 calls a minute. It is eventually consistent and local to a location, so it helps and never holds the limit alone.
+The `bindingPerMinute` limit is eventually consistent and local to a location. So it helps and never holds the limit alone.
 
 ## What stays in the shell
 

@@ -61,8 +61,8 @@ async function s256(text: string): Promise<string> {
 
 /**
  * An access token through the real flow of an MCP client with a metadata
- * document: the authorize request with PKCE S256, the consent, and the code
- * exchange. Core fetches the document through the guarded fetch.
+ * document. The flow is the authorize request with PKCE S256, the consent,
+ * and the code exchange. Core fetches the document through the guarded fetch.
  */
 async function accessToken(app: App, cookie: string, scope: string): Promise<string> {
   const verifier = crypto.randomUUID() + crypto.randomUUID();
