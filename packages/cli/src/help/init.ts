@@ -1,11 +1,15 @@
+import { STACKS } from "../templates.js";
 import { COMMON_FLAGS, type HelpText } from "./types.js";
+
+/** The stacks as prose: "a, b, or c". The help reads STACKS, so a new stack needs no edit here. */
+const STACK_PROSE = `${STACKS.slice(0, -1).join(", ")}, or ${STACKS.at(-1) ?? ""}`;
 
 export const INIT_HELP: HelpText = {
   command: "init",
   page: "init",
   purpose:
     "Write a new app with a magic link sign-in on one stack. The files are those of the example app of the stack.",
-  usage: ["authtempo init [dir] --stack <workers-d1|workers-postgres|node|bun|mcp-server>"],
+  usage: [`authtempo init [dir] --stack <${STACKS.join("|")}>`],
   examples: [
     {
       line: "authtempo init my-app --stack workers-d1",
@@ -20,7 +24,7 @@ export const INIT_HELP: HelpText = {
   flags: [
     {
       flag: "--stack <stack>",
-      says: "The stack: workers-d1, workers-postgres, node, bun, or mcp-server. It has no default.",
+      says: `The stack: ${STACK_PROSE}. It has no default.`,
     },
     ...COMMON_FLAGS,
   ],

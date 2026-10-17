@@ -55,20 +55,23 @@ beforeAll(() => {
 });
 
 /**
+ * A path part of a cited page, such as 2026-07-28-improved-record-display-format:
+ * two or more parts joined by hyphens, and each part is all lowercase letters or
+ * all digits. A random key part mixes letters and digits, so a UUID, a Mailchimp
+ * key (<32 hex>-us21), and a Mailgun key (key-<32 characters>) are no slug. A key
+ * part of letters only would pass; the scan accepts that rare case for a cited URL.
+ * The test "writes no secret into any file" holds these shapes as probes.
+ */
+function isSlug(text: string): boolean {
+  return /^(?:[a-z]+|\d+)(?:-(?:[a-z]+|\d+))+$/.test(text);
+}
+
+/**
  * The secrets that a file must not hold (spec 19): a private key, a filled
  * AUTH_SECRET or DATABASE_URL line, a URL with a password on a host other
  * than this machine, and a long token other than the documented test
  * secret and the all-zero placeholder ids of the examples.
  */
-/**
- * A path part of a cited page, such as 2026-07-28-improved-record-display-format:
- * lowercase words and numbers joined by hyphens, with a letter past f. A UUID
- * holds hex only, and a random token has capitals, so neither is a slug.
- */
-function isSlug(text: string): boolean {
-  return /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(text) && /[g-z]/.test(text);
-}
-
 function secretsIn(path: string, text: string): string[] {
   const found: string[] = [];
   if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) found.push(`${path}: a private key`);
@@ -149,7 +152,13 @@ describe("the init templates (spec 19, the one-source rule)", () => {
     expect(secretsIn("probe", "tk_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")).toHaveLength(1);
     expect(secretsIn("probe", "0f8fad5b-d9cb-469f-a165-70867728950e")).toHaveLength(1);
     expect(secretsIn("probe", "q7x2k9m4p1w8z3r6t5y0u2i9o4a7s1d6")).toHaveLength(1);
+    // The two key shapes beside mail.send, where the tutorial puts the key of a mail provider.
+    const send = (key: string) =>
+      `  async send(m) {\n    await fetch(api, { headers: { authorization: "Bearer ${key}" } });\n  },`;
+    expect(secretsIn("probe", send("3fa9c1d27b8e4f6a0c5d2e9b7a1f3c84-us21"))).toHaveLength(1);
+    expect(secretsIn("probe", send("key-3ax6xnjp29jd6fds4gc373sgvjxteol0"))).toHaveLength(1);
     expect(secretsIn("probe", "post/2026-07-28-improved-record-display-format/")).toEqual([]);
+    expect(secretsIn("probe", "post/2025-01-28-nodejs-compat-improvements/")).toEqual([]);
   });
 });
 
@@ -289,6 +298,29 @@ describe("authtempo init (spec 19)", () => {
     rmSync(join(again, "README.md"));
     expect(runBin(["init", again, "--stack", "node"]).status).toBe(2);
     expect(existsSync(join(again, "README.md"))).toBe(false);
+  });
+
+  it("names every stack of STACKS in each written stack list: the help, the usage error, the page", () => {
+    // Each list is read where a person reads it: the built help, the printed usage error,
+    // and the --stack row of the reference page. A new stack fails here until each list follows.
+    const help = linesOf(runBin(["init", "--help"]).stdout);
+    const usage = help.find((l) => l.includes("authtempo init [dir] --stack <")) ?? "";
+    const flag = help.find((l) => l.trim().startsWith("--stack <stack>")) ?? "";
+    const error = linesOf(runBin(["init", fresh("init-lists")]).stderr)[0] ?? "";
+    const page = readFileSync(
+      join(REPO, "apps/site/src/content/docs/docs/reference/cli/init.md"),
+      "utf8",
+    );
+    const row = page.split("\n").find((l) => l.startsWith("| `--stack <stack>` |")) ?? "";
+    const lists = { usage, flag, error, row };
+    for (const [name, text] of Object.entries(lists)) {
+      expect(text, `${name} is missing`).not.toBe("");
+      for (const stack of STACKS)
+        expect(
+          new RegExp(`(^|[^a-z0-9-])${stack}([^a-z0-9-]|$)`).test(text),
+          `${name}: ${stack}`,
+        ).toBe(true);
+    }
   });
 
   it("needs a stack, and names the near stack of a typo", () => {

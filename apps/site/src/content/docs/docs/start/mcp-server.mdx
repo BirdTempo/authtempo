@@ -29,6 +29,7 @@ import mcp from "../../../../../../../examples/mcp-server/src/mcp.ts?raw";
 - A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so your app lives in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.
 - The CLI, built in the repo. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
 - A Cloudflare account, for the deploy and the MCP client at the end.
+- A domain on Cloudflare, for the route of the Worker. [Workers on D1](/docs/start/workers-d1/) has the deploy steps.
 
 ## Steps
 
@@ -60,13 +61,14 @@ pnpm turbo run test --filter=my-app
 
 The test signs a person in by magic link. Then it sends the authorize request with the URL of a client metadata document and PKCE, allows the consent, and exchanges the code. Last, it calls `whoami` with the access token.
 
-8. Deploy the Worker as in steps 7 to 13 of [Workers on D1](/docs/start/workers-d1/). Also add a route or a custom domain for `BASE_URL`, because `wrangler.jsonc` turns off the `workers.dev` address.
-9. In your MCP client, add the server URL, such as `https://app.example.com/mcp`. The app has no dynamic registration, so the client must have a client metadata document.
-10. Let the client connect. The first request gets 401, with the URL of the resource metadata in `WWW-Authenticate`.
-11. Sign in by magic link on the page that the client opens, and allow the client on the consent page.
-12. Ask the client to call the tool `whoami`.
+8. In `wrangler.jsonc`, add a route or a custom domain for your origin, and set `BASE_URL` to that origin. The `workers.dev` address is off, so the Worker has no other address.
+9. Deploy the Worker as in steps 7 to 13 of [Workers on D1](/docs/start/workers-d1/).
+10. In your MCP client, add the server URL, such as `https://app.example.com/mcp`. The app has no dynamic registration, so the client must have a client metadata document.
+11. Let the client connect. The first request gets 401, with the URL of the resource metadata in `WWW-Authenticate`.
+12. Sign in by magic link on the page that the client opens, and allow the client on the consent page.
+13. Ask the client to call the tool `whoami`.
 
-The test passes. After step 12 the tool answers your user id, the URL of the client metadata document as the client id, and `mcp:tools`.
+The test passes. After step 13 the tool answers your user id, the URL of the client metadata document as the client id, and `mcp:tools`.
 
 ## Next
 

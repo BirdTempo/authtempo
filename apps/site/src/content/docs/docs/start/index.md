@@ -6,13 +6,14 @@ sources:
   - README.md "Packages"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 4
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 14
+  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 13"
 sidebar:
   order: 1
 ---
 
 **For:** a developer who starts with authtempo and must choose where it runs.
 
-**What it does:** this page compares the four stacks and sends you to the tutorial of one.
+**What it does:** this page compares the five stacks and sends you to the tutorial of one.
 
 ## Before you start
 
@@ -31,6 +32,7 @@ sidebar:
 | Workers on Postgres | `@authtempo/adapter-postgres` through Hyperdrive | On: `nodejs_compat` | `examples/worker-postgres` | [Workers on Postgres through Hyperdrive](/docs/start/workers-hyperdrive/) |
 | Node | `@authtempo/adapter-postgres` | Not a Workers setting | `examples/node` | [Node](/docs/start/node/) |
 | Bun | `@authtempo/adapter-postgres` | Not a Workers setting | `examples/node`, run by Bun | [Bun](/docs/start/bun/) |
+| An MCP server on Workers with D1 | `@authtempo/adapter-d1` | Off: `no_nodejs_compat` | `examples/mcp-server` | [An MCP server on Workers with D1](/docs/start/mcp-server/) |
 
 ## The packages today
 
