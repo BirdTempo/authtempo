@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MIGRATE_JSON_KEYS } from "@authtempo/cli";
 import { main } from "@authtempo/cli/program";
@@ -21,6 +21,16 @@ import { assertFreshIndex, siteIndex } from "./support/index.js";
 const CLI_BIN = join(REPO, "packages/cli/dist/bin/authtempo.js");
 /** The 11c fixture of a future schema version (0008_future.sql then; renumbered by later plans). */
 const FUTURE_SQL = join(REPO, "packages/cli/test/fixtures/postgres/0011_future.sql");
+/**
+ * The highest schema version of the adapter's migration files (ruling 25).
+ * The Postgres adapter keeps its migrations in code, so the folder is the D1
+ * adapter's, as in protocol-raw.test.ts. The test does not read SCHEMA_VERSION.
+ */
+const FILE_VERSION = Math.max(
+  ...readdirSync(join(REPO, "packages/adapter-d1/migrations")).map((f) =>
+    Number(/^\d{4}_schema_v(\d+)\.sql$/.exec(f)?.[1] ?? 0),
+  ),
+);
 
 /** The keys of an answer, written out: the CLI's migrate keys and the two tool keys. */
 const ANSWER_KEYS = [
@@ -184,9 +194,9 @@ describe("schema.migrate", () => {
 
   it("stops at the gate on a newer database", async () => {
     const db = await emptyDatabase();
-    const known = shellPlan(db).version;
+    const known = FILE_VERSION;
     expect(shell(db, []).status).toBe(0);
-    // The fixture of plan 11c, renumbered to one version past the last core migration.
+    // The fixture of plan 11c, renumbered to one version past the last migration file.
     const future = known + 1;
     const sql = readFileSync(FUTURE_SQL, "utf8")
       .replace(/value = '\d+'/, `value = '${future}'`)
