@@ -31,10 +31,10 @@ afterEach(() => {
 });
 
 /** A fresh build of the fixture tree into a new temp dist. The fixture has no concept page, so Reference is the optional group. */
-function fresh() {
+function fresh(tree: readonly Page[] = pages, sidebar: readonly string[] = order) {
   const dist = `${mkdtempSync(join(tmpdir(), "check-llms-"))}/`;
   temps.push(dist);
-  const index = buildAgentIndex(pages, order, {
+  const index = buildAgentIndex(tree, sidebar, {
     commit: "0123abc",
     readFile,
     terms: {},
@@ -73,6 +73,41 @@ describe("checkLlms", () => {
     // Each page of llms-full.txt has one title line, then its Source line (review I-3 of Task 3).
     expect(b.full.match(/^# Codes$/gm)).toHaveLength(1);
     expect(b.full).toContain(`\n# Codes\n\nSource: ${TWIN}\n\nEvery code of the fixture`);
+  });
+
+  // Ruling 13 of plan 11e: Task 17 writes the agents guide. Until then the
+  // build lists no agents line, and after it the guide is under Tools only.
+  it("lists the agents guide under Tools only, and only when the tree has it", () => {
+    const without = fresh();
+    expect(without.llms).not.toContain("guides/agents/");
+    expect(checkLlms(without.files(), without.llms, without.full, pages, order).counts).toEqual({
+      pages: 3,
+      links: 4,
+      twins: 3,
+    });
+
+    const guide: Page = {
+      path: "docs/guides/agents.mdx",
+      source:
+        "---\ntitle: Set up an agent\ndescription: Install the MCP server in your editor.\ntype: how-to\n---\n\nText.\n",
+    };
+    const tree = [...pages, guide];
+    const sidebar = [...order, "/docs/guides/agents/"];
+    const b = fresh(tree, sidebar);
+    const r = checkLlms(b.files(), b.llms, b.full, tree, sidebar);
+    expect(r.failures).toEqual([]);
+    // One more page, one more link: links stay pages + 1.
+    expect(r.counts).toEqual({ pages: 4, links: 5, twins: 4 });
+    const item =
+      "- [Set up an agent](https://authtempo.com/docs/guides/agents/index.md): Install the MCP server in your editor.";
+    const tools = b.llms.slice(
+      b.llms.indexOf("## Tools"),
+      b.llms.indexOf("\n## ", b.llms.indexOf("## Tools") + 1),
+    );
+    expect(tools).toContain(item);
+    expect(b.llms.split(item)).toHaveLength(2);
+    // llms-full.txt keeps the order of llms.txt, so the guide is its first page.
+    expect(b.full).toMatch(/^# authtempo\n\n> .*\n\n# Set up an agent\n\nSource: /);
   });
 
   it("fails when a page is missing from llms.txt", () => {
