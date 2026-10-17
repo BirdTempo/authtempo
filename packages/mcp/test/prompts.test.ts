@@ -12,8 +12,8 @@ import { connect } from "./support/client.js";
 import { assertFreshIndex, siteIndex } from "./support/index.js";
 
 // The prompts of plan 11e Task 14. The expected list comes from STACKS and
-// PROVIDERS of the CLI and from header.bindings of the index, read from their
-// sources here, and never from the prompt table of src/prompts.ts.
+// PROVIDERS of the CLI and from header.bindings of the index. The test reads
+// them from their sources, and never from the prompt table of src/prompts.ts.
 
 type Session = Awaited<ReturnType<typeof connect>>;
 let index: AgentIndex;

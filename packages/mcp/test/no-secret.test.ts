@@ -237,8 +237,8 @@ describe("the environment of the server", () => {
   });
 
   it("puts no password with a quote or a backslash in an answer or a stderr line", async () => {
-    // Each database name equals its password, so the CLI's stop text names it,
-    // and only the CLI's scrub keeps it out: spec 21 item 5, third sentence.
+    // Each database name equals its password, so the CLI's stop text names it.
+    // Only the CLI's scrub keeps it out: spec 21 item 5, third sentence.
     // A person can choose such a connection string, so the state is reachable.
     // The URL form keeps the password percent-encoded in the path. The raw form
     // keeps a raw backslash there, so the --json line holds it in its JSON form.

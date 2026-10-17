@@ -108,8 +108,8 @@ function build(spec: ServerSpec): McpServer {
         title: p.title,
         description: p.description,
         // A strict object: an argument that the prompt does not name is the
-        // protocol error -32602, as an unknown tool input is an input error
-        // (plan 11e Task 14, review I-6 of Task 5). A free argument takes the
+        // protocol error -32602. An unknown tool input is an input error in
+        // the same way (plan 11e Task 14, review I-6 of Task 5). A free argument takes the
         // schema of its tool input; with no schema, 1 to 2048 characters.
         argsSchema: z.strictObject(
           Object.fromEntries(

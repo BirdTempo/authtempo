@@ -12,11 +12,12 @@ import { TOOLS } from "../src/tools.js";
 import { PKG, REPO } from "./support/bin.js";
 import { assertFreshIndex, siteIndex } from "./support/index.js";
 
-// The skill pack of plan 11e Task 14. The rules come from their own sources:
-// agentskills.io/specification (read 2026-10-14) for the frontmatter, the
-// site's checkSentences and checkTerms for the prose (the one source of the
-// prose rules), the built site for the links, and the CLI and the tool table
-// for each named command, flag, and tool.
+// The skill pack of plan 11e Task 14. The rules come from their own sources.
+// The frontmatter rules come from agentskills.io/specification (read
+// 2026-10-14). The prose rules come from the site's checkSentences and
+// checkTerms, the one source of the prose rules. The links come from the
+// built site. Each named command, flag, and tool comes from the CLI and the
+// tool table.
 
 const SKILLS = join(PKG, "skills");
 
@@ -206,10 +207,11 @@ describe("the skill pack", () => {
         tools++;
         expect(local.has(name), `${where}: ${name} is no tool of the table`).toBe(true);
       }
-      // In a line that calls a tool, these spans name a key of that tool:
-      // a `key: value` span, each span after "Add the input", a span right
-      // after "with" or "Pass", a span before "set to", and each span with an
-      // underscore. A key is an input key or an output key of the row.
+      // In a line that calls a tool, some spans name a key of that tool. They
+      // are a `key: value` span, each span after "Add the input", and each
+      // span with an underscore. A bare span right after "with", "Pass", or
+      // "the" is one too, and so is a span before "set to". A key is an input
+      // key or an output key of the row.
       for (const line of f.body.split("\n")) {
         const tool = /\b[Cc]all `([^`]+)`/.exec(line)?.[1];
         const row = TOOLS.find((t) => t.name === tool);
@@ -228,7 +230,7 @@ describe("the skill pack", () => {
           const before = line.slice(0, m.index);
           const after = line.slice((m.index ?? 0) + m[0].length);
           const listed = /Add the inputs? /.test(before);
-          const named = /(?:\bwith|\bPass) $/.test(before) || after.startsWith(" set to");
+          const named = /(?:\bwith|\bPass|\bthe) $/.test(before) || after.startsWith(" set to");
           if (span.includes("_") || listed || named) given.push(span);
         }
         for (const key of given)

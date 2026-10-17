@@ -395,8 +395,9 @@ describe("the tool table on the wire", () => {
       expect(Object.keys(r.structured ?? {}).sort(), name).toEqual([...keys].sort());
     }
 
-    // Each argv that a handler gave the CLI: its command, its positionals, and
-    // each flag from the row, the row's fixed flags, or the handler's own list.
+    // Each argv that a handler gave the CLI holds its command and its
+    // positionals. Each flag comes from the row, the row's fixed flags, or the
+    // handler's own list.
     for (const t of wrapped) {
       const runs = argvs.filter(([name]) => name === t.name).map(([, argv]) => argv);
       expect(runs.length, `${t.name}: a recorded run`).toBeGreaterThan(0);

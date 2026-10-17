@@ -30,7 +30,9 @@ import { assertFreshIndex } from "./support/index.js";
 /**
  * The preload of the guarded binary. It refuses fetch, the connect of a
  * node:net socket, a dgram send or connect, each dns lookup and resolve, and
- * each child_process start. Each try writes one stderr line first.
+ * each child_process start. It also refuses a new worker_threads Worker,
+ * because a fetch in a Worker would not meet this guard (Task 15 re-review
+ * R-L1). Each try writes one stderr line first.
  */
 const PRELOAD = `
 import { syncBuiltinESMExports } from "node:module";
@@ -38,6 +40,7 @@ import net from "node:net";
 import dgram from "node:dgram";
 import dns from "node:dns";
 import cp from "node:child_process";
+import wt from "node:worker_threads";
 const refuse = (what) => {
   process.stderr.write("network-guard: refused " + what + "\\n");
   throw new Error("network-guard refused " + what);
@@ -52,13 +55,14 @@ for (const o of [dns, dns.promises, dns.Resolver.prototype, dns.promises.Resolve
       o[k] = () => refuse("dns " + k);
 for (const k of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"])
   cp[k] = () => refuse("child_process " + k);
+wt.Worker = function Worker() { refuse("worker_threads Worker"); };
 syncBuiltinESMExports();
 process.stderr.write("network-guard: on\\n");
 `;
 
 /** The network modules that no file of src imports. A file that must may be named here, with its reason. */
 const NETWORK_IMPORT =
-  /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:node:)?(dns|dgram|child_process|net|tls|http|https|http2|undici)(?:\/[a-z]+)?["']/g;
+  /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:node:)?(dns|dgram|child_process|net|tls|http|https|http2|undici|worker_threads)(?:\/[a-z]+)?["']/g;
 const NETWORK_FILES: Readonly<Record<string, readonly string[]>> = {};
 
 /** The built binary under the guard preload, one request at a time. */

@@ -250,9 +250,9 @@ describe("the stdio server on the wire", () => {
     expect(new Set(uris).size).toBe(n);
   });
 
-  // prompts/list carries no argument values, so the values of binding are
-  // held on the wire by prompts/get: each binding of the index header answers,
-  // and a name that the header does not list is -32602. The four packages
+  // prompts/list carries no argument values, so prompts/get holds the values
+  // of binding on the wire. Each binding of the index header answers, and a
+  // name that the header does not list is -32602. The four packages
   // that ruling 3 excludes from the bindings are refused too.
   it("gets integrate-binding for each binding of the index, and refuses another", async () => {
     const names = siteIndex().header.bindings.map((b) => b.name);

@@ -36,10 +36,12 @@ export const INSTRUCTIONS: Record<Surface, string> = {
 /** The default variable of the connection string (spec 21, the no-secret rule). */
 export const DEFAULT_URL_ENV = "DATABASE_URL";
 
-/** The facts of the server that a local tool reads (LocalContext of local-tools.ts). */
-export interface LocalFacts {
+/** The facts of the server that a local tool reads. */
+export interface LocalContext {
+  /** The server root, resolved by realpath at the start. */
   root: string;
   env: Readonly<Record<string, string | undefined>>;
+  /** The variable of the connection string (--url-env). */
   urlEnv: string;
 }
 
@@ -56,7 +58,7 @@ export function createServer(opts: {
    * The local tools, such as localTools of local-tools.ts. The binary passes
    * them. This file imports no CLI module, so the remote Worker can load it.
    */
-  local?: (facts: LocalFacts) => readonly ToolImpl[];
+  local?: (facts: LocalContext) => readonly ToolImpl[];
 }): ServerSpec {
   if (opts.urlEnv !== undefined && !URL_ENV_NAME.test(opts.urlEnv))
     throw new Error("--url-env takes the name of a variable, not a value");

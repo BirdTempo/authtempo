@@ -65,7 +65,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 /** The caller of core's `auth.caller` when it is an OAuth caller with core's shape, else null. */
 function fromCore(c: unknown): McpCaller | null {
   // Defence in depth: core's session and API token callers have no `clientId`, so the
-  // shape check below refuses them too, and no test can make this kind check alone decide.
+  // shape check below refuses them too. No test can make this kind check alone decide.
   // It stays so that a future core caller with these fields is never taken for an OAuth caller.
   if (!isObject(c) || c.kind !== "oauth" || !isObject(c.user)) return null;
   const { clientId, scopes, resource, tokenId, expiresAt } = c;

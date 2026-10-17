@@ -6,8 +6,8 @@
 // stale data with a PASS line proves nothing about the docs.
 // It also writes dist/agent/skills.json beside the index: the skill pack,
 // which the remote Worker reads from its assets (Task 16). Each skill must
-// parse, and the prompt names must equal the stacks and the providers of the
-// CLI, both ways (spec 21 item 13), or nothing is written.
+// parse. The prompt names must equal the stacks and the providers of the CLI,
+// both ways (spec 21 item 13). Else nothing is written.
 // Run it through `pnpm turbo run index --filter=@authtempo/mcp`, which builds
 // this package and the site first. The flags --source, --content, --target,
 // and --skills name other paths, for the tests.

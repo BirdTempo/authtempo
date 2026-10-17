@@ -27,9 +27,9 @@ function stackPrompt(stack: string): string {
 }
 
 /**
- * The prompt names that the stacks and the providers give: one per stack,
- * one for the framework bindings, one per import provider, one for Better
- * Auth, and one for the deployment check (spec 21 item 9).
+ * The prompt names that the stacks and the providers give (spec 21 item 9).
+ * There is one per stack, one for the framework bindings, and one per import
+ * provider. There is also one for Better Auth and one for the deployment check.
  */
 export function expectedPrompts(stacks: readonly string[], providers: readonly string[]): string[] {
   return [
@@ -59,8 +59,8 @@ export interface BindingRef {
 
 /**
  * The slots that a skill body may hold. A "free" slot is a prompt argument
- * whose schema is the input of a tool row (one source), with no control
- * character and no ".." segment, because its text goes into the prompt. An
+ * whose schema is the input of a tool row (one source). Its text goes into
+ * the prompt, so it holds no control character and no ".." segment. An
  * optional slot with no value gets its `absent` text, so the prompt text
  * reads as a whole step. The values of `binding` are the names of
  * header.bindings; `binding_page` is no argument: it is the page of the binding.
@@ -123,7 +123,7 @@ function freeSchema(tool: string, key: string): z.ZodType<string> {
 }
 
 /**
- * A value that YAML 1.2 reads as the same plain string: no indicator
+ * A value that YAML 1.2 reads as the same plain string. It has no indicator
  * character at the start, no ": " or " #" inside, and no space at an end. A
  * client of agentskills.io reads the frontmatter as YAML, so a value that
  * YAML reads another way, or refuses, is refused here.

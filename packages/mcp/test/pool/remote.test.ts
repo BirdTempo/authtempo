@@ -370,6 +370,15 @@ describe("the remote Worker", () => {
     expect(page.resources).toHaveLength(LIMITS.resourcePage);
   });
 
+  it("binds no storage: the env holds the assets, the vars, the limiter, and the test index", () => {
+    // Spec 21 item 8 and ruling 34: the Worker stores no query and no IP.
+    // The pool adds its own bindings, each with the __VITEST_POOL_WORKERS_ prefix.
+    const own = Object.keys(env).filter((k) => !k.startsWith("__VITEST_POOL_WORKERS_"));
+    expect(own.sort()).toEqual(
+      ["ASSETS", "MCP_ALLOWED_ORIGINS", "MCP_HOST", "MCP_LIMITER", "SITE_INDEX"].sort(),
+    );
+  });
+
   it("answers 429 when the rate limit binding of wrangler.jsonc refuses", async () => {
     const serve = serveSpy();
     const w = createWorker({ serve });

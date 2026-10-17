@@ -348,4 +348,55 @@ describe("schema.migrate", () => {
     });
     expect(await metaVersion(db)).toBe(String(expected.version));
   });
+
+  it("answers that the state is unknown when the database refuses each link after a stop", async () => {
+    // Task 9 re-review R-I1. The owner of a database can set lock_timeout on
+    // it, and can stop new links for maintenance. The test holds the migration
+    // lock, so the real run waits on it. Then the database refuses new links.
+    // The open link of the run stays, and lock_timeout stops the run with a
+    // server error. The dry run after the stop gets no link, so the state is
+    // unknown. No link is cut: a cut link mid-run crashes postgres.js 3.4.9.
+    const db = await emptyDatabase();
+    const watch = await emptyDatabase();
+    const name = new URL(db.url).pathname.slice(1);
+    await watch.sql.unsafe(`ALTER DATABASE ${name} SET lock_timeout = '3s'`);
+    const s = await start(db);
+    const id = await plan(s);
+    const holder = await db.sql.reserve();
+    await holder`SELECT pg_advisory_lock(hashtext('tempo_auth_migrations'))`;
+    const call = s.call("schema.migrate", { plan_id: id, confirm: true });
+    let waiting: number | undefined;
+    for (let i = 0; i < 200 && waiting === undefined; i++) {
+      const rows = await watch.sql<{ pid: number }[]>`
+        SELECT pid FROM pg_stat_activity
+        WHERE datname = ${name} AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%'`;
+      waiting = rows[0]?.pid;
+      if (waiting === undefined) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(waiting, "the real run never waited on the migration lock").toBeTypeOf("number");
+    await watch.sql.unsafe(`ALTER DATABASE ${name} ALLOW_CONNECTIONS false`);
+    const r = await call;
+    expect(r.isError).toBe(true);
+    const lines = text(r).split("\n");
+    expect(lines).toHaveLength(2);
+    // The text of the server for lock_timeout (SQLSTATE 55P03).
+    expect(lines[0]).toBe("stopped: canceling statement due to lock timeout");
+    expect(lines[1]).toBe(
+      "the state of the database after the stop is unknown: run schema.migrate with dry_run: true",
+    );
+    expect(doc(r)).toMatchObject({
+      target: "postgres",
+      tables: "core",
+      dryRun: false,
+      before: null,
+      after: null,
+      pending: null,
+      applied: null,
+      exit: 2,
+      plan_id: null,
+      next: null,
+    });
+    await holder`SELECT pg_advisory_unlock(hashtext('tempo_auth_migrations'))`;
+    holder.release();
+  });
 });

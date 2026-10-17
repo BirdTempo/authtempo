@@ -15,17 +15,11 @@ import {
 import { main } from "@authtempo/cli/program";
 import { type ConfinedIo, confinedIo, insideRoot, RootError } from "./cli-io.js";
 import { isPlanError, PlanStore, sha256 } from "./plans.js";
+import type { LocalContext } from "./server.js";
 import type { ToolImpl, ToolResult } from "./spec.js";
 import { IMPORT_FILE_INPUTS, TOOLS, type ToolRow } from "./tools.js";
 
-/** The facts of the server that a local tool reads. */
-export interface LocalContext {
-  /** The server root, resolved by realpath at the start. */
-  root: string;
-  env: Readonly<Record<string, string | undefined>>;
-  /** The variable of the connection string (--url-env), for Tasks 8 to 10. */
-  urlEnv: string;
-}
+export type { LocalContext };
 
 /**
  * The init templates of the CLI (dist/templates.json). init reads this one
@@ -432,7 +426,8 @@ export function localTools(
     row: runRow,
     async call(input) {
       // The plan is taken before any check, so each refusal uses it up (the
-      // brief's rule): a refused confirm, a root refusal, and a read failure too.
+      // brief's rule). A refused confirm, a root refusal, and a read failure
+      // use it up too.
       const read = readExports(ctx.root, input);
       const held = plans.take(
         "import",

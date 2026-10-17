@@ -84,8 +84,8 @@ export function resourceEntries(index: AgentIndex): ResourceEntry[] {
 
 /**
  * One page of the entries. It returns null for a cursor that the list does
- * not give: another index key, an offset that is not a page start, or an offset
- * past the end.
+ * not give. Such a cursor has another index key, an offset that is not a page
+ * start, or an offset past the end.
  */
 function pageOf(
   entries: readonly ResourceEntry[],

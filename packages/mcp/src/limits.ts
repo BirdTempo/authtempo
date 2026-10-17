@@ -19,6 +19,12 @@ export const LIMITS = {
   callsPerMinute: 120,
   /** The window of callsPerMinute, in milliseconds. */
   windowMs: 60_000,
+  /**
+   * The rate limit binding of wrangler.jsonc, in calls a minute per key. It
+   * is a copy: test/worker-config.test.ts holds the binding to it, and
+   * check-mcp holds the reference page to it.
+   */
+  bindingPerMinute: 60,
 } as const;
 
 export type Limits = typeof LIMITS;
