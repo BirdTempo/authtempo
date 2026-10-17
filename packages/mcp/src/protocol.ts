@@ -109,14 +109,16 @@ function build(spec: ServerSpec): McpServer {
         description: p.description,
         // A strict object: an argument that the prompt does not name is the
         // protocol error -32602, as an unknown tool input is an input error
-        // (plan 11e Task 14, review I-6 of Task 5). A free argument is at most
-        // 2048 characters, because its text goes into the prompt.
+        // (plan 11e Task 14, review I-6 of Task 5). A free argument takes the
+        // schema of its tool input; with no schema, 1 to 2048 characters.
         argsSchema: z.strictObject(
           Object.fromEntries(
             p.args.map((a) => {
               const [first, ...rest] = a.values;
               const value =
-                first === undefined ? z.string().min(1).max(2048) : z.enum([first, ...rest]);
+                first !== undefined
+                  ? z.enum([first, ...rest])
+                  : (a.schema ?? z.string().min(1).max(2048));
               const schema = value.describe(a.description);
               return [a.name, a.required ? schema : schema.optional()];
             }),

@@ -84,6 +84,9 @@ const LOCAL_TOOLS = [
 /** The tools that only read: the docs tools, migrate.plan, and check, typed here. */
 const READS_ONLY = [...DOCS_TOOLS, "migrate.plan", "check"];
 
+/** The packages that are no binding (ruling 3), typed here. */
+const EXCLUDED = ["core", "client", "verify", "handoff"];
+
 const version = (path: string) =>
   (JSON.parse(readFileSync(join(REPO, path), "utf8")) as { version: string }).version;
 
@@ -249,7 +252,8 @@ describe("the stdio server on the wire", () => {
 
   // prompts/list carries no argument values, so the values of binding are
   // held on the wire by prompts/get: each binding of the index header answers,
-  // and a name that the header does not list is -32602.
+  // and a name that the header does not list is -32602. The four packages
+  // that ruling 3 excludes from the bindings are refused too.
   it("gets integrate-binding for each binding of the index, and refuses another", async () => {
     const names = siteIndex().header.bindings.map((b) => b.name);
     expect(names.length).toBeGreaterThan(0);
@@ -265,14 +269,21 @@ describe("the stdio server on the wire", () => {
           name: "integrate-binding",
           arguments: { binding: "not-a-binding" },
         }),
+        ...EXCLUDED.map((binding, i) =>
+          line(5 + i, "prompts/get", { name: "integrate-binding", arguments: { binding } }),
+        ),
       ],
     );
     names.forEach((binding, i) => {
       const r = result(run, 10 + i) as { messages: { content: { text: string } }[] };
       expect(r.messages[0]?.content.text, binding).toContain(binding);
     });
-    const refused = messages(run).find((m) => m.id === 9);
-    expect((refused as { error?: { code: number } } | undefined)?.error?.code).toBe(-32602);
+    for (const id of [9, 5, 6, 7, 8]) {
+      const refused = messages(run).find((m) => m.id === id);
+      expect((refused as { error?: { code: number } } | undefined)?.error?.code, `id ${id}`).toBe(
+        -32602,
+      );
+    }
   });
 
   it("answers initialize at 2025-06-18 with the same version", () => {

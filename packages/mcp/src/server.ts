@@ -82,7 +82,8 @@ export function createServer(opts: {
     // Both surfaces serve the docs resources (spec 21 item 2).
     resources: docsResources(opts.index),
     // Both surfaces serve the prompts: one per skill, with the text of the
-    // skill (spec 21 item 9). The binding argument takes the bindings of the index.
-    prompts: skillPrompts(opts.skills, { bindings: opts.index.header.bindings.map((b) => b.name) }),
+    // skill (spec 21 item 9). The binding argument takes the bindings of the
+    // index, and each binding's page fills the skill's {binding_page}.
+    prompts: skillPrompts(opts.skills, { bindings: opts.index.header.bindings }),
   };
 }

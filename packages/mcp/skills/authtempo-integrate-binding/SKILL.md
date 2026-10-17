@@ -1,6 +1,6 @@
 ---
 name: authtempo-integrate-binding
-description: Add one authtempo framework package, such as the Next, Hono, or SvelteKit binding, to an app that runs authtempo, through the docs tools of the authtempo MCP server. Use it when a person wants the session of authtempo in a framework. In the steps, {binding} is the name of the binding.
+description: Add one authtempo framework package, such as the Next, Hono, or SvelteKit binding, to an app that runs authtempo, through the docs tools of the authtempo MCP server. Use it when a person wants the session of authtempo in a framework. In the steps, {binding} is the name of the binding, and {binding_page} is the path of its reference page.
 metadata:
   source: /docs/start/
 ---
@@ -9,7 +9,7 @@ metadata:
 
 **For:** a coding agent that adds the authtempo package of one framework to an app of a person.
 
-**What it does:** you find the reference page of the binding {binding}, and you do its steps in the code of the app.
+**What it does:** you read the reference page of the binding {binding}, and you do its steps in the code of the app.
 
 ## Before you start
 
@@ -19,13 +19,12 @@ metadata:
 
 ## Steps
 
-1. Call `docs.search` with the query {binding} and the type `reference`.
-2. Find the page of the package for {binding} in the hits. Its group is Frameworks.
-3. Call `docs.read` with the path of that page. Read its steps and its exports.
-4. Add the package of the page to the dependencies of the app. Run `pnpm install` at the root of the repo.
-5. Do each step of the page in the code of the app, in order.
-6. Run the tests of the app.
-7. Ask the person to sign in once, and to open a route that reads the session.
+1. Call `docs.read` with the path {binding_page}. It is the reference page of {binding} in the docs index.
+2. Read the steps and the exports of the page.
+3. Add the package of the page to the dependencies of the app. Run `pnpm install` at the root of the repo.
+4. Do each step of the page in the code of the app, in order.
+5. Run the tests of the app.
+6. Ask the person to sign in once, and to open a route that reads the session.
 
 ## If it fails
 

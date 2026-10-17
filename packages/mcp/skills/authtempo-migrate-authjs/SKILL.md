@@ -27,7 +27,10 @@ metadata:
 5. Call `migrate.plan` with the same input and `against: "database"`. The answer holds a `plan_id`.
 6. Show the whole report to the person. Ask the person to read each line and to say yes.
 7. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`.
-8. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps with the person.
+8. Delete the file `tables.json`. It holds the password hashes of the users.
+9. Sign in once with a known user and the old password.
+10. Change each auth call of the app with the table of [The calls](/docs/migrate/authjs/#the-calls).
+11. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps with the person.
 
 ## If it fails
 

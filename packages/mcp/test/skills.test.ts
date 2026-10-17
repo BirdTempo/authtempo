@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { COMMANDS } from "@authtempo/cli/program";
+import { COMMANDS, PROVIDERS } from "@authtempo/cli/program";
 import { beforeAll, describe, expect, it } from "vitest";
 import { checkSentences } from "../../../apps/site/scripts/check-sentences.ts";
 import { checkTerms } from "../../../apps/site/scripts/check-terms.ts";
@@ -117,6 +117,11 @@ describe("the skill pack", () => {
       source.replace(/^metadata:$/m, "license: MIT\nmetadata:"),
       source.replace(/^ {2}source: .*$/m, "  source: docs/start/node"),
       source.replace(/^---\n/, ""),
+      // Values that YAML reads another way, or refuses (agentskills.io clients read YAML).
+      source.replace(/^description: /m, "description: Use it: "),
+      source.replace(/^description: /m, "description: {"),
+      source.replace(/^description: /m, 'description: "'),
+      source.replace(/^description: /m, "description: # "),
     ];
     for (const markdown of bad) {
       expect(markdown).not.toBe(source);
@@ -201,21 +206,33 @@ describe("the skill pack", () => {
         tools++;
         expect(local.has(name), `${where}: ${name} is no tool of the table`).toBe(true);
       }
-      // In a line that calls a tool, a `key: value` span and each span after
-      // "Add the input" name an input key of that tool.
+      // In a line that calls a tool, these spans name a key of that tool:
+      // a `key: value` span, each span after "Add the input", a span right
+      // after "with" or "Pass", a span before "set to", and each span with an
+      // underscore. A key is an input key or an output key of the row.
       for (const line of f.body.split("\n")) {
         const tool = /\b[Cc]all `([^`]+)`/.exec(line)?.[1];
         const row = TOOLS.find((t) => t.name === tool);
         if (row === undefined) continue;
-        const keys = Object.keys(row.input.shape);
-        const given = spans(line).flatMap((s) => {
-          const m = /^([a-z_]+): /.exec(s);
-          return m ? [m[1] ?? ""] : [];
-        });
-        const after = line.split(/Add the inputs? /)[1];
-        if (after !== undefined) given.push(...spans(after).filter((s) => /^[a-z_]+$/.test(s)));
+        const keys = [...Object.keys(row.input.shape), ...row.outputKeys];
+        const given: string[] = [];
+        for (const m of line.matchAll(/`([^`\n]+)`/g)) {
+          const span = m[1] ?? "";
+          if (span === tool) continue;
+          const pair = /^([a-z_]+): /.exec(span);
+          if (pair) {
+            given.push(pair[1] ?? "");
+            continue;
+          }
+          if (!/^[a-z_]+$/.test(span)) continue;
+          const before = line.slice(0, m.index);
+          const after = line.slice((m.index ?? 0) + m[0].length);
+          const listed = /Add the inputs? /.test(before);
+          const named = /(?:\bwith|\bPass) $/.test(before) || after.startsWith(" set to");
+          if (span.includes("_") || listed || named) given.push(span);
+        }
         for (const key of given)
-          expect(keys, `${where}: ${key} is no input of ${row.name}`).toContain(key);
+          expect(keys, `${where}: ${key} is no key of ${row.name}`).toContain(key);
       }
       for (const span of spans(f.body)) {
         if (span.startsWith("authtempo ")) {
@@ -245,5 +262,28 @@ describe("the skill pack", () => {
     }
     expect(tools).toBeGreaterThan(0);
     expect(commands).toBeGreaterThan(0);
+  });
+  it("keeps the phases of each provider guide: the run, the sign-in, the calls, the cutover", () => {
+    // Spec 23 item 9: "Verify" and "Change the calls" come between the move and the cutover.
+    for (const provider of PROVIDERS) {
+      const f = files.find((x) => x.folder === `authtempo-migrate-${provider}`);
+      expect(f, provider).toBeDefined();
+      const steps = (f?.body ?? "").split("\n").filter((l) => /^\d+\. /.test(l));
+      const at = (re: RegExp) => steps.findIndex((l) => re.test(l));
+      const run = at(/call `migrate\.run`/);
+      const signIn = at(/^\d+\. Sign in once with a known user/);
+      const calls = at(new RegExp(`\\]\\(/docs/migrate/${provider}/#the-calls\\)`));
+      const cutover = at(/`\/docs\/migrate\/cutover\/`/);
+      expect(
+        [run, signIn, calls, cutover].every((i) => i >= 0),
+        provider,
+      ).toBe(true);
+      expect(run < signIn && signIn < calls && calls < cutover, provider).toBe(true);
+    }
+    // The Cognito guide signs in a second time, with capital letters in the address.
+    const cognito = files.find((x) => x.folder === "authtempo-migrate-cognito")?.body ?? "";
+    expect(cognito).toMatch(
+      /^\d+\. .*Sign in once more with a user whose Cognito address has capital letters\./m,
+    );
   });
 });

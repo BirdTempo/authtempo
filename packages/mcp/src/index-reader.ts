@@ -22,8 +22,7 @@ export function readIndexFile(file: string): AgentIndex {
 
 /**
  * The skills of a folder: one SKILL.md in each subfolder, in name order.
- * The skill pack comes in Task 14; until then the folder does not exist and
- * the set is empty.
+ * A folder that does not exist gives an empty set.
  */
 export function readSkills(dir: string): SkillSet {
   if (!existsSync(dir)) return [];

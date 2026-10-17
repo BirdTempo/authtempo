@@ -31,8 +31,8 @@ metadata:
 ## If it fails
 
 - `BetterAuthCompatError` at the start: change each option in its list.
-- The error "relation ta_limit already exists": the schema holds the tables of the Postgres adapter. Use a schema without them.
-- The error "no such column: issuer" on D1: the 1.7 file ran on older tables. Use the files for tables before 1.7.
+- The error `relation "ta_limit" already exists`: the schema holds the tables of the Postgres adapter. Use a schema without them.
+- The error `no such column: issuer` on D1: the 1.7 file ran on older tables. Use the files for tables before 1.7.
 - [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link, an invitation, or a delete link from before the cutover. Send it again.
 
 ## Next

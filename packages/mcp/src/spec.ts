@@ -1,5 +1,6 @@
 // The protocol-free description of a server. No file but protocol.ts imports
 // the SDK, so a change of the SDK changes protocol.ts only.
+import type { z } from "zod";
 import type { ToolRow } from "./tools.js";
 
 export type Surface = "local" | "remote";
@@ -55,7 +56,8 @@ export interface ResourceSpec {
 
 /**
  * One prompt: one skill of the skill pack (prompts.ts). Each argument is a
- * string. An argument with values takes one of them; an empty list takes any text.
+ * string. An argument with values takes one of them. An argument with no
+ * values takes the text that its schema accepts.
  */
 export interface PromptSpec {
   name: string;
@@ -66,6 +68,8 @@ export interface PromptSpec {
     description: string;
     required: boolean;
     values: readonly string[];
+    /** The schema of a free argument, from the input of a tool row; null with values. */
+    schema: z.ZodType<string> | null;
   }[];
   /** The text of the prompt for the given arguments. */
   text(args: Readonly<Record<string, string>>): string;

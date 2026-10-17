@@ -20,14 +20,16 @@ metadata:
 
 ## Steps
 
-1. In the API, set `password.legacyVerify` as the page `/docs/migrate/cognito/` shows, with the region and the app client.
-2. Call `docs.read` with the path `/docs/migrate/cognito/`. Do its export step with the person.
+1. Call `docs.read` with the path `/docs/migrate/cognito/`. Do its export step with the person.
+2. In the API, set `password.legacyVerify` as the page shows, with the region and the app client.
 3. Call `migrate.plan` with `provider: "cognito"` and `against: "empty"`. Add the inputs `users` and `legacy_verify: true`.
 4. Read the report. Fix each refused file or input, and plan again.
 5. Call `migrate.plan` with the same input and `against: "database"`. The answer holds a `plan_id`.
 6. Show the whole report to the person. Ask the person to read each line and to say yes.
 7. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`.
-8. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps with the person.
+8. Sign in once with a known user. Sign in once more with a user whose Cognito address has capital letters.
+9. Change each auth call of the app with the table of [The calls](/docs/migrate/cognito/#the-calls).
+10. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps with the person.
 
 ## If it fails
 

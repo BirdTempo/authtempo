@@ -69,9 +69,7 @@ const { PROVIDERS, STACKS } = await import("@authtempo/cli/program");
 const skills = readSkills(values.skills);
 let names;
 try {
-  names = skillPrompts(skills, { bindings: index.header.bindings.map((b) => b.name) }).map(
-    (p) => p.name,
-  );
+  names = skillPrompts(skills, { bindings: index.header.bindings }).map((p) => p.name);
 } catch (e) {
   console.error(`copy-index: FAIL ${e.message}`);
   process.exit(1);
