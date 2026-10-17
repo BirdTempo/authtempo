@@ -7,6 +7,7 @@ sources:
   - packages/mcp/src/resources.ts
   - packages/mcp/src/prompts.ts
   - packages/mcp/src/limits.ts
+  - packages/mcp/src/plans.ts
   - packages/mcp/src/worker.ts
   - packages/mcp/wrangler.jsonc
   - packages/mcp/test/drift.test.ts
@@ -254,7 +255,7 @@ Each docs page is one resource. Its URI is `authtempo://docs/<path>`: the page p
 | --- | --- | --- |
 | `authtempo://docs/{+path}` | `docs-page` | `text/markdown` |
 
-`resources/list` answers 100 resources a page, in the sidebar order. Its `nextCursor` holds the commit of the docs index and the offset of the next page. A cursor of another index build answers -32602.
+`resources/list` answers 100 resources a page, in the sidebar order. Its `nextCursor` holds the key of the docs index and the offset of the next page. The key is the commit of the index and a hash of its page paths. A cursor of another index build answers -32602.
 
 A read of a page that does not exist answers the protocol error -32602, with the URI in `data.uri`. The 2026-07-28 revision requires -32602. Older SDK builds sent -32002, so a client accepts either code when `data` holds `uri`.
 
@@ -311,7 +312,7 @@ The drift test of the package holds these lists, because `check-mcp` reads only 
 - **No secret.** No tool input is a secret, a connection string, a token, or a key. The server reads the connection string from the variable that `--url-env` names. Each line that a wrapped command prints passes the scrub of the CLI.
 - **The root.** Every path of a tool input resolves inside the server root, with each symbolic link resolved. A path outside it is a tool result with `isError: true`, and nothing is written. The tools run no child process and read no stdin.
 - **The plan handle.** `migrate.run` and `schema.migrate` run only a plan of the same server run. A plan is held 10 minutes and is used once. It binds the input, the database, and the SHA-256 of each file. The server holds at most 16 plans.
-- **No telemetry.** The local server makes no network call at its start and none for a docs tool. Only `check` fetches, and only from the origin it gets. The remote Worker stores no query and no IP, and logs no request.
+- **No telemetry.** The local server makes no network call at its start and none for a docs tool. Only `check` fetches, and only from the origin it gets. The remote Worker stores no query, keeps no IP after the isolate ends, and logs no request.
 
 ## Next
 

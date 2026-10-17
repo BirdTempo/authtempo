@@ -157,6 +157,40 @@ function compareTool(tool: WireTool, text: string, remote: readonly string[]): s
 }
 
 /**
+ * Three keys of LIMITS are copies of values that other code applies. Each copy
+ * must equal what the server answers on the wire, so a page that states a
+ * copy states what the server does (review 17 m-1).
+ */
+function appliedLimits(wire: WireLists): string[] {
+  const f: string[] = [];
+  const search = wire.tools.find((t) => t.name === "docs.search")?.properties;
+  const held: [string, number | undefined, string][] = [
+    ["queryChars", num(search?.query?.maxLength), "the docs.search query takes at most"],
+    ["limit", num(search?.limit?.maximum), "the docs.search limit is at most"],
+  ];
+  for (const [key, applied, says] of held) {
+    const value = wire.limits[key];
+    if (value === undefined) continue;
+    if (applied === undefined) f.push(`${key}: the wire has no value that applies it`);
+    else if (applied !== value)
+      f.push(`${key}: LIMITS holds ${value}; ${says} ${applied} on the wire`);
+  }
+  const page = wire.limits.resourcePage;
+  if (page !== undefined) {
+    const first = wire.resourcePage;
+    if (first === null) f.push("resourcePage: the wire has no value that applies it");
+    // A first page with a next cursor is full. A last page can be shorter.
+    else if (first.more ? first.size !== page : first.size > page)
+      f.push(
+        `resourcePage: LIMITS holds ${page}; the first resources/list page on the wire holds ${first.size}`,
+      );
+  }
+  return f;
+}
+
+const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+
+/**
  * The reference page's source against the wire answers of the built server.
  * Each tool is an h3 `tool-<name>` with its description and two tables. The
  * fact table holds the title, the surfaces, the four annotations, and the
@@ -179,7 +213,11 @@ export function checkMcp(page: string, wire: WireLists): CheckReport {
   for (const tool of wire.tools) {
     r.counts.tools = (r.counts.tools ?? 0) + 1;
     r.counts.inputs = (r.counts.inputs ?? 0) + Object.keys(tool.properties).length;
-    const section = sections.find((s) => s.name === tool.name);
+    const all = sections.filter((s) => s.name === tool.name);
+    // A second section for one tool would give a reader two facts for it.
+    if (all.length > 1)
+      r.failures.push(`the page has ${all.length} sections for the tool ${tool.name}`);
+    const section = all[0];
     if (section === undefined) {
       r.failures.push(`the page lacks the tool ${tool.name}`);
       continue;
@@ -262,6 +300,7 @@ export function checkMcp(page: string, wire: WireLists): CheckReport {
   }
   for (const key of limits.keys())
     if (!(key in wire.limits)) r.failures.push(`the limit row ${key} is not in LIMITS`);
+  r.failures.push(...appliedLimits(wire));
 
   return requireCounts(r, ["tools", "inputs", "prompts", "templates", "limits"]);
 }

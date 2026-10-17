@@ -58,12 +58,12 @@ To give an editor the skills as files, copy each skill folder whole into a proje
 | Editor | Project folders of the skills | Source |
 | --- | --- | --- |
 | Claude Code | `.claude/skills/` | code.claude.com/docs/en/skills |
-| Cursor | `.cursor/skills/` or `.agents/skills/` | cursor.com/docs/skills |
+| Cursor | `.cursor/skills/`, `.agents/skills/`, `.claude/skills/`, or `.codex/skills/` | cursor.com/docs/skills |
 | Codex | `.agents/skills/`, in the folder that starts Codex and each folder up to the repo root | learn.chatgpt.com/docs/build-skills |
 | OpenCode | `.opencode/skills/`, `.claude/skills/`, or `.agents/skills/` | opencode.ai/docs/skills |
 | VS Code | `.github/skills/`, `.claude/skills/`, or `.agents/skills/` | code.visualstudio.com/docs/copilot/customization/agent-skills |
 
-`.agents/skills/` serves four of the five editors. Claude Code needs its own copy in `.claude/skills/`.
+`.claude/skills/` serves Claude Code, Cursor, OpenCode, and VS Code. Codex reads `.agents/skills/` only, so Codex needs its own copy there. A copy in both folders shows each skill twice in Cursor, OpenCode, and VS Code.
 
 ## An agent with no MCP
 

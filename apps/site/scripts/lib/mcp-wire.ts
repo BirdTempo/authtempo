@@ -42,13 +42,15 @@ export interface WireLists {
   templates: WireTemplate[];
   /** The names that the remote Worker lists. */
   remote: { tools: string[]; prompts: string[]; templates: string[] };
+  /** The first resources/list page of the binary: its size, and whether a next cursor follows. */
+  resourcePage: { size: number; more: boolean } | null;
   /** LIMITS of the built package: the owned limits of the remote Worker. */
   limits: Record<string, number>;
   /** Null when every list came back. */
   error: string | null;
 }
 
-/** The longest wait for the four answers of the binary. */
+/** The longest wait for the five answers of the binary. */
 const TIMEOUT_MS = 30_000;
 
 /** The protocol revision of the requests: the newest of the 2025 era that the SDK serves. */
@@ -56,12 +58,16 @@ const REVISION = "2025-11-25";
 
 const LISTS = ["tools/list", "prompts/list", "resources/templates/list"] as const;
 
+/** The requests of the binary after initialize: the lists, and the first page of the resources. */
+const LOCAL = [...LISTS, "resources/list"] as const;
+
 function empty(error: string): WireLists {
   return {
     tools: [],
     prompts: [],
     templates: [],
     remote: { tools: [], prompts: [], templates: [] },
+    resourcePage: null,
     limits: {},
     error,
   };
@@ -127,9 +133,9 @@ function templateOf(v: unknown): WireTemplate {
 }
 
 /**
- * The four answers of the binary: initialize, then the three lists. The
- * binary gets stdin open until each list has its answer, because the SDK
- * drops an open request when stdin ends.
+ * The five answers of the binary: initialize, the three lists, and the first
+ * resources page. The binary gets stdin open until each request has its
+ * answer, because the SDK drops an open request when stdin ends.
  */
 function localAnswers(bin: string, indexPath: string): Promise<Map<number, unknown>> {
   return new Promise((done, fail) => {
@@ -172,10 +178,10 @@ function localAnswers(bin: string, indexPath: string): Promise<Map<number, unkno
         }
         if (isObject(message) && typeof message.id === "number") answers.set(message.id, message);
       }
-      if (answers.size === LISTS.length + 1) child.stdin.end();
+      if (answers.size === LOCAL.length + 1) child.stdin.end();
     });
     child.on("close", (code) => {
-      if (answers.size === LISTS.length + 1) finish(null);
+      if (answers.size === LOCAL.length + 1) finish(null);
       else {
         const first = err.trim().split("\n")[0] ?? "";
         finish(new Error(`exit ${code ?? "?"}: ${first}`));
@@ -195,7 +201,7 @@ function localAnswers(bin: string, indexPath: string): Promise<Map<number, unkno
       },
     });
     send({ jsonrpc: "2.0", method: "notifications/initialized" });
-    for (const [i, method] of LISTS.entries()) send({ jsonrpc: "2.0", id: i + 1, method });
+    for (const [i, method] of LOCAL.entries()) send({ jsonrpc: "2.0", id: i + 1, method });
   });
 }
 
@@ -259,9 +265,10 @@ async function remoteAnswers(pkg: string, indexPath: string): Promise<unknown[]>
 }
 
 /**
- * Starts the built server `bin` with `--index indexPath`, sends initialize
- * and the three lists, and reads the answers. Then it asks the built remote
- * Worker of the same package for the same lists, and reads LIMITS. A failure
+ * Starts the built server `bin` with `--index indexPath`. It sends
+ * initialize, the three lists, and a resources/list, and reads the answers.
+ * Then it asks the built remote Worker of the same package for the same
+ * lists, and reads LIMITS. A failure
  * of any step is the `error` of the answer, never a throw.
  */
 export async function wireLists(bin: string, indexPath: string): Promise<WireLists> {
@@ -284,6 +291,11 @@ export async function wireLists(bin: string, indexPath: string): Promise<WireLis
       "resourceTemplates",
       "resources/templates/list",
     ).map(templateOf);
+    const first = resultOf("resources/list", local.get(4));
+    const resourcePage = {
+      size: listOf(first, "resources", "resources/list").length,
+      more: typeof first.nextCursor === "string",
+    };
     const [rt, rp, rr] = await remoteAnswers(pkg, indexPath);
     const remote = {
       tools: listOf(resultOf("tools/list", rt), "tools", "tools/list").map((t) => toolOf(t).name),
@@ -299,7 +311,7 @@ export async function wireLists(bin: string, indexPath: string): Promise<WireLis
     const { LIMITS } = (await import(pathToFileURL(`${pkg}dist/limits.js`).href)) as {
       LIMITS: Record<string, number>;
     };
-    return { tools, prompts, templates, remote, limits: { ...LIMITS }, error: null };
+    return { tools, prompts, templates, remote, resourcePage, limits: { ...LIMITS }, error: null };
   } catch (e) {
     return empty((e as Error).message);
   }

@@ -11,6 +11,29 @@ function wire(): WireLists {
   return {
     tools: [
       {
+        name: "docs.search",
+        title: "Search the docs",
+        description: "Reads no file and writes nothing. Searches the docs.",
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        properties: {
+          query: { type: "string", minLength: 2, maxLength: 200, description: "The words." },
+          limit: {
+            default: 5,
+            description: "The most hits.",
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+          },
+        },
+        required: ["query"],
+        outputKeys: ["results"],
+      },
+      {
         name: "docs.read",
         title: "Read a page",
         description: "Reads no file and writes nothing. Answers one page.",
@@ -79,14 +102,35 @@ function wire(): WireLists {
       { name: "docs-page", uriTemplate: "authtempo://docs/{+path}", mimeType: "text/markdown" },
     ],
     remote: {
-      tools: ["docs.read"],
+      tools: ["docs.search", "docs.read"],
       prompts: ["check-deployment", "migrate-clerk"],
       templates: ["authtempo://docs/{+path}"],
     },
-    limits: { bodyBytes: 65_536, limit: 10 },
+    resourcePage: { size: 100, more: true },
+    limits: { bodyBytes: 65_536, queryChars: 200, limit: 10, resourcePage: 100 },
     error: null,
   };
 }
+
+const DOCS_SEARCH = `<h3 id="tool-docs-search"><code>docs.search</code></h3>
+
+Reads no file and writes nothing. Searches the docs.
+
+| Fact | Value |
+| --- | --- |
+| Title | Search the docs |
+| Surfaces | local, remote |
+| \`readOnlyHint\` | \`true\` |
+| \`destructiveHint\` | \`false\` |
+| \`idempotentHint\` | \`true\` |
+| \`openWorldHint\` | \`false\` |
+| Output keys | \`results\` |
+
+| Input | Type | Rules | What it is |
+| --- | --- | --- | --- |
+| \`query\` | string | required; 2 to 200 characters | The words. |
+| \`limit\` | integer | default \`5\`; 1 to 10 | The most hits. |
+`;
 
 const DOCS_READ = `<h3 id="tool-docs-read"><code>docs.read</code></h3>
 
@@ -150,28 +194,33 @@ const REST = `## Resources
 | Limit | Value | Why |
 | --- | --- | --- |
 | \`bodyBytes\` | \`65536\` | A docs call is small. |
+| \`queryChars\` | \`200\` | The longest query. |
+| \`resourcePage\` | \`100\` | One resources page. |
 | \`limit\` | \`10\` | The most hits. |
 
 ## Next
 `;
 
-const PAGE = `## Tools\n\n${DOCS_READ}\n${CHECK}\n${REST}`;
+const PAGE = `## Tools\n\n${DOCS_SEARCH}\n${DOCS_READ}\n${CHECK}\n${REST}`;
 
 describe("checkMcp", () => {
   it("passes when the page and the wire agree", () => {
     const r = checkMcp(PAGE, wire());
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ tools: 2, inputs: 8, prompts: 2, templates: 1, limits: 2 });
+    expect(r.counts).toEqual({ tools: 3, inputs: 10, prompts: 2, templates: 1, limits: 4 });
   });
 
   it("fails on a tool that the page lacks", () => {
-    const r = checkMcp(`## Tools\n\n${DOCS_READ}\n${REST}`, wire());
+    const r = checkMcp(`## Tools\n\n${DOCS_SEARCH}\n${DOCS_READ}\n${REST}`, wire());
     expect(r.failures).toEqual(["the page lacks the tool check"]);
   });
 
   it("fails on a page anchor of no tool", () => {
     const extra = DOCS_READ.replaceAll("docs-read", "docs-get").replaceAll("docs.read", "docs.get");
-    const r = checkMcp(`## Tools\n\n${DOCS_READ}\n${extra}\n${CHECK}\n${REST}`, wire());
+    const r = checkMcp(
+      `## Tools\n\n${DOCS_SEARCH}\n${DOCS_READ}\n${extra}\n${CHECK}\n${REST}`,
+      wire(),
+    );
     expect(r.failures).toEqual(["the page anchor tool-docs-get names no tool of the wire"]);
   });
 
@@ -217,9 +266,9 @@ describe("checkMcp", () => {
 
   it("fails on a missing annotation row", () => {
     const page = CHECK.replace("| `destructiveHint` | `false` |\n", "");
-    expect(checkMcp(`## Tools\n\n${DOCS_READ}\n${page}\n${REST}`, wire()).failures).toEqual([
-      "check: the page lacks the annotation destructiveHint",
-    ]);
+    expect(
+      checkMcp(`## Tools\n\n${DOCS_SEARCH}\n${DOCS_READ}\n${page}\n${REST}`, wire()).failures,
+    ).toEqual(["check: the page lacks the annotation destructiveHint"]);
   });
 
   it("fails on another title, description, surface list, or output key list", () => {
@@ -237,8 +286,8 @@ describe("checkMcp", () => {
 
   it("fails on a schema key that the check cannot read, and never skips it", () => {
     const w = wire();
-    const check = w.tools[1];
-    if (check === undefined) throw new Error("the fixture has two tools");
+    const check = w.tools.find((t) => t.name === "check");
+    if (check === undefined) throw new Error("the fixture has the tool check");
     check.properties.rounds = { ...check.properties.rounds, multipleOf: 2 };
     expect(checkMcp(PAGE, w).failures).toEqual([
       "check.rounds: the check cannot read the schema key multipleOf",
@@ -282,6 +331,58 @@ describe("checkMcp", () => {
     ]);
   });
 
+  it("fails on a limit that the server does not apply, also when the page agrees", () => {
+    const w = wire();
+    w.limits = { ...w.limits, queryChars: 300, limit: 20, resourcePage: 50 };
+    const page = PAGE.replace("| `queryChars` | `200` |", "| `queryChars` | `300` |")
+      .replace("| `limit` | `10` |", "| `limit` | `20` |")
+      .replace("| `resourcePage` | `100` |", "| `resourcePage` | `50` |");
+    expect(checkMcp(page, w).failures).toEqual([
+      "queryChars: LIMITS holds 300; the docs.search query takes at most 200 on the wire",
+      "limit: LIMITS holds 20; the docs.search limit is at most 10 on the wire",
+      "resourcePage: LIMITS holds 50; the first resources/list page on the wire holds 100",
+    ]);
+  });
+
+  it("accepts a short last resources page, and refuses a page longer than the limit", () => {
+    const short = { ...wire(), resourcePage: { size: 7, more: false } };
+    expect(checkMcp(PAGE, short).failures).toEqual([]);
+    const long = { ...wire(), resourcePage: { size: 101, more: false } };
+    expect(checkMcp(PAGE, long).failures).toEqual([
+      "resourcePage: LIMITS holds 100; the first resources/list page on the wire holds 101",
+    ]);
+    const none = { ...wire(), resourcePage: null };
+    expect(checkMcp(PAGE, none).failures).toEqual([
+      "resourcePage: the wire has no value that applies it",
+    ]);
+  });
+
+  it("fails on two sections for one tool", () => {
+    const second = DOCS_READ.replace(
+      "Reads no file and writes nothing. Answers one page.",
+      "Writes the page.",
+    );
+    const page = `## Tools\n\n${DOCS_SEARCH}\n${DOCS_READ}\n${second}\n${CHECK}\n${REST}`;
+    expect(checkMcp(page, wire()).failures).toEqual([
+      "the page has 2 sections for the tool docs.read",
+    ]);
+  });
+
+  it("ends the last tool section at the next h2, so a later table is not the tool's", () => {
+    const facts = CHECK.slice(CHECK.indexOf("| Fact |"), CHECK.indexOf("| Input |"));
+    const bare = CHECK.replace(facts, "");
+    const page = `## Tools\n\n${DOCS_SEARCH}\n${DOCS_READ}\n${bare}\n${REST}\n## Notes\n\n${facts}`;
+    expect(checkMcp(page, wire()).failures).toEqual([
+      "check: the title is missing on the page and Check a deployment on the wire",
+      "check: the surfaces are missing on the page and local on the wire",
+      "check: the page lacks the annotation readOnlyHint",
+      "check: the page lacks the annotation destructiveHint",
+      "check: the page lacks the annotation idempotentHint",
+      "check: the page lacks the annotation openWorldHint",
+      "check: the output keys are none on the page and base, checks on the wire",
+    ]);
+  });
+
   it("fails when the remote surface serves other prompts or templates", () => {
     const w = wire();
     w.remote.prompts = ["check-deployment"];
@@ -313,6 +414,7 @@ describe("checkMcp", () => {
       prompts: [],
       templates: [],
       remote: { tools: [], prompts: [], templates: [] },
+      resourcePage: null,
       limits: {},
       error: null,
     });
@@ -375,5 +477,6 @@ describe("wireLists", () => {
     expect(w.prompts.map((p) => p.name)).toContain("check-deployment");
     expect(w.remote.prompts).toEqual(w.prompts.map((p) => p.name));
     expect(w.limits.bodyBytes).toBe(65_536);
+    expect(w.resourcePage).toEqual({ size: 100, more: true });
   });
 });
