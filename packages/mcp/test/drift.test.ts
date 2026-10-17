@@ -2,7 +2,7 @@
 // the CLI's command table, the flags of each command, its help, and the key
 // lists of its --json documents. The test reads each of these from the CLI's
 // own entries, never from the tool table that it holds.
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -21,10 +21,11 @@ import {
 import { COMMANDS } from "@authtempo/cli/program";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { freshDatabase } from "../../cli/test/support/pg.js";
+import { readIndexFile, readSkills } from "../src/index-reader.js";
 import { localTools } from "../src/local-tools.js";
 import { createServer } from "../src/server.js";
 import { TOOLS, type ToolRow } from "../src/tools.js";
-import { assertFreshBuild, linesOf, REPO, runServer } from "./support/bin.js";
+import { assertFreshBuild, COPY, linesOf, PKG, REPO, runServer } from "./support/bin.js";
 import { type Called, connect } from "./support/client.js";
 import { type FixtureRoot, fixtureRoot } from "./support/fixture-root.js";
 import { assertFreshIndex, siteIndex } from "./support/index.js";
@@ -240,6 +241,33 @@ describe("the tool table against the CLI", () => {
     // The version tool answers the keys of `authtempo --version --json` among its own.
     const version = TOOLS.find((t) => t.name === "version");
     expect(version?.outputKeys).toEqual(expect.arrayContaining(Object.keys(VERSION_JSON_KEYS)));
+  });
+});
+
+/** The packages that are no framework binding (plan 11e ruling 3), written out here. */
+const NOT_BINDINGS = ["core", "client", "verify", "handoff"];
+
+describe("the binding prompt against the index", () => {
+  it("offers each binding of the index file as a value, and no other", () => {
+    // The expected names come from the raw JSON of the file that the binary reads.
+    const raw = JSON.parse(readFileSync(COPY, "utf8")) as {
+      header: { bindings: { name: string }[] };
+    };
+    const names = raw.header.bindings.map((b) => b.name).sort();
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of NOT_BINDINGS)
+      expect(names, "the index lists no such package").not.toContain(name);
+    const index = readIndexFile(COPY);
+    const skills = readSkills(join(PKG, "skills"));
+    for (const surface of ["local", "remote"] as const) {
+      const prompt = createServer({ surface, index, skills }).prompts.find(
+        (p) => p.name === "integrate-binding",
+      );
+      const values = prompt?.args.find((a) => a.name === "binding")?.values ?? [];
+      // Both ways: each index name is a value, and each value is an index name.
+      expect([...values].sort(), surface).toEqual(names);
+      for (const name of NOT_BINDINGS) expect(values, surface).not.toContain(name);
+    }
   });
 });
 
