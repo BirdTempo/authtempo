@@ -102,8 +102,8 @@ export const CHECK_JSON_KEYS = {
 
 /**
  * `authtempo mcp --json`: the target, the file (null for --manual), what the
- * run did, and the entry: an object, the TOML lines for Codex, or for
- * --manual the entry of each editor by its id.
+ * run did, and the entry. The entry is an object, or the TOML lines for
+ * Codex. For --manual, it is the entry of each editor by its id.
  */
 export interface McpJson extends RunKeys {
   editor: string;

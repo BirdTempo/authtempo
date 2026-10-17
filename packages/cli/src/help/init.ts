@@ -1,4 +1,4 @@
-import { STACKS } from "../templates.js";
+import { STACKS } from "../stacks.js";
 import { COMMON_FLAGS, type HelpText } from "./types.js";
 
 /** The stacks as prose: "a, b, or c". The help reads STACKS, so a new stack needs no edit here. */

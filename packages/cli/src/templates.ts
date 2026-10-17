@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { STACKS, type Stack } from "./stacks.js";
 
 /**
  * The init templates (spec 19, the one-source rule). Each stack is an
@@ -7,10 +8,10 @@ import { join, relative } from "node:path";
  * and nothing else, so a tutorial page, its example, and a scaffold cannot
  * drift. The build renders them into dist/templates.json; a test renders
  * them again and compares. `init` takes the stack list and the steps from
- * this file, and the files from the JSON.
+ * this file, and the files from the JSON. The stack names live in
+ * stacks.ts, which imports nothing.
  */
-export const STACKS = ["workers-d1", "workers-postgres", "node", "bun", "mcp-server"] as const;
-export type Stack = (typeof STACKS)[number];
+export { STACKS, type Stack };
 
 export interface StackInfo {
   /** The example app under examples/ that the stack copies. */
@@ -141,10 +142,10 @@ interface PackageJson {
 
 /**
  * The declared rewrites (plan 11c, deviation 5). A scaffold lives outside
- * the repo, so: its name is my-app; each workspace:* is the CLI's version
- * (the packages release together); each tsconfig extends the scaffold's
- * own copy of the base config; the test script of a D1 stack drops the
- * repo's bundle proof; the Bun stack starts with bun. A rewrite that finds an unexpected
+ * the repo, so its name is my-app. Each workspace:* is the CLI's version,
+ * because the packages release together. Each tsconfig extends the
+ * scaffold's own copy of the base config. The test script of a D1 stack
+ * drops the repo's bundle proof. The Bun stack starts with bun. A rewrite that finds an unexpected
  * text throws, so a change of an example fails the build, not the scaffold.
  */
 export function rewrite(stack: Stack, path: string, text: string, version: string): string {

@@ -1,4 +1,4 @@
-import { type Fetcher, fetchWithin, isLocalHost } from "./net.js";
+import { type Fetcher, fetchWithin, HostError, isLocalHost } from "./net.js";
 
 // The checks of `authtempo check` (spec 19). This file and its imports use
 // no Node.js module, so a Worker test runs them in workerd. Every request
@@ -101,15 +101,55 @@ export interface CheckInput {
   strict?: boolean;
 }
 
-/** The body of an answer as text, read in full, so no stream stays open. */
-const textOf = (res: Response) => res.text().catch(() => "");
+/**
+ * The cap of one body read. Core answers each check with a few hundred
+ * bytes, and a hostile host could stream data until the time limit ends.
+ */
+export const BODY_CAP_BYTES = 64 * 1024;
+
+/**
+ * The body of an answer as text, read to its end, so no stream stays open.
+ * A read fault gives "". A body over BODY_CAP_BYTES stops the run with a
+ * fixed text that names the request and the cap, never the body.
+ */
+async function textOf(res: Response, request: string): Promise<string> {
+  if (res.body === null) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > BODY_CAP_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new HostError(
+          `${request}: the answer body is over ${BODY_CAP_BYTES / 1024} KiB, the cap of one read`,
+        );
+      }
+      chunks.push(value);
+    }
+  } catch (e) {
+    if (e instanceof HostError) throw e;
+    return "";
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    all.set(c, at);
+    at += c.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-async function jsonOf(res: Response): Promise<Record<string, unknown> | null> {
+async function jsonOf(res: Response, request: string): Promise<Record<string, unknown> | null> {
+  const text = await textOf(res, request);
   try {
-    const v: unknown = JSON.parse(await textOf(res));
+    const v: unknown = JSON.parse(text);
     return isRecord(v) ? v : null;
   } catch {
     return null;
@@ -180,7 +220,7 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
 
   const session = await get(`${auth}/session`);
   const sessionType = session.headers.get("content-type") ?? "";
-  const sessionBody = await jsonOf(session);
+  const sessionBody = await jsonOf(session, `GET ${auth}/session`);
   const mount =
     session.status === 404 || !sessionType.includes("application/json") || sessionBody === null
       ? "mount_missing"
@@ -208,7 +248,7 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
       add(id, "skip", "no_mount", `the routes are not at ${auth}`);
   } else {
     const foreign = await post(`${auth}/sign-out`, { origin: "https://check.invalid" });
-    await textOf(foreign);
+    await textOf(foreign, `POST ${auth}/sign-out`);
     if (foreign.status === 403)
       add("origin_rule", "pass", null, "a POST from an untrusted origin answers 403");
     else
@@ -221,7 +261,7 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
 
     // A sign-out with no cookie and no Origin touches no row and answers the clear cookie (routes/sessions.ts).
     const out = await post(`${auth}/sign-out`, {});
-    await textOf(out);
+    await textOf(out, `POST ${auth}/sign-out`);
     const cookie = out.status === 200 ? out.headers.getSetCookie()[0] : undefined;
     if (cookie === undefined)
       add(
@@ -262,11 +302,11 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
 
     const jwks = await get(`${auth}/jwks`);
     if (jwks.status === 404) {
-      await textOf(jwks);
+      await textOf(jwks, `GET ${auth}/jwks`);
       add("jwks", "skip", "jwt_mint_off", `GET ${auth}/jwks answers 404: jwtMint is false`);
     } else {
       const cache = jwks.headers.get("cache-control");
-      const body = await jsonOf(jwks);
+      const body = await jsonOf(jwks, `GET ${auth}/jwks`);
       const keys = body && Array.isArray(body.keys) ? (body.keys as unknown[]) : null;
       const records = keys?.filter(isRecord) ?? [];
       if (jwks.status !== 200 || keys === null)
@@ -307,11 +347,11 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
 
   const oidc = await get(`${host.origin}/.well-known/openid-configuration`);
   const as = await get(`${host.origin}/.well-known/oauth-authorization-server`);
-  const a = await jsonOf(oidc);
-  const b = await jsonOf(as);
+  const a = await jsonOf(oidc, `GET ${host.origin}/.well-known/openid-configuration`);
+  const b = await jsonOf(as, `GET ${host.origin}/.well-known/oauth-authorization-server`);
   if (oidc.status === 404 && as.status === 404) {
     const under = await get(`${auth}/.well-known/openid-configuration`);
-    await textOf(under);
+    await textOf(under, `GET ${auth}/.well-known/openid-configuration`);
     if (under.status === 200)
       add(
         "well_known",

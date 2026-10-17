@@ -74,10 +74,10 @@ export function writePrivate(path: string, text: string): void {
 /**
  * Replaces a file that exists. An editor config is shared by the people and
  * the tools of the project, so it must stay readable: mode 0644. A file that
- * its owner made narrower, such as a 0600 .mcp.json with a token of another
- * server, keeps its own mode (plan 11e ruling 5, amended). The pattern of
- * writePrivate: the text goes to a new file in the same directory and is
- * renamed over the target, so a reader never sees half a file.
+ * its owner made narrower keeps its own mode (plan 11e ruling 5, amended).
+ * An example is a 0600 .mcp.json with a token of another server. The write
+ * has the pattern of writePrivate. The text goes to a new file in the same
+ * directory and is renamed over the target, so a reader never sees half a file.
  */
 export function replaceFile(path: string, text: string): void {
   const old = statSync(path).mode & 0o777;

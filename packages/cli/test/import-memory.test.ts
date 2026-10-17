@@ -1,3 +1,5 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exitCode, type ImportReport } from "@authtempo/import";
 import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
@@ -97,5 +99,33 @@ describe("authtempo import --target memory (plan 11e)", () => {
     expect(linesOf(r.stderr)[0]).toMatch(
       /^--target is one of postgres, d1-bundle, memory(\. Did you mean \S+\?)?$/,
     );
+  });
+
+  it("names the input and the place when an export is not JSON, never the file text", () => {
+    // A .env file named as the export: V8's parse text would quote its start.
+    const secret = "DATABASE_URL=postgres://owner:Zq9xK7wV@db.example.net/app\n";
+    const dir = mkdtempSync(join(tmpdir(), "authtempo-json-fault-"));
+    try {
+      const file = join(dir, ".env");
+      writeFileSync(file, secret);
+      const argv = ["import", "cognito", "--users", file, "--target", "memory", "--dry-run"];
+      const fault =
+        "authtempo import: the Cognito users input is not JSON (the fault is at line 1, column 1)";
+      const shell = runBin(argv);
+      expect(shell.status).toBe(2);
+      expect(linesOf(shell.stderr)).toEqual([`stopped: ${fault}; nothing was written`]);
+      const json = runBin([...argv, "--json"]);
+      expect(json.status).toBe(2);
+      const doc = JSON.parse(json.stdout) as Doc;
+      expect(doc.stopped).toBe(`${fault}; nothing was written`);
+      // Each run of four characters of the file: none may reach an answer.
+      for (let i = 0; i + 4 <= secret.length; i++) {
+        const run = secret.slice(i, i + 4);
+        for (const text of [shell.stderr, json.stderr, doc.stopped ?? ""])
+          expect(text).not.toContain(run);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

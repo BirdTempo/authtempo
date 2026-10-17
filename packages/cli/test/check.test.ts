@@ -316,6 +316,51 @@ describe("authtempo check (spec 19)", () => {
     expect(io.stderr.at(-1)).toBe(`stopped: GET ${BASE}/auth/session: no answer`);
   });
 
+  it("shows no password of the base URL in the usage line or in stopped", async () => {
+    // Spec 19 item 5 (Task 10 review I-1): the user part prints as ***.
+    const cases: [string, string][] = [
+      ["http://u:secretpw@127.0.0.1:9", "http://***@127.0.0.1:9"],
+      ["http://:secretpw@127.0.0.1:9", "http://***@127.0.0.1:9"],
+      ["https://u:secretpw@[bad", "https://***@[bad"],
+    ];
+    for (const [bad, shown] of cases) {
+      const fault = `${shown} must be an http or https origin with no path`;
+      const shell = fakeIo();
+      expect(await main(["check", bad], shell)).toBe(2);
+      expect(shell.requests).toEqual([]);
+      expect(shell.stderr[0]).toBe(fault);
+      const json = fakeIo();
+      expect(await main(["check", bad, "--json"], json)).toBe(2);
+      const stop = JSON.parse(json.stdout[0] ?? "") as { stopped: string };
+      expect(stop.stopped).toBe(fault);
+      for (const line of [...shell.stdout, ...shell.stderr, ...json.stdout, ...json.stderr])
+        expect(line).not.toContain("secretpw");
+    }
+  });
+
+  it("reads a body of 64 KiB, and stops on a body of one byte more with a fixed text", async () => {
+    // Task 10 review I-4: a hostile host could stream data until the time limit.
+    const session = (bytes: number) => {
+      const json = '{"error":"unauthorized"}';
+      const body = `${" ".repeat(bytes - json.length)}${json}`;
+      return () =>
+        new Response(body, { status: 401, headers: { "content-type": "application/json" } });
+    };
+    const at = healthy();
+    at.set("GET /auth/session", session(65_536));
+    const full = await check([], at);
+    expect(full.code).toBe(0);
+    expect(result(full.report, "mount")?.status).toBe("pass");
+    const over = healthy();
+    over.set("GET /auth/session", session(65_537));
+    const io = fakeIo({ fetch: deployment(over) });
+    expect(await main(["check", BASE], io)).toBe(2);
+    expect(io.stdout).toEqual([]);
+    expect(io.stderr.at(-1)).toBe(
+      `stopped: GET ${BASE}/auth/session: the answer body is over 64 KiB, the cap of one read`,
+    );
+  });
+
   it("compares the schema version of the database with the version of the CLI", async () => {
     const cases: [number | null, string, string | null][] = [
       [7, "pass", null],

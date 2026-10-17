@@ -51,6 +51,15 @@ export function isLocalHost(hostname: string): boolean {
 }
 
 /**
+ * A URL as a usage line may show it: the user part, with its password,
+ * becomes *** (spec 19 item 5). A regex and not the URL parser, because the
+ * line also names a value that does not parse.
+ */
+export function withoutCredentials(value: string): string {
+  return value.replace(/^((?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/)?[^/?#]*@/, "$1***@");
+}
+
+/**
  * The base URL of a deployment: an https origin with no path, query, or
  * credentials. http is for a host of this machine only (review of plan 11c
  * Task 3): a command sends a secret to this origin, and plain http to another
@@ -66,7 +75,9 @@ export function baseOf(value: string | undefined, o: { allowHttp?: boolean } = {
   try {
     u = new URL(value);
   } catch {
-    throw new UsageError(`${value} must be an http or https origin with no path`);
+    throw new UsageError(
+      `${withoutCredentials(value)} must be an http or https origin with no path`,
+    );
   }
   if (
     (u.protocol !== "https:" && u.protocol !== "http:") ||
@@ -76,10 +87,12 @@ export function baseOf(value: string | undefined, o: { allowHttp?: boolean } = {
     u.username !== "" ||
     u.password !== ""
   )
-    throw new UsageError(`${value} must be an http or https origin with no path`);
+    throw new UsageError(
+      `${withoutCredentials(value)} must be an http or https origin with no path`,
+    );
   if (u.protocol === "http:" && !isLocalHost(u.hostname) && o.allowHttp !== true)
     throw new UsageError(
-      `${value} must use https: http is for localhost, 127.0.0.1, or [::1] only`,
+      `${withoutCredentials(value)} must use https: http is for localhost, 127.0.0.1, or [::1] only`,
     );
   return u.origin;
 }

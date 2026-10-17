@@ -55,9 +55,9 @@ beforeAll(() => {
 });
 
 /**
- * A path part of a cited page, such as 2026-07-28-improved-record-display-format:
- * two or more parts joined by hyphens, and each part is all lowercase letters or
- * all digits. A random key part mixes letters and digits, so a UUID, a Mailchimp
+ * A path part of a cited page, such as 2026-07-28-improved-record-display-format.
+ * It has two or more parts joined by hyphens. Each part is all lowercase letters
+ * or all digits. A random key part mixes letters and digits, so a UUID, a Mailchimp
  * key (<32 hex>-us21), and a Mailgun key (key-<32 characters>) are no slug. A key
  * part of letters only would pass; the scan accepts that rare case for a cited URL.
  * The test "writes no secret into any file" holds these shapes as probes.

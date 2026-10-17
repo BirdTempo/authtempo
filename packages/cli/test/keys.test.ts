@@ -194,11 +194,17 @@ describe("authtempo keys rotate (spec 19)", () => {
   });
 
   it("refuses a base URL with a path or with credentials, before any request", async () => {
-    for (const bad of [`${BASE}/auth`, "https://u:p@api.example.com", "ftp://api.example.com"]) {
+    // The usage line shows *** for the user part (spec 19 item 5).
+    const cases: [string, string][] = [
+      [`${BASE}/auth`, `${BASE}/auth`],
+      ["https://u:p@api.example.com", "https://***@api.example.com"],
+      ["ftp://api.example.com", "ftp://api.example.com"],
+    ];
+    for (const [bad, shown] of cases) {
       const { code, io } = await rotate([bad, "--yes"]);
       expect(code).toBe(2);
       expect(io.requests).toEqual([]);
-      expect(io.stderr[0]).toBe(`${bad} must be an http or https origin with no path`);
+      expect(io.stderr[0]).toBe(`${shown} must be an http or https origin with no path`);
     }
   });
 

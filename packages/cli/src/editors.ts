@@ -1,7 +1,8 @@
 /**
  * The editors that `authtempo mcp` writes into (plan 11e, owner decision 4).
- * Each row holds the project file, its format, the key of the server map,
- * and the docs page that gives the shape, with the date of the read. A row
+ * Each row holds the project file, its format, and the key of the server
+ * map. It also holds the docs page that gives the shape, with the date of
+ * the read. A row
  * changes only after a new read of its page. It imports no Node.js module,
  * so the docs site and the MCP server can read it.
  */
@@ -71,8 +72,9 @@ export const EDITORS: Readonly<Record<EditorId, EditorSpec>> = {
     read: "2026-10-17",
   },
   // code.visualstudio.com/docs/copilot/reference/mcp-configuration, read
-  // 2026-10-17: no ${env:NAME} in mcp.json (plan 11e deviation 7), so no env
-  // line; the server reads the variable from the environment of VS Code.
+  // 2026-10-17: no ${env:NAME} in mcp.json (plan 11e deviation 7). So the
+  // entry has no env line, and the server reads the variable from the
+  // environment of VS Code.
   vscode: {
     flag: "--vscode",
     file: ".vscode/mcp.json",
@@ -116,8 +118,8 @@ export function mcpEntry(o: {
 const tomlString = (s: string) => JSON.stringify(s);
 
 /**
- * The entry of one editor, as its docs give it: an object for a JSON file,
- * or the lines of the TOML table (without the table header) for Codex.
+ * The entry of one editor, as its docs give it. It is an object for a JSON
+ * file. For Codex, it is the lines of the TOML table, with no table header.
  * `urlEnv` is the name of `--url-env`, or null when the flag is not given.
  * No value of the environment goes into the entry: each editor gets a
  * reference that it expands at its own start.

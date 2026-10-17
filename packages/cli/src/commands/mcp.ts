@@ -77,10 +77,10 @@ function entryText(id: EditorId, entry: unknown): string {
 /** The commands of the two editors that have their own `mcp add`. */
 function addCommands(entry: McpEntry, o: { remote: boolean; urlEnv: string | null }): string[] {
   // The two remote forms, read 2026-10-17: code.claude.com/docs/en/mcp gives
-  // `claude mcp add --transport http <name> <url>`. The Codex page
-  // (developers.openai.com/codex/mcp, which answers 308 to
-  // learn.chatgpt.com/docs/extend/mcp) gives `codex mcp add <name> --url <url>`
-  // with the optional --oauth-client-id; the remote server has no
+  // `claude mcp add --transport http <name> <url>`. The Codex page is
+  // developers.openai.com/codex/mcp, which answers 308 to
+  // learn.chatgpt.com/docs/extend/mcp. It gives `codex mcp add <name> --url
+  // <url>` with the optional --oauth-client-id. The remote server has no
   // authentication, so the line drops that flag (plan 11e ruling 9).
   if (o.remote)
     return [
@@ -162,11 +162,14 @@ function tomlCode(line: string): string {
 const tomlPath = (s: string) => s.replace(/["'\s]/g, "");
 const TAKEN = `mcp_servers.${NAME}`;
 const isTaken = (path: string) => path === TAKEN || path.startsWith(`${TAKEN}.`);
+/** The authtempo key at the start of an inline table entry, bare or quoted, then = or a dot. */
+const INLINE_KEY = new RegExp(`[{,]\\s*["']?${NAME}["']?\\s*[.=]`);
 
 /**
- * True when the TOML text defines the authtempo server in any form: a table
- * header `[mcp_servers.authtempo]` (with spaces or quotes), a key `authtempo`
- * under `[mcp_servers]`, or a dotted or inline key at the root. TOML refuses
+ * True when the TOML text defines the authtempo server in any form. The
+ * forms are a table header `[mcp_servers.authtempo]` (with spaces or quotes),
+ * a key `authtempo` under `[mcp_servers]`, and a dotted or inline key at the
+ * root. TOML refuses
  * a table that is defined two times, so an append would break the file.
  */
 function codexTaken(text: string): boolean {
@@ -185,9 +188,9 @@ function codexTaken(text: string): boolean {
     const key = tomlPath(pair[1] ?? "");
     const path = table === "" ? key : `${table}.${key}`;
     if (isTaken(path)) return true;
-    // An inline table: mcp_servers = { authtempo = { ... } }.
-    if (path === "mcp_servers" && new RegExp(`["']?${NAME}["']?\\s*=`).test(pair[2] ?? ""))
-      return true;
+    // An inline table: mcp_servers = { authtempo = { ... } }, or a dotted
+    // key in it, such as { "authtempo".command = "x" }.
+    if (path === "mcp_servers" && INLINE_KEY.test(pair[2] ?? "")) return true;
   }
   return false;
 }
@@ -214,10 +217,10 @@ function mergeToml(file: string, old: string, table: string): Merge {
 }
 
 /**
- * `authtempo mcp [dir] --<editor>` (plan 11e, owner decision 4): adds the
- * authtempo MCP server to the project file of one editor, or prints every
- * entry with --manual. It writes in the project folder only, reads no
- * secret, and writes no value of the environment: each entry names the
+ * `authtempo mcp [dir] --<editor>` (plan 11e, owner decision 4). It adds
+ * the authtempo MCP server to the project file of one editor. With --manual,
+ * it prints every entry. It writes in the project folder only, and it reads
+ * no secret. It writes no value of the environment: each entry names the
  * variable, and the editor expands it.
  */
 export const mcpCommand: Command = {
@@ -257,7 +260,9 @@ export const mcpCommand: Command = {
     const bin = hook ? resolve(ctx.cwd, hook) : fileURLToPath(MCP_BIN_URL);
     // Only the workspace binary runs before publication; after it, npx fetches the release.
     if (!remote && UNPUBLISHED && !ctx.exists(bin))
-      throw new Stop("build @authtempo/mcp first: pnpm --filter @authtempo/mcp build");
+      throw new Stop(
+        "build @authtempo/mcp first: pnpm --filter @authtempo/mcp build, then pnpm turbo run index --filter=@authtempo/mcp",
+      );
     const entry = mcpEntry({ unpublished: UNPUBLISHED, version: CLI_VERSION, bin, root });
     const opts = { remote, urlEnv };
 
@@ -288,8 +293,8 @@ export const mcpCommand: Command = {
     const file = join(root, spec.file);
     if (id === "codex") ctx.err("A Codex project file applies only in a trusted project.");
     // A merge stop returns 2 with the command's own document, as the import's
-    // runParsed does: the document keeps the file and the entry to add by hand
-    // (plan 11e ruling 11). A thrown Stop is for a stop before the merge.
+    // runParsed does. The document keeps the file and the entry to add by
+    // hand (plan 11e ruling 11). A thrown Stop is for a stop before the merge.
     const stopped = (why: string): number => {
       for (const line of entryText(id, rendered).split("\n")) if (line !== "") say(line);
       ctx.err(`stopped: ${why}`);

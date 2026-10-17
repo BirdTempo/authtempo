@@ -19,8 +19,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MCP_BIN_URL } from "../src/commands/mcp.js";
 import { type EditorId, mcpEntry, renderEntry } from "../src/editors.js";
 import { MCP_JSON_KEYS } from "../src/json.js";
+import { main } from "../src/main.js";
 import { UNPUBLISHED } from "../src/templates.js";
 import { assertFreshBuild, linesOf, PKG, REPO, runBin } from "./support/bin.js";
+import { fakeIo } from "./support/fake-io.js";
 
 const FIXTURES = join(PKG, "test/fixtures/mcp");
 const VERSION = (JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as { version: string })
@@ -345,7 +347,9 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
     const dir = fresh();
     const r = mcp(dir, ["--cursor"], { AUTHTEMPO_MCP_BIN: join(dir, "missing.js") });
     expect(r.status).toBe(2);
-    expect(r.stderr).toContain("build @authtempo/mcp first: pnpm --filter @authtempo/mcp build");
+    expect(linesOf(r.stderr)).toContain(
+      "stopped: build @authtempo/mcp first: pnpm --filter @authtempo/mcp build, then pnpm turbo run index --filter=@authtempo/mcp",
+    );
     expect(readdirSync(dir)).toEqual([]);
     // The help names the hook in its Notes block, not as a setting (plan 11e ruling 14).
     const help = runBin(["mcp", "--help"]).stdout;
@@ -372,6 +376,33 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
 
   it("stops on a key authtempo under [mcp_servers]", () => {
     codexStops('[mcp_servers]\nauthtempo = { command = "x" }\n');
+  });
+
+  it("runs no editor binary and no child process, for each target and --manual", async () => {
+    // Spec 21 item 11: the installer writes the project file and runs nothing.
+    // The targets are typed here, as the plan's table gives them.
+    const targets = ["claude-code", "cursor", "codex", "opencode", "vscode", "manual"];
+    for (const target of targets)
+      for (const extra of [[], ["--remote"]]) {
+        const runs: string[] = [];
+        const io = fakeIo({
+          env: { AUTHTEMPO_MCP_BIN: "/bin/authtempo-mcp.js" },
+          files: { "/bin/authtempo-mcp.js": "", "/work/package.json": "{}" },
+          run: async (command) => {
+            runs.push(command);
+            throw new Error(`the installer ran ${command}`);
+          },
+        });
+        const code = await main(["mcp", "/work", `--${target}`, ...extra], io);
+        expect(code, `${target}: ${io.stderr.join("\n")}`).toBe(0);
+        expect(runs, target).toEqual([]);
+      }
+  });
+
+  it("stops on an inline table at the root, with a plain or a dotted key", () => {
+    codexStops('mcp_servers = { authtempo = { command = "x" } }\n');
+    codexStops('mcp_servers = { "authtempo".command = "x" }\n');
+    codexStops('mcp_servers = { other = { command = "y" }, \'authtempo\' . command = "x" }\n');
   });
 
   it("stops on a quoted table header", () => {
