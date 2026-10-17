@@ -107,17 +107,24 @@ function build(spec: ServerSpec): McpServer {
       {
         title: p.title,
         description: p.description,
-        argsSchema: z.object(
+        // A strict object: an argument that the prompt does not name is the
+        // protocol error -32602, as an unknown tool input is an input error
+        // (plan 11e Task 14, review I-6 of Task 5). A free argument is at most
+        // 2048 characters, because its text goes into the prompt.
+        argsSchema: z.strictObject(
           Object.fromEntries(
             p.args.map((a) => {
               const [first, ...rest] = a.values;
-              const schema = first === undefined ? z.string() : z.enum([first, ...rest]);
-              return [a.name, schema.describe(a.description)];
+              const value =
+                first === undefined ? z.string().min(1).max(2048) : z.enum([first, ...rest]);
+              const schema = value.describe(a.description);
+              return [a.name, a.required ? schema : schema.optional()];
             }),
           ),
         ),
       },
       (args: unknown) => ({
+        description: p.description,
         messages: [
           {
             role: "user" as const,

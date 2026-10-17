@@ -53,17 +53,25 @@ export interface ResourceSpec {
   read(uri: string): string | null;
 }
 
-/** One prompt (Task 14 fills the list). Each argument is a string. */
+/**
+ * One prompt: one skill of the skill pack (prompts.ts). Each argument is a
+ * string. An argument with values takes one of them; an empty list takes any text.
+ */
 export interface PromptSpec {
   name: string;
   title: string;
   description: string;
-  args: readonly { name: string; description: string; values: readonly string[] }[];
+  args: readonly {
+    name: string;
+    description: string;
+    required: boolean;
+    values: readonly string[];
+  }[];
   /** The text of the prompt for the given arguments. */
   text(args: Readonly<Record<string, string>>): string;
 }
 
-/** One skill of the skill pack (Task 14): the folder name and the text of its SKILL.md. */
+/** One skill of the skill pack: the folder name and the text of its SKILL.md. */
 export interface Skill {
   name: string;
   markdown: string;

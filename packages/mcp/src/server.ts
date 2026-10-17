@@ -4,6 +4,7 @@
 import { VERSION as CORE_VERSION, SCHEMA_VERSION } from "@authtempo/core";
 import { docsTools } from "./docs-tools.js";
 import type { AgentIndex } from "./index-format.js";
+import { skillPrompts } from "./prompts.js";
 import { docsResources } from "./resources.js";
 import type { ServerSpec, SkillSet, Surface, ToolImpl } from "./spec.js";
 
@@ -80,6 +81,8 @@ export function createServer(opts: {
     tools,
     // Both surfaces serve the docs resources (spec 21 item 2).
     resources: docsResources(opts.index),
-    prompts: [],
+    // Both surfaces serve the prompts: one per skill, with the text of the
+    // skill (spec 21 item 9). The binding argument takes the bindings of the index.
+    prompts: skillPrompts(opts.skills, { bindings: opts.index.header.bindings.map((b) => b.name) }),
   };
 }

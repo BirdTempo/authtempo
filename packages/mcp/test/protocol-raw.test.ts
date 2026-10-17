@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PROVIDERS, STACKS } from "@authtempo/cli/program";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ENV_NAME } from "../../cli/src/secrets.js";
 import { INSTRUCTIONS, URL_ENV_NAME } from "../src/server.js";
@@ -188,7 +189,24 @@ describe("the stdio server on the wire", () => {
       });
       expect(t.inputSchema.additionalProperties, t.name).toBe(false);
     }
-    expect(result(run, 4).prompts).toEqual([]);
+    // One prompt per skill (plan 11e Task 14). The names come from STACKS,
+    // PROVIDERS, and the index header here, not from the prompt table.
+    const prompts = result(run, 4).prompts as {
+      name: string;
+      arguments?: { name: string; required?: boolean }[];
+    }[];
+    expect(prompts.map((p) => p.name).sort()).toEqual(
+      [
+        ...STACKS.map((s) => (s === "mcp-server" ? "protect-mcp-server" : `integrate-${s}`)),
+        "integrate-binding",
+        ...PROVIDERS.map((p) => `migrate-${p}`),
+        "migrate-better-auth",
+        "check-deployment",
+      ].sort(),
+    );
+    expect(prompts.find((p) => p.name === "integrate-binding")?.arguments).toEqual([
+      expect.objectContaining({ name: "binding", required: true }),
+    ]);
   });
 
   // The SDK's own resources/list handler (@modelcontextprotocol/server 2.3.1,
@@ -227,6 +245,34 @@ describe("the stdio server on the wire", () => {
     // Every page of the index, once: the last page has no cursor.
     expect(uris).toHaveLength(n);
     expect(new Set(uris).size).toBe(n);
+  });
+
+  // prompts/list carries no argument values, so the values of binding are
+  // held on the wire by prompts/get: each binding of the index header answers,
+  // and a name that the header does not list is -32602.
+  it("gets integrate-binding for each binding of the index, and refuses another", async () => {
+    const names = siteIndex().header.bindings.map((b) => b.name);
+    expect(names.length).toBeGreaterThan(0);
+    const run = await runServer(
+      [],
+      [
+        init("2025-11-25"),
+        line(null, "notifications/initialized"),
+        ...names.map((binding, i) =>
+          line(10 + i, "prompts/get", { name: "integrate-binding", arguments: { binding } }),
+        ),
+        line(9, "prompts/get", {
+          name: "integrate-binding",
+          arguments: { binding: "not-a-binding" },
+        }),
+      ],
+    );
+    names.forEach((binding, i) => {
+      const r = result(run, 10 + i) as { messages: { content: { text: string } }[] };
+      expect(r.messages[0]?.content.text, binding).toContain(binding);
+    });
+    const refused = messages(run).find((m) => m.id === 9);
+    expect((refused as { error?: { code: number } } | undefined)?.error?.code).toBe(-32602);
   });
 
   it("answers initialize at 2025-06-18 with the same version", () => {

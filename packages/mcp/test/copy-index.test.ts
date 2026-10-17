@@ -3,6 +3,7 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -39,10 +40,10 @@ function setup(o: { source: boolean; sourceAge: number; pageAge: number }) {
   return { source, content, target };
 }
 
-function run(p: { source: string; content: string; target: string }) {
+function run(p: { source: string; content: string; target: string }, extra: string[] = []) {
   const r = spawnSync(
     process.execPath,
-    [SCRIPT, "--source", p.source, "--content", p.content, "--target", p.target],
+    [SCRIPT, "--source", p.source, "--content", p.content, "--target", p.target, ...extra],
     { encoding: "utf8" },
   );
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -53,9 +54,21 @@ describe("copy-index", () => {
     const p = setup({ source: true, sourceAge: 10, pageAge: 100 });
     const r = run(p);
     expect(r.stderr).toBe("");
-    expect(r.stdout).toBe(`copy-index: PASS pages=${siteIndex().pages.length}\n`);
+    // One skill per folder of skills/, counted here from the folder.
+    const folders = readdirSync(join(PKG, "skills")).sort();
+    expect(r.stdout).toBe(
+      `copy-index: PASS pages=${siteIndex().pages.length} skills=${folders.length}\n`,
+    );
     expect(r.status).toBe(0);
     expect(readFileSync(p.target, "utf8")).toBe(readFileSync(SITE_INDEX, "utf8"));
+    // skills.json beside the index holds each SKILL.md as it is, for the Worker.
+    const written = JSON.parse(readFileSync(join(p.target, "../skills.json"), "utf8")) as {
+      name: string;
+      markdown: string;
+    }[];
+    expect(written.map((s) => s.name)).toEqual(folders);
+    for (const s of written)
+      expect(s.markdown).toBe(readFileSync(join(PKG, "skills", s.name, "SKILL.md"), "utf8"));
   });
 
   it("refuses an index that is older than a page source, and copies nothing", () => {
@@ -66,6 +79,23 @@ describe("copy-index", () => {
     expect(r.stderr).toContain("is older than a page source");
     expect(r.stderr).toContain("run pnpm turbo run build --filter=@authtempo/site");
     expect(() => readFileSync(p.target)).toThrow();
+  });
+
+  it("refuses a skill set that lacks a prompt of the stacks and providers, and writes nothing", () => {
+    const p = setup({ source: true, sourceAge: 10, pageAge: 100 });
+    const skills = join(p.content, "../skills");
+    for (const name of readdirSync(join(PKG, "skills")).filter(
+      (n) => n !== "authtempo-migrate-cognito",
+    )) {
+      mkdirSync(join(skills, name), { recursive: true });
+      copyFileSync(join(PKG, "skills", name, "SKILL.md"), join(skills, name, "SKILL.md"));
+    }
+    const r = run(p, ["--skills", skills]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("missing migrate-cognito");
+    expect(() => readFileSync(p.target)).toThrow();
+    expect(() => readFileSync(join(p.target, "../skills.json"))).toThrow();
   });
 
   it("refuses a missing index", () => {

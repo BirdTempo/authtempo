@@ -1,0 +1,43 @@
+---
+name: authtempo-migrate-firebase
+description: Move the users of Firebase Auth into authtempo through the tools of the authtempo MCP server, with a plan, a review by the person, and one run. Use it when a person moves an app from Firebase Auth to authtempo.
+metadata:
+  source: /docs/migrate/firebase/
+---
+
+# Move the users of Firebase Auth to authtempo
+
+**For:** a coding agent that moves the users of an app from Firebase Auth to authtempo for a person.
+
+**What it does:** you plan the import twice, the person reads the report, and one run writes the users. Then you do the cutover.
+
+## Before you start
+
+- The authtempo MCP server runs in this project. The export files are inside its root.
+- The environment of the server holds the connection string, in `DATABASE_URL` or in the variable of its `--url-env` flag.
+- Never put a connection string, a key, or a password in a tool input or in a file.
+- The database has the tables of authtempo. Run `authtempo migrate --target postgres` first.
+
+## Steps
+
+1. Call `docs.read` with the path `/docs/migrate/firebase/`. Do its export step with the person.
+2. Before the import, set the password check of the page in the API.
+3. Call `migrate.plan` with `provider: "firebase"` and `against: "empty"`. Add the inputs `users`, `firebase_rounds`, `firebase_mem_cost`, and `formats`.
+4. Read the report. Fix each refused file or input, and plan again.
+5. Call `migrate.plan` with the same input and `against: "database"`. The answer holds a `plan_id`.
+6. Show the whole report to the person. Ask the person to read each line and to say yes.
+7. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`.
+8. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps with the person.
+
+## If it fails
+
+- The answer has `isError` and "no held plan has this id": the plan expired or ran. Plan again against the database.
+- The answer has `isError` and "the input differs from the plan": give `migrate.run` the input of the plan.
+- The answer has `isError` and "changed since the plan": an export file changed. Plan again.
+- The report has `exit` 1: a person must look at a record. [The exit status](/docs/reference/cli/import/#the-exit-status) lists each case.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials) after the run: the hash format is not in the seam, or the password is wrong.
+
+## Next
+
+- [The cutover](/docs/migrate/cutover/)
+- [authtempo import](/docs/reference/cli/import/)
