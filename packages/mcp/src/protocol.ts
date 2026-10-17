@@ -8,6 +8,7 @@ import {
   McpServer,
   ProtocolError,
   ProtocolErrorCode,
+  ResourceNotFoundError,
   ResourceTemplate,
   type Transport,
 } from "@modelcontextprotocol/server";
@@ -70,20 +71,36 @@ function build(spec: ServerSpec): McpServer {
   for (const t of spec.resources.templates)
     server.registerResource(
       t.name,
-      new ResourceTemplate(t.uriTemplate, {
-        list: async () => ({
-          resources: t.list().map((r) => ({ uri: r.uri, name: r.name, mimeType: t.mimeType })),
-        }),
-      }),
+      // No list callback: the list handler below pages the list of the spec.
+      new ResourceTemplate(t.uriTemplate, { list: undefined }),
       { title: t.title, description: t.description, mimeType: t.mimeType },
       async (uri) => {
-        const text = t.read(uri.href);
-        // An unknown resource is a protocol error -32602 (the plan's Global Constraints).
-        if (text === null)
-          throw new ProtocolError(ProtocolErrorCode.InvalidParams, `no resource ${uri.href}`);
+        const text = spec.resources.read(uri.href);
+        // An unknown resource is a protocol error -32602 with the URI in its data (spec 21 item 9).
+        if (text === null) throw new ResourceNotFoundError(uri.href);
         return { contents: [{ uri: uri.href, mimeType: t.mimeType, text }] };
       },
     );
+  // The SDK's resources/list handler ignores the cursor and gives no
+  // nextCursor (@modelcontextprotocol/server 2.3.1, dist/mcp-DIH4cS6P.mjs:1880,
+  // read 2026-10-17). So the seam replaces that one handler and pages the
+  // list. setRequestHandler replaces a handler that exists (2.3.1).
+  // protocol-raw.test.ts fails when the SDK handler answers again. A cursor
+  // that the list did not give is the protocol error -32602 (InvalidParams),
+  // because the request has a parameter that is not valid.
+  server.server.setRequestHandler("resources/list", async (request) => {
+    const cursor = request.params?.cursor;
+    const page = spec.resources.list(cursor);
+    if (page === null)
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        `the cursor ${String(cursor)} is not valid`,
+      );
+    return {
+      resources: page.resources.map((r) => ({ ...r })),
+      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+    };
+  });
   for (const p of spec.prompts)
     server.registerPrompt(
       p.name,

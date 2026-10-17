@@ -4,6 +4,7 @@
 import { VERSION as CORE_VERSION, SCHEMA_VERSION } from "@authtempo/core";
 import { docsTools } from "./docs-tools.js";
 import type { AgentIndex } from "./index-format.js";
+import { docsResources } from "./resources.js";
 import type { ServerSpec, SkillSet, Surface } from "./spec.js";
 
 /**
@@ -56,7 +57,8 @@ export function createServer(opts: {
     version: MCP_VERSION,
     instructions: INSTRUCTIONS[opts.surface],
     tools,
-    resources: { templates: [] },
+    // Both surfaces serve the docs resources (spec 21 item 2).
+    resources: docsResources(opts.index),
     prompts: [],
   };
 }

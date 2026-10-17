@@ -17,20 +17,40 @@ export interface ToolImpl {
   call(input: Record<string, unknown>): Promise<ToolResult>;
 }
 
-/** One resource template (Task 6 fills the list). */
+/** One resource template. The SDK lists it in resources/templates/list. */
 export interface ResourceTemplateSpec {
   name: string;
   uriTemplate: string;
   title: string;
   description: string;
   mimeType: string;
-  list(): readonly { uri: string; name: string }[];
-  /** The text of one resource, or null when the URI names no resource. */
-  read(uri: string): string | null;
 }
 
+/** One entry of resources/list. */
+export interface ResourceEntry {
+  uri: string;
+  name: string;
+  title: string;
+  description: string;
+  mimeType: string;
+}
+
+/** One page of resources/list. A page with no nextCursor is the last page. */
+export interface ResourceListPage {
+  resources: readonly ResourceEntry[];
+  nextCursor?: string;
+}
+
+/**
+ * The resources of a server. The list and the read cover every template, so
+ * the seam pages one list and not one list per template.
+ */
 export interface ResourceSpec {
   templates: readonly ResourceTemplateSpec[];
+  /** One page of the list, or null for a cursor that the list did not give. */
+  list(cursor: string | undefined): ResourceListPage | null;
+  /** The text of one resource, or null when the URI names no resource. */
+  read(uri: string): string | null;
 }
 
 /** One prompt (Task 14 fills the list). Each argument is a string. */

@@ -173,8 +173,45 @@ describe("the stdio server on the wire", () => {
       });
       expect(t.inputSchema.additionalProperties, t.name).toBe(false);
     }
-    expect(result(run, 3).resources).toEqual([]);
     expect(result(run, 4).prompts).toEqual([]);
+  });
+
+  // The SDK's own resources/list handler (@modelcontextprotocol/server 2.3.1,
+  // dist/mcp-DIH4cS6P.mjs:1880, read 2026-10-17) answers every page at once
+  // and gives no nextCursor. A first page of 100 with a cursor shows that the
+  // seam's handler answers. This test fails when the SDK handler answers again.
+  it("pages resources/list on the wire, 100 entries a page, to a last page with no cursor", async () => {
+    const n = siteIndex().pages.length;
+    // The test needs a second page. A docs tree of 100 pages or fewer cannot show the cursor.
+    expect(n).toBeGreaterThan(100);
+    const first = result(runs.init2511, 3) as {
+      resources: { uri: string }[];
+      nextCursor?: unknown;
+    };
+    expect(first.resources).toHaveLength(100);
+    for (const r of first.resources) expect(r.uri).toMatch(/^authtempo:\/\/docs\/[a-z0-9/-]+$/);
+    expect(typeof first.nextCursor).toBe("string");
+    const uris = first.resources.map((r) => r.uri);
+    let cursor = first.nextCursor as string;
+    for (let i = 0; i < 10; i++) {
+      const run = await runServer(
+        [],
+        [
+          init("2025-11-25"),
+          line(null, "notifications/initialized"),
+          line(2, "resources/list", { cursor }),
+        ],
+      );
+      const page = result(run, 2) as { resources: { uri: string }[]; nextCursor?: unknown };
+      expect(page.resources.length).toBeGreaterThan(0);
+      expect(page.resources.length).toBeLessThanOrEqual(100);
+      uris.push(...page.resources.map((r) => r.uri));
+      if (page.nextCursor === undefined) break;
+      cursor = page.nextCursor as string;
+    }
+    // Every page of the index, once: the last page has no cursor.
+    expect(uris).toHaveLength(n);
+    expect(new Set(uris).size).toBe(n);
   });
 
   it("answers initialize at 2025-06-18 with the same version", () => {
