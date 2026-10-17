@@ -103,6 +103,23 @@ const MIGRATE_KEYS = [
   "stopped",
 ] as const;
 
+/**
+ * The keys of `authtempo check --json` (CHECK_JSON_KEYS of the CLI). The
+ * check tool keeps these keys, and drops each text of the deployment
+ * (plan deviation 1). check.test.ts holds the two lists equal.
+ */
+const CHECK_KEYS = ["base", "checks", "warnings", "summary", "exit", "stopped"] as const;
+
+/** True for an http or https URL. The CLI's own rule then asks for an origin with no path. */
+const httpUrl = (value: string): boolean => {
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 /** The name of an environment variable: the CLI's rule (ENV_NAME of packages/cli/src/secrets.ts). */
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -428,5 +445,42 @@ export const TOOLS: readonly ToolRow[] = [
         .describe("true with plan_id: the person read the plan and wants the run."),
     }),
     outputKeys: [...MIGRATE_KEYS, "plan_id", "next"],
+  },
+  {
+    name: "check",
+    title: "Check a deployed authtempo API",
+    description:
+      "Fetches the public documents of a deployment from this machine, sends no credential, and writes nothing. It runs authtempo check on base_url, and fetches no other origin. It answers each check as its id, status, code, and docs link, and each warning as its code. It answers no text of the deployment. The tool skips the schema check: run authtempo check with --target in the shell for it.",
+    surfaces: ["local"],
+    wraps: {
+      command: "check",
+      positional: ["base_url"],
+      flags: { base_path: "base-path", strict: "strict" },
+      fixed: ["--json"],
+      toolOnly: [],
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    input: z.strictObject({
+      base_url: z
+        .string()
+        .max(2048)
+        .refine(httpUrl, "base_url is an http or https URL")
+        .describe("The origin of the deployment, such as https://api.example.com."),
+      // A leading slash keeps the value from a read as a flag of the CLI.
+      base_path: z
+        .string()
+        .min(1)
+        .max(200)
+        .regex(/^\//)
+        .default("/auth")
+        .describe("The basePath of the deployment's config, /auth by default."),
+      strict: z.boolean().default(false).describe("true: each skip counts as a failure."),
+    }),
+    outputKeys: CHECK_KEYS,
   },
 ];

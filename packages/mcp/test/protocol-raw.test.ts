@@ -71,10 +71,17 @@ const SCHEMA_FILE_VERSION = Math.max(
 
 /** The tool names of plan 11e Task 5, typed here: the test does not read the table it pins. */
 const DOCS_TOOLS = ["docs.search", "docs.read", "version"];
-/** The tools of the local binary: the docs tools and the local tools of plan 11e Tasks 7 to 9. */
-const LOCAL_TOOLS = [...DOCS_TOOLS, "scaffold", "migrate.plan", "migrate.run", "schema.migrate"];
-/** The tools that only read: the docs tools and migrate.plan, typed here. */
-const READS_ONLY = [...DOCS_TOOLS, "migrate.plan"];
+/** The tools of the local binary: the docs tools and the local tools of plan 11e Tasks 7 to 10. */
+const LOCAL_TOOLS = [
+  ...DOCS_TOOLS,
+  "scaffold",
+  "migrate.plan",
+  "migrate.run",
+  "schema.migrate",
+  "check",
+];
+/** The tools that only read: the docs tools, migrate.plan, and check, typed here. */
+const READS_ONLY = [...DOCS_TOOLS, "migrate.plan", "check"];
 
 const version = (path: string) =>
   (JSON.parse(readFileSync(join(REPO, path), "utf8")) as { version: string }).version;
@@ -169,14 +176,15 @@ describe("the stdio server on the wire", () => {
     }[];
     expect(tools.map((t) => t.name).sort()).toEqual([...LOCAL_TOOLS].sort());
     for (const t of tools) {
-      // The docs tools and migrate.plan only read; scaffold writes new files and
-      // overwrites none; migrate.run writes rows and schema.migrate writes tables.
+      // The docs tools, migrate.plan, and check only read; scaffold writes new files
+      // and overwrites none; migrate.run writes rows and schema.migrate writes tables.
+      // Only check reaches another host: the deployment that its input names.
       const reads = READS_ONLY.includes(t.name);
       expect(t.annotations, t.name).toEqual({
         readOnlyHint: reads,
         destructiveHint: t.name === "migrate.run" || t.name === "schema.migrate",
         idempotentHint: reads,
-        openWorldHint: false,
+        openWorldHint: t.name === "check",
       });
       expect(t.inputSchema.additionalProperties, t.name).toBe(false);
     }

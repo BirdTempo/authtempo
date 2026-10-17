@@ -4,6 +4,14 @@
 // imports this file: it reads the CLI, so the remote Worker cannot load it.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import {
+  ALL_CHECK_CODES,
+  CHECK_IDS,
+  type CheckId,
+  type CheckStatus,
+  HELP,
+  pageUrl,
+} from "@authtempo/cli";
 import { main } from "@authtempo/cli/program";
 import { type ConfinedIo, confinedIo, insideRoot, RootError } from "./cli-io.js";
 import { isPlanError, PlanStore, sha256 } from "./plans.js";
@@ -193,6 +201,114 @@ const SCHEMA_CHANGED = "the database changed since the plan";
 
 /** The text of an input that is not one of the two modes of schema.migrate. */
 const SCHEMA_MODES = "schema.migrate takes dry_run: true alone, or plan_id with confirm: true";
+
+/** The answer of the check tool: fixed values only (plan deviation 1). */
+export interface McpCheckResult {
+  /** The input's own URL. */
+  base: string;
+  checks: { id: CheckId; status: CheckStatus; code: string | null; docs: string | null }[];
+  /** The code of each warning, with no text after it. */
+  warnings: string[];
+  summary: { run: number; pass: number; fail: number; skip: number };
+  exit: number;
+  /** The CLI's own text of a stop: a host with no answer, or a usage error (Task 7 review I-7). */
+  stopped: string | null;
+}
+
+/** The page of the check codes (the help of check): each code has its own anchor there. */
+const CHECK_PAGE = (() => {
+  const help = HELP.find((h) => h.command === "check");
+  if (!help) throw new Error("the CLI has no help of check");
+  return pageUrl(help);
+})();
+
+const CHECK_STATUSES: readonly string[] = ["pass", "fail", "skip"] satisfies CheckStatus[];
+
+/** A value of a check document that is not one of the CLI's fixed values. */
+class CheckShapeError extends Error {}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** A code of the CLI's table, or null. Each other value is refused, so no text passes. */
+function checkCode(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value === "string" && ALL_CHECK_CODES.includes(value)) return value;
+  throw new CheckShapeError();
+}
+
+function count(value: unknown): number {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  throw new CheckShapeError();
+}
+
+/**
+ * The answer of the check tool from the CLI's check document. The CLI puts
+ * the deployment's cookie name, issuer, and cache-control into `detail` and
+ * into the text of a warning (plan deviation 1). So the answer keeps each id,
+ * status, and code only when it is a value of the CLI's tables, and adds the
+ * link of the code. It throws CheckShapeError on each other value.
+ */
+export function checkResult(report: Record<string, unknown>, base: string): McpCheckResult {
+  const { checks, warnings, summary, exit, stopped } = report;
+  if (!Array.isArray(checks) || !Array.isArray(warnings) || !isRecord(summary))
+    throw new CheckShapeError();
+  if (stopped !== null && typeof stopped !== "string") throw new CheckShapeError();
+  return {
+    base,
+    checks: checks.map((c: unknown) => {
+      if (!isRecord(c)) throw new CheckShapeError();
+      const id = CHECK_IDS.find((i) => i === c.id);
+      const status = CHECK_STATUSES.find((s) => s === c.status) as CheckStatus | undefined;
+      if (id === undefined || status === undefined) throw new CheckShapeError();
+      const code = checkCode(c.code);
+      return { id, status, code, docs: code === null ? null : `${CHECK_PAGE}#${code}` };
+    }),
+    // A warning is "<code>: <text>"; the text can name the deployment's cookie.
+    warnings: warnings.map((w: unknown) => {
+      if (typeof w !== "string") throw new CheckShapeError();
+      const code = checkCode(w.split(":")[0]);
+      if (code === null) throw new CheckShapeError();
+      return code;
+    }),
+    summary: {
+      run: count(summary.run),
+      pass: count(summary.pass),
+      fail: count(summary.fail),
+      skip: count(summary.skip),
+    },
+    exit: count(exit),
+    stopped,
+  };
+}
+
+/**
+ * The Io of the check tool: the confined Io with fetch. Its fetch refuses
+ * each URL of another origin than base_url, and follows no redirect. So
+ * the tool's promise holds even if the CLI's checks change.
+ */
+export function checkIo(ctx: LocalContext, base: string): ConfinedIo {
+  // check reads no variable without --target, and the tool passes none: no secret can reach it.
+  const confined = confinedIo({ root: ctx.root, env: {}, allowFetch: true, readOnly: [] });
+  const origin = new URL(base).origin;
+  return {
+    lines: confined.lines,
+    io: {
+      ...confined.io,
+      fetch: (url, init) => {
+        let to: string;
+        try {
+          to = new URL(url).origin;
+        } catch {
+          to = "";
+        }
+        if (to !== origin)
+          return Promise.reject(new Error("the check tool fetches only the origin of base_url"));
+        return confined.io.fetch(url, { ...init, redirect: "manual" });
+      },
+    },
+  };
+}
 
 /** The local tool impls. createServer adds them for the local surface only. */
 export function localTools(
@@ -436,5 +552,36 @@ export function localTools(
       text: `${stopped}\nafter the stop, the database is at version ${state.before ?? "none"} with ${state.pending.length} pending migration(s)`,
     };
   }
-  return [scaffold, migratePlan, migrateRun, schemaMigrate];
+
+  const checkRow = row("check");
+  const check: ToolImpl = {
+    row: checkRow,
+    async call(input) {
+      const base = String(input.base_url);
+      // The flags of the row's map: a true boolean is a bare flag; false passes nothing.
+      const args = ["check", base];
+      for (const [key, flag] of Object.entries(checkRow.wraps?.flags ?? {})) {
+        const v = input[key];
+        if (v === undefined || v === false) continue;
+        args.push(`--${flag}`);
+        if (v !== true) args.push(String(v));
+      }
+      let result: McpCheckResult;
+      try {
+        const run = await runCli(
+          [...args, ...(checkRow.wraps?.fixed ?? [])],
+          checkIo(ctx, base),
+          cli,
+        );
+        result = checkResult(run.json, base);
+      } catch (e) {
+        // A fixed text: an error of the run can hold a text of the deployment.
+        if (e instanceof CheckShapeError)
+          return fault("the check document holds a value that is not a code of the CLI");
+        return fault("the check run failed in the server; run authtempo check in the shell");
+      }
+      return answer({ ...result });
+    },
+  };
+  return [scaffold, migratePlan, migrateRun, schemaMigrate, check];
 }
