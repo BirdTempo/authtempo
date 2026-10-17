@@ -70,4 +70,4 @@ DPoP and token introspection come with row 12e, through the `Verifier`, with no 
 
 ## Next
 
-- [The verify package](/docs/reference/verify/)
+- [Protect your MCP server](/docs/guides/mcp-server/)

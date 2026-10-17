@@ -1,0 +1,94 @@
+---
+title: Protect your MCP server
+description: Let authtempo sign in the callers of your own MCP server, with access tokens for its resource and a guarded fetch for client metadata.
+type: how-to
+sources:
+  - packages/verify/README.md "Protect an MCP server"
+  - packages/verify/src/mcp.ts
+  - examples/mcp-server/src/fetch.ts
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
+  - docs/superpowers/plans/2026-10-14-11e-mcp.md
+---
+
+import { Code } from "@astrojs/starlight/components";
+import guardedFetch from "../../../../../../../examples/mcp-server/src/fetch.ts?raw";
+
+**For:** a developer who serves an MCP server and wants authtempo to sign in its callers.
+
+**What it does:** core mints the access tokens. `requireMcpAuth` lets a request reach a tool only with a valid token for the MCP resource.
+
+## Before you start
+
+- An auth app that runs authtempo on a Cloudflare Worker. A [getting started tutorial](/docs/start/) makes one.
+- Read [Be the OAuth and OIDC provider for MCP clients](/docs/guides/oauth-provider/). This guide uses that provider.
+- Node 22.18 or newer for the tools of the project.
+
+## Steps
+
+1. Turn on `oauth` in the config of the auth app.
+   - Set `oauth.resources` to the URL of the MCP route, such as `https://app.example.com/mcp`.
+   - Set `oauth.scopes` to `{ "mcp:tools": "Use the tools of this app" }`, or to your own text.
+   - Set `registration: { dynamic: false }`. The MCP authorization revision calls dynamic registration deprecated. Row 12e makes off the default.
+   - Set `oauth.fetch` to `guardedFetch({ resolve: dohResolve(fetch), fetch })`. A client then registers by the URL of its metadata document.
+2. Mount `auth.wellKnown(request)` for every path that starts with `/.well-known/` at the origin root.
+3. Wrap the handler of the `/mcp` route in `requireMcpAuth` of `@authtempo/verify/mcp`.
+   - Pass the `auth` of core as the source when the MCP route is in the same Worker as the auth app.
+   - Pass `resource` with the same URL as `oauth.resources`, and `scopes: ["mcp:tools"]`.
+
+<Code code={guardedFetch} lang="ts" title="examples/mcp-server/src/fetch.ts" />
+
+## The same-Worker source
+
+The `auth` of core reads the token in the same Worker. It fetches no key set, so the Worker never fetches its own host.
+
+The Cloudflare page on compatibility flags, read 2026-10-17, gives two cases for a fetch to the Worker's own host:
+
+- Without the flag `global_fetch_strictly_public`, the fetch goes to the origin of the zone and skips every Worker on the URL.
+- With the flag, the fetch can loop back to the same Worker.
+
+So a `Verifier` with a JWKS URL on its own host is the one case that the flag changes. The example sets no `global_fetch_strictly_public`.
+
+A server that is not the auth app passes a `Verifier` of `createVerifier` as the source. [The verify MCP entry](/docs/reference/verify-mcp/) lists both sources.
+
+## The guarded fetch
+
+- The URL must be `https:`. An `http:` URL throws before any lookup.
+- The name resolves through DNS over HTTPS. Each A and AAAA answer must be public.
+- One private answer refuses the host, also when the other answers are public. A name with no answer throws.
+- The private classes are the blocks of RFC 6890 with no global reach, plus multicast. An IPv4-mapped IPv6 form counts as its IPv4 address.
+- The request goes with `redirect: "manual"`, as core also sets it.
+- A name can answer another address at the connect than at the check. Workers give no way to pin the address. Core's host rules, its 10-second timeout, and its 64 KB cap stay the first line.
+
+## The 401 and the 403
+
+The route `https://app.example.com/mcp` with `scopes: ["mcp:tools"]` answers these headers:
+
+| The request | Status | `WWW-Authenticate` |
+| --- | --- | --- |
+| No bearer | 401 | `Bearer resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"` |
+| A bearer that is not a valid token for this resource | 401 | `Bearer error="invalid_token", resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"` |
+| A valid token without `mcp:tools` | 403 | `Bearer error="insufficient_scope", scope="mcp:tools", resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/mcp"` |
+
+A source that fails gives 503 with no body, never 401.
+
+## What this does not do yet
+
+- Confidential clients. Every client is public. Row 12e adds them.
+- DPoP. Row 12e adds it.
+- Token introspection. Row 12e adds it.
+- The app's own sign-in route. A browser with no session goes to core's sign-in page. Row 12e adds `oauth.signInURL`.
+- A refresh retry window. A refresh token sent twice ends its family. Row 12e adds a reuse window, off by default.
+
+The consent page and the connected apps page are in [the provider guide](/docs/guides/oauth-provider/).
+
+## If it fails
+
+- [`invalid_token`](/docs/reference/errors/#oauth-invalid_token): the token is expired, of another resource, or not an OAuth access token. The client must get a new token.
+- [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope): the token lacks `mcp:tools`, or a tool threw `McpScopeError`. The client must ask for the scopes of the challenge.
+- [`invalid_client`](/docs/reference/errors/#oauth-invalid_client): the client id is unknown. With `dynamic: false`, a client id must be the URL of a metadata document that the guarded fetch accepts.
+
+## Next
+
+- [The verify MCP entry](/docs/reference/verify-mcp/)
+- [Be the OAuth and OIDC provider for MCP clients](/docs/guides/oauth-provider/)
