@@ -9,6 +9,7 @@ sources:
   - packages/mcp/src/limits.ts
   - packages/mcp/src/worker.ts
   - packages/mcp/wrangler.jsonc
+  - packages/mcp/test/drift.test.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
   - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 17"
 ---
@@ -294,6 +295,16 @@ The Worker checks each limit before the SDK reads the body. The values are in `p
 | `windowMs` | `60000` | The window of `callsPerMinute`, in milliseconds. |
 
 A Workers rate limiting binding also allows 60 calls a minute. It is eventually consistent and local to a location, so it helps and never holds the limit alone.
+
+## What stays in the shell
+
+The drift test of the package holds these lists, because `check-mcp` reads only the wire.
+
+- No tool runs `authtempo keys` or `authtempo mcp`. The first needs the operator secret and changes a live deployment. The second installs this server.
+- D1 migrations stay a shell command: run `authtempo migrate --target d1`. The `schema.migrate` tool serves Postgres only.
+- The `check` tool skips the schema check, because that check needs a database. Run `authtempo check` with `--target` in the shell for it.
+- No tool passes `--repair` to `authtempo import`. A repair writes into users that exist, so check each such user in the app, then run it in the shell.
+- The `check` tool keeps the timeout of the CLI, 10 s a request. So one call to a slow host can take about 70 s.
 
 ## The rules
 
