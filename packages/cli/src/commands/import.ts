@@ -107,8 +107,6 @@ export const importCommand: Command = {
           "--tables compat needs --target postgres; on D1, set TARGET=compat on the import Worker",
         );
     } else if (v.out !== undefined) throw new UsageError("--out needs --target d1-bundle");
-    if (target === "memory" && tables === "compat")
-      throw new UsageError("--tables compat needs --target postgres");
     // The secrets come first: a missing variable must not cost the read of a large export.
     const url =
       target === "postgres"

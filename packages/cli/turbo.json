@@ -2,6 +2,9 @@
   "$schema": "https://turbo.build/schema.json",
   "extends": ["//"],
   "tasks": {
-    "test": { "dependsOn": ["^build", "build", "authtempo-example-node#test"] }
+    "test": { "dependsOn": ["^build", "build", "authtempo-example-node#test"] },
+    // test/program.test.ts imports the package's own entry @authtempo/cli/program,
+    // which resolves to dist/program.d.ts. So the typecheck needs this package's build (plan 11e).
+    "typecheck": { "dependsOn": ["^build", "build"] }
   }
 }

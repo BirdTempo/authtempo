@@ -32,7 +32,7 @@ authtempo import supabase --users users.csv --identities identities.csv --format
 To plan an import from Clerk with no database, use the empty store of `--target memory`:
 
 ```sh
-authtempo import clerk --csv users.csv --users users.json --target memory --dry-run
+authtempo import clerk --csv users.csv --users users.json --formats none --target memory --dry-run
 ```
 
 | Flag | What it does |

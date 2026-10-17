@@ -18,7 +18,7 @@ export const IMPORT_HELP: HelpText = {
       says: "Write the bundle of an Auth.js import for the D1 import Worker.",
     },
     {
-      line: "authtempo import clerk --csv users.csv --users users.json --target memory --dry-run",
+      line: "authtempo import clerk --csv users.csv --users users.json --formats none --target memory --dry-run",
       says: "Plan an import from Clerk with no database.",
     },
   ],
