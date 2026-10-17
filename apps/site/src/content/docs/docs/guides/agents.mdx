@@ -53,7 +53,17 @@ For the docs tools only, add `--remote`. The entry then names the remote server 
 
 The folder `packages/mcp/skills/` holds one skill for each prompt of the server. Each skill is a folder with a `SKILL.md` file in the agentskills.io layout. The server serves each skill as a prompt with the same text, so an editor that shows MCP prompts needs no copy.
 
-To give an editor the skills as files, copy each skill folder whole into the skills folder of the editor. Keep the folder name: the `name` of each `SKILL.md` must equal it. The docs of your editor name its skills folder. This page names no editor folder yet, because no editor page was read for this release.
+To give an editor the skills as files, copy each skill folder whole into a project folder of the editor. Keep the folder name, because the `name` of each `SKILL.md` must equal it. Each row comes from the page of the editor, read on 2026-10-17.
+
+| Editor | Project folders of the skills | Source |
+| --- | --- | --- |
+| Claude Code | `.claude/skills/` | code.claude.com/docs/en/skills |
+| Cursor | `.cursor/skills/` or `.agents/skills/` | cursor.com/docs/skills |
+| Codex | `.agents/skills/`, in the folder that starts Codex and each folder up to the repo root | learn.chatgpt.com/docs/build-skills |
+| OpenCode | `.opencode/skills/`, `.claude/skills/`, or `.agents/skills/` | opencode.ai/docs/skills |
+| VS Code | `.github/skills/`, `.claude/skills/`, or `.agents/skills/` | code.visualstudio.com/docs/copilot/customization/agent-skills |
+
+`.agents/skills/` serves four of the five editors. Claude Code needs its own copy in `.claude/skills/`.
 
 ## An agent with no MCP
 

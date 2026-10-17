@@ -7,6 +7,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 4
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 14
   - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 13"
+  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 17"
 sidebar:
   order: 1
 ---
@@ -24,7 +25,7 @@ sidebar:
 
 1. Find your runtime and your database in the table.
 2. Open the tutorial of that row, and do every step.
-3. Then do [Your first sign-in from a web app](/docs/start/first-sign-in/).
+3. Then do [Your first sign-in from a web app](/docs/start/first-sign-in/). The MCP server tutorial ends with a sign-in through an MCP client, so it needs no web app.
 
 | Stack | Storage adapter | Node.js compatibility | Example app | Tutorial |
 | --- | --- | --- | --- | --- |
@@ -55,6 +56,7 @@ The `@authtempo` packages are private and at version `0.0.0`. They are not on a 
 - A password hash needs more CPU than Workers Free gives one request. A Worker with passwords needs Workers Paid.
 - D1 has no interactive transaction. A transaction on D1 is not isolated from other requests. [The race rules](/docs/concepts/races/) tell what that means.
 - On Workers the Postgres client has one connection for each request. Read [The one-connection rule](/docs/concepts/one-connection/) before you add a hook.
+- The MCP server stack signs in by magic link and holds no password, so it runs on Workers Free.
 - Off Workers, the server must give core the client IP. The Node example sets a header from the socket, and core reads only that header.
 
 ## Next
