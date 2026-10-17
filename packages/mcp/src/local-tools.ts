@@ -8,7 +8,7 @@ import { main } from "@authtempo/cli/program";
 import { type ConfinedIo, confinedIo, insideRoot, RootError } from "./cli-io.js";
 import { isPlanError, PlanStore, sha256 } from "./plans.js";
 import type { ToolImpl, ToolResult } from "./spec.js";
-import { TOOLS, type ToolRow } from "./tools.js";
+import { IMPORT_FILE_INPUTS, TOOLS, type ToolRow } from "./tools.js";
 
 /** The facts of the server that a local tool reads. */
 export interface LocalContext {
@@ -77,9 +77,6 @@ function answer(json: Record<string, unknown>, before: readonly string[] = []): 
   };
 }
 
-/** The file inputs of migrate.plan and migrate.run, in the CLI's order. */
-const FILE_INPUTS = ["users", "identities", "csv", "hashes", "organizations", "authjs_tables"];
-
 /** A text in a shell command: as it is when it is safe, else in single quotes. */
 const shellWord = (word: string): string =>
   /^[A-Za-z0-9_./:=,@%+-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
@@ -116,7 +113,7 @@ function readExports(
 ): { texts: Map<string, string>; digests: Record<string, string> } | ToolResult {
   const texts = new Map<string, string>();
   const digests: Record<string, string> = {};
-  for (const key of FILE_INPUTS) {
+  for (const key of IMPORT_FILE_INPUTS) {
     const path = input[key];
     if (typeof path !== "string") continue;
     let real: string;
@@ -143,7 +140,11 @@ function readExports(
  * A confined Io whose reads of the export files answer the bytes that the
  * tool read. Each other read goes to the confined Io.
  */
-function pinnedIo(root: string, env: LocalContext["env"], texts: Map<string, string>): ConfinedIo {
+export function pinnedIo(
+  root: string,
+  env: LocalContext["env"],
+  texts: Map<string, string>,
+): ConfinedIo {
   const base = confinedIo({ root, env, allowFetch: false, readOnly: [CLI_TEMPLATES] });
   return {
     lines: base.lines,
@@ -276,17 +277,19 @@ export function localTools(
   const migrateRun: ToolImpl = {
     row: runRow,
     async call(input) {
-      // The schema holds confirm to true. This check stays for a caller that skips the schema.
-      if (input.confirm !== true) return fault("migrate.run needs confirm: true");
+      // The plan is taken before any check, so each refusal uses it up (the
+      // brief's rule): a refused confirm, a root refusal, and a read failure too.
       const read = readExports(ctx.root, input);
-      if (!("texts" in read)) return read;
       const held = plans.take(
         "import",
         String(input.plan_id),
         cliInput(runRow, input),
-        read.digests,
+        "texts" in read ? read.digests : {},
         databaseOf(ctx),
       );
+      // The schema holds confirm to true. This check stays for a caller that skips the schema.
+      if (input.confirm !== true) return fault("migrate.run needs confirm: true");
+      if (!("texts" in read)) return read;
       if (isPlanError(held)) return fault(held.refused);
       let run: Awaited<ReturnType<typeof runCli>>;
       try {

@@ -107,6 +107,30 @@ const MIGRATE_KEYS = [
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
+ * The file inputs of an import, in the CLI's order. The row builds its
+ * file keys from this list, and the handler hashes each key of it. So a new
+ * file key is in the plan's digests, and migrate.run binds it.
+ */
+export const IMPORT_FILE_INPUTS = [
+  "users",
+  "identities",
+  "csv",
+  "hashes",
+  "organizations",
+  "authjs_tables",
+] as const;
+
+/** What each file input holds, for its description. */
+const FILE_WHAT: Record<(typeof IMPORT_FILE_INPUTS)[number], string> = {
+  users: "the users export",
+  identities: "the identities export (Supabase)",
+  csv: "the CSV export (Clerk)",
+  hashes: "the password hash export (Auth0)",
+  organizations: "the organizations export (Clerk, Auth0)",
+  authjs_tables: "the Auth.js tables export",
+};
+
+/**
  * A relative path of an export file inside the server root. A dash at the
  * start would read as a flag of the CLI.
  */
@@ -124,15 +148,15 @@ const exportFile = (what: string) =>
  * plan_id and confirm. Each key maps to the import flag of the same name,
  * with "_" as "-". No key takes a connection string: the CLI reads it from
  * the server's environment, through the variable that --url-env names.
+ * No key passes --repair: a repair writes into users that exist, and the
+ * help says to check each such user in the app first. That stays a shell step.
  */
 const IMPORT_INPUT = {
   provider: z.enum(IMPORT_PROVIDERS).describe("The provider of the export."),
-  users: exportFile("the users export"),
-  identities: exportFile("the identities export (Supabase)"),
-  csv: exportFile("the CSV export (Clerk)"),
-  hashes: exportFile("the password hash export (Auth0)"),
-  organizations: exportFile("the organizations export (Clerk, Auth0)"),
-  authjs_tables: exportFile("the Auth.js tables export"),
+  ...(Object.fromEntries(IMPORT_FILE_INPUTS.map((k) => [k, exportFile(FILE_WHAT[k])])) as Record<
+    (typeof IMPORT_FILE_INPUTS)[number],
+    ReturnType<typeof exportFile>
+  >),
   formats: z
     .string()
     .min(1)
@@ -173,6 +197,10 @@ const IMPORT_INPUT = {
     .boolean()
     .optional()
     .describe("True when the app keeps the passkey rp id of the Auth.js app."),
+  legacy_verify: z
+    .boolean()
+    .optional()
+    .describe("True when the app sets password.legacyVerify. A Cognito import needs it."),
   firebase_signer_key_env: z
     .string()
     .min(1)
@@ -303,7 +331,7 @@ export const TOOLS: readonly ToolRow[] = [
     name: "migrate.plan",
     title: "Plan an import of users from another provider",
     description:
-      'Plans an import and writes nothing. It reads the export files inside the server root and runs authtempo import with --dry-run. With against "empty" it plans against an empty store; with against "database" it plans against the database that the server\'s environment names, and answers a plan_id for migrate.run. It answers the report and the shell command of the real run.',
+      'Plans an import and writes nothing. It reads the export files inside the server root and runs authtempo import with --dry-run. With against "empty" it plans against an empty store. With against "database" it plans against the database that the server\'s environment names, and answers a plan_id for migrate.run. It answers the report and the shell command of the real run.',
     surfaces: ["local"],
     wraps: {
       command: "import",

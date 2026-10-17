@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { IMPORT_JSON_KEYS } from "@authtempo/cli";
 import { PROVIDERS } from "@authtempo/cli/program";
@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { freshDatabase } from "../../cli/test/support/pg.js";
 import * as READERS from "../../import/test/fixtures/readers.js";
 import { SUPABASE_FIXTURE_CREATED } from "../../import/test/fixtures/supabase-counts.js";
-import { localTools } from "../src/local-tools.js";
+import { localTools, pinnedIo } from "../src/local-tools.js";
 import { PlanStore } from "../src/plans.js";
 import { createServer } from "../src/server.js";
 import { IMPORT_PROVIDERS, TOOLS } from "../src/tools.js";
@@ -16,8 +16,8 @@ import { type Called, connect } from "./support/client.js";
 import { type FixtureRoot, fixtureRoot } from "./support/fixture-root.js";
 import { assertFreshIndex, siteIndex } from "./support/index.js";
 
-// migrate.plan and migrate.run (plan 11e Task 8): authtempo import through
-// the CLI's main in process, with a plan handle that binds a real run to the
+// migrate.plan and migrate.run (plan 11e Task 8) run authtempo import
+// through the CLI's main in process. A plan handle binds a real run to the
 // input, the bytes of each file, and the database of its plan.
 
 const CLI_BIN = join(REPO, "packages/cli/dist/bin/authtempo.js");
@@ -112,6 +112,7 @@ afterAll(async () => {
 async function start(
   env: Record<string, string | undefined>,
   plans?: PlanStore,
+  urlEnv?: string,
 ): Promise<{ s: Session; root: string }> {
   const f = fixtureRoot();
   fx = f;
@@ -122,6 +123,7 @@ async function start(
       skills: [],
       root: f.root,
       env,
+      ...(urlEnv === undefined ? {} : { urlEnv }),
       local: (facts) => localTools(facts, plans === undefined ? {} : { plans }),
     }),
   );
@@ -199,6 +201,20 @@ describe("migrate.plan against an empty store", () => {
     }
   });
 
+  it("plans a Cognito import with legacy_verify, and refuses the marker without it", async () => {
+    const { s, root } = await start({ PATH: process.env.PATH ?? "" });
+    const input = write(root, "cognito");
+    const with_ = await s.call("migrate.plan", { ...input, legacy_verify: true });
+    expect(with_.isError, text(with_)).toBe(false);
+    expect(doc(with_).exit).toBe(0);
+    expect(report(with_).refusedHashes).toEqual([]);
+    expect(String(doc(with_).next)).toContain(" --legacy-verify ");
+    const without = await s.call("migrate.plan", input);
+    expect(without.isError, text(without)).toBe(false);
+    expect(doc(without).exit).toBe(1);
+    expect(report(without).refusedHashes).toEqual([{ sourceId: "sub-1", format: "legacy-verify" }]);
+  });
+
   it("holds no address and no hash in the plan", async () => {
     const { s, root } = await start({ PATH: process.env.PATH ?? "" });
     for (const provider of PROVIDERS) {
@@ -269,6 +285,61 @@ describe("migrate.plan and migrate.run against the database", () => {
     expect(await users(db)).toBe(SUPABASE_FIXTURE_CREATED.user);
   });
 
+  it("refuses a plan whose identities file changed", async () => {
+    // Each file input is in the plan's digests, not only users.
+    const db = await migratedDatabase();
+    const { s, root } = await start({ PATH: process.env.PATH ?? "", DATABASE_URL: db.url });
+    const input = write(root, "supabase");
+    const id = await plan(s, input);
+    appendFileSync(join(root, String(input.identities)), "\n");
+    const r = await s.call("migrate.run", { ...input, plan_id: id, confirm: true });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toBe("the file identities changed since the plan");
+    expect(await users(db)).toBe(0);
+  });
+
+  it("plans and runs against the database that the server's --url-env names", async () => {
+    const named = await migratedDatabase();
+    // DATABASE_URL names a database with no schema: a plan or a run there stops.
+    const fallback = await freshDatabase();
+    dbs.push(fallback);
+    const { s, root } = await start(
+      { PATH: process.env.PATH ?? "", APP_DB: named.url, DATABASE_URL: fallback.url },
+      undefined,
+      "APP_DB",
+    );
+    const input = write(root, "supabase");
+    const p = await s.call("migrate.plan", { ...input, against: "database" });
+    expect(p.isError, text(p)).toBe(false);
+    expect(String(doc(p).next)).toMatch(/ --url-env APP_DB$/);
+    const id = doc(p).plan_id;
+    expect(typeof id).toBe("string");
+    const r = await s.call("migrate.run", { ...input, plan_id: id, confirm: true });
+    expect(r.isError, text(r)).toBe(false);
+    expect(await users(named)).toBe(SUPABASE_FIXTURE_CREATED.user);
+    const table = await fallback.sql<
+      { t: string | null }[]
+    >`SELECT to_regclass('ta_user')::text AS t`;
+    expect(table[0]?.t).toBeNull();
+  });
+
+  it("uses up the plan when a file cannot be read at the run", async () => {
+    const db = await migratedDatabase();
+    const { s, root } = await start({ PATH: process.env.PATH ?? "", DATABASE_URL: db.url });
+    const input = write(root, "supabase");
+    const id = await plan(s, input);
+    const path = join(root, String(input.identities));
+    renameSync(path, `${path}.away`);
+    const r = await s.call("migrate.run", { ...input, plan_id: id, confirm: true });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toBe("the file identities cannot be read: ENOENT");
+    renameSync(`${path}.away`, path);
+    const again = await s.call("migrate.run", { ...input, plan_id: id, confirm: true });
+    expect(again.isError).toBe(true);
+    expect(text(again)).toBe(NO_PLAN);
+    expect(await users(db)).toBe(0);
+  });
+
   it("refuses another input, an expired plan, another database, and confirm false", async () => {
     const db = await migratedDatabase();
     const other = await migratedDatabase();
@@ -334,6 +405,26 @@ describe("the plan store and the input rules", () => {
       expect("refused" in held, id).toBe(false);
     });
     expect(store.size).toBe(0);
+  });
+
+  it("counts a plan of another kind as unknown", () => {
+    const store = new PlanStore(() => 0);
+    const id = store.hold("import", { n: 1 }, {}, null, "db");
+    expect(store.take("schema", id, { n: 1 }, {}, "db")).toEqual({ refused: NO_PLAN });
+    expect(store.size).toBe(0);
+  });
+
+  it("gives the CLI the bytes that the plan hashed, not the file as it is now", () => {
+    const f = fixtureRoot();
+    fx = f;
+    const file = join(f.root, "users.csv");
+    writeFileSync(file, "id,email\nnew-bytes\n");
+    const { io } = pinnedIo(f.root, {}, new Map([[file, "id,email\nplanned-bytes\n"]]));
+    expect(io.readFile(file)).toBe("id,email\nplanned-bytes\n");
+    expect(io.readFile("users.csv")).toBe("id,email\nplanned-bytes\n");
+    // A file that the map does not name is read from the disk, inside the root.
+    writeFileSync(join(f.root, "other.csv"), "x\n");
+    expect(io.readFile("other.csv")).toBe("x\n");
   });
 
   it("takes no connection string as an input", async () => {
