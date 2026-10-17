@@ -1,0 +1,72 @@
+---
+title: Set up an agent
+description: Add the authtempo MCP server to your editor, give the agent the skill pack, and give an agent with no MCP the llms.txt file.
+type: how-to
+sources:
+  - packages/cli/src/editors.ts
+  - packages/cli/src/commands/mcp.ts
+  - packages/mcp/src/bin/authtempo-mcp.ts
+  - packages/mcp/src/index-reader.ts
+  - packages/mcp/turbo.json
+  - packages/mcp/skills/authtempo-check-deployment/SKILL.md
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
+  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 17"
+---
+
+**For:** a developer who wants a coding agent to add authtempo to a project with the docs and the CLI.
+
+**What it does:** `authtempo mcp` adds the authtempo MCP server to the project config of your editor. The agent then searches the docs, reads pages, and runs the CLI through tools.
+
+## Before you start
+
+- Node 22.18 or newer, and pnpm 12.8.1.
+- A clone of the authtempo repo with the CLI built. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+- One of five editors: Claude Code, Cursor, Codex, OpenCode, or VS Code. [authtempo mcp](/docs/reference/cli/mcp/) lists the file of each.
+
+## Steps
+
+1. In the repo, build the server and its docs index:
+
+   ```sh
+   pnpm turbo run index --filter=@authtempo/mcp
+   ```
+
+   The command builds `@authtempo/mcp` and the site, and copies the docs index next to the server. Without the index, the server stops at its start.
+
+2. In the folder of your app, run `authtempo mcp` with the flag of your editor:
+
+   ```sh
+   authtempo mcp --claude-code
+   ```
+
+   The other flags are `--cursor`, `--codex`, `--opencode`, and `--vscode`. With `--manual`, the command prints each entry and writes no file.
+
+3. Set `DATABASE_URL` in the environment that starts the editor, if the agent must import users or migrate the schema. The entry holds the name of the variable, never its value. `--url-env <NAME>` names another variable.
+
+4. Open the project in the editor, and approve the `authtempo` server. Claude Code asks for approval before it uses a server from `.mcp.json`. Codex reads `.codex/config.toml` only in a trusted project.
+
+5. Ask the agent to call the `version` tool. The answer holds the versions of core, the CLI, the server, and the docs index.
+
+For the docs tools only, add `--remote`. The entry then names the remote server at `https://mcp.authtempo.com/mcp`, which needs no build. It is not live before publication.
+
+## The skill pack
+
+The folder `packages/mcp/skills/` holds one skill for each prompt of the server. Each skill is a folder with a `SKILL.md` file in the agentskills.io layout. The server serves each skill as a prompt with the same text, so an editor that shows MCP prompts needs no copy.
+
+To give an editor the skills as files, copy each skill folder whole into the skills folder of the editor. Keep the folder name: the `name` of each `SKILL.md` must equal it. The docs of your editor name its skills folder. This page names no editor folder yet, because no editor page was read for this release.
+
+## An agent with no MCP
+
+Give the agent the URL `https://authtempo.com/llms.txt`. It lists every page with a link to its markdown copy. `https://authtempo.com/llms-full.txt` holds every page in one file. The site is not public yet, so in this repo both files are in `apps/site/dist/` after a site build.
+
+## If it fails
+
+- "build @authtempo/mcp first": `authtempo mcp` found no built server. Run the command of step 1 in the repo, then run `authtempo mcp` again. [A file that exists](/docs/reference/cli/mcp/#a-file-that-exists) lists each stop of the command.
+- "the docs index … is missing": the server stops at its start, because its docs index is not next to it. Run the command of step 1.
+- Another `authtempo` entry: the config file of the editor has an `authtempo` entry that differs. The command prints both entries and writes nothing. Remove the old entry or edit it by hand, then run the command again. [A file that exists](/docs/reference/cli/mcp/#a-file-that-exists) tells the rule.
+
+## Next
+
+- [The MCP server](/docs/reference/mcp/)
+- [authtempo mcp](/docs/reference/cli/mcp/)
+- [Choose your stack](/docs/start/)

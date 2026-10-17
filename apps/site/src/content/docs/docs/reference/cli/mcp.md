@@ -92,5 +92,5 @@ The command adds one server, `authtempo`, and keeps every other key in its place
 
 ## Next
 
-- [The CLI](/docs/reference/cli/)
-- [authtempo init](/docs/reference/cli/init/)
+- [Set up an agent](/docs/guides/agents/)
+- [The MCP server](/docs/reference/mcp/)

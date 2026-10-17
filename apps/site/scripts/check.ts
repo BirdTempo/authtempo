@@ -20,6 +20,7 @@ import { checkFences } from "./check-fences.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
+import { checkMcp } from "./check-mcp.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkSentences } from "./check-sentences.ts";
@@ -37,13 +38,22 @@ import {
   readRepoFile,
   sampleFiles,
 } from "./lib/load.ts";
-import { DIST, DOCS } from "./lib/paths.ts";
+import { wireLists } from "./lib/mcp-wire.ts";
+import { DIST, DOCS, REPO } from "./lib/paths.ts";
 import { type CheckReport, summaryLine } from "./lib/report.ts";
 
 /** A file of dist, or "" when the build did not write it. The check then fails on what it lacks. */
 function distText(file: string): string {
   return existsSync(`${DIST}${file}`) ? readFileSync(`${DIST}${file}`, "utf8") : "";
 }
+
+/** The built MCP server. The site's Turbo test builds it first, through the dev dependency. */
+const MCP_BIN = `${REPO}packages/mcp/dist/bin/authtempo-mcp.js`;
+
+// check-mcp reads the server on the wire (plan 11e deviation 15). The reads
+// are async, so they run once here, before the checks. A failed read is an
+// error of the answer, and check-mcp fails on it.
+const mcpWire = await wireLists(MCP_BIN, `${DIST}agent/index.json`);
 
 export const CHECKS: { name: string; run: () => CheckReport }[] = [
   { name: "check-links", run: () => checkLinks(distPages(), distFiles()) },
@@ -126,6 +136,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         helpRuns(),
         ALL_CHECK_CODES,
         (url) => docsPages().find((p) => pageUrl(p.path) === url)?.source ?? null,
+      ),
+  },
+  {
+    // The MCP reference page against what the built server answers, both ways
+    // (plan 11e Task 17): tools, inputs, hints, prompts, template, and limits.
+    name: "check-mcp",
+    run: () =>
+      checkMcp(
+        docsPages().find((p) => pageUrl(p.path) === "/docs/reference/mcp/")?.source ?? "",
+        mcpWire,
       ),
   },
   {
