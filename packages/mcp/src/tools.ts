@@ -40,8 +40,6 @@ const READ_ONLY = {
   openWorldHint: false,
 } as const;
 
-const DOCS_PATH = /^\/docs\/(?:[a-z0-9-]+\/)*$/;
-
 /** The docs version: "latest" until a release exists (spec 18 item 13). */
 const docsVersion = z
   .string()
@@ -76,9 +74,11 @@ export const TOOLS: readonly ToolRow[] = [
     wraps: null,
     annotations: READ_ONLY,
     input: z.strictObject({
+      // Any text. The handler adds a final slash and drops the site origin. A
+      // path that is still unknown gets the nearest paths, not a schema error.
       path: z
         .string()
-        .regex(DOCS_PATH)
+        .min(1)
         .max(200)
         .optional()
         .describe("A page path such as /docs/guides/magic-link/. With no path, the index."),

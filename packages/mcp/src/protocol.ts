@@ -57,8 +57,13 @@ function build(spec: ServerSpec): McpServer {
     {
       instructions: spec.instructions,
       // Declared, so the lists answer empty and never "Method not found",
-      // while a surface has no resource or prompt.
-      capabilities: { tools: {}, resources: {}, prompts: {} },
+      // while a surface has no resource or prompt. listChanged is false: spec
+      // 21 item 14 leaves list changes out, and the SDK fills true when unset.
+      capabilities: {
+        tools: { listChanged: false },
+        resources: { listChanged: false },
+        prompts: { listChanged: false },
+      },
     },
   );
   for (const impl of spec.tools) registerTool(server, impl);
@@ -111,20 +116,28 @@ function build(spec: ServerSpec): McpServer {
  * Serves a spec on stdio: one server per connection. The SDK's legacy option
  * "serve" answers the 2025-era initialize handshake from the same factory,
  * and a 2026-07-28 opening gets the modern era. `transport` replaces the
- * process's stdio, for a test that connects in process. The SDK writes only
- * protocol messages to stdout; an error report goes to stderr.
+ * process's stdio, for a test that connects in process. `streams` gives the
+ * SDK's stdio transport another input and output, such as a filtered stdin.
+ * The SDK writes only protocol messages to stdout. An error report goes to stderr.
  */
 export async function serveStdio(
   spec: ServerSpec,
-  opts: { transport?: Transport } = {},
+  opts: { transport?: Transport; streams?: { input: unknown; output: unknown } } = {},
 ): Promise<void> {
   // The stdio module reads node:stream. A dynamic import keeps it out of the
   // remote Worker's module graph at load, where only httpHandler runs.
   const stdio = await import("@modelcontextprotocol/server/stdio");
+  // The streams are Node streams; this file names no Node type, so the files
+  // of the remote surface stay free of Node modules.
+  const transport =
+    opts.transport ??
+    (opts.streams
+      ? new stdio.StdioServerTransport(opts.streams.input as never, opts.streams.output as never)
+      : undefined);
   stdio.serveStdio(() => build(spec), {
     legacy: "serve",
     onerror: (e) => console.error(`authtempo-mcp: ${e.message}`),
-    ...(opts.transport === undefined ? {} : { transport: opts.transport }),
+    ...(transport === undefined ? {} : { transport }),
   });
 }
 

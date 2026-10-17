@@ -33,8 +33,23 @@ const fixture = buildAgentIndex(
     page("docs/guides/other.md", "Other topic", {
       Steps: "The quokka option changes the output.",
     }),
+    page("docs/guides/wombat-body.md", "Body topic", { Notes: "The wombat lives here." }),
+    page("docs/guides/wombat-head.md", "Head topic", { "Wombat care": "Feed it each day." }),
+    page("docs/guides/koala-head.md", "Head notes", { "Koala care": "Feed it each day." }),
+    page("docs/guides/koala-title.md", "Koala setup", { Steps: "Run the tool once." }),
   ],
-  ["/docs/guides/beta/", "/docs/guides/alpha/", "/docs/guides/quokka/", "/docs/guides/other/"],
+  // In each pair, the page that must rank second comes first in the sidebar.
+  // So a lost weight gives a tie or a reversal, and the tie follows the sidebar.
+  [
+    "/docs/guides/beta/",
+    "/docs/guides/alpha/",
+    "/docs/guides/quokka/",
+    "/docs/guides/other/",
+    "/docs/guides/wombat-body/",
+    "/docs/guides/wombat-head/",
+    "/docs/guides/koala-head/",
+    "/docs/guides/koala-title/",
+  ],
   {
     commit: "fixture",
     readFile: () => {
@@ -70,6 +85,22 @@ describe("searchSections", () => {
   it("ranks a title match above a body match of the same term", () => {
     const hits = searchSections(fixture, "quokka", { limit: 5 });
     expect(hits.map((h) => h.path)).toEqual(["/docs/guides/quokka/", "/docs/guides/other/"]);
+  });
+
+  it("ranks a heading match above a body match of the same term", () => {
+    const hits = searchSections(fixture, "wombat", { limit: 5 });
+    expect(hits.map((h) => h.path)).toEqual([
+      "/docs/guides/wombat-head/",
+      "/docs/guides/wombat-body/",
+    ]);
+  });
+
+  it("ranks a title match above a heading match of the same term", () => {
+    const hits = searchSections(fixture, "koala", { limit: 5 });
+    expect(hits.map((h) => h.path)).toEqual([
+      "/docs/guides/koala-title/",
+      "/docs/guides/koala-head/",
+    ]);
   });
 
   it("gives the same order for the same query twice", () => {

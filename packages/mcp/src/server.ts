@@ -24,8 +24,8 @@ const FIRST =
 /**
  * The instructions of each surface. The remote text is the first three
  * sentences of the local text. The plan's local text also names
- * migrate.plan, migrate.run, and schema.migrate; Tasks 8 and 9 add that
- * sentence with the rows, because instructions.test.ts holds each name to a row.
+ * migrate.plan, migrate.run, and schema.migrate. Tasks 8 and 9 add that
+ * sentence with the rows. instructions.test.ts holds each name to a row.
  */
 export const INSTRUCTIONS: Record<Surface, string> = {
   local: `${FIRST} A tool that writes says so in the first sentence of its description.`,

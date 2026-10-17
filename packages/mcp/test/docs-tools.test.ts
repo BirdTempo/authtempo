@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createServer } from "../src/server.js";
 import { REPO } from "./support/bin.js";
 import { connect } from "./support/client.js";
@@ -152,6 +152,54 @@ describe("docs.read", () => {
       expect(markdown).not.toContain(`## ${other.heading}\n`);
   });
 
+  it("answers a level-2 section with its level-3 sections", async () => {
+    const index = siteIndex();
+    const sections = index.sections.filter((s) => s.path === "/docs/faq/");
+    const at = sections.findIndex((s) => s.anchor === "questions");
+    const parent = sections[at];
+    if (!parent) throw new Error("the index lacks the questions section of the FAQ");
+    // The FAQ keeps each question in a level-3 section, and the parent has no text.
+    expect(parent.depth).toBe(2);
+    expect(parent.text.trim()).toBe("");
+    const children: typeof sections = [];
+    for (const s of sections.slice(at + 1)) {
+      if (s.depth === 2) break;
+      children.push(s);
+    }
+    expect(children.length).toBeGreaterThan(1);
+    const markdown = (await ok("docs.read", { path: "/docs/faq/", section: "questions" }))
+      .markdown as string;
+    expect(markdown.startsWith("## Questions\n\n")).toBe(true);
+    for (const child of children) {
+      expect(markdown).toContain(`### ${child.heading}\n\n`);
+      expect(markdown).toContain(child.text);
+    }
+  });
+
+  it("gives each hit a snippet, also for a section whose text is in its children", async () => {
+    for (const query of ["vue exports", "faq questions", "session"])
+      for (const hit of await search(query, { limit: 10 }))
+        expect(hit.snippet.length, `${query}: ${hit.path}#${hit.anchor}`).toBeGreaterThan(0);
+  });
+
+  it("reads a path with no final slash and a full URL as the page", async () => {
+    for (const path of [
+      "/docs/guides/magic-link",
+      "https://authtempo.com/docs/guides/magic-link/",
+    ]) {
+      const r = await ok("docs.read", { path });
+      expect(r.path, path).toBe("/docs/guides/magic-link/");
+    }
+  });
+
+  it("answers the nearest paths for an unknown path with no final slash", async () => {
+    const r = await local.call("docs.read", { path: "/docs/guides/magic-links" });
+    expect(r.isError).toBe(true);
+    expect((r.structured?.suggestions as string[] | undefined)?.[0]).toBe(
+      "/docs/guides/magic-link/",
+    );
+  });
+
   it("refuses an unknown section with the anchors of the page", async () => {
     const index = siteIndex();
     const path = "/docs/operations/key-rotation/";
@@ -183,6 +231,16 @@ describe("docs.read", () => {
   });
 });
 
+/**
+ * The schema version from the migration files of the D1 adapter: the highest
+ * NNNN_schema_vN.sql. This source does not pass through core's constant.
+ */
+const SCHEMA_FILE_VERSION = Math.max(
+  ...readdirSync(join(REPO, "packages/adapter-d1/migrations")).map((f) =>
+    Number(/^\d{4}_schema_v(\d+)\.sql$/.exec(f)?.[1] ?? 0),
+  ),
+);
+
 describe("version", () => {
   const pkg = (path: string) =>
     (JSON.parse(readFileSync(join(REPO, path), "utf8")) as { version: string }).version;
@@ -194,7 +252,7 @@ describe("version", () => {
       core: pkg("packages/core/package.json"),
       cli: "9.9.9",
       mcp: pkg("packages/mcp/package.json"),
-      schemaVersion: expect.any(Number),
+      schemaVersion: SCHEMA_FILE_VERSION,
       protocol: "2026-07-28",
       docsIndex: {
         commit: index.header.commit,
@@ -202,6 +260,35 @@ describe("version", () => {
         builtFrom: index.header.builtFrom,
       },
     });
+  });
+
+  it("puts each version in its own key", async () => {
+    // Every package is 0.0.0, so a swap of core and mcp passes a compare of
+    // values. A core with other values shows where each value goes.
+    vi.resetModules();
+    vi.doMock("@authtempo/core", async (load) => ({
+      ...(await load<Record<string, unknown>>()),
+      VERSION: "1.1.1",
+      SCHEMA_VERSION: 77,
+    }));
+    try {
+      const fresh = (await import("../src/server.js")).createServer;
+      const session = await connect(
+        fresh({ surface: "local", index: siteIndex(), skills: [], cli: "3.3.3" }),
+      );
+      try {
+        const v = (await session.call("version", {})).structured;
+        expect(v?.core).toBe("1.1.1");
+        expect(v?.cli).toBe("3.3.3");
+        expect(v?.mcp).toBe(pkg("packages/mcp/package.json"));
+        expect(v?.schemaVersion).toBe(77);
+      } finally {
+        await session.close();
+      }
+    } finally {
+      vi.doUnmock("@authtempo/core");
+      vi.resetModules();
+    }
   });
 
   it("answers cli null on the remote surface, with the same keys", async () => {

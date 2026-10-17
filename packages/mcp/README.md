@@ -14,11 +14,11 @@ node packages/mcp/dist/bin/authtempo-mcp.js --root /path/to/project
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--root <dir>` | the current folder | The project folder. The server resolves it once, at start. |
+| `--root <dir>` | the current folder | The project folder. The server resolves it once, at start. A file is a usage error. |
 | `--url-env <NAME>` | `DATABASE_URL` | The name of the variable that holds the connection string. The value never goes in a tool input. |
 | `--index <file>` | `dist/agent/index.json` | The agent index to read. |
 
-The server writes only MCP messages to stdout. It writes each log line to stderr. A usage error exits 2.
+The server writes only MCP messages to stdout. It writes each log line to stderr. A usage error exits 2. A stdin line that is not JSON gets the JSON-RPC error -32700 and one log line.
 
 ## The tools
 

@@ -12,10 +12,19 @@
 // The 2025-06-18 request is the `initialize` of the lifecycle page of that
 // revision (modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle,
 // read 2026-10-14): `protocolVersion`, `capabilities`, and `clientInfo`.
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SCHEMA_VERSION } from "@authtempo/cli/program";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ENV_NAME } from "../../cli/src/secrets.js";
 import { INSTRUCTIONS, URL_ENV_NAME } from "../src/server.js";
 import { assertFreshBuild, linesOf, PKG, REPO, runServer, type ServerRun } from "./support/bin.js";
@@ -39,6 +48,26 @@ const init = (version: string) =>
     capabilities: {},
     clientInfo: { name: "raw-test", version: "0.0.0" },
   });
+
+/**
+ * The capabilities, as spec 21 item 14 states them: no list-change notices.
+ * The SDK sets listChanged to true when a server leaves it unset.
+ */
+const CAPABILITIES = {
+  tools: { listChanged: false },
+  resources: { listChanged: false },
+  prompts: { listChanged: false },
+};
+
+/** The answer to a line that is not JSON (JSON-RPC 2.0, section 5.1). */
+const PARSE_ERROR = { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } };
+
+/** The schema version from the D1 migration files: a source that is not core's constant. */
+const SCHEMA_FILE_VERSION = Math.max(
+  ...readdirSync(join(REPO, "packages/adapter-d1/migrations")).map((f) =>
+    Number(/^\d{4}_schema_v(\d+)\.sql$/.exec(f)?.[1] ?? 0),
+  ),
+);
 
 /** The tool names of plan 11e Task 5, typed here: the test does not read the table it pins. */
 const DOCS_TOOLS = ["docs.search", "docs.read", "version"];
@@ -73,12 +102,13 @@ function result(run: ServerRun, id: number): Record<string, unknown> {
   return m.result;
 }
 
-const runs: Record<"discover" | "init2511" | "init2506" | "calls", ServerRun> = {} as never;
+const runs: Record<"discover" | "init2511" | "init2506" | "calls" | "parse", ServerRun> =
+  {} as never;
 
 beforeAll(async () => {
   assertFreshBuild();
   assertFreshIndex();
-  const [discover, init2511, init2506, calls] = await Promise.all([
+  const [discover, init2511, init2506, calls, parse] = await Promise.all([
     runServer(
       [],
       [line(1, "server/discover", { _meta: META }), line(2, "tools/list", { _meta: META })],
@@ -107,8 +137,9 @@ beforeAll(async () => {
         line(4, "tools/call", { name: "version", arguments: {} }),
       ],
     ),
+    runServer([], ["this is not json", init("2025-06-18")]),
   ]);
-  Object.assign(runs, { discover, init2511, init2506, calls });
+  Object.assign(runs, { discover, init2511, init2506, calls, parse });
 }, 120_000);
 
 describe("the stdio server on the wire", () => {
@@ -116,6 +147,7 @@ describe("the stdio server on the wire", () => {
     const run = runs.discover;
     const found = result(run, 1);
     expect(found.supportedVersions).toContain("2026-07-28");
+    expect(found.capabilities).toEqual(CAPABILITIES);
     expect(found.instructions).toBe(INSTRUCTIONS.local);
     const tools = result(run, 2).tools as { name: string }[];
     expect(tools.map((t) => t.name).sort()).toEqual([...DOCS_TOOLS].sort());
@@ -125,6 +157,7 @@ describe("the stdio server on the wire", () => {
   it("answers initialize at 2025-11-25, then the lists", () => {
     const run = runs.init2511;
     expect(result(run, 1).protocolVersion).toBe("2025-11-25");
+    expect(result(run, 1).capabilities).toEqual(CAPABILITIES);
     const tools = result(run, 2).tools as {
       name: string;
       annotations: Record<string, boolean>;
@@ -171,8 +204,7 @@ describe("the stdio server on the wire", () => {
       core: version("packages/core/package.json"),
       cli: version("packages/cli/package.json"),
       mcp: version("packages/mcp/package.json"),
-      // The CLI's value: the server answers the schema that `authtempo migrate` expects.
-      schemaVersion: SCHEMA_VERSION,
+      schemaVersion: SCHEMA_FILE_VERSION,
       protocol: "2026-07-28",
       docsIndex: {
         commit: index.header.commit,
@@ -180,6 +212,18 @@ describe("the stdio server on the wire", () => {
         builtFrom: "apps/site/src/content/docs/docs/",
       },
     });
+  });
+
+  it("answers a line that is not JSON with -32700, and logs one line", () => {
+    const run = runs.parse;
+    const first = linesOf(run.stdout)[0] ?? "";
+    expect(JSON.parse(first)).toEqual(PARSE_ERROR);
+    // The next request still gets its answer.
+    expect(result(run, 1).protocolVersion).toBe("2025-06-18");
+    const logged = linesOf(run.stderr).filter((l) => l.includes("not JSON"));
+    expect(logged).toEqual(["authtempo-mcp: a stdin line is not JSON: answered -32700"]);
+    // The log holds no text of the input, which can hold a secret.
+    expect(run.stderr).not.toContain("this is not json");
   });
 
   it("writes nothing but MCP messages on stdout", () => {
@@ -202,6 +246,11 @@ describe("the stdio server on the wire", () => {
   });
 });
 
+const made: string[] = [];
+afterAll(() => {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+});
+
 describe("the flags of the binary", () => {
   it("refuses a --url-env that is no variable name, and writes no stdout", async () => {
     const r = await runServer(["--url-env", "postgres://u:p@h/db"], []);
@@ -219,6 +268,32 @@ describe("the flags of the binary", () => {
     const r = await runServer(["--verbose"], []);
     expect(r.status).toBe(2);
     expect(r.stdout).toBe("");
+  });
+
+  it("resolves --root by its links, and logs the target", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "authtempo-mcp-root-")));
+    made.push(dir);
+    const target = join(dir, "project");
+    mkdirSync(target);
+    symlinkSync(target, join(dir, "link"), "dir");
+    const r = await runServer(["--root", join(dir, "link")], []);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain(`authtempo-mcp: root ${target}, `);
+  });
+
+  it("refuses a --root that does not exist, or that is a file", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "authtempo-mcp-root-")));
+    made.push(dir);
+    writeFileSync(join(dir, "file.txt"), "a file, not a folder\n");
+    const missing = await runServer(["--root", join(dir, "no-such-folder")], []);
+    expect(missing.status).toBe(2);
+    expect(missing.stdout).toBe("");
+    expect(missing.stderr).toContain("does not exist");
+    const file = await runServer(["--root", join(dir, "file.txt")], []);
+    expect(file.status).toBe(2);
+    expect(file.stdout).toBe("");
+    expect(file.stderr).toContain(`the root ${join(dir, "file.txt")} is not a folder`);
   });
 
   it("exits 2 with the index command when the index is missing", async () => {

@@ -209,6 +209,18 @@ function snippetOf(text: string): string {
 }
 
 /**
+ * The text of a section. A section with no text of its own gives the text of
+ * its first level-3 child. So a hit never has an empty snippet.
+ */
+function textOrChild(index: AgentIndex, at: number): string {
+  const s = index.sections[at];
+  const next = index.sections[at + 1];
+  if (s && s.text.trim() === "" && next && next.path === s.path && next.depth === 3)
+    return next.text;
+  return s?.text ?? "";
+}
+
+/**
  * The best sections for a query, at most one per page and at most `limit`.
  * A higher score comes first; a tie follows the sidebar order, then the
  * order of the sections on the page. The same query gives the same order.
@@ -241,7 +253,7 @@ export function searchSections(
         title: page.title,
         heading: s?.heading ?? "",
         anchor: s?.anchor ?? null,
-        snippet: snippetOf(s?.text ?? ""),
+        snippet: snippetOf(textOrChild(index, doc.section)),
         type: page.type,
         // Rounded, so the JSON of a hit is the same on each run and each platform.
         score: Math.round(score * 10_000) / 10_000,

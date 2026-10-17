@@ -1,7 +1,7 @@
 // The docs tools: docs.search, docs.read, and version. They read the index
 // that the server loaded at its start, and nothing else. They run on Node
 // and on the remote Worker.
-import type { AgentIndex, AgentPage } from "./index-format.js";
+import type { AgentIndex, AgentPage, AgentSection } from "./index-format.js";
 import { searchSections } from "./search.js";
 import type { ToolImpl, ToolResult } from "./spec.js";
 import { TOOLS, type ToolRow } from "./tools.js";
@@ -145,6 +145,31 @@ export function nearestPaths(index: AgentIndex, path: string): string[] {
     .map((p) => p.path);
 }
 
+/**
+ * The page path of a path as an agent may type it. The site origin goes, and
+ * a final slash comes. The handler only looks the result up in the index.
+ */
+function pagePath(raw: string): string {
+  let path = raw.trim();
+  if (path.startsWith(SITE_ORIGIN)) path = path.slice(SITE_ORIGIN.length);
+  return path.endsWith("/") ? path : `${path}/`;
+}
+
+/**
+ * The markdown of one section. A level-2 section also holds each level-3
+ * section under it, up to the next level-2 heading. Many level-2 headings
+ * have no text of their own: their content is in their level-3 children.
+ */
+function sectionMarkdown(sections: readonly AgentSection[], s: AgentSection): string {
+  const out = [`${"#".repeat(s.depth)} ${s.heading}\n\n${s.text}\n`];
+  if (s.depth === 2)
+    for (const next of sections.slice(sections.indexOf(s) + 1)) {
+      if (next.depth === 2) break;
+      out.push(`\n### ${next.heading}\n\n${next.text}\n`);
+    }
+  return out.join("");
+}
+
 function search(index: AgentIndex): ToolImpl {
   return {
     row: row("docs.search"),
@@ -182,7 +207,7 @@ function read(index: AgentIndex): ToolImpl {
           links: index.pages.map((p) => p.path),
         });
       }
-      const path = String(input.path);
+      const path = pagePath(String(input.path));
       const page = index.pages.find((p) => p.path === path);
       if (!page) {
         const suggestions = nearestPaths(index, path);
@@ -200,7 +225,7 @@ function read(index: AgentIndex): ToolImpl {
             error: `the page ${path} has no section ${String(input.section)}`,
             anchors: sections.map((x) => x.anchor),
           });
-        markdown = `${"#".repeat(s.depth)} ${s.heading}\n\n${s.text}\n`;
+        markdown = sectionMarkdown(sections, s);
       }
       return done({
         version,

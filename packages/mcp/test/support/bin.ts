@@ -42,7 +42,13 @@ export interface ServerRun {
 function requestIds(lines: readonly string[]): unknown[] {
   const ids: unknown[] = [];
   for (const line of lines) {
-    const m = JSON.parse(line) as { id?: unknown; method?: unknown };
+    let m: { id?: unknown; method?: unknown };
+    try {
+      m = JSON.parse(line) as { id?: unknown; method?: unknown };
+    } catch {
+      // A line that is not JSON gets an answer with id null: no request id to wait for.
+      continue;
+    }
     if (m.id !== undefined && typeof m.method === "string") ids.push(m.id);
   }
   return ids;
