@@ -22,13 +22,13 @@ const CLI_BIN = join(REPO, "packages/cli/dist/bin/authtempo.js");
 /** The 11c fixture of a future schema version (0008_future.sql then; renumbered by later plans). */
 const FUTURE_SQL = join(REPO, "packages/cli/test/fixtures/postgres/0011_future.sql");
 /**
- * The highest schema version of the adapter's migration files (ruling 25).
- * The Postgres adapter keeps its migrations in code, so the folder is the D1
- * adapter's, as in protocol-raw.test.ts. The test does not read SCHEMA_VERSION.
+ * The highest schema version of the Postgres adapter's migration files
+ * (ruling 25). CORE_MIGRATIONS of the CLI comes from this folder. The test
+ * does not read SCHEMA_VERSION.
  */
 const FILE_VERSION = Math.max(
-  ...readdirSync(join(REPO, "packages/adapter-d1/migrations")).map((f) =>
-    Number(/^\d{4}_schema_v(\d+)\.sql$/.exec(f)?.[1] ?? 0),
+  ...readdirSync(join(REPO, "packages/adapter-postgres/src/migrations")).map((f) =>
+    Number(/^\d{4}_schema_v(\d+)\.ts$/.exec(f)?.[1] ?? 0),
   ),
 );
 
@@ -48,15 +48,16 @@ const ANSWER_KEYS = [
   "target",
 ];
 /** The fixed texts, written out here: the test does not read the constants it pins. */
-const NO_PLAN = "no held plan has this id; run migrate.plan again";
+const NO_PLAN = "no held plan has this id; run schema.migrate with dry_run: true again";
+const OTHER_DATABASE = "the database differs from the plan";
 const CHANGED = "the database changed since the plan";
 const MODES = "schema.migrate takes dry_run: true alone, or plan_id with confirm: true";
 const NEXT = "authtempo migrate --target postgres --tables core --url-env DATABASE_URL";
 
 type Session = Awaited<ReturnType<typeof connect>>;
 type Db = Awaited<ReturnType<typeof freshDatabase>>;
-let fx: FixtureRoot | undefined;
-let session: Session | undefined;
+const roots: FixtureRoot[] = [];
+const sessions: Session[] = [];
 const dbs: Db[] = [];
 
 beforeAll(() => {
@@ -64,10 +65,8 @@ beforeAll(() => {
   assertFreshIndex();
 });
 afterEach(async () => {
-  await session?.close();
-  session = undefined;
-  fx?.remove();
-  fx = undefined;
+  for (const s of sessions.splice(0)) await s.close();
+  for (const f of roots.splice(0)) f.remove();
 });
 // Each test database is dropped here, also when a test fails.
 afterAll(async () => {
@@ -84,8 +83,8 @@ async function emptyDatabase(): Promise<Db> {
 /** A server on a new fixture root, with DATABASE_URL in its environment. */
 async function start(db: Db, opts: { plans?: PlanStore; main?: CliMain } = {}): Promise<Session> {
   const f = fixtureRoot();
-  fx = f;
-  session = await connect(
+  roots.push(f);
+  const session = await connect(
     createServer({
       surface: "local",
       index: siteIndex(),
@@ -95,6 +94,7 @@ async function start(db: Db, opts: { plans?: PlanStore; main?: CliMain } = {}): 
       local: (facts) => localTools(facts, opts),
     }),
   );
+  sessions.push(session);
   return session;
 }
 
@@ -130,6 +130,20 @@ async function metaVersion(db: Db): Promise<string | null> {
 
 const text = (r: Called) => r.texts.join("\n");
 const doc = (r: Called) => r.structured ?? {};
+
+/**
+ * Writes the fixture of plan 11c, renumbered to one version past the last
+ * migration file, and answers that version.
+ */
+async function applyFuture(db: Db): Promise<number> {
+  const future = FILE_VERSION + 1;
+  const sql = readFileSync(FUTURE_SQL, "utf8")
+    .replace(/value = '\d+'/, `value = '${future}'`)
+    .replace(/'\d+_future'/, `'${String(future).padStart(4, "0")}_future'`);
+  await db.sql.unsafe(sql);
+  expect(await metaVersion(db)).toBe(String(future));
+  return future;
+}
 
 /** A dry run that must give a plan_id. */
 async function plan(s: Session): Promise<string> {
@@ -197,12 +211,7 @@ describe("schema.migrate", () => {
     const known = FILE_VERSION;
     expect(shell(db, []).status).toBe(0);
     // The fixture of plan 11c, renumbered to one version past the last migration file.
-    const future = known + 1;
-    const sql = readFileSync(FUTURE_SQL, "utf8")
-      .replace(/value = '\d+'/, `value = '${future}'`)
-      .replace(/'\d+_future'/, `'${String(future).padStart(4, "0")}_future'`);
-    await db.sql.unsafe(sql);
-    expect(await metaVersion(db)).toBe(String(future));
+    const future = await applyFuture(db);
     const s = await start(db);
     const r = await s.call("schema.migrate", { dry_run: true });
     expect(r.isError).toBe(true);
@@ -266,6 +275,37 @@ describe("schema.migrate", () => {
     expect(doc(run).exit).toBe(0);
   });
 
+  it("refuses a plan of one database on another", async () => {
+    const a = await emptyDatabase();
+    const b = await emptyDatabase();
+    // Two servers share one store; each one has its own DATABASE_URL.
+    const store = new PlanStore();
+    const onA = await start(a, { plans: store });
+    const onB = await start(b, { plans: store });
+    const id = await plan(onA);
+    const r = await onB.call("schema.migrate", { plan_id: id, confirm: true });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toBe(OTHER_DATABASE);
+    expect(await metaVersion(a)).toBeNull();
+    expect(await metaVersion(b)).toBeNull();
+  });
+
+  it("stops at the gate in a run when the database became newer after the plan", async () => {
+    const db = await emptyDatabase();
+    const known = FILE_VERSION;
+    expect(shell(db, []).status).toBe(0);
+    const s = await start(db);
+    const id = await plan(s);
+    const future = await applyFuture(db);
+    const r = await s.call("schema.migrate", { plan_id: id, confirm: true });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toBe(
+      `stopped: the database is at version ${future}; this CLI knows version ${known}; use a newer CLI`,
+    );
+    expect(doc(r).plan_id).toBeNull();
+    expect(await metaVersion(db)).toBe(String(future));
+  });
+
   it("reads the database again after a run that stops", async () => {
     const db = await emptyDatabase();
     const expected = shellPlan(db);
@@ -295,6 +335,8 @@ describe("schema.migrate", () => {
       `after the stop, the database is at version ${expected.version} with 0 pending migration(s)`,
     ]);
     expect(doc(r)).toMatchObject({
+      target: "postgres",
+      tables: "core",
       dryRun: false,
       before: null,
       after: expected.version,

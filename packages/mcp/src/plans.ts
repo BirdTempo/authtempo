@@ -18,7 +18,6 @@ export const PLAN_MAX = 16;
 
 /** The fixed texts of a refusal. A test compares each one as a literal. */
 export const PLAN_REFUSALS = {
-  unknown: "no held plan has this id; run migrate.plan again",
   input: "the input differs from the plan",
   database: "the database differs from the plan",
 } as const;
@@ -31,6 +30,15 @@ export const fileChanged = (key: string): string => `the file ${key} changed sin
  * run of schema.migrate. A plan of another kind is an unknown id.
  */
 export type PlanKind = "import" | "schema";
+
+/**
+ * The refusal of an id that the store does not hold for this kind: unknown,
+ * used, or old. It names the call that makes a new plan of the kind.
+ */
+export const UNKNOWN_PLAN: Readonly<Record<PlanKind, string>> = {
+  import: "no held plan has this id; run migrate.plan again",
+  schema: "no held plan has this id; run schema.migrate with dry_run: true again",
+};
 
 /** One held plan. `input` is canonical JSON; `files` maps each file input to its SHA-256. */
 export interface Held {
@@ -127,8 +135,8 @@ export class PlanStore {
   /**
    * Takes a plan for one run. The entry goes first, so an id serves one run
    * only, also when a check refuses it. Then each check refuses with its
-   * fixed text: an unknown or old id, a plan of another kind, another
-   * input, a changed file, and another database.
+   * fixed text. The checks are an unknown or old id, a plan of another kind,
+   * another input, a changed file, and another database.
    */
   take(
     kind: PlanKind,
@@ -140,7 +148,7 @@ export class PlanStore {
     const held = this.#plans.get(id);
     this.#plans.delete(id);
     if (held === undefined || held.kind !== kind || this.#now() - held.at > PLAN_TTL_MS)
-      return { refused: PLAN_REFUSALS.unknown };
+      return { refused: UNKNOWN_PLAN[kind] };
     if (held.input !== canonicalInput(input) || !sameKeys(held.files, files))
       return { refused: PLAN_REFUSALS.input };
     for (const [key, digest] of Object.entries(held.files))

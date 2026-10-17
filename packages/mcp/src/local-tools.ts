@@ -525,6 +525,8 @@ export function localTools(
       return {
         structured: {
           ...stop,
+          target: "postgres",
+          tables,
           dryRun: false,
           before: planned.before,
           after: null,
@@ -540,6 +542,9 @@ export function localTools(
     return {
       structured: {
         ...stop,
+        // The stop document holds the empty target and tables; the tool knows both.
+        target: "postgres",
+        tables,
         dryRun: false,
         before: planned.before,
         after: state.before,

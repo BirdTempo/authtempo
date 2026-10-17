@@ -410,7 +410,10 @@ describe("the plan store and the input rules", () => {
   it("counts a plan of another kind as unknown", () => {
     const store = new PlanStore(() => 0);
     const id = store.hold("import", { n: 1 }, {}, null, "db");
-    expect(store.take("schema", id, { n: 1 }, {}, "db")).toEqual({ refused: NO_PLAN });
+    // The text names the call that makes a plan of the caller's kind (Task 9 review m-1).
+    expect(store.take("schema", id, { n: 1 }, {}, "db")).toEqual({
+      refused: "no held plan has this id; run schema.migrate with dry_run: true again",
+    });
     expect(store.size).toBe(0);
   });
 
