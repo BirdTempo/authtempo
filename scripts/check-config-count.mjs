@@ -21,9 +21,10 @@ import { execFileSync } from "node:child_process";
 // config), then packages/solid and examples/solid (35, Task 8), then
 // packages/fastify and examples/fastify (37, Task 9), then
 // packages/tanstack-start (38, Task 10; the example has no vitest config),
-// then examples/elysia and examples/nestjs (40, Task 14).
+// then examples/elysia and examples/nestjs (40, Task 14). Plan 11e adds
+// packages/mcp (41, Task 5).
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 40;
+const MINIMUM = 41;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

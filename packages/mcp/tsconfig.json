@@ -1,5 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // The binary and index-reader.ts read files and argv through node: modules
+    // (@types/node 24.19.1, pinned). The files of the remote surface import no
+    // Node module; test/search.test.ts holds them to the repo's no-Node check.
+    "types": ["node"]
+  },
   "include": ["src"]
 }

@@ -1,0 +1,61 @@
+// The protocol-free description of a server. No file but protocol.ts imports
+// the SDK, so a change of the SDK changes protocol.ts only.
+import type { ToolRow } from "./tools.js";
+
+export type Surface = "local" | "remote";
+
+/** The answer of a tool. A tool fault is `isError: true`, never a protocol error. */
+export interface ToolResult {
+  structured: Record<string, unknown>;
+  isError: boolean;
+  /** The text block. When it is absent, the text block is the JSON of `structured`. */
+  text?: string;
+}
+
+export interface ToolImpl {
+  row: ToolRow;
+  call(input: Record<string, unknown>): Promise<ToolResult>;
+}
+
+/** One resource template (Task 6 fills the list). */
+export interface ResourceTemplateSpec {
+  name: string;
+  uriTemplate: string;
+  title: string;
+  description: string;
+  mimeType: string;
+  list(): readonly { uri: string; name: string }[];
+  /** The text of one resource, or null when the URI names no resource. */
+  read(uri: string): string | null;
+}
+
+export interface ResourceSpec {
+  templates: readonly ResourceTemplateSpec[];
+}
+
+/** One prompt (Task 14 fills the list). Each argument is a string. */
+export interface PromptSpec {
+  name: string;
+  title: string;
+  description: string;
+  args: readonly { name: string; description: string; values: readonly string[] }[];
+  /** The text of the prompt for the given arguments. */
+  text(args: Readonly<Record<string, string>>): string;
+}
+
+/** One skill of the skill pack (Task 14): the folder name and the text of its SKILL.md. */
+export interface Skill {
+  name: string;
+  markdown: string;
+}
+
+export type SkillSet = readonly Skill[];
+
+export interface ServerSpec {
+  name: "authtempo";
+  version: string;
+  instructions: string;
+  tools: readonly ToolImpl[];
+  resources: ResourceSpec;
+  prompts: readonly PromptSpec[];
+}

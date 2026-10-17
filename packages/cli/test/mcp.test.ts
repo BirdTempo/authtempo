@@ -57,22 +57,22 @@ const project = (fixture: string) => {
 };
 
 /**
- * The server binary comes from plan 11e Task 5. Until then the test hook
- * AUTHTEMPO_MCP_BIN names a stand-in file in its own folder, so no project
- * folder holds it.
+ * The real server binary of plan 11e Task 5, by the path that the plan
+ * states. The Turbo test task builds @authtempo/mcp first. The test hook
+ * AUTHTEMPO_MCP_BIN stays for the missing-bin stop only.
  */
-let BIN: string;
+const BIN = join(REPO, "packages/mcp/dist/bin/authtempo-mcp.js");
 beforeAll(() => {
   assertFreshBuild();
-  BIN = join(fresh(), "authtempo-mcp.js");
-  writeFileSync(BIN, "// a stand-in for the server binary of plan 11e Task 5\n");
+  if (!existsSync(BIN))
+    throw new Error(`${BIN} is missing: run pnpm turbo run build --filter=@authtempo/mcp`);
 });
 afterAll(() => {
   for (const dir of made) rmSync(dir, { recursive: true, force: true });
 });
 
 const mcp = (dir: string, args: string[], env: Record<string, string> = {}) =>
-  runBin(["mcp", ...args], { cwd: dir, env: { AUTHTEMPO_MCP_BIN: BIN, ...env } });
+  runBin(["mcp", ...args], { cwd: dir, env });
 
 /** Every file under a folder, by its relative path, with its bytes. */
 function snapshot(dir: string): Map<string, string> {

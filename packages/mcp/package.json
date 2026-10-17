@@ -3,20 +3,43 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "description": "The authtempo MCP server: the docs tools on stdio, and the remote docs server.",
+  "bin": {
+    "authtempo-mcp": "./dist/bin/authtempo-mcp.js"
+  },
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./index-format": {
       "types": "./dist/index-format.d.ts",
       "default": "./dist/index-format.js"
     }
   },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "index": "node scripts/copy-index.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@authtempo/cli": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@modelcontextprotocol/server": "2.3.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "typescript": "7.0.2"
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
   }
 }

@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The sources and the Node tests (plan 11e Task 5).
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    // test/search.test.ts builds its fixture index with the site's own builder,
+    // apps/site/scripts/lib/agent.ts, whose imports carry the .ts extension.
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src", "test"]
+}

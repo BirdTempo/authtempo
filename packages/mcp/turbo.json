@@ -1,0 +1,14 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // The index is the site's build output, and the server reads it. The site's
+    // checks read the built server. So the order is the build of mcp, the build
+    // of the site, and the index of mcp (the form of plan 11c Task 7 Step 3).
+    "index": { "dependsOn": ["build", "@authtempo/site#build"], "outputs": ["dist/agent/**"] },
+    // The tests spawn dist/bin/authtempo-mcp.js and read dist/agent/index.json.
+    "test": { "dependsOn": ["^build", "build", "index"] },
+    // tsconfig.test.json reads the dist types of @authtempo/cli/program.
+    "typecheck": { "dependsOn": ["^build"] }
+  }
+}
