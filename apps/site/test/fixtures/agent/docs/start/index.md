@@ -17,6 +17,16 @@ sources:
 | [Sample](/docs/guides/sample/) | One sample include |
 | [Codes](/docs/reference/codes/) | Two anchors |
 
+### Example
+
+Open the sample page.
+
+## More pages
+
+### Example
+
+Open the codes page.
+
 ## Next
 
 - [Codes](/docs/reference/codes/)

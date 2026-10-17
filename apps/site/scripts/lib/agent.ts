@@ -19,7 +19,12 @@ export type ReadFile = (path: string) => string;
 
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const RAW_IMPORT = /^import\s+(\w+)\s+from\s+"([^"]+)\?raw";?\s*$/;
-const CODE_TAG = /^\s*<Code\s([^>]*?)\s*\/>\s*$/;
+const CODE_TAG = /^<Code\s([^>]*?)\s*\/>\s*$/;
+/**
+ * The elements that a prose line may hold. Each other element throws, so a
+ * new component fails the build and never vanishes from the agent's text.
+ */
+const KNOWN_TAGS = new Set(["code", "abbr"]);
 const RAW_H3 = /^<h3 id="([^"]+)">(.*)<\/h3>\s*$/;
 
 function decode(s: string): string {
@@ -47,11 +52,11 @@ function fenceFor(text: string): string {
 }
 
 /**
- * One prose line with the markup of a page made plain: an autolink keeps its
- * URL, each HTML and MDX element goes and its text stays, and each `/docs/`
- * link becomes absolute. A code span stays as it is, because its text is code.
+ * One prose line with the markup of a page made plain. An autolink keeps its
+ * URL. A known element goes, and its text stays. Each `/docs/` link becomes
+ * absolute. A code span stays as it is, because its text is code.
  */
-function plainLine(line: string): string {
+function plainLine(line: string, where: string): string {
   return line
     .split(/(`[^`]*`)/)
     .map((part) => {
@@ -59,8 +64,13 @@ function plainLine(line: string): string {
       let out = part
         .replace(/<!--[\s\S]*?-->/g, "")
         .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-        .replace(/<(https?:[^>\s]+)>/g, "$1")
-        .replace(/<\/?[A-Za-z][^>]*>/g, "");
+        .replace(/<(https?:[^>\s]+)>/g, "$1");
+      for (const m of out.matchAll(/<\/?([A-Za-z][\w.-]*)/g))
+        if (!KNOWN_TAGS.has(m[1] ?? ""))
+          throw new Error(
+            `${where}: the element <${m[1]}> is not one that the agent markdown knows`,
+          );
+      out = out.replace(/<\/?[A-Za-z][^>]*>/g, "");
       out = out.replace(/\]\(\/docs\//g, `](${SITE_ORIGIN}/docs/`);
       return out;
     })
@@ -68,10 +78,11 @@ function plainLine(line: string): string {
 }
 
 /**
- * The agent markdown of a page: `# <title>`, the description, and the body
- * with each sample include as a fence, each raw h3 anchor as a heading with
- * its id, every other element as its text, and each `/docs/` link absolute.
- * Tables, headings, lists, and fences stay as they are.
+ * The agent markdown of a page: `# <title>`, the description, and the body.
+ * Each sample include becomes a fence, and each raw h3 anchor a heading with
+ * its id. Every other known element becomes its text, and each `/docs/` link
+ * becomes absolute. Tables, headings, lists, and fences stay as they are.
+ * Unknown markup throws with the page and the line.
  */
 export function agentMarkdown(page: Page, readFile: ReadFile): string {
   const fm = parseFrontmatter(page.source);
@@ -84,7 +95,8 @@ export function agentMarkdown(page: Page, readFile: ReadFile): string {
 
   const out: string[] = [`# ${title}`, "", description, ""];
   let fence: string | null = null;
-  for (const line of fm.body.split("\n")) {
+  for (const [i, line] of fm.body.split("\n").entries()) {
+    const where = `${page.path}:${fm.bodyLine + i}`;
     const f = FENCE.exec(line);
     if (fence !== null) {
       out.push(line);
@@ -102,12 +114,14 @@ export function agentMarkdown(page: Page, readFile: ReadFile): string {
       out.push(...includeFence(page, code[1] ?? "", imports, readFile));
       continue;
     }
+    if (line.includes("<Code"))
+      throw new Error(`${where}: a <Code> tag must stand alone on one line, at the start`);
     const h3 = RAW_H3.exec(line);
     if (h3) {
       out.push(`### ${textOf(h3[2] ?? "")} {#${h3[1]}}`);
       continue;
     }
-    out.push(plainLine(line));
+    out.push(plainLine(line, where));
   }
   return `${out
     .join("\n")
@@ -256,7 +270,8 @@ export function sectionsOf(path: string, markdown: string): AgentSection[] {
 /** The `/docs/` link targets of an agent markdown, in order, with no duplicate. */
 function linksOf(markdown: string): string[] {
   const out: string[] = [];
-  for (const m of markdown.matchAll(/\]\(https:\/\/authtempo\.com(\/docs\/[^)\s]*)\)/g)) {
+  const origin = SITE_ORIGIN.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  for (const m of markdown.matchAll(new RegExp(`\\]\\(${origin}(/docs/[^)\\s]*)\\)`, "g"))) {
     const link = m[1] ?? "";
     if (!out.includes(link)) out.push(link);
   }
@@ -269,9 +284,10 @@ export function termsOf(terms: readonly { term: string; use: string }[]): Record
 }
 
 /**
- * The packages of the SDK that are no binding. The client runs in the
- * browser, verify checks a caller in any server, handoff passes a sign-in to
- * a native app, and core is the engine that each binding wraps.
+ * The packages of the SDK that are no binding. Core is the engine that each
+ * binding wraps. The client runs in the browser. Verify checks a caller in
+ * any server. Handoff passes a sign-in to a native app. A plan that adds a
+ * package to SDK_PACKAGES decides here if it is a binding (ruling 3 of 11e).
  */
 const NOT_BINDINGS = new Set([
   "@authtempo/core",
@@ -302,8 +318,7 @@ export interface BuildOptions {
 /**
  * The agent index of a content tree: one entry per page in the sidebar
  * order, and one per `##` and `###` section. It throws on a page that the
- * sidebar does not list and on a sidebar link that has no page, so the index
- * and the site hold the same pages.
+ * sidebar does not list. It also throws on a sidebar link that has no page.
  */
 export function buildAgentIndex(
   pages: readonly Page[],

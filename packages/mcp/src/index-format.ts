@@ -88,7 +88,7 @@ const indexSchema = z
         z.strictObject({ name: z.string().min(1), page: z.string().regex(DOCS_PATH) }),
       ),
     }),
-    pages: z.array(pageSchema),
+    pages: z.array(pageSchema).min(1),
     sections: z.array(sectionSchema),
   })
   // The header counts are a promise of the file. A count that differs from
@@ -100,6 +100,20 @@ const indexSchema = z
   .refine((i) => i.header.sections === i.sections.length, {
     message: "header.sections differs from the number of sections",
     path: ["header", "sections"],
+  })
+  // The build cannot write the next three. A copied file can hold them, and a
+  // repeated path makes a reader answer one page twice.
+  .refine((i) => new Set(i.pages.map((p) => p.path)).size === i.pages.length, {
+    message: "two pages have one path",
+    path: ["pages"],
+  })
+  .refine((i) => i.sections.every((s) => i.pages.some((p) => p.path === s.path)), {
+    message: "a section names a path that is no page",
+    path: ["sections"],
+  })
+  .refine((i) => i.header.bindings.every((b) => i.pages.some((p) => p.path === b.page)), {
+    message: "a binding names a page that the index lacks",
+    path: ["header", "bindings"],
   });
 
 /** The index of a JSON text. Throws with the first issue when the text does not keep the format. */

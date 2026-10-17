@@ -24,7 +24,7 @@ The body is not valid JSON. See the <abbr title="specification">spec</abbr> at <
 
 <h3 id="unauthorized"><code>unauthorized</code> 401</h3>
 
-The request has no session.<br />Sign in again.
+The request has no session. Sign in again.
 
 ## Next
 

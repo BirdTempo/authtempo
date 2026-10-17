@@ -47,15 +47,18 @@ function prose(markdown: string): string[] {
   });
 }
 
-function build(order = sidebarOrder(html)) {
+function build(order = sidebarOrder(html), bindings = bindingsOf(EXPORT_ENTRIES, SDK_PACKAGES)) {
   return buildAgentIndex(pages, order, {
     commit: "0123abc",
     readFile,
     terms: termsOf(FORBIDDEN_TERMS),
-    bindings: bindingsOf(EXPORT_ENTRIES, SDK_PACKAGES),
+    bindings,
     groups: sidebarGroups(html),
   });
 }
+
+/** The fixture index with a binding of a fixture page, so the parser can accept it. */
+const FIXTURE_BINDINGS = [{ name: "sample", page: "/docs/guides/sample/" }];
 
 describe("agentMarkdown", () => {
   it("keeps the text and drops the frontmatter and the imports", () => {
@@ -118,6 +121,45 @@ describe("agentMarkdown", () => {
       "docs/guides/sample.mdx: the include hello names ../../samples/hello.ts, which does not exist",
     );
   });
+
+  it("refuses markup it does not know", () => {
+    const at = (body: string): Page => ({
+      path: "docs/guides/odd.mdx",
+      source: `---\ntitle: Odd\ndescription: One odd shape.\ntype: how-to\n---\n\nFirst line.\n${body}\n`,
+    });
+    const cases: [string, string][] = [
+      // A <Code> tag on two lines.
+      [
+        '<Code code={hello}\n  lang="ts" />',
+        "docs/guides/odd.mdx:8: a <Code> tag must stand alone on one line, at the start",
+      ],
+      // A <Code> tag indented in a list.
+      [
+        '1. Read it.\n\n   <Code code={hello} lang="ts" title="t" />',
+        "docs/guides/odd.mdx:10: a <Code> tag must stand alone on one line, at the start",
+      ],
+      // A placeholder in prose, outside a code span.
+      [
+        "Open <your-domain> in a browser.",
+        "docs/guides/odd.mdx:8: the element <your-domain> is not one that the agent markdown knows",
+      ],
+      [
+        "One sentence.<br />Another sentence.",
+        "docs/guides/odd.mdx:8: the element <br> is not one that the agent markdown knows",
+      ],
+      // A component that the agent markdown has no rule for.
+      [
+        "<Tabs>\nThe text of a tab.\n</Tabs>",
+        "docs/guides/odd.mdx:8: the element <Tabs> is not one that the agent markdown knows",
+      ],
+    ];
+    for (const [body, message] of cases)
+      expect(() => agentMarkdown(at(body), readFile)).toThrow(message);
+    // A placeholder in a code span and an autolink stay text, and do not throw.
+    expect(
+      agentMarkdown(at("Open `<your-domain>` or <https://example.com/x>."), readFile),
+    ).toContain("Open `<your-domain>` or https://example.com/x.");
+  });
 });
 
 describe("the agent index", () => {
@@ -130,7 +172,7 @@ describe("the agent index", () => {
   });
 
   it("writes one entry per page and one per section, in the sidebar order", () => {
-    const index = build();
+    const index = build(sidebarOrder(html), FIXTURE_BINDINGS);
     expect(index.pages.map((p) => [p.path, p.type, p.group])).toEqual([
       ["/docs/start/", "tutorial", ""],
       ["/docs/guides/sample/", "how-to", "How-to guides"],
@@ -138,6 +180,10 @@ describe("the agent index", () => {
     ]);
     expect(index.sections.map((s) => [s.path, s.depth, s.heading, s.anchor])).toEqual([
       ["/docs/start/", 2, "The pages", "the-pages"],
+      // A repeated heading gains -1, as the build's slugger gives it.
+      ["/docs/start/", 3, "Example", "example"],
+      ["/docs/start/", 2, "More pages", "more-pages"],
+      ["/docs/start/", 3, "Example", "example-1"],
       ["/docs/start/", 2, "Next", "next"],
       ["/docs/guides/sample/", 2, "Before you start", "before-you-start"],
       ["/docs/guides/sample/", 2, "The steps", "the-steps"],
@@ -159,10 +205,82 @@ describe("the agent index", () => {
       commit: "0123abc",
       builtFrom: "apps/site/src/content/docs/docs/",
       pages: 3,
-      sections: 11,
+      sections: 14,
       versions: ["latest"],
     });
     expect(parseAgentIndex(JSON.stringify(index))).toEqual(index);
+  });
+
+  it("refuses a malformed index", () => {
+    const good = build(sidebarOrder(html), FIXTURE_BINDINGS);
+    // The copy is plain JSON, so a case can set a value that the format refuses.
+    type Row = Record<string, unknown>;
+    type Loose = {
+      header: Row & { pages: number; sections: number };
+      pages: Row[];
+      sections: Row[];
+    };
+    const text = (change: (i: Loose) => void): string => {
+      const copy = structuredClone(good) as unknown as Loose;
+      change(copy);
+      return JSON.stringify(copy);
+    };
+    const cases: [string, string][] = [
+      [
+        text((i) => {
+          i.header.pages += 1;
+        }),
+        "the agent index is not valid: header.pages: header.pages differs from the number of pages",
+      ],
+      [
+        text((i) => {
+          i.header.format = 2;
+        }),
+        "the agent index is not valid: header.format:",
+      ],
+      [
+        text((i) => {
+          Object.assign(i.pages[0] ?? {}, { extra: "x" });
+        }),
+        "the agent index is not valid: pages.0:",
+      ],
+      [
+        text((i) => {
+          Object.assign(i.sections[0] ?? {}, { depth: 4 });
+        }),
+        "the agent index is not valid: sections.0.depth:",
+      ],
+      [
+        text((i) => {
+          Object.assign(i.pages[1] ?? {}, { path: i.pages[0]?.path });
+        }),
+        "the agent index is not valid: pages: two pages have one path",
+      ],
+      [
+        text((i) => {
+          Object.assign(i.sections[0] ?? {}, { path: "/docs/missing/" });
+        }),
+        "the agent index is not valid: sections: a section names a path that is no page",
+      ],
+      [
+        text((i) => {
+          i.header.bindings = [{ name: "hono", page: "/docs/reference/hono/" }];
+        }),
+        "the agent index is not valid: header.bindings: a binding names a page that the index lacks",
+      ],
+      [
+        text((i) => {
+          i.pages = [];
+          i.sections = [];
+          i.header.pages = 0;
+          i.header.sections = 0;
+          i.header.bindings = [];
+        }),
+        "the agent index is not valid: pages:",
+      ],
+      ["{", "the agent index is not JSON:"],
+    ];
+    for (const [input, message] of cases) expect(() => parseAgentIndex(input)).toThrow(message);
   });
 
   it("puts each forbidden term and each binding in the header", () => {
@@ -172,30 +290,24 @@ describe("the agent index", () => {
     expect(Object.keys(header.terms)).toHaveLength(FORBIDDEN_TERMS.length);
     expect(header.bindings).toContainEqual({ name: "hono", page: "/docs/reference/hono/" });
     expect(header.bindings).toContainEqual({ name: "vue-nuxt", page: "/docs/reference/vue/" });
-    const names = header.bindings.map((b) => b.name);
-    for (const no of [
-      "core",
-      "core-routes",
-      "client",
-      "client-oauth",
-      "verify",
-      "handoff",
-      "handoff-expo",
-    ])
-      expect(names).not.toContain(no);
-    // Every row of a binding package is in the list, and no row is twice.
-    const bindingPackages = SDK_PACKAGES.filter(
-      (p) =>
-        ![
-          "@authtempo/core",
-          "@authtempo/client",
-          "@authtempo/verify",
-          "@authtempo/handoff",
-        ].includes(p),
-    );
-    const rows = EXPORT_ENTRIES.filter((e) => bindingPackages.includes(e.pkg));
-    expect(new Set(names).size).toBe(names.length);
-    expect(names.toSorted()).toEqual(rows.map((e) => e.label).toSorted());
+    // Ruling 3 of plan 11e: core, client, verify, and handoff are no bindings.
+    // The list is pinned, so a new SDK package cannot become a binding in silence.
+    expect(header.bindings.map((b) => b.name)).toEqual([
+      "react",
+      "next",
+      "hono",
+      "express",
+      "astro",
+      "sveltekit",
+      "react-router",
+      "vue",
+      "vue-nuxt",
+      "solid",
+      "solid-start",
+      "sveltekit-store",
+      "fastify",
+      "tanstack-start",
+    ]);
   });
 
   it("fails on a page that the sidebar does not list, and on a sidebar link with no page", () => {
