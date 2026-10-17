@@ -17,6 +17,16 @@
  *   So a Verifier with a JWKS URL on its own host is the one case that the flag changes.
  *   This example sets no global_fetch_strictly_public, and core refuses its own host as a client id.
  *
+ * - A Worker cannot fetch an address that Cloudflare owns: error 1024
+ *   (developers.cloudflare.com/workers/observability/errors/, read 2026-10-17).
+ *   No page says that a deployed Worker can fetch https://cloudflare-dns.com/dns-query.
+ *   An owner-run probe must show it before the stack is published.
+ * - The DoH JSON format "has no formal RFC and its schema is not guaranteed to be stable"
+ *   (developers.cloudflare.com/changelog/post/2026-07-28-improved-record-display-format/,
+ *   read 2026-10-17). That change touches other record types, not A or AAAA. A changed
+ *   `data` form fails closed here: a text that is no address is not public. A move to
+ *   the DoH wireformat (RFC 8484) waits for the probe.
+ *
  * The gap: the name can answer another address at the connect than at this check
  * (DNS rebinding). Workers give no way to pin the address of a fetch. So core's own
  * host rules, `redirect: "manual"`, the 10-second timeout, and the 64 KB cap stay the
@@ -25,14 +35,15 @@
 
 /** What the guard needs: a name lookup and the fetch that sends the request. */
 export interface GuardDeps {
-  /** Every A and AAAA answer of a name. An empty list means no address. */
-  resolve(name: string): Promise<string[]>;
+  /** Every A and AAAA answer of a name. An empty list means no address. The signal ends the lookup. */
+  resolve(name: string, signal?: AbortSignal): Promise<string[]>;
   fetch: typeof fetch;
 }
 
 /**
- * The private IPv4 classes. Source: RFC 6890 sections 2.2.2 (each block has
- * "Global: False", read 2026-10-17), and RFC 5771 for multicast, which RFC 6890 does not list.
+ * The private IPv4 classes: the blocks of RFC 6890 section 2.2.2 with "Global: False"
+ * (read 2026-10-17), and multicast (RFC 5771), which RFC 6890 does not list.
+ * The 6to4 relay 192.88.99.0/24 is the one RFC 6890 block with "Global: True".
  * One line for each class.
  */
 const PRIVATE_V4: readonly (readonly [base: string, bits: number])[] = [
@@ -43,8 +54,11 @@ const PRIVATE_V4: readonly (readonly [base: string, bits: number])[] = [
   ["169.254.0.0", 16], // Link Local, with the cloud metadata address 169.254.169.254
   ["172.16.0.0", 12], // Private-Use
   ["192.0.0.0", 24], // IETF Protocol Assignments
+  ["192.0.2.0", 24], // Documentation, TEST-NET-1 (RFC 5737)
   ["192.168.0.0", 16], // Private-Use
   ["198.18.0.0", 15], // Benchmarking
+  ["198.51.100.0", 24], // Documentation, TEST-NET-2 (RFC 5737)
+  ["203.0.113.0", 24], // Documentation, TEST-NET-3 (RFC 5737)
   ["224.0.0.0", 4], // Multicast (RFC 5771)
   ["240.0.0.0", 4], // Reserved, with the limited broadcast 255.255.255.255
 ];
@@ -109,16 +123,37 @@ function parseV6(text: string): number[] | null {
   return [...head, ...new Array<number>(missing).fill(0), ...rest, ...tail];
 }
 
-function isPrivateV6(groups: number[]): boolean {
-  const [g0 = 0, g1 = 0, g2 = 0, g3 = 0, g4 = 0, g5 = 0, g6 = 0, g7 = 0] = groups;
-  const zeroHead = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0;
-  if (zeroHead && g5 === 0 && g6 === 0 && g7 === 0) return true; // :: (RFC 6890, unspecified)
-  if (zeroHead && g5 === 0 && g6 === 0 && g7 === 1) return true; // ::1 (RFC 6890, loopback)
-  if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 (RFC 6890, unique local)
-  if ((g0 & 0xffc0) === 0xfe80) return true; // fe80::/10 (RFC 6890, link local)
-  // ::ffff:0:0/96, the IPv4-mapped form: the IPv4 address decides.
-  if (zeroHead && g5 === 0xffff) return isPrivateV4(g6 * 65536 + g7);
-  return false;
+/** The IPv4 address of two 16-bit groups is private. */
+function v4Private(hi: number, lo: number): boolean {
+  return isPrivateV4(hi * 65536 + lo);
+}
+
+/** True when groups `from` to `to - 1` are all zero. */
+function zeros(g: readonly number[], from: number, to: number): boolean {
+  return g.slice(from, to).every((x) => x === 0);
+}
+
+/**
+ * The private IPv6 classes. Sources, read 2026-10-17: RFC 6890 section 2.2.3, and the RFC
+ * on each line. A form that holds an IPv4 address is decided by that address, because a
+ * translator can reach it. One line for each class.
+ */
+const PRIVATE_V6: readonly ((g: readonly number[]) => boolean)[] = [
+  (g) => zeros(g, 0, 6) && v4Private(g[6] ?? 0, g[7] ?? 0), // ::/96 IPv4-compatible (RFC 4291), with :: and ::1
+  (g) => zeros(g, 0, 5) && g[5] === 0xffff && v4Private(g[6] ?? 0, g[7] ?? 0), // ::ffff:0:0/96 IPv4-mapped (RFC 4291)
+  (g) => zeros(g, 0, 4) && g[4] === 0xffff && g[5] === 0 && v4Private(g[6] ?? 0, g[7] ?? 0), // ::ffff:0:0:0/96 IPv4-translated (RFC 2765)
+  (g) => g[0] === 0x64 && g[1] === 0xff9b && zeros(g, 2, 6) && v4Private(g[6] ?? 0, g[7] ?? 0), // 64:ff9b::/96 NAT64 (RFC 6052)
+  (g) => g[0] === 0x2002 && v4Private(g[1] ?? 0, g[2] ?? 0), // 2002::/16 6to4 (RFC 3056)
+  (g) => g[0] === 0x100 && zeros(g, 1, 4), // 100::/64 Discard-Only (RFC 6666)
+  (g) => g[0] === 0x2001 && g[1] === 0xdb8, // 2001:db8::/32 Documentation (RFC 3849)
+  (g) => ((g[0] ?? 0) & 0xfe00) === 0xfc00, // fc00::/7 Unique-Local (RFC 4193)
+  (g) => ((g[0] ?? 0) & 0xffc0) === 0xfe80, // fe80::/10 Link-Local (RFC 4291)
+  (g) => ((g[0] ?? 0) & 0xffc0) === 0xfec0, // fec0::/10 site-local, deprecated (RFC 3879)
+  (g) => ((g[0] ?? 0) & 0xff00) === 0xff00, // ff00::/8 Multicast (RFC 4291)
+];
+
+function isPrivateV6(groups: readonly number[]): boolean {
+  return PRIVATE_V6.some((rule) => rule(groups));
 }
 
 /**
@@ -140,22 +175,37 @@ const TYPE_AAAA = 28;
 /**
  * A lookup of the A and AAAA answers through Cloudflare's DNS over HTTPS
  * (`https://cloudflare-dns.com/dns-query` with `accept: application/dns-json`).
- * A Worker has no other name lookup.
+ * With no Node compat, a Worker has no other name lookup: `node:dns` needs nodejs_compat
+ * (developers.cloudflare.com/changelog/post/2025-01-28-nodejs-compat-improvements/, read 2026-10-17).
  */
-export function dohResolve(fetchFn: typeof fetch): (name: string) => Promise<string[]> {
-  const ask = async (name: string, type: "A" | "AAAA", code: number): Promise<string[]> => {
+export function dohResolve(
+  fetchFn: typeof fetch,
+): (name: string, signal?: AbortSignal) => Promise<string[]> {
+  const failed = () => new Error("the DNS lookup of the client metadata host failed");
+  const ask = async (
+    name: string,
+    type: "A" | "AAAA",
+    code: number,
+    signal: AbortSignal | undefined,
+  ): Promise<string[]> => {
     const url = new URL("https://cloudflare-dns.com/dns-query");
     url.searchParams.set("name", name);
     url.searchParams.set("type", type);
     const res = await fetchFn(url, {
       headers: { accept: "application/dns-json" },
       redirect: "manual",
+      ...(signal ? { signal } : {}),
     });
     if (res.status !== 200) {
       await res.body?.cancel();
-      throw new Error("the DNS lookup of the client metadata host failed");
+      throw failed();
     }
-    const body: unknown = await res.json();
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      throw failed();
+    }
     if (typeof body !== "object" || body === null) return [];
     const answer = (body as { Answer?: unknown }).Answer;
     if (!Array.isArray(answer)) return [];
@@ -167,8 +217,11 @@ export function dohResolve(fetchFn: typeof fetch): (name: string) => Promise<str
       })
       .map((a) => a.data);
   };
-  return async (name) => {
-    const [a, aaaa] = await Promise.all([ask(name, "A", TYPE_A), ask(name, "AAAA", TYPE_AAAA)]);
+  return async (name, signal) => {
+    const [a, aaaa] = await Promise.all([
+      ask(name, "A", TYPE_A, signal),
+      ask(name, "AAAA", TYPE_AAAA, signal),
+    ]);
     return [...a, ...aaaa];
   };
 }
@@ -188,6 +241,9 @@ function untilAbort<T>(work: Promise<T>, signal: AbortSignal | null): Promise<T>
  * every address is public. Wire it as `guardedFetch({ resolve: dohResolve(fetch), fetch })`.
  */
 export function guardedFetch(deps: GuardDeps): typeof fetch {
+  // Take the members once. A call as `deps.fetch(...)` passes `deps` as `this`, and the
+  // global fetch of workerd throws "Illegal invocation" for that receiver.
+  const { resolve, fetch: send } = deps;
   return async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -195,11 +251,13 @@ export function guardedFetch(deps: GuardDeps): typeof fetch {
     // A trailing dot names the same host. Brackets hold an IPv6 literal.
     const host = url.hostname.replace(/\.$/, "").replace(/^\[(.*)\]$/, "$1");
     const literal = parseV4(host) !== null || host.includes(":");
-    const addresses = literal ? [host] : await untilAbort(deps.resolve(host), request.signal);
+    const addresses = literal
+      ? [host]
+      : await untilAbort(resolve(host, request.signal), request.signal);
     if (addresses.length === 0) throw new Error("the client metadata host has no address");
     if (!addresses.every(isPublicAddress))
       throw new Error("the client metadata host resolves to a private address");
     // Core sets redirect manual too (spec 8.13). A redirect must not lead past this check.
-    return deps.fetch(new Request(request, { redirect: "manual" }));
+    return send(new Request(request, { redirect: "manual" }));
   };
 }

@@ -29,7 +29,7 @@ import guardedFetch from "../../../../../../../examples/mcp-server/src/fetch.ts?
 1. Turn on `oauth` in the config of the auth app.
    - Set `oauth.resources` to the URL of the MCP route, such as `https://app.example.com/mcp`.
    - Set `oauth.scopes` to `{ "mcp:tools": "Use the tools of this app" }`, or to your own text.
-   - Set `registration: { dynamic: false }`. The MCP authorization revision calls dynamic registration deprecated. Row 12e makes off the default.
+   - Set `oauth.registration` to `{ dynamic: false }`. The MCP authorization revision calls dynamic registration deprecated. Row 12e makes `dynamic: false` the default.
    - Set `oauth.fetch` to `guardedFetch({ resolve: dohResolve(fetch), fetch })`. A client then registers by the URL of its metadata document.
 2. Mount `auth.wellKnown(request)` for every path that starts with `/.well-known/` at the origin root.
 3. Wrap the handler of the `/mcp` route in `requireMcpAuth` of `@authtempo/verify/mcp`.
@@ -56,7 +56,10 @@ A server that is not the auth app passes a `Verifier` of `createVerifier` as the
 - The URL must be `https:`. An `http:` URL throws before any lookup.
 - The name resolves through DNS over HTTPS. Each A and AAAA answer must be public.
 - One private answer refuses the host, also when the other answers are public. A name with no answer throws.
-- The private classes are the blocks of RFC 6890 with no global reach, plus multicast. An IPv4-mapped IPv6 form counts as its IPv4 address.
+- The private IPv4 classes are the blocks of RFC 6890 with no global reach, plus multicast.
+- The private IPv6 classes are `::1`, `::`, `fc00::/7`, `fe80::/10`, `fec0::/10`, `ff00::/8`, `100::/64`, and `2001:db8::/32`.
+- An IPv6 form that holds an IPv4 address counts as that IPv4 address. These forms are `::/96`, `::ffff:0:0/96`, `::ffff:0:0:0/96`, `64:ff9b::/96`, and `2002::/16`.
+- Other blocks of `2001::/23` are not refused.
 - The request goes with `redirect: "manual"`, as core also sets it.
 - A name can answer another address at the connect than at the check. Workers give no way to pin the address. Core's host rules, its 10-second timeout, and its 64 KB cap stay the first line.
 
@@ -87,6 +90,8 @@ The consent page and the connected apps page are in [the provider guide](/docs/g
 - [`invalid_token`](/docs/reference/errors/#oauth-invalid_token): the token is expired, of another resource, or not an OAuth access token. The client must get a new token.
 - [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope): the token lacks `mcp:tools`, or a tool threw `McpScopeError`. The client must ask for the scopes of the challenge.
 - [`invalid_client`](/docs/reference/errors/#oauth-invalid_client): the client id is unknown. With `dynamic: false`, a client id must be the URL of a metadata document that the guarded fetch accepts.
+- The error "the DNS lookup of the client metadata host failed" means that the resolver did not answer, or did not answer JSON. With `dynamic: false`, no client can register then.
+- Core logs each refusal of the guard as "the fetch failed or timed out". The log line does not give the reason.
 
 ## Next
 
