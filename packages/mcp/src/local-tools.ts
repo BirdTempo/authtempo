@@ -35,8 +35,9 @@ export const CLI_TEMPLATES = fileURLToPath(
 export async function runCli(
   argv: readonly string[],
   io: ConfinedIo,
+  cli: CliMain = main,
 ): Promise<{ code: number; json: Record<string, unknown> }> {
-  const code = await main(argv, io.io);
+  const code = await cli(argv, io.io);
   const { out } = io.lines();
   const [line, ...more] = out;
   if (line === undefined || more.length > 0)
@@ -169,10 +170,37 @@ function pinnedIo(root: string, env: LocalContext["env"], texts: Map<string, str
 const databaseOf = (ctx: LocalContext): string =>
   sha256(`${ctx.urlEnv}\u0000${ctx.env[ctx.urlEnv] ?? ""}`);
 
+/** The main of the CLI. A test can wrap it to put a fault into a real run. */
+export type CliMain = typeof main;
+
+/** The fields of a migrate document that a dry run reads from the database. */
+interface SchemaState {
+  before: number | null;
+  pending: string[];
+}
+
+/** The state of a migrate document that did not stop, or null. */
+function schemaState(json: Record<string, unknown>): SchemaState | null {
+  const { before, pending } = json;
+  if (json.exit === 2 || !Array.isArray(pending)) return null;
+  if (before !== null && typeof before !== "number") return null;
+  return { before, pending: pending.map(String) };
+}
+
+/** The refusal of a plan whose database moved after the dry run. */
+const SCHEMA_CHANGED = "the database changed since the plan";
+
+/** The text of an input that is not one of the two modes of schema.migrate. */
+const SCHEMA_MODES = "schema.migrate takes dry_run: true alone, or plan_id with confirm: true";
+
 /** The local tool impls. createServer adds them for the local surface only. */
-export function localTools(ctx: LocalContext, opts: { plans?: PlanStore } = {}): ToolImpl[] {
+export function localTools(
+  ctx: LocalContext,
+  opts: { plans?: PlanStore; main?: CliMain } = {},
+): ToolImpl[] {
   // One store per server: the plan of one connection is not a plan of another server.
   const plans = opts.plans ?? new PlanStore();
+  const cli = opts.main ?? main;
   const scaffold: ToolImpl = {
     row: row("scaffold"),
     async call(input) {
@@ -193,7 +221,7 @@ export function localTools(ctx: LocalContext, opts: { plans?: PlanStore } = {}):
       });
       let run: Awaited<ReturnType<typeof runCli>>;
       try {
-        run = await runCli(["init", dir, "--stack", stack, "--json"], io);
+        run = await runCli(["init", dir, "--stack", stack, "--json"], io, cli);
       } catch (e) {
         return fault(e instanceof Error ? e.message : String(e));
       }
@@ -220,6 +248,7 @@ export function localTools(ctx: LocalContext, opts: { plans?: PlanStore } = {}):
         run = await runCli(
           ["import", ...args, ...target, ...(planRow.wraps?.fixed ?? [])],
           pinnedIo(ctx.root, ctx.env, read.texts),
+          cli,
         );
       } catch (e) {
         return fault(e instanceof Error ? e.message : String(e));
@@ -270,6 +299,7 @@ export function localTools(ctx: LocalContext, opts: { plans?: PlanStore } = {}):
             ctx.urlEnv,
           ],
           pinnedIo(ctx.root, ctx.env, read.texts),
+          cli,
         );
       } catch (e) {
         return fault(e instanceof Error ? e.message : String(e));
@@ -277,5 +307,131 @@ export function localTools(ctx: LocalContext, opts: { plans?: PlanStore } = {}):
       return answer(run.json);
     },
   };
-  return [scaffold, migratePlan, migrateRun];
+  const schemaRow = row("schema.migrate");
+  /** One run of authtempo migrate on the server's database: a dry run, or the real run. */
+  const migrate = (tables: string, dryRun: boolean) =>
+    runCli(
+      [
+        "migrate",
+        ...(schemaRow.wraps?.fixed ?? []),
+        "--url-env",
+        ctx.urlEnv,
+        "--tables",
+        tables,
+        ...(dryRun ? ["--dry-run"] : []),
+      ],
+      confinedIo({ root: ctx.root, env: ctx.env, allowFetch: false, readOnly: [] }),
+      cli,
+    );
+  const schemaMigrate: ToolImpl = {
+    row: schemaRow,
+    async call(input) {
+      const dryRun = input.dry_run;
+      const planId = input.plan_id;
+      const planMode = dryRun === true && planId === undefined && input.confirm === undefined;
+      const runMode = dryRun === undefined && typeof planId === "string" && input.confirm === true;
+      if (!planMode && !runMode) return fault(SCHEMA_MODES);
+      const tables = input.tables === "compat" ? "compat" : "core";
+      const bound = cliInput(schemaRow, input);
+      // The command of the real run, for the shell: the same flags with no --json.
+      const next = [
+        "authtempo",
+        "migrate",
+        "--target",
+        "postgres",
+        "--tables",
+        tables,
+        "--url-env",
+        ctx.urlEnv,
+      ]
+        .map(shellWord)
+        .join(" ");
+
+      if (planMode) {
+        let plan: Awaited<ReturnType<typeof runCli>>;
+        try {
+          plan = await migrate(tables, true);
+        } catch (e) {
+          return fault(e instanceof Error ? e.message : String(e));
+        }
+        // The version gate of the CLI stops a newer database with exit 2: no plan_id.
+        const state = schemaState(plan.json);
+        if (state === null) return answer({ ...plan.json, plan_id: null, next: null });
+        const id = plans.hold("schema", bound, {}, state, databaseOf(ctx));
+        return answer({ ...plan.json, plan_id: id, next });
+      }
+
+      const held = plans.take("schema", String(planId), bound, {}, databaseOf(ctx));
+      if (isPlanError(held)) return fault(held.refused);
+      const planned = held.report as SchemaState;
+      // The dry run again, against the database as it is now. The gate runs in it first.
+      let fresh: Awaited<ReturnType<typeof runCli>>;
+      try {
+        fresh = await migrate(tables, true);
+      } catch (e) {
+        return fault(e instanceof Error ? e.message : String(e));
+      }
+      const now = schemaState(fresh.json);
+      if (now === null) return answer({ ...fresh.json, plan_id: null, next: null });
+      if (JSON.stringify(now) !== JSON.stringify(planned)) return fault(SCHEMA_CHANGED);
+      let run: Awaited<ReturnType<typeof runCli>>;
+      try {
+        run = await migrate(tables, false);
+      } catch (e) {
+        return fault(e instanceof Error ? e.message : String(e));
+      }
+      if (run.json.exit !== 2) return answer({ ...run.json, plan_id: null, next: null });
+      return afterStop(run.json, tables, planned);
+    },
+  };
+
+  /**
+   * The answer of a real run that stopped. A stop document holds empty
+   * values, also after a migration was applied (Task 7 review I-2). So the
+   * tool reads the state from the database again with a dry run.
+   */
+  async function afterStop(
+    stop: Record<string, unknown>,
+    tables: string,
+    planned: SchemaState,
+  ): Promise<ToolResult> {
+    const stopped = `stopped: ${String(stop.stopped)}`;
+    let state: SchemaState | null = null;
+    try {
+      state = schemaState((await migrate(tables, true)).json);
+    } catch {
+      // The state stays unknown, and the answer says so.
+    }
+    if (state === null)
+      return {
+        structured: {
+          ...stop,
+          dryRun: false,
+          before: planned.before,
+          after: null,
+          pending: null,
+          applied: null,
+          plan_id: null,
+          next: null,
+        },
+        isError: true,
+        text: `${stopped}\nthe state of the database after the stop is unknown: run schema.migrate with dry_run: true`,
+      };
+    const left = new Set(state.pending);
+    return {
+      structured: {
+        ...stop,
+        dryRun: false,
+        before: planned.before,
+        after: state.before,
+        pending: planned.pending,
+        applied: planned.pending.filter((n) => !left.has(n)),
+        plan_id: null,
+        next: null,
+      },
+      isError: true,
+      text: `${stopped}\nafter the stop, the database is at version ${state.before ?? "none"} with ${state.pending.length} pending migration(s)`,
+    };
+  }
+  return [scaffold, migratePlan, migrateRun, schemaMigrate];
 }

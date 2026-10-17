@@ -1,7 +1,7 @@
-// The plan handle of migrate.plan and migrate.run (plan 11e Task 8). A real
-// run takes the id of a plan against the database. The id binds the run to
-// the input, the bytes of each file, and the database of that plan. The
-// store is in memory: a new server holds no plan.
+// The plan handle of migrate.plan and migrate.run (plan 11e Task 8), and of
+// schema.migrate (Task 9). A real run takes the id of a plan against the
+// database. The id binds the run to the input, the bytes of each file, and
+// the database of that plan. The store is in memory: a new server holds no plan.
 import { createHash, randomBytes } from "node:crypto";
 
 /**
@@ -26,9 +26,15 @@ export const PLAN_REFUSALS = {
 /** The refusal text for a file whose SHA-256 differs from the plan. */
 export const fileChanged = (key: string): string => `the file ${key} changed since the plan`;
 
+/**
+ * The tool that made a plan: "import" for migrate.plan, "schema" for a dry
+ * run of schema.migrate. A plan of another kind is an unknown id.
+ */
+export type PlanKind = "import" | "schema";
+
 /** One held plan. `input` is canonical JSON; `files` maps each file input to its SHA-256. */
 export interface Held {
-  kind: string;
+  kind: PlanKind;
   input: string;
   files: Readonly<Record<string, string>>;
   /** The SHA-256 of the connection string of the plan. Only the store reads it; no answer holds it. */
@@ -95,7 +101,7 @@ export class PlanStore {
    * characters (16 random bytes). The id carries no part of the input.
    */
   hold(
-    kind: string,
+    kind: PlanKind,
     input: Readonly<Record<string, unknown>>,
     files: Readonly<Record<string, string>>,
     report: unknown,
@@ -121,11 +127,11 @@ export class PlanStore {
   /**
    * Takes a plan for one run. The entry goes first, so an id serves one run
    * only, also when a check refuses it. Then each check refuses with its
-   * fixed text: an unknown or old id, another input, a changed file, and
-   * another database.
+   * fixed text: an unknown or old id, a plan of another kind, another
+   * input, a changed file, and another database.
    */
   take(
-    kind: string,
+    kind: PlanKind,
     id: string,
     input: Readonly<Record<string, unknown>>,
     files: Readonly<Record<string, string>>,

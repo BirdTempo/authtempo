@@ -86,6 +86,23 @@ export const IMPORT_PROVIDERS = [
  */
 const IMPORT_KEYS = ["report", "stopped", "bundle", "exit"] as const;
 
+/**
+ * The keys of `authtempo migrate --json` (MIGRATE_JSON_KEYS of the CLI): the
+ * target, the table set, the versions, the migration names, and the exit code.
+ */
+const MIGRATE_KEYS = [
+  "target",
+  "tables",
+  "dryRun",
+  "before",
+  "after",
+  "pending",
+  "applied",
+  "copied",
+  "exit",
+  "stopped",
+] as const;
+
 /** The name of an environment variable: the CLI's rule (ENV_NAME of packages/cli/src/secrets.ts). */
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -338,5 +355,50 @@ export const TOOLS: readonly ToolRow[] = [
       confirm: z.literal(true).describe("true: the person read the plan and wants the run."),
     }),
     outputKeys: IMPORT_KEYS,
+  },
+  {
+    name: "schema.migrate",
+    title: "Migrate the Postgres schema of authtempo",
+    description:
+      "Writes the authtempo migrations into the Postgres database that the server's environment names, after a dry run. With dry_run: true it writes nothing, and answers the pending migrations and a plan_id. With that plan_id and confirm: true it runs the dry run again, refuses when the database changed, and applies the plan. D1 is not a tool: run `authtempo migrate --target d1` in the shell.",
+    surfaces: ["local"],
+    wraps: {
+      command: "migrate",
+      positional: [],
+      flags: { tables: "tables" },
+      // --url-env <NAME> follows: the server's --url-env, never a tool input.
+      // A dry run also passes --dry-run.
+      fixed: ["--target", "postgres", "--json"],
+      toolOnly: ["dry_run", "plan_id", "confirm"],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    // The handler takes one of two modes: dry_run: true alone, or plan_id
+    // with confirm: true. Each other mix is an input error.
+    input: z.strictObject({
+      tables: z
+        .enum(["core", "compat"])
+        .default("core")
+        .describe("The table set: core, or compat for a Better Auth schema."),
+      dry_run: z
+        .boolean()
+        .optional()
+        .describe("true: list the pending migrations, write nothing, and answer a plan_id."),
+      plan_id: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("The plan_id of a dry run of this tool. Give it with confirm: true."),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe("true with plan_id: the person read the plan and wants the run."),
+    }),
+    outputKeys: [...MIGRATE_KEYS, "plan_id", "next"],
   },
 ];
