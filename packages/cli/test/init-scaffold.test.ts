@@ -17,6 +17,8 @@ const PASSES: Readonly<Record<Stack, readonly string[]>> = {
   "workers-postgres": ["2 passed", "--dry-run: exiting now."],
   node: ["node-e2e: PASS", "bun-e2e: PASS"],
   bun: ["node-e2e: PASS", "bun-e2e: PASS"],
+  // The MCP example: its test file has five tests, and the guarded fetch's file has 44.
+  "mcp-server": ["Test Files  2 passed (2)", "Tests  49 passed (49)"],
 };
 
 beforeAll(() => {

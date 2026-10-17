@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "my-app",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  // From compatibility date 2026-08-04 Workers turn nodejs_compat on by
+  // default. Core, the D1 adapter, verify, and the MCP SDK on workerd use no
+  // Node.js API, so these two flags turn it off. The bundle proof fails on
+  // any node: import. There is no global_fetch_strictly_public flag: see
+  // src/fetch.ts for what that flag changes.
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  // No workers.dev address and no preview address. An MCP client finds the
+  // resource and the issuer by BASE_URL, so the Worker must answer on that
+  // origin only. Add a route or a custom domain for BASE_URL before a deploy.
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    // The origin of this Worker. Change it to your own origin before a deploy.
+    // The MCP resource is BASE_URL with /mcp.
+    "BASE_URL": "https://example.test"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "my-app",
+      // Replace this with the id that `wrangler d1 create my-app` prints.
+      // The test runs on a local database and needs no real id.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      // The adapter package ships the migrations. wrangler reads this path
+      // relative to this file.
+      "migrations_dir": "node_modules/@authtempo/adapter-d1/migrations"
+    }
+  ],
+  // The sweep deletes expired links, codes, sessions, and OAuth rows. Without
+  // a trigger they stay in D1 forever.
+  "triggers": { "crons": ["17 * * * *"] }
+  // AUTH_SECRET is a secret: `wrangler secret put AUTH_SECRET`. The test sets
+  // it in vitest.config.ts.
+}

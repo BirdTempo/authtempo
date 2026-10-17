@@ -5,18 +5,22 @@ export const INIT_HELP: HelpText = {
   page: "init",
   purpose:
     "Write a new app with a magic link sign-in on one stack. The files are those of the example app of the stack.",
-  usage: ["authtempo init [dir] --stack <workers-d1|workers-postgres|node|bun>"],
+  usage: ["authtempo init [dir] --stack <workers-d1|workers-postgres|node|bun|mcp-server>"],
   examples: [
     {
       line: "authtempo init my-app --stack workers-d1",
       says: "Write a Worker on D1 into the folder my-app.",
     },
     { line: "authtempo init . --stack node", says: "Write a Node server into this folder." },
+    {
+      line: "authtempo init my-mcp --stack mcp-server",
+      says: "Write an MCP server on a Worker with D1 into the folder my-mcp.",
+    },
   ],
   flags: [
     {
       flag: "--stack <stack>",
-      says: "The stack: workers-d1, workers-postgres, node, or bun. It has no default.",
+      says: "The stack: workers-d1, workers-postgres, node, bun, or mcp-server. It has no default.",
     },
     ...COMMON_FLAGS,
   ],

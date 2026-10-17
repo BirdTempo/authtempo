@@ -411,6 +411,19 @@ importers:
         version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
 
   examples/mcp-server:
+    dependencies:
+      '@authtempo/adapter-d1':
+        specifier: workspace:*
+        version: link:../../packages/adapter-d1
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@authtempo/verify':
+        specifier: workspace:*
+        version: link:../../packages/verify
+      '@modelcontextprotocol/server':
+        specifier: 2.3.1
+        version: 2.3.1
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.4.0
@@ -10959,7 +10972,7 @@ snapshots:
     optionalDependencies:
       vite: 8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)
 
-  '@vitest/mocker@5.0.3(vite@8.3.3(@types/node@24.19.1))':
+  '@vitest/mocker@5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.3
@@ -15596,7 +15609,7 @@ snapshots:
   vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.3(vite@8.3.3(@types/node@24.19.1))
+      '@vitest/mocker': 5.0.3(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0

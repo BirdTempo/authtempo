@@ -1,11 +1,12 @@
 ---
 title: authtempo init
-description: Write a new app with a magic link sign-in on Workers with D1, Workers with Postgres, Node, or Bun.
+description: Write a new app with a magic link sign-in on Workers with D1, Workers with Postgres, Node, Bun, or an MCP server on Workers with D1.
 type: reference
 sources:
   - packages/cli/README.md "init"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 19
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 7"
+  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 13"
 sidebar:
   order: 2
 ---
@@ -30,7 +31,7 @@ authtempo init my-app --stack workers-d1
 | Flag | What it does |
 | --- | --- |
 | `[dir]` | The folder of the app. The default is the current folder. |
-| `--stack <stack>` | `workers-d1`, `workers-postgres`, `node`, or `bun`. It has no default. |
+| `--stack <stack>` | `workers-d1`, `workers-postgres`, `node`, `bun`, or `mcp-server`. It has no default. |
 | `--json` | Prints `{ stack, dir, files, next }`. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
@@ -47,6 +48,7 @@ authtempo init my-app --stack workers-d1
 | `workers-postgres` | `examples/worker-postgres` | [Workers on Postgres through Hyperdrive](/docs/start/workers-hyperdrive/) |
 | `node` | `examples/node` | [Node](/docs/start/node/) |
 | `bun` | `examples/node`, with `bun src/main.ts` as its start script | [Bun](/docs/start/bun/) |
+| `mcp-server` | `examples/mcp-server`, an MCP server on a Worker with D1 | [An MCP server on Workers with D1](/docs/start/mcp-server/) |
 
 The `node` stack and the `bun` stack need Node 22.18 or newer. Node runs their `.ts` files with its type stripping.
 
@@ -62,7 +64,7 @@ The `node` stack and the `bun` stack need Node 22.18 or newer. Node runs their `
 
 - The files are those of the example apps, with five changes only.
 - The name of the app is `my-app`, and each `@authtempo` package has its exact version.
-- Each `tsconfig*.json` extends the copied base config. The D1 test script has no bundle proof of the repo.
+- Each `tsconfig*.json` extends the copied base config. The test script of `workers-d1` and `mcp-server` has no bundle proof of the repo.
 - The start script of the Bun stack is `bun src/main.ts`.
 - `init` runs no install and needs no network. It prints `pnpm install` as a next step.
 - `init` writes no secret. A test scans each file for a key, a token, and a password.

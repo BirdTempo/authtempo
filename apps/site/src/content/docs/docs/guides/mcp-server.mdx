@@ -5,6 +5,9 @@ type: how-to
 sources:
   - packages/verify/README.md "Protect an MCP server"
   - packages/verify/src/mcp.ts
+  - examples/mcp-server/src/auth.ts
+  - examples/mcp-server/src/index.ts
+  - examples/mcp-server/src/mcp.ts
   - examples/mcp-server/src/fetch.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
@@ -12,7 +15,10 @@ sources:
 ---
 
 import { Code } from "@astrojs/starlight/components";
+import auth from "../../../../../../../examples/mcp-server/src/auth.ts?raw";
 import guardedFetch from "../../../../../../../examples/mcp-server/src/fetch.ts?raw";
+import worker from "../../../../../../../examples/mcp-server/src/index.ts?raw";
+import mcp from "../../../../../../../examples/mcp-server/src/mcp.ts?raw";
 
 **For:** a developer who serves an MCP server and wants authtempo to sign in its callers.
 
@@ -35,6 +41,20 @@ import guardedFetch from "../../../../../../../examples/mcp-server/src/fetch.ts?
 3. Wrap the handler of the `/mcp` route in `requireMcpAuth` of `@authtempo/verify/mcp`.
    - Pass the `auth` of core as the source when the MCP route is in the same Worker as the auth app.
    - Pass `resource` with the same URL as `oauth.resources`, and `scopes: ["mcp:tools"]`.
+
+The example app `examples/mcp-server` does these steps. Its config of core sets each option of step 1, with the reason beside it.
+
+<Code code={auth} lang="ts" title="examples/mcp-server/src/auth.ts" />
+
+The Worker mounts the metadata documents, the auth routes, and the wrapped MCP route.
+
+<Code code={worker} lang="ts" title="examples/mcp-server/src/index.ts" />
+
+The MCP route is a seam over the MCP SDK. It is the one file that imports the SDK, and it serves the tool `whoami`.
+
+<Code code={mcp} lang="ts" title="examples/mcp-server/src/mcp.ts" />
+
+The guarded fetch refuses a metadata host with a private address.
 
 <Code code={guardedFetch} lang="ts" title="examples/mcp-server/src/fetch.ts" />
 
@@ -95,5 +115,6 @@ The consent page and the connected apps page are in [the provider guide](/docs/g
 
 ## Next
 
+- [An MCP server on Workers with D1](/docs/start/mcp-server/)
 - [The verify MCP entry](/docs/reference/verify-mcp/)
 - [Be the OAuth and OIDC provider for MCP clients](/docs/guides/oauth-provider/)

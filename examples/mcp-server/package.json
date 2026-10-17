@@ -4,8 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "wrangler dev",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run && node ../worker/proof/bundle-no-node.mjs ."
+  },
+  "dependencies": {
+    "@authtempo/adapter-d1": "workspace:*",
+    "@authtempo/core": "workspace:*",
+    "@authtempo/verify": "workspace:*",
+    "@modelcontextprotocol/server": "2.3.1"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",

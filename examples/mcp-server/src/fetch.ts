@@ -5,7 +5,7 @@
  * so core fetches a URL that a stranger chose. This fetch refuses a host whose
  * name resolves to a private address (server-side request forgery).
  *
- * Two platform facts, read 2026-10-17:
+ * Four platform facts, read 2026-10-17:
  * - A Worker fetches by URL, not by IP address
  *   (developers.cloudflare.com/workers/platform/known-issues/, "Fetch to IP addresses").
  *   No page says that Workers refuse a name that resolves to a private address.
@@ -16,7 +16,6 @@
  *   (developers.cloudflare.com/workers/configuration/compatibility-flags/, read 2026-10-17).
  *   So a Verifier with a JWKS URL on its own host is the one case that the flag changes.
  *   This example sets no global_fetch_strictly_public, and core refuses its own host as a client id.
- *
  * - A Worker cannot fetch an address that Cloudflare owns: error 1024
  *   (developers.cloudflare.com/workers/observability/errors/, read 2026-10-17).
  *   No page says that a deployed Worker can fetch https://cloudflare-dns.com/dns-query.

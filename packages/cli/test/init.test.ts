@@ -60,6 +60,15 @@ beforeAll(() => {
  * than this machine, and a long token other than the documented test
  * secret and the all-zero placeholder ids of the examples.
  */
+/**
+ * A path part of a cited page, such as 2026-07-28-improved-record-display-format:
+ * lowercase words and numbers joined by hyphens, with a letter past f. A UUID
+ * holds hex only, and a random token has capitals, so neither is a slug.
+ */
+function isSlug(text: string): boolean {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(text) && /[g-z]/.test(text);
+}
+
 function secretsIn(path: string, text: string): string[] {
   const found: string[] = [];
   if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) found.push(`${path}: a private key`);
@@ -68,7 +77,7 @@ function secretsIn(path: string, text: string): string[] {
   for (const m of text.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s:@/"'`]+:[^\s@/"'`]+@([^\s/:"'`]+)/gi))
     if (m[1] !== "localhost" && m[1] !== "127.0.0.1") found.push(`${path}: a password for ${m[1]}`);
   for (const m of text.matchAll(/[A-Za-z0-9_-]{32,}/g))
-    if (m[0] !== TEST_SECRET && !/^[0-]+$/.test(m[0]))
+    if (m[0] !== TEST_SECRET && !/^[0-]+$/.test(m[0]) && !isSlug(m[0]))
       found.push(`${path}: ${m[0].slice(0, 8)}… looks like a token`);
   return found;
 }
@@ -114,7 +123,7 @@ describe("the init templates (spec 19, the one-source rule)", () => {
             ...(pkg.devDependencies ? { devDependencies: pinned(pkg.devDependencies) } : {}),
             scripts: {
               ...pkg.scripts,
-              ...(stack === "workers-d1" ? { test: "vitest run" } : {}),
+              ...(stack === "workers-d1" || stack === "mcp-server" ? { test: "vitest run" } : {}),
               ...(stack === "bun" ? { start: "bun src/main.ts" } : {}),
             },
           });
@@ -138,6 +147,9 @@ describe("the init templates (spec 19, the one-source rule)", () => {
     expect(secretsIn("probe", "AUTH_SECRET=abc")).toHaveLength(1);
     expect(secretsIn("probe", "postgres://u:p@db.example.com/x")).toHaveLength(1);
     expect(secretsIn("probe", "tk_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")).toHaveLength(1);
+    expect(secretsIn("probe", "0f8fad5b-d9cb-469f-a165-70867728950e")).toHaveLength(1);
+    expect(secretsIn("probe", "q7x2k9m4p1w8z3r6t5y0u2i9o4a7s1d6")).toHaveLength(1);
+    expect(secretsIn("probe", "post/2026-07-28-improved-record-display-format/")).toEqual([]);
   });
 });
 
@@ -195,6 +207,36 @@ describe("authtempo init (spec 19)", () => {
       const readme = readFileSync(join(dir, "README.md"), "utf8");
       expect(readme.includes(UNPUBLISHED_NOTE)).toBe(UNPUBLISHED);
     }
+  });
+
+  it("writes the mcp-server stack: the MCP example on D1, with its steps and its page", () => {
+    const dir = fresh("init-mcp-server");
+    const r = runBin(["init", dir, "--stack", "mcp-server"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(
+      `\nNext:\n  cd ${dir}\n  pnpm install\n  cp .dev.vars.example .dev.vars\n  authtempo migrate --target d1\n  pnpm dev\n`,
+    );
+    expect(linesOf(r.stdout).at(-1)).toBe("Docs: https://authtempo.com/docs/start/mcp-server/");
+    for (const path of [
+      "wrangler.jsonc",
+      "src/index.ts",
+      "src/auth.ts",
+      "src/mcp.ts",
+      "src/fetch.ts",
+      "test/mcp.test.ts",
+      ".dev.vars.example",
+    ])
+      expect(existsSync(join(dir, path)), path).toBe(true);
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+      name: string;
+      scripts: Record<string, string>;
+      dependencies: Record<string, string>;
+    };
+    expect(pkg.name).toBe("my-app");
+    // The repo's bundle proof is no file of the app, so the scaffold's test drops it.
+    expect(pkg.scripts.test).toBe("vitest run");
+    expect(pkg.dependencies["@modelcontextprotocol/server"]).toBe("2.3.1");
+    expect(pkg.dependencies["@authtempo/verify"]).toBe(VERSION);
   });
 
   it("names the install note only while the CLI is unpublished", () => {
@@ -258,7 +300,7 @@ describe("authtempo init (spec 19)", () => {
     const typo = runBin(["init", fresh("init-typo"), "--stack", "worker-d1"]);
     expect(typo.status).toBe(2);
     expect(linesOf(typo.stderr)[0]).toBe(
-      "--stack is one of workers-d1, workers-postgres, node, bun. Did you mean workers-d1?",
+      "--stack is one of workers-d1, workers-postgres, node, bun, mcp-server. Did you mean workers-d1?",
     );
   });
 });

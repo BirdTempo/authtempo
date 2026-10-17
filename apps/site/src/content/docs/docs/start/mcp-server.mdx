@@ -1,0 +1,75 @@
+---
+title: An MCP server on Workers with D1
+description: Write an MCP server on a Cloudflare Worker with authtempo init, sign a person in through an MCP client, and call the whoami tool.
+type: tutorial
+sources:
+  - examples/mcp-server/src/index.ts
+  - examples/mcp-server/src/auth.ts
+  - examples/mcp-server/src/mcp.ts
+  - examples/mcp-server/test/mcp.test.ts
+  - packages/verify/README.md "Protect an MCP server"
+  - packages/cli/src/templates.ts
+  - docs/superpowers/plans/2026-10-14-11e-mcp.md
+sidebar:
+  order: 7
+---
+
+import { Code } from "@astrojs/starlight/components";
+import auth from "../../../../../../../examples/mcp-server/src/auth.ts?raw";
+import worker from "../../../../../../../examples/mcp-server/src/index.ts?raw";
+import mcp from "../../../../../../../examples/mcp-server/src/mcp.ts?raw";
+
+**For:** a developer who wants an MCP server whose callers sign in with authtempo.
+
+**What it does:** `authtempo init` writes a Worker on D1 with one MCP tool, `whoami`. An MCP client signs a person in, gets an access token, and calls the tool.
+
+## Before you start
+
+- Node 22.18 or newer, and pnpm 12.8.1.
+- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so your app lives in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.
+- The CLI, built in the repo. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+- A Cloudflare account, for the deploy and the MCP client at the end.
+
+## Steps
+
+1. In the folder `examples` of the clone, write the app into the folder `my-mcp`.
+
+```sh
+authtempo init my-mcp --stack mcp-server
+```
+
+2. In `examples/my-mcp`, run the next steps that the command prints, up to `pnpm dev`. They install the packages, copy `.dev.vars.example` to `.dev.vars`, and migrate the local D1 database.
+3. Write a secret of 32 characters or more into `AUTH_SECRET` of `.dev.vars`. Make it with `openssl rand -base64 32`. Then run `pnpm dev`.
+4. Read `src/auth.ts`. It turns on the OAuth provider with one resource, the scope `mcp:tools`, no dynamic registration, and the guarded fetch.
+
+<Code code={auth} lang="ts" title="examples/my-mcp/src/auth.ts" />
+
+5. Read `src/index.ts`. It mounts the metadata documents, the auth routes, and the MCP route. `requireMcpAuth` lets a request reach the tool only with a token for `/mcp` that holds `mcp:tools`.
+
+<Code code={worker} lang="ts" title="examples/my-mcp/src/index.ts" />
+
+6. Read `src/mcp.ts`. It is the one file that imports the MCP SDK. The tool `whoami` answers the user id, the client id, and the scopes of the caller.
+
+<Code code={mcp} lang="ts" title="examples/my-mcp/src/mcp.ts" />
+
+7. Run the test. It plays the MCP client on a local D1 database.
+
+```sh
+pnpm turbo run test --filter=my-app
+```
+
+The test signs a person in by magic link. Then it sends the authorize request with the URL of a client metadata document and PKCE, allows the consent, and exchanges the code. Last, it calls `whoami` with the access token.
+
+8. Deploy the Worker as in steps 7 to 13 of [Workers on D1](/docs/start/workers-d1/). Also add a route or a custom domain for `BASE_URL`, because `wrangler.jsonc` turns off the `workers.dev` address.
+9. In your MCP client, add the server URL, such as `https://app.example.com/mcp`. The app has no dynamic registration, so the client must have a client metadata document.
+10. Let the client connect. The first request gets 401, with the URL of the resource metadata in `WWW-Authenticate`.
+11. Sign in by magic link on the page that the client opens, and allow the client on the consent page.
+12. Ask the client to call the tool `whoami`.
+
+The test passes. After step 12 the tool answers your user id, the URL of the client metadata document as the client id, and `mcp:tools`.
+
+## Next
+
+- [Protect your MCP server](/docs/guides/mcp-server/)
+- [Be the OAuth and OIDC provider for MCP clients](/docs/guides/oauth-provider/)
+- [authtempo init](/docs/reference/cli/init/)

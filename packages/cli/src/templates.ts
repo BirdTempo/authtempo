@@ -9,7 +9,7 @@ import { join, relative } from "node:path";
  * them again and compares. `init` takes the stack list and the steps from
  * this file, and the files from the JSON.
  */
-export const STACKS = ["workers-d1", "workers-postgres", "node", "bun"] as const;
+export const STACKS = ["workers-d1", "workers-postgres", "node", "bun", "mcp-server"] as const;
 export type Stack = (typeof STACKS)[number];
 
 export interface StackInfo {
@@ -60,6 +60,15 @@ export const STACK_INFO: Readonly<Record<Stack, StackInfo>> = {
     page: "bun",
     secrets: ".env.example",
     next: ["cp .env.example .env", "bun src/main.ts"],
+  },
+  // An app's own MCP server, guarded by requireMcpAuth (plan 11e). It is a
+  // Worker on D1, so its steps are those of workers-d1.
+  "mcp-server": {
+    example: "mcp-server",
+    label: "an MCP server on Cloudflare Workers with D1",
+    page: "mcp-server",
+    secrets: ".dev.vars.example",
+    next: ["cp .dev.vars.example .dev.vars", "authtempo migrate --target d1", "pnpm dev"],
   },
 };
 
@@ -118,8 +127,10 @@ export const UNPUBLISHED_NOTE =
   "The packages are not on a registry yet: pnpm install works only inside the authtempo workspace until they are published. Until then, run each authtempo step as node /path/to/authtempo/packages/cli/dist/bin/authtempo.js in the folder of the app. Write the path of your clone in place of /path/to/authtempo.";
 
 const BASE_EXTENDS = '"extends": "../../tsconfig.base.json"';
-/** The test script of the D1 example: its bundle proof is a file of the repo, not of the app. */
+/** The test script of the D1 examples: its bundle proof is a file of the repo, not of the app. */
 const D1_TEST = "vitest run && node ../worker/proof/bundle-no-node.mjs .";
+/** The stacks whose example has D1_TEST as its test script. */
+const D1_STACKS: ReadonlySet<Stack> = new Set(["workers-d1", "mcp-server"]);
 
 interface PackageJson {
   name?: string;
@@ -132,8 +143,8 @@ interface PackageJson {
  * The declared rewrites (plan 11c, deviation 5). A scaffold lives outside
  * the repo, so: its name is my-app; each workspace:* is the CLI's version
  * (the packages release together); each tsconfig extends the scaffold's
- * own copy of the base config; the D1 test script drops the repo's bundle
- * proof; the Bun stack starts with bun. A rewrite that finds an unexpected
+ * own copy of the base config; the test script of a D1 stack drops the
+ * repo's bundle proof; the Bun stack starts with bun. A rewrite that finds an unexpected
  * text throws, so a change of an example fails the build, not the scaffold.
  */
 export function rewrite(stack: Stack, path: string, text: string, version: string): string {
@@ -143,9 +154,11 @@ export function rewrite(stack: Stack, path: string, text: string, version: strin
     for (const deps of [pkg.dependencies, pkg.devDependencies])
       if (deps)
         for (const [k, v] of Object.entries(deps)) if (v === "workspace:*") deps[k] = version;
-    if (stack === "workers-d1") {
+    if (D1_STACKS.has(stack)) {
       if (pkg.scripts?.test !== D1_TEST)
-        throw new Error(`examples/worker-d1: the test script is not "${D1_TEST}"`);
+        throw new Error(
+          `examples/${STACK_INFO[stack].example}: the test script is not "${D1_TEST}"`,
+        );
       pkg.scripts.test = "vitest run";
     }
     if (stack === "bun") {
