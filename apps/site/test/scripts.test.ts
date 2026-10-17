@@ -48,7 +48,9 @@ describe("the package scripts (plan 11a)", () => {
   // The test script runs vitest after a failed check, so a unit-test failure
   // never hides behind a check failure, and it fails when either one fails.
   it("runs vitest after a failed check, and fails when either one fails", () => {
-    const build = `${PREFIX}astro build && `;
+    // The test pins the order of plan 11e Task 3: build-agent runs right after
+    // astro build, and before any check, because the checks read its output.
+    const build = `${PREFIX}astro build && node scripts/build-agent.ts && `;
     const script = pkg.scripts.test ?? "";
     expect(script.startsWith(build)).toBe(true);
     const rest = script.slice(build.length);

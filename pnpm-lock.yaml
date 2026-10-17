@@ -230,6 +230,9 @@ importers:
       '@authtempo/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@authtempo/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1
@@ -1212,6 +1215,16 @@ importers:
       wrangler:
         specifier: 4.148.0
         version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
+
+  packages/mcp:
+    dependencies:
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
 
   packages/next:
     dependencies:

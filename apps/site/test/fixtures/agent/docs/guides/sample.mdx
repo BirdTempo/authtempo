@@ -1,0 +1,38 @@
+---
+title: Sample
+description: Show one sample file in a fence.
+type: how-to
+sources:
+  - apps/site/test/agent.test.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import hello from "../../samples/hello.ts?raw";
+
+**For:** a reader of the agent index tests.
+
+**What it does:** this page includes one sample file.
+
+## Before you start
+
+- Read the [codes](/docs/reference/codes/#invalid_body).
+
+## The steps
+
+1. Read the sample.
+
+<Code code={hello} lang="ts" title="samples/hello.ts" />
+
+2. Run the command.
+
+```sh
+pnpm test
+```
+
+## If it fails
+
+- [`unauthorized`](/docs/reference/codes/#unauthorized): sign in again.
+
+## Next
+
+- [Start](/docs/start/)

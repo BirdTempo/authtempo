@@ -1,0 +1,22 @@
+{
+  "name": "@authtempo/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./index-format": {
+      "types": "./dist/index-format.d.ts",
+      "default": "./dist/index-format.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}
