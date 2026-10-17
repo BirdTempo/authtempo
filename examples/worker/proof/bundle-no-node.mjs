@@ -13,6 +13,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The second argument names the bundle file. Wrangler names it after "main":
+// src/index.ts gives index.js, the default; packages/mcp has src/worker.ts.
+const ENTRY = process.argv[3] ?? "index.js";
+
 const out = mkdtempSync(join(tmpdir(), "authtempo-bundle-"));
 try {
   const run = spawnSync("pnpm", ["exec", "wrangler", "deploy", "--dry-run", "--outdir", out], {
@@ -29,8 +33,7 @@ try {
     failures.push("wrangler warned that a module is built into node");
   // Count what was scanned: a bundle in another file name or folder must not pass unseen.
   const files = readdirSync(out).filter((n) => /\.m?js$/.test(n));
-  if (!files.includes("index.js"))
-    failures.push("index.js is not in the output; scanned 0 entry files");
+  if (!files.includes(ENTRY)) failures.push(`${ENTRY} is not in the output; scanned 0 entry files`);
   for (const f of files) {
     const text = readFileSync(join(out, f), "utf8");
     // from "node:x", import "node:x", import("node:x"), require("node:x")

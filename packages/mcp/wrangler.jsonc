@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The remote docs MCP server (plan 11e Task 16). Only `wrangler deploy
+  // --dry-run` runs in this repo. Publication is the owner's call.
+  "name": "authtempo-mcp",
+  "main": "src/worker.ts",
+  // The date of apps/site/wrangler.jsonc. From compatibility date 2026-08-04
+  // Workers turn nodejs_compat on by default. The Worker, core, and the MCP
+  // SDK under its workerd condition use no Node.js API, so these two flags
+  // turn it off. scripts/dry-run.mjs fails on any node: import in the bundle.
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  // Wrangler sets workers_dev to true when no route is given, so the first
+  // deploy would publish a workers.dev URL. Publication is the owner's call:
+  // the owner turns these two on, or adds the route of MCP_HOST, at
+  // publication (the comment of apps/site/wrangler.jsonc). No routes here.
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    // copy-index.mjs writes index.json and skills.json here.
+    "directory": "./dist/agent",
+    "binding": "ASSETS",
+    // Every request reaches the script; the index is data for the script, not a
+    // public file of this host. Without it a GET of /index.json answers the file.
+    "run_worker_first": true
+  },
+  // The server stores no query and no IP. Logs would hold both.
+  "observability": { "enabled": false },
+  "vars": {
+    // The one host that the Worker answers. Another Host header gets 403.
+    "MCP_HOST": "mcp.authtempo.com",
+    // The browser origins that may call, as a comma list. Empty: a request
+    // with an Origin header gets 403, and a request with no Origin passes.
+    "MCP_ALLOWED_ORIGINS": ""
+  },
+  "ratelimits": [
+    {
+      "name": "MCP_LIMITER",
+      // A namespace of the account's rate limits: a number that the owner
+      // chooses once and keeps (wrangler 4.148.0 config schema, read 2026-10-17).
+      "namespace_id": "1016",
+      // Eventually consistent and local to a location (Cloudflare docs read
+      // 2026-10-14); it helps and never holds the limit alone. The token bucket
+      // of src/remote-limiter.ts holds it.
+      "simple": { "limit": 60, "period": 60 }
+    }
+  ]
+}

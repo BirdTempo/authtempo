@@ -8,5 +8,8 @@
     // apps/site/scripts/lib/agent.ts, whose imports carry the .ts extension.
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  // test/pool imports cloudflare:test; tsconfig.pool.json checks it with the
+  // Workers types (plan 11e Task 16, ruling 26).
+  "exclude": ["test/pool"]
 }

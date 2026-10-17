@@ -27,8 +27,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "index": "node scripts/copy-index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.pool.json",
+    "test": "vitest run && vitest run -c vitest.pool.config.ts && node scripts/dry-run.mjs"
   },
   "dependencies": {
     "@authtempo/cli": "workspace:*",
@@ -37,9 +37,12 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "@cloudflare/workers-types": "5.20261007.1",
     "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "24.19.1",
     "typescript": "7.0.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
   }
 }
