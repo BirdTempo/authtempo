@@ -204,7 +204,7 @@ const SCHEMA_MODES = "schema.migrate takes dry_run: true alone, or plan_id with 
 
 /** The answer of the check tool: fixed values only (plan deviation 1). */
 export interface McpCheckResult {
-  /** The input's own URL. */
+  /** The origin that the CLI checked: the origin of base_url. */
   base: string;
   checks: { id: CheckId; status: CheckStatus; code: string | null; docs: string | null }[];
   /** The code of each warning, with no text after it. */
@@ -242,14 +242,52 @@ function count(value: unknown): number {
   throw new CheckShapeError();
 }
 
+/** The stop text of the tool for each stop that it cannot tie to its own input. */
+export const CHECK_STOPPED = "the check stopped; run authtempo check in the shell for the reason";
+
+/** The usage error of --base-path (basePathOf of the CLI): a fixed text with no part of the input. */
+const BASE_PATH_STOP =
+  "--base-path starts with / and does not end with /, as basePath in the config";
+
+/**
+ * True when a stop text of the CLI names only the tool's own input. It
+ * accepts the HostError texts of fetchWithin for each request of the run, and
+ * the usage error of --base-path. The CLI puts the message of each thrown
+ * error into stopped, so a text of another form can hold a text of the deployment.
+ */
+function ownStop(stopped: string, base: string, basePath: string): boolean {
+  if (stopped === BASE_PATH_STOP) return true;
+  const auth = `${base}${basePath}`;
+  const requests = [
+    `GET ${auth}/session`,
+    `POST ${auth}/sign-out`,
+    `GET ${auth}/jwks`,
+    `GET ${base}/.well-known/openid-configuration`,
+    `GET ${base}/.well-known/oauth-authorization-server`,
+    `GET ${auth}/.well-known/openid-configuration`,
+  ];
+  return requests.some(
+    (r) =>
+      stopped.startsWith(r) &&
+      /^(: no answer( in \d+ s)?| answered 3\d\d, a redirect: the CLI follows no redirect)$/.test(
+        stopped.slice(r.length),
+      ),
+  );
+}
+
 /**
  * The answer of the check tool from the CLI's check document. The CLI puts
  * the deployment's cookie name, issuer, and cache-control into `detail` and
  * into the text of a warning (plan deviation 1). So the answer keeps each id,
- * status, and code only when it is a value of the CLI's tables, and adds the
- * link of the code. It throws CheckShapeError on each other value.
+ * status, and code only when it is a value of the CLI's tables. It adds the
+ * link of each code, and throws CheckShapeError on each other value. A stop
+ * text that ownStop refuses becomes CHECK_STOPPED.
  */
-export function checkResult(report: Record<string, unknown>, base: string): McpCheckResult {
+export function checkResult(
+  report: Record<string, unknown>,
+  base: string,
+  basePath: string,
+): McpCheckResult {
   const { checks, warnings, summary, exit, stopped } = report;
   if (!Array.isArray(checks) || !Array.isArray(warnings) || !isRecord(summary))
     throw new CheckShapeError();
@@ -278,7 +316,7 @@ export function checkResult(report: Record<string, unknown>, base: string): McpC
       skip: count(summary.skip),
     },
     exit: count(exit),
-    stopped,
+    stopped: stopped === null || ownStop(stopped, base, basePath) ? stopped : CHECK_STOPPED,
   };
 }
 
@@ -562,7 +600,9 @@ export function localTools(
   const check: ToolImpl = {
     row: checkRow,
     async call(input) {
-      const base = String(input.base_url);
+      // The origin that the CLI checks (baseOf of the CLI). The schema holds base_url to an origin.
+      const base = new URL(String(input.base_url)).origin;
+      const basePath = String(input.base_path);
       // The flags of the row's map: a true boolean is a bare flag; false passes nothing.
       const args = ["check", base];
       for (const [key, flag] of Object.entries(checkRow.wraps?.flags ?? {})) {
@@ -578,7 +618,7 @@ export function localTools(
           checkIo(ctx, base),
           cli,
         );
-        result = checkResult(run.json, base);
+        result = checkResult(run.json, base, basePath);
       } catch (e) {
         // A fixed text: an error of the run can hold a text of the deployment.
         if (e instanceof CheckShapeError)

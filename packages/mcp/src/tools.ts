@@ -110,11 +110,22 @@ const MIGRATE_KEYS = [
  */
 const CHECK_KEYS = ["base", "checks", "warnings", "summary", "exit", "stopped"] as const;
 
-/** True for an http or https URL. The CLI's own rule then asks for an origin with no path. */
-const httpUrl = (value: string): boolean => {
+/**
+ * True for an http or https origin: the rule of baseOf of the CLI. A path, a
+ * query, a fragment, or credentials fail here, before the CLI runs. The CLI's
+ * usage error repeats the input, so a password would reach the stop text.
+ */
+const httpOrigin = (value: string): boolean => {
   try {
     const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
+    return (
+      (u.protocol === "http:" || u.protocol === "https:") &&
+      u.pathname === "/" &&
+      u.search === "" &&
+      u.hash === "" &&
+      u.username === "" &&
+      u.password === ""
+    );
   } catch {
     return false;
   }
@@ -469,7 +480,10 @@ export const TOOLS: readonly ToolRow[] = [
       base_url: z
         .string()
         .max(2048)
-        .refine(httpUrl, "base_url is an http or https URL")
+        .refine(
+          httpOrigin,
+          "base_url is an http or https origin with no path, query, fragment, or credentials",
+        )
         .describe("The origin of the deployment, such as https://api.example.com."),
       // A leading slash keeps the value from a read as a flag of the CLI.
       base_path: z

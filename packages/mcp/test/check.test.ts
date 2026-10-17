@@ -7,10 +7,11 @@ import {
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { ALL_CHECK_CODES, CHECK_IDS, CHECK_JSON_KEYS } from "@authtempo/cli";
+import { main } from "@authtempo/cli/program";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 // The one copy of the wrangler start: the live test of the CLI uses it too.
 import { START_LIMIT_MS, startExampleWorker } from "../../cli/test/support/example-worker.js";
-import { checkIo, localTools } from "../src/local-tools.js";
+import { type CliMain, checkIo, localTools } from "../src/local-tools.js";
 import { createServer } from "../src/server.js";
 import { assertFreshBuild, linesOf, REPO, runServer } from "./support/bin.js";
 import { connect } from "./support/client.js";
@@ -65,9 +66,9 @@ async function serve(
 }
 
 /**
- * A deployment that puts the injected text in each place a check reads: the
- * cookie name, a header, each body, a key id, the cache-control of the key
- * set, and the issuer of the documents. Its routes are under `prefix`.
+ * A deployment that puts the injected text in each place a check reads. The
+ * places are the cookie name, a header, each body, a key id, the
+ * cache-control of the key set, and the issuer. Its routes are under `prefix`.
  */
 function hostileDeployment(prefix: string, jwksUri: string) {
   return (req: IncomingMessage, res: ServerResponse) => {
@@ -158,7 +159,8 @@ afterEach(async () => {
   for (const s of servers.splice(0)) await s.close();
 });
 
-async function start(): Promise<Session> {
+/** A server in process. `cli` replaces the CLI's main, so a test can change a real run. */
+async function start(cli?: CliMain): Promise<Session> {
   fx = fixtureRoot();
   session = await connect(
     createServer({
@@ -167,11 +169,29 @@ async function start(): Promise<Session> {
       skills: [],
       root: fx.root,
       env: {},
-      local: localTools,
+      local: (facts) => localTools(facts, cli ? { main: cli } : {}),
     }),
   );
   return session;
 }
+
+/** The real main, with each stdout document changed by `edit` before the tool reads it. */
+const rewriting =
+  (edit: (doc: Record<string, unknown>) => void): CliMain =>
+  (argv, io) =>
+    main(argv, {
+      ...io,
+      out: (line) => {
+        const doc = JSON.parse(line) as Record<string, unknown>;
+        edit(doc);
+        io.out(JSON.stringify(doc));
+      },
+    });
+
+/** The fault texts of the tool, written out here. */
+const NOT_A_CODE = "the check document holds a value that is not a code of the CLI";
+const RUN_FAILED = "the check run failed in the server; run authtempo check in the shell";
+const STOPPED = "the check stopped; run authtempo check in the shell for the reason";
 
 async function served(handler: (req: IncomingMessage, res: ServerResponse) => void) {
   const s = await serve(handler);
@@ -277,7 +297,11 @@ describe("check", () => {
     const page = readFileSync(BUILT_PAGE, "utf8");
     const s = await start();
     const site = await served(hostileDeployment("/api/auth", "https://other.example/jwks"));
-    const hostile = await s.call("check", { base_url: site.origin, base_path: "/api/auth" });
+    // The answer's base is the origin that the CLI checked, not the input's own text.
+    const hostile = await s.call("check", {
+      base_url: `${site.origin.replace("http:", "HTTP:")}/`,
+      base_path: "/api/auth",
+    });
     expect(site.requests).toEqual(runOf("/api/auth"));
     expect(hostile.structured).toEqual(hostileAnswer(site.origin));
 
@@ -374,5 +398,96 @@ describe("check", () => {
       spy.mockRestore();
     }
     expect(other.requests).toEqual([]);
+  });
+
+  it("refuses a base_url that is not an origin, before the CLI runs", async () => {
+    const site = await served(hostileDeployment("/auth", "https://other.example/jwks"));
+    const s = await start();
+    const host = site.origin.slice("http://".length);
+    for (const base_url of [
+      `http://user:secretpw@${host}`,
+      `http://user@${host}`,
+      `${site.origin}/auth`,
+      `${site.origin}/?q=1`,
+      `${site.origin}/#part`,
+      `ftp://${host}/`,
+    ]) {
+      const r = await s.call("check", { base_url });
+      expect(r.isError, base_url).toBe(true);
+      // The input error of the SDK names the field; a CLI stop would hold a document.
+      expect(r.structured, base_url).toBeUndefined();
+      expect(r.texts.join("\n"), base_url).toContain("base_url");
+      expect(JSON.stringify(r), base_url).not.toContain("secretpw");
+    }
+    expect(site.requests).toEqual([]);
+  });
+
+  it("answers a fixed text for a document value or a throw that is not the CLI's", async () => {
+    const site = await served(hostileDeployment("/auth", "https://other.example/jwks"));
+    const cases: [CliMain, string][] = [
+      // A code field that holds the hostile cache-control value of the key set.
+      [
+        rewriting((doc) => {
+          const jwks = (doc.checks as Record<string, unknown>[])[4];
+          if (jwks) jwks.code = `private, max-age=60, ${COOKIE}`;
+        }),
+        NOT_A_CODE,
+      ],
+      [
+        rewriting((doc) => {
+          (doc.summary as Record<string, unknown>).pass = 1.5;
+        }),
+        NOT_A_CODE,
+      ],
+      [
+        async () => {
+          throw new Error(INJECTED);
+        },
+        RUN_FAILED,
+      ],
+    ];
+    for (const [cli, text] of cases) {
+      const s = await start(cli);
+      const r = await s.call("check", { base_url: site.origin });
+      expect(r).toEqual({ isError: true, structured: { error: text }, texts: [text] });
+      await s.close();
+      session = undefined;
+      fx?.remove();
+      fx = undefined;
+    }
+    // The two runs of the real CLI reached the deployment.
+    expect(site.requests).toEqual([...runOf("/auth"), ...runOf("/auth")]);
+  });
+
+  it("answers a fixed stop text for a stop that names no part of the input", async () => {
+    const site = await served(hostileDeployment("/auth", "https://other.example/jwks"));
+    // A throw inside the real run: the CLI's main puts its message into stopped.
+    const s = await start((argv, io) =>
+      main(argv, {
+        ...io,
+        err: (line) => {
+          if (line.startsWith("reading ")) throw new Error(`the deployment said: ${INJECTED}`);
+          io.err(line);
+        },
+      }),
+    );
+    const r = await s.call("check", { base_url: site.origin });
+    expect(r.isError).toBe(true);
+    expect(r.structured).toMatchObject({ base: site.origin, exit: 2, stopped: STOPPED });
+    expect(r.texts).toEqual([`stopped: ${STOPPED}`]);
+    expect(JSON.stringify(r)).not.toMatch(HOSTILE);
+
+    // The stops that name only the input keep the CLI's text.
+    await s.close();
+    fx?.remove();
+    const closed = await serve(() => {});
+    await closed.close();
+    const plain = await start();
+    const none = await plain.call("check", { base_url: closed.origin });
+    expect(none.structured?.stopped).toBe(`GET ${closed.origin}/auth/session: no answer`);
+    const path = await plain.call("check", { base_url: site.origin, base_path: "/auth/" });
+    expect(path.structured?.stopped).toBe(
+      "--base-path starts with / and does not end with /, as basePath in the config",
+    );
   });
 });
