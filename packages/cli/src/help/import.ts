@@ -6,7 +6,7 @@ export const IMPORT_HELP: HelpText = {
   purpose:
     "Move the users of Supabase, Clerk, Auth0, Firebase, Auth.js, or Cognito into authtempo. A second run writes nothing.",
   usage: [
-    "authtempo import <provider> [the files of the provider] --formats <list> --target <postgres|d1-bundle> [flags]",
+    "authtempo import <provider> [the files of the provider] --formats <list> --target <postgres|d1-bundle|memory> [flags]",
   ],
   examples: [
     {
@@ -17,11 +17,15 @@ export const IMPORT_HELP: HelpText = {
       line: "authtempo import authjs --authjs-tables tables.json --formats bcrypt --target d1-bundle --out input/import.local.json",
       says: "Write the bundle of an Auth.js import for the D1 import Worker.",
     },
+    {
+      line: "authtempo import clerk --csv users.csv --users users.json --target memory --dry-run",
+      says: "Plan an import from Clerk with no database.",
+    },
   ],
   flags: [
     {
-      flag: "--target <postgres|d1-bundle>",
-      says: "Write into Postgres, or write a bundle for the D1 import Worker and stop. It has no default.",
+      flag: "--target <postgres|d1-bundle|memory>",
+      says: "Write to Postgres, write a D1 bundle, or plan against an empty store (memory, with --dry-run only).",
     },
     {
       flag: "--tables <core|compat>",

@@ -12,6 +12,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./program": {
+      "types": "./dist/program.d.ts",
+      "default": "./dist/program.js"
     }
   },
   "files": [

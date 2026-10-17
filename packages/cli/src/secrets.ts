@@ -2,6 +2,15 @@ import { resolve } from "node:path";
 import { UsageError } from "./errors.js";
 import type { Ctx } from "./output.js";
 
+/**
+ * A flag whose name matches takes a name or a path, never the value (spec 19
+ * item 5). One copy: the common test and the MCP server's input test read it.
+ */
+export const SECRETISH_FLAG = /secret|password|token|key|url|postgres|dsn/;
+
+/** A column name, not a value: the Auth.js password column of import. */
+export const NAME_ONLY_FLAGS: ReadonlySet<string> = new Set(["password-column"]);
+
 /** The name of an environment variable: a person who types a URL or a token here gets a usage error. */
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 

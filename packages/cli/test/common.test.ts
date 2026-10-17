@@ -4,6 +4,7 @@ import { HELP } from "../src/help/index.js";
 import { pageUrl } from "../src/help/types.js";
 import { VERSION_JSON_KEYS } from "../src/json.js";
 import { COMMANDS } from "../src/main.js";
+import { NAME_ONLY_FLAGS, SECRETISH_FLAG } from "../src/secrets.js";
 import { assertFreshBuild, ESC, linesOf, runBin } from "./support/bin.js";
 
 beforeAll(() => {
@@ -131,11 +132,8 @@ describe("the common rules (spec 19)", () => {
       });
 
       it("takes no secret as the value of a flag", () => {
-        const SECRETISH = /secret|password|token|key|url|postgres|dsn/;
-        // A column name, not a value: the Auth.js password column of `import`.
-        const NAME_ONLY = new Set(["password-column"]);
         for (const [flag, spec] of Object.entries(command.options))
-          if (spec.type === "string" && SECRETISH.test(flag) && !NAME_ONLY.has(flag))
+          if (spec.type === "string" && SECRETISH_FLAG.test(flag) && !NAME_ONLY_FLAGS.has(flag))
             expect(flag, `--${flag} takes a value that can be a secret`).toMatch(/-(env|file)$/);
       });
     });

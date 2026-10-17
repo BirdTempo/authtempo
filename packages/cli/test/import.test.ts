@@ -152,7 +152,7 @@ describe("authtempo import (spec 19, the flag map)", () => {
 
   it("needs a target, a set connection string, and --out for a bundle, each before any file read", async () => {
     const cases: [string[], Record<string, string>, string][] = [
-      [[], {}, "name a target: --target postgres or --target d1-bundle"],
+      [[], {}, "name a target: --target postgres, --target d1-bundle, or --target memory"],
       [
         ["--target", "postgres"],
         {},

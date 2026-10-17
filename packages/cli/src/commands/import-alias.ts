@@ -138,4 +138,8 @@ export const nodeImportIo: CliIo = {
     }
     return { storage: betterAuth ? pg.compatStorage() : pg.coreStorage(), close: () => pg.close() };
   },
+  // The alias parses no memory flag, so no run of the alias reaches this member (plan 11e).
+  openMemory: async () => {
+    throw new Error("the alias has no memory target");
+  },
 };

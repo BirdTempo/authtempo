@@ -29,11 +29,18 @@ The packages are not on a registry yet. In this repo, run each command below as 
 authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run
 ```
 
+To plan an import from Clerk with no database, use the empty store of `--target memory`:
+
+```sh
+authtempo import clerk --csv users.csv --users users.json --target memory --dry-run
+```
+
 | Flag | What it does |
 | --- | --- |
 | `<provider>` | `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, or `cognito`. Exactly one. |
 | `--target postgres` | Writes into Postgres. It has no default. |
 | `--target d1-bundle` | Writes a bundle for the import Worker on D1 to the file of `--out`, and stops. |
+| `--target memory` | Plans against an empty store, with `--dry-run` only. It reads no connection string. |
 | `--tables core` | Postgres: core's tables. This is the default. |
 | `--tables compat` | Postgres: the Better Auth 1.7 tables of the compatibility package. |
 | `--url-env <NAME>`, `--url-file <path>` | The connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |

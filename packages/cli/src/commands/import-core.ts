@@ -30,6 +30,8 @@ export interface CliIo {
     url: string,
     betterAuth: boolean,
   ): Promise<{ storage: StorageAdapter; close(): Promise<void> }>;
+  /** An empty store for `--target memory`: a plan with no database (plan 11e). */
+  openMemory(): Promise<{ storage: StorageAdapter; close(): Promise<void> }>;
 }
 
 export const PROVIDERS = Object.keys(PROVIDER_FILES) as SourceName[];
@@ -66,6 +68,8 @@ export interface ImportValues {
   postgres?: string | undefined;
   "better-auth"?: boolean | undefined;
   "d1-bundle"?: string | undefined;
+  /** `authtempo import --target memory` only: the alias has no such flag. */
+  memory?: boolean | undefined;
   "dry-run"?: boolean | undefined;
   repair?: boolean | undefined;
   "on-email-taken"?: string | undefined;
@@ -104,8 +108,19 @@ export function parseImportValues(
   const provider = positionals[0] as SourceName | undefined;
   if (!provider || positionals.length !== 1 || !PROVIDERS.includes(provider))
     throw new Error(`name one provider: ${PROVIDERS.join(", ")}`);
-  if (!values.postgres === !values["d1-bundle"])
-    throw new Error("name exactly one target: --postgres or --d1-bundle");
+  const targets = [values.postgres, values["d1-bundle"], values.memory].filter(Boolean).length;
+  if (targets !== 1)
+    // The alias has no memory target, so its message stays as it was.
+    throw new Error(
+      values.memory
+        ? "name exactly one target: postgres, d1-bundle, or memory"
+        : "name exactly one target: --postgres or --d1-bundle",
+    );
+  // A memory store is empty, so a real run there writes rows that nobody reads.
+  if (values.memory && values["dry-run"] !== true)
+    throw new Error("--target memory needs --dry-run");
+  if (values.memory && values["better-auth"])
+    throw new Error("--tables compat needs --target postgres");
   if (values["better-auth"] && !values.postgres) throw new Error("--better-auth needs --postgres");
   for (const [flag, owner] of Object.entries(FLAG_PROVIDER))
     if (values[flag as keyof typeof FLAG_PROVIDER] !== undefined && owner !== provider)
@@ -246,7 +261,9 @@ export async function runParsed(parsed: ParsedImport, io: CliIo): Promise<Import
   }
   let target: Awaited<ReturnType<CliIo["openStorage"]>>;
   try {
-    target = await io.openStorage(values.postgres as string, values["better-auth"] === true);
+    target = values.memory
+      ? await io.openMemory()
+      : await io.openStorage(values.postgres as string, values["better-auth"] === true);
   } catch (e) {
     return stop(`${storageFailure(e, values.postgres as string)}; nothing was written`, null);
   }

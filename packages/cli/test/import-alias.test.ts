@@ -46,6 +46,10 @@ function io(files: Record<string, string>, storage: StorageAdapter = createMemor
       opened.push({ url, betterAuth });
       return { storage, close: async () => {} };
     },
+    // The alias parses no memory flag, so no run of the alias reaches this member (plan 11e).
+    openMemory: async () => {
+      throw new Error("the alias has no memory target");
+    },
   };
   return { value, out, err, written, opened, reads, storage };
 }

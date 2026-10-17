@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { createMemoryAdapter } from "@authtempo/core";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
 import { UsageError } from "../errors.js";
@@ -93,9 +94,11 @@ export const importCommand: Command = {
       throw new UsageError(
         "--tables names the table set, core or compat; an Auth.js export is --authjs-tables <file>",
       );
-    const target = oneOf("target", v.target, ["postgres", "d1-bundle"] as const);
+    const target = oneOf("target", v.target, ["postgres", "d1-bundle", "memory"] as const);
     if (target === undefined)
-      throw new UsageError("name a target: --target postgres or --target d1-bundle");
+      throw new UsageError(
+        "name a target: --target postgres, --target d1-bundle, or --target memory",
+      );
     const tables = oneOf("tables", v.tables, ["core", "compat"] as const) ?? "core";
     if (target === "d1-bundle") {
       if (v.out === undefined) throw new UsageError("--target d1-bundle needs --out <file>");
@@ -104,6 +107,8 @@ export const importCommand: Command = {
           "--tables compat needs --target postgres; on D1, set TARGET=compat on the import Worker",
         );
     } else if (v.out !== undefined) throw new UsageError("--out needs --target d1-bundle");
+    if (target === "memory" && tables === "compat")
+      throw new UsageError("--tables compat needs --target postgres");
     // The secrets come first: a missing variable must not cost the read of a large export.
     const url =
       target === "postgres"
@@ -143,6 +148,7 @@ export const importCommand: Command = {
       postgres: url,
       "better-auth": tables === "compat" ? true : undefined,
       "d1-bundle": target === "d1-bundle" ? v.out : undefined,
+      memory: target === "memory" ? true : undefined,
       "dry-run": v["dry-run"],
       repair: v.repair,
       "on-email-taken": v["on-email-taken"],
@@ -174,6 +180,8 @@ export const importCommand: Command = {
           close: () => pg.close(),
         };
       },
+      // An empty store: the plan shows no conflict with rows of a database (plan 11e).
+      openMemory: async () => ({ storage: createMemoryAdapter(), close: async () => {} }),
     };
     let parsed: ParsedImport;
     try {
