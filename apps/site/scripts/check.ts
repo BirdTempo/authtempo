@@ -2,11 +2,13 @@
 // `astro build`, so every check that reads dist reads a build that is newer
 // than the change. Each check prints one summary line. The run fails when one
 // check fails, and the last line counts the checks that passed.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { ROUTES } from "@authtempo/core/routes";
+import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
@@ -17,11 +19,13 @@ import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
 import { checkFences } from "./check-fences.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkLinks } from "./check-links.ts";
+import { checkLlms } from "./check-llms.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
+import { sidebarOrder } from "./lib/agent.ts";
 import { cliHelpPages, helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
 import { EXPORT_ENTRIES } from "./lib/entries.ts";
@@ -33,8 +37,13 @@ import {
   readRepoFile,
   sampleFiles,
 } from "./lib/load.ts";
-import { DIST } from "./lib/paths.ts";
+import { DIST, DOCS } from "./lib/paths.ts";
 import { type CheckReport, summaryLine } from "./lib/report.ts";
+
+/** A file of dist, or "" when the build did not write it. The check then fails on what it lacks. */
+function distText(file: string): string {
+  return existsSync(`${DIST}${file}`) ? readFileSync(`${DIST}${file}`, "utf8") : "";
+}
 
 export const CHECKS: { name: string; run: () => CheckReport }[] = [
   { name: "check-links", run: () => checkLinks(distPages(), distFiles()) },
@@ -43,6 +52,31 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   { name: "check-terms", run: () => checkTerms([...docsPages(), ...cliHelpPages()]) },
   { name: "check-sentences", run: () => checkSentences([...docsPages(), ...cliHelpPages()]) },
   { name: "check-fences", run: () => checkFences(docsPages(), sampleFiles(), existsSync) },
+  // The agent files of plan 11e: llms.txt, llms-full.txt, and the .md twins
+  // list every page, and the agent index holds the tree, its anchors, and its samples.
+  {
+    name: "check-llms",
+    run: () => {
+      const home = distPageOrEmpty("/docs/");
+      return checkLlms(
+        distFiles(),
+        distText("llms.txt"),
+        distText("llms-full.txt"),
+        docsPages(),
+        home === "" ? [] : sidebarOrder(home),
+      );
+    },
+  },
+  {
+    name: "check-agent-index",
+    run: () =>
+      checkAgentIndex(
+        distText("agent/index.json"),
+        docsPages(),
+        distPages(),
+        sampleIncludes(docsPages(), (path) => readFileSync(resolve(DOCS, path), "utf8")),
+      ),
+  },
   // The FAQ answers the questions of the migration guides, and each guide has an
   // entry that links it, so a new guide fails here until the FAQ covers it (plan 11d2).
   {

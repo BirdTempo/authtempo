@@ -87,6 +87,21 @@ async function expectAnswer(path: string, test: (res: Response, body: string) =>
   if (problem) failures.push(`${path}: ${problem}`);
 }
 
+/**
+ * The verdict on one agent file: status 200 and a text content type. It
+ * prints the content type, so the run records what the Worker answered.
+ */
+function agentAnswer(res: Response, problem: string | null): string | null {
+  const type = res.headers.get("content-type") ?? "(none)";
+  console.log(
+    `preview-smoke: ${new URL(res.url).pathname} status=${res.status} content-type=${type}`,
+  );
+  if (res.status !== 200) return `status ${res.status}`;
+  if (!type.startsWith("text/"))
+    return `content-type ${type}, not a text type, so a client may take it as a download`;
+  return problem;
+}
+
 try {
   await ready();
   await expectAnswer("/", (res, body) =>
@@ -112,6 +127,15 @@ try {
   await expectAnswer("/pagefind/pagefind.js", (res) =>
     res.status === 200 ? null : `status ${res.status}`,
   );
+  // The agent files of plan 11e. A client reads them as text, so the smoke
+  // prints the content type of each, and a download type fails.
+  await expectAnswer("/llms.txt", (res, body) =>
+    agentAnswer(
+      res,
+      body.startsWith("# authtempo\n") ? null : "the body does not start with # authtempo",
+    ),
+  );
+  await expectAnswer("/docs/start/index.md", (res) => agentAnswer(res, null));
 } catch (e) {
   failures.push(e instanceof Error ? e.message : String(e));
 } finally {
