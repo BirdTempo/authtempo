@@ -237,29 +237,44 @@ describe("the environment of the server", () => {
   });
 
   it("puts no password with a quote or a backslash in an answer or a stderr line", async () => {
-    // The scrub of the CLI also covers the JSON form of a secret (Task 7 review m-2).
-    // A wrong password stops each database tool with a stop document.
-    const { db, fx } = await setUp();
-    const name = new URL(db.url).pathname.slice(1);
-    const password = 'q"w\\e-7';
-    const url = `postgres://tempo:${encodeURIComponent(password)}@${new URL(ADMIN_URL).host}/${name}`;
-    const b = startBinary(["--root", fx.root], { DATABASE_URL: url });
-    await open(b);
-    const stops = [
-      await call(b, "schema.migrate", { dry_run: true }),
-      await call(b, "migrate.plan", { ...USERS, against: "database" }),
+    // Each database name equals its password, so the CLI's stop text names it,
+    // and only the CLI's scrub keeps it out: spec 21 item 5, third sentence.
+    // A person can choose such a connection string, so the state is reachable.
+    // The URL form keeps the password percent-encoded in the path. The raw form
+    // keeps a raw backslash there, so the --json line holds it in its JSON form.
+    const { fx } = await setUp();
+    const host = new URL(ADMIN_URL).host;
+    const cases = [
+      { password: 'q"w\\e-7', name: encodeURIComponent('q"w\\e-7') },
+      { password: "b\\s-8", name: "b\\s-8" },
     ];
-    const { stdout, stderr } = await b.close();
-    for (const s of stops) expect(s.exit, stdout).toBe(2);
-    const forms = [
-      url,
-      encodeURIComponent(password),
-      password,
-      JSON.stringify(password).slice(1, -1),
-    ];
-    for (const f of forms) {
-      expect(stdout).not.toContain(f);
-      expect(stderr).not.toContain(f);
+    for (const c of cases) {
+      const url = `postgres://tempo:${encodeURIComponent(c.password)}@${host}/${c.name}`;
+      // The stop text shows the path of the URL as it is: the test reads it from the URL.
+      expect(new URL(url).pathname.slice(1), url).toBe(c.name);
+      const b = startBinary(["--root", fx.root], { DATABASE_URL: url });
+      await open(b);
+      const stops = [
+        await call(b, "schema.migrate", { dry_run: true }),
+        await call(b, "migrate.plan", { ...USERS, against: "database" }),
+      ];
+      const { stdout, stderr } = await b.close();
+      for (const s of stops) {
+        expect(s.exit, stdout).toBe(2);
+        // The stop names the host and the scrubbed database name.
+        expect(String(s.stopped), stdout).toContain(`${host}/***`);
+      }
+      const forms = [
+        url,
+        c.name,
+        encodeURIComponent(c.password),
+        c.password,
+        JSON.stringify(c.password).slice(1, -1),
+      ];
+      for (const f of forms) {
+        expect(stdout, url).not.toContain(f);
+        expect(stderr, url).not.toContain(f);
+      }
     }
   });
 });

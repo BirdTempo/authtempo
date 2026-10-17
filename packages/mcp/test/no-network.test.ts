@@ -1,20 +1,121 @@
 // The local server makes no network call at its start or for a docs tool
-// (plan 11e Task 15, spec 21 item 8). A spy on globalThis.fetch and on the
-// connect of each node:net socket sees each try, and refuses it.
-import { copyFileSync, mkdirSync } from "node:fs";
+// (plan 11e Task 15, spec 21 item 8). The built binary runs under a preload
+// that refuses each network call and logs it. A scan holds the imports of src.
+// The local tools reach only their own targets, under spies in process.
+import { spawn } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { type AddressInfo, Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLI_VERSION } from "@authtempo/cli/program";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { freshDatabase } from "../../cli/test/support/pg.js";
-import { readIndexFile, readSkills } from "../src/index-reader.js";
+import { readIndexFile } from "../src/index-reader.js";
 import { localTools } from "../src/local-tools.js";
 import { createServer } from "../src/server.js";
-import { assertFreshBuild, COPY, PKG, REPO } from "./support/bin.js";
+import { assertFreshBuild, BIN, COPY, PKG, REPO } from "./support/bin.js";
 import { connect } from "./support/client.js";
 import { type FixtureRoot, fixtureRoot } from "./support/fixture-root.js";
 import { assertFreshIndex } from "./support/index.js";
+
+/**
+ * The preload of the guarded binary. It refuses fetch, the connect of a
+ * node:net socket, a dgram send or connect, each dns lookup and resolve, and
+ * each child_process start. Each try writes one stderr line first.
+ */
+const PRELOAD = `
+import { syncBuiltinESMExports } from "node:module";
+import net from "node:net";
+import dgram from "node:dgram";
+import dns from "node:dns";
+import cp from "node:child_process";
+const refuse = (what) => {
+  process.stderr.write("network-guard: refused " + what + "\\n");
+  throw new Error("network-guard refused " + what);
+};
+globalThis.fetch = async (input) => refuse("fetch " + String(input?.url ?? input));
+net.Socket.prototype.connect = function () { refuse("socket connect"); };
+dgram.Socket.prototype.send = function () { refuse("dgram send"); };
+dgram.Socket.prototype.connect = function () { refuse("dgram connect"); };
+for (const o of [dns, dns.promises, dns.Resolver.prototype, dns.promises.Resolver.prototype])
+  for (const k of Object.keys(o))
+    if (/^(lookup|resolve|reverse)/.test(k) && typeof o[k] === "function")
+      o[k] = () => refuse("dns " + k);
+for (const k of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"])
+  cp[k] = () => refuse("child_process " + k);
+syncBuiltinESMExports();
+process.stderr.write("network-guard: on\\n");
+`;
+
+/** The network modules that no file of src imports. A file that must may be named here, with its reason. */
+const NETWORK_IMPORT =
+  /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:node:)?(dns|dgram|child_process|net|tls|http|https|http2|undici)(?:\/[a-z]+)?["']/g;
+const NETWORK_FILES: Readonly<Record<string, readonly string[]>> = {};
+
+/** The built binary under the guard preload, one request at a time. */
+function startGuarded(args: readonly string[]) {
+  const dir = mkdtempSync(join(tmpdir(), "authtempo-mcp-guard-"));
+  guards.push(dir);
+  const preload = join(dir, "guard.mjs");
+  writeFileSync(preload, PRELOAD);
+  const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, BIN, ...args], {
+    cwd: PKG,
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      TMPDIR: process.env.TMPDIR ?? "/tmp",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stderr = "";
+  let rest = "";
+  const waiting = new Map<number, (m: Record<string, unknown>) => void>();
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (d: string) => {
+    const lines = (rest + d).split("\n");
+    rest = lines.pop() ?? "";
+    for (const line of lines) {
+      const m = JSON.parse(line) as Record<string, unknown>;
+      if (typeof m.id === "number") waiting.get(m.id)?.(m);
+    }
+  });
+  child.stderr.on("data", (d: string) => {
+    stderr += d;
+  });
+  // A binary that exits early answers each open request with an error: the test then fails on it.
+  const closed = new Promise<void>((done) =>
+    child.on("close", () => {
+      for (const done2 of waiting.values()) done2({ error: `the binary exited: ${stderr}` });
+      done();
+    }),
+  );
+  let id = 0;
+  const send = (m: Record<string, unknown>) => child.stdin.write(`${JSON.stringify(m)}\n`);
+  return {
+    async request(method: string, params?: Record<string, unknown>) {
+      id++;
+      const answer = new Promise<Record<string, unknown>>((done) => waiting.set(id, done));
+      send({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) });
+      return answer;
+    },
+    notify: (method: string) => send({ jsonrpc: "2.0", method }),
+    async close() {
+      child.stdin.end();
+      await closed;
+      return { stderr };
+    },
+  };
+}
 
 /** The host and port, or the path, of one connect call of a socket. */
 function target(args: readonly unknown[]): string {
@@ -72,6 +173,7 @@ const USERS = {
 };
 
 const fixtures: FixtureRoot[] = [];
+const guards: string[] = [];
 beforeAll(() => {
   assertFreshBuild();
   assertFreshIndex();
@@ -79,51 +181,59 @@ beforeAll(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   for (const f of fixtures.splice(0)) f.remove();
+  for (const d of guards.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
 describe("the network of the local server", () => {
   it("makes no network call at the start and for the docs tools", async () => {
-    const seen = watchNetwork();
+    // The built binary, its start included, under the preload that refuses each network call.
     const fx = fixtureRoot();
     fixtures.push(fx);
-    // The start of the binary: the index, the skills, the server, the session.
-    const index = readIndexFile(COPY);
-    const skills = readSkills(join(PKG, "skills"));
-    const s = await connect(
-      createServer({
-        surface: "local",
-        index,
-        skills,
-        root: fx.root,
-        env: { PATH: process.env.PATH ?? "" },
-        cli: CLI_VERSION,
-        local: localTools,
-      }),
-    );
-    try {
-      for (const [name, args] of [
-        ["version", {}],
-        ["docs.search", { query: "magic link" }],
-        ["docs.read", { path: "/docs/guides/magic-link/" }],
-        ["docs.read", {}],
-      ] as const) {
-        const r = await s.call(name, args);
-        expect(r.isError, `${name}: ${r.texts.join("\n")}`).toBe(false);
-      }
-      const listed = await s.client.listResources();
-      const first = listed.resources[0]?.uri ?? "";
-      expect(first).toMatch(/^authtempo:\/\/docs\//);
-      const read = await s.client.readResource({ uri: first });
-      expect(read.contents.length).toBeGreaterThan(0);
-      const prompts = await s.client.listPrompts();
-      expect(prompts.prompts.length).toBe(skills.length);
-      const got = await s.client.getPrompt({ name: "check-deployment", arguments: {} });
-      expect(got.messages.length).toBeGreaterThan(0);
-    } finally {
-      await s.close();
+    const b = startGuarded(["--root", fx.root]);
+    const ask = async (method: string, params?: Record<string, unknown>) => {
+      const m = await b.request(method, params);
+      expect(m.error, `${method}: ${JSON.stringify(m)}`).toBeUndefined();
+      return (m.result ?? {}) as Record<string, unknown>;
+    };
+    await ask("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "no-network-test", version: "0.0.0" },
+    });
+    b.notify("notifications/initialized");
+    for (const [name, args] of [
+      ["version", {}],
+      ["docs.search", { query: "magic link" }],
+      ["docs.read", { path: "/docs/guides/magic-link/" }],
+      ["docs.read", {}],
+    ] as const) {
+      const r = await ask("tools/call", { name, arguments: args });
+      expect(r.isError ?? false, `${name}: ${JSON.stringify(r)}`).toBe(false);
     }
-    expect(seen.fetches).toEqual([]);
-    expect(seen.sockets).toEqual([]);
+    const listed = (await ask("resources/list")).resources as { uri: string }[];
+    expect(listed.length).toBeGreaterThan(0);
+    await ask("resources/read", { uri: listed[0]?.uri ?? "" });
+    expect(((await ask("prompts/list")).prompts as unknown[]).length).toBeGreaterThan(0);
+    await ask("prompts/get", { name: "check-deployment", arguments: {} });
+    const { stderr } = await b.close();
+    // The guard was on, and it saw no network call.
+    expect(stderr).toContain("network-guard: on");
+    expect(stderr.split("\n").filter((l) => l.startsWith("network-guard: refused"))).toEqual([]);
+  });
+
+  it("imports no network module in src", () => {
+    const files = readdirSync(join(PKG, "src"), { recursive: true })
+      .map(String)
+      .filter((f) => f.endsWith(".ts"));
+    // A scan that reads no file proves nothing.
+    expect(files.length).toBeGreaterThan(10);
+    const found: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(join(PKG, "src", file), "utf8");
+      for (const m of text.matchAll(NETWORK_IMPORT))
+        if (!(NETWORK_FILES[file] ?? []).includes(m[1] ?? "")) found.push(`${file}: ${m[0]}`);
+    }
+    expect(found).toEqual([]);
   });
 
   // The scope beyond the brief: a local tool opens a socket only to the

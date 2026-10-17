@@ -18,7 +18,7 @@ import {
   MIGRATE_JSON_KEYS,
   VERSION_JSON_KEYS,
 } from "@authtempo/cli";
-import { COMMANDS } from "@authtempo/cli/program";
+import { COMMANDS, main } from "@authtempo/cli/program";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { freshDatabase } from "../../cli/test/support/pg.js";
 import { readIndexFile, readSkills } from "../src/index-reader.js";
@@ -58,7 +58,7 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     "url-file":
       "the server reads the connection string from its environment only, never from a file of the input",
     out: "it writes the bundle of the d1-bundle target, and the tools run against memory or postgres only",
-    "dry-run": "migrate.plan always passes it, and migrate.run never does",
+    "dry-run": "the handler of migrate.plan always passes it, and migrate.run never does",
     report: "it writes a report file, and the tool answers the report in its result",
     repair:
       "a repair writes into users that exist, and the help says to check each such user in the app first",
@@ -84,7 +84,7 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
   check: {
     ...HELP_FLAG,
     timeout:
-      "the tool keeps the CLI's default of 10 s a request, so a slow host can hold one call for about 70 s (Task 10 review I-3)",
+      "the tool keeps the CLI's default of 10 s a request. So a slow host can hold one call for about 70 s (Task 10 review I-3)",
     target: "the tool skips the schema check, which needs a database: the shell runs it",
     "url-env": "a flag of the schema check, which the tool skips",
     "url-file": "a flag of the schema check, which the tool skips",
@@ -96,18 +96,15 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 };
 
 /**
- * The argv parts that each handler adds beside the row's flags and fixed
- * flags, written out from local-tools.ts. DATABASE_URL stands for the
- * server's --url-env, and core for the tables input.
+ * The exempt flags that each handler sets by itself, beside the row's flags
+ * and fixed flags. The real-call test records the argv of each run and holds
+ * each flag to the row and to this list. No other exempt flag may reach the CLI.
  */
-const HANDLER_ARGS: Readonly<Record<string, readonly (readonly string[])[]>> = {
+const HANDLER_SETS: Readonly<Record<string, readonly string[]>> = {
   scaffold: [],
-  "migrate.plan": [
-    ["--target", "memory"],
-    ["--target", "postgres", "--url-env", "DATABASE_URL"],
-  ],
-  "migrate.run": [["--url-env", "DATABASE_URL"]],
-  "schema.migrate": [["--url-env", "DATABASE_URL", "--tables", "core"], ["--dry-run"]],
+  "migrate.plan": ["target", "url-env"],
+  "migrate.run": ["url-env"],
+  "schema.migrate": ["url-env", "dry-run"],
   check: [],
 };
 
@@ -134,20 +131,38 @@ const options = (command: string) => {
   return c.options;
 };
 
-/** True when the help of the command lists --<flag>, as "--flag <value>" or "-n, --flag". */
+/**
+ * True when the help of the command lists --<flag>, as "--flag <value>" or
+ * "-n, --flag". This test holds the help one way: each mapped flag is in the
+ * help. The other way is the CLI's test "lists every flag of its parser in
+ * its help, and no flag that the parser lacks" (packages/cli/test/common.test.ts).
+ */
 function inHelp(command: string, flag: string): boolean {
   const help = HELP.find((h) => h.command === command);
   if (!help) throw new Error(`the CLI has no help for ${command}`);
   return help.flags.some((f) => f.flag.split(", ").some((p) => p.split(" ")[0] === `--${flag}`));
 }
 
-/** The flag names of an argv part. Each part is a flag, and a string flag takes the next part. */
-function flagsOf(argv: readonly string[], command: string, where: string): string[] {
+/**
+ * The flags and the positionals of an argv. A part that starts with -- is a
+ * flag, and a string flag takes the next part. With `flagsOnly`, a positional fails.
+ */
+function argvOf(
+  argv: readonly string[],
+  command: string,
+  where: string,
+  flagsOnly: boolean,
+): { flags: string[]; positionals: string[] } {
   const known = options(command);
   const names: string[] = [];
+  const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const part = argv[i] ?? "";
-    expect(part.startsWith("--"), `${where}: ${part} is no flag`).toBe(true);
+    if (!part.startsWith("--")) {
+      expect(flagsOnly, `${where}: ${part} is no flag`).toBe(false);
+      positionals.push(part);
+      continue;
+    }
     const name = part.slice(2);
     expect(Object.hasOwn(known, name), `${where}: --${name} is no flag of ${command}`).toBe(true);
     names.push(name);
@@ -156,8 +171,12 @@ function flagsOf(argv: readonly string[], command: string, where: string): strin
       i++;
     }
   }
-  return names;
+  return { flags: names, positionals };
 }
+
+/** The flags of the row's fixed argv. */
+const fixedFlags = (t: Wrapped) =>
+  argvOf(t.wraps.fixed, t.wraps.command, `${t.name} fixed`, true).flags;
 
 describe("the tool table against the CLI", () => {
   it("wraps every command of the CLI or names it as exempt", () => {
@@ -177,7 +196,7 @@ describe("the tool table against the CLI", () => {
   it("passes only flags that the command knows", () => {
     expect(wrapped.length).toBeGreaterThan(0);
     for (const t of wrapped) {
-      const { command, flags, positional, fixed, toolOnly } = t.wraps;
+      const { command, flags, positional, toolOnly } = t.wraps;
       const known = options(command);
       for (const [key, flag] of Object.entries(flags)) {
         expect(Object.hasOwn(known, flag), `${t.name}: --${flag} is no flag of ${command}`).toBe(
@@ -188,10 +207,15 @@ describe("the tool table against the CLI", () => {
         );
         expect(Object.hasOwn(t.input.shape, key), `${t.name}: ${key} is an input key`).toBe(true);
       }
-      flagsOf(fixed, command, `${t.name} fixed`);
-      const parts = HANDLER_ARGS[t.name];
-      expect(parts, `${t.name}: the handler's own argv is written out here`).toBeDefined();
-      for (const part of parts ?? []) flagsOf(part, command, `${t.name} handler`);
+      // Each flag that the handler passes by itself is exempt, with a reason that says so.
+      const sets = HANDLER_SETS[t.name];
+      expect(sets, `${t.name}: the flags that its handler sets are listed here`).toBeDefined();
+      for (const flag of [...fixedFlags(t), ...(sets ?? [])]) {
+        const reason = EXEMPT_FLAGS[command]?.[flag] ?? "";
+        expect(reason, `${t.name} --${flag}: an exempt flag that the handler sets`).toMatch(
+          /\bthe handler\b/,
+        );
+      }
       for (const key of [...positional, ...toolOnly])
         expect(Object.hasOwn(t.input.shape, key), `${t.name}: ${key} is an input key`).toBe(true);
       for (const key of Object.keys(t.input.shape))
@@ -233,7 +257,7 @@ describe("the tool table against the CLI", () => {
         [...Object.keys(list ?? {}), ...(TOOL_KEYS[t.name] ?? [])].sort(),
       );
     }
-    for (const name of Object.keys(TOOL_KEYS))
+    for (const name of [...Object.keys(TOOL_KEYS), ...Object.keys(HANDLER_SETS)])
       expect(
         wrapped.map((t) => t.name),
         `${name} is a row`,
@@ -311,6 +335,8 @@ describe("the tool table on the wire", () => {
   it("answers the keys of the CLI's JSON in a real call of each tool", async () => {
     db = await freshDatabase();
     deployment = await notFoundServer();
+    const argvs: [string, string[]][] = [];
+    let current = "";
     fx = fixtureRoot();
     mkdirSync(join(fx.root, "supabase"));
     copyFileSync(join(FIXTURES, "supabase-users.csv"), join(fx.root, "supabase/users.csv"));
@@ -322,11 +348,19 @@ describe("the tool table on the wire", () => {
         skills: [],
         root: fx.root,
         env: { PATH: process.env.PATH ?? "", DATABASE_URL: db.url },
-        local: localTools,
+        // Each run of the CLI is recorded with the tool that started it, then runs for real.
+        local: (facts) =>
+          localTools(facts, {
+            main: (argv, io) => {
+              argvs.push([current, [...argv]]);
+              return main(argv, io);
+            },
+          }),
       }),
     );
     const calls: [string, Called][] = [];
     const call = async (name: string, args: Record<string, unknown>) => {
+      current = name;
       const r = await s.call(name, args);
       expect(r.isError, `${name}: ${r.texts.join("\n")}`).toBe(false);
       calls.push([name, r]);
@@ -359,6 +393,32 @@ describe("the tool table on the wire", () => {
     for (const [name, r] of calls) {
       const keys = TOOLS.find((t) => t.name === name)?.outputKeys ?? [];
       expect(Object.keys(r.structured ?? {}).sort(), name).toEqual([...keys].sort());
+    }
+
+    // Each argv that a handler gave the CLI: its command, its positionals, and
+    // each flag from the row, the row's fixed flags, or the handler's own list.
+    for (const t of wrapped) {
+      const runs = argvs.filter(([name]) => name === t.name).map(([, argv]) => argv);
+      expect(runs.length, `${t.name}: a recorded run`).toBeGreaterThan(0);
+      const allowed = new Set([
+        ...Object.values(t.wraps.flags),
+        ...fixedFlags(t),
+        ...(HANDLER_SETS[t.name] ?? []),
+      ]);
+      const seen = new Set<string>();
+      for (const argv of runs) {
+        const where = `${t.name}: ${argv.join(" ")}`;
+        expect(argv[0], where).toBe(t.wraps.command);
+        const { flags, positionals } = argvOf(argv.slice(1), t.wraps.command, where, false);
+        expect(positionals.length, where).toBe(t.wraps.positional.length);
+        for (const flag of flags) {
+          expect(allowed.has(flag), `${where}: --${flag} comes from no row entry`).toBe(true);
+          seen.add(flag);
+        }
+      }
+      // A stale entry of the handler's list fails: each one reached the CLI.
+      for (const flag of HANDLER_SETS[t.name] ?? [])
+        expect(seen.has(flag), `${t.name}: --${flag} reached the CLI`).toBe(true);
     }
   });
 
