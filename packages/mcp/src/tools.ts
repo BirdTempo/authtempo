@@ -66,6 +66,136 @@ export const SCAFFOLD_STACKS = [
  */
 const INIT_KEYS = ["stack", "dir", "files", "next", "exit", "stopped"] as const;
 
+/**
+ * The providers of `authtempo import`. The Worker cannot import the CLI, so
+ * the list is a copy of PROVIDERS of @authtempo/cli/program; migrate.test.ts
+ * holds the two equal.
+ */
+export const IMPORT_PROVIDERS = [
+  "supabase",
+  "clerk",
+  "auth0",
+  "firebase",
+  "authjs",
+  "cognito",
+] as const;
+
+/**
+ * The keys of `authtempo import --json` (IMPORT_JSON_KEYS of the CLI): the
+ * report, the reason of a stop, the bundle path, and the exit code.
+ */
+const IMPORT_KEYS = ["report", "stopped", "bundle", "exit"] as const;
+
+/** The name of an environment variable: the CLI's rule (ENV_NAME of packages/cli/src/secrets.ts). */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * A relative path of an export file inside the server root. A dash at the
+ * start would read as a flag of the CLI.
+ */
+const exportFile = (what: string) =>
+  z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(/^[^-]/)
+    .optional()
+    .describe(`A relative path inside the server root: ${what}.`);
+
+/**
+ * The input of migrate.plan without `against`, and of migrate.run without
+ * plan_id and confirm. Each key maps to the import flag of the same name,
+ * with "_" as "-". No key takes a connection string: the CLI reads it from
+ * the server's environment, through the variable that --url-env names.
+ */
+const IMPORT_INPUT = {
+  provider: z.enum(IMPORT_PROVIDERS).describe("The provider of the export."),
+  users: exportFile("the users export"),
+  identities: exportFile("the identities export (Supabase)"),
+  csv: exportFile("the CSV export (Clerk)"),
+  hashes: exportFile("the password hash export (Auth0)"),
+  organizations: exportFile("the organizations export (Clerk, Auth0)"),
+  authjs_tables: exportFile("the Auth.js tables export"),
+  formats: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      "The formats list of the app's createLegacyPasswordHash, comma-separated, or none. Each provider but Cognito needs it.",
+    ),
+  role_map: z
+    .string()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("Source role to owner, admin, or member, such as org:admin=admin,basic=member."),
+  reserved_slugs: z
+    .string()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("The reserved organization slugs, comma-separated."),
+  platform_slug: z
+    .string()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("The slug of the platform organization."),
+  on_email_taken: z
+    .enum(["skip", "fail"])
+    .optional()
+    .describe("What a taken address does: skip the record (the default), or stop the run."),
+  password_column: z
+    .string()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("The column of the Auth.js users table that holds the password hash."),
+  same_passkey_rp_id: z
+    .boolean()
+    .optional()
+    .describe("True when the app keeps the passkey rp id of the Auth.js app."),
+  firebase_signer_key_env: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(ENV_NAME)
+    .optional()
+    .describe("The name of the variable that holds the Firebase signer key, never the key."),
+  firebase_salt_separator: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("The salt separator of the Firebase project."),
+  firebase_rounds: z
+    .number()
+    .int()
+    .min(0)
+    .max(1000)
+    .optional()
+    .describe("The rounds of the Firebase project."),
+  firebase_mem_cost: z
+    .number()
+    .int()
+    .min(0)
+    .max(1000)
+    .optional()
+    .describe("The mem cost of the Firebase project."),
+  tables: z
+    .enum(["core", "compat"])
+    .default("core")
+    .describe("The table set: core, or compat for a Better Auth schema."),
+};
+
+/** The import flag of each input key: "_" becomes "-". */
+const IMPORT_FLAGS = Object.fromEntries(
+  Object.keys(IMPORT_INPUT)
+    .filter((k) => k !== "provider")
+    .map((k) => [k, k.replaceAll("_", "-")]),
+);
+
 export const TOOLS: readonly ToolRow[] = [
   {
     name: "docs.search",
@@ -151,5 +281,62 @@ export const TOOLS: readonly ToolRow[] = [
       stack: z.enum(SCAFFOLD_STACKS).describe("The stack of the app."),
     }),
     outputKeys: INIT_KEYS,
+  },
+  {
+    name: "migrate.plan",
+    title: "Plan an import of users from another provider",
+    description:
+      'Plans an import and writes nothing. It reads the export files inside the server root and runs authtempo import with --dry-run. With against "empty" it plans against an empty store; with against "database" it plans against the database that the server\'s environment names, and answers a plan_id for migrate.run. It answers the report and the shell command of the real run.',
+    surfaces: ["local"],
+    wraps: {
+      command: "import",
+      positional: ["provider"],
+      flags: IMPORT_FLAGS,
+      // The target flags follow `against`: --target memory, or --target postgres --url-env <NAME>.
+      fixed: ["--dry-run", "--json"],
+      toolOnly: ["against"],
+    },
+    annotations: READ_ONLY,
+    input: z.strictObject({
+      ...IMPORT_INPUT,
+      against: z
+        .enum(["empty", "database"])
+        .default("empty")
+        .describe(
+          'Plan against an empty store ("empty", no database) or against the database ("database"). Only a plan against the database gives a plan_id.',
+        ),
+    }),
+    outputKeys: [...IMPORT_KEYS, "against", "plan_id", "next"],
+  },
+  {
+    name: "migrate.run",
+    title: "Run a held import plan",
+    description:
+      "Writes the users of a held plan into the database that the server's environment names. It takes the plan_id of a migrate.plan against the database, with the same input and the same files, once, within 10 minutes. It runs authtempo import with --target postgres.",
+    surfaces: ["local"],
+    wraps: {
+      command: "import",
+      positional: ["provider"],
+      flags: IMPORT_FLAGS,
+      // --url-env <NAME> follows: the server's --url-env, never a tool input.
+      fixed: ["--target", "postgres", "--json"],
+      toolOnly: ["plan_id", "confirm"],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    input: z.strictObject({
+      ...IMPORT_INPUT,
+      plan_id: z
+        .string()
+        .min(1)
+        .max(100)
+        .describe('The plan_id of a migrate.plan with against "database".'),
+      confirm: z.literal(true).describe("true: the person read the plan and wants the run."),
+    }),
+    outputKeys: IMPORT_KEYS,
   },
 ];

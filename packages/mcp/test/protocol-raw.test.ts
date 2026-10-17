@@ -71,8 +71,10 @@ const SCHEMA_FILE_VERSION = Math.max(
 
 /** The tool names of plan 11e Task 5, typed here: the test does not read the table it pins. */
 const DOCS_TOOLS = ["docs.search", "docs.read", "version"];
-/** The tools of the local binary: the docs tools and the local tools of plan 11e Task 7. */
-const LOCAL_TOOLS = [...DOCS_TOOLS, "scaffold"];
+/** The tools of the local binary: the docs tools and the local tools of plan 11e Tasks 7 and 8. */
+const LOCAL_TOOLS = [...DOCS_TOOLS, "scaffold", "migrate.plan", "migrate.run"];
+/** The tools that only read: the docs tools and migrate.plan, typed here. */
+const READS_ONLY = [...DOCS_TOOLS, "migrate.plan"];
 
 const version = (path: string) =>
   (JSON.parse(readFileSync(join(REPO, path), "utf8")) as { version: string }).version;
@@ -167,12 +169,13 @@ describe("the stdio server on the wire", () => {
     }[];
     expect(tools.map((t) => t.name).sort()).toEqual([...LOCAL_TOOLS].sort());
     for (const t of tools) {
-      // The docs tools read the index only; scaffold writes new files and overwrites none.
-      const docs = DOCS_TOOLS.includes(t.name);
+      // The docs tools and migrate.plan only read; scaffold writes new files and
+      // overwrites none; migrate.run writes rows into the database.
+      const reads = READS_ONLY.includes(t.name);
       expect(t.annotations, t.name).toEqual({
-        readOnlyHint: docs,
-        destructiveHint: false,
-        idempotentHint: docs,
+        readOnlyHint: reads,
+        destructiveHint: t.name === "migrate.run",
+        idempotentHint: reads,
         openWorldHint: false,
       });
       expect(t.inputSchema.additionalProperties, t.name).toBe(false);

@@ -3,53 +3,10 @@ import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { authjsSource } from "../../src/readers/authjs.js";
+import { AUTHJS_TABLES as TABLES } from "../fixtures/readers.js";
 import { all, now } from "./all.js";
 
 describe("authjsSource", () => {
-  // Columns: the Prisma schema of nextauthjs/next-auth main, read 2026-10-11.
-  const TABLES = JSON.stringify({
-    users: [
-      {
-        id: "cuid1",
-        name: "Ida",
-        email: "ida@example.com",
-        emailVerified: "2024-01-01T00:00:00.000Z",
-        image: null,
-        passwordHash: "$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga",
-      },
-      { id: "cuid2", name: null, email: "jo@example.com", emailVerified: null, image: null },
-    ],
-    accounts: [
-      { userId: "cuid1", type: "oidc", provider: "google", providerAccountId: "g-1" },
-      { userId: "cuid1", type: "email", provider: "resend", providerAccountId: "ida@example.com" },
-      { userId: "cuid2", type: "oauth", provider: "github", providerAccountId: "gh-2" },
-    ],
-    authenticators: [
-      {
-        credentialID: "AQID+/8=",
-        userId: "cuid1",
-        providerAccountId: "x",
-        // Canonical standard base64, as Auth.js writes it (review M-3).
-        credentialPublicKey: "pQECAyYgASFYIPv/",
-        counter: 4,
-        credentialDeviceType: "multiDevice",
-        credentialBackedUp: true,
-        transports: "internal,hybrid",
-      },
-      // The unverified user's passkey: the importer drops and lists it (review M-2).
-      {
-        credentialID: "BAUG",
-        userId: "cuid2",
-        providerAccountId: "y",
-        credentialPublicKey: "pQECAyYgASFYIPv/",
-        counter: 0,
-        credentialDeviceType: "singleDevice",
-        credentialBackedUp: false,
-        transports: null,
-      },
-    ],
-  });
-
   it("maps the tables, takes the password column the operator names, and keeps passkeys only under the same rp id", async () => {
     const strict = await all(authjsSource({ tables: TABLES, passwordColumn: "passwordHash" }));
     expect(strict[0]).toMatchObject({

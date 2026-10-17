@@ -3,45 +3,10 @@ import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { firebaseSource } from "../../src/readers/firebase.js";
+import { FIREBASE_LIST as LIST, FIREBASE_USERS as USERS } from "../fixtures/readers.js";
 import { all, FIRESCRYPT, now } from "./all.js";
 
 describe("firebaseSource", () => {
-  // Fields: firebase-tools src/accountExporter.ts, read 2026-10-11. The user is the firebase/scrypt README vector.
-  // Unverified, checked by owner runbook item 5: the JSON type of createdAt (a
-  // digit string and a number are both here) and the { "users": [...] } wrapper
-  // (a bare array is tested too).
-  const LIST = [
-    {
-      localId: "fbuid1",
-      email: "user1@example.com",
-      emailVerified: true,
-      passwordHash:
-        "lSrfV15cpx95/sZS2W9c9Kp6i/LVgQNDNC/qzrCnh1SAyZvqmZqAjTdn3aoItz+VHjoZilo78198JAdRuid5lQ==",
-      salt: "42xEC+ixf3L2lw==",
-      displayName: "User One",
-      createdAt: "1600000000000",
-      providerUserInfo: [
-        { providerId: "apple.com", rawId: "001.apple" },
-        { providerId: "facebook.com", rawId: "fb-1" },
-      ],
-    },
-    {
-      localId: "fbuid2",
-      email: "off@example.com",
-      emailVerified: true,
-      disabled: true,
-      createdAt: 1600000000000,
-    },
-    {
-      localId: "fbuid3",
-      email: "nopw@example.com",
-      emailVerified: false,
-      passwordHash: "",
-      salt: "",
-    },
-  ];
-  const USERS = JSON.stringify({ users: LIST });
-
   it("builds the firescrypt string from the project's rounds and mem_cost", async () => {
     const r = await all(firebaseSource({ users: USERS, hashConfig: { rounds: 8, memCost: 14 } }));
     expect(r[0]).toMatchObject({
