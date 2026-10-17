@@ -29,8 +29,10 @@
   "vars": {
     // The one host that the Worker answers. Another Host header gets 403.
     "MCP_HOST": "mcp.authtempo.com",
-    // The browser origins that may call, as a comma list. Empty: a request
-    // with an Origin header gets 403, and a request with no Origin passes.
+    // The origins that may call, as a comma list. Empty: a request with an
+    // Origin header gets 403, and a request with no Origin passes. The Worker
+    // sends no CORS header and answers no preflight. So the list admits a
+    // caller outside CORS only; browser access is a later row.
     "MCP_ALLOWED_ORIGINS": ""
   },
   "ratelimits": [

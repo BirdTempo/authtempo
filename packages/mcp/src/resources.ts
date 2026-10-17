@@ -43,11 +43,33 @@ function pathOf(uri: string): string | null {
 }
 
 /**
- * A cursor is the commit of the index, a colon, and the offset of the next
- * entry. The commit makes a cursor of another index build fail. This matters
+ * A cursor is the key of the index, a colon, and the offset of the next
+ * entry. The key makes a cursor of another index build fail. This matters
  * for the stateless remote surface, where two requests can meet two deploys.
  */
 const OFFSET = /^[1-9][0-9]*$/;
+
+/**
+ * The key of an index: its commit, a hyphen, and a hash of its page paths.
+ * A build with no git has the commit "unknown", and a dirty tree has the commit
+ * of the clean one. The hash still differs when the pages differ (review R-I1 of Task 6).
+ */
+export function indexKey(index: AgentIndex): string {
+  return `${index.header.commit}-${fnv1a(index.pages.map((p) => p.path).join("\n"))}`;
+}
+
+/**
+ * The 32-bit FNV-1a hash of a text, as 8 hex digits. It is no security check,
+ * only a change marker. It needs no Node module and no async call.
+ */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(text)) {
+    h ^= byte;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
 
 /** The entries of the list, in the sidebar order. It throws for a page whose URI is not its own. */
 export function resourceEntries(index: AgentIndex): ResourceEntry[] {
@@ -62,19 +84,19 @@ export function resourceEntries(index: AgentIndex): ResourceEntry[] {
 
 /**
  * One page of the entries. It returns null for a cursor that the list does
- * not give: another commit, an offset that is not a page start, or an offset
+ * not give: another index key, an offset that is not a page start, or an offset
  * past the end.
  */
 function pageOf(
   entries: readonly ResourceEntry[],
-  commit: string,
+  key: string,
   cursor: string | undefined,
   size: number,
 ): ResourceListPage | null {
   let start = 0;
   if (cursor !== undefined) {
     const colon = cursor.lastIndexOf(":");
-    if (colon < 0 || cursor.slice(0, colon) !== commit) return null;
+    if (colon < 0 || cursor.slice(0, colon) !== key) return null;
     const offset = cursor.slice(colon + 1);
     if (!OFFSET.test(offset)) return null;
     start = Number(offset);
@@ -83,7 +105,7 @@ function pageOf(
   }
   const resources = entries.slice(start, start + size);
   const next = start + size;
-  if (next < entries.length) return { resources, nextCursor: `${commit}:${next}` };
+  if (next < entries.length) return { resources, nextCursor: `${key}:${next}` };
   return { resources };
 }
 
@@ -96,7 +118,7 @@ export function listResources(
   cursor: string | undefined,
   size: number = RESOURCE_PAGE,
 ): ResourceListPage | null {
-  return pageOf(resourceEntries(index), index.header.commit, cursor, size);
+  return pageOf(resourceEntries(index), indexKey(index), cursor, size);
 }
 
 /** The agent markdown of the page of a URI, or null when no page has the URI. */
@@ -110,6 +132,7 @@ export function readResource(index: AgentIndex, uri: string): string | null {
 export function docsResources(index: AgentIndex, size: number = RESOURCE_PAGE): ResourceSpec {
   // The entries are made once, so a page with a wrong URI fails at the start of the server.
   const entries = resourceEntries(index);
+  const key = indexKey(index);
   return {
     templates: [
       {
@@ -121,7 +144,7 @@ export function docsResources(index: AgentIndex, size: number = RESOURCE_PAGE): 
         mimeType: RESOURCE_MIME,
       },
     ],
-    list: (cursor) => pageOf(entries, index.header.commit, cursor, size),
+    list: (cursor) => pageOf(entries, key, cursor, size),
     read: (uri) => readResource(index, uri),
   };
 }

@@ -42,7 +42,8 @@ function versionFault(index: AgentIndex, version: unknown): ToolResult | null {
 // the site's scripts, so this is a second writer of one text. The test
 // docs-tools.test.ts holds the two byte-equal, so they cannot drift in silence.
 const SITE_ORIGIN = "https://authtempo.com";
-const REMOTE_MCP_URL = "https://mcp.authtempo.com/mcp";
+/** The address of the remote server. test/pool/remote.test.ts holds it to the Worker and the CLI. */
+export const REMOTE_MCP_URL = "https://mcp.authtempo.com/mcp";
 const OPTIONAL_GROUPS: readonly string[] = ["Concepts", "Versions"];
 const TOP_LEVEL_SECTION = "Overview";
 const AGENTS_GUIDE = "/docs/guides/agents/";

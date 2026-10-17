@@ -124,17 +124,21 @@ describe("the docs resources", () => {
       index.pages.map((p) => expectedUri(p.path)),
     );
     // A cursor that the list did not give is a protocol error -32602. Each
-    // offset carries the commit of the index, so only the offset is wrong.
+    // offset carries the key of a real cursor, so only the offset is wrong.
     // 5 and 99 are inside the list but are no page start.
-    const commit = index.header.commit;
+    const first = (await small.client.request({ method: "resources/list", params: {} })).nextCursor;
+    if (first === undefined) throw new Error("the small list gives no cursor");
+    const key = first.slice(0, first.lastIndexOf(":"));
+    expect(key.startsWith(`${index.header.commit}-`)).toBe(true);
     for (const offset of ["x", "0", "-7", "1.5", String(n), "007", "5", "99"]) {
-      const cursor = `${commit}:${offset}`;
+      const cursor = `${key}:${offset}`;
       for (const s of [small, local]) {
         const e = await failure(s.client.listResources({ cursor }));
         expect(e.code, cursor).toBe(-32602);
       }
     }
-    for (const cursor of ["x", "7", `other-commit:${SMALL}`]) {
+    // The commit alone, the cursor form before the page hash, is no key.
+    for (const cursor of ["x", "7", `other-commit:${SMALL}`, `${index.header.commit}:${SMALL}`]) {
       const e = await failure(small.client.listResources({ cursor }));
       expect(e.code, cursor).toBe(-32602);
     }
@@ -225,5 +229,28 @@ describe("the docs resources of a fixture tree", () => {
     if (cursor === undefined) throw new Error("the first list gives no cursor");
     expect(first.list(cursor)?.resources.map((r) => r.uri)).toEqual(["authtempo://docs/b"]);
     expect(second.list(cursor)).toBeNull();
+  });
+
+  it("refuses a cursor of an index with the same commit and other pages", () => {
+    // A build with no git, or from a dirty tree, keeps the commit of another build.
+    const first = docsResources(
+      fixtureIndex(["docs/a.md", "docs/b.md", "docs/c.md"], "unknown"),
+      1,
+    );
+    const second = docsResources(
+      fixtureIndex(["docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md"], "unknown"),
+      1,
+    );
+    const cursor = first.list(undefined)?.nextCursor;
+    if (cursor === undefined) throw new Error("the first list gives no cursor");
+    expect(cursor.startsWith("unknown-")).toBe(true);
+    expect(first.list(cursor)?.resources.map((r) => r.uri)).toEqual(["authtempo://docs/b"]);
+    expect(second.list(cursor)).toBeNull();
+    // The same pages give the same key: one input, one cursor.
+    const again = docsResources(
+      fixtureIndex(["docs/a.md", "docs/b.md", "docs/c.md"], "unknown"),
+      1,
+    );
+    expect(again.list(undefined)?.nextCursor).toBe(cursor);
   });
 });

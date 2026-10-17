@@ -1,5 +1,5 @@
-// The remote Worker on workerd (plan 11e Task 16): the owned checks in front
-// of the SDK, the remote surface on the wire, and the data of the assets.
+// The remote Worker on workerd (plan 11e Task 16). The tests hold the owned
+// checks in front of the SDK, the remote surface on the wire, and the assets.
 //
 // The values of wrangler.jsonc are written out here: the host, the empty
 // origin list, and the binding limit. The limits of src/limits.ts are written
@@ -180,12 +180,24 @@ describe("the remote Worker", () => {
   });
 
   it("answers 403 to another Host", async () => {
-    for (const host of ["evil.example", "mcp.authtempo.com.evil.example", ""]) {
+    const refused = [
+      "evil.example",
+      "mcp.authtempo.com.evil.example",
+      "",
+      "x@mcp.authtempo.com",
+      "mcp.authtempo.com/x",
+      "mcp.authtempo.com?x",
+      "mcp.authtempo.com:99999",
+      "mcp.authtempo.com.",
+    ];
+    for (const host of refused) {
       const r = await worker.fetch(modern("tools/list", {}, { host }), ENV);
       expect(r.status, host).toBe(403);
     }
-    const port = await worker.fetch(modern("tools/list", {}, { host: `${HOST}:443` }), ENV);
-    expect(port.status).toBe(200);
+    for (const host of [`${HOST}:443`, "MCP.AUTHTEMPO.COM"]) {
+      const r = await worker.fetch(modern("tools/list", {}, { host }), ENV);
+      expect(r.status, host).toBe(200);
+    }
   });
 
   it("answers 413 to a body of 65 KiB, before the parse", async () => {
@@ -287,9 +299,29 @@ describe("the remote Worker", () => {
       modern("prompts/list"),
       modern("tools/call", { name: "scaffold", arguments: {} }),
     ];
+    // Requests that the SDK refuses. Its error text names their values, so none may reach a log.
+    const refused = [
+      request({ body: "[]" }),
+      modern(
+        "tools/call",
+        { name: "docs.search", arguments: { query: "x" } },
+        { "mcp-name": "OTHER-NAME" },
+      ),
+      request({ body: JSON.stringify({ id: 1, method: "tools/list" }) }),
+      request({ body: "42" }),
+      request({
+        headers: { "content-type": "text/plain" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      }),
+    ];
     for (const c of calls) {
       const r = await worker.fetch(c, ENV);
       await r.text();
+    }
+    for (const c of refused) {
+      const r = await worker.fetch(c, ENV);
+      await r.text();
+      expect(r.status).toBeGreaterThanOrEqual(400);
     }
     for (const s of spies) expect(s).not.toHaveBeenCalled();
   });
@@ -315,6 +347,27 @@ describe("the remote Worker", () => {
     expect(second.resources.length).toBeGreaterThan(0);
     const uris = [...first.resources, ...second.resources].map((e) => e.uri);
     expect(new Set(uris).size).toBe(uris.length);
+  });
+
+  // queryChars, limit, and resourcePage are copies in LIMITS: tools.ts and resources.ts
+  // enforce them. This test holds each copy to the value that the server answers.
+  it("holds the copied keys of LIMITS to the limits on the wire", async () => {
+    const { tools } = resultOf(await rpc(await worker.fetch(modern("tools/list"), ENV))) as {
+      tools: {
+        name: string;
+        inputSchema: { properties: Record<string, Record<string, unknown>> };
+      }[];
+    };
+    const search = tools.find((t) => t.name === "docs.search")?.inputSchema.properties ?? {};
+    expect(search.query?.maxLength).toBe(LIMITS.queryChars);
+    expect(search.limit?.maximum).toBe(LIMITS.limit);
+    const page = resultOf(await rpc(await worker.fetch(modern("resources/list"), ENV))) as {
+      resources: unknown[];
+      nextCursor?: string;
+    };
+    // The index has more pages than one list page, so the first page is full.
+    expect(page.nextCursor).toEqual(expect.any(String));
+    expect(page.resources).toHaveLength(LIMITS.resourcePage);
   });
 
   it("answers 429 when the rate limit binding of wrangler.jsonc refuses", async () => {

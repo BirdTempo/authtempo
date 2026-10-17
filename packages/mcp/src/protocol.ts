@@ -168,11 +168,17 @@ export async function serveStdio(
 /**
  * A fetch handler for the remote surface: one fresh server per request. The
  * legacy option "stateless" answers 2025-era requests from the same factory.
+ * `onerror` gets each error that the SDK reports, such as a refused request.
+ * The default writes one stderr line. The remote Worker passes a handler that
+ * writes nothing, because the SDK's text can hold header and body values.
  */
-export function httpHandler(factory: () => ServerSpec): (request: Request) => Promise<Response> {
+export function httpHandler(
+  factory: () => ServerSpec,
+  opts: { onerror?: (error: Error) => void } = {},
+): (request: Request) => Promise<Response> {
   const handler = createMcpHandler(() => build(factory()), {
     legacy: "stateless",
-    onerror: (e) => console.error(`authtempo-mcp: ${e.message}`),
+    onerror: opts.onerror ?? ((e) => console.error(`authtempo-mcp: ${e.message}`)),
   });
   return (request) => handler.fetch(request);
 }

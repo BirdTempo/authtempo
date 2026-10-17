@@ -7,7 +7,9 @@
 export const LIMITS = {
   /** A docs call is under 1 KiB; 64 KiB leaves room and refuses a flood. */
   bodyBytes: 65_536,
-  /** The longest docs.search query (the input schema of the row holds the same value). */
+  // The next three keys are copies. tools.ts and resources.ts enforce them.
+  // test/pool/remote.test.ts holds each copy to the value on the wire.
+  /** The longest docs.search query. */
   queryChars: 200,
   /** The most hits of one docs.search call. */
   limit: 10,

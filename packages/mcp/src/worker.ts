@@ -1,9 +1,9 @@
 // The remote MCP server: a stateless Worker with the docs tools, the docs
 // resources, and the prompts (plan 11e Task 16, spec 21). It has no
 // authentication and stores no query and no IP. Each owned check runs before
-// the SDK reads the body: the path, the method, the Host, the Origin, the body
-// size, the token bucket, and the rate limit binding. This file imports no SDK
-// module (protocol.ts is the one seam) and no Node module.
+// the SDK reads the body. The checks are the path, the method, the Host, the
+// Origin, the body size, the token bucket, and the rate limit binding. This
+// file imports no SDK module (protocol.ts is the one seam) and no Node module.
 import { type AgentIndex, parseAgentIndex } from "./index-format.js";
 import { LIMITS } from "./limits.js";
 import { httpHandler } from "./protocol.js";
@@ -28,7 +28,11 @@ export interface Env {
   ASSETS: AssetsBinding;
   /** The one host name that the Worker answers (DNS rebinding protection). */
   MCP_HOST: string;
-  /** The browser origins that may call, as a comma list. Empty: a request with an Origin header gets 403. */
+  /**
+   * The origins that may call, as a comma list. Empty: a request with an Origin
+   * header gets 403. The Worker answers no CORS preflight and sends no CORS
+   * header, so the list admits a caller outside CORS only, not a browser page.
+   */
   MCP_ALLOWED_ORIGINS: string;
   MCP_LIMITER?: RateLimitBinding;
 }
@@ -54,14 +58,18 @@ function refuse(status: number, message: string, headers: Record<string, string>
   );
 }
 
-/** The host name of a Host header with no port, or null when the header is absent or not a host. */
+/**
+ * A Host header value: a DNS name, with an optional port of 1 to 5 digits.
+ * Any other text, such as user info, a path, or an IPv6 literal, is no host here.
+ */
+const HOST_VALUE = /^([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)(?::([0-9]{1,5}))?$/;
+
+/** The host name of a Host header, in lower case, or null when the header is absent or not of the grammar. */
 function hostnameOf(host: string | null): string | null {
-  if (host === null || host === "") return null;
-  try {
-    return new URL(`http://${host}`).hostname;
-  } catch {
-    return null;
-  }
+  const m = host === null ? null : HOST_VALUE.exec(host);
+  if (m === null || m[1] === undefined) return null;
+  if (m[2] !== undefined && Number(m[2]) > 65_535) return null;
+  return m[1].toLowerCase();
 }
 
 /** The allowed origins of the comma list. */
@@ -74,8 +82,8 @@ function originsOf(list: string): string[] {
 
 /**
  * The body, read to at most LIMITS.bodyBytes. It answers null when the body is
- * longer: the read stops at the first chunk past the limit, so a stream with
- * no content-length cannot fill the memory of the isolate.
+ * longer. The read stops at the first chunk past the limit. So a stream with no
+ * content-length cannot fill the memory of the isolate.
  */
 async function readCapped(request: Request): Promise<Uint8Array<ArrayBuffer> | null> {
   if (request.body === null) return new Uint8Array(0);
@@ -136,7 +144,11 @@ function sdkServe(): (request: Request, env: Env) => Promise<Response> {
     handler ??= (async () => {
       const index: AgentIndex = parseAgentIndex(await assetText(env, "/index.json"));
       const skills = parseSkills(await assetText(env, "/skills.json"));
-      return httpHandler(() => createServer({ surface: "remote", index, skills }));
+      // The Worker logs no request (spec 21 item 8). The SDK's error text of a
+      // refused request can hold header and body values, so it goes nowhere.
+      return httpHandler(() => createServer({ surface: "remote", index, skills }), {
+        onerror: () => {},
+      });
     })();
     let serve: (request: Request) => Promise<Response>;
     try {
@@ -169,6 +181,8 @@ export function createWorker(deps: WorkerDeps = {}): {
       if (hostnameOf(request.headers.get("host")) !== env.MCP_HOST)
         return refuse(403, "the host is not allowed");
       // A browser sends Origin. A server-side client sends none, and passes.
+      // The surface serves MCP clients, not browser pages: it sends no CORS
+      // header. Browser access needs CORS and a preflight, a later row.
       const origin = request.headers.get("origin");
       if (origin !== null && !originsOf(env.MCP_ALLOWED_ORIGINS).includes(origin))
         return refuse(403, "the origin is not allowed");

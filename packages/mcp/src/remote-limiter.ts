@@ -2,7 +2,6 @@
 // the token bucket of this file, which is ours, and a RemoteLimiter, which can
 // be the platform's rate limit binding. The bucket keeps the promise alone;
 // the binding helps and never holds the limit alone.
-import type { Limits } from "./limits.js";
 
 /**
  * A second limiter behind the token bucket. `limit` answers true when the
@@ -55,7 +54,7 @@ export interface TokenBucket {
  * the bucket drops the key with the oldest call.
  */
 export function tokenBucket(
-  limits: Pick<Limits, "callsPerMinute" | "windowMs">,
+  limits: { readonly callsPerMinute: number; readonly windowMs: number },
   clock: () => number,
 ): TokenBucket {
   const size = limits.callsPerMinute;
