@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sidebarOrder } from "../../../apps/site/scripts/lib/agent.ts";
+import { buildAgentIndex, sidebarOrder } from "../../../apps/site/scripts/lib/agent.ts";
+import type { Page } from "../../../apps/site/scripts/lib/markdown.ts";
 import type { AgentIndex } from "../src/index-format.js";
 import { docsResources } from "../src/resources.js";
 import { createServer } from "../src/server.js";
@@ -54,8 +55,8 @@ interface Listed {
 /**
  * Each page of resources/list, from the first call to the last cursor. The
  * client's listResources() with no cursor walks every page itself
- * (@modelcontextprotocol/client 2.3.1, read 2026-10-17), so each call here
- * is a raw request that returns the server's own page.
+ * (@modelcontextprotocol/client 2.3.1, read 2026-10-17). So each call here
+ * is a raw request, which returns the server's own page.
  */
 async function allPages(s: Session): Promise<Listed[][]> {
   const pages: Listed[][] = [];
@@ -102,6 +103,7 @@ describe("the docs resources", () => {
     for (const [i, r] of listed.entries()) {
       const page = index.pages[i];
       expect(r.mimeType, r.uri).toBe("text/markdown");
+      expect(r.name, r.uri).toBe(page?.path);
       expect(r.title, r.uri).toBe(page?.title);
       expect(r.description, r.uri).toBe(page?.description);
     }
@@ -121,8 +123,18 @@ describe("the docs resources", () => {
     expect(smallPages.flat().map((r) => r.uri)).toEqual(
       index.pages.map((p) => expectedUri(p.path)),
     );
-    // A cursor that the list did not give is a protocol error -32602.
-    for (const cursor of ["x", "0", "-7", "1.5", String(n), "007"]) {
+    // A cursor that the list did not give is a protocol error -32602. Each
+    // offset carries the commit of the index, so only the offset is wrong.
+    // 5 and 99 are inside the list but are no page start.
+    const commit = index.header.commit;
+    for (const offset of ["x", "0", "-7", "1.5", String(n), "007", "5", "99"]) {
+      const cursor = `${commit}:${offset}`;
+      for (const s of [small, local]) {
+        const e = await failure(s.client.listResources({ cursor }));
+        expect(e.code, cursor).toBe(-32602);
+      }
+    }
+    for (const cursor of ["x", "7", `other-commit:${SMALL}`]) {
       const e = await failure(small.client.listResources({ cursor }));
       expect(e.code, cursor).toBe(-32602);
     }
@@ -171,5 +183,47 @@ describe("the docs resources", () => {
         mimeType: "text/markdown",
       });
     }
+  });
+});
+
+/** A page of a fixture tree, in the frontmatter form of the site (spec 18). */
+function fixturePage(path: string, title: string): Page {
+  const source = `---\ntitle: ${title}\ndescription: A page of the resources test.\ntype: how-to\nsources:\n  - packages/mcp/test/resources.test.ts\n---\n\n**For:** a reader of the resources test.\n\n## Notes\n\nNo text.\n`;
+  return { path, source };
+}
+
+/** An index of a fixture tree, built by the site's own builder (the plan's fixture rule). */
+function fixtureIndex(files: readonly string[], commit: string): AgentIndex {
+  const pages = files.map((f, i) => fixturePage(f, `Page ${i}`));
+  const order = files.map((f) => `/${f.replace(/\.md$/, "").replace(/(^|\/)index$/, "")}/`);
+  return buildAgentIndex(pages, order, {
+    commit,
+    readFile: () => {
+      throw new Error("the fixture has no include");
+    },
+    terms: {},
+    bindings: [],
+    groups: {},
+  });
+}
+
+describe("the docs resources of a fixture tree", () => {
+  it("refuses a page at /docs/index/ when the server is made, not when it lists", () => {
+    // An author can write docs/index/index.md. Its URI would be the URI of the home page.
+    const index = fixtureIndex(["docs/index.md", "docs/index/index.md"], "fixture");
+    expect(index.pages.map((p) => p.path)).toEqual(["/docs/", "/docs/index/"]);
+    expect(() => docsResources(index)).toThrow(
+      "the page /docs/index/ has the URI of the home page",
+    );
+  });
+
+  it("refuses a cursor of another index build", () => {
+    const files = ["docs/a.md", "docs/b.md", "docs/c.md"];
+    const first = docsResources(fixtureIndex(files, "commit-one"), 1);
+    const second = docsResources(fixtureIndex(files, "commit-two"), 1);
+    const cursor = first.list(undefined)?.nextCursor;
+    if (cursor === undefined) throw new Error("the first list gives no cursor");
+    expect(first.list(cursor)?.resources.map((r) => r.uri)).toEqual(["authtempo://docs/b"]);
+    expect(second.list(cursor)).toBeNull();
   });
 });
