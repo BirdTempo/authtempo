@@ -82,7 +82,8 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
   },
   check: {
     ...HELP_FLAG,
-    timeout: "the tool keeps the CLI's default time limit of each request",
+    timeout:
+      "the tool keeps the CLI's default of 10 s a request, so a slow host can hold one call for about 70 s (Task 10 review I-3)",
     target: "the tool skips the schema check, which needs a database: the shell runs it",
     "url-env": "a flag of the schema check, which the tool skips",
     "url-file": "a flag of the schema check, which the tool skips",
