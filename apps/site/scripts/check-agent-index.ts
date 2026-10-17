@@ -2,6 +2,7 @@ import { dirname, posix } from "node:path";
 import { type AgentIndex, parseAgentIndex } from "@authtempo/mcp/index-format";
 import { pageUrl } from "./check-frontmatter.ts";
 import type { ReadFile } from "./lib/agent.ts";
+import { twinFile, twinUrl } from "./lib/agent-files.ts";
 import { idsOf } from "./lib/html.ts";
 import type { Page } from "./lib/markdown.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
@@ -17,8 +18,10 @@ export const TITLE_LANGS: readonly string[] = ["ts", "tsx", "jsonc"];
 export interface SampleInclude {
   /** The URL path of the page. */
   path: string;
-  /** The file, by its path from the folder of the page sources. */
-  file: string;
+  /** The name of the code variable of the include. */
+  name: string;
+  /** The file, by its path from the folder of the page sources, or null when no ?raw import names it. */
+  file: string | null;
   lang: string;
   title: string | null;
   /** The text of the file now, or null when it does not exist. */
@@ -41,17 +44,20 @@ export function sampleIncludes(pages: readonly Page[], readFile: ReadFile): Samp
     );
     for (const m of p.source.matchAll(/^<Code\s([^>]*?)\s*\/>\s*$/gm)) {
       const attrs = m[1] ?? "";
-      const target = imports.get(/\bcode=\{(\w+)\}/.exec(attrs)?.[1] ?? "");
-      if (target === undefined) continue;
-      const file = posix.normalize(posix.join(dirname(p.path), target));
-      let text: string | null;
+      const name = /\bcode=\{(\w+)\}/.exec(attrs)?.[1] ?? "";
+      const target = imports.get(name);
+      // An include with no import is kept, so the check fails on it and does not skip it.
+      const file =
+        target === undefined ? null : posix.normalize(posix.join(dirname(p.path), target));
+      let text: string | null = null;
       try {
-        text = readFile(file);
+        if (file !== null) text = readFile(file);
       } catch {
         text = null;
       }
       out.push({
         path: pageUrl(p.path),
+        name,
         file,
         lang: /\blang="([^"]*)"/.exec(attrs)?.[1] ?? "",
         title: /\btitle="([^"]*)"/.exec(attrs)?.[1] ?? null,
@@ -78,6 +84,15 @@ function fencesOf(markdown: string): { lang: string; body: string }[] {
   return out;
 }
 
+/** True when `full` holds `block`, and the block ends the text or comes before the next title line. */
+function holdsBlock(full: string, block: string): boolean {
+  for (let at = full.indexOf(block); at >= 0; at = full.indexOf(block, at + 1)) {
+    const after = full.slice(at + block.length);
+    if (after === "" || after.startsWith("\n# ")) return true;
+  }
+  return false;
+}
+
 /** The ids of the h2 and h3 headings of a built page, in order, without the page contents heading of Starlight. */
 function headingIds(html: string): string[] {
   return [...html.matchAll(/<h[23]\b[^>]*\sid="([^"]+)"/g)]
@@ -96,19 +111,21 @@ export function checkAgentIndex(
   pages: readonly Page[],
   distPages: ReadonlyMap<string, string>,
   samples: readonly SampleInclude[],
+  readDist: (file: string) => string | null,
 ): CheckReport {
   const r: CheckReport = {
     name: "check-agent-index",
-    counts: { pages: 0, sections: 0, samples: 0 },
+    counts: { pages: 0, sections: 0, samples: 0, twins: 0, bodies: 0 },
     failures: [],
   };
+  const keys = ["pages", "sections", "samples", "twins", "bodies"];
   // The parser also holds the header counts to the array lengths.
   let index: AgentIndex;
   try {
     index = parseAgentIndex(indexText);
   } catch (e) {
     r.failures.push((e as Error).message);
-    return requireCounts(r, ["pages", "sections", "samples"]);
+    return requireCounts(r, keys);
   }
   r.counts.pages = index.pages.length;
 
@@ -142,10 +159,37 @@ export function checkAgentIndex(
       );
   }
 
+  // The twins and llms-full.txt come from the index, so each body equals the index
+  // markdown. A twin that differs gives a second answer to one question.
+  const full = readDist("llms-full.txt") ?? "";
+  for (const page of index.pages) {
+    const twin = readDist(twinFile(page.path));
+    if (twin === null) r.failures.push(`${page.path}: the build has no twin`);
+    else if (twin !== page.markdown)
+      r.failures.push(`${page.path}: the twin differs from the markdown of the index`);
+    else r.counts.twins = (r.counts.twins ?? 0) + 1;
+    const title = `# ${page.title}\n`;
+    const rest = page.markdown.startsWith(title)
+      ? page.markdown.slice(title.length).replace(/^\n+/, "").trimEnd()
+      : null;
+    const block = `\n${title}\nSource: ${twinUrl(page.path)}\n\n${rest}\n`;
+    if (rest === null)
+      r.failures.push(
+        `${page.path}: the markdown of the index does not start with ${title.trim()}`,
+      );
+    else if (!holdsBlock(full, block))
+      r.failures.push(`${page.path}: llms-full.txt does not hold the page as the index has it`);
+    else r.counts.bodies = (r.counts.bodies ?? 0) + 1;
+  }
+
   for (const s of samples) {
     const page = index.pages.find((p) => p.path === s.path);
     if (!page) continue;
     r.counts.samples = (r.counts.samples ?? 0) + 1;
+    if (s.file === null) {
+      r.failures.push(`${s.path}: the include ${s.name} has no ?raw import`);
+      continue;
+    }
     if (s.text === null) {
       r.failures.push(`${s.path}: the sample ${s.file} does not exist`);
       continue;
@@ -161,5 +205,5 @@ export function checkAgentIndex(
     if (!fencesOf(page.markdown).some((f) => f.lang === s.lang && f.body === body))
       r.failures.push(`${s.path}: no ${s.lang} fence holds the text of ${s.file}`);
   }
-  return requireCounts(r, ["pages", "sections", "samples"]);
+  return requireCounts(r, keys);
 }

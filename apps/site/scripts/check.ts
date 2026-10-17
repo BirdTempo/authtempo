@@ -25,7 +25,7 @@ import { checkSchema } from "./check-schema.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
-import { sidebarOrder } from "./lib/agent.ts";
+import { sidebarGroups, sidebarOrder } from "./lib/agent.ts";
 import { cliHelpPages, helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
 import { EXPORT_ENTRIES } from "./lib/entries.ts";
@@ -52,8 +52,8 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   { name: "check-terms", run: () => checkTerms([...docsPages(), ...cliHelpPages()]) },
   { name: "check-sentences", run: () => checkSentences([...docsPages(), ...cliHelpPages()]) },
   { name: "check-fences", run: () => checkFences(docsPages(), sampleFiles(), existsSync) },
-  // The agent files of plan 11e: llms.txt, llms-full.txt, and the .md twins
-  // list every page, and the agent index holds the tree, its anchors, and its samples.
+  // The agent files of plan 11e. llms.txt, llms-full.txt, and the .md twins list every page.
+  // The agent index holds the tree, its anchors, its samples, and the bodies of the twins.
   {
     name: "check-llms",
     run: () => {
@@ -64,6 +64,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         distText("llms-full.txt"),
         docsPages(),
         home === "" ? [] : sidebarOrder(home),
+        home === "" ? {} : sidebarGroups(home),
       );
     },
   },
@@ -75,6 +76,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         docsPages(),
         distPages(),
         sampleIncludes(docsPages(), (path) => readFileSync(resolve(DOCS, path), "utf8")),
+        (file) => (existsSync(`${DIST}${file}`) ? readFileSync(`${DIST}${file}`, "utf8") : null),
       ),
   },
   // The FAQ answers the questions of the migration guides, and each guide has an

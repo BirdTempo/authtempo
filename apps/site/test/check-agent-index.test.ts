@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { checkAgentIndex, sampleIncludes } from "../scripts/check-agent-index.ts";
 import {
   buildAgentIndex,
@@ -9,10 +10,11 @@ import {
   sidebarGroups,
   sidebarOrder,
 } from "../scripts/lib/agent.ts";
+import { buildAgentFiles } from "../scripts/lib/agent-files.ts";
 import { walk } from "../scripts/lib/files.ts";
 import type { Page } from "../scripts/lib/markdown.ts";
 
-// The content tree of Task 3: three pages, one sample, and a built page with a sidebar.
+// The fixture tree: five pages, one sample, and a built page with a sidebar.
 const ROOT = fileURLToPath(new URL("./fixtures/agent/", import.meta.url));
 const pages: Page[] = walk(`${ROOT}docs/`, (p) => /\.mdx?$/.test(p)).map((p) => ({
   path: p.slice(ROOT.length),
@@ -22,8 +24,8 @@ const readFile: ReadFile = (path) => readFileSync(resolve(ROOT, path), "utf8");
 const html = readFileSync(`${ROOT}index.html`, "utf8");
 
 /**
- * A built page as Starlight writes it: the title, the heading of the page
- * contents, and one h2 or h3 with an id per section of the page.
+ * A built page as Starlight writes it. It has the title, the heading of the
+ * page contents, and one h2 or h3 with an id per section.
  */
 function built(headings: string[]): string {
   const body = headings.map((h) => {
@@ -56,12 +58,23 @@ function distOf(change: Record<string, string[]> = {}): Map<string, string> {
       "### unauthorized",
       "## next",
     ],
+    "docs/concepts/races/index.html": ["## the-rule"],
+    "docs/versioning/index.html": ["## the-rule"],
     ...change,
   };
   return new Map(Object.entries(ids).map(([file, h]) => [file, built(h)]));
 }
 
-function indexText(tree: readonly Page[] = pages, order = sidebarOrder(html)): string {
+const temps: string[] = [];
+afterEach(() => {
+  for (const t of temps.splice(0)) rmSync(t, { recursive: true, force: true });
+});
+
+/**
+ * A build of a tree: the index text, and a reader of the twins and
+ * llms-full.txt that buildAgentFiles wrote into a new temp dist.
+ */
+function build(tree: readonly Page[] = pages, order = sidebarOrder(html)) {
   const index = buildAgentIndex(tree, order, {
     commit: "0123abc",
     readFile,
@@ -69,28 +82,44 @@ function indexText(tree: readonly Page[] = pages, order = sidebarOrder(html)): s
     bindings: [],
     groups: sidebarGroups(html),
   });
-  return JSON.stringify(index, null, 2);
+  const dist = `${mkdtempSync(join(tmpdir(), "check-agent-index-"))}/`;
+  temps.push(dist);
+  // No optional group: an in-test tree has no concept or version page.
+  buildAgentFiles(index, dist, []);
+  const read = (file: string): string | null => {
+    try {
+      return readFileSync(`${dist}${file}`, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  return { text: JSON.stringify(index, null, 2), dist, read };
 }
+
+const samples = sampleIncludes(pages, readFile);
 
 describe("checkAgentIndex", () => {
   it("passes on a fresh build", () => {
-    const r = checkAgentIndex(indexText(), pages, distOf(), sampleIncludes(pages, readFile));
+    const b = build();
+    const r = checkAgentIndex(b.text, pages, distOf(), samples, b.read);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ pages: 3, sections: 14, samples: 1 });
+    expect(r.counts).toEqual({ pages: 5, sections: 16, samples: 1, twins: 5, bodies: 5 });
   });
 
   it("fails when the parser refuses the index", () => {
-    const r = checkAgentIndex("{", pages, distOf(), sampleIncludes(pages, readFile));
+    const r = checkAgentIndex("{", pages, distOf(), samples, build().read);
     expect(r.failures[0]).toMatch(/^the agent index is not JSON: /);
   });
 
   it("fails on an anchor that the page lacks", () => {
     const codes = ["## before-you-start", "## the-codes", "### unauthorized", "## next"];
+    const b = build();
     const r = checkAgentIndex(
-      indexText(),
+      b.text,
       pages,
       distOf({ "docs/reference/codes/index.html": codes }),
-      sampleIncludes(pages, readFile),
+      samples,
+      b.read,
     );
     expect(r.failures).toEqual([
       "/docs/reference/codes/#invalid_body: the built page has no such id",
@@ -100,26 +129,74 @@ describe("checkAgentIndex", () => {
   it("fails when the anchors of a page differ in order from its headings", () => {
     // A repeat heading with the wrong id: each id exists on the page, but not in this order.
     const start = ["## the-pages", "### example-1", "## more-pages", "### example", "## next"];
+    const b = build();
     const r = checkAgentIndex(
-      indexText(),
+      b.text,
       pages,
       distOf({ "docs/start/index.html": start }),
-      sampleIncludes(pages, readFile),
+      samples,
+      b.read,
     );
     expect(r.failures).toEqual([
       "/docs/start/: the anchors differ from the headings of the built page: the-pages, example, more-pages, example-1, next in the index; the-pages, example-1, more-pages, example, next on the page",
     ]);
   });
 
+  // Review L-2 of Task 4: each twin and each page of llms-full.txt equals the index markdown.
+  it("fails on a twin that differs from the index", () => {
+    const b = build();
+    const twin = `${b.dist}docs/reference/codes/index.md`;
+    // One section is cut from the twin.
+    writeFileSync(
+      twin,
+      readFileSync(twin, "utf8").replace(/\n### unauthorized[\s\S]*?(?=\n## )/, ""),
+    );
+    const r = checkAgentIndex(b.text, pages, distOf(), samples, b.read);
+    expect(r.failures).toEqual([
+      "/docs/reference/codes/: the twin differs from the markdown of the index",
+    ]);
+  });
+
+  it("fails on a page of llms-full.txt that differs from the index", () => {
+    const b = build();
+    const full = `${b.dist}llms-full.txt`;
+    // The body of one page loses its last line.
+    writeFileSync(
+      full,
+      readFileSync(full, "utf8").replace(
+        "\nA change that breaks a caller gives a new major version.",
+        "",
+      ),
+    );
+    const r = checkAgentIndex(b.text, pages, distOf(), samples, b.read);
+    expect(r.failures).toEqual([
+      "/docs/versioning/: llms-full.txt does not hold the page as the index has it",
+    ]);
+  });
+
   it("fails on a fence that differs from its sample", () => {
-    const text = indexText();
+    const b = build();
     // The sample changed after the build, so the fence of the index is old.
     const changed: ReadFile = (path) =>
       path === "samples/hello.ts" ? `${readFile(path)}export const late = 1;\n` : readFile(path);
-    const r = checkAgentIndex(text, pages, distOf(), sampleIncludes(pages, changed));
+    const r = checkAgentIndex(b.text, pages, distOf(), sampleIncludes(pages, changed), b.read);
     expect(r.failures).toEqual([
       "/docs/guides/sample/: no ts fence holds the text of samples/hello.ts",
     ]);
+  });
+
+  // Review I-4 of Task 4: an include with no ?raw import fails, and is not skipped.
+  it("fails on an include that no import names", () => {
+    const b = build();
+    // The page lost its import after the build.
+    const edited = pages.map((p) =>
+      p.path === "docs/guides/sample.mdx"
+        ? { ...p, source: p.source.replace(/^import hello from .*\n/m, "") }
+        : p,
+    );
+    expect(edited).not.toEqual(pages);
+    const r = checkAgentIndex(b.text, edited, distOf(), sampleIncludes(edited, readFile), b.read);
+    expect(r.failures).toEqual(["/docs/guides/sample/: the include hello has no ?raw import"]);
   });
 
   it("fails on a title line in a language where // is no comment", () => {
@@ -128,18 +205,18 @@ describe("checkAgentIndex", () => {
         ? { ...p, source: p.source.replace('lang="ts"', 'lang="sh"') }
         : p,
     );
-    const r = checkAgentIndex(indexText(odd), odd, distOf(), sampleIncludes(odd, readFile));
+    const b = build(odd);
+    const r = checkAgentIndex(b.text, odd, distOf(), sampleIncludes(odd, readFile), b.read);
     expect(r.failures).toEqual([
       "/docs/guides/sample/: the sample samples/hello.ts has a title, and its // line is no comment in sh (the title line suits ts, tsx, jsonc)",
     ]);
   });
 
   it("fails on a page that the tree lacks, and on a page that the index lacks", () => {
-    const text = indexText();
-    const samples = sampleIncludes(pages, readFile);
+    const b = build();
     // A page that left the tree after the build.
     const fewer = pages.filter((p) => p.path !== "docs/start/index.md");
-    expect(checkAgentIndex(text, fewer, distOf(), samples).failures).toEqual([
+    expect(checkAgentIndex(b.text, fewer, distOf(), samples, b.read).failures).toEqual([
       "the content tree lacks /docs/start/, which the index holds",
     ]);
     // A page that came into the tree after the build.
@@ -147,7 +224,7 @@ describe("checkAgentIndex", () => {
       path: "docs/guides/extra.md",
       source: "---\ntitle: Extra\ndescription: One more page.\ntype: how-to\n---\n\nText.\n",
     };
-    expect(checkAgentIndex(text, [...pages, extra], distOf(), samples).failures).toEqual([
+    expect(checkAgentIndex(b.text, [...pages, extra], distOf(), samples, b.read).failures).toEqual([
       "the index lacks /docs/guides/extra/",
     ]);
   });
@@ -158,13 +235,15 @@ describe("checkAgentIndex", () => {
       path: "docs/start/index.md",
       source: "---\ntitle: Start\ndescription: One page.\ntype: tutorial\n---\n\nText.\n",
     };
+    const b = build([one], ["/docs/start/"]);
     const r = checkAgentIndex(
-      indexText([one], ["/docs/start/"]),
+      b.text,
       [one],
       new Map([["docs/start/index.html", built([])]]),
       [],
+      b.read,
     );
-    expect(r.counts).toEqual({ pages: 1, sections: 0, samples: 0 });
+    expect(r.counts).toEqual({ pages: 1, sections: 0, samples: 0, twins: 1, bodies: 1 });
     expect(r.failures).toEqual(["read 0 sections", "read 0 samples"]);
   });
 });

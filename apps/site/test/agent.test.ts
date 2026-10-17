@@ -17,7 +17,7 @@ import { EXPORT_ENTRIES, SDK_PACKAGES } from "../scripts/lib/entries.ts";
 import { walk } from "../scripts/lib/files.ts";
 import type { Page } from "../scripts/lib/markdown.ts";
 
-// A content tree of three pages, one sample, and a built page with a sidebar.
+// A content tree of five pages, one sample, and a built page with a sidebar.
 const ROOT = fileURLToPath(new URL("./fixtures/agent/", import.meta.url));
 const pages: Page[] = walk(`${ROOT}docs/`, (p) => /\.mdx?$/.test(p)).map((p) => ({
   path: p.slice(ROOT.length),
@@ -168,6 +168,8 @@ describe("the agent index", () => {
       "/docs/start/",
       "/docs/guides/sample/",
       "/docs/reference/codes/",
+      "/docs/concepts/races/",
+      "/docs/versioning/",
     ]);
   });
 
@@ -177,6 +179,8 @@ describe("the agent index", () => {
       ["/docs/start/", "tutorial", ""],
       ["/docs/guides/sample/", "how-to", "How-to guides"],
       ["/docs/reference/codes/", "reference", "Reference"],
+      ["/docs/concepts/races/", "explanation", "Concepts"],
+      ["/docs/versioning/", "explanation", "Versions"],
     ]);
     expect(index.sections.map((s) => [s.path, s.depth, s.heading, s.anchor])).toEqual([
       ["/docs/start/", 2, "The pages", "the-pages"],
@@ -194,6 +198,8 @@ describe("the agent index", () => {
       ["/docs/reference/codes/", 3, "invalid_body 400", "invalid_body"],
       ["/docs/reference/codes/", 3, "unauthorized 401", "unauthorized"],
       ["/docs/reference/codes/", 2, "Next", "next"],
+      ["/docs/concepts/races/", 2, "The rule", "the-rule"],
+      ["/docs/versioning/", 2, "The rule", "the-rule"],
     ]);
     const codes = index.sections.find((s) => s.anchor === "invalid_body");
     expect(codes?.text).toBe(
@@ -204,8 +210,8 @@ describe("the agent index", () => {
       format: 1,
       commit: "0123abc",
       builtFrom: "apps/site/src/content/docs/docs/",
-      pages: 3,
-      sections: 14,
+      pages: 5,
+      sections: 16,
       versions: ["latest"],
     });
     expect(parseAgentIndex(JSON.stringify(index))).toEqual(index);
