@@ -34,7 +34,8 @@ The name follows Better Auth 1.7.7. Its older name `withMcpAuth` is not an expor
 
 | The request | The answer |
 | --- | --- |
-| A `resource` that is not `https:`, or `http:` on `127.0.0.1` or `localhost`, or that has a query, a fragment, or user info | Construction throws. |
+| A `resource` that is not `https:`. Construction accepts `http:` only on `127.0.0.1` or `localhost`. | Construction throws. |
+| A `resource` with a query, a fragment, or user info | Construction throws. |
 | A scope with a quote or a space, `offline_access`, or an empty list | Construction throws. |
 | No bearer | 401 with the challenge of `resource` and `challengeScopes`. A session cookie is no credential here. |
 | A bearer that is not an OAuth access token | The same 401 with `error="invalid_token"`. |

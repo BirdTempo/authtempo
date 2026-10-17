@@ -51,7 +51,19 @@ function setup() {
     storage: db.storage,
     oauth: { resources: [MCP, FILES_API], scopes: SCOPES, registration: { cimd: false } },
   });
-  return { server, down: db.down };
+  return { server, down: db.down, storage: db.storage };
+}
+
+/**
+ * A real API token of core, minted by its token API for the signed-in person.
+ * `storage` is the storage that core uses: `setup` gives core its own, not the harness's.
+ */
+async function apiToken(server: Server, storage: StorageAdapter, userId: string): Promise<string> {
+  const user = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+  if (!user) throw new Error("no user");
+  const t = await server.auth.api.tokens.create({ user, name: "ci" });
+  if (!t.ok) throw new Error(t.code);
+  return t.value.token;
 }
 
 type SourceName = "verifier" | "core";
@@ -96,6 +108,8 @@ describe("requireMcpAuth construction (plan 11e)", () => {
       "https://user:pw@api.example.com/mcp",
       "ftp://api.example.com/mcp",
       "http://127.0.0.2/mcp",
+      // Core's rule refuses any "#", an empty fragment too.
+      "https://api.example.com/mcp#",
     ])
       expect(() => requireMcpAuth(source, handler, { resource }), resource).toThrow(/resource/);
   });
@@ -141,15 +155,17 @@ describe.each(["verifier", "core"] as const)("requireMcpAuth with the %s source"
   });
 
   it("answers 401 invalid_token for a bearer that is not an access token", async () => {
-    const { server } = setup();
+    const { server, storage } = setup();
     const s = await signedIn(server);
     const jwt = await sessionJwt(server, s.sessionToken);
+    const tk = await apiToken(server, storage, s.user.id);
+    expect(tk.startsWith("tk_")).toBe(true);
     const r = recorder();
     const route = requireMcpAuth(sourceOf(name, server), r.handler, {
       resource: MCP,
       scopes: ["mcp:tools"],
     });
-    for (const bearer of [s.sessionToken, jwt, "not-a-token"]) {
+    for (const bearer of [s.sessionToken, jwt, tk, "not-a-token"]) {
       const res = await route(withBearer(MCP, bearer));
       expect(res.status, bearer).toBe(401);
       expect(res.headers.get("www-authenticate")).toBe(
@@ -175,6 +191,41 @@ describe.each(["verifier", "core"] as const)("requireMcpAuth with the %s source"
       bearerChallenge({ resource: FILES_API, scope: ["mcp:tools"], error: "invalid_token" }),
     );
     expect(r.seen).toEqual([]);
+  });
+
+  it("refuses a token for another resource at this route", async () => {
+    const { server } = setup();
+    const s = await signedIn(server);
+    // Review focus 6: a token of the files resource, sent to the MCP route.
+    const at = await accessToken(server, s.cookie, "openid mcp:tools", FILES_API);
+    const r = recorder();
+    const route = requireMcpAuth(sourceOf(name, server), r.handler, {
+      resource: MCP,
+      scopes: ["mcp:tools"],
+    });
+    const res = await route(withBearer(`${MCP}/tools`, at));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(
+      bearerChallenge({ resource: MCP, scope: ["mcp:tools"], error: "invalid_token" }),
+    );
+    expect(r.seen).toEqual([]);
+  });
+
+  it("lets the bearer decide when the request also holds a session cookie", async () => {
+    const { server } = setup();
+    const s = await signedIn(server);
+    const at = await accessToken(server, s.cookie, "openid mcp:tools");
+    const r = recorder();
+    const route = requireMcpAuth(sourceOf(name, server), r.handler, {
+      resource: MCP,
+      scopes: ["mcp:tools"],
+    });
+    // A client in a page of the auth app's origin sends the cookie with each fetch.
+    const request = new Request(`${MCP}/tools`, {
+      headers: { authorization: `Bearer ${at}`, cookie: s.cookie },
+    });
+    expect(await route(request)).toBe(r.answer);
+    expect(r.seen.map((c) => c.userId)).toEqual([s.user.id]);
   });
 
   it("answers 403 that names every scope of the operation", async () => {

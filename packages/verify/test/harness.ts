@@ -115,11 +115,12 @@ async function s256(text: string): Promise<string> {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** An access token for MCP through the real provider flow: register, consent, exchange. */
+/** An access token through the real provider flow: register, consent, exchange. For MCP by default. */
 export async function accessToken(
   server: Server,
   cookie: string,
   scope = "openid",
+  resource = MCP,
 ): Promise<string> {
   const post = (path: string, headers: Record<string, string>, body: string) =>
     server.auth.handle(new Request(`${ISSUER}${path}`, { method: "POST", headers, body }));
@@ -137,7 +138,7 @@ export async function accessToken(
     code_challenge: await s256(verifier),
     code_challenge_method: "S256",
     scope,
-    resource: MCP,
+    resource,
     state: "st",
   });
   const page = await server.auth.handle(
@@ -159,7 +160,7 @@ export async function accessToken(
       code_verifier: verifier,
       client_id: clientId,
       redirect_uri: REDIRECT,
-      resource: MCP,
+      resource,
     }).toString(),
   );
   if (tokens.status !== 200) throw new Error(`token answered ${tokens.status}`);

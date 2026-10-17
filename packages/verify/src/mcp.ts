@@ -4,7 +4,7 @@
  * The 401 and the 403 come from `unauthorized.ts`, so the challenge has one source.
  * DPoP and token introspection come with row 12e, through the `Verifier`, with no new call.
  */
-import { readBearer } from "@authtempo/core/credentials";
+import { isResourceUrl, readBearer } from "@authtempo/core/credentials";
 import {
   bearerChallenge,
   insufficientScopeResponse,
@@ -43,18 +43,18 @@ export class McpScopeError extends Error {
 /** Better Auth's `mcp()` rule: https, or http on the loopback names only. */
 const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
 
+/**
+ * Core's resource rule (`isResourceUrl`, its one copy), plus https or a loopback http.
+ * A value that core refuses as `oauth.resources` then throws here, not at each request.
+ */
 function checkResource(resource: string): void {
-  let url: URL;
-  try {
-    url = new URL(resource);
-  } catch {
-    throw new Error("authtempo verify: the MCP resource must be an absolute URL");
-  }
-  const secure =
-    url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK.has(url.hostname));
-  if (!secure || url.search || url.hash || url.username || url.password)
+  const url = isResourceUrl(resource) ? new URL(resource) : null;
+  if (
+    url === null ||
+    !(url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK.has(url.hostname)))
+  )
     throw new Error(
-      "authtempo verify: the MCP resource must be https, or http on 127.0.0.1 or localhost, with no query, fragment, or user info",
+      "authtempo verify: the MCP resource must be a resource URL of core: https, or http on 127.0.0.1 or localhost only, with no query, fragment, or user info",
     );
 }
 
@@ -64,6 +64,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /** The caller of core's `auth.caller` when it is an OAuth caller with core's shape, else null. */
 function fromCore(c: unknown): McpCaller | null {
+  // Defence in depth: core's session and API token callers have no `clientId`, so the
+  // shape check below refuses them too, and no test can make this kind check alone decide.
+  // It stays so that a future core caller with these fields is never taken for an OAuth caller.
   if (!isObject(c) || c.kind !== "oauth" || !isObject(c.user)) return null;
   const { clientId, scopes, resource, tokenId, expiresAt } = c;
   const userId = c.user.id;
@@ -90,8 +93,15 @@ async function callerOf(source: McpSource, request: Request): Promise<McpCaller 
       const { userId, clientId, scopes, resource, tokenId, expiresAt } = r.value;
       return { userId, clientId, scopes, resource, tokenId, expiresAt };
     }
-    if ("caller" in source && typeof source.caller === "function")
-      return fromCore(await source.caller(request));
+    if ("caller" in source && typeof source.caller === "function") {
+      // Core's caller reads the session cookie first and then never reads the bearer.
+      // A client in a page of the auth app's origin sends the cookie with each fetch.
+      // So core gets a copy with no cookie, and the bearer alone decides.
+      const headers = new Headers(request.headers);
+      headers.delete("cookie");
+      const bare = new Request(request.url, { method: request.method, headers });
+      return fromCore(await source.caller(bare));
+    }
   } catch {
     return "failed";
   }

@@ -155,9 +155,9 @@ The source is one of two:
 
 The rules:
 
-- Construction throws for a `resource` that is not `https:`, or `http:` on
-  `127.0.0.1` or `localhost`. It also throws for a query, a fragment, or user
-  info in it.
+- Construction throws when `resource` is not `https:`. It accepts `http:`
+  only on `127.0.0.1` or `localhost`. It also throws for a query, a fragment,
+  or user info in it: the resource rule of core.
 - Construction throws for a scope that the challenge refuses:
   `offline_access`, a quote, a space, or an empty list.
 - No bearer gives 401 with the challenge of `resource` and

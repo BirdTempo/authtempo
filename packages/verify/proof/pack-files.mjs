@@ -10,7 +10,15 @@ import { fileURLToPath } from "node:url";
 
 const pkg = fileURLToPath(new URL("..", import.meta.url));
 /** The files a pack must hold. npm adds package.json and README.md. */
-const NEEDED = ["package.json", "README.md", "dist/index.js", "dist/index.d.ts"];
+const NEEDED = [
+  "package.json",
+  "README.md",
+  "dist/index.js",
+  "dist/index.d.ts",
+  // The ./mcp entry of plan 11e: without these two files the entry does not resolve.
+  "dist/mcp.js",
+  "dist/mcp.d.ts",
+];
 const run = spawnSync("pnpm", ["pack", "--dry-run", "--json"], {
   cwd: pkg,
   encoding: "utf8",
