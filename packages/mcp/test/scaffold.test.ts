@@ -129,9 +129,15 @@ describe("scaffold", () => {
 
   it("answers an input error for a dir that starts with a dash", async () => {
     const s = await start();
-    const r = await s.call("scaffold", { dir: "--help", stack: "node" });
-    expect(r.isError).toBe(true);
-    expect(readdirSync(fx.root)).toEqual(["link"]);
+    // Without the rule, --json leaves init with no folder, and init writes the stack into the root.
+    for (const dir of ["--json", "-n", "--help"]) {
+      const r = await s.call("scaffold", { dir, stack: "node" });
+      expect(r.isError, dir).toBe(true);
+      // The input error of the SDK names the field; a CLI fault would name no input field.
+      expect(r.structured, dir).toBeUndefined();
+      expect(r.texts.join("\n"), dir).toContain("dir");
+      expect(readdirSync(fx.root), dir).toEqual(["link"]);
+    }
   });
 
   it("offers the stacks of the CLI, and only on the local surface", async () => {

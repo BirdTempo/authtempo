@@ -20,10 +20,12 @@ export interface LocalContext {
 }
 
 /**
- * The dist folder of the CLI. init reads its templates.json there, so the
- * confined Io may read this folder; it writes nothing there.
+ * The init templates of the CLI (dist/templates.json). init reads this one
+ * file, so the confined Io may read it. It reads no other file of the CLI.
  */
-const CLI_DIST = fileURLToPath(new URL(".", import.meta.resolve("@authtempo/cli/program")));
+export const CLI_TEMPLATES = fileURLToPath(
+  new URL("templates.json", import.meta.resolve("@authtempo/cli/program")),
+);
 
 /**
  * Runs the CLI with --json in the argv, and parses its one document. The
@@ -141,7 +143,7 @@ function readExports(
  * tool read. Each other read goes to the confined Io.
  */
 function pinnedIo(root: string, env: LocalContext["env"], texts: Map<string, string>): ConfinedIo {
-  const base = confinedIo({ root, env, allowFetch: false, readOnly: [CLI_DIST] });
+  const base = confinedIo({ root, env, allowFetch: false, readOnly: [CLI_TEMPLATES] });
   return {
     lines: base.lines,
     io: {
@@ -187,7 +189,7 @@ export function localTools(ctx: LocalContext, opts: { plans?: PlanStore } = {}):
         root: ctx.root,
         env: ctx.env,
         allowFetch: false,
-        readOnly: [CLI_DIST],
+        readOnly: [CLI_TEMPLATES],
       });
       let run: Awaited<ReturnType<typeof runCli>>;
       try {

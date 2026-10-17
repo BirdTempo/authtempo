@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { confinedIo, insideRoot, RootError } from "../src/cli-io.js";
-import { localTools } from "../src/local-tools.js";
+import { CLI_TEMPLATES, localTools } from "../src/local-tools.js";
 import { createServer } from "../src/server.js";
+import { REPO } from "./support/bin.js";
 import { connect } from "./support/client.js";
 import { type FixtureRoot, fixtureRoot } from "./support/fixture-root.js";
 import { assertFreshIndex, siteIndex } from "./support/index.js";
@@ -11,6 +12,26 @@ import { assertFreshIndex, siteIndex } from "./support/index.js";
 // The root rule (plan 11e): every path of a tool resolves, with each link
 // resolved by realpath, inside the server root. A path outside it is a tool
 // fault, and nothing is written.
+
+/**
+ * A swap that another process could make: when mkdirSync makes the folder
+ * `made`, the mock puts a link to `to` at that name. Off while `made` is null.
+ */
+const swap = vi.hoisted(() => ({ made: null as string | null, to: "" }));
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  const mkdirSync = (...args: Parameters<typeof fs.mkdirSync>) => {
+    const r = fs.mkdirSync(...args);
+    const made = swap.made;
+    if (made !== null && String(args[0]).startsWith(made)) {
+      swap.made = null;
+      fs.rmSync(made, { recursive: true, force: true });
+      fs.symlinkSync(swap.to, made);
+    }
+    return r;
+  };
+  return { ...fs, default: { ...fs, mkdirSync }, mkdirSync };
+});
 
 let fx: FixtureRoot | undefined;
 beforeAll(() => {
@@ -78,6 +99,22 @@ describe("the root rule", () => {
     expect(f.around().outside).toEqual([]);
   });
 
+  it("refuses a write when another process swaps the new folder for a link during mkdir", () => {
+    const f = fixtureRoot();
+    fx = f;
+    // The outside folder has the same names, so a write through the link would land there.
+    mkdirSync(join(f.outside, "app"));
+    const { io } = confinedIo({ root: f.root, env, allowFetch: false });
+    swap.made = join(f.root, "made");
+    swap.to = f.outside;
+    expect(() => io.writeNew(join(f.root, "made/app/package.json"), "{}\n")).toThrow(
+      "outside the server root",
+    );
+    expect(swap.made).toBeNull();
+    expect(f.around().outside).toEqual(["app"]);
+    rmSync(join(f.root, "made"));
+  });
+
   it("writes a new file inside the root, and refuses a file that exists", () => {
     const f = fixtureRoot();
     fx = f;
@@ -101,6 +138,17 @@ describe("the root rule", () => {
     expect(() => io.listDir("link")).toThrow(RootError);
     expect(() => io.realpath("link")).toThrow(RootError);
     expect(existsSync(join(f.outside, "secret"))).toBe(true);
+  });
+
+  it("reads the init templates of the CLI, and no other file of its dist folder", () => {
+    const f = fixtureRoot();
+    fx = f;
+    const dist = join(REPO, "packages/cli/dist");
+    expect(CLI_TEMPLATES).toBe(join(dist, "templates.json"));
+    const { io } = confinedIo({ root: f.root, env, allowFetch: false, readOnly: [CLI_TEMPLATES] });
+    expect(io.readFile(join(dist, "templates.json")).length).toBeGreaterThan(0);
+    expect(() => io.readFile(join(dist, "program.js"))).toThrow(RootError);
+    expect(() => io.listDir(dist)).toThrow(RootError);
   });
 
   it("runs no child process and makes no fetch", async () => {

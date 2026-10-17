@@ -76,9 +76,9 @@ export interface ConfinedIo {
 }
 
 /**
- * An Io that keeps the CLI inside the root. Reads may also reach the
- * folders of `readOnly`, such as the CLI's own dist folder with the init
- * templates; no write reaches them. `fetch` runs only with `allowFetch`.
+ * An Io that keeps the CLI inside the root. Reads may also reach each path
+ * of `readOnly`, such as the init templates of the CLI. No write reaches
+ * them. `fetch` runs only with `allowFetch`.
  */
 export function confinedIo(opts: {
   root: string;
@@ -102,9 +102,11 @@ export function confinedIo(opts: {
     }
   };
   /**
-   * A new file inside the root. A step can put a link in the path between
-   * the check and the write. So the parent folder is checked again after the
-   * folders are made. The flag wx refuses a file or a link at the target.
+   * A new file inside the root. write is synchronous, so only another
+   * process can put a link in the path after the first check. The second
+   * check after mkdir makes that window smaller. It does not close it: a gap
+   * stays before writeFileSync, and mkdir can make empty folders outside the
+   * root before the refusal. The flag wx refuses a file or a link at the target.
    */
   const write = (path: string, text: string, mode: number): void => {
     const target = insideRoot(root, path);
