@@ -46,7 +46,9 @@ export const initCommand: Command = {
       throw new UsageError(`init takes one folder; got ${positionals.length}`);
     const stack = oneOf("stack", values.stack, STACKS);
     if (stack === undefined)
-      throw new UsageError("name a stack: --stack workers-d1, workers-postgres, node, or bun");
+      throw new UsageError(
+        "name a stack: --stack workers-d1, workers-postgres, node, bun, or mcp-server",
+      );
     const given = positionals[0] ?? ".";
     const dir = resolve(ctx.cwd, given);
     const all = JSON.parse(ctx.readFile(TEMPLATES)) as Record<Stack, TemplateFile[]>;

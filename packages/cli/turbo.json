@@ -5,8 +5,17 @@
     // test/mcp.test.ts writes the entry of the real server binary, so the MCP
     // package must be built first. A task dependency, not a package one: the
     // MCP package depends on this package's ./program entry (plan 11e Task 5).
+    // The mcp-server scaffold test imports @authtempo/verify/mcp through the
+    // example's node_modules. The example's test builds verify first (^build),
+    // and proves the example before the scaffold copies it (plan 11e Task 13).
     "test": {
-      "dependsOn": ["^build", "build", "authtempo-example-node#test", "@authtempo/mcp#build"]
+      "dependsOn": [
+        "^build",
+        "build",
+        "authtempo-example-node#test",
+        "authtempo-example-mcp-server#test",
+        "@authtempo/mcp#build"
+      ]
     },
     // test/program.test.ts imports the package's own entry @authtempo/cli/program,
     // which resolves to dist/program.d.ts. So the typecheck needs this package's build (plan 11e).

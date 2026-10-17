@@ -295,7 +295,7 @@ describe("authtempo init (spec 19)", () => {
     const none = runBin(["init", fresh("init-none")]);
     expect(none.status).toBe(2);
     expect(linesOf(none.stderr)[0]).toBe(
-      "name a stack: --stack workers-d1, workers-postgres, node, or bun",
+      "name a stack: --stack workers-d1, workers-postgres, node, bun, or mcp-server",
     );
     const typo = runBin(["init", fresh("init-typo"), "--stack", "worker-d1"]);
     expect(typo.status).toBe(2);
