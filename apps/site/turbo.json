@@ -1,0 +1,14 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // The site's test runs its own astro build, which rewrites dist. So it
+    // runs after the site's build, after the mcp index copy that reads that
+    // dist, and after the mcp tests, which read dist/agent/index.json. Without
+    // this order a second build overlaps the first under load, and the site
+    // build fails on a missing prerender chunk. An mcp test that runs during
+    // the rebuild finds no index file (plan 11e ruling 37).
+    // "cache": false comes from the root.
+    "test": { "dependsOn": ["^build", "build", "@authtempo/mcp#index", "@authtempo/mcp#test"] }
+  }
+}
