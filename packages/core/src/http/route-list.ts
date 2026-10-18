@@ -166,10 +166,10 @@ export type RoutePath<M extends RouteMethod = RouteMethod> = Extract<
 >["path"];
 
 /**
- * The codes that the router answers for every route (plan 11g): `not_found`
- * for a feature that is off, `origin_not_trusted` for a POST from an origin
- * that is not trusted, and `internal` for an unhandled error. An entry does
- * not repeat them; the OpenAPI document adds them to each operation.
+ * The codes that the router answers for every route (plan 11g). `not_found`
+ * is for a feature that is off. `origin_not_trusted` is for a POST from an
+ * origin that is not trusted. `internal` is for an unhandled error. An entry
+ * does not repeat them; the OpenAPI document adds them to each operation.
  */
 export const ROUTER_CODES = [
   "not_found",

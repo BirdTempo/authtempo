@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../src/config.js";
 import { ERRORS } from "../src/errors.js";
 import { json } from "../src/http/json.js";
@@ -23,6 +23,10 @@ const routes: Route[] = [
   { method: "POST", path: "/echo", handler: async () => json({ echoed: true }) },
 ];
 const handle = createRouter(config, routes);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("router", () => {
   it("matches method and path under basePath", async () => {
@@ -249,5 +253,38 @@ describe("router", () => {
     expect(ERRORS.origin_not_trusted).toBe(403);
     expect(await foreign.json()).toEqual({ error: "origin_not_trusted" });
     expect(ROUTER_CODES).toEqual(["not_found", "origin_not_trusted", "internal"]);
+  });
+  it("answers internal with one log line when the legacy cookie move throws", async () => {
+    const down = resolveConfig({
+      baseURL: "https://api.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: ["https://app.example.com"],
+      storage: {
+        ...createMemoryAdapter(),
+        findOne: async () => {
+          throw new Error("db down");
+        },
+      },
+      mail: { send: async () => {} },
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await createRouter(
+      down,
+      routes,
+    )(
+      new Request("https://api.example.com/auth/ping", {
+        headers: {
+          cookie: `tempo_session=ts_${"a".repeat(43)}`,
+          origin: "https://app.example.com",
+        },
+      }),
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "internal" });
+    expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0]).toBe("authtempo: unhandled error");
   });
 });

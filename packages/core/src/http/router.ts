@@ -212,15 +212,29 @@ export function createRouter(
         origin,
       );
     }
-    const res = await moveLegacyCookie(config, request, await dispatch(request));
-    return trusted ? cors(res, origin) : res;
+    // The one error boundary of a request (plan 11g). A throw of the handler,
+    // of the cookie move, or of the CORS write answers `internal` with one log line.
+    try {
+      const res = await moveLegacyCookie(config, request, await dispatch(request));
+      return trusted ? cors(res, origin) : res;
+    } catch (e) {
+      console.error(
+        "authtempo: unhandled error",
+        request.method,
+        new URL(request.url).pathname,
+        // The app sets the name, so it can hold a code or a token (plan 9c).
+        appErrorName(e),
+      );
+      const res = routerError("internal");
+      return trusted ? cors(res, origin) : res;
+    }
   };
 
   function refused(): Response {
     return routerError("origin_not_trusted");
   }
 
-  /** A route's own answer to a foreign preflight, or null. A throw is logged and answers 500, as in dispatch. */
+  /** A route's own answer to a foreign preflight, or null. A throw is logged and answers 500, as in the boundary above. */
   async function foreign(request: Request, origin: string): Promise<Response | null> {
     const url = new URL(request.url);
     const route = preflights.get(url.pathname);
@@ -245,27 +259,12 @@ export function createRouter(
     if (!route) return routerError("not_found");
     const refusal = gate(request);
     if (refusal) return refusal;
-    return run(route, request, url);
-  }
-
-  async function run(route: Route, request: Request, url: URL): Promise<Response> {
-    try {
-      return await route.handler({
-        request,
-        url,
-        config,
-        ip: config.clientIp(request),
-        now: config.clock.now(),
-      });
-    } catch (e) {
-      console.error(
-        "authtempo: unhandled error",
-        route.method,
-        route.path,
-        // The app sets the name, so it can hold a code or a token (plan 9c).
-        appErrorName(e),
-      );
-      return routerError("internal");
-    }
+    return route.handler({
+      request,
+      url,
+      config,
+      ip: config.clientIp(request),
+      now: config.clock.now(),
+    });
   }
 }
