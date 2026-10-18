@@ -11,6 +11,7 @@ import { ROUTES } from "@authtempo/core/routes";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
+import { checkContrast } from "./check-contrast.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
 import { checkErrorLinks, errorLinks } from "./check-error-links.ts";
 import { checkErrors } from "./check-errors.ts";
@@ -171,6 +172,11 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         sources: siteSources(),
         favicon: null,
       }),
+  },
+  {
+    // Brand spec 4 and 14: each pair at build time, by the WCAG 2.1 formula.
+    name: "check-contrast",
+    run: () => checkContrast(readSiteFile("src/styles/tokens.css") ?? ""),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },
