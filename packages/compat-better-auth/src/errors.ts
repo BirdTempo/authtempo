@@ -48,6 +48,11 @@ export const BETTER_AUTH_CODES = {
   // authtempo's own names: Better Auth has no code for a hook's refusal or failure.
   hook_refused: "HOOK_REFUSED",
   hook_failed: "HOOK_FAILED",
+  // Plan 11g. authtempo's own name: no Better Auth file names one (read
+  // 2026-10-19). Better Auth 1.7.2's BASE_ERROR_CODES (@better-auth/core
+  // dist/error/codes.mjs) has no code for an unhandled error; its routes throw
+  // APIError("INTERNAL_SERVER_ERROR", ...), the status name of better-call.
+  internal: "INTERNAL_ERROR",
   // Plan 9e. Better Auth 1.7.2's own names (dist/plugins/email-otp/error-codes.mjs:4-8, read
   // 2026-10-13). Core answers an expired code invalid_code, so OTP_EXPIRED never appears.
   // Better Auth answers TOO_MANY_ATTEMPTS 403; the status stays core's, 400.

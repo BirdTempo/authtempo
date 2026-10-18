@@ -285,6 +285,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /handoff/redeem`](/docs/reference/routes/#post-handoff-redeem), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`POST /organizations/update`](/docs/reference/routes/#post-organizations-update), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/invite`](/docs/reference/routes/#post-organizations-invite), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`GET /token`](/docs/reference/routes/#get-token), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
 
+<h3 id="internal"><code>internal</code> 500</h3>
+
+- **Meaning:** A route had an unhandled error. The server wrote one log line with the route.
+- **Do:** Read the log line, and report the error. Try the request again later.
+
+| Routes |
+| --- |
+| Every route. |
+
 <h3 id="organization_limit"><code>organization_limit</code> 409</h3>
 
 - **Meaning:** The user holds `organizations.limits.perUser` memberships.

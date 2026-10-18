@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../src/config.js";
+import { ERRORS } from "../src/errors.js";
 import { json } from "../src/http/json.js";
+import { ROUTER_CODES } from "../src/http/route-list.js";
 import { createRouter, type Route } from "../src/http/router.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
@@ -216,5 +218,36 @@ describe("router", () => {
       new Request("https://api.example.com/auth/ping", { headers: { origin: "consumera://" } }),
     );
     expect(scheme.headers.get("access-control-allow-origin")).toBe("consumera://");
+  });
+  it("answers internal with the status of ERRORS when a handler throws", async () => {
+    const boom = createRouter(config, [
+      {
+        method: "GET",
+        path: "/boom",
+        handler: async () => {
+          throw new Error("x");
+        },
+      },
+    ]);
+    const res = await boom(new Request("https://api.example.com/auth/boom"));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "internal" });
+    expect(ERRORS.internal).toBe(500);
+  });
+  it("answers each router code with its status from ERRORS", async () => {
+    const missing = await handle(new Request("https://api.example.com/auth/nope"));
+    expect(missing.status).toBe(404);
+    expect(ERRORS.not_found).toBe(404);
+    expect(await missing.json()).toEqual({ error: "not_found" });
+    const foreign = await handle(
+      new Request("https://api.example.com/auth/echo", {
+        method: "POST",
+        headers: { origin: "https://evil.example" },
+      }),
+    );
+    expect(foreign.status).toBe(403);
+    expect(ERRORS.origin_not_trusted).toBe(403);
+    expect(await foreign.json()).toEqual({ error: "origin_not_trusted" });
+    expect(ROUTER_CODES).toEqual(["not_found", "origin_not_trusted", "internal"]);
   });
 });

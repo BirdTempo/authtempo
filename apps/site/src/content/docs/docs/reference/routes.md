@@ -21,7 +21,7 @@ sources:
 - A route that a config key turns off answers 404 `not_found`.
 - A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`.
 - A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`.
-- An unhandled error answers 500 `{ "error": "internal" }` and writes one log line.
+- An unhandled error answers 500 [`internal`](/docs/reference/errors/#internal) and writes one log line.
 
 ## Sessions
 

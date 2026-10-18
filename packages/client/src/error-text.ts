@@ -69,6 +69,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   identity_taken:
     "This provider account belongs to another account. Sign in to that account to use it.",
   sole_owner: "You are the only owner of a team. Make another member an owner first.",
+  internal: "The server had an error. Try again later.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

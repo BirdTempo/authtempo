@@ -1,9 +1,11 @@
 import { CAPTCHA_HEADER } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
+import { ERRORS } from "../errors.js";
 import { appErrorName } from "../primitives/app-error.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { json } from "./json.js";
+import type { RouterCode } from "./route-list.js";
 
 export interface RouteContext {
   request: Request;
@@ -80,6 +82,11 @@ export function fetchMetadataRefuses(request: Request, originTrusted: boolean): 
   return (site === "cross-site" || site === "same-site") && !originTrusted;
 }
 
+/** One answer of the router itself (plan 11g): the code with its status from `ERRORS`. */
+function routerError(code: RouterCode): Response {
+  return json({ error: code }, ERRORS[code]);
+}
+
 /** Credentialed CORS for one trusted origin. `Vary: Origin` keeps a cache from serving it to another. */
 function cors(res: Response, origin: string): Response {
   res.headers.set("access-control-allow-origin", origin);
@@ -152,8 +159,8 @@ export function createPostGate(
     const origin = request.headers.get("origin");
     if (route?.clientOrigin && origin !== null) return null;
     const trusted = origin !== null && originTrusted(config, origin);
-    if (origin !== null && !trusted) return json({ error: "origin_not_trusted" }, 403);
-    if (fetchMetadataRefuses(request, trusted)) return json({ error: "origin_not_trusted" }, 403);
+    if (origin !== null && !trusted) return routerError("origin_not_trusted");
+    if (fetchMetadataRefuses(request, trusted)) return routerError("origin_not_trusted");
     return null;
   };
 }
@@ -210,7 +217,7 @@ export function createRouter(
   };
 
   function refused(): Response {
-    return json({ error: "origin_not_trusted" }, 403);
+    return routerError("origin_not_trusted");
   }
 
   /** A route's own answer to a foreign preflight, or null. A throw is logged and answers 500, as in dispatch. */
@@ -228,14 +235,14 @@ export function createRouter(
         // The app sets the name, so it can hold a code or a token (plan 9c).
         appErrorName(e),
       );
-      return json({ error: "internal" }, 500);
+      return routerError("internal");
     }
   }
 
   async function dispatch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const route = table.get(`${request.method} ${url.pathname}`);
-    if (!route) return json({ error: "not_found" }, 404);
+    if (!route) return routerError("not_found");
     const refusal = gate(request);
     if (refusal) return refusal;
     return run(route, request, url);
@@ -258,7 +265,7 @@ export function createRouter(
         // The app sets the name, so it can hold a code or a token (plan 9c).
         appErrorName(e),
       );
-      return json({ error: "internal" }, 500);
+      return routerError("internal");
     }
   }
 }

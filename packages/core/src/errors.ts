@@ -61,6 +61,8 @@ export const ERRORS = {
   identity_taken: 409,
   // plan 12a: the account is the last owner of an organization with other members
   sole_owner: 409,
+  // plan 11g: an unhandled error of a route. The router answers it; no route names it.
+  internal: 500,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

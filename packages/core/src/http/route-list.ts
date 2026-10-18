@@ -1,3 +1,5 @@
+import type { ErrorCode } from "../errors.js";
+
 /**
  * Every route that core can serve, with the config that turns it on (plan
  * 11a). The docs routes page has one anchor for each entry, and its check
@@ -162,3 +164,16 @@ export type RoutePath<M extends RouteMethod = RouteMethod> = Extract<
   RouteLiteral,
   { method: M }
 >["path"];
+
+/**
+ * The codes that the router answers for every route (plan 11g): `not_found`
+ * for a feature that is off, `origin_not_trusted` for a POST from an origin
+ * that is not trusted, and `internal` for an unhandled error. An entry does
+ * not repeat them; the OpenAPI document adds them to each operation.
+ */
+export const ROUTER_CODES = [
+  "not_found",
+  "origin_not_trusted",
+  "internal",
+] as const satisfies readonly ErrorCode[];
+export type RouterCode = (typeof ROUTER_CODES)[number];
