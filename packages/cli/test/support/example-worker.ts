@@ -10,7 +10,14 @@ const WRANGLER = join(WORKER, "node_modules/.bin/wrangler");
 export const OPERATOR_SECRET = "authtempo-example-operator-secret-0123456789";
 const OPERATOR_HASH = "9553f46eb9e964b487a02e36147c562555bf1a684cfa614904bcc0f5ab5f1c57";
 // CI=1: wrangler takes the default of each question (examples/worker/proof/dev.mjs, read 2026-10-10).
-const ENV = { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" };
+// The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+const ENV = {
+  ...process.env,
+  CI: "1",
+  WRANGLER_SEND_METRICS: "false",
+  WRANGLER_HIDE_BANNER: "true",
+  NO_COLOR: "1",
+};
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**

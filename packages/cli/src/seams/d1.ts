@@ -18,9 +18,16 @@ const SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /**
  * CI=1 makes wrangler take the default of each question, as
  * examples/worker/proof/dev.mjs found (read 2026-10-10). The metrics prompt
- * and color stay off in a child process.
+ * and color stay off in a child process. The hidden banner skips wrangler's
+ * npm update check (wrangler 4.148.0, seen 2026-10-18). The check's open
+ * socket keeps the child alive when the registry does not answer.
  */
-const ENV = { CI: "1", WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" } as const;
+const ENV = {
+  CI: "1",
+  WRANGLER_SEND_METRICS: "false",
+  WRANGLER_HIDE_BANNER: "true",
+  NO_COLOR: "1",
+} as const;
 
 export interface D1Project {
   /** The folder of the wrangler config: wrangler runs here. */

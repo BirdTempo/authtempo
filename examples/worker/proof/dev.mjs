@@ -64,7 +64,8 @@ export async function startWorker() {
     throw new Error(`port 8787 answers already; stop the other wrangler dev first`);
   const persist = mkdtempSync(join(tmpdir(), "authtempo-proof-d1-"));
   // CI=1 makes wrangler skip its confirm prompt.
-  const env = { ...process.env, CI: "1" };
+  // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+  const env = { ...process.env, CI: "1", WRANGLER_HIDE_BANNER: "true" };
   // Every child process in the proofs has a limit. The local apply takes a few seconds; 2 min
   // allows a loaded machine. A stuck apply then fails the run and never hangs it.
   try {

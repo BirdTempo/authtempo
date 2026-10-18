@@ -82,7 +82,13 @@ try {
       encoding: "utf8",
       // Pin the directory: wrangler reads worker/wrangler.jsonc from here.
       cwd: workerDir,
-      env: { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
+      // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+      env: {
+        ...process.env,
+        WRANGLER_SEND_METRICS: "false",
+        WRANGLER_HIDE_BANNER: "true",
+        NO_COLOR: "1",
+      },
     },
   );
   const log = `${run.stdout}\n${run.stderr}`;

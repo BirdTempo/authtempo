@@ -7,7 +7,13 @@ export function wranglerDryRun(): { status: number | null; output: string } {
   const run = spawnSync("pnpm", ["exec", "wrangler", "deploy", "--dry-run"], {
     cwd: SITE,
     encoding: "utf8",
-    env: { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
+    // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+    env: {
+      ...process.env,
+      WRANGLER_SEND_METRICS: "false",
+      WRANGLER_HIDE_BANNER: "true",
+      NO_COLOR: "1",
+    },
   });
   return { status: run.status, output: `${run.stdout ?? ""}${run.stderr ?? ""}`.trim() };
 }

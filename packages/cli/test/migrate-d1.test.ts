@@ -44,6 +44,8 @@ function wranglerLocal(dir: string, args: string[]): { stdout: string } {
       TMPDIR: process.env.TMPDIR ?? "/tmp",
       CI: "1",
       WRANGLER_SEND_METRICS: "false",
+      // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+      WRANGLER_HIDE_BANNER: "true",
       NO_COLOR: "1",
     },
     timeout: 120_000,
@@ -214,14 +216,15 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     });
   });
 
-  it("with --remote, gives --remote to each wrangler call (a fake wrangler records them; no test logs in)", () => {
+  it("with --remote, gives --remote to each wrangler call, and hides the banner so no npm check holds the child (a fake wrangler records them; no test logs in)", () => {
     const files = Object.fromEntries(
       ADAPTER_FILES.map((f) => [`migrations/${f}`, readFileSync(join(ADAPTER, f), "utf8")]),
     );
     // The fake answers each SELECT as wrangler 4.148.0 answers on a new database with --json.
+    // It records CI and WRANGLER_HIDE_BANNER as it got them, then the arguments.
     const fake = [
       "#!/bin/sh",
-      'printf \'CI=%s %s\\n\' "$CI" "$*" >> "$(dirname "$0")/../../wrangler-calls.log"',
+      'printf \'CI=%s WRANGLER_HIDE_BANNER=%s %s\\n\' "$CI" "$WRANGLER_HIDE_BANNER" "$*" >> "$(dirname "$0")/../../wrangler-calls.log"',
       'if [ "$2" = "execute" ]; then echo \'{"error":{"text":"no such table: ta_meta: SQLITE_ERROR"}}\'; exit 1; fi',
       "exit 0",
       "",
@@ -238,13 +241,15 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     expect(linesOf(r.stderr)).toContain("running wrangler d1 migrations apply cli-d1 --remote");
     const tail = `--remote --config ${join(p.dir, "wrangler.jsonc")}`;
     // CI=1 on each call: wrangler then takes the default answer of the apply confirmation.
+    // WRANGLER_HIDE_BANNER=true on each call: the banner's npm update check never holds the child.
     // The applied list comes first: the version check needs its count.
-    const applied = `CI=1 d1 execute cli-d1 --json --command SELECT name FROM d1_migrations ORDER BY id ${tail}`;
-    const version = `CI=1 d1 execute cli-d1 --json --command SELECT value FROM ta_meta WHERE key = 'schema_version' ${tail}`;
+    const head = "CI=1 WRANGLER_HIDE_BANNER=true";
+    const applied = `${head} d1 execute cli-d1 --json --command SELECT name FROM d1_migrations ORDER BY id ${tail}`;
+    const version = `${head} d1 execute cli-d1 --json --command SELECT value FROM ta_meta WHERE key = 'schema_version' ${tail}`;
     expect(linesOf(readFileSync(join(p.dir, "wrangler-calls.log"), "utf8"))).toEqual([
       applied,
       version,
-      `CI=1 d1 migrations apply cli-d1 ${tail}`,
+      `${head} d1 migrations apply cli-d1 ${tail}`,
       applied,
       version,
     ]);

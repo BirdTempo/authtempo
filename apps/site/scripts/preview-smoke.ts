@@ -33,7 +33,13 @@ if (stale) {
 // wrangler, and workerd. Without it workerd outlives the run.
 const dev = spawn("pnpm", ["exec", "wrangler", ...wranglerArgs], {
   cwd: SITE,
-  env: { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
+  // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+  env: {
+    ...process.env,
+    WRANGLER_SEND_METRICS: "false",
+    WRANGLER_HIDE_BANNER: "true",
+    NO_COLOR: "1",
+  },
   stdio: ["ignore", "ignore", "pipe"],
   detached: true,
 });

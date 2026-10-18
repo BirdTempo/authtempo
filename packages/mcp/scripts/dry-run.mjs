@@ -20,7 +20,13 @@ const PKG = fileURLToPath(new URL("..", import.meta.url));
 const PROOF = fileURLToPath(
   new URL("../../../examples/worker/proof/bundle-no-node.mjs", import.meta.url),
 );
-const ENV = { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" };
+// The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+const ENV = {
+  ...process.env,
+  WRANGLER_SEND_METRICS: "false",
+  WRANGLER_HIDE_BANNER: "true",
+  NO_COLOR: "1",
+};
 
 /** The bundle file: wrangler names it after main (src/worker.ts in wrangler.jsonc). */
 const ENTRY = "worker.js";
