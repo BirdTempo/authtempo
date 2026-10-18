@@ -26,6 +26,7 @@ import { checkSchema } from "./check-schema.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
+import { checkTokens } from "./check-tokens.ts";
 import { sidebarGroups, sidebarOrder } from "./lib/agent.ts";
 import { cliHelpPages, helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
@@ -36,7 +37,9 @@ import {
   distPages,
   docsPages,
   readRepoFile,
+  readSiteFile,
   sampleFiles,
+  siteSources,
 } from "./lib/load.ts";
 import { wireLists } from "./lib/mcp-wire.ts";
 import { DIST, DOCS, REPO } from "./lib/paths.ts";
@@ -158,6 +161,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         COMPAT_MIGRATION_NAMES,
         distPageOrEmpty("/docs/migrate/better-auth/"),
       ),
+  },
+  {
+    // Brand spec 4 and 14. Task 6 passes the favicon; until then it is the placeholder of plan 11a.
+    name: "check-tokens",
+    run: () =>
+      checkTokens({
+        css: readSiteFile("src/styles/tokens.css") ?? "",
+        sources: siteSources(),
+        favicon: null,
+      }),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },

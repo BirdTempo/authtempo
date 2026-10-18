@@ -1,0 +1,95 @@
+/*
+ * The one token file of authtempo (brand spec 2026-10-15, sections 4 to 7).
+ * The root pages import it in Site.astro, and Starlight reads it through
+ * customCss in astro.config.mjs. Every color of the site is a token here:
+ * check-tokens fails on a literal color in any other source file, and
+ * check-contrast recomputes every pair of brand spec 4 from these values.
+ */
+
+/* Light, "Ruled paper". */
+:root {
+  --at-paper: #f6f5f2;
+  --at-surface: #ffffff;
+  --at-ink: #15161a;
+  --at-mute: #6b6f78;
+  --at-line: rgba(0, 0, 0, 0.08);
+  --at-accent: #2f6df6;
+  --at-accent-text: #1f55d6;
+  --at-code: #15161a;
+  --at-code-ink: #e8e6e1;
+  color-scheme: light;
+}
+
+/*
+ * Dark, "Ink". With no stored choice, the page follows the system scheme,
+ * so a reader with script off still gets their scheme (brand spec 12). The
+ * toggle and Starlight's select set data-theme, which wins either way.
+ * check-tokens holds the two dark blocks to the same names and values.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --at-paper: #121316;
+    --at-surface: #1c1e23;
+    --at-ink: #e8e6e1;
+    --at-mute: #8a8f9a;
+    --at-line: rgba(255, 255, 255, 0.09);
+    --at-accent: #2f6df6;
+    --at-accent-text: #6b9bff;
+    --at-code: #1c1e23;
+    --at-code-ink: #e8e6e1;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --at-paper: #121316;
+  --at-surface: #1c1e23;
+  --at-ink: #e8e6e1;
+  --at-mute: #8a8f9a;
+  --at-line: rgba(255, 255, 255, 0.09);
+  --at-accent: #2f6df6;
+  --at-accent-text: #6b9bff;
+  --at-code: #1c1e23;
+  --at-code-ink: #e8e6e1;
+  color-scheme: dark;
+}
+
+/*
+ * Starlight reads these names (style/props.css of 0.42.6, read 2026-10-15).
+ * This file is in no cascade layer, so it wins over Starlight's
+ * starlight.base layer in both schemes, and one map serves light and dark.
+ * Starlight's dark set has gray-1 as its lightest step, and its light set
+ * turns the steps round. Each step maps to the token of its role, so both
+ * schemes read right. check-tokens holds every --sl-color-* to a token.
+ */
+:root {
+  --sl-color-white: var(--at-ink);
+  --sl-color-gray-1: var(--at-ink);
+  --sl-color-gray-2: var(--at-ink);
+  --sl-color-gray-3: var(--at-mute);
+  --sl-color-gray-4: var(--at-mute);
+  --sl-color-gray-5: var(--at-line);
+  --sl-color-gray-6: var(--at-surface);
+  --sl-color-gray-7: var(--at-surface);
+  --sl-color-black: var(--at-paper);
+  --sl-color-text: var(--at-ink);
+  --sl-color-text-accent: var(--at-accent-text);
+  --sl-color-text-invert: var(--at-paper);
+  --sl-color-accent-low: var(--at-surface);
+  --sl-color-accent: var(--at-accent);
+  --sl-color-accent-high: var(--at-accent-text);
+  --sl-color-bg: var(--at-paper);
+  --sl-color-bg-nav: var(--at-paper);
+  --sl-color-bg-sidebar: var(--at-paper);
+  --sl-color-bg-inline-code: var(--at-surface);
+  --sl-color-bg-accent: var(--at-accent);
+  --sl-color-hairline-light: var(--at-line);
+  --sl-color-hairline: var(--at-line);
+  --sl-color-hairline-shade: var(--at-line);
+}
+
+/* Focus (brand spec 14): a 2 px accent outline with a 2 px offset on every interactive element. */
+:focus-visible {
+  outline: 2px solid var(--at-accent);
+  outline-offset: 2px;
+}

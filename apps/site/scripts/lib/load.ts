@@ -55,3 +55,26 @@ export function readRepoFile(path: string): string | null {
   const abs = `${REPO}${path}`;
   return existsSync(abs) ? readFileSync(abs, "utf8") : null;
 }
+
+/** A file of apps/site/ by its path from there, or null when it does not exist. */
+export function readSiteFile(path: string): string | null {
+  const abs = `${SITE}${path}`;
+  return existsSync(abs) ? readFileSync(abs, "utf8") : null;
+}
+
+/**
+ * The site's own sources that can hold a color or a motion: each .astro,
+ * .css, and .svg file under src/ outside the content, and the sprite.
+ * tokens.css is not one: it is the one place for a literal color.
+ */
+export function siteSources(): { path: string; text: string }[] {
+  const files = walk(
+    `${SITE}src/`,
+    (p) =>
+      /\.(astro|css|svg)$/.test(p) &&
+      !p.startsWith(`${SITE}src/content/`) &&
+      p !== `${SITE}src/styles/tokens.css`,
+  );
+  if (existsSync(`${SITE}public/icons.svg`)) files.push(`${SITE}public/icons.svg`);
+  return files.map((p) => ({ path: p.slice(SITE.length), text: readFileSync(p, "utf8") }));
+}

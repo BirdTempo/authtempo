@@ -54,6 +54,8 @@ export default defineConfig({
     starlight({
       title: "authtempo",
       sidebar,
+      // Starlight reads the brand tokens (brand spec 11). The root pages import the same file in Site.astro.
+      customCss: ["./src/styles/tokens.css"],
     }),
   ],
 });
