@@ -39,7 +39,7 @@ export interface WorkosExport {
 export const WORKOS_ROLES = { admin: "admin", member: "member" } as const;
 
 /**
- * Only `MicrosoftOAuth` appears on the identity page (read 2026-10-14). The
+ * Only `MicrosoftOAuth` appears on the identity page (read 2026-10-19). The
  * other three values and `idp_id` as the provider's subject are unverified:
  * runbook item 13. LinkedIn: no field marks the OIDC `sub`, so it is the
  * legacy name (plan 9b2). Any other value goes to a provider the importer
@@ -138,6 +138,7 @@ export function workosSource(input: WorkosExport): Source {
 
       // The memberships, read before the users: a membership that does not
       // import is listed on its user, and the users yield first.
+      const userIds = new Set(idCount.keys());
       const orgIds = new Set(organizations.map((o) => str(o.id)).filter((id) => id !== null));
       const members = new Map<string, ImportOrganization["members"]>();
       const memberDrops = new Map<string, string[]>();
@@ -149,8 +150,13 @@ export function workosSource(input: WorkosExport): Source {
       for (const m of memberships.map(asRecord)) {
         const userId = str(m.user_id);
         const orgId = str(m.organization_id);
-        // No user id: nothing to list it on. No organization id: the same as an unknown one.
+        // No user id: nothing to list it on.
         if (userId === null) continue;
+        // A user id that the users file lacks: WorkOS deleted the user between
+        // the two fetches of the script, and the user list is the source of
+        // truth. The membership is not read, so the importer sees no conflict.
+        if (!userIds.has(userId)) continue;
+        // No organization id: the same as an unknown one.
         if (orgId === null || !orgIds.has(orgId)) {
           dropOn(userId, "member:unknown_organization");
           continue;

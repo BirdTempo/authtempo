@@ -6,17 +6,17 @@ import type { SourceName } from "./types.js";
 /**
  * Test data only: one small fixture export per provider, from the hashes of
  * `@authtempo/legacy-hashes/testing`. The no-secret test of the CLI, the
- * guide samples of the site, and the MCP plan test read these files, so a
+ * guide samples of the site, and the MCP plan test read these files. So a
  * reader change and its docs test the same export. It imports no Node
  * module. It is in `src` so that the build ships it as `dist/testing.js`
- * under the entry `@authtempo/import/testing`; the main entry does not
+ * under the entry `@authtempo/import/testing`. The main entry does not
  * import this file (plan 11f Task 1).
  *
  * Each fixture has at most three users, at least one with an address and a
- * name, in the provider's real file format (the shape of the reader's own
- * test in `test/readers/`). `secrets` names every address, every name, and
- * every hash string of the fixture, so a test can prove that no output
- * holds one of them (spec 23 item 14).
+ * name. The files are in the provider's real format, the shape of the
+ * reader's own test in `test/readers/`. `secrets` names every address,
+ * every name, and every hash string of the fixture. So a test can prove
+ * that no output holds one of them (spec 23 item 14).
  */
 export interface FixtureExport {
   bundle: ImportBundle;

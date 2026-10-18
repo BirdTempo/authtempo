@@ -2,6 +2,7 @@ import { createMemoryAdapter } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
 import { workosSource } from "../../src/readers/workos.js";
+import { exitCode } from "../../src/report.js";
 import { all, now } from "./all.js";
 
 // Shapes: the WorkOS reference pages user-management/user,
@@ -310,6 +311,26 @@ describe("workosSource", () => {
     expect(report.dropped).toEqual([
       { sourceId: "user_01", item: "unverified_extra_credential:github" },
     ]);
+  });
+
+  it("does not read a membership of a user that the users file lacks", async () => {
+    // WorkOS deleted user_99 between the two fetches of the guide's script.
+    const db = createMemoryAdapter();
+    const report = await importUsers(
+      db,
+      workosSource({
+        users: users(user("user_01")),
+        organizations: JSON.stringify([org("org_01", "Acme")]),
+        memberships: JSON.stringify([
+          membership("user_01", "org_01", "active", { slug: "admin" }),
+          membership("user_99", "org_01", "active", { slug: "member" }),
+        ]),
+      }),
+      { formats: [], now },
+    );
+    expect(report.skipped).toEqual([]);
+    expect(report.created).toMatchObject({ user: 1, organization: 1, member: 1 });
+    expect(exitCode(report)).toBe(0);
   });
 
   it("lists a membership of an organization that the organizations file lacks", async () => {
