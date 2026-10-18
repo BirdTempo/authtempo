@@ -9,12 +9,13 @@ sources:
   - packages/core/src/routes.ts
   - packages/core/src/credentials.ts
   - packages/core/src/operator-secret.ts
+  - packages/core/src/secrets-entry.ts
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.
 
-**What it does:** this page lists the members of the auth object and every export of the core entry. The export check holds this page to `packages/core/src/index.ts`. Three more export checks hold it to the route, credential, and operator secret entries.
+**What it does:** this page lists the members of the auth object and every export of the core entry. The export check holds this page to `packages/core/src/index.ts`. Four more export checks hold it to the route, credential, operator secret, and secrets entries.
 
 ## Before you start
 
@@ -152,7 +153,8 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | `@authtempo/core/testing` | `SoftAuthenticator`, `totpCode`, `base32Decode`, `ROUTES`, the route list, and `TEST_SECRET`, the app secret of the tests. |
 | `@authtempo/core/routes` | The route facts of an SDK. The next part lists them. |
 | `@authtempo/core/credentials` | The credential facts of an SDK. The part after it lists them. |
-| `@authtempo/core/operator-secret` | The form of the operator secret, for the CLI, not for an app. The last part of this page lists it. |
+| `@authtempo/core/operator-secret` | The form of the operator secret, for the CLI, not for an app. The part before the last lists it. |
+| `@authtempo/core/secrets` | The rules of the app secret, for the CLI, not for an app. The last part of this page lists it. |
 
 ## The route entry
 
@@ -195,6 +197,18 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | --- | --- |
 | `OPERATOR_SECRET` | The form of the operator secret: 32 to 512 visible ASCII characters. |
 | `isOperatorSecret` | True when a value has the form of an operator secret. |
+
+## The secrets entry
+
+`@authtempo/core/secrets` holds the rules of the app secret, outside the main entry. `authtempo secret` reads them, so it refuses a value that `createAuth` would warn on.
+
+| Export | What it is |
+| --- | --- |
+| `entropyBits` | The entropy estimate of a secret value, in bits. |
+| `ENTROPY_WARN_BITS` | The estimate under which `createAuth` warns: 120 bits. |
+| `ENTROPY_REFUSE_BITS` | The estimate under which `createAuth` refuses the value: 100 bits. |
+| `SECRET_VERSION_MAX` | The largest secret version: 999999. |
+| `REWRAP_LIMIT` | The row limit of one rewrap call: 100 by default, at most 1000. |
 
 ## Next
 

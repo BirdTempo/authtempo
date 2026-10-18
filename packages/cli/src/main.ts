@@ -24,23 +24,27 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   mcp: mcpCommand,
 };
 
-/** A command by its name; `constructor` and the other names of Object.prototype are no command. */
-function lookup(name: string): Command | undefined {
-  return Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
-}
-
-function rootHelp(): HelpText {
-  return {
-    ...ROOT_HELP,
-    commands: Object.values(COMMANDS).map((c) => ({ name: c.help.command, says: c.help.purpose })),
-  };
-}
-
-function unknown(ctx: Ctx, name: string): 2 {
-  const near = nearest(name, Object.keys(COMMANDS));
-  ctx.err(near ? `unknown command ${name}. Did you mean ${near}?` : `unknown command ${name}`);
-  ctx.err("Run authtempo --help");
-  return 2;
+/**
+ * The help of `<command> [<sub>]`, and its key in `STOP_JSON` (plan 11c2).
+ * When `rest[0]` is an own key of the command's subcommands, the answer is
+ * that subcommand's help and the key `<name> <sub>`; else the command's own
+ * help and the key `<name>`. `name` is the key of the table: the help's
+ * `command` can differ from it, as `keys rotate` does.
+ */
+export function helpOf(
+  name: string,
+  command: Command,
+  rest: readonly string[],
+): { key: string; help: HelpText } {
+  const sub = rest[0];
+  const entry =
+    sub !== undefined &&
+    command.subcommands !== undefined &&
+    Object.hasOwn(command.subcommands, sub)
+      ? command.subcommands[sub]
+      : undefined;
+  if (entry) return { key: `${name} ${sub}`, help: entry.help };
+  return { key: name, help: command.help };
 }
 
 /**
@@ -54,66 +58,90 @@ function printStop(ctx: Ctx, name: string, reason: string): void {
 }
 
 /**
- * The program (spec 19): `--version`, `help`, the command table, and the
- * exit codes. A usage error prints the short help of its command and exits
- * 2; any other error prints one `stopped:` line and exits 2. With
- * `--json`, both also print the stop document on stdout. Every line passes
- * the scrub of `guarded`.
+ * The program (spec 19) over a command table: `--version`, `help`, the
+ * commands, and the exit codes. A usage error prints the short help of its
+ * command or subcommand and exits 2; any other error prints one `stopped:`
+ * line and exits 2. With `--json`, both also print the stop document on
+ * stdout. Every line passes the scrub of `guarded`. The tests build a
+ * program over a table of their own; `main` is the program over `COMMANDS`.
  */
-export async function main(argv: readonly string[], io: Io): Promise<number> {
-  const ctx = guarded(io);
-  const [first, ...rest] = argv;
-  if (first === undefined) {
-    for (const line of shortHelp(ROOT_HELP)) ctx.err(line);
+export function makeMain(
+  commands: Readonly<Record<string, Command>>,
+): (argv: readonly string[], io: Io) => Promise<number> {
+  /** A command by its name; `constructor` and the other names of Object.prototype are no command. */
+  const lookup = (name: string): Command | undefined =>
+    Object.hasOwn(commands, name) ? commands[name] : undefined;
+
+  const rootHelp = (): HelpText => ({
+    ...ROOT_HELP,
+    commands: Object.values(commands).map((c) => ({ name: c.help.command, says: c.help.purpose })),
+  });
+
+  const unknown = (ctx: Ctx, name: string): 2 => {
+    const near = nearest(name, Object.keys(commands));
+    ctx.err(near ? `unknown command ${name}. Did you mean ${near}?` : `unknown command ${name}`);
+    ctx.err("Run authtempo --help");
     return 2;
-  }
-  if (first === "--help" || first === "-h") {
-    for (const line of renderHelp(rootHelp())) ctx.out(line);
-    return 0;
-  }
-  if (first === "--version") {
-    if (rest.includes("--json"))
-      printJson(ctx, { cli: CLI_VERSION, schemaVersion: SCHEMA_VERSION } satisfies VersionJson);
-    else ctx.out(`authtempo ${CLI_VERSION} (schema version ${SCHEMA_VERSION})`);
-    return 0;
-  }
-  if (first === "help") {
-    const name = rest[0];
-    if (name === undefined) {
+  };
+
+  return async (argv, io) => {
+    const ctx = guarded(io);
+    const [first, ...rest] = argv;
+    if (first === undefined) {
+      for (const line of shortHelp(ROOT_HELP)) ctx.err(line);
+      return 2;
+    }
+    if (first === "--help" || first === "-h") {
       for (const line of renderHelp(rootHelp())) ctx.out(line);
       return 0;
     }
-    const c = lookup(name);
-    if (!c) return unknown(ctx, name);
-    for (const line of renderHelp(c.help)) ctx.out(line);
-    return 0;
-  }
-  const command = lookup(first);
-  if (!command) return unknown(ctx, first);
-  if (rest.includes("--help") || rest.includes("-h")) {
-    for (const line of renderHelp(command.help)) ctx.out(line);
-    return 0;
-  }
-  // A command that returns 2 with no throw prints its own document; only a throw gets this one.
-  const json = rest.includes("--json");
-  const name = first;
-  try {
-    return await command.run([...rest], ctx);
-  } catch (e) {
-    let reason: string;
-    if (e instanceof UsageError) {
-      ctx.err(e.message);
-      // Every usage line of the command: migrate has one line for each target.
-      const [first, ...tail] = shortHelp(command.help);
-      const usage = command.help.usage.map((u) => `Usage: ${u}`);
-      for (const line of [...(usage.length > 0 ? usage : [first ?? ""]), ...tail]) ctx.err(line);
-      // The reason is the first stderr line: the message of the usage error.
-      reason = e.message.split("\n")[0] ?? "";
-    } else {
-      reason = e instanceof Error ? e.message : String(e);
-      ctx.err(`stopped: ${reason}`);
+    if (first === "--version") {
+      if (rest.includes("--json"))
+        printJson(ctx, { cli: CLI_VERSION, schemaVersion: SCHEMA_VERSION } satisfies VersionJson);
+      else ctx.out(`authtempo ${CLI_VERSION} (schema version ${SCHEMA_VERSION})`);
+      return 0;
     }
-    if (json) printStop(ctx, name, reason);
-    return 2;
-  }
+    if (first === "help") {
+      const name = rest[0];
+      if (name === undefined) {
+        for (const line of renderHelp(rootHelp())) ctx.out(line);
+        return 0;
+      }
+      const c = lookup(name);
+      if (!c) return unknown(ctx, name);
+      for (const line of renderHelp(helpOf(name, c, rest.slice(1)).help)) ctx.out(line);
+      return 0;
+    }
+    const command = lookup(first);
+    if (!command) return unknown(ctx, first);
+    const { key, help } = helpOf(first, command, rest);
+    if (rest.includes("--help") || rest.includes("-h")) {
+      for (const line of renderHelp(help)) ctx.out(line);
+      return 0;
+    }
+    // A command that returns 2 with no throw prints its own document; only a throw gets this one.
+    const json = rest.includes("--json");
+    try {
+      return await command.run([...rest], ctx);
+    } catch (e) {
+      let reason: string;
+      if (e instanceof UsageError) {
+        ctx.err(e.message);
+        // Every usage line of the command: migrate has one line for each target.
+        const [first, ...tail] = shortHelp(help);
+        const usage = help.usage.map((u) => `Usage: ${u}`);
+        for (const line of [...(usage.length > 0 ? usage : [first ?? ""]), ...tail]) ctx.err(line);
+        // The reason is the first stderr line: the message of the usage error.
+        reason = e.message.split("\n")[0] ?? "";
+      } else {
+        reason = e instanceof Error ? e.message : String(e);
+        ctx.err(`stopped: ${reason}`);
+      }
+      if (json) printStop(ctx, key, reason);
+      return 2;
+    }
+  };
 }
+
+/** The program over the command table (spec 19). The binary and the MCP server call it. */
+export const main = makeMain(COMMANDS);

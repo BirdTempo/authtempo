@@ -14,6 +14,16 @@ export const NAME_ONLY_FLAGS: ReadonlySet<string> = new Set(["password-column"])
 /** The name of an environment variable: a person who types a URL or a token here gets a usage error. */
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * The variable of the connection string when `--url-env` is not given. One
+ * source (plan 11c2): every command reads it, and `info` lists it as a
+ * secret name.
+ */
+export const DEFAULT_URL_ENV = "DATABASE_URL";
+
+/** The variable of the operator secret when `--token-env` is not given. One source, as `DEFAULT_URL_ENV`. */
+export const DEFAULT_TOKEN_ENV = "AUTHTEMPO_OPERATOR_SECRET";
+
 /** The longest variable name that a message prints (review of plan 11c, m12). A secret is longer. */
 const MAX_SHOWN_NAME = 40;
 

@@ -24,6 +24,8 @@ export function fakeIo(
     answer?: boolean;
     fetch?: (url: string, init: RequestInit) => Promise<Response>;
     run?: (command: string, args: readonly string[], cwd: string) => Promise<RunResult>;
+    /** The random bytes of `randomBytes`. The default fills each byte from a counter, so a test can predict it. */
+    random?: (n: number) => Uint8Array;
   } = {},
 ): FakeIo {
   const stdout: string[] = [];
@@ -74,6 +76,12 @@ export function fakeIo(
       if (!files.has(path)) throw new Error(`ENOENT: ${path}`);
       files.set(path, text);
     },
+    writeNewPrivate(path, text) {
+      if (files.has(path)) throw new Error(`EEXIST: ${path}`);
+      files.set(path, text);
+    },
+    randomBytes: o.random ?? ((n) => Uint8Array.from({ length: n }, (_, i) => i & 0xff)),
+    runtime: { node: "v26.10.0", platform: "linux", arch: "x64" },
     async fetch(url, init) {
       requests.push({ url, method: init.method ?? "GET", headers: new Headers(init.headers) });
       if (!o.fetch) throw new TypeError("fetch failed");

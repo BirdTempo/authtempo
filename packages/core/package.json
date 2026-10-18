@@ -28,6 +28,10 @@
       "types": "./dist/operator-secret.d.ts",
       "default": "./dist/operator-secret.js"
     },
+    "./secrets": {
+      "types": "./dist/secrets-entry.d.ts",
+      "default": "./dist/secrets-entry.js"
+    },
     "./testing": {
       "types": "./dist/testing/soft-authenticator.d.ts",
       "default": "./dist/testing/soft-authenticator.js"

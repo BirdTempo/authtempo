@@ -45,6 +45,16 @@ export interface Io {
   writePrivate(path: string, text: string): void;
   /** The one write over a file that exists; only authtempo mcp calls it. Mode 0644, or the old mode when it is narrower. */
   replaceFile(path: string, text: string): void;
+  /**
+   * A new file with mode 0600 (plan 11c2): `authtempo secret --out`. It
+   * refuses any path that exists, a link too, and makes no folder on the
+   * way, so no secret file is ever replaced.
+   */
+  writeNewPrivate(path: string, text: string): void;
+  /** `n` bytes of the Web Crypto source (plan 11c2): the value of `authtempo secret`. */
+  randomBytes(n: number): Uint8Array;
+  /** The Node version, the platform, and the architecture of the process (plan 11c2): the runtime part of `authtempo info`. */
+  readonly runtime: { readonly node: string; readonly platform: string; readonly arch: string };
   fetch(url: string, init: RequestInit): Promise<Response>;
   run(
     command: string,
@@ -117,6 +127,16 @@ export function nodeIo(): Io {
     },
     writePrivate,
     replaceFile,
+    // `wx` is O_CREAT and O_EXCL: it refuses any path that exists, a link and
+    // a link to a missing file too, so no secret file is ever replaced. The
+    // umask can only narrow the mode. `writePrivate` renames over its target,
+    // so `secret` must not use it.
+    writeNewPrivate: (path, text) => {
+      writeFileSync(path, text, { flag: "wx", mode: 0o600 });
+    },
+    // The Web Crypto source, with no seed and no fallback.
+    randomBytes: (n) => globalThis.crypto.getRandomValues(new Uint8Array(n)),
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
     fetch: (url, init) => fetch(url, init),
     run: (command, args, options) =>
       new Promise((done, fail) => {

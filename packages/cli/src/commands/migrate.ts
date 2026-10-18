@@ -22,7 +22,7 @@ import {
   openPostgres,
   storageFailure,
 } from "../seams/postgres.js";
-import { readSecret } from "../secrets.js";
+import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
 const OPTIONS = {
@@ -79,7 +79,7 @@ async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<
     fileFlag: "url-file",
     env: v["url-env"],
     file: v["url-file"],
-    defaultEnv: "DATABASE_URL",
+    defaultEnv: DEFAULT_URL_ENV,
     what: "the connection string",
   });
   plan.note(`connecting to ${describeUrl(url)}`);

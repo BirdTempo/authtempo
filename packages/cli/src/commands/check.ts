@@ -11,7 +11,7 @@ import { describeUrl, printJson } from "../output.js";
 import { readableVersion, readD1Version } from "../schema-version.js";
 import { findWranglerConfig, readD1Project, wranglerOf } from "../seams/d1.js";
 import { openPostgres, storageFailure } from "../seams/postgres.js";
-import { readSecret } from "../secrets.js";
+import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
 const OPTIONS = {
@@ -63,7 +63,7 @@ export const checkCommand: Command = {
         fileFlag: "url-file",
         env: v["url-env"],
         file: v["url-file"],
-        defaultEnv: "DATABASE_URL",
+        defaultEnv: DEFAULT_URL_ENV,
         what: "the connection string",
       });
       readSchema = async () => {

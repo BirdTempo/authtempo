@@ -8,7 +8,7 @@ import { IMPORT_HELP } from "../help/import.js";
 import type { ImportJson } from "../json.js";
 import { describeUrl, printJson, sayer } from "../output.js";
 import { openPostgres } from "../seams/postgres.js";
-import { readSecret } from "../secrets.js";
+import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import {
   type CliIo,
   type ImportValues,
@@ -115,7 +115,7 @@ export const importCommand: Command = {
             fileFlag: "url-file",
             env: v["url-env"],
             file: v["url-file"],
-            defaultEnv: "DATABASE_URL",
+            defaultEnv: DEFAULT_URL_ENV,
             what: "the connection string",
           })
         : undefined;

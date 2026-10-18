@@ -55,6 +55,15 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     page: "/docs/reference/api/",
     headings: ["The operator secret entry"],
   },
+  // The app secret rules of plan 11c2, for `authtempo secret`.
+  {
+    label: "core-secrets",
+    pkg: "@authtempo/core",
+    entry: "./secrets",
+    source: "packages/core/src/secrets-entry.ts",
+    page: "/docs/reference/api/",
+    headings: ["The secrets entry"],
+  },
   {
     label: "client",
     pkg: "@authtempo/client",

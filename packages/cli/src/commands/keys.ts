@@ -7,7 +7,7 @@ import { KEYS_HELP } from "../help/keys.js";
 import type { KeysJson } from "../json.js";
 import { baseOf, basePathOf, fetchWithin, HostError, timeoutOf } from "../net.js";
 import { type Ctx, printJson } from "../output.js";
-import { readSecret } from "../secrets.js";
+import { DEFAULT_TOKEN_ENV, readSecret } from "../secrets.js";
 
 const OPTIONS = {
   ...COMMON_OPTIONS,
@@ -72,7 +72,7 @@ export const keysCommand: Command = {
       fileFlag: "token-file",
       env: values["token-env"],
       file: values["token-file"],
-      defaultEnv: "AUTHTEMPO_OPERATOR_SECRET",
+      defaultEnv: DEFAULT_TOKEN_ENV,
       what: "the operator secret",
     });
     // Core's own rule (one source): a value of another form costs one of the

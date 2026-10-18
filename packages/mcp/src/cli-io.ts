@@ -138,6 +138,13 @@ export function confinedIo(opts: {
     replaceFile: () => {
       throw new Error("no tool rewrites a file");
     },
+    // The root rule writes no secret file (spec 21 item 4): no tool wraps `authtempo secret`.
+    writeNewPrivate: () => {
+      throw new RootError("the MCP server writes no secret file");
+    },
+    // The Web Crypto source, as the CLI's own io.
+    randomBytes: (n) => globalThis.crypto.getRandomValues(new Uint8Array(n)),
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
     fetch: (url, init) => {
       if (!opts.allowFetch) return Promise.reject(new Error("this tool makes no network call"));
       return fetch(url, init);

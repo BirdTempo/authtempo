@@ -1,11 +1,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { COMMON_OPTIONS } from "../src/args.js";
+import type { Command } from "../src/command.js";
+import { UsageError } from "../src/errors.js";
 import { ROOT_HELP } from "../src/help/authtempo.js";
 import { HELP } from "../src/help/index.js";
-import { type HelpText, pageUrl, renderHelp } from "../src/help/types.js";
+import { COMMON_FLAGS, type HelpText, pageUrl, renderHelp } from "../src/help/types.js";
 import { VERSION_JSON_KEYS } from "../src/json.js";
-import { COMMANDS } from "../src/main.js";
+import { COMMANDS, makeMain } from "../src/main.js";
 import { NAME_ONLY_FLAGS, SECRETISH_FLAG } from "../src/secrets.js";
 import { assertFreshBuild, ESC, linesOf, runBin } from "./support/bin.js";
+import { fakeIo } from "./support/fake-io.js";
 
 beforeAll(() => {
   assertFreshBuild();
@@ -21,7 +25,6 @@ const NAMES = ["init", "migrate", "import", "check", "keys", "mcp"];
 describe("the common rules (spec 19)", () => {
   it("has the six commands, and one help text for each", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
-    expect(HELP).toEqual([ROOT_HELP, ...Object.values(COMMANDS).map((c) => c.help)]);
   });
 
   it("prints a Notes block after the exit codes for a help with notes, and none without", () => {
@@ -153,6 +156,11 @@ describe("the common rules (spec 19)", () => {
         expect(new Set(helpFlags(command.help.flags))).toEqual(
           new Set(Object.keys(command.options)),
         );
+        // Each subcommand has its own parser and its own help (plan 11c2).
+        for (const [sub, s] of Object.entries(command.subcommands ?? {}))
+          expect(new Set(helpFlags(s.help.flags)), `${name} ${sub}`).toEqual(
+            new Set(Object.keys(s.options)),
+          );
       });
 
       it("takes no secret as the value of a flag", () => {
@@ -162,4 +170,73 @@ describe("the common rules (spec 19)", () => {
       });
     });
   }
+});
+
+describe("subcommands (plan 11c2)", () => {
+  /** A help text of a test command or a test subcommand, with one flag of its own. */
+  const sub = (command: string, flag: string): HelpText => ({
+    command,
+    page: command.replace(" ", "-"),
+    purpose: `Run ${command}.`,
+    usage: [`authtempo ${command}`],
+    examples: [{ line: `authtempo ${command}`, says: `Run ${command}.` }],
+    flags: [{ flag, says: "A test flag." }, ...COMMON_FLAGS],
+    exits: [{ code: 0, says: "Done." }],
+  });
+  // A table of one test command, built with makeMain: this block adds no real command.
+  const demo: Command = {
+    help: sub("demo", "--alpha"),
+    options: { ...COMMON_OPTIONS, alpha: { type: "boolean" } },
+    subcommands: {
+      run: {
+        help: sub("demo run", "--beta"),
+        options: { ...COMMON_OPTIONS, beta: { type: "boolean" } },
+      },
+    },
+    async run(argv) {
+      if (argv[0] === "run" && argv.includes("--bad")) throw new UsageError("bad flag");
+      return 0;
+    },
+  };
+  const demoMain = makeMain({ demo });
+  const runHelp = demo.subcommands?.run?.help;
+  if (!runHelp) throw new Error("no subcommand run");
+
+  it("prints the help of a subcommand for `demo run --help`, `demo run -h`, and `help demo run`", async () => {
+    for (const argv of [
+      ["demo", "run", "--help"],
+      ["demo", "run", "-h"],
+      ["help", "demo", "run"],
+    ]) {
+      const io = fakeIo();
+      expect(await demoMain(argv, io), argv.join(" ")).toBe(0);
+      expect(io.stdout, argv.join(" ")).toEqual(renderHelp(runHelp));
+      expect(io.stderr).toEqual([]);
+    }
+    const io = fakeIo();
+    expect(await demoMain(["demo", "--help"], io)).toBe(0);
+    expect(io.stdout).toEqual(renderHelp(demo.help));
+  });
+
+  it("prints the usage of the subcommand on a usage error", async () => {
+    const io = fakeIo();
+    expect(await demoMain(["demo", "run", "--bad"], io)).toBe(2);
+    expect(io.stdout).toEqual([]);
+    expect(io.stderr).toEqual([
+      "bad flag",
+      "Usage: authtempo demo run",
+      "Example: authtempo demo run",
+      "Run authtempo demo run --help",
+    ]);
+  });
+
+  it("holds HELP to the table, each subcommand after its command", () => {
+    expect(HELP).toEqual([
+      ROOT_HELP,
+      ...Object.values(COMMANDS).flatMap((c) => [
+        c.help,
+        ...Object.values(c.subcommands ?? {}).map((s) => s.help),
+      ]),
+    ]);
+  });
 });
