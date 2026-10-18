@@ -1,8 +1,8 @@
 /*
  * The one token file of authtempo (brand spec 2026-10-15, sections 4 to 7).
  * The root pages import it in Site.astro, and Starlight reads it through
- * customCss in astro.config.mjs. Every color of the site is a token here:
- * check-tokens fails on a literal color in any other source file, and
+ * customCss in astro.config.mjs. Every color of the site is a token here.
+ * check-tokens fails on a literal color in any other source file.
  * check-contrast recomputes every pair of brand spec 4 from these values.
  */
 

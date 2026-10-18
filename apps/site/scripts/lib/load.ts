@@ -63,18 +63,21 @@ export function readSiteFile(path: string): string | null {
 }
 
 /**
- * The site's own sources that can hold a color or a motion: each .astro,
- * .css, and .svg file under src/ outside the content, and the sprite.
- * tokens.css is not one: it is the one place for a literal color.
+ * The site's own sources that can hold a color or a motion. They are each
+ * .astro, .css, .svg, .ts, .js, .mjs, and .json file under src/ outside the
+ * content, astro.config.mjs, and the sprite. tokens.css is not one: it is
+ * the one place for a literal color. public/favicon.svg is not one: it is
+ * a standalone file, and check-tokens reads it by its own input.
  */
 export function siteSources(): { path: string; text: string }[] {
   const files = walk(
     `${SITE}src/`,
     (p) =>
-      /\.(astro|css|svg)$/.test(p) &&
+      /\.(astro|css|svg|ts|js|mjs|json)$/.test(p) &&
       !p.startsWith(`${SITE}src/content/`) &&
       p !== `${SITE}src/styles/tokens.css`,
   );
+  files.push(`${SITE}astro.config.mjs`);
   if (existsSync(`${SITE}public/icons.svg`)) files.push(`${SITE}public/icons.svg`);
   return files.map((p) => ({ path: p.slice(SITE.length), text: readFileSync(p, "utf8") }));
 }

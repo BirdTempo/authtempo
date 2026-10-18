@@ -14,6 +14,37 @@ export const COLOR_TOKENS = [
 ] as const;
 export type ColorToken = (typeof COLOR_TOKENS)[number];
 
+/**
+ * The Starlight color names that tokens.css maps to a token (brand spec 11;
+ * style/props.css of Starlight 0.42.6, read 2026-10-15). The list is typed
+ * here and never read from the map, so check-tokens holds the map both ways.
+ */
+export const STARLIGHT_COLORS = [
+  "--sl-color-white",
+  "--sl-color-gray-1",
+  "--sl-color-gray-2",
+  "--sl-color-gray-3",
+  "--sl-color-gray-4",
+  "--sl-color-gray-5",
+  "--sl-color-gray-6",
+  "--sl-color-gray-7",
+  "--sl-color-black",
+  "--sl-color-text",
+  "--sl-color-text-accent",
+  "--sl-color-text-invert",
+  "--sl-color-accent-low",
+  "--sl-color-accent",
+  "--sl-color-accent-high",
+  "--sl-color-bg",
+  "--sl-color-bg-nav",
+  "--sl-color-bg-sidebar",
+  "--sl-color-bg-inline-code",
+  "--sl-color-bg-accent",
+  "--sl-color-hairline-light",
+  "--sl-color-hairline",
+  "--sl-color-hairline-shade",
+] as const;
+
 export const DARK_MEDIA = "@media (prefers-color-scheme: dark)";
 export const DARK_MEDIA_SELECTOR = ':root:not([data-theme="light"])';
 export const DARK_ATTR_SELECTOR = ':root[data-theme="dark"]';

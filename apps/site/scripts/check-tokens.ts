@@ -1,6 +1,6 @@
 import { cssRules, declarations } from "./lib/css.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
-import { COLOR_TOKENS, parseTokens } from "./lib/tokens.ts";
+import { COLOR_TOKENS, parseTokens, STARLIGHT_COLORS } from "./lib/tokens.ts";
 
 /** A source file of the site, by its path from apps/site/. */
 export interface SourceFile {
@@ -9,13 +9,29 @@ export interface SourceFile {
 }
 
 const COLORS: readonly string[] = COLOR_TOKENS;
-/** A literal color: a hex value or a color function. */
-const LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/i;
-const NO_OUTLINE = /outline\s*:\s*(?:none|0)\b/;
+const STARLIGHT: readonly string[] = STARLIGHT_COLORS;
+/** A hex color of 3, 4, 6, or 8 digits, with no word character, dot, or dash after it. */
+const HEX = "#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![\\w.-])";
+const COLOR_FUNCTION = "\\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\\(";
+/** A literal color in a declaration value: a hex color or a color function. */
+const COLOR_VALUE = new RegExp(`${HEX}|${COLOR_FUNCTION}`, "i");
+/**
+ * A literal color in a source text. A hex color sits in a value, a string,
+ * a function argument, or a list. So a colon, a quote, a bracket, a comma,
+ * or an equal sign precedes it. An id selector such as `#bad { }` has no
+ * such prefix and a brace after it, so it is not a color.
+ */
+const LITERAL = new RegExp(`(?<=[:"'\`(,=]\\s*)${HEX}(?!\\s*\\{)|${COLOR_FUNCTION}`, "i");
+/** A declaration that removes the focus ring, in any of its forms (brand spec 14). */
+const NO_OUTLINE = /outline(?:-style|-width|-color)?\s*:\s*(?:none|0(?:px)?|transparent)\b/;
 
-/** The text that can hold a color: a whole .css file; the style blocks and color attributes of an .astro or .svg file. */
+/**
+ * The text that can hold a color. It is the whole text of a .css, .ts, .js,
+ * .mjs, or .json file. It is the style blocks and the color attributes of
+ * an .astro or .svg file.
+ */
 function colorText(f: SourceFile): string {
-  if (f.path.endsWith(".css")) return f.text;
+  if (/\.(css|ts|js|mjs|json)$/.test(f.path)) return f.text;
   const styles = [...f.text.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1] ?? "");
   const attrs = [...f.text.matchAll(/\s(?:fill|stroke|stop-color|color|style)="([^"]*)"/g)].map(
     (m) => m[1] ?? "",
@@ -24,11 +40,13 @@ function colorText(f: SourceFile): string {
 }
 
 /**
- * Brand spec 4 and 14: one token file for every color, the same color tokens
- * in the light and the two dark blocks, every Starlight color mapped to a
- * token, a focus ring that no source removes, no literal color outside
- * tokens.css, and no use of a token that tokens.css does not define. The
- * favicon is a standalone file: its colors must be the ink and the accent.
+ * Brand spec 4 and 14. One token file holds every color. The light block
+ * and the two dark blocks define the same color tokens. Each Starlight color
+ * of the list maps to a token, and the map sets no other Starlight color.
+ * The focus ring is in tokens.css, and no source removes it. No source
+ * outside tokens.css holds a literal color. No source uses a token that
+ * tokens.css does not define. The favicon is a standalone file: its colors
+ * must be the ink and the accent.
  */
 export function checkTokens(input: {
   css: string;
@@ -62,8 +80,19 @@ export function checkTokens(input: {
     for (const name of block.keys())
       if (!COLORS.includes(name))
         r.failures.push(`the ${label} block sets ${name}, which is not a color token`);
+  // The light block also holds the scheme-free tokens of later tasks, so the
+  // rule reads the value's shape: a color value names a color token.
+  for (const [name, value] of t.light)
+    if (name.startsWith("--at-") && !COLORS.includes(name) && COLOR_VALUE.test(value))
+      r.failures.push(`the light block sets ${name} to ${value}, which is not a color token`);
+  for (const name of STARLIGHT_COLORS)
+    if (!t.light.has(name)) r.failures.push(`tokens.css does not set ${name}`);
   for (const [name, value] of t.light) {
     if (!name.startsWith("--sl-color-")) continue;
+    if (!STARLIGHT.includes(name)) {
+      r.failures.push(`tokens.css sets ${name}, which is not a Starlight color of the map`);
+      continue;
+    }
     const ref = /^var\((--at-[a-z-]+)\)$/.exec(value)?.[1];
     if (ref === undefined || !COLORS.includes(ref))
       r.failures.push(`${name} is ${value}; a Starlight color maps to var(<a color token>)`);
