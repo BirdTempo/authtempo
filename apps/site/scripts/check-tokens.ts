@@ -28,13 +28,14 @@ const NO_OUTLINE = /outline(?:-style|-width|-color)?\s*:\s*(?:none|0(?:px)?|tran
 /**
  * The text that can hold a color. It is the whole text of a .css, .ts, .js,
  * .mjs, or .json file. It is the style blocks and the color attributes of
- * an .astro or .svg file.
+ * an .astro or .svg file. An attribute keeps its name and its quotes, so
+ * LITERAL reads the quote before a hex color such as fill="#ff0000".
  */
 function colorText(f: SourceFile): string {
   if (/\.(css|ts|js|mjs|json)$/.test(f.path)) return f.text;
   const styles = [...f.text.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1] ?? "");
-  const attrs = [...f.text.matchAll(/\s(?:fill|stroke|stop-color|color|style)="([^"]*)"/g)].map(
-    (m) => m[1] ?? "",
+  const attrs = [...f.text.matchAll(/\s(?:fill|stroke|stop-color|color|style)="[^"]*"/g)].map((m) =>
+    m[0].trim(),
   );
   return [...styles, ...attrs].join("\n");
 }

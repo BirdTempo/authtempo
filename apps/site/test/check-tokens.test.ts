@@ -135,6 +135,33 @@ describe("checkTokens", () => {
     );
   });
 
+  it("fails a hex color in an attribute of an SVG", () => {
+    const source = {
+      path: "src/assets/mark.svg",
+      text: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-hidden="true"><rect fill="#ff0000" width="8" height="32"/></svg>',
+    };
+    expect(checkTokens({ css, sources: [source], favicon: null }).failures).toEqual([
+      "src/assets/mark.svg holds the literal color #ff0000; use a token of tokens.css",
+    ]);
+  });
+
+  it("fails a hex color in an attribute of a page body", () => {
+    const source = {
+      path: "src/pages/index.astro",
+      text: '<body><svg viewBox="0 0 32 32" aria-hidden="true"><rect fill="#ff0000" width="8" height="32"/></svg></body>',
+    };
+    expect(checkTokens({ css, sources: [source], favicon: null }).failures).toEqual([
+      "src/pages/index.astro holds the literal color #ff0000; use a token of tokens.css",
+    ]);
+  });
+
+  it("fails a hex color in a style attribute", () => {
+    const source = { path: "src/pages/index.astro", text: '<p style="color: #ff0000">x</p>' };
+    expect(checkTokens({ css, sources: [source], favicon: null }).failures).toEqual([
+      "src/pages/index.astro holds the literal color #ff0000; use a token of tokens.css",
+    ]);
+  });
+
   it("passes an id selector that looks like a hex color", () => {
     const source = {
       path: "src/pages/index.astro",
