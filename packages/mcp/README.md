@@ -55,7 +55,7 @@ Each skill folder in `skills/` is one prompt, with the text of its `SKILL.md`. T
 | `integrate-workers-d1`, `integrate-workers-postgres`, `integrate-node`, `integrate-bun` | `dir`, optional: the folder of the new app. |
 | `protect-mcp-server` | `dir`, optional. It is the prompt of the stack `mcp-server`. |
 | `integrate-binding` | `binding`, required: one of the bindings that the docs index lists. |
-| `migrate-supabase`, `migrate-clerk`, `migrate-auth0`, `migrate-firebase`, `migrate-authjs`, `migrate-cognito`, `migrate-better-auth` | None. |
+| `migrate-supabase`, `migrate-clerk`, `migrate-auth0`, `migrate-firebase`, `migrate-authjs`, `migrate-cognito`, `migrate-workos`, `migrate-better-auth` | None. |
 | `check-deployment` | `base_url`, optional: the origin of the deployed API. |
 
 An argument that the prompt does not name is the JSON-RPC error -32602. The tests hold the prompts to the stacks, the bindings, and the import providers, both ways.

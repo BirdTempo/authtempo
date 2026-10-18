@@ -37,6 +37,12 @@ export interface CliIo {
 export const PROVIDERS = Object.keys(PROVIDER_FILES) as SourceName[];
 const ROLES: readonly ImportRole[] = ["owner", "admin", "member"];
 
+/** Neither exports a hash (spec 17.3 and 23 item 3), so --formats may be left out. */
+export const NO_HASH_PROVIDERS: ReadonlySet<SourceName> = new Set<SourceName>([
+  "cognito",
+  "workos",
+]);
+
 /**
  * The provider that each provider-specific flag belongs to. A flag given to
  * another provider is a usage error, because its reader would ignore it in
@@ -58,6 +64,8 @@ export interface ImportValues {
   csv?: string | undefined;
   hashes?: string | undefined;
   organizations?: string | undefined;
+  /** `authtempo import workos` only: the organization memberships file (plan 11f). */
+  memberships?: string | undefined;
   tables?: string | undefined;
   "firebase-signer-key"?: string | undefined;
   "firebase-salt-separator"?: string | undefined;
@@ -125,11 +133,23 @@ export function parseImportValues(
   for (const [flag, owner] of Object.entries(FLAG_PROVIDER))
     if (values[flag as keyof typeof FLAG_PROVIDER] !== undefined && owner !== provider)
       throw new Error(`${provider} takes no --${display(flag)}`);
+  // No hash moves from WorkOS (owner decision 1 of 2026-10-14), so the marker
+  // of --legacy-verify would mark no user. Before the file read, as each flag check.
+  if (provider === "workos" && values["legacy-verify"])
+    throw new Error("workos takes no --legacy-verify: WorkOS exports no password hash");
   // Every flag check runs before the first file read: an export can be gigabytes,
   // and a typo in a later flag must not cost that read (review M-1).
   const spec = PROVIDER_FILES[provider];
   const paths: [keyof ImportBundle["files"], string][] = [];
-  for (const name of ["users", "identities", "csv", "hashes", "organizations", "tables"] as const) {
+  for (const name of [
+    "users",
+    "identities",
+    "csv",
+    "hashes",
+    "organizations",
+    "memberships",
+    "tables",
+  ] as const) {
     const path = values[name];
     if (path === undefined) continue;
     if (!spec.needs.includes(name) && !spec.may.includes(name))
@@ -145,8 +165,8 @@ export function parseImportValues(
   // Spec 17.1: a hash imports only in a format the app's seam verifies. Only
   // the operator knows the seam's list, so the flag has no default: a default
   // of all five imports a format the seam refuses, and those users cannot
-  // sign in, with exit 0. Cognito exports no hash, so it may leave it out.
-  if (values.formats === undefined && provider !== "cognito")
+  // sign in, with exit 0. A provider that exports no hash may leave it out.
+  if (values.formats === undefined && !NO_HASH_PROVIDERS.has(provider))
     throw new Error(
       `${provider} needs --formats: the formats list of the app's createLegacyPasswordHash, or none`,
     );
@@ -253,6 +273,16 @@ export async function runParsed(parsed: ParsedImport, io: CliIo): Promise<Import
   }
   if (bundle.provider === "auth0" && bundle.files.hashes === undefined)
     io.out("auth0: no --hashes file; no password is imported");
+  // Warnings go to stderr (spec 19), so a script that reads stdout reads the report only.
+  if (bundle.provider === "workos") {
+    io.err(
+      "workos: WorkOS exports no password hash; each user signs in by a magic link or sets a new password",
+    );
+    if (bundle.files.identities === undefined)
+      io.err("workos: no --identities file; no social identity is imported");
+    if (bundle.files.organizations === undefined)
+      io.err("workos: no --organizations file; no organization is imported");
+  }
   const d1 = values["d1-bundle"];
   if (d1) {
     io.writeFile(d1, JSON.stringify({ bundle, options: parsed.options }));

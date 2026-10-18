@@ -1,6 +1,6 @@
 ---
 title: authtempo import
-description: Move the users of Supabase, Clerk, Auth0, Firebase, Auth.js, or Cognito into authtempo with one command.
+description: Move the users of Supabase, Clerk, Auth0, Firebase, Auth.js, Cognito, or WorkOS into authtempo with one command.
 type: reference
 sources:
   - packages/cli/README.md "import"
@@ -14,7 +14,7 @@ sidebar:
 
 **For:** an operator who moves the users of another system into authtempo.
 
-**What it does:** `authtempo import` reads an export, and writes only the rows that a core flow writes. This page lists its flags and the old flags of `authtempo-import`.
+**What it does:** `authtempo import` reads an export of Supabase, Clerk, Auth0, Firebase, Auth.js, Cognito, or WorkOS. It writes only the rows that a core flow writes. This page lists its flags and the old flags of `authtempo-import`.
 
 ## Before you start
 
@@ -37,7 +37,7 @@ authtempo import clerk --csv users.csv --users users.json --formats none --targe
 
 | Flag | What it does |
 | --- | --- |
-| `<provider>` | `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, or `cognito`. Exactly one. |
+| `<provider>` | `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, `cognito`, or `workos`. Exactly one. |
 | `--target postgres` | Writes into Postgres. It has no default. |
 | `--target d1-bundle` | Writes a bundle for the import Worker on D1 to the file of `--out`, and stops. |
 | `--target memory` | Plans against an empty store, with `--dry-run` only. It reads no connection string. |
@@ -45,11 +45,12 @@ authtempo import clerk --csv users.csv --users users.json --formats none --targe
 | `--tables compat` | Postgres: the Better Auth 1.7 tables of the compatibility package. |
 | `--url-env <NAME>`, `--url-file <path>` | The connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--out <file>` | `d1-bundle`: the file of the bundle, with mode 0600. |
-| `--users <file>` | The users file of `supabase`, `clerk`, `auth0`, `firebase`, or `cognito`. |
-| `--identities <file>` | `supabase`: the identities CSV. |
+| `--users <file>` | The users file of `supabase`, `clerk`, `auth0`, `firebase`, `cognito`, or `workos`. |
+| `--identities <file>` | `supabase`: the identities CSV. `workos`: the JSON object of the identities of each user. |
 | `--csv <file>` | `clerk`: the CSV export with the password hashes. |
 | `--hashes <file>` | `auth0`: the NDJSON file of the password hashes. |
-| `--organizations <file>` | `clerk` and `auth0`: the organizations file. |
+| `--organizations <file>` | `clerk`, `auth0`, and `workos`: the organizations file. |
+| `--memberships <file>` | `workos`: the JSON array of the organization memberships. Give it with `--organizations`. |
 | `--authjs-tables <file>` | `authjs`: the JSON file of the `User`, `Account`, and `Authenticator` rows. |
 | `--firebase-signer-key-env <NAME>`, `--firebase-signer-key-file <path>` | `supabase`: the Firebase signer key, from a variable or a file. |
 | `--firebase-salt-separator <value>` | `supabase`: the Firebase salt separator. Give it with the signer key. |
@@ -57,7 +58,7 @@ authtempo import clerk --csv users.csv --users users.json --formats none --targe
 | `--firebase-mem-cost <n>` | `firebase`: the `mem_cost` of the hash config of the project. |
 | `--password-column <name>` | `authjs`: the password column of the `User` table. |
 | `--same-passkey-rp-id` | `authjs`: the new app keeps the relying party id, so the passkeys move. |
-| `--formats <list>` | Required, except on `cognito`. The `formats` list of the app's `createLegacyPasswordHash`, or `none`. |
+| `--formats <list>` | Required, except on `cognito` and `workos`. The `formats` list of the app's `createLegacyPasswordHash`, or `none`. |
 | `--legacy-verify` | The app sets `password.legacyVerify`. A `cognito` import needs it. |
 | `--on-email-taken skip` | Skips a record whose address is taken. This is the default. |
 | `--on-email-taken fail` | Stops the run at the first taken address. |

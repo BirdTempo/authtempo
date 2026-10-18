@@ -78,6 +78,7 @@ export const IMPORT_PROVIDERS = [
   "firebase",
   "authjs",
   "cognito",
+  "workos",
 ] as const;
 
 /**
@@ -145,16 +146,18 @@ export const IMPORT_FILE_INPUTS = [
   "csv",
   "hashes",
   "organizations",
+  "memberships",
   "authjs_tables",
 ] as const;
 
 /** What each file input holds, for its description. */
 const FILE_WHAT: Record<(typeof IMPORT_FILE_INPUTS)[number], string> = {
   users: "the users export",
-  identities: "the identities export (Supabase)",
+  identities: "the identities export (Supabase, WorkOS)",
   csv: "the CSV export (Clerk)",
   hashes: "the password hash export (Auth0)",
-  organizations: "the organizations export (Clerk, Auth0)",
+  organizations: "the organizations export (Clerk, Auth0, WorkOS)",
+  memberships: "the organization memberships export (WorkOS)",
   authjs_tables: "the Auth.js tables export",
 };
 
@@ -191,7 +194,7 @@ const IMPORT_INPUT = {
     .max(200)
     .optional()
     .describe(
-      "The formats list of the app's createLegacyPasswordHash, comma-separated, or none. Each provider but Cognito needs it.",
+      "The formats list of the app's createLegacyPasswordHash, comma-separated, or none. Each provider but Cognito and WorkOS needs it.",
     ),
   role_map: z
     .string()

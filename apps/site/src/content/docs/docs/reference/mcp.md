@@ -139,14 +139,15 @@ Plans an import and writes nothing. It reads the export files inside the server 
 
 | Input | Type | Rules | What it is |
 | --- | --- | --- | --- |
-| `provider` | string | required; one of `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, `cognito` | The provider of the export. |
+| `provider` | string | required; one of `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, `cognito`, `workos` | The provider of the export. |
 | `users` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the users export. |
-| `identities` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the identities export (Supabase). |
+| `identities` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the identities export (Supabase, WorkOS). |
 | `csv` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the CSV export (Clerk). |
 | `hashes` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the password hash export (Auth0). |
-| `organizations` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the organizations export (Clerk, Auth0). |
+| `organizations` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the organizations export (Clerk, Auth0, WorkOS). |
+| `memberships` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the organization memberships export (WorkOS). |
 | `authjs_tables` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the Auth.js tables export. |
-| `formats` | string | optional; 1 to 200 characters | The formats list of the app's createLegacyPasswordHash, comma-separated, or none. Each provider but Cognito needs it. |
+| `formats` | string | optional; 1 to 200 characters | The formats list of the app's createLegacyPasswordHash, comma-separated, or none. Each provider but Cognito and WorkOS needs it. |
 | `role_map` | string | optional; 1 to 1000 characters | Source role to owner, admin, or member, such as org:admin=admin,basic=member. |
 | `reserved_slugs` | string | optional; 1 to 1000 characters | The reserved organization slugs, comma-separated. |
 | `platform_slug` | string | optional; 1 to 100 characters | The slug of the platform organization. |
@@ -177,14 +178,15 @@ Writes the users of a held plan into the database that the server's environment 
 
 | Input | Type | Rules | What it is |
 | --- | --- | --- | --- |
-| `provider` | string | required; one of `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, `cognito` | The provider of the export. |
+| `provider` | string | required; one of `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, `cognito`, `workos` | The provider of the export. |
 | `users` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the users export. |
-| `identities` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the identities export (Supabase). |
+| `identities` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the identities export (Supabase, WorkOS). |
 | `csv` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the CSV export (Clerk). |
 | `hashes` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the password hash export (Auth0). |
-| `organizations` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the organizations export (Clerk, Auth0). |
+| `organizations` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the organizations export (Clerk, Auth0, WorkOS). |
+| `memberships` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the organization memberships export (WorkOS). |
 | `authjs_tables` | string | optional; 1 to 200 characters; matches `^[^-]` | A relative path inside the server root: the Auth.js tables export. |
-| `formats` | string | optional; 1 to 200 characters | The formats list of the app's createLegacyPasswordHash, comma-separated, or none. Each provider but Cognito needs it. |
+| `formats` | string | optional; 1 to 200 characters | The formats list of the app's createLegacyPasswordHash, comma-separated, or none. Each provider but Cognito and WorkOS needs it. |
 | `role_map` | string | optional; 1 to 1000 characters | Source role to owner, admin, or member, such as org:admin=admin,basic=member. |
 | `reserved_slugs` | string | optional; 1 to 1000 characters | The reserved organization slugs, comma-separated. |
 | `platform_slug` | string | optional; 1 to 100 characters | The slug of the platform organization. |
@@ -276,6 +278,7 @@ Each prompt is one skill of the skill pack, with the same text. The local and th
 | `migrate-better-auth` | Move an app from Better Auth to authtempo | none |
 | `migrate-clerk` | Move the users of Clerk to authtempo | none |
 | `migrate-cognito` | Move the users of Amazon Cognito to authtempo | none |
+| `migrate-workos` | Move the users of WorkOS to authtempo | none |
 | `migrate-firebase` | Move the users of Firebase Auth to authtempo | none |
 | `migrate-supabase` | Move the users of Supabase Auth to authtempo | none |
 | `protect-mcp-server` | Protect an MCP server with authtempo | `dir` (optional) |

@@ -5,6 +5,7 @@ import { IMPORT_JSON_KEYS } from "@authtempo/cli";
 import { PROVIDERS } from "@authtempo/cli/program";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { freshDatabase } from "../../cli/test/support/pg.js";
+import { FIXTURE_EXPORTS } from "../../import/src/testing.js";
 import * as READERS from "../../import/test/fixtures/readers.js";
 import { SUPABASE_FIXTURE_CREATED } from "../../import/test/fixtures/supabase-counts.js";
 import { localTools, pinnedIo } from "../src/local-tools.js";
@@ -38,9 +39,17 @@ interface ProviderExport {
 
 const fixture = (name: string) => readFileSync(join(FIXTURES, name), "utf8");
 
+/** One file of the WorkOS fixture export of @authtempo/import/testing (plan 11f). */
+function workosFile(name: "users" | "identities" | "memberships" | "organizations"): string {
+  const text = FIXTURE_EXPORTS.workos.bundle.files[name];
+  if (text === undefined) throw new Error(`the WorkOS fixture has no ${name} file`);
+  return text;
+}
+
 /**
- * The export of each provider: the Supabase CSV pair, and for the others
- * the main export of each reader test (packages/import/test/fixtures/readers.ts).
+ * The export of each provider: the Supabase CSV pair, the WorkOS fixture
+ * export, and for the others the main export of each reader test
+ * (packages/import/test/fixtures/readers.ts).
  */
 const EXPORTS: Record<string, ProviderExport> = {
   supabase: {
@@ -76,6 +85,16 @@ const EXPORTS: Record<string, ProviderExport> = {
   },
   cognito: {
     files: { users: { name: "users.json", text: READERS.COGNITO_USERS } },
+    input: {},
+  },
+  // No hash moves from WorkOS, so the plan takes no formats.
+  workos: {
+    files: {
+      users: { name: "users.json", text: workosFile("users") },
+      identities: { name: "identities.json", text: workosFile("identities") },
+      memberships: { name: "memberships.json", text: workosFile("memberships") },
+      organizations: { name: "organizations.json", text: workosFile("organizations") },
+    },
     input: {},
   },
 };

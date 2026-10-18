@@ -4,7 +4,7 @@ export const IMPORT_HELP: HelpText = {
   command: "import",
   page: "import",
   purpose:
-    "Move the users of Supabase, Clerk, Auth0, Firebase, Auth.js, or Cognito into authtempo. A second run writes nothing.",
+    "Move the users of Supabase, Clerk, Auth0, Firebase, Auth.js, Cognito, or WorkOS into authtempo. A second run writes nothing.",
   usage: [
     "authtempo import <provider> [the files of the provider] --formats <list> --target <postgres|d1-bundle|memory> [flags]",
   ],
@@ -20,6 +20,10 @@ export const IMPORT_HELP: HelpText = {
     {
       line: "authtempo import clerk --csv users.csv --users users.json --formats none --target memory --dry-run",
       says: "Plan an import from Clerk with no database.",
+    },
+    {
+      line: "authtempo import workos --users users.json --identities identities.json --memberships memberships.json --organizations organizations.json --target postgres --dry-run",
+      says: "Print the report of a WorkOS import, and write nothing.",
     },
   ],
   flags: [
@@ -45,12 +49,19 @@ export const IMPORT_HELP: HelpText = {
     },
     {
       flag: "--users <file>",
-      says: "The users file of supabase, clerk, auth0, firebase, or cognito.",
+      says: "The users file of supabase, clerk, auth0, firebase, cognito, or workos.",
     },
-    { flag: "--identities <file>", says: "supabase: the identities CSV." },
+    {
+      flag: "--identities <file>",
+      says: "supabase: the identities CSV. workos: the JSON object of the identities of each user.",
+    },
     { flag: "--csv <file>", says: "clerk: the CSV export with the password hashes." },
     { flag: "--hashes <file>", says: "auth0: the NDJSON file of the password hashes." },
-    { flag: "--organizations <file>", says: "clerk and auth0: the organizations file." },
+    { flag: "--organizations <file>", says: "clerk, auth0, and workos: the organizations file." },
+    {
+      flag: "--memberships <file>",
+      says: "workos: the JSON array of the organization memberships. Give it with --organizations.",
+    },
     {
       flag: "--authjs-tables <file>",
       says: "authjs: the JSON file of the User, Account, and Authenticator rows.",
@@ -82,7 +93,7 @@ export const IMPORT_HELP: HelpText = {
     },
     {
       flag: "--formats <list>",
-      says: "The formats list of the app's createLegacyPasswordHash, with commas, or none. Only cognito may leave it out.",
+      says: "The formats list of the app's createLegacyPasswordHash, with commas, or none. Only cognito and workos may leave it out.",
     },
     {
       flag: "--legacy-verify",
