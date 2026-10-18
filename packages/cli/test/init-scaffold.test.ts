@@ -40,7 +40,12 @@ function script(dir: string, name: string) {
     cwd: dir,
     encoding: "utf8",
     timeout: 600_000,
-    env: { ...process.env, PATH: `${join(dir, "node_modules", ".bin")}:${process.env.PATH ?? ""}` },
+    env: {
+      ...process.env,
+      PATH: `${join(dir, "node_modules", ".bin")}:${process.env.PATH ?? ""}`,
+      // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
+      WRANGLER_HIDE_BANNER: "true",
+    },
   });
 }
 

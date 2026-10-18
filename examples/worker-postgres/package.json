@@ -7,7 +7,7 @@
     "dev": "wrangler dev",
     "migrate": "node scripts/migrate.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
-    "test": "vitest run && wrangler deploy --dry-run"
+    "test": "vitest run && WRANGLER_HIDE_BANNER=true WRANGLER_SEND_METRICS=false wrangler deploy --dry-run"
   },
   "dependencies": {
     "@authtempo/adapter-postgres": "workspace:*",
