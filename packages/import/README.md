@@ -3,8 +3,8 @@
 Moves users, social identities (Google, Apple, GitHub, and LinkedIn), password hashes, Auth.js
 passkeys, organizations, and members into authtempo (spec 17). No session
 moves from any source, and no MFA secret moves (spec 17.5). Passkeys move only
-from Auth.js. A Clerk, Supabase, Auth0, Firebase, or Cognito passkey needs a
-new enrolment.
+from Auth.js. A Clerk, Supabase, Auth0, Firebase, Cognito, or WorkOS passkey
+needs a new enrolment.
 
 ```bash
 authtempo import <provider> [files] --formats <the seam's list> --target postgres --url-env DATABASE_URL --dry-run
@@ -32,7 +32,8 @@ used. Firebase and Cognito have no built-in LinkedIn provider.
 of the app's `createLegacyPasswordHash`, comma-separated, or `none` for an app
 with no legacy seam. A hash in another format is refused and listed. The user
 is then imported with no password, and a reset or a magic link signs that user
-in. Only `cognito` may leave out `--formats`, because Cognito exports no hash.
+in. Only `cognito` and `workos` may leave out `--formats`, because neither
+exports a hash.
 
 WARNING: Do not give a format that the app's seam does not verify. The import
 then writes those hashes, reports no refusal, and exits 0. Each of those users
@@ -291,6 +292,44 @@ Cognito exports no hash, so this command needs no `--formats`.
   `duplicate_row`. An `Enabled` value other than `true` skips the user.
 - After the import, sign in once with a known user, and once with a user whose
   Cognito address has upper-case letters (runbook).
+
+### WorkOS
+
+The guide's script writes four JSON files with `curl` and `$WORKOS_API_KEY`
+from the shell: see [the WorkOS guide](/docs/migrate/workos/). It saves the
+`data` array of every list page, and one object of user id to the identities
+array of each user. The CLI reads the files and makes no network call.
+
+```bash
+authtempo import workos --users users.json --identities identities.json --memberships memberships.json --organizations organizations.json --target postgres --url-env DATABASE_URL --dry-run
+```
+
+No password moves: WorkOS exports no hash. Each user signs in by a magic link
+or sets a new password. This command needs no `--formats`.
+
+- Only `--users` is required. `--memberships` and `--organizations` go
+  together; one alone stops the run. A top-level value of another shape stops
+  the run.
+- `id` is the source id. `email`, `email_verified` (true only for the JSON
+  value `true`), `name` (else `first_name` and `last_name` joined by one
+  space), `profile_picture_url`, and `created_at` move. `external_id`,
+  `metadata`, `locale`, and `last_sign_in_at` do not.
+- An identity of `type` `OAuth` maps `GoogleOAuth` to Google, `AppleOAuth` to
+  Apple, and `GitHubOAuth` to GitHub, with `idp_id` as the subject.
+  `LinkedInOAuth` is listed as `identity:linkedin_legacy`, because no field
+  marks the OIDC `sub`. Every other provider and every other type is dropped
+  and listed.
+- Only a membership with `status` `active` imports. Any other status is
+  listed on its user as `member:<status>`. The role is `role.slug`: `admin`
+  becomes admin and `member` becomes member, and the first admin becomes
+  owner. A membership of an organization that the organizations file lacks
+  is listed as `member:unknown_organization`.
+- A user with no `id` is listed as `no_source_id`, a conflict. An `id` on two
+  users is `duplicate_row`. The reader has no ban signal.
+- Unverified (runbook item 13): the provider values other than
+  `MicrosoftOAuth`, `idp_id` as the provider's own subject, the `statuses`
+  query form, the `list_metadata.after` cursor of each list, and the rate
+  limit.
 
 ## Targets
 

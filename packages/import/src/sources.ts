@@ -5,6 +5,7 @@ import { clerkSource } from "./readers/clerk.js";
 import { cognitoSource } from "./readers/cognito.js";
 import { firebaseSource } from "./readers/firebase.js";
 import { supabaseSource } from "./readers/supabase.js";
+import { workosSource } from "./readers/workos.js";
 import type { ImportOptions, ImportRecord, ImportRole, Source, SourceName } from "./types.js";
 
 /**
@@ -15,7 +16,10 @@ import type { ImportOptions, ImportRecord, ImportRole, Source, SourceName } from
 export interface ImportBundle {
   provider: SourceName;
   files: Partial<
-    Record<"users" | "identities" | "csv" | "hashes" | "organizations" | "tables", string>
+    Record<
+      "users" | "identities" | "csv" | "hashes" | "organizations" | "tables" | "memberships",
+      string
+    >
   >;
   firebase?: { signerKey: string; saltSeparator: string; rounds?: number; memCost?: number };
   passwordColumn?: string;
@@ -31,9 +35,19 @@ export const PROVIDER_FILES: Record<SourceName, { needs: string[]; may: string[]
   firebase: { needs: ["users"], may: [] },
   authjs: { needs: ["tables"], may: [] },
   cognito: { needs: ["users"], may: [] },
+  // WorkOS: the files of the guide's curl script (owner decision 4 of 2026-10-14). The memberships and organizations go together; the reader refuses one alone.
+  workos: { needs: ["users"], may: ["identities", "memberships", "organizations"] },
 };
 
-const FILE_NAMES = ["users", "identities", "csv", "hashes", "organizations", "tables"] as const;
+const FILE_NAMES = [
+  "users",
+  "identities",
+  "csv",
+  "hashes",
+  "organizations",
+  "tables",
+  "memberships",
+] as const;
 type FileName = (typeof FILE_NAMES)[number];
 
 function invalid(field: string, problem: string): never {
@@ -235,6 +249,13 @@ export function sourceOf(b: ImportBundle): Source {
       });
     case "cognito":
       return cognitoSource({ users: need(b, "users") });
+    case "workos":
+      return workosSource({
+        users: need(b, "users"),
+        ...(b.files.identities !== undefined ? { identities: b.files.identities } : {}),
+        ...(b.files.memberships !== undefined ? { memberships: b.files.memberships } : {}),
+        ...(b.files.organizations !== undefined ? { organizations: b.files.organizations } : {}),
+      });
     default:
       // A bundle from a file can name any text; bundleOf refuses it first.
       throw new Error(

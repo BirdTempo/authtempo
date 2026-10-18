@@ -1,6 +1,13 @@
 import type { LegacyFormat } from "@authtempo/legacy-hashes";
 
-export type SourceName = "supabase" | "clerk" | "auth0" | "firebase" | "authjs" | "cognito";
+export type SourceName =
+  | "supabase"
+  | "clerk"
+  | "auth0"
+  | "firebase"
+  | "authjs"
+  | "cognito"
+  | "workos";
 
 /** A role core's default ranks name (spec 8.6). The importer maps every source role onto one. */
 export type ImportRole = "owner" | "admin" | "member";
