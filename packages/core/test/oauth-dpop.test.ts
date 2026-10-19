@@ -112,15 +112,20 @@ async function publicCode(h: Handle, params: Record<string, string> = {}, client
   return { ...s, clientId: id, verifier: p.verifier, code: url.searchParams.get("code"), url };
 }
 
-/** A code exchange with `proof` as the DPoP header, or with none. */
+/** A code exchange with `proof` as the DPoP header, or with none, at `url` (default TOKEN_URL). */
 async function exchangeWith(
   h: Handle,
   c: { code: string | null; clientId: string; verifier: string },
   proof: string | null,
   headers: Record<string, string> = {},
+  url = TOKEN_URL,
 ) {
   const req = exchange(c.code ?? "", c.clientId, c.verifier);
-  const out = new Request(req, { headers: new Headers(req.headers) });
+  const out = new Request(url, {
+    method: "POST",
+    headers: new Headers(req.headers),
+    body: await req.text(),
+  });
   for (const [k, v] of Object.entries(headers)) out.headers.set(k, v);
   if (proof !== null) out.headers.set("dpop", proof);
   return answer(await h.auth.handle(out));
@@ -352,6 +357,35 @@ describe("the DPoP scheme (RFC 9449 section 7)", () => {
     if (r.status !== 200) throw new Error(`the exchange answered ${r.status}`);
     return { ...c, token: String(r.body.access_token), refresh: String(r.body.refresh_token) };
   }
+
+  it("checks htu at the token route and userinfo against the public URL, not the request URL (ruling 31)", async () => {
+    const h = instance();
+    const key = await dpopKey();
+    const c = await publicCode(h);
+    // P1: a forged Host header gives another origin, and the proof names that origin.
+    const evil = "https://evil.example/auth/oauth/token";
+    const forged = await key.proof({ htu: evil, iat: nowS(h) });
+    expect(await exchangeWith(h, c, forged, {}, evil)).toEqual(BAD_PROOF);
+    // P2: a TLS proxy gives core an http URL, and the proof names the public https URL.
+    const behind = "http://api.example.com/auth/oauth/token";
+    const ok = await exchangeWith(h, c, await tokenProof(h, key), {}, behind);
+    expect(ok).toMatchObject({ status: 200, body: { token_type: "DPoP" } });
+    const token = String(ok.body.access_token);
+    const userinfo = async (url: string, htu: string) =>
+      (
+        await h.auth.handle(
+          new Request(url, {
+            headers: {
+              authorization: `DPoP ${token}`,
+              dpop: await resourceProof(h, key, token, htu),
+            },
+          }),
+        )
+      ).status;
+    const evilInfo = "https://evil.example/auth/oauth/userinfo";
+    expect(await userinfo(evilInfo, evilInfo)).toBe(401);
+    expect(await userinfo("http://api.example.com/auth/oauth/userinfo", USERINFO_URL)).toBe(200);
+  });
 
   it("answers the caller for Authorization DPoP with a proof, and null for a bound token as a Bearer (RFC 9449 7.2)", async () => {
     const h = instance();

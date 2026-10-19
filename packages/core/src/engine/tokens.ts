@@ -258,7 +258,9 @@ async function dpopCaller(
   const r = await resolveAccessToken(config, token);
   if (!r || r.access.dpopJkt === null) return null;
   if (r.access.resource !== requestResource(config, request)) return null;
-  if (!(await resourceProofHolds(config, request, token, r.access.dpopJkt))) return null;
+  // The resource check above pins the origin, so the request URL is the target here.
+  const bound = { token, jkt: r.access.dpopJkt };
+  if (!(await resourceProofHolds(config, request, request.url, bound))) return null;
   return accessCaller(r);
 }
 

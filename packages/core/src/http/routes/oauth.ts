@@ -19,7 +19,13 @@ import {
   registeredClient,
 } from "../../engine/oauth-clients.js";
 import { CREDENTIALS_GRANT, credentialsGrant } from "../../engine/oauth-credentials.js";
-import { dpopAlgs, readDpopToken, resourceProofHolds, tokenDpop } from "../../engine/oauth-dpop.js";
+import {
+  dpopAlgs,
+  readDpopToken,
+  resourceProofHolds,
+  routeUrl,
+  tokenDpop,
+} from "../../engine/oauth-dpop.js";
 import { listGrants, revokeGrant } from "../../engine/oauth-grants.js";
 import { introspect, introspectLimited } from "../../engine/oauth-introspect.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
@@ -305,7 +311,10 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       const r = await resolveAccessToken(config, dpopToken);
       if (r?.kind !== "oauth" || r.access.dpopJkt === null)
         return userinfoRefused(401, "DPoP", "invalid_token");
-      if (!(await resourceProofHolds(config, request, dpopToken, r.access.dpopJkt)))
+      // The public URL of this route, not the request URL (ruling 31 of plan 12e).
+      const url = routeUrl(config, "/oauth/userinfo");
+      const bound = { token: dpopToken, jkt: r.access.dpopJkt };
+      if (!(await resourceProofHolds(config, request, url, bound)))
         return userinfoRefused(401, "DPoP", "invalid_dpop_proof");
       const claims = userinfoClaims(r.access);
       return claims ? json(claims) : userinfoRefused(403, "DPoP", "insufficient_scope");

@@ -3,6 +3,7 @@ import { checkDpopProof, type DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
 import type { OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { issuerOf } from "./jwt.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { replayHash } from "./verification.js";
 
@@ -50,10 +51,14 @@ export async function spendDpopJti(
   }
 }
 
-/** The proof of `request` checked and spent, with `token` and its key for a resource request. */
+/**
+ * The proof of `request` for `url`, checked and spent. A resource request
+ * passes its `token` and the key of the token.
+ */
 async function proofOf(
   config: ResolvedConfig,
   request: Request,
+  url: string,
   bound?: { token: string; jkt: string },
 ): Promise<DpopBinding | null> {
   const proof = request.headers.get("dpop");
@@ -62,7 +67,7 @@ async function proofOf(
   const r = await checkDpopProof({
     proof,
     method: request.method,
-    url: request.url,
+    url,
     ...(bound ? { accessToken: bound.token, jkt: bound.jkt } : {}),
     algs,
     windowSeconds,
@@ -71,6 +76,15 @@ async function proofOf(
   if (!r.ok || !(await spendDpopJti(config, r.jkt, r.jti, r.iat))) return null;
   return { jkt: r.jkt };
 }
+
+/**
+ * The public URL of a route of core: the issuer and the route path. A Node
+ * binding builds the request URL from the Host header, and a TLS proxy
+ * changes its scheme. So core's own routes check `htu` against this URL
+ * (ruling 31 of plan 12e).
+ */
+export const routeUrl = (config: ResolvedConfig, path: string): string =>
+  `${issuerOf(config)}${path}`;
 
 /**
  * The DPoP binding of a token request (RFC 9449 section 5): null with no
@@ -84,21 +98,21 @@ export async function tokenDpop(
 ): Promise<OAuthResult<DpopBinding | null>> {
   if (!request.headers.has("dpop"))
     return client.dpopBound ? oauthFail("invalid_dpop_proof") : oauthOk(null);
-  const binding = await proofOf(config, request);
+  const binding = await proofOf(config, request, routeUrl(config, "/oauth/token"));
   return binding ? oauthOk(binding) : oauthFail("invalid_dpop_proof");
 }
 
 /**
- * True when the request holds one valid proof of key `jkt` for `token`
- * (RFC 9449 section 7.1). The proof's `jti` is spent, so a replay fails.
+ * True when the request holds one valid proof of key `jkt` for `token` and
+ * `url` (RFC 9449 section 7.1). The proof's `jti` is spent, so a replay fails.
  */
 export async function resourceProofHolds(
   config: ResolvedConfig,
   request: Request,
-  token: string,
-  jkt: string,
+  url: string,
+  bound: { token: string; jkt: string },
 ): Promise<boolean> {
-  return (await proofOf(config, request, { token, jkt })) !== null;
+  return (await proofOf(config, request, url, bound)) !== null;
 }
 
 /** The value of `Authorization: DPoP <token>`, or null (RFC 9449 section 7.1). */
