@@ -13,7 +13,8 @@ import { vendorHosts } from "../src/data/vendors.ts";
 const html = walk(DIST, (p) => p.endsWith(".html")).map((p) => p.slice(DIST.length));
 const docsPages = html.filter((p) => p.startsWith("docs/"));
 
-const tokens = parseTokens(readFileSync(`${SITE}src/styles/tokens.css`, "utf8"));
+const tokenCss = readFileSync(`${SITE}src/styles/tokens.css`, "utf8");
+const tokens = parseTokens(tokenCss);
 const toggle = readFileSync(`${SITE}src/scripts/theme-toggle.js`, "utf8");
 const page = (path: string) => readFileSync(`${DIST}${path}`, "utf8");
 const read = (href: string) => {
@@ -186,6 +187,9 @@ describe("the home page (brand spec 9)", () => {
     expect(rail.match(/<span\b/g)?.length).toBe(5);
     expect(rail.match(/rail-accent/g)?.length).toBe(1);
     expect(home).toMatch(/ class="hero-mark at-beat[ "]/);
+    // The beat rules select .at-beat .at-mark rect, so the svg of the mark must keep its class.
+    const mark = home.split(/ class="hero-mark at-beat[ "]/)[1]?.split("</span>")[0] ?? "";
+    expect(tags(mark, "svg").some((t) => / class="(?:[^"]* )?at-mark[ "]/.test(t))).toBe(true);
   });
 
   it("lists one feature row per RouteFeature member, in route order", () => {
@@ -199,6 +203,18 @@ describe("the home page (brand spec 9)", () => {
     }
     expect(home.match(/ class="at-icon (?:astro-\w+ )?at-draw"/g)?.length).toBe(
       featureOrder(ROUTES).length,
+    );
+  });
+
+  it("delays the draw of each feature row after the first by 0.1 s more", () => {
+    const rules = [
+      ...tokenCss.matchAll(
+        /\.at-draw-list > :nth-child\((\d+)\) \.at-draw \{\s*animation-delay: ([\d.]+)s;\s*\}/g,
+      ),
+    ].map((m) => [Number(m[1]), Number(m[2])]);
+    const rows = featureOrder(ROUTES).length;
+    expect(rules).toEqual(
+      Array.from({ length: rows - 1 }, (_, i) => [i + 2, Number(((i + 1) / 10).toFixed(1))]),
     );
   });
 
