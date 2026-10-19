@@ -348,11 +348,13 @@ describe("the limits of the demo", () => {
         redirect: "manual",
         headers: { "cf-connecting-ip": ip },
       });
-      expect({ i, status: head.status, cookie: head.headers.get("set-cookie") }).toEqual({
+      // 204 with no body: a link checker reads it as a live page (re-review R7).
+      expect({
         i,
-        status: 409,
-        cookie: null,
-      });
+        status: head.status,
+        cookie: head.headers.get("set-cookie"),
+        body: await head.text(),
+      }).toEqual({ i, status: 204, cookie: null, body: "" });
     }
     expect((await gateIps()).filter((x) => x === ip)).toEqual([]);
     expect((await firstVisit(ip)).status).toBe(303);
