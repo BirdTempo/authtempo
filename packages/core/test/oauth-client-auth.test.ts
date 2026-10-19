@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { basicCredentials } from "../src/engine/oauth-client-auth.js";
+import { secretMatches } from "../src/engine/oauth-client-secret.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import { BASE_URL } from "./helpers.js";
 import {
@@ -17,6 +18,12 @@ import {
   signedIn,
   tokenPost,
 } from "./oauth-helpers.js";
+
+// The real compare, wrapped, so a test sees whether the auth reached it.
+vi.mock("../src/engine/oauth-client-secret.js", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../src/engine/oauth-client-secret.js")>();
+  return { ...m, secretMatches: vi.fn(m.secretMatches) };
+});
 
 const CLIENT_ORIGIN = new URL(REDIRECT).origin;
 /** A failed client auth after an Authorization header. */
@@ -243,6 +250,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
       withBasic(codeBody(await codeOf(h, s.cookie, form.clientId)), form.clientId, form.secret),
     );
     expect(inHeader.status).toBe(200);
+    expect(vi.mocked(secretMatches)).toHaveBeenCalled();
     // A public client and a private_key_jwt client take no secret by either method.
     const open = await registered(h);
     const made = await h.auth.api.oauth?.clients.create({
@@ -253,6 +261,8 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     if (!made?.ok) throw new Error("the create failed");
     const keyed = made.value.client.id;
     const secret = `cs_${"A".repeat(43)}`;
+    // The method rule refuses these first: the secret compare never runs for them.
+    vi.mocked(secretMatches).mockClear();
     for (const clientId of [open, keyed]) {
       const c = await codeOf(h, s.cookie, clientId);
       for (const [req, refused] of [
@@ -264,6 +274,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
           answer: refused,
         });
     }
+    expect(vi.mocked(secretMatches)).not.toHaveBeenCalled();
   });
 
   it("counts an empty client_secret as omitted (RFC 6749 2.3.1)", async () => {
