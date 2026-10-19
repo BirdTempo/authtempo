@@ -1,5 +1,5 @@
 import { REWRAP_LIMIT, SECRET_VERSION_MAX } from "@authtempo/core/secrets";
-import { DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
+import { CALLS_PER_HOUR, DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
 import { OPERATOR_FLAGS, operatorFlagsWithYes } from "./keys.js";
 import { COMMON_FLAGS, type HelpText } from "./types.js";
 
@@ -80,7 +80,7 @@ export const SECRET_REWRAP_HELP: HelpText = {
   command: "secret rewrap",
   page: "secret-rewrap",
   purpose:
-    "Reseal the rows of the old app secret versions under the current version. The command calls the deployment until no row moves.",
+    "Reseal the rows of the old app secret versions under the current version. The command calls the deployment until no old row remains, the pass ends, or the run reaches --max-calls.",
   usage: [
     "authtempo secret rewrap <base url> [--limit <n>] [--max-calls <n>] [--token-env <NAME> | --token-file <path>] --yes",
   ],
@@ -112,7 +112,7 @@ export const SECRET_REWRAP_HELP: HelpText = {
     },
     {
       code: 2,
-      says: "A usage error, or a stop: no answer, the route is off, the deployment refused the secret, or the limit of calls.",
+      says: `A usage error, or a stop: no answer, the route is off, the deployment refused the secret, or the limit of ${CALLS_PER_HOUR} calls an hour.`,
     },
   ],
 };

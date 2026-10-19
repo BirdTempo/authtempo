@@ -25,7 +25,8 @@ sidebar:
 
 - Access to the secret store of the API. On Workers that is `pnpm --filter my-app exec wrangler secret put`. On Node and Bun it is the process environment. [Deploy](/docs/operations/deploy/) sets the first value.
 - Core at schema version 9 on every instance. An instance at version 8 writes each value under version 1. [Upgrades](/docs/operations/upgrades/) gives the steps.
-- A way to run code in the API's process, for the [in-process API](/docs/reference/api/#the-in-process-api). Or, for the commands of [the CLI](/docs/reference/cli/), `operator: { secretHash }` in the config and the operator secret in `AUTHTEMPO_OPERATOR_SECRET`.
+- A way to run code in the API's process, for the [in-process API](/docs/reference/api/#the-in-process-api). Or the operator routes on, for the commands of [the CLI](/docs/reference/cli/).
+- For the operator routes: run `authtempo secret --operator --out operator-secret.txt`. It writes the operator secret to the file and prints its `secretHash`. [authtempo secret](/docs/reference/cli/secret/) gives the flags. Set `operator: { secretHash }` in the config, and deploy before step 5. Give the command the secret in `AUTHTEMPO_OPERATOR_SECRET`. Without the routes, steps 5 and 9 stop with exit 2 and "the operator route is off".
 
 ## What the secret protects
 
@@ -44,6 +45,8 @@ Each such row names its version in the column `secret_version`. A read opens a v
 The provider secrets, such as `social.google.clientSecret` and `social.apple.privateKey`, are separate settings. [Key rotation](/docs/operations/key-rotation/) tells how to change them.
 
 ## Steps
+
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. Else the shell answers "command not found" at step 1.
 
 1. Make a new secret of 32 random bytes with `authtempo secret --version 2 --out secret-v2.txt`. The command writes a new file that only its owner can read, and replaces no file.
 
@@ -65,10 +68,14 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 4. Put version 2 first in `secrets`, then version 1. Deploy to every instance at 100 percent. Each new value is now written under version 2.
 5. Run `authtempo secret rewrap <base url> --yes`. The command ends when no row of an old version remains, when a pass ends, or at `--max-calls`. It exits 1 when a row did not open or rows remain. [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/) gives the flags.
 
+   The operator routes allow 120 calls an hour from one IP address. A run makes at most 100 calls of 100 rows, so it moves 10 000 rows. On a large deployment, add `--limit 1000`: each call then moves up to 1000 rows, and one run moves 100 000.
+
    In the API's process, the same pass is `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true.
 
 6. In the API's process, pass the `next` of each answer as `after` to the next call. Stop when `next` is `null`. That is one pass. The command does this step itself.
 7. Run a new pass from step 5, with no `after`, while the last answer has `more: true`. Wait 15 minutes first when `skipped` or `failed` was above 0. With the command, run it again while it exits 1.
+
+   A second run in the same hour can reach the limit of 120 calls. It then stops with exit 2 and a line that names the limit. Wait one hour, then run it again.
 
    After 3 passes with the same `failed` count, stop and read the second warning below. Such a row fails on every pass.
 

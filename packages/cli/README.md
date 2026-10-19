@@ -33,8 +33,9 @@ for `--help` only. After the first release, install the CLI with
 ## The rules
 
 - Exit codes: 0 done; 1 a person must look (a failed check, an import
-  record that needs a person); 2 a usage error, a malformed input, or a
-  stop. A stop prints one `stopped:` line on stderr.
+  record or a secret row that needs a person, an info part with no
+  answer); 2 a usage error, a malformed input, or a stop. A stop prints one
+  `stopped:` line on stderr.
 - stdout holds the result. Usage errors, warnings, the `stopped:` line,
   and each progress line that names what the command reads or connects to
   go to stderr. A result line may name a file or the base URL, such as
@@ -181,6 +182,20 @@ secret. The old key verifies for 24 hours and signs nothing. With no
 terminal the command needs `--yes`; it reads the key set before and after,
 and warns when a cache still serves the old set.
 
+## mcp
+
+```bash
+authtempo mcp --claude-code
+```
+
+It adds the authtempo MCP server to the config of an editor in this
+project. The editor flags are `--claude-code`, `--cursor`, `--codex`,
+`--opencode`, and `--vscode`. `--manual` prints each entry and writes no
+file. The file holds the name of the variable of `--url-env`, never its
+value. The command stops, and writes nothing, on another authtempo entry or
+on a file that does not parse. `--remote` uses the remote docs server.
+`-n`, `--dry-run` prints the new text and writes nothing.
+
 ## secret
 
 ```bash
@@ -219,11 +234,11 @@ authtempo info https://api.example.com --target postgres
 ```
 
 It prints a support report in four parts: the tools, the project, the
-database (with `--target`), and the deployment (with a base URL, through
-`GET <basePath>/operator/info`). The report holds no secret value and no
-host name. The deployment answers config key paths, never a value, and the
-command drops each path that is not a plain name. Exit 1 names a part that
-gave no answer.
+database (with `--target`), and the deployment. The deployment part needs
+a base URL, and reads `GET <basePath>/operator/info`. The report holds no
+secret value and no host name. The deployment answers config key paths,
+never a value, and the command drops each path that is not a plain name.
+Exit 1 names a part that gave no answer.
 
 ## Tests
 

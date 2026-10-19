@@ -3,6 +3,7 @@ import { textOf } from "./checks.js";
 import { Stop, UsageError } from "./errors.js";
 import { fetchWithin, HostError } from "./net.js";
 import type { Ctx } from "./output.js";
+import { CALLS_PER_HOUR } from "./rewrap-limits.js";
 import { DEFAULT_TOKEN_ENV, readSecret } from "./secrets.js";
 
 /** One call of an operator route of core (plan 11c2). */
@@ -73,14 +74,6 @@ export class OperatorStop extends Stop {
     this.why = why;
   }
 }
-
-/**
- * The limit of the three routes of plan 11c2: 120 calls per IP per hour. A
- * copy of `OPERATOR_SECRETS_PER_IP.max` in core's `src/http/routes/operator.ts`
- * (read 2026-10-19), because no entry of core that the CLI reads exports it.
- * The number is in a stop text only, as the 5 of `keys rotate` is.
- */
-const CALLS_PER_HOUR = 120;
 
 /**
  * The shared call of the operator routes of plan 11c2: `secret status`,

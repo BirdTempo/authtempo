@@ -1,6 +1,6 @@
 ---
 title: authtempo secret rewrap
-description: Reseal the rows of the old app secret versions under the current version through the operator route, call after call.
+description: Reseal the rows of the old app secret versions under the current version through the operator route, until no old row remains, the pass ends, or the run reaches --max-calls.
 type: reference
 sources:
   - packages/cli/src/commands/secret.ts
@@ -45,7 +45,7 @@ authtempo secret rewrap https://api.example.com --yes
 | --- | --- |
 | 0 | No row of a configured old version remains. |
 | 1 | A row did not open, or rows remain after the last call. A person must look. |
-| 2 | A usage error, or a stop: no answer, the route is off, the deployment refused the secret, or the limit of calls. |
+| 2 | A usage error, or a stop: no answer, the route is off, the deployment refused the secret, or the limit of 120 calls an hour. |
 
 Each call prints one line on stderr: `call <i>: resealed <n>, failed <n>, skipped <n>, more <true|false>`. The sums go to stdout at the end: `calls <n>, resealed <n>, failed <n>, skipped <n>, more <true|false>`.
 

@@ -35,7 +35,10 @@ export const ROOT_HELP: HelpText = {
   ],
   exits: [
     { code: 0, says: "Done. Every check passed, or the command made the change that it named." },
-    { code: 1, says: "A person must look: a check failed, or an import record needs a person." },
+    {
+      code: 1,
+      says: "A person must look: a check failed, a record or a row needs a person, or a part of the report gave no answer.",
+    },
     {
       code: 2,
       says: "A usage error, a malformed input, or a stop. A stop prints one stopped line.",

@@ -34,7 +34,8 @@ import { assertFreshIndex, siteIndex } from "./support/index.js";
 const EXEMPT_COMMANDS: Readonly<Record<string, string>> = {
   keys: "it needs the operator secret and changes a live deployment",
   mcp: "it is the installer of this server",
-  secret: "it makes a secret, and a secret must not enter the context of an agent",
+  secret:
+    "it makes a secret, which must not enter the context of an agent; its subcommands need the operator secret, and rewrap changes a live deployment",
   info: "a support report for a person; a later row can add a tool",
 };
 
