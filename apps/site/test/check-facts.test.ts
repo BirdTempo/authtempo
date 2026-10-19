@@ -168,6 +168,13 @@ describe("checkFacts (plan 11b Task 6)", () => {
       x.id === "b5" ? { ...x, source: "https://better-auth.com.evil.example/docs/x" } : x,
     );
     expect(run({ rows: other }).failures).toHaveLength(1);
+    // A docs page outside the sitemap list fails, as a typo of a real page (re-review R6).
+    const typo = rows().map((x) =>
+      x.id === "b5" ? { ...x, source: "https://better-auth.com/docs/plugins/magic-links" } : x,
+    );
+    expect(run({ rows: typo }).failures).toEqual([
+      'cmp-b5 names "https://better-auth.com/docs/plugins/magic-links", which is not public and not a tracked file',
+    ]);
     expect(run({ tracked: new Set() }).failures).toContain("read 0 tracked");
   });
 

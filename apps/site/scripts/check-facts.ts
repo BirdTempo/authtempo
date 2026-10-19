@@ -1,4 +1,6 @@
+import { BETTER_AUTH_DOCS } from "../src/data/better-auth-docs.ts";
 import {
+  BETTER_AUTH_DOCS_BASE,
   type CompareRow,
   type CompareSide,
   FACT_MAX_DAYS,
@@ -39,16 +41,24 @@ const ENTITIES: Readonly<Record<string, string>> = {
 /**
  * A public source of a fact (final review m4 of plan 11b). It is a page of
  * the Better Auth docs, its repository or releases on GitHub, or a file of
- * its npm package at a version. Any other part of a source must be a tracked file of this
- * repository, so a reader can open each source.
+ * its npm package at a version. A docs page must be a path of
+ * BETTER_AUTH_DOCS, the sitemap that the wave read (re-review R6). Any other
+ * part of a source must be a tracked file of this repository.
  */
 const PUBLIC_SOURCE = new RegExp(
   [
-    String.raw`^https://better-auth\.com/docs/[a-z0-9/-]+$`,
     String.raw`^https://github\.com/better-auth/better-auth(?:/[A-Za-z0-9._/-]+)?$`,
     String.raw`^npm better-auth@\d+\.\d+\.\d+, dist/[A-Za-z0-9._/-]+$`,
   ].join("|"),
 );
+const DOCS = new Set<string>(BETTER_AUTH_DOCS);
+
+/** True for a public source part: a docs page of the list, or a GitHub or npm source. */
+function isPublic(part: string): boolean {
+  if (part.startsWith(BETTER_AUTH_DOCS_BASE))
+    return DOCS.has(part.slice(BETTER_AUTH_DOCS_BASE.length));
+  return PUBLIC_SOURCE.test(part);
+}
 
 /** The text of an HTML part: each tag is a space, and each currency entity is its sign. */
 export function textOfHtml(html: string): string {
@@ -120,7 +130,7 @@ export function checkFacts(input: {
     if (f.source.trim() === "") r.failures.push(`${f.id} names no source`);
     else
       for (const part of f.source.split("; "))
-        if (!PUBLIC_SOURCE.test(part) && !tracked.has(part) && !("error" in input.tracked))
+        if (!isPublic(part) && !tracked.has(part) && !("error" in input.tracked))
           r.failures.push(`${f.id} names "${part}", which is not public and not a tracked file`);
     const day = dayOf(f.read);
     if (day === null) {

@@ -159,7 +159,7 @@ The owner runs or decides each item below. No task of plan 11b runs one. This is
 
 - `/compare/` states each Better Auth fact with its public source and the read date 2026-10-14. `FACT_MAX_DAYS` is 180.
 - From 2027-04-13, check-facts fails every site test run. Each later lane that runs the whole repository then fails, whatever its change. Before that day, read each source of `SOURCES` in `apps/site/src/data/compare.ts` again, and change each read date.
-- The plan 11b fix wave read the docs sitemap of better-auth.com on 2026-10-20. It did not read the GitHub and npm sources again, because it made no request to those hosts. Check them at the refresh.
+- The plan 11b fix wave read the docs sitemap of better-auth.com on 2026-10-20. Its docs paths are `BETTER_AUTH_DOCS` in `apps/site/src/data/better-auth-docs.ts`, and check-facts fails a docs source outside it. Replace the list at the refresh. It did not read the GitHub and npm sources again, because it made no request to those hosts. Check them at the refresh.
 - check-claims allows three phrases that name Better Auth outside `/compare/`, for the compatibility package (`ALLOWED_PHRASES` in `apps/site/scripts/check-claims.ts`). Ruling 42 asked for a rule on any competitor name. The owner may change the list.
 
 ### Each release
