@@ -215,11 +215,11 @@ async function writeRefresh(
 }
 
 /**
- * True while the grant still stands: at a refresh, the spent row exists;
- * at the code exchange, the code row (its id is the family id) and the
- * consent of the user for the client exist. At a device poll, the device
- * row and the consent exist. A grant revoke deletes the consent, the
- * refresh rows, and the device rows (`revokeGrant`); a reset or a password
+ * True while the grant still stands. At a refresh, the spent row exists.
+ * At the code exchange, the code row (its id is the family id) exists, and
+ * the consent of the user for the client exists. At a device poll, the
+ * device row and the consent exist. A grant revoke deletes the consent, the
+ * refresh rows, and the device rows (`revokeGrant`). A reset or a password
  * change deletes the refresh rows, the code rows, and the device rows
  * (`deleteOAuthTokens`).
  */

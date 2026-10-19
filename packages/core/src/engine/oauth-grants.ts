@@ -67,13 +67,15 @@ export async function listGrants(
 }
 
 /**
- * Ends the grant of one client: deletes the consent, every refresh token,
- * and every decided device row of the user and the client. `{ ok: true }` also when nothing existed, so
- * the answer tells no caller which clients a user has. A code exchange
+ * Ends the grant of one client. It deletes the consent of the user for the
+ * client. It also deletes every refresh token and every decided device row
+ * of the user and the client. The answer is `{ ok: true }` also when nothing
+ * existed, so it tells no caller which clients a user has. A code exchange
  * re-checks the consent (`exchangeCode`). A refresh in flight can still
  * see its spent row until the commit on Postgres, and write a new row. So
  * after the commit, each family of the user and the client ends with its
- * mark (`endFamilies`, ruling 43 of plan 12e). Then no refresh token outlives the call.
+ * mark (`endFamilies`, ruling 43 of plan 12e). Then no refresh token
+ * outlives the call.
  */
 export async function revokeGrant(
   config: ResolvedConfig,
@@ -108,13 +110,14 @@ export async function revokeGrant(
 }
 
 /**
- * Deletes every refresh token, every `oauth-code` row, and every decided
- * device row of the user, in the caller's transaction: a reset of either
- * kind and a password change (spec 8.7, the plan 9g final fix wave). A code
- * from before the reset then gives nothing. A device code that the user
- * approved is such a code (plan 12e). The consents stay, so the next authorize asks for no
- * consent, but each client must send the person through the authorize step again.
- * The caller ends `ends` after its commit (`endFamilies`, ruling 43 of plan 12e).
+ * Deletes the user's OAuth access in the caller's transaction. A reset of
+ * either kind and a password change call it (spec 8.7, the plan 9g final
+ * fix wave). It deletes every refresh token, every `oauth-code` row, and
+ * every decided device row of the user. A code from before the reset then
+ * gives nothing. A device code that the user approved is such a code (plan
+ * 12e). The consents stay, so the next authorize asks for no consent. But
+ * each client must send the person through the authorize step again. The
+ * caller ends `ends` after its commit (`endFamilies`, ruling 43 of plan 12e).
  */
 export async function deleteOAuthTokens(
   tx: StorageAdapter,

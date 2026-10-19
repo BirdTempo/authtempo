@@ -2,7 +2,7 @@ import { escapeHtml } from "./confirm-page.js";
 
 /**
  * The line that the consent state of the device page shows (RFC 8628
- * section 5.4): a person who types a code that a stranger sent approves
+ * section 5.4). A person who types a code that a stranger sent approves
  * the stranger's device.
  */
 export const DEVICE_WARNING = "Approve only a device that is in front of you.";
