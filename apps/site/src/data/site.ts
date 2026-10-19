@@ -1,6 +1,7 @@
 /**
  * The site's own names (brand spec 9 and 13). They are the origin of the
- * canonical and Open Graph URLs, the docs path, and the two header labels.
+ * canonical and Open Graph URLs, the docs path, and the labels of the header
+ * and the footer.
  * One source for each: no template holds a copy.
  */
 export const SITE = {
@@ -23,9 +24,9 @@ export const NAV_LINKS: readonly { label: string; href: string }[] = [
 ];
 
 /**
- * The links of the root footer (plan 11b): the feed, the changelog, and the
- * security page. Each one joins with its page, as a header link does. Plan
- * 11b Task 5 adds the security page, and Task 7 adds the feed.
+ * The links of the root footer (plan 11b, ruling 7 of its lane): Features,
+ * Pricing, Security, the changelog, and the feed. Each one joins with its
+ * page, as a header link does. Tasks 4, 5, and 7 of plan 11b add the others.
  */
 export const FOOTER_LINKS: readonly { label: string; href: string }[] = [
   { label: "Changelog", href: `${SITE.docs}changelog/` },
