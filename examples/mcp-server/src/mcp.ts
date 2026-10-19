@@ -28,7 +28,7 @@ export function mcpHandler(request: Request, caller: McpCaller): Promise<Respons
         "whoami",
         {
           title: "Who am I",
-          description: "Answers the user id, the client id, and the scopes of the caller.",
+          description: "Answers the token subject, the client id, and the scopes of the caller.",
         },
         async () => {
           const answer = whoami(caller);

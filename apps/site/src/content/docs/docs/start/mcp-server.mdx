@@ -49,7 +49,7 @@ authtempo init my-mcp --stack mcp-server
 
 <Code code={worker} lang="ts" title="examples/my-mcp/src/index.ts" />
 
-6. Read `src/mcp.ts`. It is the one file that imports the MCP SDK. The tool `whoami` answers the user id, the client id, and the scopes of the caller.
+6. Read `src/mcp.ts`. It is the one file that imports the MCP SDK. The tool `whoami` answers the token subject, the client id, and the scopes of the caller. The token subject is the user id for a public client, and the pairwise subject for a pairwise client.
 
 <Code code={mcp} lang="ts" title="examples/my-mcp/src/mcp.ts" />
 
@@ -68,7 +68,7 @@ The test signs a person in by magic link. Then it sends the authorize request wi
 12. Sign in by magic link on the page that the client opens, and allow the client on the consent page.
 13. Ask the client to call the tool `whoami`.
 
-The test passes. After step 13 the tool answers your user id, the URL of the client metadata document as the client id, and `mcp:tools`.
+The test passes. After step 13 the tool answers the token subject, the URL of the client metadata document as the client id, and `mcp:tools`. The client of this guide is public, so the token subject is your user id.
 
 ## Next
 
