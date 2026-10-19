@@ -62,6 +62,22 @@ function expectHero(path: string, title: string): void {
     words: true,
   });
 }
+/** The plan names that a cost row can state. A new plan name joins this list. */
+const PLANS = ["Workers Free", "Workers Paid"];
+/**
+ * The terms of a cost text: each plan name, and each number with the first
+ * plan name after it. A fact and its quote must hold the same terms (ruling 21).
+ */
+function costTerms(text: string): string[] {
+  const tokens = [...text.matchAll(new RegExp(`\\b\\d+\\b|${PLANS.join("|")}`, "g"))].map(
+    (m) => m[0],
+  );
+  const plans = [...new Set(tokens.filter((t) => PLANS.includes(t)))];
+  const pairs = tokens.flatMap((t, i) =>
+    /^\d+$/.test(t) ? [`${t} ${tokens.slice(i + 1).find((u) => PLANS.includes(u)) ?? "-"}`] : [],
+  );
+  return [...plans, ...pairs].sort();
+}
 /** True when one tag of the kind has each attribute with its value, in any order. */
 const hasTag = (html: string, tag: string, attrs: Record<string, string>) =>
   tags(html, tag).some((t) => Object.entries(attrs).every(([k, v]) => t.includes(` ${k}="${v}"`)));
@@ -342,6 +358,24 @@ describe("the pricing and security pages (plan 11b)", () => {
         held: true,
       });
     }
+  });
+
+  it("reads the terms of a cost text: each plan, and each number with its plan", () => {
+    expect(costTerms("D1 goes back 7 days on Workers Free, and 30 days on Workers Paid.")).toEqual([
+      "30 Workers Paid",
+      "7 Workers Free",
+      "Workers Free",
+      "Workers Paid",
+    ]);
+    expect(costTerms("It holds 5 rows.")).toEqual(["5 -"]);
+  });
+
+  it("holds each number and plan name of each shown fact to its quote, both ways", () => {
+    for (const cost of PLATFORM_COSTS)
+      expect({ fact: cost.fact, terms: costTerms(cost.fact) }).toEqual({
+        fact: cost.fact,
+        terms: costTerms(cost.quote),
+      });
   });
 
   it("links the threat model, the limits, and the cookies under Read more, by their titles", () => {

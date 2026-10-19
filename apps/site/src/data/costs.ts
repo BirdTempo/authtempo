@@ -3,9 +3,10 @@ import { HOME } from "./home.ts";
 /**
  * One cost of the platform under authtempo, for /pricing/ (plan 11b Task 5).
  * `fact` is the line of the page. `page` and `anchor` name the docs section
- * that states it. `quote` is the sentence of that section that holds the
- * fact. A layout test fails a row with no source (ruling 19 of the plan 11b
- * lane).
+ * that states it. `quote` is the text of that section that holds the fact.
+ * A layout test fails a row with no source (ruling 19 of the plan 11b lane).
+ * Another test holds each number and each plan name of `fact` to `quote`,
+ * both ways (ruling 21).
  */
 export interface PlatformCost {
   fact: string;
@@ -17,10 +18,12 @@ export interface PlatformCost {
 /** The costs of the platform, each from a docs page. The page states no price of its own. */
 export const PLATFORM_COSTS: readonly PlatformCost[] = [
   {
-    fact: "Password sign-in at the default cost needs Workers Paid.",
+    fact: "Password sign-in needs Workers Paid: one PBKDF2 hash needs more CPU than Workers Free gives one request.",
     page: "/docs/operations/deploy/",
     anchor: "the-workers-settings",
-    quote: "One PBKDF2 hash needs more CPU than Workers Free gives one request.",
+    // The row "The plan" of the table, as its three cells read.
+    quote:
+      "The plan Workers Paid with password One PBKDF2 hash needs more CPU than Workers Free gives one request.",
   },
   {
     fact: "D1 Time Travel goes back 7 days on Workers Free, and 30 days on Workers Paid.",
