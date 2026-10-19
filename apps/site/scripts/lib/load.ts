@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import type { FontManifest } from "../check-fonts.ts";
 import { walk } from "./files.ts";
 import type { Page } from "./markdown.ts";
 import { DIST, DOCS, REPO, SITE } from "./paths.ts";
@@ -80,4 +81,28 @@ export function siteSources(): { path: string; text: string }[] {
   files.push(`${SITE}astro.config.mjs`);
   if (existsSync(`${SITE}public/icons.svg`)) files.push(`${SITE}public/icons.svg`);
   return files.map((p) => ({ path: p.slice(SITE.length), text: readFileSync(p, "utf8") }));
+}
+
+/** Each file of public/fonts/ by its name, as bytes. Empty when the folder does not exist. */
+export function fontDir(): Map<string, Uint8Array> {
+  const dir = `${SITE}public/fonts/`;
+  if (!existsSync(dir)) return new Map();
+  return new Map(readdirSync(dir).map((n) => [n, new Uint8Array(readFileSync(`${dir}${n}`))]));
+}
+
+/** src/assets/fonts.json, or an empty record, so the check fails on "read 0 fonts". */
+export function readFontManifest(): FontManifest {
+  const text = readSiteFile("src/assets/fonts.json");
+  if (text === null) return { tool: "", read: "", unicodes: "", sources: [], files: [] };
+  return JSON.parse(text) as FontManifest;
+}
+
+/** Each .css and .html file of dist, by its path relative to dist. */
+export function distTexts(): Map<string, string> {
+  return new Map(
+    walk(DIST, (p) => /\.(css|html)$/.test(p)).map((p) => [
+      p.slice(DIST.length),
+      readFileSync(p, "utf8"),
+    ]),
+  );
 }

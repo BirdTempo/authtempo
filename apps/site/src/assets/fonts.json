@@ -1,0 +1,72 @@
+{
+  "tool": "pyftsubset of fonttools 4.55.3 with brotli 1.2.0, Python 3.9.6, macOS",
+  "read": "2026-10-15",
+  "unicodes": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+  "sources": [
+    {
+      "family": "Inter",
+      "version": "4.1",
+      "archive": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+      "archiveSha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+      "license": "Inter-LICENSE.txt",
+      "licenseSha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+      "layoutFeatures": "kern,liga,calt,tnum"
+    },
+    {
+      "family": "JetBrains Mono",
+      "version": "2.304",
+      "archive": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
+      "archiveSha256": "6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf",
+      "license": "JetBrainsMono-OFL.txt",
+      "licenseSha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad",
+      "layoutFeatures": "kern"
+    }
+  ],
+  "files": [
+    {
+      "file": "inter-400.woff2",
+      "family": "Inter",
+      "weight": 400,
+      "from": "extras/ttf/Inter-Regular.ttf",
+      "fromSha256": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82",
+      "bytes": 24116,
+      "sha256": "e2fa4e0e516400b64e23b8862d6997ea97cf9776c336caa35dfd8c421490d290"
+    },
+    {
+      "file": "inter-500.woff2",
+      "family": "Inter",
+      "weight": 500,
+      "from": "extras/ttf/Inter-Medium.ttf",
+      "fromSha256": "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872",
+      "bytes": 24556,
+      "sha256": "7fc59f0695b08e5e383df5d8caa82090de9ba11b36625251ccafbc55fed893d9"
+    },
+    {
+      "file": "inter-600.woff2",
+      "family": "Inter",
+      "weight": 600,
+      "from": "extras/ttf/Inter-SemiBold.ttf",
+      "fromSha256": "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3",
+      "bytes": 24724,
+      "sha256": "8a0701a4268fb5b26373ae205de9a552415adfafcd1e02bfffc1cb1372f0ab4d"
+    },
+    {
+      "file": "jetbrains-mono-400.woff2",
+      "family": "JetBrains Mono",
+      "weight": 400,
+      "from": "fonts/ttf/JetBrainsMono-Regular.ttf",
+      "fromSha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f",
+      "bytes": 14628,
+      "sha256": "e0ad9802d84d4f042fbcbf6b4f5ad6635368608495762212d113ed2ce9cb3b72"
+    },
+    {
+      "file": "jetbrains-mono-500.woff2",
+      "family": "JetBrains Mono",
+      "weight": 500,
+      "from": "fonts/ttf/JetBrainsMono-Medium.ttf",
+      "fromSha256": "31c92d01a8a08528b718a43addf0ad3df0af2ca4b7b3290a452f70f358e14d3d",
+      "bytes": 14812,
+      "sha256": "444d88f36795dfaf5ddb41bef4d57ea73a4657184c107360aa16f7607ce6892f"
+    }
+  ]
+}

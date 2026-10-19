@@ -18,6 +18,7 @@ import { checkErrors } from "./check-errors.ts";
 import { checkExports, readExports } from "./check-exports.ts";
 import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
 import { checkFences } from "./check-fences.ts";
+import { checkFonts } from "./check-fonts.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
@@ -36,7 +37,10 @@ import {
   distFiles,
   distPageOrEmpty,
   distPages,
+  distTexts,
   docsPages,
+  fontDir,
+  readFontManifest,
   readRepoFile,
   readSiteFile,
   sampleFiles,
@@ -177,6 +181,18 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     // Brand spec 4 and 14: each pair at build time, by the WCAG 2.1 formula.
     name: "check-contrast",
     run: () => checkContrast(readSiteFile("src/styles/tokens.css") ?? ""),
+  },
+  {
+    // Brand spec 5: five self-hosted subsets, their licenses, and no font host in the build.
+    name: "check-fonts",
+    run: () =>
+      checkFonts({
+        manifest: readFontManifest(),
+        fontDir: fontDir(),
+        tokensCss: readSiteFile("src/styles/tokens.css") ?? "",
+        built: distTexts(),
+        distFiles: distFiles(),
+      }),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },
