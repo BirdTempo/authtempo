@@ -58,7 +58,9 @@ const result = (r: CheckReport | null, id: CheckId) => r?.checks.find((c) => c.i
 /**
  * The rows that `wrangler d1 execute --json` gives for the two reads of
  * D1_SHAPE_SQL on a fresh database, for the fake wrangler below.
- * check-schema.test.ts reads a real local D1 database.
+ * check-schema.test.ts reads a real local D1 database. Four secret_version
+ * columns have DEFAULT 1 there, but the compare reads the default of an
+ * extra column only, so dflt null serves.
  */
 const D1_COLUMN_ROWS = expectedD1Shape().flatMap((t) =>
   t.columns.map((c) => ({
@@ -306,13 +308,37 @@ describe("authtempo check (spec 19)", () => {
     ).toBe("pass");
   });
 
-  it("turns each skip into a failure with --strict", async () => {
+  it("turns each skip into a failure with --strict, except compat_database", async () => {
     const r = await check(["--strict"]);
     expect(r.code).toBe(1);
-    expect(result(r.report, "schema_version")).toMatchObject({
+    for (const id of ["schema_version", "schema_shape"] as const)
+      expect(result(r.report, id)).toMatchObject({ status: "fail", code: "no_database" });
+    const strict = (version: number, compat: boolean) =>
+      runChecks({
+        base: BASE,
+        basePath: "/auth",
+        fetch: deployment(healthy()),
+        timeoutMs: 1000,
+        schemaVersion: 7,
+        strict: true,
+        readSchema: async () => version,
+        shape: {
+          expected: [],
+          read: async () => [],
+          compat: async () => compat,
+        },
+      });
+    expect(result(await strict(6, false), "schema_shape")).toMatchObject({
       status: "fail",
-      code: "no_database",
+      code: "schema_not_current",
     });
+    // Ruling 12: a compat database is a supported state, so the skip stays a skip.
+    const compat = await strict(7, true);
+    expect(result(compat, "schema_shape")).toMatchObject({
+      status: "skip",
+      code: "compat_database",
+    });
+    expect(compat.summary).toEqual({ run: 8, pass: 7, fail: 0, skip: 1 });
   });
 
   it("stops with exit 2 when the host gives no answer, and reports no check", async () => {

@@ -125,7 +125,7 @@ export interface CheckInput {
     /** True when the database holds the compat tables, which have another shape (ruling 11). */
     compat: () => Promise<boolean>;
   };
-  /** Each skip counts as a failure. */
+  /** Each skip counts as a failure, except compat_database (ruling 12). */
   strict?: boolean;
 }
 
@@ -509,9 +509,16 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
     throw new Error(
       `runChecks reported ${results.map((r) => r.id).join(", ")}; the table is ${CHECK_IDS.join(", ")}`,
     );
+  // Ruling 12 of plan 11c2: --strict keeps the skip compat_database. A compat
+  // database is a supported state that the shape compare does not cover, and
+  // no operator action clears the skip. A pass would claim a compare that did not run.
   const checks =
     input.strict === true
-      ? results.map((r) => (r.status === "skip" ? { ...r, status: "fail" as const } : r))
+      ? results.map((r) =>
+          r.status === "skip" && r.code !== "compat_database"
+            ? { ...r, status: "fail" as const }
+            : r,
+        )
       : results;
   const count = (s: CheckStatus) => checks.filter((r) => r.status === s).length;
   return {

@@ -113,7 +113,9 @@ export function expectedD1Shape(): ExpectedShape {
  * `wrangler d1 execute` runs it. `ta\_%` with the escape matches the prefix
  * `ta_` only. Column order: `cid` and `seqno`. The alias `"notNull"` has
  * quotes, because NOTNULL is an SQLite keyword: without them the read fails
- * with a syntax error.
+ * with a syntax error. SQLite has no identity column. `pragma_table_info`
+ * leaves out a generated column, and an insert cannot name one, so the read
+ * skips it with no harm.
  */
 export const D1_SHAPE_SQL: { columns: string; indexes: string } = {
   columns: `SELECT m.name AS tableName, p.name AS name, p.type AS type, p."notnull" AS "notNull", p.dflt_value AS dflt, p.pk AS pk FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table' AND m.name LIKE 'ta\\_%' ESCAPE '\\' ORDER BY m.name, p.cid`,

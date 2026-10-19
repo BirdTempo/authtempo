@@ -86,7 +86,8 @@ describe("schema_shape on Postgres (plan 11c2)", () => {
   afterEach(async () => {
     await db.drop();
   });
-  const pg = () => check(["--target", "postgres"], { env: { DATABASE_URL: db.url } });
+  const pg = (extra: string[] = []) =>
+    check(["--target", "postgres", ...extra], { env: { DATABASE_URL: db.url } });
   const migrate = async (extra: string[] = []) =>
     expect(
       (await cli(["migrate", "--target", "postgres", ...extra], { env: { DATABASE_URL: db.url } }))
@@ -152,10 +153,13 @@ describe("schema_shape on Postgres (plan 11c2)", () => {
     await migrate();
     await db.sql.unsafe("ALTER TABLE ta_user ADD COLUMN plan text NOT NULL DEFAULT 'x'");
     await db.sql.unsafe("ALTER TABLE ta_user ALTER COLUMN plan DROP DEFAULT");
+    // Postgres makes the value of an identity column, so an insert that leaves it out does not fail.
+    await db.sql.unsafe("ALTER TABLE ta_user ADD COLUMN seq bigint GENERATED ALWAYS AS IDENTITY");
     const r = await pg();
     expect(r.code).toBe(0);
     expect(r.report.warnings).toEqual([
       "schema_column_extra_required: the table ta_user has the NOT NULL column plan with no default: each insert of core into ta_user fails",
+      "schema_column_extra: the table ta_user has the column seq, which the migrations do not make",
     ]);
   });
 
@@ -196,6 +200,17 @@ describe("schema_shape on Postgres (plan 11c2)", () => {
         "the database holds the Better Auth compatibility tables; the shape of core's tables does not apply",
     });
   });
+
+  it("keeps the compat_database skip with --strict, and exits 0", async () => {
+    await db.sql.unsafe(readFileSync(join(BA_FIXTURES, "better-auth-1.7.2.postgres.sql"), "utf8"));
+    await migrate(["--tables", "compat"]);
+    const r = await pg(["--strict"]);
+    expect(r.code).toBe(0);
+    expect(result(r.report, "schema_shape")).toMatchObject({
+      status: "skip",
+      code: "compat_database",
+    });
+  });
 });
 
 afterAll(() => {
@@ -204,7 +219,8 @@ afterAll(() => {
 
 // Each check calls the project's wrangler five times on its local D1.
 describe("schema_shape on D1 (plan 11c2)", { timeout: 300_000 }, () => {
-  const d1 = (dir: string) => check(["--target", "d1"], { cwd: dir });
+  const d1 = (dir: string, extra: string[] = []) =>
+    check(["--target", "d1", ...extra], { cwd: dir });
 
   it("passes schema_shape on a fresh database", async () => {
     const p = d1Project();
@@ -223,6 +239,8 @@ describe("schema_shape on D1 (plan 11c2)", { timeout: 300_000 }, () => {
   it("warns on an extra column and fails on a dropped unique index", async () => {
     const p = d1Project();
     expect((await cli(["migrate", "--target", "d1"], { cwd: p.dir })).code).toBe(0);
+    // pragma_table_info leaves out a generated column, and an insert cannot name it: no finding.
+    wranglerSql(p.dir, "ALTER TABLE ta_user ADD COLUMN shout text AS (upper(email))");
     wranglerSql(p.dir, "ALTER TABLE ta_user ADD COLUMN nickname text");
     const extra = await d1(p.dir);
     expect(extra.code).toBe(0);
@@ -265,6 +283,28 @@ describe("schema_shape on D1 (plan 11c2)", { timeout: 300_000 }, () => {
       code: "compat_database",
       detail:
         "the database holds the Better Auth compatibility tables; the shape of core's tables does not apply",
+    });
+  });
+
+  it("keeps the compat_database skip with --strict, and exits 0", async () => {
+    const p = d1Project({
+      migrationsDir: "migrations",
+      files: {
+        "migrations/0001_better_auth.sql": readFileSync(
+          join(BA_FIXTURES, "better-auth-1.7.2.sqlite.sql"),
+          "utf8",
+        ),
+      },
+    });
+    const migrated = await cli(["migrate", "--target", "d1", "--tables", "compat"], {
+      cwd: p.dir,
+    });
+    expect(migrated.code, migrated.stderr.join("\n")).toBe(0);
+    const r = await d1(p.dir, ["--strict"]);
+    expect(r.code).toBe(0);
+    expect(result(r.report, "schema_shape")).toMatchObject({
+      status: "skip",
+      code: "compat_database",
     });
   });
 });

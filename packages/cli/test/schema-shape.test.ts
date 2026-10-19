@@ -8,7 +8,11 @@ import { compareShape, findingText, PLAIN_NAME } from "../src/schema-shape.js";
 
 const EXPECTED = expectedPostgresShape();
 
-/** The live form of a table as a fresh database gives it: no column of core has a default. */
+/**
+ * The live form of a table. Four secret_version columns have DEFAULT 1
+ * (migration 0009), but compareShape reads hasDefault of an extra column
+ * only, so false serves for each column of core.
+ */
 const liveTable = (t: ExpectedTable): LiveTable => ({
   ...t,
   columns: t.columns.map((c) => ({ ...c, hasDefault: false })),
@@ -173,6 +177,8 @@ describe("compareShape (plan 11c2)", () => {
     expect(compareShape(EXPECTED, [...fresh(), note])).toEqual([
       { code: "schema_table_extra", kind: "warn", table: "ta_app_note" },
     ]);
+    // A table of the app with no ta_ prefix is no finding.
+    expect(compareShape(EXPECTED, [...fresh(), { ...note, name: "app_note" }])).toEqual([]);
   });
 
   it("finds nothing for another column order or an extra index", () => {

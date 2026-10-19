@@ -37,11 +37,28 @@ describe("postgres migration matches the core schema", () => {
     }
   });
 
-  it("reads an extra column with its default", async () => {
+  it("reads an extra column with its default, and an identity or generated column as one with a default", async () => {
     const db = await freshDatabase();
     try {
       await db.sql.unsafe("ALTER TABLE ta_user ADD COLUMN nickname text DEFAULT 'x'");
+      // An identity or a generated column has no column_default, but Postgres makes its value.
+      await db.sql.unsafe("ALTER TABLE ta_user ADD COLUMN seq bigint GENERATED ALWAYS AS IDENTITY");
+      await db.sql.unsafe(
+        "ALTER TABLE ta_user ADD COLUMN shout text GENERATED ALWAYS AS (upper(email)) STORED",
+      );
       const user = (await readPostgresShape(db.sql)).find((t) => t.name === "ta_user");
+      expect(user?.columns.find((c) => c.name === "seq")).toEqual({
+        name: "seq",
+        type: "bigint",
+        notNull: true,
+        hasDefault: true,
+      });
+      expect(user?.columns.find((c) => c.name === "shout")).toEqual({
+        name: "shout",
+        type: "text",
+        notNull: false,
+        hasDefault: true,
+      });
       expect(user?.columns.find((c) => c.name === "nickname")).toEqual({
         name: "nickname",
         type: "text",

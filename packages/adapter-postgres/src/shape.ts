@@ -103,6 +103,8 @@ interface ColumnRow {
   data_type: string;
   is_nullable: string;
   column_default: string | null;
+  is_identity: string;
+  is_generated: string;
 }
 
 interface IndexRow {
@@ -114,7 +116,7 @@ interface IndexRow {
 // `ta\_%` escapes the underscore, so the pattern matches the prefix `ta_` only.
 // The columns of a view are also in `information_schema.columns`, so the read
 // keeps base tables only. D1 does the same with `type = 'table'`.
-const COLUMNS_SQL = `SELECT table_name, column_name, data_type, is_nullable, column_default
+const COLUMNS_SQL = `SELECT table_name, column_name, data_type, is_nullable, column_default, is_identity, is_generated
 FROM information_schema.columns
 WHERE table_schema = current_schema() AND table_name LIKE 'ta\\_%'
 AND table_name IN (SELECT table_name FROM information_schema.tables
@@ -181,7 +183,10 @@ export async function readPostgresShape(sql: Sql): Promise<LiveShape> {
       name: c.column_name,
       type: c.data_type,
       notNull: c.is_nullable === "NO",
-      hasDefault: c.column_default !== null,
+      // An identity or a generated column has no column_default, but Postgres
+      // makes its value, so an insert that leaves it out does not fail.
+      hasDefault:
+        c.column_default !== null || c.is_identity === "YES" || c.is_generated === "ALWAYS",
     });
   }
   for (const ix of indexes) {

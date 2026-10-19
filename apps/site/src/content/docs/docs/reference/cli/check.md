@@ -35,7 +35,7 @@ authtempo check https://api.example.com --target postgres --url-env DATABASE_URL
 | `<base url>` | The origin of the API, with no path. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
-| `--strict` | Counts each skipped check as a failure. |
+| `--strict` | Counts each skipped check as a failure, except `compat_database`. |
 | `--target postgres`, `--target d1` | Read the schema version and the table shape from this kind of database. Without it, the two schema checks skip. |
 | `--url-env <NAME>`, `--url-file <path>` | Postgres: the connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--database <name>`, `--config <path>`, `--remote` | D1: the database of the wrangler config, as for `authtempo migrate`. |
@@ -188,43 +188,43 @@ A skip: the `schema_version` check did not pass, so the tables are not the table
 
 <h3 id="compat_database"><code>compat_database</code></h3>
 
-A skip: the database holds the Better Auth compatibility tables, which have another shape. The check is for a database of core's own tables.
+A skip: the database holds the Better Auth compatibility tables, which have another shape, and the check compares core's own tables only. `--strict` keeps this skip as a skip, because no fix applies to a supported compat database.
 
 <h3 id="schema_table_missing"><code>schema_table_missing</code></h3>
 
-A table of the migrations is missing. Core fails on each operation that uses it. Run `authtempo migrate`, or restore the table from a backup.
+A table of the migrations is missing, so core fails on each operation that uses it. Run `authtempo migrate`, or restore the table from a backup.
 
 <h3 id="schema_column_missing"><code>schema_column_missing</code></h3>
 
-A column of the migrations is missing. Core fails on each read or write of the table. Add the column again as the migration makes it.
+A column of the migrations is missing, so core fails on each read or write of the table. Add the column again as the migration makes it.
 
 <h3 id="schema_column_type"><code>schema_column_type</code></h3>
 
-A column has another type than the migration makes. Core can read wrong values from it. Change the column back to the type of the migration.
+A column has another type than the migration makes, so core can read wrong values from it. Change the column back to the type of the migration.
 
 <h3 id="schema_column_null"><code>schema_column_null</code></h3>
 
-A column has another NOT NULL rule than the migration makes. A NOT NULL column where core writes null fails each insert. Change the rule back to the rule of the migration.
+A column has another NOT NULL rule than the migration makes, and a NOT NULL column where core writes null fails each insert. Change the rule back to the rule of the migration.
 
 <h3 id="schema_unique_missing"><code>schema_unique_missing</code></h3>
 
-A unique index or the primary key is missing, or has another column order. Core maps a unique conflict to its fields by the index name, and the claim rule needs the unique email. Make the index again with the name and the columns of the migration.
+A unique index or the primary key is missing or has another column order, and the claim rule needs the unique email. Core maps a unique conflict to its fields by the index name, so make the index again as the migration makes it.
 
 <h3 id="schema_index_missing"><code>schema_index_missing</code></h3>
 
-A warning, not a failure. A plain index of the migrations is missing, or has another column order. The reads of core become slow on a large table. Make the index again.
+A warning: a plain index of the migrations is missing or has another column order, so core reads a large table slowly. Make the index again.
 
 <h3 id="schema_column_extra"><code>schema_column_extra</code></h3>
 
-A warning, not a failure. The table has a column that the migrations do not make. Core does not read or write it. Keep it only when your app needs it.
+A warning: the table has a column that the migrations do not make, and core does not read or write it. Keep it only when your app needs it.
 
 <h3 id="schema_column_extra_required"><code>schema_column_extra_required</code></h3>
 
-A warning, not a failure. The table has an extra NOT NULL column with no default, so each insert of core into the table fails. Give the column a default, or make it nullable.
+A warning: the table has an extra NOT NULL column with no default, so each insert of core into the table fails. Give the column a default, or make it nullable.
 
 <h3 id="schema_table_extra"><code>schema_table_extra</code></h3>
 
-A warning, not a failure. The database has a `ta_` table that the migrations do not make. The `ta_` prefix is for core's tables. Give the table of your app another name.
+A warning: the database has a `ta_` table that the migrations do not make, and the `ta_` prefix is for core's tables. Give the table of your app another name.
 
 ## Next
 
