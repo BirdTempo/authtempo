@@ -1,7 +1,8 @@
 // Review Focus 1 of plan 11a: the Worker answers a URL with no trailing slash
 // and a missing page the way a reader expects. It runs `wrangler dev` on the
-// built dist and makes five requests. It is not part of `pnpm test`, because
-// wrangler dev takes seconds to start; Task 14 of plan 11a runs it.
+// built dist and checks each answer below; the summary line counts them. Plan
+// 11b adds the headers of dist/_headers on / and /docs/. It is not part of
+// `pnpm test`, because wrangler dev takes seconds to start.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { DIST, SITE } from "./lib/paths.ts";
@@ -98,6 +99,39 @@ function builtPolicy(): string | null {
   return line?.[1]?.trim() ?? null;
 }
 
+/** The other headers of the rule for /* in dist/_headers, by lower-case name (check-csp holds their values). */
+function builtSiteHeaders(): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!existsSync(`${DIST}_headers`)) return out;
+  let rule = "";
+  for (const line of readFileSync(`${DIST}_headers`, "utf8").split("\n")) {
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    if (!/^\s/.test(line)) rule = line.trim();
+    else if (rule === "/*") {
+      const m = /^\s+([^:\s]+)\s*:\s*(.*)$/.exec(line);
+      const name = m?.[1]?.toLowerCase();
+      if (name !== undefined && name !== "content-security-policy")
+        out.set(name, (m?.[2] ?? "").trim());
+    }
+  }
+  return out;
+}
+
+/** The verdict on the other headers of a page: each header of the rule for /*, with its value. */
+function siteHeadersAnswer(res: Response): string | null {
+  const want = builtSiteHeaders();
+  console.log(
+    `preview-smoke: ${new URL(res.url).pathname} status=${res.status} ${[...want.keys()].map((n) => `${n}=${res.headers.get(n) ?? "(none)"}`).join(" ")}`,
+  );
+  if (res.status !== 200) return `status ${res.status}`;
+  if (want.size !== 3)
+    return `the rule for /* of dist/_headers has ${want.size} other headers; it has 3`;
+  for (const [name, value] of want)
+    if (res.headers.get(name) !== value)
+      return `${name} ${res.headers.get(name) ?? "(none)"}, not ${value}`;
+  return null;
+}
+
 /** The verdict on the CSP header of one page: equal to the line of dist/_headers. */
 function policyAnswer(res: Response): string | null {
   const want = builtPolicy();
@@ -148,6 +182,8 @@ try {
   await expectAnswer("/docs/", (res) => (res.status === 200 ? null : `status ${res.status}`));
   // Plan 11b Task 3: the Worker sends the CSP of dist/_headers on a root page and on a docs page.
   await expectAnswer("/", (res) => policyAnswer(res));
+  // Spec 24 item 5: Referrer-Policy, X-Content-Type-Options, and Permissions-Policy on a root page.
+  await expectAnswer("/", (res) => siteHeadersAnswer(res));
   await expectAnswer("/docs/", (res) => policyAnswer(res));
   await expectAnswer("/docs", (res) =>
     (res.status === 307 || res.status === 308) && res.headers.get("location") === "/docs/"
@@ -173,8 +209,9 @@ try {
     ),
   );
   await expectAnswer("/docs/start/index.md", (res) => agentAnswer(res, null));
-  // The OpenAPI document of plan 11g. public/_headers gives this one path a CORS
-  // header with no credentials, so a browser tool on another origin reads it.
+  // The OpenAPI document of plan 11g. The rule of public/_headers.template gives
+  // this one path a CORS header with no credentials, so a browser tool on
+  // another origin reads it.
   await expectAnswer("/docs/reference/openapi.json", (res) => {
     const type = res.headers.get("content-type") ?? "(none)";
     const origin = res.headers.get("access-control-allow-origin");
