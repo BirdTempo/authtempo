@@ -20,10 +20,18 @@ const helpFlags = (flags: readonly { flag: string }[]) =>
   flags.flatMap((f) => [...f.flag.matchAll(/--([a-z0-9.-]+)/g)].map((m) => m[1] ?? ""));
 
 /** The command table in the order of the root help. Each task of plan 11c adds its command. */
-const NAMES = ["init", "migrate", "import", "check", "keys", "mcp"];
+const NAMES = ["init", "migrate", "import", "check", "keys", "mcp", "secret"];
+
+/**
+ * The commands that need an argument, so the bare command is a usage error
+ * (plan 11c2 ruling 4). `secret` runs with no argument and prints a value,
+ * and `info` of Task 5 runs with no argument too, so this list is typed by
+ * hand and is not read from NAMES.
+ */
+const NEEDS_ARGUMENT = ["init", "migrate", "import", "check", "keys", "mcp"];
 
 describe("the common rules (spec 19)", () => {
-  it("has the six commands in the order of the root help", () => {
+  it("has the seven commands in the order of the root help", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
   });
 
@@ -104,6 +112,17 @@ describe("the common rules (spec 19)", () => {
           expect(`${name} --${flag} -${spec.short}`).toBe(`${name} --${flag} -${ALLOWED[flag]}`);
   });
 
+  it("prints the short help on stderr and exits 2 for a bare command that needs an argument", () => {
+    for (const name of NEEDS_ARGUMENT) {
+      const command = COMMANDS[name];
+      if (!command) throw new Error(`no command ${name}`);
+      const r = runBin([name]);
+      expect(r.status, name).toBe(2);
+      expect(r.stdout, name).toBe("");
+      expect(linesOf(r.stderr).at(-1), name).toBe(`Run authtempo ${command.help.command} --help`);
+    }
+  });
+
   it("writes no escape byte in any output", () => {
     for (const args of [
       ["--help"],
@@ -145,10 +164,11 @@ describe("the common rules (spec 19)", () => {
         expect(text.indexOf("Examples:")).toBeLessThan(text.indexOf("Flags:"));
       });
 
-      it("prints the short help on stderr and exits 2 on a usage error", () => {
-        const r = runBin([name]);
+      it("prints the short help on stderr and exits 2 on an unknown flag", () => {
+        const r = runBin([name, "--no-such-flag"]);
         expect(r.status).toBe(2);
         expect(r.stdout).toBe("");
+        expect(linesOf(r.stderr)[0]).toBe("unknown flag --no-such-flag");
         expect(linesOf(r.stderr).at(-1)).toBe(`Run authtempo ${command.help.command} --help`);
       });
 

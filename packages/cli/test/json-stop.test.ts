@@ -13,6 +13,7 @@ import {
   KEYS_JSON_KEYS,
   MCP_JSON_KEYS,
   MIGRATE_JSON_KEYS,
+  SECRET_JSON_KEYS,
   STOP_JSON,
   VERSION_JSON_KEYS,
 } from "../src/json.js";
@@ -310,6 +311,32 @@ describe("mcp --json", () => {
   });
 });
 
+describe("authtempo secret", () => {
+  it("prints the stop document on a usage error and on a taken --out path, and exit 0 on a success", () => {
+    const usage = runBin(["secret", "--version", "0", "--json"]);
+    expect(stopDoc(usage, SECRET_JSON_KEYS, true)).toMatchObject({
+      kind: "app",
+      value: null,
+      version: null,
+      bytes: 0,
+      estimateBits: 0,
+      out: null,
+      secretHash: null,
+    });
+
+    const dir = fresh();
+    writeFileSync(join(dir, "taken.txt"), "old\n");
+    const stop = runBin(["secret", "--version", "2", "--out", "taken.txt", "--json"], { cwd: dir });
+    expect(stopDoc(stop, SECRET_JSON_KEYS, false).value).toBeNull();
+    expect(stop.stderr).toContain(`${join(dir, "taken.txt")} exists`);
+    expect(readFileSync(join(dir, "taken.txt"), "utf8")).toBe("old\n");
+
+    const done = doneDoc(runBin(["secret", "--version", "2", "--json"]), SECRET_JSON_KEYS, 0);
+    expect(done.version).toBe(2);
+    expect(typeof done.value).toBe("string");
+  });
+});
+
 describe("STOP_JSON", () => {
   it("holds STOP_JSON to each key list", () => {
     const lists: Record<keyof typeof STOP_JSON, object> = {
@@ -319,9 +346,10 @@ describe("STOP_JSON", () => {
       check: CHECK_JSON_KEYS,
       keys: KEYS_JSON_KEYS,
       mcp: MCP_JSON_KEYS,
+      secret: SECRET_JSON_KEYS,
     };
     expect(Object.keys(STOP_JSON).sort()).toEqual(
-      ["check", "import", "init", "keys", "mcp", "migrate"].sort(),
+      ["check", "import", "init", "keys", "mcp", "migrate", "secret"].sort(),
     );
     for (const [name, list] of Object.entries(lists)) {
       const shape = STOP_JSON[name as keyof typeof STOP_JSON];

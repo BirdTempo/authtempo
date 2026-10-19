@@ -6,6 +6,7 @@ import { initCommand } from "./commands/init.js";
 import { keysCommand } from "./commands/keys.js";
 import { mcpCommand } from "./commands/mcp.js";
 import { migrateCommand } from "./commands/migrate.js";
+import { secretCommand } from "./commands/secret.js";
 import { UsageError } from "./errors.js";
 import { ROOT_HELP } from "./help/authtempo.js";
 import { type HelpText, renderHelp, shortHelp } from "./help/types.js";
@@ -22,6 +23,7 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   check: checkCommand,
   keys: keysCommand,
   mcp: mcpCommand,
+  secret: secretCommand,
 };
 
 /**

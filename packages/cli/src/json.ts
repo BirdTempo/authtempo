@@ -120,6 +120,30 @@ export const MCP_JSON_KEYS = {
   stopped: true,
 } as const satisfies Record<keyof McpJson, true>;
 
+/** `authtempo secret --json` (plan 11c2). With --out the value is null: it is in the file only. */
+export interface SecretJson extends RunKeys {
+  kind: "app" | "operator";
+  value: string | null;
+  version: number | null;
+  bytes: number;
+  /** entropyBits(value) of core, rounded down. */
+  estimateBits: number;
+  out: string | null;
+  /** --operator only: the SHA-256 hex for operator.secretHash. */
+  secretHash: string | null;
+}
+export const SECRET_JSON_KEYS = {
+  kind: true,
+  value: true,
+  version: true,
+  bytes: true,
+  estimateBits: true,
+  out: true,
+  secretHash: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof SecretJson, true>;
+
 /**
  * The document of a usage error or a thrown stop under `--json`, for each
  * command (plan 11e deviation 19). Each other key holds its empty value: "",
@@ -151,6 +175,17 @@ export const STOP_JSON = {
   },
   keys: { kid: "", exit: 2, stopped: null },
   mcp: { editor: "", file: null, action: "stopped", entry: null, exit: 2, stopped: null },
+  secret: {
+    kind: "app",
+    value: null,
+    version: null,
+    bytes: 0,
+    estimateBits: 0,
+    out: null,
+    secretHash: null,
+    exit: 2,
+    stopped: null,
+  },
 } satisfies {
   init: InitJson;
   migrate: MigrateJson;
@@ -158,4 +193,5 @@ export const STOP_JSON = {
   check: CheckJson;
   keys: KeysJson;
   mcp: McpJson;
+  secret: SecretJson;
 };

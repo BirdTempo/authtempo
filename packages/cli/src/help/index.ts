@@ -5,6 +5,7 @@ import { INIT_HELP } from "./init.js";
 import { KEYS_HELP } from "./keys.js";
 import { MCP_HELP } from "./mcp.js";
 import { MIGRATE_HELP } from "./migrate.js";
+import { SECRET_HELP } from "./secret.js";
 import type { HelpText } from "./types.js";
 
 /**
@@ -20,4 +21,5 @@ export const HELP: readonly HelpText[] = [
   CHECK_HELP,
   KEYS_HELP,
   MCP_HELP,
+  SECRET_HELP,
 ];

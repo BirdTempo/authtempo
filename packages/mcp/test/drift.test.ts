@@ -34,6 +34,7 @@ import { assertFreshIndex, siteIndex } from "./support/index.js";
 const EXEMPT_COMMANDS: Readonly<Record<string, string>> = {
   keys: "it needs the operator secret and changes a live deployment",
   mcp: "it is the installer of this server",
+  secret: "it makes a secret, and a secret must not enter the context of an agent",
 };
 
 /** The --help flag of every command. An agent reads the tool's own schema, not the help text. */
