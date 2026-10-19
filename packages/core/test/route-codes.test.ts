@@ -1,0 +1,1162 @@
+import { describe, expect, it, vi } from "vitest";
+import { CAPTCHA_FLOWS, CAPTCHA_HEADER } from "../src/captcha.js";
+import type { AuthConfig } from "../src/config.js";
+import { requestAccountDelete } from "../src/engine/account-delete.js";
+import { requestEmailChange } from "../src/engine/email-change.js";
+import { requestEmailOtp, requestResetOtp } from "../src/engine/email-otp.js";
+import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
+import { hookRefusal } from "../src/engine/hooks.js";
+import { inviteMember } from "../src/engine/invitations.js";
+import { mintSessionJwt } from "../src/engine/jwt.js";
+import { requestMagicLink } from "../src/engine/magic-link.js";
+import { addMember, createOrganization } from "../src/engine/organizations.js";
+import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/engine/password.js";
+import { requestReauthCode } from "../src/engine/reauth.js";
+import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
+import { createSession } from "../src/engine/sessions.js";
+import { API_TOKEN_CAP, createApiToken } from "../src/engine/tokens.js";
+import { CHALLENGE_MAX_ATTEMPTS } from "../src/engine/totp.js";
+import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
+import type { RouteContract } from "../src/http/contract/types.js";
+import { AUTH_ERROR_PARAM } from "../src/http/redirect.js";
+import { ROUTES, type RouteKey } from "../src/http/route-list.js";
+import { createRouter } from "../src/http/router.js";
+import { coreRoutes } from "../src/http/routes/index.js";
+import { SOCIAL } from "./every-feature.js";
+import { BASE_URL, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
+import { pkce } from "./oauth-helpers.js";
+import { FAST, upSession } from "./password-helpers.js";
+import { codeNow, enrolled, PASSWORD, verifiedSession, wrongFor } from "./totp-helpers.js";
+
+/**
+ * The codes that one world answers on every route that declares them (plan
+ * 11g Task 5). Each family reads its routes from `ROUTES`, so a route that
+ * gains the code joins the family, and the answer recorder sees the code
+ * on each route. A route whose check comes after another refusal needs a
+ * body that passes the earlier checks: `BODIES` holds one valid body per
+ * POST, and the first test holds each one to the contract's schema.
+ */
+
+const CONTRACT: Record<string, RouteContract> = ROUTE_CONTRACT;
+/** 43 characters of a token body, as every `xx_` token of core has. */
+const BODY43 = "A".repeat(43);
+/** A ceremony answer whose client data decodes to nothing: the passkey check refuses it. */
+const CEREMONY = { id: "cred-1", response: { clientDataJSON: "e30" } };
+/** A ceremony answer whose client data names `challenge` and that no authenticator signed. */
+function ceremonyOf(challenge: string) {
+  const clientDataJSON = btoa(JSON.stringify({ type: "webauthn.get", challenge, origin: BASE_URL }))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  return { id: "cred-1", response: { clientDataJSON } };
+}
+/** A ceremony answer with a well-formed challenge that no row holds: the challenge check refuses it. */
+const UNKNOWN_CEREMONY = ceremonyOf(BODY43);
+
+/**
+ * A body that parses under the route's schema, for each POST with a body. A
+ * value that starts with `$` is a placeholder: a test fills it with a value
+ * of its world (an organization id, a mailed token, a challenge).
+ */
+const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+  "POST /sessions/revoke": { id: "s1" },
+  "POST /reauth": { password: PASSWORD },
+  "POST /user/update": { name: "Ada" },
+  "POST /user/change-email": { newEmail: "new@example.com" },
+  "POST /user/change-email/confirm": { token: "$emailChangeToken" },
+  "POST /user/change-email/verify": { code: "123456" },
+  "POST /user/delete/confirm": { token: "$deleteToken" },
+  "POST /identities/unlink": { id: "i1" },
+  "POST /magic-link/request": { email: "ada@example.com" },
+  "POST /magic-link/verify": { token: "$magicToken" },
+  "POST /passkey/register/verify": { response: CEREMONY },
+  "POST /passkey/authenticate/verify": { response: CEREMONY },
+  "POST /passkeys/delete": { id: "p1" },
+  "POST /passkeys/rename": { id: "p1", name: "Key" },
+  "POST /password/sign-up": { email: "$newEmail", password: PASSWORD },
+  "POST /password/sign-in": { email: "ada@example.com", password: PASSWORD },
+  "POST /password/verify": { token: BODY43 },
+  "POST /password/verify/resend": { email: "ada@example.com" },
+  "POST /password/reset/request": { email: "ada@example.com" },
+  "POST /password/reset": { token: "$resetToken", password: PASSWORD },
+  "POST /password/change": { currentPassword: PASSWORD, newPassword: "a new horse battery" },
+  "POST /totp/setup": { password: PASSWORD },
+  "POST /totp/enable": { code: "000000" },
+  "POST /totp/disable": { code: "000000" },
+  "POST /totp/backup-codes": { code: "000000" },
+  "POST /totp/verify": { challenge: "$challenge", code: "000000" },
+  "POST /totp/challenge": { challenge: "$challenge", code: "000000" },
+  "POST /second-factor/passkey/enable": { password: PASSWORD, response: CEREMONY },
+  "POST /second-factor/passkey/options": { challenge: "$challenge" },
+  "POST /second-factor/disable": { method: "email", password: PASSWORD },
+  "POST /second-factor/email/enable": { password: PASSWORD },
+  "POST /second-factor/email/send": { challenge: "$challenge" },
+  "POST /otp/request": { email: "ada@example.com" },
+  "POST /otp/verify": { email: "$otpEmail", code: "$otpCode" },
+  "POST /otp/reset/request": { email: "ada@example.com" },
+  "POST /otp/reset": { email: "$otpEmail", code: "$otpCode", password: PASSWORD },
+  "POST /handoff/continue": { h: `hs_${BODY43}` },
+  "POST /handoff/redeem": { code: BODY43, verifier: BODY43 },
+  "POST /organizations/create": { slug: "acme", name: "Acme" },
+  "POST /organizations/update": { organizationId: "$org", name: "Acme" },
+  "POST /organizations/delete": { organizationId: "$org" },
+  "POST /organizations/members/add": { organizationId: "$org", userId: "u2", role: "member" },
+  "POST /organizations/members/role": { organizationId: "$org", userId: "u2", role: "admin" },
+  "POST /organizations/members/remove": { organizationId: "$org", userId: "u2" },
+  "POST /organizations/invite": {
+    organizationId: "$org",
+    email: "bob@example.com",
+    role: "member",
+  },
+  "POST /organizations/invitations/revoke": { organizationId: "$org", invitationId: "i1" },
+  "POST /organizations/invitations/accept": { token: "$inviteToken" },
+  "POST /organizations/invitations/decline": { token: "$inviteToken" },
+  "POST /organizations/active": { organizationId: "$org" },
+  "POST /tokens": { name: "ci" },
+  "POST /tokens/revoke": { id: "t1" },
+  "POST /oauth/register": { redirect_uris: ["https://client.example.com/callback"] },
+  "POST /oauth/authorize": { request_id: BODY43, decision: "allow" },
+  "POST /oauth/token": { grant_type: "authorization_code", client_id: "client-1" },
+  "POST /oauth/revoke": { token: BODY43 },
+  "POST /oauth/grants/revoke": { clientId: "client-1" },
+};
+
+/** The query of a GET whose route refuses a request with none. A `$` value is a placeholder too. */
+const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
+  "GET /handoff/start": { challenge: BODY43, redirect: "example://auth" },
+  "GET /organizations/members": { organizationId: "$org" },
+  "GET /organizations/invitations": { organizationId: "$org" },
+};
+
+/** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
+type Fills = Record<string, string>;
+
+/** The value of a placeholder that a test does not fill: a well-formed value that names no row. */
+const UNFILLED: Fills = {
+  $newEmail: "new@example.com",
+  $otpEmail: "ada@example.com",
+  $otpCode: "123456",
+  $magicToken: BODY43,
+  $resetToken: BODY43,
+  $emailChangeToken: BODY43,
+  $deleteToken: BODY43,
+  $inviteToken: BODY43,
+  $challenge: BODY43,
+  $org: "o1",
+};
+
+/** `value` with its placeholder filled from `fills`, or from `UNFILLED`. */
+function filled(value: unknown, fills: Fills): unknown {
+  if (typeof value !== "string" || !value.startsWith("$")) return value;
+  const known = fills[value] ?? UNFILLED[value];
+  if (known === undefined) throw new Error(`no value for the placeholder ${value}`);
+  return known;
+}
+
+/** What a route answered: the status, and the code of a JSON error or of a redirect's error parameter. */
+interface Answer {
+  status: number;
+  code: string | null;
+}
+
+async function answerOf(res: Response): Promise<Answer> {
+  if (res.status === 302 || res.status === 303) {
+    const location = new URL(res.headers.get("location") ?? "", BASE_URL);
+    const code = location.searchParams.get(AUTH_ERROR_PARAM) ?? location.searchParams.get("error");
+    return { status: res.status, code };
+  }
+  const type = res.headers.get("content-type") ?? "";
+  if (type.startsWith("application/json")) {
+    const body = (await res.json()) as { error?: string };
+    return { status: res.status, code: body.error ?? null };
+  }
+  return { status: res.status, code: null };
+}
+
+const entryOf = (key: RouteKey) => {
+  const entry = ROUTES.find((r) => `${r.method} ${r.path}` === key);
+  if (!entry) throw new Error(`no entry ${key}`);
+  return entry;
+};
+
+/** The entry of `key` takes the credential form `form`. */
+function takes(key: RouteKey, form: string): boolean {
+  return (entryOf(key).auth as readonly string[]).includes(form);
+}
+
+/** The routes whose entry declares `code`, in `codes` or `oauthCodes`. */
+function declaring(code: string): RouteKey[] {
+  return ROUTES.filter(
+    (r) =>
+      (r.codes as readonly string[]).includes(code) ||
+      (r.oauthCodes as readonly string[]).includes(code),
+  ).map((r) => `${r.method} ${r.path}` as RouteKey);
+}
+
+/**
+ * The request of one route from the app: the path with a real provider, the
+ * body of the table by its media, the placeholders filled. `own` replaces
+ * the body of the table.
+ */
+function requestOf(
+  key: RouteKey,
+  headers: Record<string, string>,
+  fills: Fills,
+  own?: Record<string, unknown>,
+): Request {
+  const entry = entryOf(key);
+  const query = new URLSearchParams();
+  for (const [k, v] of Object.entries(QUERIES[key] ?? {})) query.set(k, String(filled(v, fills)));
+  const path = entry.path.replace(":provider", "google");
+  const url = `${BASE_URL}/auth${path}${query.size > 0 ? `?${query}` : ""}`;
+  if (entry.method === "GET") return new Request(url, { headers });
+  const body: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(own ?? BODIES[key] ?? {})) body[k] = filled(v, fills);
+  const media = CONTRACT[key]?.body?.media ?? ["json"];
+  if (media.includes("json"))
+    return new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE_URL, ...headers },
+      body: JSON.stringify(body),
+    });
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(body)) params.set(k, String(v));
+  return new Request(url, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE_URL, ...headers },
+    body: params.toString(),
+  });
+}
+
+/**
+ * A world with every feature on. Its limiter allows every request until a
+ * test sets `refuse`, so the setup of the test runs the real flows first.
+ */
+function world(extra: Partial<AuthConfig> = {}) {
+  const limiter = { refuse: false, allow: async () => !limiter.refuse };
+  const auth = makeAuth({
+    limiter,
+    password: { hash: FAST, uniformSignUp: false },
+    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
+    handoff: { schemes: ["example://"] },
+    social: SOCIAL,
+    organizations: {},
+    oauth: { resources: [`${BASE_URL}/mcp`], registration: { cimd: false } },
+    operator: { secretHash: "0".repeat(64) },
+    account: { deleteConfirm: { ttlMinutes: 60 } },
+    // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
+    trustedOrigins: [BASE_URL],
+    ...extra,
+  });
+  const handle = createRouter(auth.config, coreRoutes(auth.config));
+  const cookie = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
+  /** The token of the last mail that the fake mail port recorded. */
+  const lastToken = () => tokenFromMail(auth.mail.at(-1)?.text ?? "");
+  /** The six-digit code of the last mail. */
+  const lastCode = () => {
+    const m = /\b(\d{6})\b/.exec(auth.mail.at(-1)?.text ?? "");
+    if (!m?.[1]) throw new Error("no code in mail");
+    return m[1];
+  };
+  /** The invitation token of the last mail: its link carries `invitation=`. */
+  const lastInvitation = () => {
+    const m = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(auth.mail.at(-1)?.text ?? "");
+    if (!m?.[1]) throw new Error("no invitation in mail");
+    return m[1];
+  };
+  return { auth, limiter, handle, cookie, lastToken, lastCode, lastInvitation };
+}
+type World = ReturnType<typeof world>;
+
+/** A fresh challenge of a user with the email method on, from a real password sign-in. */
+async function challengeOf(w: World, email: string): Promise<string> {
+  const r = await passwordSignIn(w.auth.config, {
+    email,
+    password: PASSWORD,
+    ip: null,
+    userAgent: null,
+  });
+  if (!r.ok || !("twoFactor" in r.value)) throw new Error("the sign-in answered no challenge");
+  return r.value.twoFactor.challenge;
+}
+
+/** `fn` answered ok, or the test stops with its code. */
+function must<T>(r: { ok: true; value: T } | { ok: false; code: string }): T {
+  if (!r.ok) throw new Error(`the setup answered ${r.code}`);
+  return r.value;
+}
+
+/** The answer of one route to one body, with the placeholders filled. */
+async function call(
+  w: World,
+  key: RouteKey,
+  headers: Record<string, string>,
+  own?: Record<string, unknown>,
+  fills: Fills = {},
+): Promise<Answer> {
+  return answerOf(await w.handle(requestOf(key, headers, fills, own)));
+}
+
+/** The answers of the routes, by key. `headersOf` gives the credential of each route. */
+async function probe(
+  w: World,
+  routes: RouteKey[],
+  headersOf: (key: RouteKey) => Record<string, string>,
+  fills: Fills = {},
+): Promise<Record<string, Answer>> {
+  const results: Record<string, Answer> = {};
+  for (const key of routes)
+    results[key] = await answerOf(await w.handle(requestOf(key, headersOf(key), fills)));
+  return results;
+}
+
+/**
+ * The routes whose answer is not the code with `status`, with what they
+ * answered: empty when every route answers it. A route in `redirects`
+ * carries the code in a 302 to the app.
+ */
+function unlike(
+  results: Record<string, Answer>,
+  code: string,
+  status: number,
+  redirects: readonly RouteKey[] = [],
+): Record<string, Answer> {
+  const differing: Record<string, Answer> = {};
+  for (const [key, got] of Object.entries(results)) {
+    const want = redirects.includes(key as RouteKey) ? 302 : status;
+    if (got.status !== want || got.code !== code) differing[key] = got;
+  }
+  return differing;
+}
+
+describe("the codes that one world answers on every route (plan 11g)", () => {
+  it("holds each body of the table to the route's schema", () => {
+    for (const [key, body] of Object.entries(BODIES)) {
+      const schema = CONTRACT[key]?.body?.schema;
+      expect(schema, `${key} has a body in the table and no body schema`).toBeDefined();
+      expect(schema?.safeParse(body).success, `${key}: the body does not parse`).toBe(true);
+    }
+  });
+
+  it("answers 429 rate_limited on every route that declares it when the limiter refuses", async () => {
+    const w = world();
+    const { config } = w.auth;
+    // A verified user with a password, an organization, and the email method on.
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const org = must(
+      await createOrganization(config, { user: me.user, slug: "acme", name: "Acme" }),
+    );
+    must(await requestPasswordReset(config, { email: me.user.email, ip: null }));
+    const resetToken = w.lastToken();
+    must(await requestEmailChange(config, { session: me, newEmail: "ada2@example.com" }));
+    const emailChangeToken = w.lastToken();
+    must(await requestAccountDelete(config, { session: me, ip: null, userAgent: null }));
+    const deleteToken = w.lastToken();
+    const jwt = must(
+      await mintSessionJwt(config, { userId: me.user.id, sessionId: me.session.id }),
+    );
+    must(await enableEmailMethod(config, { session: me, password: PASSWORD }));
+    const challenge = await challengeOf(w, me.user.email);
+    const fills: Fills = {
+      $org: org.organization.id,
+      $resetToken: resetToken,
+      $emailChangeToken: emailChangeToken,
+      $deleteToken: deleteToken,
+      $challenge: challenge,
+    };
+    const routes = declaring("rate_limited");
+    expect(routes.length).toBeGreaterThan(0);
+    w.limiter.refuse = true;
+    const results = await probe(
+      w,
+      routes,
+      (key) =>
+        key === "POST /token/live" ? { authorization: `Bearer ${jwt.token}` } : w.cookie(me.token),
+      fills,
+    );
+    // The two routes that carry the code in a redirect to the app.
+    const redirects: RouteKey[] = ["GET /social/:provider/start", "POST /totp/challenge"];
+    expect(unlike(results, "rate_limited", 429, redirects)).toEqual({});
+  });
+
+  it("answers 403 email_unverified on every session route that declares it to an unverified user", async () => {
+    const w = world();
+    const { config } = w.auth;
+    // Pat signed up with a password and did not use the link. Ada, verified, invites Pat.
+    const pat = upSession(
+      must(
+        await passwordSignUp(config, {
+          email: "pat@example.com",
+          password: PASSWORD,
+          ip: null,
+          userAgent: null,
+        }),
+      ),
+    );
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const org = must(
+      await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+    );
+    must(
+      await inviteMember(config, {
+        user: ada.user,
+        organizationId: org.organization.id,
+        email: "pat@example.com",
+        role: "member",
+      }),
+    );
+    const fills: Fills = { $org: org.organization.id, $inviteToken: w.lastInvitation() };
+    const routes = declaring("email_unverified").filter((key) => takes(key, "session"));
+    expect(routes.length).toBeGreaterThan(0);
+    const results = await probe(w, routes, () => w.cookie(pat.token), fills);
+    expect(unlike(results, "email_unverified", 403)).toEqual({});
+  });
+
+  it("answers 403 forbidden_rank on every route that declares it to a user outside the organization", async () => {
+    const w = world();
+    const { config } = w.auth;
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const org = must(
+      await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+    );
+    const carol = await verifiedSession(w.auth, "carol@example.com");
+    const routes = declaring("forbidden_rank");
+    expect(routes.length).toBeGreaterThan(0);
+    const results = await probe(w, routes, () => w.cookie(carol.token), {
+      $org: org.organization.id,
+    });
+    expect(unlike(results, "forbidden_rank", 403)).toEqual({});
+  });
+
+  it("answers 503 captcha_unavailable on every route that declares it when the port cannot answer", async () => {
+    const w = world({
+      captcha: {
+        port: {
+          verify: async () => "unavailable",
+          // The sign-in page of the handoff and the consent needs the widget of a gated flow.
+          page: {
+            scriptSrc: "https://captcha.example/widget.js",
+            widgetHtml: "<div></div>",
+            responseField: "x-captcha-response",
+            cspSources: ["https://captcha.example"],
+          },
+        },
+        flows: [...CAPTCHA_FLOWS],
+        onUnavailable: "refuse",
+      },
+    });
+    const routes = declaring("captcha_unavailable");
+    expect(routes.length).toBeGreaterThan(0);
+    const results = await probe(w, routes, () => ({ [CAPTCHA_HEADER]: "tok" }));
+    expect(unlike(results, "captcha_unavailable", 503)).toEqual({});
+  });
+
+  it("answers 403 sign_up_closed on every route that declares it, but a social callback, when sign-up is off", async () => {
+    const w = world({ signUp: false });
+    const { config } = w.auth;
+    const email = "new@example.com";
+    // The mail of each way in: a request mails for an unknown address too, so the address learns nothing.
+    must(await requestMagicLink(config, { email, ip: null }));
+    const magicToken = w.lastToken();
+    must(await requestPasswordReset(config, { email, ip: null }));
+    const resetToken = w.lastToken();
+    must(await requestEmailOtp(config, { email, ip: null }));
+    const otpCode = w.lastCode();
+    const fills: Fills = {
+      $newEmail: email,
+      $otpEmail: email,
+      $otpCode: otpCode,
+      $magicToken: magicToken,
+      $resetToken: resetToken,
+    };
+    // The callback of a provider needs a provider exchange: sign-up-rule.test.ts proves it on the engine.
+    const callbacks: RouteKey[] = ["GET /social/:provider/callback", "POST /social/apple/callback"];
+    const routes = declaring("sign_up_closed").filter((key) => !callbacks.includes(key));
+    expect(routes.length).toBeGreaterThan(0);
+    const otpReset = "POST /otp/reset";
+    // The reset code is one mail of its own, after the sign-in code is spent by nothing: the last mail wins.
+    const first = await probe(
+      w,
+      routes.filter((key) => key !== otpReset),
+      () => ({}),
+      fills,
+    );
+    must(await requestResetOtp(config, { email, ip: null }));
+    const second = await probe(w, [otpReset], () => ({}), { ...fills, $otpCode: w.lastCode() });
+    expect(unlike({ ...first, ...second }, "sign_up_closed", 403)).toEqual({});
+  });
+});
+
+/**
+ * The codes of one route each (plan 11g Task 5). Each test builds the one
+ * state that the route refuses, through the engine or the routes, and reads
+ * the code on the wire, so the answer recorder sees it on that route.
+ */
+describe("the codes of one route (plan 11g)", () => {
+  it("POST /tokens answers token_limit at the cap", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    for (let i = 0; i < API_TOKEN_CAP; i++)
+      must(await createApiToken(w.auth.config, { user: me.user, name: `t${i}` }));
+    expect(await call(w, "POST /tokens", w.cookie(me.token))).toEqual({
+      status: 409,
+      code: "token_limit",
+    });
+  });
+
+  it("the organization routes answer organization_limit, member_limit, and invitation_limit at each limit", async () => {
+    const w = world({
+      organizations: {
+        limits: { perUser: 1, membersPerOrganization: 2, pendingInvitationsPerOrganization: 3 },
+      },
+    });
+    const { config } = w.auth;
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    const carol = await verifiedSession(w.auth, "carol@example.com");
+    const org = must(
+      await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+    );
+    const fills: Fills = { $org: org.organization.id };
+    const cookie = w.cookie(ada.token);
+    expect(
+      await call(w, "POST /organizations/create", cookie, { slug: "beta", name: "Beta" }),
+    ).toEqual({ status: 409, code: "organization_limit" });
+    const add = (userId: string) =>
+      call(
+        w,
+        "POST /organizations/members/add",
+        cookie,
+        { organizationId: "$org", userId, role: "member" },
+        fills,
+      );
+    expect(await add(bob.user.id)).toEqual({ status: 200, code: null });
+    expect(await add(bob.user.id)).toEqual({ status: 409, code: "already_member" });
+    expect(await add(carol.user.id)).toEqual({ status: 409, code: "member_limit" });
+    const invite = (email: string) =>
+      call(
+        w,
+        "POST /organizations/invite",
+        cookie,
+        { organizationId: "$org", email, role: "member" },
+        fills,
+      );
+    const dan = await verifiedSession(w.auth, "dan@example.com");
+    expect(await invite(dan.user.email)).toEqual({ status: 200, code: null });
+    const danToken = w.lastInvitation();
+    expect(await invite("eve@example.com")).toEqual({ status: 200, code: null });
+    expect(await invite("frank@example.com")).toEqual({ status: 200, code: null });
+    expect(await invite("gus@example.com")).toEqual({ status: 409, code: "invitation_limit" });
+    expect(
+      await call(w, "POST /organizations/invitations/accept", w.cookie(dan.token), {
+        token: danToken,
+      }),
+    ).toEqual({ status: 409, code: "member_limit" });
+  });
+
+  it("the organization routes answer slug_reserved and slug_taken on a create and an update", async () => {
+    const w = world({ organizations: { reservedSlugs: ["reserved"] } });
+    const { config } = w.auth;
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const acme = must(
+      await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+    );
+    must(await createOrganization(config, { user: ada.user, slug: "beta", name: "Beta" }));
+    const cookie = w.cookie(ada.token);
+    const create = (slug: string) =>
+      call(w, "POST /organizations/create", cookie, { slug, name: "X" });
+    expect(await create("reserved")).toEqual({ status: 400, code: "slug_reserved" });
+    expect(await create("beta")).toEqual({ status: 409, code: "slug_taken" });
+    const update = (slug: string) =>
+      call(w, "POST /organizations/update", cookie, { organizationId: acme.organization.id, slug });
+    expect(await update("reserved")).toEqual({ status: 400, code: "slug_reserved" });
+    expect(await update("beta")).toEqual({ status: 409, code: "slug_taken" });
+  });
+
+  it("POST /organizations/delete answers slug_reserved for the platform organization", async () => {
+    const w = world({
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+    });
+    const { root, platformOrg } = await seedPlatform(w.auth);
+    const session = await createSession(w.auth.config, {
+      userId: root.id,
+      ip: null,
+      userAgent: null,
+    });
+    expect(
+      await call(w, "POST /organizations/delete", w.cookie(session.token), {
+        organizationId: platformOrg.id,
+      }),
+    ).toEqual({ status: 400, code: "slug_reserved" });
+  });
+
+  it("the member routes answer last_owner when the sole owner leaves or steps down", async () => {
+    const w = world();
+    const { config } = w.auth;
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    const org = must(
+      await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+    );
+    const cookie = w.cookie(ada.token);
+    const body = { organizationId: org.organization.id, userId: ada.user.id };
+    must(
+      await addMember(config, {
+        user: ada.user,
+        organizationId: org.organization.id,
+        userId: bob.user.id,
+        role: "member",
+      }),
+    );
+    expect(
+      await call(w, "POST /organizations/members/role", cookie, { ...body, role: "member" }),
+    ).toEqual({ status: 409, code: "last_owner" });
+    expect(await call(w, "POST /organizations/members/remove", cookie, body)).toEqual({
+      status: 409,
+      code: "last_owner",
+    });
+  });
+
+  it("POST /user/delete/confirm answers sole_owner when the user became the sole owner after the request", async () => {
+    const w = world();
+    const { config } = w.auth;
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    must(await requestAccountDelete(config, { session: ada, ip: null, userAgent: null }));
+    const token = w.lastToken();
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    const org = must(
+      await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+    );
+    must(
+      await addMember(config, {
+        user: ada.user,
+        organizationId: org.organization.id,
+        userId: bob.user.id,
+        role: "member",
+      }),
+    );
+    expect(await call(w, "POST /user/delete/confirm", w.cookie(ada.token), { token })).toEqual({
+      status: 409,
+      code: "sole_owner",
+    });
+  });
+
+  it("the password routes answer password_policy, password_breached, and breach_check_unavailable", async () => {
+    const breach = { answer: false as boolean | "unavailable" };
+    const w = world({
+      password: { hash: FAST, uniformSignUp: false, breachCheck: async () => breach.answer },
+    });
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const cookie = w.cookie(ada.token);
+    const change = (newPassword: string) =>
+      call(w, "POST /password/change", cookie, { currentPassword: PASSWORD, newPassword });
+    expect(await change("short")).toEqual({ status: 400, code: "password_policy" });
+    breach.answer = true;
+    expect(await change("a new horse battery")).toEqual({ status: 400, code: "password_breached" });
+    expect(
+      await call(w, "POST /password/sign-up", {}, { email: "new@example.com", password: PASSWORD }),
+    ).toEqual({ status: 400, code: "password_breached" });
+    must(await requestPasswordReset(w.auth.config, { email: ada.user.email, ip: null }));
+    expect(
+      await call(
+        w,
+        "POST /password/reset",
+        {},
+        { token: w.lastToken(), password: "a new horse battery" },
+      ),
+    ).toEqual({ status: 400, code: "password_breached" });
+    breach.answer = "unavailable";
+    expect(await change("a new horse battery")).toEqual({
+      status: 503,
+      code: "breach_check_unavailable",
+    });
+    must(await requestResetOtp(w.auth.config, { email: ada.user.email, ip: null }));
+    expect(
+      await call(
+        w,
+        "POST /otp/reset",
+        {},
+        { email: ada.user.email, code: w.lastCode(), password: "a new horse battery" },
+      ),
+    ).toEqual({ status: 503, code: "breach_check_unavailable" });
+  });
+
+  it("POST /password/sign-up answers email_taken_unverified for an unverified user with no password", async () => {
+    const w = world();
+    // A social sign-up with an unverified provider address leaves this row: no password, not verified.
+    const now = w.auth.clock.now();
+    await w.auth.storage.create("user", {
+      id: "u-pat",
+      email: "pat@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const body = { email: "pat@example.com", password: PASSWORD };
+    expect(await call(w, "POST /password/sign-up", {}, body)).toEqual({
+      status: 409,
+      code: "email_taken_unverified",
+    });
+  });
+
+  it("the TOTP routes answer totp_enabled, totp_not_enabled, invalid_code, and too_many_attempts", async () => {
+    const w = world();
+    const me = await enrolled(w.auth, "ada@example.com");
+    const cookie = w.cookie(me.session.token);
+    const wrong = wrongFor(await codeNow(w.auth, me.secret));
+    expect(await call(w, "POST /totp/setup", cookie, { password: PASSWORD })).toEqual({
+      status: 409,
+      code: "totp_enabled",
+    });
+    expect(await call(w, "POST /totp/enable", cookie, { code: wrong })).toEqual({
+      status: 409,
+      code: "totp_enabled",
+    });
+    expect(await call(w, "POST /totp/disable", cookie, { code: wrong })).toEqual({
+      status: 400,
+      code: "invalid_code",
+    });
+    expect(await call(w, "POST /totp/backup-codes", cookie, { code: wrong })).toEqual({
+      status: 400,
+      code: "invalid_code",
+    });
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    expect(await call(w, "POST /totp/enable", w.cookie(bob.token), { code: wrong })).toEqual({
+      status: 400,
+      code: "totp_not_enabled",
+    });
+    // The sign-in challenge: a wrong code each time, until the challenge is spent.
+    const challenge = await challengeOf(w, me.user.email);
+    const verify = () => call(w, "POST /totp/verify", {}, { challenge, code: wrong });
+    expect(await verify()).toEqual({ status: 400, code: "invalid_code" });
+    const codes: string[] = [];
+    for (let i = 0; i < CHALLENGE_MAX_ATTEMPTS; i++) codes.push((await verify()).code ?? "");
+    expect(codes).toContain("too_many_attempts");
+    // The form of the challenge page carries each code in a redirect.
+    const page = await challengeOf(w, me.user.email);
+    const form = () => call(w, "POST /totp/challenge", {}, { challenge: page, code: wrong });
+    const formCodes: Answer[] = [];
+    for (let i = 0; i <= CHALLENGE_MAX_ATTEMPTS; i++) formCodes.push(await form());
+    expect(formCodes).toContainEqual({ status: 302, code: "too_many_attempts" });
+  });
+
+  it("the second-factor routes answer invalid_credentials, totp_not_enabled, and passkey_failed", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const cookie = w.cookie(me.token);
+    const refused = { status: 401, code: "invalid_credentials" };
+    expect(
+      await call(w, "POST /second-factor/disable", cookie, { method: "email", password: "wrong" }),
+    ).toEqual(refused);
+    expect(
+      await call(w, "POST /second-factor/email/enable", cookie, { password: "wrong" }),
+    ).toEqual(refused);
+    expect(
+      await call(w, "POST /second-factor/passkey/enable", cookie, {
+        password: "wrong",
+        response: CEREMONY,
+      }),
+    ).toEqual(refused);
+    expect(
+      await call(w, "POST /second-factor/disable", cookie, { method: "email", password: PASSWORD }),
+    ).toEqual({ status: 400, code: "totp_not_enabled" });
+    expect(
+      await call(w, "POST /second-factor/passkey/enable", cookie, {
+        password: PASSWORD,
+        response: CEREMONY,
+      }),
+    ).toEqual({ status: 400, code: "passkey_failed" });
+  });
+
+  it("POST /reauth answers invalid_code, too_many_attempts, invalid_token, passkey_failed, and token_expired", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const cookie = w.cookie(me.token);
+    must(await requestReauthCode(w.auth.config, { session: me }));
+    const code = () => call(w, "POST /reauth", cookie, { emailCode: "000000" });
+    expect(await code()).toEqual({ status: 400, code: "invalid_code" });
+    const codes: string[] = [];
+    for (let i = 0; i < 10; i++) codes.push((await code()).code ?? "");
+    expect(codes).toContain("too_many_attempts");
+    // A client data with no challenge, and one with a challenge that no row holds: both refuse the token.
+    for (const passkey of [CEREMONY, UNKNOWN_CEREMONY])
+      expect(await call(w, "POST /reauth", cookie, { passkey })).toEqual({
+        status: 400,
+        code: "invalid_token",
+      });
+    // A real challenge with an assertion that no authenticator signed, then one past its five minutes.
+    const options = async () => {
+      const res = await w.handle(requestOf("POST /reauth/passkey/options", cookie, {}));
+      const body = (await res.json()) as { challenge?: string; error?: string };
+      expect({ status: res.status, error: body.error }).toEqual({ status: 200, error: undefined });
+      return body.challenge ?? "";
+    };
+    expect(await call(w, "POST /reauth", cookie, { passkey: ceremonyOf(await options()) })).toEqual(
+      {
+        status: 400,
+        code: "passkey_failed",
+      },
+    );
+    const stale = await options();
+    w.auth.clock.advance(6 * 60_000);
+    expect(await call(w, "POST /reauth", cookie, { passkey: ceremonyOf(stale) })).toEqual({
+      status: 400,
+      code: "token_expired",
+    });
+  });
+
+  it("the passkey ceremonies answer passkey_failed to an assertion that no authenticator signed, and token_expired after five minutes", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const cookie = w.cookie(me.token);
+    const challengeOfOptions = async (key: RouteKey, headers: Record<string, string>) => {
+      const res = await w.handle(requestOf(key, headers, {}));
+      const body = (await res.json()) as { challenge?: string; error?: string };
+      expect({ key, status: res.status, error: body.error }).toEqual({
+        key,
+        status: 200,
+        error: undefined,
+      });
+      return body.challenge ?? "";
+    };
+    const register = await challengeOfOptions("POST /passkey/register/options", cookie);
+    expect(
+      await call(w, "POST /passkey/register/verify", cookie, { response: ceremonyOf(register) }),
+    ).toEqual({ status: 400, code: "passkey_failed" });
+    const signIn = await challengeOfOptions("POST /passkey/authenticate/options", {});
+    expect(
+      await call(w, "POST /passkey/authenticate/verify", {}, { response: ceremonyOf(signIn) }),
+    ).toEqual({ status: 400, code: "passkey_failed" });
+    const staleRegister = await challengeOfOptions("POST /passkey/register/options", cookie);
+    const staleSignIn = await challengeOfOptions("POST /passkey/authenticate/options", {});
+    w.auth.clock.advance(6 * 60_000);
+    expect(
+      await call(w, "POST /passkey/register/verify", cookie, {
+        response: ceremonyOf(staleRegister),
+      }),
+    ).toEqual({ status: 400, code: "token_expired" });
+    expect(
+      await call(w, "POST /passkey/authenticate/verify", {}, { response: ceremonyOf(staleSignIn) }),
+    ).toEqual({ status: 400, code: "token_expired" });
+  });
+
+  it("GET /token answers hook_failed when the claims hook throws", async () => {
+    const w = world({
+      jwtMint: {
+        claims: () => {
+          throw new Error("down");
+        },
+      },
+    });
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await call(w, "GET /token", w.cookie(me.token))).toEqual({
+      status: 500,
+      code: "hook_failed",
+    });
+    log.mockRestore();
+  });
+});
+
+/**
+ * The routes that declare a hook code and that this file does not drive:
+ * the provider callbacks need a provider exchange, the passkey sign-in a
+ * registered passkey, and the unlink a linked identity. session-hooks.test.ts,
+ * link.test.ts, and identities.test.ts prove the hook on the engine path.
+ */
+const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
+  "GET /social/:provider/callback",
+  "POST /social/apple/callback",
+  "POST /passkey/authenticate/verify",
+  "POST /identities/unlink",
+  // The claims hook of the JWT: its own test above.
+  "GET /token",
+];
+
+/** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */
+function hookWorld(mode: "refuse" | "throw", extra: Partial<AuthConfig> = {}) {
+  const armed = { on: false };
+  const guard = () => {
+    if (!armed.on) return;
+    if (mode === "refuse") throw hookRefusal("Not now.");
+    throw new Error("down");
+  };
+  const w = world({
+    ...extra,
+    hooks: {
+      user: { beforeCreate: guard, beforeUpdate: guard, beforeDelete: guard, beforeVerify: guard },
+      session: { beforeCreate: guard },
+      organization: {
+        beforeCreate: guard,
+        beforeUpdate: guard,
+        beforeDelete: guard,
+        beforeAddMember: guard,
+        beforeUpdateMemberRole: guard,
+        beforeRemoveMember: guard,
+        beforeInvite: guard,
+      },
+      identity: { beforeLink: guard, beforeUnlink: guard },
+    },
+  });
+  return { ...w, armed };
+}
+
+/** The flows of every hook route, run before the hooks are armed: the tokens, codes, and ids each body needs. */
+async function hookFlows(w: ReturnType<typeof hookWorld>) {
+  const { config } = w.auth;
+  const ada = await verifiedSession(w.auth, "ada@example.com");
+  const bob = await verifiedSession(w.auth, "bob@example.com");
+  const carol = await verifiedSession(w.auth, "carol@example.com");
+  const dan = await verifiedSession(w.auth, "dan@example.com");
+  const org = must(
+    await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+  );
+  const organizationId = org.organization.id;
+  must(
+    await addMember(config, {
+      user: ada.user,
+      organizationId,
+      userId: carol.user.id,
+      role: "member",
+    }),
+  );
+  must(
+    await inviteMember(config, {
+      user: ada.user,
+      organizationId,
+      email: dan.user.email,
+      role: "member",
+    }),
+  );
+  const inviteToken = w.lastInvitation();
+  must(await requestMagicLink(config, { email: ada.user.email, ip: null }));
+  const magicToken = w.lastToken();
+  must(await requestEmailOtp(config, { email: ada.user.email, ip: null }));
+  const otpCode = w.lastCode();
+  must(await requestResetOtp(config, { email: ada.user.email, ip: null }));
+  const resetCode = w.lastCode();
+  must(await requestPasswordReset(config, { email: ada.user.email, ip: null }));
+  const resetToken = w.lastToken();
+  must(
+    await passwordSignUp(config, {
+      email: "pat@example.com",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    }),
+  );
+  const verifyToken = w.lastToken();
+  must(
+    await requestEmailChange(config, {
+      session: ada,
+      newEmail: "ada2@example.com",
+      method: "code",
+    }),
+  );
+  const changeCode = w.lastCode();
+  must(await requestEmailChange(config, { session: bob, newEmail: "bob2@example.com" }));
+  const changeToken = w.lastToken();
+  // Bob owns no organization, so the delete rule lets the request and the confirm through to the hook.
+  must(await requestAccountDelete(config, { session: bob, ip: null, userAgent: null }));
+  const deleteToken = w.lastToken();
+  const { verifier, challenge } = await pkce();
+  const handoff = must(
+    await startHandoff(config, { challenge, redirect: "example://auth", ip: null }),
+  );
+  const landed = must(
+    await continueHandoff(config, {
+      handoffId: handoff.handoffId,
+      userId: ada.user.id,
+      sessionId: ada.session.id,
+    }),
+  );
+  const handoffCode = new URL(landed.location).searchParams.get("code") ?? "";
+  // One enrolled user per TOTP route: a code passes once, and the first route spends it.
+  const totp = await enrolled(w.auth, "totp@example.com");
+  const totpChallenge = await challengeOf(w, totp.user.email);
+  const totpCode = await codeNow(w.auth, totp.secret);
+  const totpForm = await enrolled(w.auth, "totp-form@example.com");
+  const formChallenge = await challengeOf(w, totpForm.user.email);
+  const formCode = await codeNow(w.auth, totpForm.secret);
+  const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+    "POST /password/sign-in": { email: ada.user.email, password: PASSWORD },
+    "POST /password/sign-up": { email: "new@example.com", password: PASSWORD },
+    "POST /password/verify": { token: verifyToken },
+    "POST /password/reset": { token: resetToken, password: "a new horse battery" },
+    "POST /magic-link/verify": { token: magicToken },
+    "POST /otp/verify": { email: ada.user.email, code: otpCode },
+    "POST /otp/reset": { email: ada.user.email, code: resetCode, password: "a new horse battery" },
+    "POST /handoff/redeem": { code: handoffCode, verifier },
+    "POST /totp/verify": { challenge: totpChallenge, code: totpCode },
+    "POST /totp/challenge": { challenge: formChallenge, code: formCode },
+    "POST /user/update": { name: "Ada" },
+    "POST /user/change-email/verify": { code: changeCode },
+    "POST /user/change-email/confirm": { token: changeToken },
+    "POST /user/delete/confirm": { token: deleteToken },
+    "POST /organizations/create": { slug: "beta", name: "Beta" },
+    "POST /organizations/update": { organizationId, name: "Acme Co" },
+    "POST /organizations/delete": { organizationId },
+    "POST /organizations/members/add": { organizationId, userId: bob.user.id, role: "member" },
+    "POST /organizations/members/role": { organizationId, userId: carol.user.id, role: "admin" },
+    "POST /organizations/members/remove": { organizationId, userId: carol.user.id },
+    "POST /organizations/invite": { organizationId, email: "eve@example.com", role: "member" },
+    "POST /organizations/invitations/accept": { token: inviteToken },
+  };
+  const headersOf = (key: RouteKey): Record<string, string> => {
+    if (key === "POST /organizations/invitations/accept") return w.cookie(dan.token);
+    if (key === "POST /user/delete/confirm") return w.cookie(bob.token);
+    return takes(key, "session") ? w.cookie(ada.token) : {};
+  };
+  return { bodies, headersOf };
+}
+
+describe("the hook codes on every route that declares them (plan 11g)", () => {
+  for (const [mode, code, status] of [
+    ["refuse", "hook_refused", 403],
+    ["throw", "hook_failed", 500],
+  ] as const) {
+    it(`answers ${status} ${code} on every route that declares it when a before hook ${mode}s`, async () => {
+      const w = hookWorld(mode);
+      const { bodies, headersOf } = await hookFlows(w);
+      // The delete with no mailed confirm runs the hook at the request: a world with the confirm off.
+      const direct = hookWorld(mode, { account: {} });
+      const bob = await verifiedSession(direct.auth, "bob@example.com");
+      const atOnce: RouteKey = "POST /user/delete";
+      const routes = declaring(code).filter((key) => !HOOK_ROUTES_ELSEWHERE.includes(key));
+      expect(routes.length).toBeGreaterThan(0);
+      for (const key of routes)
+        if (key !== atOnce) expect(bodies[key], `${key} has no flow in hookFlows`).toBeDefined();
+      w.armed.on = true;
+      direct.armed.on = true;
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const results: Record<string, Answer> = {};
+      for (const key of routes)
+        results[key] =
+          key === atOnce
+            ? await call(direct, key, direct.cookie(bob.token), {})
+            : await call(w, key, headersOf(key), bodies[key]);
+      log.mockRestore();
+      // The challenge form carries the code in a redirect to the page.
+      expect(unlike(results, code, status, ["POST /totp/challenge"])).toEqual({});
+    });
+  }
+});
+
+/**
+ * The routes that declare `token_expired` and that this file does not
+ * drive: the provider callbacks need a provider exchange, and the passkey
+ * second factor a registered passkey. social.test.ts and second-factor.test.ts
+ * prove the engine path.
+ */
+const EXPIRY_ROUTES_ELSEWHERE: readonly RouteKey[] = [
+  "GET /social/:provider/callback",
+  "POST /social/apple/callback",
+  "POST /second-factor/passkey/enable",
+  // The mailed tokens of the account: their own tests in email-change.test.ts and account-delete.test.ts.
+  "POST /user/change-email/confirm",
+  "POST /user/delete/confirm",
+  "POST /reauth",
+  "POST /passkey/register/verify",
+  "POST /passkey/authenticate/verify",
+];
+
+describe("token_expired on every route that declares it (plan 11g)", () => {
+  it("answers token_expired to each token, code, and challenge after its lifetime", async () => {
+    const w = world();
+    const { config } = w.auth;
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const dan = await verifiedSession(w.auth, "dan@example.com");
+    const org = must(
+      await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
+    );
+    must(
+      await inviteMember(config, {
+        user: ada.user,
+        organizationId: org.organization.id,
+        email: dan.user.email,
+        role: "member",
+      }),
+    );
+    const inviteToken = w.lastInvitation();
+    must(await requestPasswordReset(config, { email: ada.user.email, ip: null }));
+    const resetToken = w.lastToken();
+    must(await requestMagicLink(config, { email: ada.user.email, ip: null }));
+    const magicToken = w.lastToken();
+    must(
+      await passwordSignUp(config, {
+        email: "pat@example.com",
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    const verifyToken = w.lastToken();
+    const { verifier, challenge } = await pkce();
+    const start = must(
+      await startHandoff(config, { challenge, redirect: "example://auth", ip: null }),
+    );
+    const second = must(
+      await startHandoff(config, { challenge, redirect: "example://auth", ip: null }),
+    );
+    const landed = must(
+      await continueHandoff(config, {
+        handoffId: second.handoffId,
+        userId: ada.user.id,
+        sessionId: ada.session.id,
+      }),
+    );
+    const handoffCode = new URL(landed.location).searchParams.get("code") ?? "";
+    // Past every lifetime. The sessions of the probe are new ones.
+    w.auth.clock.advance(31 * 86_400_000);
+    const adaAgain = await createSession(config, {
+      userId: ada.user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const danAgain = await createSession(config, {
+      userId: dan.user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+      "POST /handoff/continue": { h: start.handoffId },
+      "POST /handoff/redeem": { code: handoffCode, verifier },
+      "POST /organizations/invitations/accept": { token: inviteToken },
+      "POST /organizations/invitations/decline": { token: inviteToken },
+      "POST /password/reset": { token: resetToken, password: "a new horse battery" },
+      "POST /password/verify": { token: verifyToken },
+      "POST /magic-link/verify": { token: magicToken },
+    };
+    const queries: { readonly [K in RouteKey]?: Record<string, string> } = {
+      "GET /handoff/continue": { h: start.handoffId },
+    };
+    const routes = declaring("token_expired").filter(
+      (key) => !EXPIRY_ROUTES_ELSEWHERE.includes(key),
+    );
+    expect(routes.length).toBeGreaterThan(0);
+    const results: Record<string, Answer> = {};
+    for (const key of routes) {
+      const headers =
+        key === "POST /organizations/invitations/accept"
+          ? w.cookie(danAgain.token)
+          : w.cookie(adaAgain.token);
+      const query = queries[key];
+      if (query) {
+        const url = `${BASE_URL}/auth${entryOf(key).path}?${new URLSearchParams(query)}`;
+        results[key] = await answerOf(await w.handle(new Request(url, { headers })));
+      } else {
+        expect(bodies[key], `${key} has no body here`).toBeDefined();
+        results[key] = await call(w, key, headers, bodies[key]);
+      }
+    }
+    // The handoff pages carry the code in a redirect to the app.
+    const redirects: RouteKey[] = ["GET /handoff/continue", "POST /handoff/continue"];
+    expect(unlike(results, "token_expired", 400, redirects)).toEqual({});
+  });
+});

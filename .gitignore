@@ -9,6 +9,8 @@ coverage
 .superpowers/
 # Turbo writes AGENTS.md at the root on each run. It is generated, not a source file.
 /AGENTS.md
+# The answer records of core's test run (plan 11g). The check run reads them; they are not source.
+packages/core/.answers/
 # wrangler dev secrets for local runs. Never commit them.
 .dev.vars
 *.env

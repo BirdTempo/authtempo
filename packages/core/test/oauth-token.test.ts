@@ -409,6 +409,20 @@ describe("userinfo and the endpoint's edges (plan 9g)", () => {
     expect(await res.json()).toEqual({ error: "insufficient_scope" });
   });
 
+  it("POST /oauth/userinfo answers insufficient_scope as the GET does (plan 11g)", async () => {
+    const plain = oauthHandle();
+    const d = await codeFor(plain, "mcp:read");
+    const u = await tokens(await plain.auth.handle(exchange(d.code, d.clientId, d.verifier)));
+    const res = await plain.auth.handle(
+      new Request(`${BASE_URL}/auth/oauth/userinfo`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${u.access_token}` },
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "insufficient_scope" });
+  });
+
   it("answers 401 for a session JWT whose audience is a resource and whose app claims add client_id and scope: the typ and jti checks refuse it", async () => {
     const h = oauthHandle();
     // One config cannot hold the overlap (review I-2: construction refuses

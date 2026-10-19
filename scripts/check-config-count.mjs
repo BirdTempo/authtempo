@@ -25,8 +25,9 @@ import { execFileSync } from "node:child_process";
 // packages/mcp (41, Task 5), then examples/mcp-server (42, Task 13). The
 // config of examples/mcp-server came in Task 12, and Task 13 raises the
 // minimum. Then plan 11e adds packages/mcp/vitest.pool.config.ts (43, Task 16).
+// Plan 11g adds packages/core/vitest.answers.config.ts (44, Task 5).
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 43;
+const MINIMUM = 44;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",
