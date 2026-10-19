@@ -3,6 +3,7 @@ import { type AuthConfig, ConfigError } from "../src/config.js";
 import { markFresh } from "../src/engine/fresh.js";
 import { authTimeOf } from "../src/engine/oauth-authorize.js";
 import { createSession } from "../src/engine/sessions.js";
+import { authorizeQuery } from "../src/http/contract/oauth.js";
 import { fromBase64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { APP_ORIGIN, BASE_URL, get } from "./helpers.js";
 import {
@@ -228,6 +229,18 @@ describe("prompt=login, max_age, and auth_time (plan 12e, OIDC Core 3.1.2.1)", (
         await h.auth.handle(withPairs(values.map((v): [string, string] => ["max_age", v]))),
       );
     expect(await codeRows(h)).toEqual([]);
+  });
+
+  it("the contract takes an empty max_age and dpop_jkt, as the engine does, and refuses a bad value", () => {
+    const base = authorizeParams({ clientId: "cl_x", challenge: "c".repeat(43) });
+    const parse = (more: Record<string, string>) =>
+      authorizeQuery.safeParse({ ...base, ...more }).success;
+    expect(parse({ max_age: "", dpop_jkt: "" })).toBe(true);
+    expect(parse({ max_age: "0", dpop_jkt: "a".repeat(43) })).toBe(true);
+    for (const max_age of ["-1", "1.5", " 1", "12345678901"])
+      expect({ max_age, ok: parse({ max_age }) }).toEqual({ max_age, ok: false });
+    for (const dpop_jkt of ["a".repeat(42), "a".repeat(44), `${"a".repeat(42)}=`])
+      expect({ dpop_jkt, ok: parse({ dpop_jkt }) }).toEqual({ dpop_jkt, ok: false });
   });
 
   it("answers login_required to prompt=none with either case", async () => {

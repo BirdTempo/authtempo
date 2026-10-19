@@ -44,6 +44,12 @@ export const registerBody = z.object({
  * `pkceRequired`). The engine refuses its absence for every other request.
  * `dpop_jkt` binds the code to a DPoP key (RFC 9449 section 10).
  */
+/**
+ * An anchored engine pattern that also takes an empty value. RFC 6749
+ * section 3.1 treats an empty parameter as omitted, and the engine does so.
+ */
+const orEmpty = (re: RegExp) => new RegExp(`^(?:${re.source.slice(1, -1)})?$`);
+
 export const authorizeQuery = z.object({
   response_type: z.literal("code"),
   client_id: z.string().min(1).max(2048),
@@ -55,9 +61,9 @@ export const authorizeQuery = z.object({
   state: z.string().max(512).optional(),
   nonce: z.string().max(512).optional(),
   prompt: z.string().optional(),
-  dpop_jkt: z.string().regex(DPOP_JKT_RE).optional(),
+  dpop_jkt: z.string().regex(orEmpty(DPOP_JKT_RE)).optional(),
   // OIDC Core 1.0 section 3.1.2.1 (plan 12e): seconds since the last sign-in.
-  max_age: z.string().regex(MAX_AGE_RE).optional(),
+  max_age: z.string().regex(orEmpty(MAX_AGE_RE)).optional(),
   // Read once each and ignored (OIDC Core 1.0 sections 3.1.2.1, 5.2, and 5.5).
   display: z.string().optional(),
   ui_locales: z.string().optional(),
