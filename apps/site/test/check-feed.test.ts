@@ -226,6 +226,21 @@ describe("checkFeed (plan 11b Task 7)", () => {
     );
   });
 
+  it.each(["2026-02-30T10:00:00Z", "2026-11-15T24:00:00Z"])(
+    "fails a row of RELEASE_DATES at %s, which is no real instant",
+    (date) => {
+      const r = checkFeed({
+        feed: fixtureFeed(),
+        versions: FIXTURE_VERSIONS,
+        changelogs,
+        dates: { ...DATES, "@authtempo/core@0.1.0": date },
+      });
+      expect(r.failures).toContain(
+        `the row @authtempo/core@0.1.0 of RELEASE_DATES is ${date}; it must be YYYY-MM-DDTHH:MM:SSZ`,
+      );
+    },
+  );
+
   it("reads zero packages as a failure", () => {
     const r = checkFeed({ feed: emptyFeed, versions: [], changelogs: [], dates: {} });
     expect(r.failures).toEqual(["read 0 packages"]);
@@ -325,6 +340,27 @@ describe("checkFeed and RFC 4287 (plan 11b Task 7, ruling 29)", () => {
         `<updated>${FEED_START}</updated>`,
         "<updated>2026-10-14T00:00:00.5+08:00</updated>",
       ).failures,
+    ).toEqual([]);
+  });
+
+  // Date.parse takes each of these, and RFC 3339 does not (review of Task 7, Minor 1).
+  it.each([
+    "2026-02-30T10:00:00Z",
+    "2026-11-15T24:00:00Z",
+    "2026-04-31T00:00:00Z",
+    "2026-13-01T00:00:00Z",
+    "2026-11-15T10:60:00Z",
+    "2026-11-15T10:00:00+24:00",
+  ])("3.3: fails the date %s, which is no real calendar instant", (date) => {
+    expect(
+      emptyWith(`<updated>${FEED_START}</updated>`, `<updated>${date}</updated>`).failures,
+    ).toEqual([`the updated date of the feed is ${date}; it is not an RFC 3339 date-time`]);
+  });
+
+  it("3.3: passes the last day of February in a leap year, and a leap second", () => {
+    expect(
+      emptyWith(`<updated>${FEED_START}</updated>`, "<updated>2028-02-29T23:59:60Z</updated>")
+        .failures,
     ).toEqual([]);
   });
 

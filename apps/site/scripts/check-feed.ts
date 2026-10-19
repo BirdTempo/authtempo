@@ -9,9 +9,46 @@ import { parseXml, type XmlElement } from "./lib/xml.ts";
 
 const ATOM = "http://www.w3.org/2005/Atom";
 /** RFC 3339 date-time; RFC 4287 3.3 also needs an upper-case T and Z. */
-const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/;
 /** The form of a row of RELEASE_DATES: one form, in UTC, so the newest row is plain to find. */
 const ROW_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * True for a date-time of RFC 3339 section 5.6 with a real calendar day.
+ * Date.parse takes 2026-02-30 and the hour 24, so the parts are checked
+ * here: the month, the day of that month, the hour 00 to 23, the minute, the
+ * second (60 for a leap second, section 5.7), and the offset.
+ */
+export function isDateTime(d: string): boolean {
+  const m = DATE_TIME.exec(d);
+  if (m === null) return false;
+  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number) as number[];
+  const days = new Date(Date.UTC(year ?? 0, month ?? 0, 0)).getUTCDate();
+  return (
+    month !== undefined &&
+    month >= 1 &&
+    month <= 12 &&
+    day !== undefined &&
+    day >= 1 &&
+    day <= days &&
+    (hour ?? 99) <= 23 &&
+    (minute ?? 99) <= 59 &&
+    (second ?? 99) <= 60 &&
+    Number(m[7] ?? 0) <= 23 &&
+    Number(m[8] ?? 0) <= 59
+  );
+}
+
+/**
+ * True for a row of RELEASE_DATES: the UTC form with no fraction, and a real
+ * instant. The round trip through Date fails 2026-02-30 and the hour 24.
+ */
+export function isRowDate(d: string): boolean {
+  if (!ROW_DATE.test(d)) return false;
+  const t = new Date(d);
+  return !Number.isNaN(t.getTime()) && t.toISOString().replace(".000Z", "Z") === d;
+}
 /** An absolute IRI: a scheme, a colon, and no space (RFC 3987). */
 const ABSOLUTE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/;
 const TEXT_TYPES = ["text", "html", "xhtml"];
@@ -43,7 +80,7 @@ function checkElement(el: XmlElement, of: string, failures: string[], isEntry: b
   const [updated] = kids(el, "updated");
   if (kids(el, "updated").length === 1 && updated !== undefined) {
     const d = updated.text.trim();
-    if (!DATE_TIME.test(d) || Number.isNaN(Date.parse(d)))
+    if (!isDateTime(d))
       failures.push(`the updated date of ${of} is ${d}; it is not an RFC 3339 date-time`);
   }
   for (const title of kids(el, "title")) {
@@ -155,7 +192,7 @@ export function checkFeed(input: FeedInput): CheckReport {
   for (const [key, date] of Object.entries(input.dates)) {
     if (!headings.includes(key))
       r.failures.push(`${key} has a row of RELEASE_DATES and no changelog heading`);
-    if (!ROW_DATE.test(date) || Number.isNaN(Date.parse(date)))
+    if (!isRowDate(date))
       r.failures.push(
         `the row ${key} of RELEASE_DATES is ${date}; it must be YYYY-MM-DDTHH:MM:SSZ`,
       );
