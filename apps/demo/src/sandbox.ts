@@ -1,5 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
+import type { Auth } from "@authtempo/core";
+import { demoAuth } from "./auth.js";
+import { createMailbox, MAILBOX_DDL, type Mailbox } from "./mailbox.js";
 import { MIGRATIONS } from "./migrations.gen.js";
+import { PROVIDER_DDL, providerRoute } from "./provider.js";
+import { sqliteD1 } from "./sqlite-d1.js";
 
 /** The life of a sandbox: its alarm deletes the store 60 minutes after create() (decision 1). */
 export const SANDBOX_LIFE_MS = 3_600_000;
@@ -26,7 +31,10 @@ function json(status: number, body: unknown): Response {
  * an id from a cookie never makes a store.
  */
 export class Sandbox extends DurableObject<Cloudflare.Env> {
-  /** Makes the store: the alarm, then the shipped migrations, then the meta rows. */
+  /** The auth of this sandbox, built once per object instance. */
+  private demo: { auth: Auth; db: D1Database; mailbox: Mailbox } | null = null;
+
+  /** Makes the store: the alarm, then the shipped migrations, then the demo tables and the meta rows. */
   async create(): Promise<{ resetAt: number }> {
     if (this.isLive()) throw new Error("demo: the sandbox exists");
     const sql = this.ctx.storage.sql;
@@ -39,6 +47,8 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
     for (const m of MIGRATIONS) this.ctx.storage.transactionSync(() => sql.exec(m.sql));
     this.ctx.storage.transactionSync(() => {
       sql.exec(META_DDL);
+      sql.exec(MAILBOX_DDL);
+      sql.exec(PROVIDER_DDL);
       const put = "INSERT INTO demo_meta (key, value) VALUES (?, ?)";
       sql.exec(put, "created_at", String(createdAt));
       sql.exec(put, "reset_at", String(resetAt));
@@ -53,8 +63,28 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
   }
 
   /** Answers one request of a live sandbox. No path here makes a sandbox. */
-  async handle(_request: Request): Promise<Response> {
+  async handle(request: Request): Promise<Response> {
     if (!this.isLive()) return json(404, { error: "no_sandbox" });
+    const { auth, db, mailbox } = this.open();
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/auth/")) return auth.handle(request);
+    if (url.pathname === "/whoami") {
+      // As examples/worker: the session cookie, a ts_ bearer, or a tk_ bearer.
+      const c = await auth.caller(request);
+      if (!c) return json(401, { error: "unauthorized" });
+      const res = json(200, { kind: c.kind, id: c.user.id, email: c.user.email });
+      // After a sliding refresh, renew the cookie or the browser drops it early.
+      const renewed = c.kind === "session" ? auth.sessionCookie(request, c) : null;
+      if (renewed) res.headers.set("set-cookie", renewed);
+      return res;
+    }
+    if (url.pathname.startsWith("/provider/")) return providerRoute(request, db);
+    if (url.pathname === "/mailbox" && request.method === "GET") {
+      // Task 10 adds the HTML page of the mailbox.
+      if (!(request.headers.get("accept") ?? "").includes("application/json"))
+        return json(406, { error: "not_acceptable" });
+      return json(200, { mail: mailbox.list() });
+    }
     return new Response("ok", { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
 
@@ -66,6 +96,20 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
   /** The reset: the alarm at reset_at deletes the whole store. */
   override async alarm(): Promise<void> {
     await this.ctx.storage.deleteAll();
+  }
+
+  /** The auth, the D1 surface, and the mailbox of this store, made at the first request. */
+  private open(): { auth: Auth; db: D1Database; mailbox: Mailbox } {
+    if (this.demo) return this.demo;
+    const storage = this.ctx.storage;
+    const secret = storage.sql
+      .exec<{ value: string }>("SELECT value FROM demo_meta WHERE key = 'secret'")
+      .one().value;
+    const db = sqliteD1(storage.sql, (fn) => storage.transactionSync(fn));
+    const mailbox = createMailbox(storage.sql);
+    const auth = demoAuth({ origin: this.env.DEMO_ORIGIN, secret, db, mailbox });
+    this.demo = { auth, db, mailbox };
+    return this.demo;
   }
 
   private isLive(): boolean {

@@ -1,3 +1,4 @@
+import { CLIENT_IP_HEADER } from "./auth.js";
 import { Gate } from "./gate.js";
 import { Sandbox } from "./sandbox.js";
 
@@ -29,6 +30,19 @@ function newId(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * The request for the sandbox. The Worker deletes any incoming
+ * x-demo-client-ip and sets it from cf-connecting-ip, which only Cloudflare
+ * sets. So a visitor cannot choose the IP that core's limits count.
+ */
+function forSandbox(request: Request): Request {
+  const forwarded = new Request(request);
+  forwarded.headers.delete(CLIENT_IP_HEADER);
+  const ip = request.headers.get("cf-connecting-ip");
+  if (ip) forwarded.headers.set(CLIENT_IP_HEADER, ip);
+  return forwarded;
+}
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -44,7 +58,7 @@ export default {
     // The first value that names a live sandbox takes the request.
     for (const id of cookieIds(request)) {
       const stub = env.SANDBOX.get(env.SANDBOX.idFromName(id));
-      if (await stub.exists()) return stub.handle(request);
+      if (await stub.exists()) return stub.handle(forSandbox(request));
     }
     // A form post never lands in a new sandbox by surprise.
     if (request.method !== "GET" && request.method !== "HEAD")

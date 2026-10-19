@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // facts.ts alone, to dist/facts.js and its declaration. It imports types
+  // only, so the site loads it in Node with no Workers type.
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "lib": ["ES2023"],
+    "types": []
+  },
+  "files": ["src/facts.ts"]
+}
