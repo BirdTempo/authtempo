@@ -23,7 +23,7 @@ import { type DpopKey, dpopKey } from "./support/dpop-key.js";
 
 /**
  * The refresh reuse window (plan 12e Task 13, spec 8.16 item 12). A retry
- * inside the window answers a new child and spends the child of the first
+ * inside the window answers a new child. It spends the child of the first
  * use, so the family keeps one live branch. A copy outside the window, or
  * a superseded child, ends the family on every instance.
  */
@@ -168,6 +168,8 @@ describe("the refresh reuse window (plan 12e Task 13)", () => {
     const a = instance(10);
     const b = instance(10, a);
     const g = await grant(a);
+    // The client uses the token an hour after its issue: the window counts from the use.
+    a.clock.advance(3_600_000);
     // The client's first use: the answer with the first child is lost on the network.
     const lost = refreshOf(await refresh(a, g.token, { client_id: g.clientId }));
     a.clock.advance(5_000);
@@ -187,6 +189,21 @@ describe("the refresh reuse window (plan 12e Task 13)", () => {
     expect((await liveRows(a, g.familyId)).length).toBe(1);
     // The family lives: the new child refreshes on the first instance.
     expect((await refresh(a, child, { client_id: g.clientId })).status).toBe(200);
+  });
+
+  it("answers a second retry inside the window with a new child, and keeps one live row", async () => {
+    const a = instance(10);
+    const b = instance(10, a);
+    const g = await grant(a);
+    refreshOf(await refresh(a, g.token, { client_id: g.clientId }));
+    a.clock.advance(2_000);
+    // Two answers in a row are lost: each retry spends the live child of the parent.
+    const second = refreshOf(await refresh(b, g.token, { client_id: g.clientId }));
+    a.clock.advance(2_000);
+    const third = refreshOf(await refresh(a, g.token, { client_id: g.clientId }));
+    expect((await rowOf(a, second))?.usedAt).toEqual(a.clock.now());
+    expect(await liveRows(a, g.familyId)).toMatchObject([{ id: (await rowOf(a, third))?.id }]);
+    expect((await refresh(b, third, { client_id: g.clientId })).status).toBe(200);
   });
 
   it("deletes the family when the superseded child comes later", async () => {
