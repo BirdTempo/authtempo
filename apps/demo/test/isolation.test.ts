@@ -176,6 +176,12 @@ function refused(jar: Jar, res: Response): boolean {
  * Each item of `held` does nothing in the sandbox of `other`. The checks that
  * only read come first. `fresh` is true when `other` has made no data yet, so
  * a cross of the stores meets a named refusal here, not a step of hold().
+ *
+ * Two tables of core get no refusal of their own here (Task 12 re-review,
+ * Low 4). ta_limit holds the limiter counts, and ta_identity holds a social
+ * identity. Each one lives in the same SQLite store of the sandbox as every
+ * row above, through the same D1 surface. So a cross of the stores fails the
+ * first refusal here before it reaches either table (break B2x).
  */
 async function refusedIn(other: Jar, held: Held, fresh: boolean): Promise<void> {
   // The session token as the session cookie, beside the sandbox cookie of `other`.
