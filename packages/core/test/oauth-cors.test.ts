@@ -153,6 +153,16 @@ describe("CORS on the token endpoint for a registered client's origin (plan 11d)
     }
   });
 
+  it("answers the preflight of a client of api.oauth.clients, whose kind is api (plan 12e)", async () => {
+    const h = oauthHandle();
+    const made = await h.auth.api.oauth?.clients.create({ redirectUris: [REDIRECT] });
+    if (!made?.ok) throw new Error("create failed");
+    expect(made.value.client.kind).toBe("api");
+    const res = await h.auth.handle(preflight(CLIENT_ORIGIN, `?client_id=${made.value.client.id}`));
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe(CLIENT_ORIGIN);
+  });
+
   it("never fetches at a preflight: a client metadata document URL answers 403 (T6)", async () => {
     let fetched = 0;
     const h = oauthHandle({

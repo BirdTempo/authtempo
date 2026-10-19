@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { secretMatches } from "../src/engine/oauth-client-secret.js";
-import { deleteClient } from "../src/engine/oauth-client-store.js";
+import { deleteClient, rotateClientSecret } from "../src/engine/oauth-client-store.js";
+import { findClient } from "../src/engine/oauth-clients.js";
 import type { ModelName } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { post } from "./helpers.js";
@@ -403,5 +404,78 @@ describe("api.oauth.clients (plan 12e)", () => {
     const text = logged();
     expect(text).not.toContain(oldSecret);
     expect(text).not.toContain(newSecret);
+  });
+  it("lets one of two rotations on one read win: the other answers invalid_request and no secret", async () => {
+    const h = oauthHandle();
+    const made = await clientsOf(h).create({
+      redirectUris: [REDIRECT],
+      authMethod: "client_secret_basic",
+    });
+    if (!made.ok) throw new Error(made.error);
+    const clientId = made.value.client.id;
+    // Both calls read the row before either writes: the reads wait for each other.
+    let reads = 0;
+    let open: () => void = () => {};
+    const bothRead = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const storage: StorageAdapter = {
+      ...h.storage,
+      findOne: async (model, where) => {
+        const row = await h.storage.findOne(model, where);
+        if (model === "oauthClient" && ++reads === 2) open();
+        if (model === "oauthClient") await bothRead;
+        return row;
+      },
+    };
+    const config = { ...h.config, storage };
+    const [a, b] = await Promise.all([
+      rotateClientSecret(config, { clientId }),
+      rotateClientSecret(config, { clientId }),
+    ]);
+    const results = [a, b];
+    const won = results.filter((r) => r.ok);
+    expect(won).toHaveLength(1);
+    expect(results.filter((r) => !r.ok)).toEqual([
+      { ok: false, error: "invalid_request", status: 400 },
+    ]);
+    const winner = won[0];
+    if (!winner?.ok) throw new Error("no winner");
+    const row = await h.storage.findOne("oauthClient", [
+      { field: "id", op: "eq", value: clientId },
+    ]);
+    if (!row) throw new Error("no client row");
+    expect(row.secretHash).toBe(await sha256(winner.value.clientSecret));
+    expect(await secretMatches(row, made.value.clientSecret ?? "", h.clock.now())).toBe(true);
+  });
+
+  it("refuses update and rotateSecret on a CIMD client: its document is the source of its fields", async () => {
+    const docUrl = "https://client.example.com/oauth/metadata.json";
+    const doc = {
+      client_id: docUrl,
+      client_name: "Doc client",
+      redirect_uris: [REDIRECT],
+      token_endpoint_auth_method: "none",
+    };
+    const h = oauthHandle({
+      oauth: {
+        resources: ["https://api.example.com/mcp"],
+        fetch: async () =>
+          new Response(JSON.stringify(doc), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      },
+    });
+    expect(await findClient(h.config, docUrl)).toMatchObject({ id: docUrl, kind: "cimd" });
+    const before = await h.storage.findOne("oauthClient", [
+      { field: "id", op: "eq", value: docUrl },
+    ]);
+    const refused = { ok: false, error: "invalid_client", status: 401 };
+    expect(await clientsOf(h).update({ clientId: docUrl, name: "Renamed" })).toEqual(refused);
+    expect(await clientsOf(h).rotateSecret({ clientId: docUrl })).toEqual(refused);
+    expect(
+      await h.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: docUrl }]),
+    ).toEqual(before);
   });
 });
