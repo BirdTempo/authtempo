@@ -1,5 +1,6 @@
 import { createLocalJWKSet, decodeJwt, jwtVerify } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createAuth } from "../src/create-auth.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { publicKeySet } from "../src/engine/jwt.js";
@@ -7,6 +8,7 @@ import { createClient } from "../src/engine/oauth-client-store.js";
 import { DEVICE_GRANT, fetchCimd } from "../src/engine/oauth-clients.js";
 import { deliverLogouts, linkIdToken } from "../src/engine/oauth-logout.js";
 import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
+import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { revokeOtherSessions, revokeSession } from "../src/engine/session-list.js";
 import { createSession, endSessions, type ResolvedSession } from "../src/engine/sessions.js";
 import { sweepExpired } from "../src/engine/sweep.js";
@@ -16,7 +18,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { base32Decode } from "../src/primitives/totp.js";
 import type { OAuthLogoutRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { BASE_URL, post, tokenFromMail } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, post, tokenFromMail } from "./helpers.js";
 import {
   authorizeGet,
   consentPost,
@@ -29,6 +31,7 @@ import {
   SCOPES,
   tokenPost,
 } from "./oauth-helpers.js";
+import { FAST } from "./password-helpers.js";
 import { codeNow, EMAIL, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 /**
@@ -94,18 +97,32 @@ function world(opts: { noFetch?: boolean; cimd?: boolean } = {}) {
     if (custom) return custom(init);
     return new Response(null, { status: status.get(String(url)) ?? 200 });
   };
-  const auth = totpAuth({
-    oauth: {
-      resources: [RESOURCE],
-      scopes: SCOPES,
-      registration: { cimd: opts.cimd === true, dynamic: true },
-      device: {},
-      ...(opts.noFetch ? {} : { fetch: fetchFn as typeof fetch }),
-    },
-  });
+  const oauth = {
+    resources: [RESOURCE],
+    scopes: SCOPES,
+    registration: { cimd: opts.cimd === true, dynamic: true },
+    device: {},
+    ...(opts.noFetch ? {} : { fetch: fetchFn as typeof fetch }),
+  };
+  const auth = totpAuth({ oauth });
   storage = auth.storage;
   const handle = createRouter(auth.config, coreRoutes(auth.config));
-  return { auth, handle, calls, status, answer };
+  // The api of the same app, on the same storage and clock.
+  const { api } = createAuth({
+    baseURL: BASE_URL,
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [APP_ORIGIN],
+    storage: auth.storage,
+    clock: auth.clock,
+    mail: {
+      send: async (m) => {
+        auth.mail.push(m);
+      },
+    },
+    password: { hash: FAST, uniformSignUp: false },
+    oauth,
+  });
+  return { auth, handle, api, calls, status, answer };
 }
 type World = ReturnType<typeof world>;
 
@@ -201,6 +218,34 @@ const FLOWS: Flow[] = [
     name: "a sign-out",
     target: "actor",
     run: (w, actor) => w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) })),
+  },
+  {
+    name: "the api sign-out",
+    target: "actor",
+    run: (w, actor) => w.api.signOut(actor.token),
+  },
+  {
+    // The cookie move of plan 12b: a sign-out also ends the session of the old cookie name.
+    name: "a sign-out of the old cookie name",
+    target: "other",
+    run: (w, actor, other) =>
+      w.handle(
+        post(
+          "/auth/sign-out",
+          {},
+          {
+            cookie: `${cookieOf(w, actor.token)}; ${w.auth.config.legacyCookieName}=${other.token}`,
+          },
+        ),
+      ),
+  },
+  {
+    name: "the first email second-factor enable",
+    target: "other",
+    async run(w, actor) {
+      const r = await enableEmailMethod(w.auth.config, { session: actor, password: PASSWORD });
+      if (!r.ok) throw new Error(r.code);
+    },
   },
   {
     name: "a reset",
@@ -421,6 +466,27 @@ describe("back-channel logout (plan 12e Task 16)", () => {
         }
       });
     }
+  });
+
+  it("drops a waiting row whose client lost its back-channel URI, and posts nothing", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const created = await w.api.oauth?.clients.create({
+      redirectUris: [REDIRECT],
+      backchannelLogoutUri: BC,
+    });
+    if (!created?.ok) throw new Error("no client");
+    const id = created.value.client.id;
+    await tokensOf(w, actor.token, id);
+    w.status.set(BC, 500);
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(await outbox(w)).toMatchObject([{ clientId: id, attempts: 1 }]);
+    const updated = await w.api.oauth?.clients.update({ clientId: id, backchannelLogoutUri: null });
+    expect(updated?.ok).toBe(true);
+    w.auth.clock.advance(MINUTE);
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(1);
+    expect(await outbox(w)).toEqual([]);
+    expect(w.calls).toHaveLength(1);
   });
 
   it("delivers a form POST of logout_token after the commit and deletes the row on 200 or 204", async () => {

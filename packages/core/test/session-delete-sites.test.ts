@@ -22,6 +22,8 @@ interface SourceFs {
 }
 const FS_MODULE = "node:fs";
 const SRC = new URL("../src/", import.meta.url);
+/** The compat package stores core's rows too: the Step 1 grep of the brief reads it (review L3). */
+const COMPAT = new URL("../../compat-better-auth/src/", import.meta.url);
 
 type Kind =
   /** `endSessions` writes the outbox rows of the user's links in the flow's transaction. */
@@ -197,14 +199,19 @@ function sourceFiles(fs: SourceFs, dir: URL): URL[] {
 async function foundSites(): Promise<Map<string, number>> {
   const fs: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
   const found = new Map<string, number>();
-  for (const file of sourceFiles(fs, SRC)) {
+  const files = [...sourceFiles(fs, SRC), ...sourceFiles(fs, COMPAT)];
+  expect(files.some((f) => f.href.startsWith(COMPAT.href))).toBe(true);
+  for (const file of files) {
     const text = code(fs.readFileSync(file, "utf8"));
     for (const m of text.matchAll(CALL_RE)) {
       const before = text.slice(0, m.index);
       // The definition of a function is no site.
       if (/function\s+$/.test(before)) continue;
       const fn = [...before.matchAll(/function\s+(\w+)/g)].at(-1)?.[1] ?? "(top)";
-      const key = `${file.href.slice(SRC.href.length)}|${fn}|${m[1] ?? 'delete("session"'}`;
+      const name = file.href.startsWith(COMPAT.href)
+        ? `compat-better-auth/${file.href.slice(COMPAT.href.length)}`
+        : file.href.slice(SRC.href.length);
+      const key = `${name}|${fn}|${m[1] ?? 'delete("session"'}`;
       found.set(key, (found.get(key) ?? 0) + 1);
     }
   }
