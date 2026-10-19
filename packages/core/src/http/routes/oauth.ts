@@ -532,13 +532,20 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     // the request could not see the session. A cross-site POST carries no
     // SameSite=Lax cookie, so a POST with no session goes on as a GET of the
     // same request, without the yes. A top-level GET carries the Lax cookie.
-    if (!resolved && ctx.request.method === "POST") {
-      const query = new URLSearchParams(
-        [...params].filter(([name]) => name !== "confirm"),
-      ).toString();
-      const tail = query === "" ? "" : `?${query}`;
-      return redirect(`${config.baseURL}${config.basePath}/oauth/end-session${tail}`, 303);
-    }
+    // A GET in a frame carries none either: with Sec-Fetch-Dest present and
+    // not `document`, and no session, a page offers the same GET at the top.
+    // A request with no Sec-Fetch-Dest keeps the GET rules.
+    const query = new URLSearchParams(
+      [...params].filter(([name]) => name !== "confirm"),
+    ).toString();
+    const topLevel = `${config.baseURL}${config.basePath}/oauth/end-session${query === "" ? "" : `?${query}`}`;
+    if (!resolved && ctx.request.method === "POST") return redirect(topLevel, 303);
+    const dest = ctx.request.headers.get("sec-fetch-dest");
+    if (!resolved && dest !== null && dest !== "document")
+      return new Response(
+        defaultEndSessionPage({ kind: "framed", appName: config.appName, href: topLevel }),
+        { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) },
+      );
     const hintText = value("id_token_hint");
     let hint = hintText === null ? null : await checkIdTokenHint(config, hintText);
     // Section 2: a client_id beside the hint must be the client of the hint.

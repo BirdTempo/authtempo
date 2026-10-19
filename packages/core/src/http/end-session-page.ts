@@ -16,7 +16,12 @@ export type EndSessionPageInput =
       /** The request of the relying party, posted back with the yes, so the same checks run again. */
       fields: Readonly<Record<string, string>>;
     }
-  | { kind: "signed-out"; appName: string };
+  | { kind: "signed-out"; appName: string }
+  /**
+   * A request in a frame, which carries no SameSite=Lax cookie. The page
+   * says nothing of the session and links to the same GET at the top.
+   */
+  | { kind: "framed"; appName: string; href: string };
 
 const STYLE = `<style>
 body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #f6f6f6; color: #111; }
@@ -51,6 +56,13 @@ ${body}
  */
 export function defaultEndSessionPage(input: EndSessionPageInput): string {
   const appName = escapeHtml(input.appName);
+  if (input.kind === "framed")
+    return shell(
+      `Sign out of ${appName}`,
+      `<h1>Sign out of ${appName}</h1>
+<p>A sign-out cannot run inside a frame.</p>
+<p><a href="${escapeHtml(input.href)}" target="_top">Continue to sign out</a></p>`,
+    );
   if (input.kind === "signed-out")
     return shell(
       `Signed out of ${appName}`,

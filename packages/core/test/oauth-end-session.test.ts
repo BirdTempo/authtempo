@@ -396,6 +396,42 @@ describe("RP-initiated logout (plan 12e Task 15, OIDC RP-Initiated Logout 1.0)",
     expect(bare.headers.get("location")).toBe(PATH);
   });
 
+  it("answers a frame that sees no session with a top-level link, not a redirect", async () => {
+    const h = oauthHandle();
+    const s = await signedIn(h);
+    const hint = await idTokenOf(h, s.cookie, await client(h));
+    const params = { id_token_hint: hint, post_logout_redirect_uri: BYE, state: "st-<9>" };
+    // An iframe of the relying party: a browser sends no SameSite=Lax cookie in a cross-site frame.
+    const framed = await h.auth.handle(
+      endGet(params, { "sec-fetch-dest": "iframe", "sec-fetch-site": "cross-site" }),
+    );
+    expect(framed.status).toBe(200);
+    expect(framed.headers.get("location")).toBeNull();
+    const html = await framed.text();
+    expect(html).not.toContain("You are signed out");
+    expect(html).not.toContain("<form");
+    expect(html).not.toContain("<script");
+    expect(framed.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    const href = /<a href="([^"]+)" target="_top">/.exec(html)?.[1] ?? "";
+    expect(href).toBe(`${PATH}?${new URLSearchParams(params)}`.replaceAll("&", "&amp;"));
+    expect(html).not.toContain("st-<9>");
+    expect(await live(h, s.session.id)).toBe(true);
+    // The top-level GET with the cookie keeps the redirect.
+    const done = await h.auth.handle(
+      endGet(params, {
+        "sec-fetch-dest": "document",
+        "sec-fetch-site": "cross-site",
+        cookie: s.cookie,
+      }),
+    );
+    expect(done.status).toBe(302);
+    expect(done.headers.get("location")).toBe(`${BYE}?state=st-%3C9%3E`);
+    expect(await live(h, s.session.id)).toBe(false);
+    // A document GET with no session keeps the redirect too: nothing hides a session there.
+    const after = await h.auth.handle(endGet(params, { "sec-fetch-dest": "document" }));
+    expect(after.status).toBe(302);
+  });
+
   it("escapes each reflected field on the confirmation page", async () => {
     const h = oauthHandle();
     const s = await signedIn(h);
