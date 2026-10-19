@@ -361,10 +361,10 @@ describe("openApiDocument (plan 11g)", () => {
     // The 403 of the POST also holds origin_not_trusted, which the router answers with no challenge.
     expect(header("/oauth/userinfo", "post", "403")?.required).toBe(false);
     expect(header("/oauth/userinfo", "post", "403")?.description).toContain("`insufficient_scope`");
-    // Plan 12e: invalid_client after a Basic attempt carries the Basic challenge, so it is optional.
+    // Plan 12e, ruling 17: each invalid_client 401 carries the Basic challenge (RFC 7235 section 3.1).
     for (const path of ["/oauth/token", "/oauth/revoke"]) {
-      expect(header(path, "post", "401")?.required, path).toBe(false);
-      expect(header(path, "post", "401")?.description, path).toContain("`invalid_client`");
+      expect(header(path, "post", "401")?.required, path).toBe(true);
+      expect(header(path, "post", "401")?.description, path).toContain("Basic challenge");
     }
   });
 

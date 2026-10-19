@@ -143,7 +143,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     expect(await answer(raw)).toEqual(CLIENT);
   });
 
-  it("answers 401 with a Basic challenge after a Basic attempt", async () => {
+  it("answers each invalid_client 401 with a Basic challenge (RFC 6749 5.2, RFC 7235 3.1)", async () => {
     const h = oauthHandle();
     const s = await signedIn(h);
     const basic = await confidential(h, "client_secret_basic");
@@ -172,7 +172,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
         client_secret: wrong,
       }),
     );
-    expect(viaForm.headers.get("www-authenticate")).toBeNull();
+    expect(viaForm.headers.get("www-authenticate")).toBe(`Basic realm="${ISSUER}"`);
     expect(await answer(viaForm)).toEqual(CLIENT);
   });
 
@@ -350,6 +350,10 @@ describe("client auth at the token endpoint (plan 12e)", () => {
       { token: refresh_token, client_id: basic.clientId },
     ]) {
       const res = await h.auth.handle(revoke(body));
+      expect({ body, challenge: res.headers.get("www-authenticate") }).toEqual({
+        body,
+        challenge: `Basic realm="${ISSUER}"`,
+      });
       expect({ body, answer: await answer(res) }).toEqual({ body, answer: CLIENT });
     }
     const wrong = await h.auth.handle(

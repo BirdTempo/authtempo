@@ -63,21 +63,20 @@ export function namesClient(request: Request, form: URLSearchParams): boolean {
  * `client_assertion_type` in the form. More than one is `invalid_request`.
  * With none, `client_id` of the form names a public client. The method
  * present must be the client's own: a public client with a secret, and a
- * confidential client with none, are `invalid_client`. After a Basic
- * attempt the answer carries `basic`, so a 401 adds the Basic challenge
- * (RFC 6749 section 5.2). `known` is a row of the named id that the caller
- * already read, so a CIMD client is not read twice.
+ * confidential client with none, are `invalid_client`. The route adds the
+ * Basic challenge to each `invalid_client` (RFC 6749 section 5.2). `known`
+ * is a row of the named id that the caller already read, so a CIMD client
+ * is not read twice.
  */
 export async function authenticateClient(
   config: ResolvedConfig,
   request: Request,
   form: URLSearchParams,
   known?: OAuthClientRow,
-): Promise<OAuthResult<AuthedClient> & { basic?: true }> {
+): Promise<OAuthResult<AuthedClient>> {
   const header = request.headers.get("authorization") ?? "";
   const isBasic = BASIC_RE.test(header);
-  const fail = (error: "invalid_request" | "invalid_client") =>
-    isBasic ? { ...oauthFail<AuthedClient>(error), basic: true as const } : oauthFail(error);
+  const fail = (error: "invalid_request" | "invalid_client") => oauthFail<AuthedClient>(error);
   const formSecret = form.get("client_secret");
   const assertion = form.has("client_assertion_type");
   const present = [isBasic, formSecret !== null, assertion].filter(Boolean).length;
@@ -100,8 +99,7 @@ export async function authenticateClient(
   if (client.authMethod !== method) return fail("invalid_client");
   if (secret !== null && !(await secretMatches(client, secret, config.clock.now())))
     return fail("invalid_client");
-  const authed = oauthOk({ client, method, confidential: method !== "none" });
-  return isBasic ? { ...authed, basic: true } : authed;
+  return oauthOk({ client, method, confidential: method !== "none" });
 }
 
 /**

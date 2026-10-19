@@ -931,7 +931,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 
 | Field | Value |
 | --- | --- |
-| Needs | Nothing; or the client id and secret as HTTP Basic. A public client sends `client_id` and no credential. A confidential client sends its secret by its own method: HTTP Basic (`client_secret_basic`) or `client_secret` in the form (`client_secret_post`). A browser on a foreign origin needs that origin in a redirect URI of the public client that the form names. Its answer then carries `access-control-allow-origin` and no credentials. An origin of `trustedOrigins` gets that header with credentials. `POST /oauth/revoke` still answers 403 to a cross-site form post. A preflight from that origin names the client in `?client_id=` |
+| Needs | Nothing; or the client id and secret as HTTP Basic. A public client sends `client_id` and no credential. A confidential client sends its secret by its own method: HTTP Basic (`client_secret_basic`) or `client_secret` in the form (`client_secret_post`). Each `invalid_client` 401 carries `WWW-Authenticate: Basic` with the issuer as the realm. A browser on a foreign origin needs that origin in a redirect URI of the public client that the form names. Its answer then carries `access-control-allow-origin` and no credentials. An origin of `trustedOrigins` gets that header with credentials. `POST /oauth/revoke` still answers 403 to a cross-site form post. A preflight from that origin names the client in `?client_id=` |
 | Input | Form `{ grant_type, client_id?, client_secret?, code?, code_verifier?, redirect_uri?, resource?, refresh_token?, scope? }`. `grant_type=authorization_code` with `code`, `code_verifier`, `client_id`, `redirect_uri`, `resource?`; or `grant_type=refresh_token` with `refresh_token`, `client_id`, `scope?`, `resource?`. A Basic client may omit `client_id`. A code with no challenge takes no `code_verifier` |
 | Answer | `{ access_token, token_type: "Bearer", expires_in, scope, refresh_token?, id_token? }` |
 | Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`unsupported_grant_type`](/docs/reference/errors/#oauth-unsupported_grant_type), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
@@ -940,7 +940,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 
 | Field | Value |
 | --- | --- |
-| Needs | Nothing; or the client id and secret as HTTP Basic. A request that names a client takes the client auth of `POST /oauth/token`. A refresh token of a confidential client needs that auth |
+| Needs | Nothing; or the client id and secret as HTTP Basic. A request that names a client takes the client auth of `POST /oauth/token`. A refresh token of a confidential client needs that auth. Each `invalid_client` 401 carries `WWW-Authenticate: Basic` with the issuer as the realm |
 | Input | Form `{ token, client_id?, client_secret? }`. RFC 7009 |
 | Answer | 200 `{}` for any token; a refresh token's family goes |
 | Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |

@@ -444,7 +444,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_client"><code>invalid_client</code> 401</h3>
 
-- **Meaning:** The `client_id` is unknown, or its metadata document failed. At the token and revoke routes, the client auth failed. The secret is wrong, or the method is not the client's own. A confidential client sent no secret, or a public client sent one. After an HTTP Basic attempt, the answer carries `WWW-Authenticate: Basic`.
+- **Meaning:** The `client_id` is unknown, or its metadata document failed. At the token and revoke routes, the client auth failed. The secret is wrong, or the method is not the client's own. A confidential client sent no secret, or a public client sent one. At those routes the 401 carries `WWW-Authenticate: Basic`, with the issuer as the realm.
 - **Do:** Register the client again, or fix its metadata document. Send the secret by the client's own `token_endpoint_auth_method`, and send one method only.
 
 | Routes |

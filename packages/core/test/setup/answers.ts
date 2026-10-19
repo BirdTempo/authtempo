@@ -23,6 +23,8 @@ const FS_MODULE = "node:fs";
  * 2. A 2xx JSON body parses under the strict answer schema of the contract.
  * 3. The content type fits a kind of the contract: JSON for `json` and
  *    `metadata`, HTML for `html`, a 302 with `Location` for `redirect`.
+ * 4. A route that takes `clientSecretBasic` answers each `invalid_client`
+ *    with a Basic challenge (RFC 7235 section 3.1; plan 12e).
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
 vi.mock("../../src/http/router.js", async (importOriginal) => {
@@ -152,6 +154,12 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       if (code === null) return { ...base, verdict: "ok" };
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, true) };
     }
+    if (
+      code === "invalid_client" &&
+      ENTRIES.get(key)?.auth.includes("clientSecretBasic") &&
+      !(res.headers.get("www-authenticate") ?? "").startsWith("Basic realm=")
+    )
+      return { ...base, verdict: "an invalid_client answer carries no Basic challenge" };
     if (code !== null)
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, false) };
     if (status >= 400) return { ...base, verdict: `a ${status} ${type} answer carries no code` };

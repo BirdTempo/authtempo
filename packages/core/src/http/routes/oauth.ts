@@ -198,12 +198,16 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     redirectOrigins(client.redirectUris).has(origin);
   const originChecked = async (ip: string | null) =>
     config.limiter.allow(`oauth-token-origin:ip:${ipKey(ip)}`, ORIGIN_CHECK_PER_IP);
-  /** A failed client auth; after a Basic attempt a 401 carries the Basic challenge (RFC 6749 section 5.2). */
-  const clientRefused = (r: { ok: false; error: OAuthErrorCode; status: number; basic?: true }) =>
+  /**
+   * A refusal of the token or the revoke route. Each `invalid_client` 401
+   * carries the Basic challenge: RFC 7235 section 3.1 asks a challenge of
+   * every 401, and RFC 6749 section 5.2 names Basic.
+   */
+  const clientRefused = (r: { ok: false; error: OAuthErrorCode; status: number }) =>
     json(
       { error: r.error },
       r.status,
-      r.basic && r.status === 401
+      r.error === "invalid_client"
         ? { "www-authenticate": `Basic realm="${issuerOf(config)}"` }
         : {},
     );
@@ -329,7 +333,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           client = authed.value;
         }
         const r = await revokeToken(config, { token: form.get("token") ?? "", client });
-        return r.ok ? json({}) : oauthJson(r);
+        return r.ok ? json({}) : clientRefused(r);
       },
     },
     { method: "GET", path: "/oauth/userinfo", key: "GET /oauth/userinfo", handler: userinfo },
