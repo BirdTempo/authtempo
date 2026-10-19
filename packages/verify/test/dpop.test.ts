@@ -317,6 +317,40 @@ describe("DPoP in the verifier (plan 12e Task 10)", () => {
     );
   });
 
+  it("bounds the refused-proof record in entries and in bytes", async () => {
+    const server = makeServer();
+    const { token } = await bound(server);
+    const v = verifierOf(server, { algs: ["ES256"] });
+    const challengeOf = (request: Request) =>
+      v.unauthorized({ request }).headers.get("www-authenticate");
+    const proofError = 'Bearer, DPoP error="invalid_dpop_proof", algs="ES256"';
+    const tokenError = 'Bearer, DPoP error="invalid_token", algs="ES256"';
+    // 1001 refused proofs, each with its own signature part. The record keeps 1000.
+    const refused: Request[] = [];
+    for (let i = 0; i <= 1000; i++) {
+      const request = withDpop(TOOLS, token, `e30.e30.s${i}`);
+      expect((await v.verifyRequest(request)).ok).toBe(true);
+      refused.push(request);
+    }
+    const [first, second] = refused;
+    const last = refused.at(-1);
+    if (!first || !second || !last) throw new Error("no request");
+    // The 1001st refusal evicts the oldest: a clone of the first names the token now.
+    expect(challengeOf(first.clone())).toBe(tokenError);
+    expect(challengeOf(second.clone())).toBe(proofError);
+    expect(challengeOf(last.clone())).toBe(proofError);
+    // The request itself keeps its own result.
+    expect(challengeOf(first)).toBe(proofError);
+    // A signature part over 683 characters leaves no entry; 683 characters do.
+    const long = withDpop(TOOLS, token, `e30.e30.${"s".repeat(684)}`);
+    const longest = withDpop(TOOLS, token, `e30.e30.${"s".repeat(683)}`);
+    for (const request of [long, longest])
+      expect(await v.verifyRequest(request)).toEqual({ ok: true, value: null });
+    expect(challengeOf(long.clone())).toBe(tokenError);
+    expect(challengeOf(long)).toBe(proofError);
+    expect(challengeOf(longest.clone())).toBe(proofError);
+  });
+
   it("refuses a wrong dpop option at construction", () => {
     const server = makeServer();
     for (const dpop of [

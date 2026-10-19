@@ -18,6 +18,7 @@ import { type DpopOptions, resolveDpop, resourceProofHolds } from "./dpop.js";
 import { ownedFetch, TIMEOUT_DEFAULT_MS, TIMEOUT_MAX_MS, TIMEOUT_MIN_MS } from "./fetch.js";
 import { checkIntrospect, type IntrospectOptions, introspectActive } from "./introspect.js";
 import { createKeyCache } from "./jwks.js";
+import { sha256HexSync } from "./sha256.js";
 import {
   bearerChallenge,
   type ChallengeInput,
@@ -79,8 +80,15 @@ export type VerifyResult = { ok: true; value: Caller | null } | ClientFailure;
 
 /** The longest `tk_` answer cache. A revoke then takes effect within a minute at most. */
 export const API_TOKEN_CACHE_MAX_SECONDS = 60;
-/** The refused proofs whose signature a verifier keeps, for the 401 of a clone of the request. */
+/** The refused proofs whose signature hash a verifier keeps, for the 401 of a clone of the request. */
 const REFUSED_PROOFS_MAX = 1000;
+/**
+ * The longest signature part that the record keeps: a 4096-bit RSA
+ * signature is 512 bytes, so 683 base64url characters. A longer part is no
+ * real proof, and the record keeps nothing for it, so its memory has a
+ * bound in bytes too.
+ */
+const SIGNATURE_MAX = 683;
 /** The `tk_` answers a verifier keeps at most; the oldest goes first. */
 const API_TOKEN_CACHE_MAX = 1000;
 /** Core's rule of a `jwtMint.audience` entry (config.ts): 1 to 10 entries of 1 to 2048 characters. */
@@ -368,17 +376,25 @@ export function createVerifier(options: VerifierOptions): Verifier {
    */
   const refusals = new WeakMap<Request, "passed" | "invalid_dpop_proof">();
   /**
-   * The signatures of the refused proofs, so a clone of a refused request
-   * gets its error too. A signature names its proof. The oldest goes first
-   * above the bound, so the memory has a bound.
+   * The SHA-256 of the signature of each refused proof, so a clone of a
+   * refused request gets its error too. A signature names its proof. The
+   * oldest goes first above `REFUSED_PROOFS_MAX`, and each key is 64
+   * characters, so the memory has a bound in bytes.
    */
   const refusedProofs = new Set<string>();
+  /** The key of a proof in the record: a hash of its signature part, or null for none or a long one. */
+  const proofKey = (proof: string | null): string | null => {
+    const signature = proof?.split(".")[2];
+    return signature === undefined || signature.length > SIGNATURE_MAX
+      ? null
+      : sha256HexSync(signature);
+  };
   const refuseProof = (request: Request) => {
     refusals.set(request, "invalid_dpop_proof");
-    const signature = request.headers.get("dpop")?.split(".")[2];
-    if (signature === undefined) return;
-    refusedProofs.delete(signature);
-    refusedProofs.add(signature);
+    const key = proofKey(request.headers.get("dpop"));
+    if (key === null) return;
+    refusedProofs.delete(key);
+    refusedProofs.add(key);
     while (refusedProofs.size > REFUSED_PROOFS_MAX) {
       const oldest = refusedProofs.values().next().value;
       if (oldest === undefined) break;
@@ -391,10 +407,8 @@ export function createVerifier(options: VerifierOptions): Verifier {
     if (record !== undefined) return record === "passed" ? "invalid_token" : record;
     const proof = request.headers.get("dpop");
     if (proof === null) return "invalid_dpop_proof";
-    const signature = proof.split(".")[2];
-    return signature !== undefined && refusedProofs.has(signature)
-      ? "invalid_dpop_proof"
-      : "invalid_token";
+    const key = proofKey(proof);
+    return key !== null && refusedProofs.has(key) ? "invalid_dpop_proof" : "invalid_token";
   };
   /**
    * The answer of each DPoP request, so a second `verifyRequest` of one
