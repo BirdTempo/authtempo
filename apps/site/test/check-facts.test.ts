@@ -289,6 +289,15 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
       ].sort(),
     );
     expect(of("better-auth")).toHaveLength(50);
+    // Ruling 27: an authtempo row with a lack by design names the lack and its reason.
+    for (const id of ["f4", "f16", "g6"])
+      expect({
+        id,
+        named: /, by design: /.test(COMPARE_ROWS.find((r) => r.id === id)?.authtempo ?? ""),
+      }).toEqual({
+        id,
+        named: true,
+      });
     for (const id of ["a31", "a32", "b28", "b3", "b31", "b6", "d5", "e1", "f11", "g8"])
       expect({ id, side: COMPARE_ROWS.find((r) => r.id === id)?.side }).toEqual({
         id,

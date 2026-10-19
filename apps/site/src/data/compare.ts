@@ -91,9 +91,10 @@ function moved(
 /**
  * The rows, by side (rulings 25 and 26 of the plan 11b lane). A row is
  * "parity" only when authtempo has each part of its Better Auth cell. A row
- * is "authtempo" only when it also has more. A part that authtempo leaves
- * out by a design choice of the review keeps the review's side. The
- * authtempo cell then names that part (f4, f16, g6). Each other row is
+ * is "authtempo" only when it also has more. One exception (ruling 27): a
+ * lack that is a stated design choice for safety or privacy keeps the
+ * review's side. Its reason is in the review, and the authtempo cell names
+ * the lack and the reason with "by design" (f4, f16, g6). Each other row is
  * "better-auth": the new plan rows that are not merged, and each row where
  * Better Auth keeps a part. A port with one adapter does not match five
  * shipped providers.
@@ -125,14 +126,14 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "f4",
     "authtempo",
     "Trusted origins",
-    "Exact origins and app schemes only, with no wildcard and no function. A takeover of one subdomain gives no trust.",
+    "Exact origins and app schemes only. No wildcard and no function, by design: a takeover of one subdomain then gives no trust.",
     "Exact origins, wildcards, custom schemes, or a function for each request.",
   ),
   row(
     "f16",
     "authtempo",
     "Provider tokens at rest",
-    "Stores no access token and no refresh token of a social provider, so the store holds none to steal. An app cannot call the provider with one.",
+    "No provider token at rest, by design: the store holds none to steal. So an app cannot call the provider API with a stored token.",
     "Stores the tokens of each linked account, with encryption as an option.",
   ),
   row(
@@ -146,7 +147,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "g6",
     "authtempo",
     "Telemetry",
-    "No telemetry, and no setting turns it on. No data leaves your app.",
+    "No telemetry, and no setting turns it on, by design: no data leaves your app.",
     "Telemetry that is off by default, and that an app can turn on.",
   ),
   row(
