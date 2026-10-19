@@ -629,14 +629,15 @@ export interface OAuthConfig {
    *
    * The odds. Without the window, a copy of a refresh token presented after
    * the client's own use deletes the family at once. Take a window of N
-   * seconds. A copy presented within N seconds of the client's use gets a
-   * refresh token and an access token that lives `accessTtlMinutes`. The
-   * family dies at the client's next refresh, when it presents the
-   * superseded child. So the window gives an attacker who holds a copy at
-   * most N seconds to act, and at most `accessTtlMinutes` of access per
-   * success. For a confidential client or a DPoP-bound grant, the copy is
-   * useless without the secret or the key. The use: a client whose answer
-   * was lost on the network retries and keeps its grant.
+   * seconds. A copy presented within N seconds of the client's use gets an
+   * access token and a refresh token. The holder of the copy can rotate
+   * that refresh token until the client's next refresh. That refresh
+   * presents the superseded child and deletes the family. So an attacker
+   * who holds a copy has N seconds to act. Its access then lasts until the
+   * client's next refresh, plus at most `accessTtlMinutes`. For a
+   * confidential client or a DPoP-bound grant, the copy is useless without
+   * the secret or the key. The use: a client whose answer was lost on the
+   * network retries and keeps its grant.
    *
    * RFC 9700 section 4.14.2 (read 2026-10-20) gives no grace period for
    * rotation, so the window is off by default.
