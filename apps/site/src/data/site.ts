@@ -8,6 +8,8 @@ export const SITE = {
   docs: "/docs/",
   /** The aria-label of the header nav. */
   nav: "Site",
+  /** The aria-label of the footer nav. */
+  footerNav: "Footer",
   /** The label of the repository link, shown when REPO_URL is set. */
   repo: "GitHub",
 } as const;
@@ -18,6 +20,15 @@ export const SITE = {
  */
 export const NAV_LINKS: readonly { label: string; href: string }[] = [
   { label: "Docs", href: SITE.docs },
+];
+
+/**
+ * The links of the root footer (plan 11b): the feed, the changelog, and the
+ * security page. Each one joins with its page, as a header link does. Plan
+ * 11b Task 5 adds the security page, and Task 7 adds the feed.
+ */
+export const FOOTER_LINKS: readonly { label: string; href: string }[] = [
+  { label: "Changelog", href: `${SITE.docs}changelog/` },
 ];
 
 /**

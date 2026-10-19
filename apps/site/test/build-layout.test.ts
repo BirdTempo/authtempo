@@ -168,6 +168,14 @@ describe("the root layout (plan 11b1)", () => {
   });
 });
 
+describe("the root layout (plan 11b)", () => {
+  // Each link of the plan joins with its page, so check-links never meets a missing page.
+  it("links the changelog in the footer", () => {
+    const footer = page("index.html").split('class="site-footer')[1] ?? "";
+    expect(footer).toMatch(/<a\b[^>]* href="\/docs\/changelog\/"[^>]*>Changelog<\/a>/);
+  });
+});
+
 // Starlight 0.42.6 sets scopedStyleStrategy "where", so Astro adds an astro-<hash>
 // class to each element of a styled component. A class match allows that class.
 describe("the home page (brand spec 9)", () => {

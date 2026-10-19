@@ -11,7 +11,7 @@ import { REPO } from "../scripts/lib/paths.ts";
 import { FEATURES, featureOrder } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
-import { NAV_LINKS, SITE } from "../src/data/site.ts";
+import { FOOTER_LINKS, NAV_LINKS, SITE } from "../src/data/site.ts";
 import { DOCUMENTATION_HOSTS, unusedDocumentationHosts, vendorHosts } from "../src/data/vendors.ts";
 
 /** Every string inside a value, at any depth. */
@@ -207,6 +207,7 @@ describe("the data of the home page (plan 11b1)", () => {
       ...leaves(HOME),
       ...Object.values(FEATURES).flatMap((f) => [f.title, f.line]),
       ...NAV_LINKS.map((l) => l.label),
+      ...FOOTER_LINKS.map((l) => l.label),
       ...(Object.keys(SITE) as (keyof typeof SITE)[])
         .filter((key) => !ADDRESSES.includes(key))
         .map((key) => SITE[key]),

@@ -11,7 +11,7 @@ import { parseTokens } from "../../scripts/lib/tokens.ts";
 import Icon from "../components/Icon.astro";
 import Lockup from "../components/Lockup.astro";
 import { HOME } from "../data/home.ts";
-import { NAV_LINKS, REPO_URL, SITE } from "../data/site.ts";
+import { FOOTER_LINKS, NAV_LINKS, REPO_URL, SITE } from "../data/site.ts";
 import toggle from "../scripts/theme-toggle.js?raw";
 import "../styles/tokens.css";
 import tokensCss from "../styles/tokens.css?raw";
@@ -69,6 +69,9 @@ const license: string =
     <main id="main"><slot /></main>
     <footer class="site-footer">
       <span>{HOME.title} · {license}</span>
+      <nav aria-label={SITE.footerNav}>
+        {FOOTER_LINKS.map((link) => <a href={link.href}>{link.label}</a>)}
+      </nav>
       <span class="mono">{corePackage.version}</span>
     </footer>
   </body>
@@ -89,6 +92,8 @@ const license: string =
   .site-header nav { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--at-unit) * 3); margin-inline-start: auto; }
   .site-header nav a { color: var(--at-ink); text-decoration: none; font-weight: 500; }
   .site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--at-rhythm); padding-block: var(--at-rhythm); border-top: 1px solid var(--at-line); color: var(--at-mute); font-size: var(--at-text-small); }
+  .site-footer nav { display: flex; flex-wrap: wrap; gap: calc(var(--at-unit) * 3); }
+  .site-footer nav a { color: var(--at-mute); }
   .at-toggle { display: inline-grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--at-line); border-radius: 0.5rem; background: transparent; color: var(--at-ink); cursor: pointer; }
   .at-toggle :global(.at-icon) { display: none; grid-area: 1 / 1; width: 1.25rem; height: 1.25rem; }
   :global(:root[data-theme-choice="auto"]) .at-toggle :global(.at-toggle-auto),

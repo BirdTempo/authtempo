@@ -1,6 +1,6 @@
 import { FEATURES } from "../../src/data/features.ts";
 import { HOME } from "../../src/data/home.ts";
-import { NAV_LINKS, SITE } from "../../src/data/site.ts";
+import { FOOTER_LINKS, NAV_LINKS, SITE } from "../../src/data/site.ts";
 import type { Page } from "./markdown.ts";
 
 /** The path that a failure of check-terms or check-sentences names for the home prose. */
@@ -38,6 +38,7 @@ export function homeProsePage(): Page {
     HOME.skip,
     HOME.noLicense,
     ...NAV_LINKS.map((l) => l.label),
+    ...FOOTER_LINKS.map((l) => l.label),
     ...siteLabels(),
   ];
   return {
