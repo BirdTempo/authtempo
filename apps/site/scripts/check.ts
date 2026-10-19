@@ -34,15 +34,14 @@ import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkScript } from "./check-script.ts";
 import { checkSentences } from "./check-sentences.ts";
-import { checkSitePages } from "./check-site-pages.ts";
+import { checkSitePages, MINIMUM_ENTRIES } from "./check-site-pages.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
 import { checkTokens } from "./check-tokens.ts";
 import { sidebarGroups, sidebarOrder } from "./lib/agent.ts";
-import { cliHelpPages, helpRuns } from "./lib/cli-help.ts";
+import { helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
 import { EXPORT_ENTRIES } from "./lib/entries.ts";
-import { homeProsePage } from "./lib/home-prose.ts";
 import {
   distFiles,
   distPageOrEmpty,
@@ -62,6 +61,7 @@ import {
 } from "./lib/load.ts";
 import { wireLists } from "./lib/mcp-wire.ts";
 import { DIST, DOCS, REPO } from "./lib/paths.ts";
+import { prosePages } from "./lib/prose.ts";
 import { type CheckReport, summaryLine } from "./lib/report.ts";
 
 /** A file of dist, or "" when the build did not write it. The check then fails on what it lacks. */
@@ -97,18 +97,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   },
   { name: "check-frontmatter", run: () => checkFrontmatter(docsPages(), readRepoFile) },
   // Each root page has the layout and its entry of the collection `site` (plan 11b).
-  { name: "check-site-pages", run: () => checkSitePages(sitePages(), rootPages()) },
+  // The row names MINIMUM_ENTRIES, so it is the one tie to ruling 9 of the plan 11b lane.
+  {
+    name: "check-site-pages",
+    run: () => checkSitePages(sitePages(), rootPages(), MINIMUM_ENTRIES),
+  },
   // The help texts of the CLI keep the same terms and sentence limits as the pages (plan 11c).
   // The home prose keeps the docs rules (brand spec 2; plan 11b1), and so do the
-  // entries of the collection `site` (plan 11b).
-  {
-    name: "check-terms",
-    run: () => checkTerms([...docsPages(), ...sitePages(), homeProsePage(), ...cliHelpPages()]),
-  },
-  {
-    name: "check-sentences",
-    run: () => checkSentences([...docsPages(), ...sitePages(), homeProsePage(), ...cliHelpPages()]),
-  },
+  // entries of the collection `site` (plan 11b). prosePages() is the one list.
+  { name: "check-terms", run: () => checkTerms(prosePages()) },
+  { name: "check-sentences", run: () => checkSentences(prosePages()) },
   {
     name: "check-fences",
     run: () => checkFences(docsPages(), sampleFiles(), existsSync, (p) => readFileSync(p, "utf8")),

@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { checkSentences } from "../scripts/check-sentences.ts";
 import { checkSitePages } from "../scripts/check-site-pages.ts";
 import { checkTerms } from "../scripts/check-terms.ts";
 import { walk } from "../scripts/lib/files.ts";
-import { docsPages, rootPages, sitePages } from "../scripts/lib/load.ts";
+import { rootPages, sitePages } from "../scripts/lib/load.ts";
 import { SITE } from "../scripts/lib/paths.ts";
+import { prosePages } from "../scripts/lib/prose.ts";
 
 const FIXTURES = `${SITE}test/fixtures/site/pages/`;
 
@@ -82,6 +84,31 @@ describe("checkSitePages", () => {
       1,
     );
     expect(r.failures).toEqual(["index.html has no description meta with a content"]);
+  });
+
+  it("fails a root page with a description of only spaces", () => {
+    const r = checkSitePages(
+      entries("valid"),
+      withPage("index.html", (h) =>
+        h.replace('content="Authentication that your app owns."', 'content="   "'),
+      ),
+      1,
+    );
+    expect(r.failures).toEqual(["index.html has no description meta with a content"]);
+  });
+
+  it("reads an h1 with an entity and a tag as its text", () => {
+    const r = checkSitePages(
+      withEntry("title: Features", "title: Free & owned"),
+      withPage("features/index.html", (h) =>
+        h.replace(
+          /<h1[^>]*>Features<\/h1>/,
+          '<h1 class="at-enter">Free &amp;\n  <em>owned</em></h1>',
+        ),
+      ),
+      1,
+    );
+    expect(r.failures).toEqual([]);
   });
 
   it("fails a root page with no title, no viewport meta, or no layout", () => {
@@ -190,8 +217,14 @@ describe("checkSitePages", () => {
   });
 
   it("reads the site collection in the term check", () => {
-    const glossary = docsPages().filter((p) => p.path === "docs/reference/glossary.md");
-    const r = checkTerms([...glossary, ...entries("terms")]);
+    const r = checkTerms(prosePages(`${FIXTURES}terms/site/`));
     expect(r.failures).toEqual(['site/terms.md:7: "Log in" is forbidden; write "sign in"']);
+  });
+
+  it("reads the site collection in the sentence check", () => {
+    const r = checkSentences(prosePages(`${FIXTURES}terms/site/`));
+    expect(r.failures).toEqual([
+      'site/terms.md:9: 27 words in a sentence (at most 25): "This sentence is a fixture that holds more …"',
+    ]);
   });
 });

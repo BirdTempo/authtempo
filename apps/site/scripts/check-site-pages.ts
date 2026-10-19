@@ -54,12 +54,13 @@ function textOf(html: string): string {
  * 2. No root page holds data-pagefind-body: the search reads the docs only.
  * 3. Each entry names a root page, and that page's h1 is the entry's title.
  *    Each root page has one entry, except a page of ENTRY_EXEMPT.
- * 4. It reads at least one root page, and at least `minimum` entries.
+ * 4. It reads at least one root page, and at least `minimum` entries. The
+ *    CHECKS row passes MINIMUM_ENTRIES, so the row names the constant.
  */
 export function checkSitePages(
   sources: readonly Page[],
   built: ReadonlyMap<string, string>,
-  minimum: number = MINIMUM_ENTRIES,
+  minimum: number,
 ): CheckReport {
   const r: CheckReport = {
     name: "check-site-pages",
