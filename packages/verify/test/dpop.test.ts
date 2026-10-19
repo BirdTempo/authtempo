@@ -130,7 +130,8 @@ describe("DPoP in the verifier (plan 12e Task 10)", () => {
     expect(v.unauthorized({ resource: MCP, request }).headers.get("www-authenticate")).toBe(
       `Bearer ${METADATA}, DPoP error="invalid_token", algs="EdDSA Ed25519 ES256 RS256 PS256", ${METADATA}`,
     );
-    // A verifier with no dpop option reads no DPoP scheme.
+    // A verifier with no dpop option reads no DPoP scheme. It answers the plain challenge
+    // with no error code (RFC 6750 section 3.1), as for any method it does not support.
     const bearerOnly = createVerifier({
       issuer: ISSUER,
       resources: [MCP],
@@ -142,7 +143,7 @@ describe("DPoP in the verifier (plan 12e Task 10)", () => {
     expect(await bearerOnly.verifyRequest(good)).toEqual({ ok: true, value: null });
     expect(
       bearerOnly.unauthorized({ resource: MCP, request: good }).headers.get("www-authenticate"),
-    ).toBe(`Bearer error="invalid_token", ${METADATA}`);
+    ).toBe(`Bearer ${METADATA}`);
   });
 
   it("sees a replay inside one isolate with the default store, and across two verifiers with a shared store", async () => {

@@ -519,8 +519,9 @@ export function createVerifier(options: VerifierOptions): Verifier {
       const { request, ...challenge } = input;
       // With the request, its scheme decides. Without it, `invalidToken` names a refused Bearer token.
       const scheme = request ? schemeOf(request) : challenge.invalidToken ? "Bearer" : null;
-      // A server with no `dpop` reads no DPoP scheme, so it refuses a DPoP request as a token.
-      const bearerError = scheme === "Bearer" || (scheme === "DPoP" && !dpop);
+      // A server with no `dpop` does not support the DPoP scheme. RFC 6750 section 3.1: a
+      // request of a method that the server does not support gets no error code.
+      const bearerError = scheme === "Bearer";
       const bearer = bearerChallenge({
         ...challenge,
         ...(bearerError ? { error: "invalid_token" as const } : {}),
