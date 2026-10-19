@@ -31,7 +31,7 @@ interface Operation {
   tags: string[];
   description?: string;
   parameters?: Parameter[];
-  requestBody?: { content: Record<string, { schema: unknown }> };
+  requestBody?: { required: boolean; content: Record<string, { schema: unknown }> };
   operationId: string;
   externalDocs: { url: string };
   "x-authtempo-feature": string;
@@ -84,7 +84,7 @@ describe("openApiDocument (plan 11g)", () => {
     const keys = operations(doc).map((o) => o.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(99);
+    expect(keys.length).toBe(102);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -152,6 +152,16 @@ describe("openApiDocument (plan 11g)", () => {
       .filter(([, info]) => info.default === "on")
       .map(([feature]) => feature);
     expect([...served].sort()).toEqual(on.sort());
+  });
+
+  it("marks the rewrap body as not required, and every other body as required", () => {
+    // The rewrap reads an empty body as `{}` (plan 11c2), so its body is the one that is not required.
+    const optional = operations(reference())
+      .filter(({ op }) => op.requestBody?.required === false)
+      .map(({ key }) => key);
+    expect(optional).toEqual(["POST /operator/secrets/rewrap"]);
+    const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
+    expect(bodies.length).toBe(60);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -305,7 +315,7 @@ describe("openApiDocument (plan 11g)", () => {
         queries++;
       } else expect(params, key).toEqual([]);
     }
-    expect([answers, bodies, queries]).toEqual([79, 59, 14]);
+    expect([answers, bodies, queries]).toEqual([82, 60, 14]);
   });
 
   it("takes the request_id form of the authorize query", () => {

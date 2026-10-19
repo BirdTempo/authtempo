@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { rotateKey } from "../../engine/jwt.js";
 import { rewrapSecrets, secretsStatus } from "../../engine/secrets.js";
@@ -11,6 +10,7 @@ import {
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { SCHEMA_VERSION } from "../../schema.js";
 import { VERSION } from "../../version.js";
+import { rewrapBody } from "../contract/operator.js";
 import { json, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
 
@@ -20,16 +20,6 @@ import type { Route, RouteContext } from "../router.js";
  * other form answers 401 with no hash.
  */
 const OPERATOR_AUTH = /^Operator (\S+)$/i;
-
-/**
- * The body of a rewrap: `limit`, a whole number, and `after`, the cursor of
- * the last answer. An empty body is `{}`. The engine refuses a cursor that
- * is not `totp:<id>` or `jwk:<id>`.
- */
-const rewrapBody = z.strictObject({
-  limit: z.number().int().optional(),
-  after: z.string().optional(),
-});
 
 type Operator = NonNullable<ResolvedConfig["operator"]>;
 
@@ -102,6 +92,7 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/operator/secrets/status",
+      key: "GET /operator/secrets/status",
       async handler(ctx) {
         if (
           !(await config.limiter.allow(
@@ -117,6 +108,7 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/operator/secrets/rewrap",
+      key: "POST /operator/secrets/rewrap",
       async handler(ctx) {
         if (
           !(await config.limiter.allow(
@@ -134,6 +126,7 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/operator/info",
+      key: "GET /operator/info",
       async handler(ctx) {
         if (
           !(await config.limiter.allow(

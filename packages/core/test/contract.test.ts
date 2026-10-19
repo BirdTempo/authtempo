@@ -287,6 +287,13 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
   const id = "x".repeat(26);
   const rows: BodyRow[] = [
     { key: "POST /sessions/revoke", body: { id }, session: true, refused: INVALID_BODY },
+    // The operator secret of the world: the route checks it before the body (plan 11c2).
+    {
+      key: "POST /operator/secrets/rewrap",
+      body: { limit: 10 },
+      headers: { authorization: `Operator ${OPERATOR_SECRET}` },
+      refused: INVALID_BODY,
+    },
     { key: "POST /reauth", body: { password: PASSWORD }, session: true, refused: INVALID_BODY },
     {
       key: "POST /user/update",
@@ -554,7 +561,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(99);
+    expect(keys.length).toBe(102);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -923,14 +930,14 @@ describe("the route contract (plan 11g)", () => {
   });
 
   it("uses the contract's schema in the route", async () => {
-    const w = world();
+    const w = world(await sha256Hex(OPERATOR_SECRET));
     const { rows, cookie } = await validBodies(w);
     const withBody = Object.entries(CONTRACT)
       .filter(([, c]) => c.body?.parsedBy === "zod")
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(55);
+    expect(withBody.length).toBe(56);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -956,11 +963,11 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(53);
+    expect(refusals).toBe(54);
   });
 
   it("names the media of a body by its read call", async () => {
-    const w = world();
+    const w = world(await sha256Hex(OPERATOR_SECRET));
     const { rows, cookie } = await validBodies(w);
     const media = (key: RouteKey) => CONTRACT[key]?.body?.media;
     // Every body names one of the four forms: readJson, readBody, a form read by hand, or JSON read by hand.
@@ -974,7 +981,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 47, both: 9, form: 3 });
+    expect(counts).toEqual({ json: 48, both: 9, form: 3 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

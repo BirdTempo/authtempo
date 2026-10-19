@@ -139,7 +139,7 @@ export function openApiDocument(options: OpenApiOptions): OpenApiDoc {
     if (contract.body) {
       const schema = schemaOf(contract.body.schema, "input");
       operation.requestBody = {
-        required: true,
+        required: contract.body.optional !== true,
         content: Object.fromEntries(contract.body.media.map((m) => [MEDIA[m], { schema }])),
       };
     }

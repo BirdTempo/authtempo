@@ -28,6 +28,8 @@ export interface RouteContract {
     readonly schema: z.ZodType;
     readonly media: readonly ("json" | "form")[];
     readonly parsedBy: "zod" | "hand";
+    /** The route reads an empty body as `{}`, so the document marks the body as not required. */
+    readonly optional?: true;
   };
   readonly answer: AnswerKind;
   /** A second answer kind: a JSON body gets JSON, a form post gets a redirect. */
