@@ -195,7 +195,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `readBearer` | The value of `Authorization: Bearer <value>`, or null. |
 | `JWS_RE`, `decodeJws`, `DecodedJws` | The shape of a compact JWS, and its parts with no check. |
 | `verifyJws`, `PublicJwk`, `JwsAlg` | The signature check on Web Crypto, for EdDSA, ES256, and RS256. The header must name the alg and the kid of the key. |
-| `JWS_ALGS`, `isPublicJwk` | The three values of `jwtMint.alg`, and the check of one public signing key: its members fit its alg, and it holds no private member. |
+| `JWS_ALGS`, `isPublicJwk`, `JWK_PRIVATE_MEMBERS` | The three values of `jwtMint.alg`, and the check of one public signing key: its members fit its alg, and it holds no private member. The private member names of RFC 7518. |
 | `JWKS_RETIRED_MAX` | The retired keys that the key set lists at most. |
 | `isResourceUrl`, `resourceOf` | The rule of an `oauth.resources` entry, and the entry that a request URL falls under. |
 

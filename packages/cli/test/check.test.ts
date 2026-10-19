@@ -287,6 +287,19 @@ describe("authtempo check (spec 19)", () => {
     expect(result((await check([], routes)).report, "jwks")).toMatchObject({ status: "fail" });
   });
 
+  it("gives jwks_private_part for each private member of each key type", async () => {
+    // RFC 7518 sections 6.2.2, 6.3.2, and 6.4: d of EC and OKP; d, p, q, dp, dq, qi, and oth of RSA; k of oct.
+    for (const member of ["d", "p", "q", "dp", "dq", "qi", "oth", "k"]) {
+      const routes = healthy();
+      routes.set("GET /auth/jwks", () => keySet([{ ...KEY, [member]: "AQAB" }]));
+      const r = await check([], routes);
+      expect({ member, jwks: result(r.report, "jwks")?.code }).toEqual({
+        member,
+        jwks: "jwks_private_part",
+      });
+    }
+  });
+
   it("gives jwks_bad_key, not a stop, for an RSA key whose n is not base64url", async () => {
     // A length of 1 mod 4: no base64 text has that length.
     const bad = { kty: "RSA", n: "A".repeat(345), e: "AQAB", kid: "R2", alg: "RS256", use: "sig" };

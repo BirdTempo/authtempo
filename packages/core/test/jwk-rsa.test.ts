@@ -15,7 +15,7 @@ import {
 import { RFC7515_A2_HEADER, RFC7515_A2_JWS, RFC7515_A2_KEY } from "./fixtures/rfc7515-a2.js";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
-const PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "k"];
+const PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 const enc = new TextEncoder();
 
 describe("RS256 keys (plan 12e, owner decision 1)", () => {

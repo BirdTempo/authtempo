@@ -121,7 +121,7 @@ The key set holds no key. Core always lists its signing key, so another handler 
 
 <h3 id="jwks_private_part"><code>jwks_private_part</code></h3>
 
-Warning: a key of the key set holds `d`, a private part. Rotate the key at once with `authtempo keys rotate`, and remove the handler that serves it.
+Warning: a key of the key set holds a private member: `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, or `k`. Rotate the key at once with `authtempo keys rotate`, and remove the handler that serves it.
 
 <h3 id="jwks_bad_key"><code>jwks_bad_key</code></h3>
 

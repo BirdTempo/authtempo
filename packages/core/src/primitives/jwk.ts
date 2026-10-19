@@ -82,8 +82,11 @@ const SEAL_INFO = "tempo-auth jwk";
 /** A token core issues is far shorter. The cap bounds the parse of a stranger's bearer. */
 const TOKEN_MAX = 8192;
 const PART_RE = /^[A-Za-z0-9_-]+$/;
-/** The private members of a JWK (RFC 7518 sections 6.2.2, 6.3.2, and 6.4). A public key holds none. */
-const PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "k"] as const;
+/**
+ * The private members of a JWK (RFC 7518 sections 6.2.2, 6.3.2, and 6.4). A public key holds none.
+ * One list for core, the CLI check, and the verifier.
+ */
+export const JWK_PRIVATE_MEMBERS: readonly string[] = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 const enc = new TextEncoder();
 
 function keyAlgorithm(alg: JwsAlg): Algorithm | EcKeyImportParams | RsaHashedImportParams {
@@ -124,7 +127,7 @@ function publicJwkOf(jwk: JsonWebKey, alg: JwsAlg, kid: string): PublicJwk {
 export function isPublicJwk(value: unknown): value is PublicJwk {
   if (!isObject(value)) return false;
   if (typeof value.kid !== "string" || value.use !== "sig") return false;
-  if (PRIVATE_MEMBERS.some((m) => m in value)) return false;
+  if (JWK_PRIVATE_MEMBERS.some((m) => m in value)) return false;
   // A length of 1 mod 4 passes the alphabet, but no base64 text has it, and the decode throws.
   const b64 = (v: unknown): v is string =>
     typeof v === "string" && PART_RE.test(v) && v.length % 4 !== 1;

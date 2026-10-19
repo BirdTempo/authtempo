@@ -1,4 +1,4 @@
-import { isPublicJwk } from "@authtempo/core/credentials";
+import { isPublicJwk, JWK_PRIVATE_MEMBERS } from "@authtempo/core/credentials";
 import type { ExpectedShape, LiveShape } from "@authtempo/core/sql";
 import { type Fetcher, fetchWithin, HostError, isLocalHost } from "./net.js";
 import { compareShape, findingText } from "./schema-shape.js";
@@ -347,8 +347,13 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
           `GET ${auth}/jwks answers ${jwks.status} with no key set`,
         );
       else if (keys.length === 0) add("jwks", "fail", "jwks_empty", "the key set holds no key");
-      else if (records.some((k) => "d" in k))
-        add("jwks", "fail", "jwks_private_part", "a key of the key set holds a private part (d)");
+      else if (records.some((k) => JWK_PRIVATE_MEMBERS.some((m) => m in k)))
+        add(
+          "jwks",
+          "fail",
+          "jwks_private_part",
+          `a key of the key set holds a private member (${JWK_PRIVATE_MEMBERS.join(", ")})`,
+        );
       // One rule with core and the verifier: `isPublicJwk` of `@authtempo/core/credentials` (plan 12e).
       else if (records.length !== keys.length || !records.every(isPublicJwk))
         add(

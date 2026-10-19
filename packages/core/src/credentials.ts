@@ -20,6 +20,7 @@ export {
   type DecodedJws,
   decodeJws,
   isPublicJwk,
+  JWK_PRIVATE_MEMBERS,
   JWKS_RETIRED_MAX,
   JWS_ALGS,
   JWS_RE,
