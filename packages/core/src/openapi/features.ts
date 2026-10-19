@@ -24,6 +24,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   operator: { configKey: "operator", default: "off" },
   oauth: { configKey: "oauth", default: "off" },
   oauthRegistration: { configKey: "oauth.registration.dynamic", default: "off" },
+  oauthDevice: { configKey: "oauth.device", default: "off" },
   openapi: { configKey: "openapi", default: "off" },
 };
 

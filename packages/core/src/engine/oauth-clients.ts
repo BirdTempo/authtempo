@@ -42,13 +42,15 @@ const NAME_MAX = 80;
 /** A busy client must not write its row on every request. */
 const LAST_SEEN_EVERY_MS = 86_400_000;
 const GRANT_TYPES = ["authorization_code", "refresh_token"];
+/** RFC 8628 section 3.4 (read 2026-10-20): the grant type of a device poll (plan 12e). */
+export const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 /**
- * The grants of a client of `api.oauth.clients`: the registration ones and
- * `client_credentials`. A registration never takes `client_credentials`: a
- * stranger must not get a machine client. The device grant comes with
- * `oauth.device` (plan 12e Task 14); until then every source refuses it.
+ * The grants that only a client of `api.oauth.clients` takes, beside the
+ * registration ones. A registration never takes `client_credentials`: a
+ * stranger must not get a machine client. Every source takes the device
+ * grant while `oauth.device` is on, and refuses it while it is off.
  */
-const CREATE_GRANT_TYPES = [...GRANT_TYPES, "client_credentials"];
+const CREATE_ONLY_GRANT_TYPES = ["client_credentials"];
 const RESPONSE_TYPES = ["code"];
 const AUTH_METHODS: readonly ClientAuthMethod[] = [
   "none",
@@ -357,11 +359,12 @@ function readClientMetadata(
     if (rule !== null) return meta(rule);
   }
   const absent = (v: unknown) => v === undefined || v === null;
-  const allowedGrants = source === "create" ? CREATE_GRANT_TYPES : GRANT_TYPES;
+  const served = oauth.device !== null ? [...GRANT_TYPES, DEVICE_GRANT] : GRANT_TYPES;
+  const allowedGrants = source === "create" ? [...served, ...CREATE_ONLY_GRANT_TYPES] : served;
   let grantTypes: string[] | null;
   // A null list reads as an absent one, at every source (ruling 26 of plan 12e).
   if (absent(m.grant_types)) grantTypes = [...GRANT_TYPES];
-  else if (cimd) grantTypes = servedList(m.grant_types, GRANT_TYPES, "grant_types", dropped);
+  else if (cimd) grantTypes = servedList(m.grant_types, served, "grant_types", dropped);
   else
     grantTypes = stringList(m.grant_types, (g) => allowedGrants.includes(g), allowedGrants.length);
   // A document is a client of the code grant: core serves no other grant to a document.
@@ -428,6 +431,13 @@ function readClientMetadata(
     }
     // A cl_ client needs one host over all its redirect URIs. A document's redirect hosts never set its sector.
     if (!cimd && redirectSector(redirectUris) === null) return meta("subject_type");
+    // The device grant has no redirect, so nothing ties the sector to this
+    // client: a dynamic client could name a host it does not own (ruling 34).
+    if (grantTypes.includes(DEVICE_GRANT)) {
+      if (!cimd) return meta("grant_types");
+      grantTypes = grantTypes.filter((g) => g !== DEVICE_GRANT);
+      dropped.push("grant_types");
+    }
   }
   // One key of one alg signs every token (owner decision 1).
   if (

@@ -923,7 +923,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | Query `{ next }`. `next` is `<basePath>/oauth/authorize?…` |
+| Input | Query `{ next }`. `next` is `<basePath>/oauth/authorize?…`, or the device page: `<basePath>/oauth/device`, alone or with `?user_code=XXXX-XXXX` |
 | Answer | 200, the sign-in page, which lands back on `next`; another `next` redirects to `/?auth_error=invalid_request` |
 | Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request) |
 
@@ -932,9 +932,9 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Field | Value |
 | --- | --- |
 | Needs | Nothing; or the client id and secret as HTTP Basic. A public client sends `client_id` and no credential. A client with a secret sends it as HTTP Basic or as `client_secret` in the form, one method per request (RFC 6749 section 2.3.1). An empty `client_secret` counts as omitted. A `private_key_jwt` client sends `client_assertion_type` and `client_assertion`, a JWT signed by its key (RFC 7523). A failed assertion is a 400 `invalid_client`. After an `Authorization` header, `invalid_client` is a 401 with `WWW-Authenticate: Basic` and the issuer as the realm. With no header it is a 400 with no challenge. A browser on a foreign origin needs that origin in a redirect URI of the public client that the form names. Its answer then carries `access-control-allow-origin` and no credentials. An origin of `trustedOrigins` gets that header with credentials. `POST /oauth/revoke` still answers 403 to a cross-site form post. A preflight from that origin names the client in `?client_id=` |
-| Input | Form `{ grant_type, client_id?, client_secret?, client_assertion_type?, client_assertion?, code?, code_verifier?, redirect_uri?, resource?, refresh_token?, scope? }`. `grant_type=authorization_code` with `code`, `code_verifier`, `client_id`, `redirect_uri`, `resource?`; or `grant_type=refresh_token` with `refresh_token`, `client_id`, `scope?`, `resource?`. A confidential client with the grant sends `grant_type=client_credentials` with `resource` and `scope?`. A Basic client may omit `client_id`. A code with no challenge takes no `code_verifier`. A `DPoP` header holds a proof of RFC 9449 for this URL and POST. Core checks it after the client auth and spends its `jti` before the grant. A client of `dpop_bound_access_tokens` must send one on every grant |
-| Answer | `{ access_token, token_type, expires_in, scope, refresh_token?, id_token? }`. `token_type` is `"DPoP"` after a proof: the access token then holds `cnf.jkt`, the thumbprint of the key. A public client's refresh token is bound to the key too, and each refresh needs a proof of it. A confidential client's refresh token stays unbound (RFC 9449 section 5). With no proof, `token_type` is `"Bearer"`. The `client_credentials` grant answers no `refresh_token` and no `id_token` |
-| Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`unsupported_grant_type`](/docs/reference/errors/#oauth-unsupported_grant_type), [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client), [`invalid_dpop_proof`](/docs/reference/errors/#oauth-invalid_dpop_proof), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
+| Input | Form `{ grant_type, client_id?, client_secret?, client_assertion_type?, client_assertion?, code?, code_verifier?, redirect_uri?, resource?, refresh_token?, scope?, device_code? }`. `grant_type=authorization_code` with `code`, `code_verifier`, `client_id`, `redirect_uri`, `resource?`; or `grant_type=refresh_token` with `refresh_token`, `client_id`, `scope?`, `resource?`. A confidential client with the grant sends `grant_type=client_credentials` with `resource` and `scope?`. With `oauth.device` on, a device polls with `grant_type=urn:ietf:params:oauth:grant-type:device_code`, `device_code`, and the client auth of the device request (RFC 8628 section 3.4). A Basic client may omit `client_id`. A code with no challenge takes no `code_verifier`. A `DPoP` header holds a proof of RFC 9449 for this URL and POST. Core checks it after the client auth and spends its `jti` before the grant. A client of `dpop_bound_access_tokens` must send one on every grant |
+| Answer | `{ access_token, token_type, expires_in, scope, refresh_token?, id_token? }`. `token_type` is `"DPoP"` after a proof: the access token then holds `cnf.jkt`, the thumbprint of the key. A public client's refresh token is bound to the key too, and each refresh needs a proof of it. A confidential client's refresh token stays unbound (RFC 9449 section 5). With no proof, `token_type` is `"Bearer"`. The `client_credentials` grant answers no `refresh_token` and no `id_token`. The device grant answers as the code exchange, with an `id_token` for `openid`, once. A poll before the approval answers `authorization_pending`. A poll within `interval` seconds of the last answers `slow_down`, and the interval grows by 5 seconds. A denied code answers `access_denied`, and an expired one `expired_token`. A spent code answers `invalid_grant` |
+| Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`unsupported_grant_type`](/docs/reference/errors/#oauth-unsupported_grant_type), [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client), [`invalid_dpop_proof`](/docs/reference/errors/#oauth-invalid_dpop_proof), [`authorization_pending`](/docs/reference/errors/#oauth-authorization_pending), [`slow_down`](/docs/reference/errors/#oauth-slow_down), [`access_denied`](/docs/reference/errors/#oauth-access_denied), [`expired_token`](/docs/reference/errors/#oauth-expired_token), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
 
 <h3 id="post-oauth-revoke"><code>POST /oauth/revoke</code></h3>
 
@@ -953,6 +953,33 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Input | Form `{ token, token_type_hint?, client_id?, client_secret?, client_assertion_type?, client_assertion? }`. RFC 7662. The hint orders the lookups only |
 | Answer | `{ active: true, scope, client_id, sub, aud, iss, exp, iat, jti, token_type, cnf? }` for a live access token, and for a live refresh token of the caller. A DPoP-bound access token answers `token_type: "DPoP"` and `cnf: { jkt }`; the resource server checks the proof itself (RFC 9449 section 6.2). `{ active: false }` alone for every other token. An access token of a resource outside the caller's [`oauth.introspection`](/docs/reference/config/#oauth-provider) entry is inactive too. A refresh token answers its own client with no map entry. A revoke or a delete ends any token here at once. A scope that the config drops ends an access token at once. A refresh token then shows the scopes that the config still serves, and it is inactive when only `offline_access` is left |
 | Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
+
+<h3 id="post-oauth-device-authorization"><code>POST /oauth/device_authorization</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing; or the client id and secret as HTTP Basic. `oauth.device` is on. The caller takes the client auth of `POST /oauth/token`, and the client holds the device grant. A pairwise client is refused. After an `Authorization` header, `invalid_client` is a 401 with `WWW-Authenticate: Basic` and the issuer as the realm. With no header it is a 400 with no challenge |
+| Input | Form `{ client_id?, client_secret?, client_assertion_type?, client_assertion?, scope?, resource? }`. RFC 8628 section 3.1. `scope` and `resource` are checked as at `GET /oauth/authorize`. A `DPoP` header with a proof for this URL binds the device code to its key: each poll then needs a proof of that key |
+| Answer | `{ device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval }`. RFC 8628 section 3.2. `user_code` is `XXXX-XXXX` of the letters `BCDFGHJKLMNPQRSTVWXZ`. `verification_uri` is `<issuer>/oauth/device` |
+| Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`invalid_dpop_proof`](/docs/reference/errors/#oauth-invalid_dpop_proof), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
+
+<h3 id="get-oauth-device"><code>GET /oauth/device</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing; or a session cookie, or a `ts_` bearer token. `oauth.device` is on. With no session, the route sends the browser to the sign-in step |
+| Input | Query `{ user_code? }`. A code of the `XXXX-XXXX` form fills the field. The person still submits it (RFC 8628 section 3.3.1) |
+| Answer | 200, the device page; or 302 to `/oauth/sign-in` or to `oauth.signInURL`. After `oauth.signInURL`, the person types the code again: core never stores a user code in clear |
+| Errors | None |
+
+<h3 id="post-oauth-device"><code>POST /oauth/device</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. `oauth.device` is on. `Origin` equals `baseURL` |
+| Input | Form `{ user_code, decision? }`. Without `decision` the page shows the client of the code, its scopes, and the line "Approve only a device that is in front of you." `decision` is `allow` or `deny` |
+| Answer | 200, the device page: the form again with its error, the consent, or the end of the decision. Each post counts 5 per session and 20 per IP per 15 minutes. A found code counts 10 per 15 minutes |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
 
 <h3 id="get-oauth-userinfo"><code>GET /oauth/userinfo</code></h3>
 

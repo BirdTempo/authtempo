@@ -5,6 +5,7 @@ import { hookRefusal } from "../src/engine/hooks.js";
 import { acceptInvitation, inviteMember } from "../src/engine/invitations.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import type { NoticeMailInput } from "../src/engine/notices.js";
+import { DEVICE_GRANT } from "../src/engine/oauth-clients.js";
 import {
   addMember,
   createOrganization,
@@ -58,6 +59,7 @@ const OAUTH = {
   resources: [RESOURCE],
   scopes: SCOPES,
   registration: { cimd: false, dynamic: true },
+  device: {},
 };
 const NOTICE = "Security notice for your api.example.com account";
 
@@ -100,9 +102,9 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
  * Task 1). A seeded row would be a state the product cannot reach. Tasks 11,
  * 14, and 16 of plan 12e write the flows, and each one takes its model out
  * of this set. Task 11 took `oauthSubject` out: a pairwise grant writes it.
+ * Task 14 took `oauthDevice` out: a device grant that the user approves writes it.
  */
 const NO_FLOW_YET: ReadonlySet<(typeof USER_CHILD_MODELS)[number]> = new Set([
-  "oauthDevice",
   "oauthSessionClient",
   "oauthLogout",
 ]);
@@ -173,6 +175,38 @@ async function oauthGrant(w: World, token: string, subjectType: "public" | "pair
   if (!code) throw new Error("no code");
   const tokens = await w.handle(exchange(code, clientId, p.verifier));
   if (tokens.status !== 200) throw new Error(`the exchange answered ${tokens.status}`);
+}
+
+/** A device grant that the session's user approves, through the routes (plan 12e Task 14). */
+async function deviceGrant(w: World, token: string) {
+  const reg = await w.handle(
+    post("/auth/oauth/register", {
+      redirect_uris: [REDIRECT],
+      grant_types: ["authorization_code", DEVICE_GRANT],
+    }),
+  );
+  if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
+  const clientId = ((await reg.json()) as { client_id: string }).client_id;
+  const formPost = (path: string, body: Record<string, string>, headers = {}) =>
+    new Request(`https://api.example.com/auth${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams(body).toString(),
+    });
+  const started = await w.handle(
+    formPost("/oauth/device_authorization", {
+      client_id: clientId,
+      scope: "mcp:read",
+      resource: RESOURCE,
+    }),
+  );
+  const { user_code } = (await started.json()) as { user_code: string };
+  const page = {
+    cookie: `${w.auth.config.cookieName}=${token}`,
+    origin: "https://api.example.com",
+  };
+  const done = await w.handle(formPost("/oauth/device", { user_code, decision: "allow" }, page));
+  if (!(await done.text()).includes("The device is connected.")) throw new Error("no approval");
 }
 
 /**
@@ -248,6 +282,7 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     expect((await createApiToken(w.auth.config, { user: me.user, name: "ci" })).ok).toBe(true);
     await oauthGrant(w, me.token);
     await oauthGrant(w, me.token, "pairwise");
+    await deviceGrant(w, me.token);
     // A solo organization, a team of Bob's where the user is an admin, and an
     // organization of Bob's that invites the user's address.
     const solo = await organization(w, me.user, "ada-solo");

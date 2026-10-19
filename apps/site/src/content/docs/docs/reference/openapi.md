@@ -74,6 +74,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `operator` | `operator` | off |
 | `oauth` | `oauth` | off |
 | `oauthRegistration` | `oauth.registration.dynamic` | off |
+| `oauthDevice` | `oauth.device` | off |
 | `openapi` | `openapi` | off |
 
 ## The error shape

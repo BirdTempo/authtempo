@@ -284,8 +284,12 @@ export type ClientAuthMethod =
   | "client_secret_post"
   | "private_key_jwt";
 
-/** The state of one device grant (plan 12e, RFC 8628). */
-export type DeviceStatus = "pending" | "approved" | "denied";
+/**
+ * The state of one device grant (plan 12e, RFC 8628). `spent`: the poll
+ * took the tokens, and a later poll answers `invalid_grant` (ruling 44).
+ * The column is text with no SQL check, so the value needs no migration.
+ */
+export type DeviceStatus = "pending" | "approved" | "denied" | "spent";
 
 /** An OAuth client (plan 9g). */
 export interface OAuthClientRow extends BaseRow {

@@ -106,6 +106,14 @@ export {
   CREDENTIALS_PER_CLIENT,
   type OAuthClientAccess,
 } from "./engine/oauth-credentials.js";
+export {
+  DEVICE_GRANT,
+  DEVICE_START_PER_IP,
+  DEVICE_VERIFY_PER_CODE,
+  DEVICE_VERIFY_PER_IP,
+  DEVICE_VERIFY_PER_SESSION,
+  type DeviceAuthorizationAnswer,
+} from "./engine/oauth-device.js";
 export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
 export type { OAuthResult } from "./engine/oauth-result.js";
 export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
@@ -184,6 +192,7 @@ export {
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 export { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+export { DEVICE_WARNING, type DevicePageInput, defaultDevicePage } from "./http/device-page.js";
 export { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
 export {
   defaultHandoffConfirmPage,

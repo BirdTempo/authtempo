@@ -103,7 +103,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /session`](/docs/reference/routes/#get-session), [`POST /session/refresh`](/docs/reference/routes/#post-session-refresh), [`POST /passkey/register/options`](/docs/reference/routes/#post-passkey-register-options), [`POST /passkey/register/verify`](/docs/reference/routes/#post-passkey-register-verify), [`GET /passkeys`](/docs/reference/routes/#get-passkeys), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /passkeys/rename`](/docs/reference/routes/#post-passkeys-rename), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup), [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`GET /totp`](/docs/reference/routes/#get-totp), [`POST /totp/devices/revoke`](/docs/reference/routes/#post-totp-devices-revoke), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`GET /organizations`](/docs/reference/routes/#get-organizations), [`POST /organizations/update`](/docs/reference/routes/#post-organizations-update), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`GET /organizations/members`](/docs/reference/routes/#get-organizations-members), [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/invite`](/docs/reference/routes/#post-organizations-invite), [`GET /organizations/invitations`](/docs/reference/routes/#get-organizations-invitations), [`POST /organizations/invitations/revoke`](/docs/reference/routes/#post-organizations-invitations-revoke), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`POST /organizations/active`](/docs/reference/routes/#post-organizations-active), [`POST /tokens`](/docs/reference/routes/#post-tokens), [`GET /tokens`](/docs/reference/routes/#get-tokens), [`POST /tokens/revoke`](/docs/reference/routes/#post-tokens-revoke), [`GET /tokens/current`](/docs/reference/routes/#get-tokens-current), [`GET /token`](/docs/reference/routes/#get-token), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`GET /oauth/grants`](/docs/reference/routes/#get-oauth-grants), [`POST /oauth/grants/revoke`](/docs/reference/routes/#post-oauth-grants-revoke), [`GET /sessions`](/docs/reference/routes/#get-sessions), [`POST /sessions/revoke`](/docs/reference/routes/#post-sessions-revoke), [`POST /sessions/revoke-others`](/docs/reference/routes/#post-sessions-revoke-others), [`POST /reauth`](/docs/reference/routes/#post-reauth), [`POST /reauth/email`](/docs/reference/routes/#post-reauth-email), [`POST /reauth/passkey/options`](/docs/reference/routes/#post-reauth-passkey-options), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email`](/docs/reference/routes/#post-user-change-email), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`GET /identities`](/docs/reference/routes/#get-identities), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /social/:provider/link`](/docs/reference/routes/#post-social-provider-link), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
+| [`GET /session`](/docs/reference/routes/#get-session), [`POST /session/refresh`](/docs/reference/routes/#post-session-refresh), [`POST /passkey/register/options`](/docs/reference/routes/#post-passkey-register-options), [`POST /passkey/register/verify`](/docs/reference/routes/#post-passkey-register-verify), [`GET /passkeys`](/docs/reference/routes/#get-passkeys), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /passkeys/rename`](/docs/reference/routes/#post-passkeys-rename), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup), [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`GET /totp`](/docs/reference/routes/#get-totp), [`POST /totp/devices/revoke`](/docs/reference/routes/#post-totp-devices-revoke), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`GET /organizations`](/docs/reference/routes/#get-organizations), [`POST /organizations/update`](/docs/reference/routes/#post-organizations-update), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`GET /organizations/members`](/docs/reference/routes/#get-organizations-members), [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/invite`](/docs/reference/routes/#post-organizations-invite), [`GET /organizations/invitations`](/docs/reference/routes/#get-organizations-invitations), [`POST /organizations/invitations/revoke`](/docs/reference/routes/#post-organizations-invitations-revoke), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`POST /organizations/active`](/docs/reference/routes/#post-organizations-active), [`POST /tokens`](/docs/reference/routes/#post-tokens), [`GET /tokens`](/docs/reference/routes/#get-tokens), [`POST /tokens/revoke`](/docs/reference/routes/#post-tokens-revoke), [`GET /tokens/current`](/docs/reference/routes/#get-tokens-current), [`GET /token`](/docs/reference/routes/#get-token), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/device`](/docs/reference/routes/#post-oauth-device), [`GET /oauth/grants`](/docs/reference/routes/#get-oauth-grants), [`POST /oauth/grants/revoke`](/docs/reference/routes/#post-oauth-grants-revoke), [`GET /sessions`](/docs/reference/routes/#get-sessions), [`POST /sessions/revoke`](/docs/reference/routes/#post-sessions-revoke), [`POST /sessions/revoke-others`](/docs/reference/routes/#post-sessions-revoke-others), [`POST /reauth`](/docs/reference/routes/#post-reauth), [`POST /reauth/email`](/docs/reference/routes/#post-reauth-email), [`POST /reauth/passkey/options`](/docs/reference/routes/#post-reauth-passkey-options), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email`](/docs/reference/routes/#post-user-change-email), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`GET /identities`](/docs/reference/routes/#get-identities), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /social/:provider/link`](/docs/reference/routes/#post-social-provider-link), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
 
 <h3 id="origin_not_trusted"><code>origin_not_trusted</code> 403</h3>
 
@@ -440,7 +440,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`GET /oauth/sign-in`](/docs/reference/routes/#get-oauth-sign-in), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`GET /oauth/sign-in`](/docs/reference/routes/#get-oauth-sign-in), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization), [`POST /oauth/device`](/docs/reference/routes/#post-oauth-device). |
 
 <h3 id="oauth-invalid_client"><code>invalid_client</code> 401</h3>
 
@@ -449,11 +449,11 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization). |
 
 <h3 id="oauth-invalid_grant"><code>invalid_grant</code> 400</h3>
 
-- **Meaning:** The code or the refresh token is spent, expired, of another client, or its verifier does not match. A refresh token whose grant keeps no scope of the config but `offline_access` is refused too. A code with no challenge takes no verifier. A reused refresh token deletes its family.
+- **Meaning:** The code or the refresh token is spent, expired, of another client, or its verifier does not match. A refresh token whose grant keeps no scope of the config but `offline_access` is refused too. A code with no challenge takes no verifier. A reused refresh token deletes its family. A device code is spent, of another client, or unknown.
 - **Do:** Start the authorize step again.
 
 | Routes |
@@ -462,8 +462,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-unsupported_grant_type"><code>unsupported_grant_type</code> 400</h3>
 
-- **Meaning:** The `grant_type` is not `authorization_code`, `refresh_token`, or `client_credentials`.
-- **Do:** Use one of the three grant types.
+- **Meaning:** The `grant_type` is not `authorization_code`, `refresh_token`, `client_credentials`, or, with `oauth.device` on, the device grant `urn:ietf:params:oauth:grant-type:device_code`.
+- **Do:** Use a grant type that the server serves.
 
 | Routes |
 | --- |
@@ -476,7 +476,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization). |
 
 <h3 id="oauth-invalid_target"><code>invalid_target</code> 400</h3>
 
@@ -485,7 +485,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization). |
 
 <h3 id="oauth-unsupported_response_type"><code>unsupported_response_type</code> 400</h3>
 
@@ -498,12 +498,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-access_denied"><code>access_denied</code> 400</h3>
 
-- **Meaning:** The person refused, or the user has no verified address.
-- **Do:** Show that access was refused.
+- **Meaning:** The person refused, or the user has no verified address. At the token route, the person denied the device code (RFC 8628 section 3.5).
+- **Do:** Show that access was refused. A device stops its poll.
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
 
 <h3 id="oauth-login_required"><code>login_required</code> 400</h3>
 
@@ -588,30 +588,57 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_dpop_proof"><code>invalid_dpop_proof</code> 400</h3>
 
-- **Meaning:** The `DPoP` header of a token request fails a check of RFC 9449 section 4.3, or its `jti` was spent. Or a client of `dpop_bound_access_tokens` sent no proof. Or the code or the refresh token is bound to another key. At userinfo, a bound token came with no valid proof of its key. The status there is 401, with the `DPoP` challenge (RFC 9449 section 7.1).
+- **Meaning:** The `DPoP` header of a token request fails a check of RFC 9449 section 4.3, or its `jti` was spent. Or a client of `dpop_bound_access_tokens` sent no proof. Or the code, the refresh token, or the device code is bound to another key. At userinfo, a bound token came with no valid proof of its key. The status there is 401, with the `DPoP` challenge (RFC 9449 section 7.1).
 - **Do:** Sign a new proof for each request, with `htm`, `htu`, a fresh `iat`, and a new `jti`. Use the key that the code or the refresh token is bound to.
 
 | Routes |
 | --- |
-| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`GET /oauth/userinfo`](/docs/reference/routes/#get-oauth-userinfo), [`POST /oauth/userinfo`](/docs/reference/routes/#post-oauth-userinfo). |
+| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization), [`GET /oauth/userinfo`](/docs/reference/routes/#get-oauth-userinfo), [`POST /oauth/userinfo`](/docs/reference/routes/#post-oauth-userinfo). |
+
+<h3 id="oauth-authorization_pending"><code>authorization_pending</code> 400</h3>
+
+- **Meaning:** The person has not yet approved or denied the device code (RFC 8628 section 3.5).
+- **Do:** Poll again after `interval` seconds.
+
+| Routes |
+| --- |
+| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
+
+<h3 id="oauth-slow_down"><code>slow_down</code> 400</h3>
+
+- **Meaning:** The device polled within `interval` seconds of its last poll. The interval of the code grows by 5 seconds (RFC 8628 section 3.5).
+- **Do:** Add 5 seconds to the interval, for this poll and every later one.
+
+| Routes |
+| --- |
+| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
+
+<h3 id="oauth-expired_token"><code>expired_token</code> 400</h3>
+
+- **Meaning:** The device code expired, and its device authorization ended (RFC 8628 section 3.5).
+- **Do:** Stop the poll. Start a new device authorization when the person asks for it.
+
+| Routes |
+| --- |
+| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
 
 <h3 id="oauth-rate_limited"><code>rate_limited</code> 429</h3>
 
-- **Meaning:** A limit of the provider is full: register, authorize, or token for the IP, or introspection for the IP or the client.
+- **Meaning:** A limit of the provider is full: register, authorize, or token for the IP, or introspection for the IP or the client. Or a device limit is full: the device request for the IP, or the device page for the session, the IP, or one code.
 - **Do:** Wait for the window to end.
 
 | Routes |
 | --- |
-| [`POST /oauth/register`](/docs/reference/routes/#post-oauth-register), [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect). |
+| [`POST /oauth/register`](/docs/reference/routes/#post-oauth-register), [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization), [`POST /oauth/device`](/docs/reference/routes/#post-oauth-device). |
 
 <h3 id="oauth-unauthorized_client"><code>unauthorized_client</code> 400</h3>
 
-- **Meaning:** A revoke named a `client_id` that is not the client of the refresh token. Nothing is revoked. Or a `client_credentials` request came from a public client, or from a client whose `grantTypes` do not hold the grant.
+- **Meaning:** A revoke named a `client_id` that is not the client of the refresh token. Nothing is revoked. Or a `client_credentials` request came from a public client, or from a client whose `grantTypes` do not hold the grant. A device request or poll came from a client without the device grant, or from a pairwise client.
 - **Do:** Revoke with the client id of the token, or with no client id. For `client_credentials`, use a confidential client of `api.oauth.clients` with the grant.
 
 | Routes |
 | --- |
-| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke). |
+| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization). |
 
 ## Other answers
 

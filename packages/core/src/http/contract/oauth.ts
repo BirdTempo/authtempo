@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CHALLENGE_RE, DPOP_JKT_RE, MAX_AGE_RE } from "../../engine/oauth-authorize.js";
+import { DEVICE_GRANT } from "../../engine/oauth-clients.js";
 import type { RouteKey } from "../route-list.js";
 import { OkAnswer } from "./shapes.js";
 import type { RouteContract } from "./types.js";
@@ -19,14 +20,15 @@ const AuthMethod = z.enum(["none", "client_secret_basic", "client_secret_post", 
  * The registration of RFC 7591 section 2 and OIDC Registration section 2,
  * read by hand: `redirect_uris` is the one required key. An omitted
  * `token_endpoint_auth_method` is `none` (plan 12e, owner decision 4). The
- * grant types are the code and the refresh, and the one response type is
- * `code`. The engine rules on each value.
+ * grant types are the code, the refresh, and the device grant while
+ * `oauth.device` is on. The one response type is `code`. The engine rules
+ * on each value.
  */
 export const registerBody = z.object({
   redirect_uris: z.array(z.string()).min(1),
   client_name: z.string().min(1).max(80).optional(),
   token_endpoint_auth_method: AuthMethod.optional(),
-  grant_types: z.array(z.enum(["authorization_code", "refresh_token"])).optional(),
+  grant_types: z.array(z.enum(["authorization_code", "refresh_token", DEVICE_GRANT])).optional(),
   response_types: z.array(z.literal("code")).optional(),
   jwks: ClientKeySet.optional(),
   jwks_uri: z.string().optional(),
@@ -85,7 +87,7 @@ export const consentBody = z.object({
   decision: z.enum(["allow", "deny"]),
 });
 
-/** The sign-in step of an authorize request: `next` is the authorize URL to land back on. */
+/** The sign-in step of an authorize request or the device page: `next` is the page to land back on. */
 export const signInQuery = z.object({ next: z.string().min(1) });
 
 /**
@@ -97,10 +99,11 @@ export const signInQuery = z.object({ next: z.string().min(1) });
  * `client_secret_basic` client sends its id in the header and may omit
  * `client_id`. A `private_key_jwt` client sends `client_assertion_type`
  * and `client_assertion` (plan 12e). The `client_credentials` grant takes
- * `resource` and `scope?` from a confidential client (plan 12e).
+ * `resource` and `scope?` from a confidential client (plan 12e). The device
+ * grant of RFC 8628 section 3.4 takes `device_code` (plan 12e).
  */
 export const tokenBody = z.object({
-  grant_type: z.enum(["authorization_code", "refresh_token", "client_credentials"]),
+  grant_type: z.enum(["authorization_code", "refresh_token", "client_credentials", DEVICE_GRANT]),
   client_id: z.string().min(1).max(2048).optional(),
   client_secret: z.string().optional(),
   client_assertion_type: z.string().optional(),
@@ -111,6 +114,7 @@ export const tokenBody = z.object({
   resource: z.string().optional(),
   refresh_token: z.string().optional(),
   scope: z.string().optional(),
+  device_code: z.string().optional(),
 });
 
 /** The revocation of RFC 7009 section 2.1, read by hand as a form. The client auth is that of the token route (plan 12e). */
@@ -134,6 +138,38 @@ export const introspectBody = z.object({
   client_secret: z.string().optional(),
   client_assertion_type: z.string().optional(),
   client_assertion: z.string().optional(),
+});
+
+/**
+ * The device authorization request of RFC 8628 section 3.1, read by hand as
+ * a form. The client auth is that of the token route (plan 12e).
+ */
+export const deviceAuthorizationBody = z.object({
+  client_id: z.string().optional(),
+  client_secret: z.string().optional(),
+  client_assertion_type: z.string().optional(),
+  client_assertion: z.string().optional(),
+  scope: z.string().optional(),
+  resource: z.string().optional(),
+});
+
+/** The answer of RFC 8628 section 3.2, as `startDevice` answers it. */
+export const DeviceAuthorizationJson = z.strictObject({
+  device_code: z.string(),
+  user_code: z.string(),
+  verification_uri: z.string(),
+  verification_uri_complete: z.string(),
+  expires_in: z.number().int(),
+  interval: z.number().int(),
+});
+
+/** The device page: `user_code` of `verification_uri_complete` fills the field. */
+export const deviceQuery = z.object({ user_code: z.string().optional() });
+
+/** A post of the device page: the code, and the decision on the consent step. */
+export const deviceBody = z.object({
+  user_code: z.string(),
+  decision: z.enum(["allow", "deny"]).optional(),
 });
 
 /**
@@ -233,7 +269,7 @@ export const OAUTH_CONTRACT = {
   },
   "GET /oauth/sign-in": {
     query: { schema: signInQuery, parsedBy: "hand" },
-    // The sign-in page; a `next` that is not an authorize URL goes to the app's error page.
+    // The sign-in page; a `next` that is not an authorize URL or the device page goes to the app's error page.
     answer: { kind: "html" },
     alt: { kind: "redirect", param: "auth_error" },
   },
@@ -249,6 +285,20 @@ export const OAUTH_CONTRACT = {
   "POST /oauth/introspect": {
     body: { schema: introspectBody, media: ["form"], parsedBy: "hand" },
     answer: { kind: "json", schema: IntrospectAnswerJson },
+  },
+  "POST /oauth/device_authorization": {
+    body: { schema: deviceAuthorizationBody, media: ["form"], parsedBy: "hand" },
+    answer: { kind: "json", schema: DeviceAuthorizationJson },
+  },
+  "GET /oauth/device": {
+    query: { schema: deviceQuery, parsedBy: "hand" },
+    // The code form with a session; else the sign-in step.
+    answer: { kind: "html" },
+    alt: { kind: "redirect" },
+  },
+  "POST /oauth/device": {
+    body: { schema: deviceBody, media: ["form"], parsedBy: "hand" },
+    answer: { kind: "html" },
   },
   "GET /oauth/userinfo": userinfo,
   "POST /oauth/userinfo": userinfo,

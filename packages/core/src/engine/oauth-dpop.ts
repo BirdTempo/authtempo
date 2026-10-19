@@ -103,6 +103,21 @@ export async function tokenDpop(
 }
 
 /**
+ * The DPoP key of a device authorization request (plan 12e): null with no
+ * `DPoP` header, the key of a valid proof, or `invalid_dpop_proof`. RFC 8628
+ * and RFC 9449 define no proof here. Core takes one, as `dpop_jkt` of RFC
+ * 9449 section 10: the poll then needs a proof of the same key.
+ */
+export async function deviceStartDpop(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<OAuthResult<DpopBinding | null>> {
+  if (!request.headers.has("dpop")) return oauthOk(null);
+  const binding = await proofOf(config, request, routeUrl(config, "/oauth/device_authorization"));
+  return binding ? oauthOk(binding) : oauthFail("invalid_dpop_proof");
+}
+
+/**
  * True when the request holds one valid proof of key `jkt` for `token` and
  * `url` (RFC 9449 section 7.1). The proof's `jti` is spent, so a replay fails.
  */

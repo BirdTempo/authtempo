@@ -36,6 +36,7 @@ import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+import { type DevicePageInput, defaultDevicePage } from "./http/device-page.js";
 import { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
 import {
   defaultHandoffConfirmPage,
@@ -643,6 +644,15 @@ export interface OAuthConfig {
    * rotation, so the window is off by default.
    */
   refreshReuseSeconds?: number;
+  /**
+   * The device grant of RFC 8628 (plan 12e). Absent or `false`: off, and no
+   * device route exists. `codeTtlMinutes`: the life of a device code and
+   * its user code, 1 to 30; default 10. `interval`: the poll interval in
+   * seconds, 5 to 60; default 5 (RFC 8628 section 3.2).
+   */
+  device?: false | { codeTtlMinutes?: number; interval?: number };
+  /** The HTML of the device page. Default `defaultDevicePage`. */
+  devicePage?: (input: DevicePageInput) => string;
 }
 
 /** The longest refresh reuse window: each second is a second an attacker with a copy can act (plan 12e). */
@@ -669,6 +679,9 @@ export interface ResolvedOAuth {
   signInURL: string | null;
   /** The refresh reuse window in seconds, 0 to `REUSE_WINDOW_MAX_S`; 0 is off (plan 12e). */
   refreshReuseSeconds: number;
+  /** The device grant, or null: off (plan 12e). */
+  device: { codeTtlMinutes: number; interval: number } | null;
+  devicePage: (input: DevicePageInput) => string;
   /** The metadata documents this isolate read, by URL, each for one hour. */
   cimdCache: Map<string, CimdEntry>;
   /** The `jwks_uri` key sets of `private_key_jwt` clients that this isolate read, by URL, each for one hour (plan 12e). */
@@ -1618,6 +1631,8 @@ const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
   dpop: true,
   signInURL: true,
   refreshReuseSeconds: true,
+  device: true,
+  devicePage: true,
 };
 
 /** The longest client id: a `cl_` id or a metadata document URL (plan 11d). */
@@ -1724,6 +1739,28 @@ function resolveSignInURL(
   return url.toString();
 }
 
+/** `oauth.device` (plan 12e). Absent or `false`: off. */
+function resolveDevice(input: unknown): ResolvedOAuth["device"] {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input)) throw new ConfigError("oauth.device must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && key !== "codeTtlMinutes" && key !== "interval")
+      throw new ConfigError(
+        `oauth.device.${key} is not an option; core has codeTtlMinutes and interval`,
+      );
+  const ttl: unknown = input.codeTtlMinutes ?? 10;
+  const interval: unknown = input.interval ?? 5;
+  if (typeof ttl !== "number")
+    throw new ConfigError("oauth.device.codeTtlMinutes must be an integer from 1 to 30");
+  if (typeof interval !== "number")
+    throw new ConfigError("oauth.device.interval must be an integer from 5 to 60");
+  return {
+    codeTtlMinutes: integerIn("oauth.device.codeTtlMinutes", ttl, 1, 30),
+    // RFC 8628 section 3.2: a client with no interval polls every 5 seconds, so no shorter value.
+    interval: integerIn("oauth.device.interval", interval, 5, 60),
+  };
+}
+
 function integerIn(path: string, value: number, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max)
     throw new ConfigError(`${path} must be an integer from ${min} to ${max}`);
@@ -1741,7 +1778,7 @@ function resolveOAuth(
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
       throw new ConfigError(
-        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, and refreshReuseSeconds`,
+        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, refreshReuseSeconds, device, and devicePage`,
       );
   if (!jwtMint)
     throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
@@ -1820,6 +1857,8 @@ function resolveOAuth(
     );
   if (input.consentPage !== undefined && typeof input.consentPage !== "function")
     throw new ConfigError("oauth.consentPage must be a function");
+  if (input.devicePage !== undefined && typeof input.devicePage !== "function")
+    throw new ConfigError("oauth.devicePage must be a function");
   return {
     resources: [...(resources as string[])],
     scopes,
@@ -1845,6 +1884,8 @@ function resolveOAuth(
       0,
       REUSE_WINDOW_MAX_S,
     ),
+    device: resolveDevice(input.device),
+    devicePage: input.devicePage ?? defaultDevicePage,
     cimdCache: new Map(),
     jwksCache: new Map(),
   };

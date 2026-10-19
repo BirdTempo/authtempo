@@ -34,7 +34,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   tokens: ["tokens"],
   jwt: ["jwtMint"],
   operator: ["operator"],
-  oauth: ["oauth", "oauthRegistration"],
+  oauth: ["oauth", "oauthRegistration", "oauthDevice"],
   openapi: ["openapi"],
 };
 
@@ -49,7 +49,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(103);
+    expect(listed.length).toBe(106);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -136,6 +136,16 @@ describe("ROUTES (plan 11a)", () => {
         },
       },
       features: ["oauth"],
+    },
+    {
+      name: "oauth device",
+      start: {
+        oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false } },
+      },
+      delta: {
+        oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false }, device: {} },
+      },
+      features: ["oauthDevice"],
     },
     { name: "emailOtp off", delta: { emailOtp: false }, features: ["emailOtp"], off: true },
     { name: "jwtMint off", delta: { jwtMint: false }, features: ["jwtMint"], off: true },

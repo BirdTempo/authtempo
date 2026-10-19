@@ -208,7 +208,13 @@ export const CONFIG_KEYS = {
     dpop: true,
     signInURL: true,
     refreshReuseSeconds: true,
+    device: true,
+    devicePage: true,
   } satisfies Keys<OAuthConfig>,
+  "oauth.device": {
+    codeTtlMinutes: true,
+    interval: true,
+  } satisfies Keys<NonNullable<Exclude<OAuthConfig["device"], false>>>,
   "oauth.dpop": {
     algs: true,
     windowSeconds: true,

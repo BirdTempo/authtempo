@@ -143,6 +143,12 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /oauth/authorize": { request_id: BODY43, decision: "allow" },
   "POST /oauth/token": { grant_type: "authorization_code", client_id: "client-1" },
   "POST /oauth/revoke": { token: BODY43 },
+  "POST /oauth/device_authorization": {
+    client_id: "client-1",
+    scope: "openid",
+    resource: `${BASE_URL}/mcp`,
+  },
+  "POST /oauth/device": { user_code: "BCDF-GHJK" },
   "POST /oauth/grants/revoke": { clientId: "client-1" },
 };
 
@@ -266,7 +272,11 @@ function world(extra: Partial<AuthConfig> = {}) {
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     organizations: {},
-    oauth: { resources: [`${BASE_URL}/mcp`], registration: { cimd: false, dynamic: true } },
+    oauth: {
+      resources: [`${BASE_URL}/mcp`],
+      registration: { cimd: false, dynamic: true },
+      device: {},
+    },
     operator: { secretHash: "0".repeat(64) },
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.

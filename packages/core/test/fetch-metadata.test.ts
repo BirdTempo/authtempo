@@ -82,9 +82,9 @@ describe("the router applies it on every POST route (plan 12b)", () => {
     // Apple's callback is the one POST that a provider sends cross-site (allowCrossSiteForm).
     // The token endpoint (clientOrigin, plan 11d) reads no cookie, so a post with an Origin
     // skips the rule there; oauth-cors.test.ts holds its cases.
-    // /handoff/continue and /oauth/authorize answer the same 403 from their own handlers, so on
-    // those two routes this case cannot tell the router from the handler. The stub route test
-    // below closes that gap: its handler never refuses.
+    // /handoff/continue, /oauth/authorize, and /oauth/device answer the same 403 from their own
+    // handlers, so on those three routes this case cannot tell the router from the handler. The
+    // stub route test below closes that gap: its handler never refuses.
     if (path === "/social/apple/callback" || path === "/oauth/token") {
       expect(res.status).not.toBe(403);
       return;
@@ -97,8 +97,9 @@ describe("the router applies it on every POST route (plan 12b)", () => {
   });
 
   it.each(posts)("passes a post with no Sec-Fetch-Site on %s to its handler", async (path) => {
-    // Two routes have their own stricter check: their Origin must be baseURL.
-    const origin = path === "/handoff/continue" || path === "/oauth/authorize" ? BASE : TRUSTED;
+    // Three routes have their own stricter check: their Origin must be baseURL.
+    const own = ["/handoff/continue", "/oauth/authorize", "/oauth/device"];
+    const origin = own.includes(path) ? BASE : TRUSTED;
     const res = await handle(
       request(`${config.basePath}${path}`, null, "application/json", origin),
     );

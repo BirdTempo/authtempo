@@ -504,7 +504,10 @@ async function settle(
  * parameter carries no URL and opens no redirect (plan 9h). Else core's
  * sign-in page, with `next` back to the held request.
  */
-function signInStep(config: ResolvedConfig, requestId: string): AuthorizeStep {
+function signInStep(
+  config: ResolvedConfig,
+  requestId: string,
+): { kind: "sign-in"; location: string } {
   const { signInURL } = oauthOf(config);
   if (signInURL !== null) {
     const url = new URL(signInURL);
@@ -512,10 +515,42 @@ function signInStep(config: ResolvedConfig, requestId: string): AuthorizeStep {
     return { kind: "sign-in", location: url.toString() };
   }
   const next = `${config.basePath}/oauth/authorize?request_id=${requestId}`;
-  return {
-    kind: "sign-in",
-    location: `${config.baseURL}${config.basePath}/oauth/sign-in?next=${encodeURIComponent(next)}`,
-  };
+  return { kind: "sign-in", location: signInPageUrl(config, next) };
+}
+
+/** Core's sign-in page, with `next` back to a page of the provider. */
+function signInPageUrl(config: ResolvedConfig, next: string): string {
+  return `${config.baseURL}${config.basePath}/oauth/sign-in?next=${encodeURIComponent(next)}`;
+}
+
+/**
+ * The params of a held row of the device page (plan 12e ruling 44). The
+ * row holds no user code: core never stores a user code in clear.
+ */
+const DEVICE_HELD_PARAMS = "device=1";
+/** The identifier of a held row of the device page: it names no client yet. */
+const DEVICE_HELD_IDENTIFIER = "device";
+
+/** The path of the device page, with a user code in its `XXXX-XXXX` form, or with none. */
+export function devicePagePath(config: ResolvedConfig, userCode: string | null): string {
+  return `${config.basePath}/oauth/device${userCode === null ? "" : `?user_code=${userCode}`}`;
+}
+
+/**
+ * The sign-in step of the device page (plan 12e ruling 44). Core's sign-in
+ * page lands back on the device page with the code in the URL. An app's
+ * own sign-in route gets the id of a held row, as for an authorize request.
+ * The row holds no user code, so after the sign-in the person types it again.
+ */
+export async function deviceSignIn(
+  config: ResolvedConfig,
+  userCode: string | null,
+): Promise<string> {
+  if (oauthOf(config).signInURL === null)
+    return signInPageUrl(config, devicePagePath(config, userCode));
+  const params = new URLSearchParams(DEVICE_HELD_PARAMS);
+  const id = await holdRequest(config, DEVICE_HELD_IDENTIFIER, params, null, null);
+  return signInStep(config, id).location;
 }
 
 /** `params` with `login` dropped from `prompt`: the sign-in page is the fresh sign-in that `login` asks for. */
@@ -602,6 +637,12 @@ async function heldStep(
   if (!held) return { kind: "error", error: "invalid_request" };
   if (held.data.userId !== null && held.data.userId !== session?.user.id)
     return { kind: "error", error: "invalid_request" };
+  // A held row of the device page goes back to the page after the sign-in, once.
+  if (held.data.params === DEVICE_HELD_PARAMS) {
+    if (!session) return signInStep(config, held.id);
+    const location = `${config.baseURL}${devicePagePath(config, null)}`;
+    return settle(config, held, () => Promise.resolve({ kind: "redirect", location }));
+  }
   const params = new URLSearchParams(held.data.params);
   const c = await checkAuthorize(config, params);
   if (!c.ok) {

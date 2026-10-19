@@ -28,6 +28,7 @@ export const ROUTE_FEATURES = [
   "operator",
   "oauth",
   "oauthRegistration",
+  "oauthDevice",
   "openapi",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
@@ -54,7 +55,8 @@ export interface RouteEntry {
    * The config that turns the route on. `session`, `magicLink`, and `tokens`
    * are in every deployment; `emailOtp` and `jwtMint` are on by default;
    * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
-   * `oauthRegistration` needs `oauth` with `registration.dynamic`; `operator`
+   * `oauthRegistration` needs `oauth` with `registration.dynamic`;
+   * `oauthDevice` needs `oauth` with `device` (plan 12e); `operator`
    * needs `operator.secretHash` (plan 11c), and `/operator/keys/rotate` also
    * needs `jwtMint` (plan 11c2). `account` (plan 12a) is in every
    * deployment. `accountDelete` (plan 12a) is on by default; `account.delete:
@@ -1257,6 +1259,11 @@ export const ROUTES = Object.freeze([
       "invalid_scope",
       "unauthorized_client",
       "invalid_dpop_proof",
+      // RFC 8628 section 3.5: the device poll (plan 12e).
+      "authorization_pending",
+      "slow_down",
+      "access_denied",
+      "expired_token",
     ],
   },
   {
@@ -1274,6 +1281,38 @@ export const ROUTES = Object.freeze([
     auth: ["none", "clientSecretBasic"],
     codes: [],
     oauthCodes: ["invalid_request", "rate_limited", "invalid_client"],
+  },
+  {
+    method: "POST",
+    path: "/oauth/device_authorization",
+    feature: "oauthDevice",
+    auth: ["none", "clientSecretBasic"],
+    codes: [],
+    oauthCodes: [
+      "invalid_request",
+      "rate_limited",
+      "invalid_client",
+      "unauthorized_client",
+      "invalid_target",
+      "invalid_scope",
+      "invalid_dpop_proof",
+    ],
+  },
+  {
+    method: "GET",
+    path: "/oauth/device",
+    feature: "oauthDevice",
+    auth: ["none", "session"],
+    codes: [],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/oauth/device",
+    feature: "oauthDevice",
+    auth: ["session"],
+    codes: ["unauthorized"],
+    oauthCodes: ["invalid_request", "rate_limited"],
   },
   {
     method: "GET",

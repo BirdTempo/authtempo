@@ -109,6 +109,11 @@ export const OAUTH_ERRORS = {
   // fails a check of section 4.3. Or a client that must send a proof sent none.
   // At userinfo the status is DPOP_PROOF_AT_RESOURCE.
   invalid_dpop_proof: 400,
+  // RFC 8628 section 3.5 (read 2026-10-20): the answers of a device poll.
+  // RFC 6749 section 5.2 gives an error of the token endpoint the status 400.
+  authorization_pending: 400,
+  slow_down: 400,
+  expired_token: 400,
   rate_limited: 429,
 } as const;
 

@@ -12,7 +12,13 @@ import type { DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { resourceOf } from "../primitives/resource.js";
-import type { OAuthClientRow, OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
+import type {
+  OAuthClientRow,
+  OAuthDeviceRow,
+  OAuthTokenRow,
+  UserRow,
+  VerificationRow,
+} from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
@@ -81,8 +87,10 @@ interface Grant {
   authTime: number | null;
   /** The id of the code row at the code exchange; the family of the spent row at a refresh. */
   familyId: string;
-  /** The spent refresh row at a refresh; null at the code exchange, which alone answers an ID token. */
+  /** The spent refresh row at a refresh; null at the code exchange and the device poll, which alone answer an ID token. */
   spentId: string | null;
+  /** The spent device row at a device poll (plan 12e); null for the other grants. */
+  deviceId: string | null;
   /** The key of the request's proof: the access token gets `cnf.jkt` (plan 12e). */
   dpop: DpopBinding | null;
   /** The refresh row keeps the key of `dpop`: a public client's (RFC 9449 section 5). */
@@ -209,7 +217,8 @@ async function writeRefresh(
 /**
  * True while the grant still stands: at a refresh, the spent row exists;
  * at the code exchange, the code row (its id is the family id) and the
- * consent of the user for the client exist. A grant revoke deletes the
+ * consent of the user for the client exist. At a device poll, the device
+ * row and the consent exist. A grant revoke deletes the
  * consent and the refresh rows (`revokeGrant`); a reset or a password
  * change deletes the refresh rows and the code rows (`deleteOAuthTokens`).
  */
@@ -222,8 +231,14 @@ async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> 
         { field: "id", op: "eq", value: g.spentId },
       ])) !== null
     );
-  // A reset or a password change that ran during this exchange deleted the code row it spent.
-  if (
+  if (g.deviceId !== null) {
+    // The device row stays after its spend, as a code row does.
+    if (
+      !(await config.storage.findOne("oauthDevice", [{ field: "id", op: "eq", value: g.deviceId }]))
+    )
+      return false;
+  } else if (
+    // A reset or a password change that ran during this exchange deleted the code row it spent.
     !(await config.storage.findOne("verification", [{ field: "id", op: "eq", value: g.familyId }]))
   )
     return false;
@@ -285,7 +300,7 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
     }
     answer.refresh_token = fresh.token;
   }
-  // OIDC Core 1.0 section 3.1.3.3: an ID token at the code exchange. A refresh answers none.
+  // OIDC Core 1.0 section 3.1.3.3: an ID token at the code exchange and the device poll. A refresh answers none.
   if (g.spentId === null && g.scopes.includes("openid")) {
     const claims: Record<string, unknown> = {
       iss: issuer,
@@ -380,6 +395,42 @@ export async function exchangeCode(
     authTime: data.authTime,
     familyId: consumed.value.id,
     spentId: null,
+    deviceId: null,
+    dpop: input.dpop,
+    bindRefresh: !input.client.confidential,
+  });
+}
+
+/**
+ * The tokens of a spent device row (plan 12e, RFC 8628 section 3.5): the
+ * answer of the code exchange, with an ID token for `openid`. The family id
+ * is the id of the device row. `pollDevice` checked the client, the key,
+ * and the user, and spent the row.
+ */
+export async function issueDeviceTokens(
+  config: ResolvedConfig,
+  input: {
+    row: OAuthDeviceRow;
+    user: UserRow;
+    client: AuthedClient;
+    /** `authTimeOf` the session of the approval, or null when it ended. */
+    authTime: number | null;
+    dpop: DpopBinding | null;
+  },
+): Promise<OAuthResult<TokenAnswer>> {
+  const { row } = input;
+  return issueTokens(config, {
+    user: input.user,
+    client: input.client.client,
+    scopes: row.scopes,
+    grantScopes: row.scopes,
+    resource: row.resource,
+    nonce: null,
+    sessionId: row.sessionId,
+    authTime: input.authTime,
+    familyId: row.id,
+    spentId: null,
+    deviceId: row.id,
     dpop: input.dpop,
     bindRefresh: !input.client.confidential,
   });
@@ -532,6 +583,7 @@ export async function refreshGrant(
     authTime: null,
     familyId: row.familyId,
     spentId: row.id,
+    deviceId: null,
     dpop: input.dpop,
     bindRefresh: !input.client.confidential,
   });

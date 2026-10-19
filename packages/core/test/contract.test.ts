@@ -6,6 +6,7 @@ import { CHALLENGE_RE, ID_RE, startHandoff } from "../src/engine/handoff.js";
 import { MAGIC_LINK_TOKEN_RE } from "../src/engine/magic-link.js";
 import { CHALLENGE_RE as PKCE_CHALLENGE_RE } from "../src/engine/oauth-authorize.js";
 import { createClient } from "../src/engine/oauth-client-store.js";
+import { DEVICE_GRANT } from "../src/engine/oauth-clients.js";
 import {
   PASSWORD_RESET_TOKEN_RE,
   PASSWORD_VERIFY_TOKEN_RE,
@@ -109,7 +110,7 @@ function world(secretHash = "0".repeat(64)) {
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     organizations: {},
-    oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true } },
+    oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true }, device: {} },
     operator: { secretHash },
     account: { deleteConfirm: { ttlMinutes: 60 } },
   });
@@ -562,7 +563,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(103);
+    expect(keys.length).toBe(106);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -766,6 +767,16 @@ describe("the route contract (plan 11g)", () => {
         },
       },
       {
+        // The code form; a value of another form leaves the field empty (plan 12e).
+        key: "GET /oauth/device",
+        path: "/oauth/device",
+        query: { user_code: "BCDF-GHJK" },
+        headers: cookie,
+        required: [],
+        valid: { status: 200, code: null },
+        missing: {},
+      },
+      {
         key: "GET /oauth/sign-in",
         path: "/oauth/sign-in",
         query: { next: `/auth/oauth/authorize?client_id=${clientId}` },
@@ -779,7 +790,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
-    expect(hand.length).toBe(14);
+    expect(hand.length).toBe(15);
     let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = CONTRACT[row.key];
@@ -839,6 +850,16 @@ describe("the route contract (plan 11g)", () => {
     });
     if (!rs.ok || !rs.value.clientSecret) throw new Error("no resource server");
     const rsBasic = { authorization: basicHeader(rs.value.client.id, rs.value.clientSecret) };
+    // A public client of the device grant (plan 12e).
+    const deviceClient = await jsonOf<{ client_id: string }>(
+      await w.handle(
+        post("/auth/oauth/register", {
+          redirect_uris: [REDIRECT],
+          grant_types: ["authorization_code", DEVICE_GRANT],
+        }),
+      ),
+      "the device client register",
+    );
     /**
      * Each POST that reads its body by hand, with its media and a valid body. It also has the
      * keys that the schema requires, with the answer when each one is absent. `valid` is the
@@ -900,6 +921,25 @@ describe("the route contract (plan 11g)", () => {
         missing: { token: { status: 200, code: null } },
       },
       {
+        // RFC 8628 section 3.1: every key is optional in the schema; the engine refuses a missing scope.
+        key: "POST /oauth/device_authorization",
+        media: "form",
+        body: { client_id: deviceClient.client_id, scope: "openid", resource: RESOURCE },
+        required: [],
+        valid: { status: 200, code: null },
+        missing: {},
+      },
+      {
+        // An unknown code shows the form again with its error: the page answers 200.
+        key: "POST /oauth/device",
+        media: "form",
+        body: { user_code: "BCDF-GHJK" },
+        headers: consent,
+        required: ["user_code"],
+        valid: { status: 200, code: null },
+        missing: { user_code: { status: 200, code: null } },
+      },
+      {
         // RFC 7662 section 2.1: an unknown token answers active false; the token is required.
         key: "POST /oauth/introspect",
         media: "form",
@@ -915,7 +955,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_FORMS.map((row) => row.key).sort());
-    expect(hand.length).toBe(5);
+    expect(hand.length).toBe(7);
     for (const row of VALID_FORMS) {
       const contract = CONTRACT[row.key];
       const body = contract?.body;
@@ -992,7 +1032,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 48, both: 9, form: 4 });
+    expect(counts).toEqual({ json: 48, both: 9, form: 6 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);
@@ -1004,7 +1044,7 @@ describe("the route contract (plan 11g)", () => {
         expect(answer, `${row.key}: a form`).not.toEqual(INVALID_BODY);
       else expect(answer, `${row.key}: a form`).toEqual(INVALID_BODY);
     }
-    // The four hand-read forms refuse a JSON body, and the hand-read JSON refuses a form.
+    // The six hand-read forms refuse a JSON body, and the hand-read JSON refuses a form.
     // The consent route checks its origin and the session before the body.
     const consent = { ...cookie, origin: BASE_URL };
     for (const key of [
@@ -1012,6 +1052,8 @@ describe("the route contract (plan 11g)", () => {
       "POST /oauth/token",
       "POST /oauth/revoke",
       "POST /oauth/introspect",
+      "POST /oauth/device_authorization",
+      "POST /oauth/device",
     ] as const)
       expect(
         await answerOf(await w.handle(post(`/auth${key.slice(5)}`, {}, consent))),

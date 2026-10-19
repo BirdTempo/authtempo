@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { secretMatches } from "../src/engine/oauth-client-secret.js";
 import { deleteClient, rotateClientSecret } from "../src/engine/oauth-client-store.js";
-import { findClient } from "../src/engine/oauth-clients.js";
+import { DEVICE_GRANT, findClient } from "../src/engine/oauth-clients.js";
 import type { ModelName } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { post } from "./helpers.js";
-import { codeFor, exchange, type Handle, oauthHandle, REDIRECT } from "./oauth-helpers.js";
+import {
+  approvedDevice,
+  codeFor,
+  exchange,
+  type Handle,
+  OTHER_RESOURCE,
+  oauthHandle,
+  REDIRECT,
+  RESOURCE,
+  SCOPES,
+} from "./oauth-helpers.js";
 
 /** The SHA-256 hex of a text, computed here, apart from core's own helper. */
 async function sha256(text: string): Promise<string> {
@@ -272,32 +282,27 @@ describe("api.oauth.clients (plan 12e)", () => {
   });
 
   it("deletes a client with its consents, refresh tokens, device rows, session links, and outbox rows in one transaction", async () => {
-    const h = oauthHandle();
+    const h = oauthHandle({
+      oauth: {
+        resources: [RESOURCE, OTHER_RESOURCE],
+        scopes: SCOPES,
+        registration: { cimd: false, dynamic: true },
+        device: {},
+      },
+    });
     const g = await codeFor(h);
     const res = await h.auth.handle(exchange(g.code, g.clientId, g.verifier));
     expect(res.status).toBe(200);
     const now = h.clock.now();
-    // No flow writes these three yet: the device grant (Task 14) and the
-    // back-channel logout (Task 16) will. The rows have the shape those flows write.
+    // The device row comes from the device grant (Task 14). No flow writes the
+    // other two yet: the back-channel logout (Task 16) will. Those rows have the shape it writes.
     const seed = async (clientId: string) => {
-      await h.storage.create("oauthDevice", {
-        id: `od-${clientId}`,
-        deviceCodeHash: await sha256(`device-${clientId}`),
-        userCodeHash: await sha256(`user-${clientId}`),
-        secretVersion: 1,
+      const client = await clientsOf(h).update({
         clientId,
-        scopes: ["mcp:read"],
-        resource: "https://api.example.com/mcp",
-        status: "approved",
-        userId: g.user.id,
-        sessionId: g.session.id,
-        interval: 5,
-        lastPolledAt: null,
-        dpopJkt: null,
-        expiresAt: new Date(now.getTime() + 600_000),
-        createdAt: now,
-        updatedAt: now,
+        grantTypes: ["authorization_code", "refresh_token", DEVICE_GRANT],
       });
+      if (!client.ok) throw new Error(client.error);
+      await approvedDevice(h, clientId, g.cookie);
       await h.storage.create("oauthSessionClient", {
         id: `sc-${clientId}`,
         sessionId: g.session.id,

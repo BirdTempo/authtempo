@@ -16,7 +16,7 @@ export interface Feature {
 
 /**
  * One row per member of RouteFeature (17 at 0ef9665; plan 11g adds `openapi`,
- * the 18th). A Record over the union fails the site's typecheck when core
+ * the 18th; plan 12e adds `oauthDevice`, the 19th). A Record over the union fails the site's typecheck when core
  * adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
@@ -27,7 +27,7 @@ export interface Feature {
  * `account.notices` is on. The first option is off by default, and the second
  * is on. The next row, `magicLink`, also shows the envelope. We accept the
  * repeat: no symbol of spec 8 means a removal, and spec 9 sets no rule against
- * a repeat. The two oauth rows also repeat.
+ * a repeat. The three oauth rows also repeat.
  * The guide of `session` is the architecture page (plan 11b Task 4). The guide
  * of `operator` is the Operator section of the routes page, which shows its
  * four routes (ruling 18 of the plan 11b lane). `accountDelete` and
@@ -137,6 +137,11 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "An MCP client registers itself when you turn the option on.",
     icon: "oauth",
     guide: "/docs/guides/oauth-provider/#how-it-behaves",
+  },
+  oauthDevice: {
+    title: "Device sign-in",
+    line: "A device with no browser gets tokens after the person types a short code on your site.",
+    icon: "oauth",
   },
   openapi: {
     title: "OpenAPI document",

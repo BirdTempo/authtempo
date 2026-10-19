@@ -5,6 +5,8 @@ import {
   type AuthorizeStep,
   authorizeStep,
   decideAuthorize,
+  devicePagePath,
+  deviceSignIn,
 } from "../../engine/oauth-authorize.js";
 import {
   type AuthedClient,
@@ -20,6 +22,17 @@ import {
 } from "../../engine/oauth-clients.js";
 import { CREDENTIALS_GRANT, credentialsGrant } from "../../engine/oauth-credentials.js";
 import {
+  DEVICE_GRANT,
+  DEVICE_START_PER_IP,
+  type DeviceStep,
+  decideDevice,
+  normalizeUserCode,
+  pollDevice,
+  startDevice,
+  USER_CODE_RE,
+} from "../../engine/oauth-device.js";
+import {
+  deviceStartDpop,
   dpopAlgs,
   readDpopToken,
   resourceProofHolds,
@@ -43,7 +56,8 @@ import { INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, type OAuthErrorCode } from "../
 import { ipKey } from "../../limiter/ip-key.js";
 import type { OAuthClientRow } from "../../schema.js";
 import { revokeGrantBody } from "../contract/oauth.js";
-import { consentPagePolicy, pageHeaders } from "../csp.js";
+import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
+import { DEVICE_WARNING, type DevicePageInput } from "../device-page.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import { originTrusted, type Route, type RouteContext } from "../router.js";
@@ -111,6 +125,17 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         return oauthJson(r, 201);
       },
     });
+  /**
+   * True for the device page as the sign-in step names it (ruling 44): the
+   * path alone, or with a user code of the `XXXX-XXXX` form. No other query.
+   */
+  const deviceNext = (next: string): boolean => {
+    if (!oauth.device) return false;
+    const path = devicePagePath(config, null);
+    if (next === path) return true;
+    const prefix = `${path}?user_code=`;
+    return next.startsWith(prefix) && USER_CODE_RE.test(next.slice(prefix.length));
+  };
   const stepResponse = (step: AuthorizeStep): Response => {
     if (step.kind === "error") return json({ error: step.error }, OAUTH_ERRORS[step.error]);
     if (step.kind !== "consent") return redirect(step.location);
@@ -179,7 +204,10 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       key: "GET /oauth/sign-in",
       async handler(ctx) {
         const next = ctx.url.searchParams.get("next") ?? "";
-        if (!next.startsWith(`${config.basePath}/oauth/authorize?`) || safeNext(next) !== next)
+        if (
+          !(next.startsWith(`${config.basePath}/oauth/authorize?`) || deviceNext(next)) ||
+          safeNext(next) !== next
+        )
           return redirect(authErrorUrl(config, "invalid_request"));
         return signInPageResponse(config, next);
       },
@@ -224,7 +252,12 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       });
     return json({ error: r.error }, INVALID_CLIENT_NO_HEADER);
   };
-  const GRANTS = new Set(["authorization_code", "refresh_token", CREDENTIALS_GRANT]);
+  const GRANTS = new Set([
+    "authorization_code",
+    "refresh_token",
+    CREDENTIALS_GRANT,
+    ...(oauth.device ? [DEVICE_GRANT] : []),
+  ]);
   /**
    * The grant of a form; the answer of the endpoint before any CORS header.
    * The client auth runs before the grant, so a failed auth spends nothing.
@@ -259,6 +292,14 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           client: authed.value,
           redirectUri: form.get("redirect_uri") ?? "",
           resource: form.get("resource"),
+          dpop: dpop.value,
+        }),
+      );
+    if (grant === DEVICE_GRANT)
+      return tokenAnswer(
+        await pollDevice(config, {
+          deviceCode: form.get("device_code") ?? "",
+          client: authed.value,
           dpop: dpop.value,
         }),
       );
@@ -422,6 +463,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     { method: "GET", path: "/oauth/userinfo", key: "GET /oauth/userinfo", handler: userinfo },
     { method: "POST", path: "/oauth/userinfo", key: "POST /oauth/userinfo", handler: userinfo },
   );
+  if (oauth.device) routes.push(...deviceRoutes(config, clientRefused, noCache));
   // The grants of the signed-in person (plan 9g final fix wave, review I-1).
   // A session only, through `sessionFromRequest`: a `tk_` bearer and an
   // access token answer 401, so an agent cannot list or end grants. The
@@ -483,4 +525,127 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     },
   );
   return routes;
+}
+
+/**
+ * The routes of the device grant (plan 12e, RFC 8628). They exist only while
+ * `oauth.device` is on. The device asks at `/oauth/device_authorization`
+ * with the client auth of the token route. The person uses `/oauth/device`.
+ * The page has no script, and its POST needs this origin and a session.
+ */
+function deviceRoutes(
+  config: ResolvedConfig,
+  clientRefused: (
+    request: Request,
+    r: { ok: false; error: OAuthErrorCode; status: number },
+  ) => Response,
+  noCache: (res: Response) => Response,
+): Route[] {
+  const oauth = config.oauth;
+  if (!oauth) return [];
+  const action = devicePagePath(config, null);
+  const page = (input: DevicePageInput): Response =>
+    new Response(oauth.devicePage(input), {
+      status: 200,
+      headers: pageHeaders(config, noScriptPagePolicy(config)),
+    });
+  const stepPage = (step: Exclude<DeviceStep, { kind: "error" }>, email: string): Response => {
+    if (step.kind === "done")
+      return page({ step: "done", appName: config.appName, approved: step.approved });
+    if (step.kind === "code")
+      return page({
+        step: "code",
+        action,
+        appName: config.appName,
+        email,
+        userCode: step.userCode,
+        error: step.error,
+      });
+    const { row, client } = step;
+    return page({
+      step: "consent",
+      action,
+      appName: config.appName,
+      email,
+      clientName: client.name ?? client.id,
+      clientId: client.id,
+      userCode: step.userCode,
+      scopes: row.scopes.map((name) => ({ name, description: oauth.scopes.get(name) ?? name })),
+      resource: row.resource,
+      otherResources: oauth.resources.filter((r) => r !== row.resource),
+      warning: DEVICE_WARNING,
+      // The form posts the code again with the decision: the server holds no other state.
+      fields: { user_code: step.userCode },
+    });
+  };
+  return [
+    {
+      method: "POST",
+      path: "/oauth/device_authorization",
+      key: "POST /oauth/device_authorization",
+      async handler(ctx) {
+        const form = await formParams(ctx.request);
+        if (!form) return noCache(oauthJson(oauthFail("invalid_request")));
+        const limitKey = `oauth-device:ip:${ipKey(ctx.ip)}`;
+        if (!(await config.limiter.allow(limitKey, DEVICE_START_PER_IP)))
+          return noCache(oauthJson(oauthFail("rate_limited")));
+        const authed = await authenticateClient(config, ctx.request, form);
+        if (!authed.ok) return noCache(clientRefused(ctx.request, authed));
+        const dpop = await deviceStartDpop(config, ctx.request);
+        if (!dpop.ok) return noCache(oauthJson(dpop));
+        return noCache(
+          oauthJson(
+            await startDevice(config, {
+              client: authed.value,
+              scope: form.get("scope"),
+              resource: form.get("resource"),
+              dpop: dpop.value,
+            }),
+          ),
+        );
+      },
+    },
+    {
+      method: "GET",
+      path: "/oauth/device",
+      key: "GET /oauth/device",
+      async handler(ctx) {
+        // RFC 8628 section 3.3.1: the code of the URL fills the field, and the person still submits it.
+        const raw = ctx.url.searchParams.get("user_code");
+        const userCode = raw === null ? null : normalizeUserCode(raw);
+        const session = await sessionFromRequest(config, ctx.request);
+        if (!session) return redirect(await deviceSignIn(config, userCode));
+        return page({
+          step: "code",
+          action,
+          appName: config.appName,
+          email: session.user.email,
+          userCode: userCode ?? "",
+          error: null,
+        });
+      },
+    },
+    {
+      method: "POST",
+      path: "/oauth/device",
+      key: "POST /oauth/device",
+      async handler(ctx) {
+        // The page posts from this origin only. The router admits a POST with no Origin; a person's form always sends one.
+        if (ctx.request.headers.get("origin") !== config.baseURL)
+          return json({ error: "origin_not_trusted" }, 403);
+        const session = await sessionFromRequest(config, ctx.request);
+        if (!session) return json({ error: "unauthorized" }, 401);
+        const form = await formParams(ctx.request);
+        if (!form) return json({ error: "invalid_request" }, OAUTH_ERRORS.invalid_request);
+        const step = await decideDevice(config, {
+          userCode: form.get("user_code") ?? "",
+          decision: form.get("decision"),
+          session,
+          ip: ctx.ip,
+        });
+        if (step.kind === "error") return json({ error: step.error }, OAUTH_ERRORS[step.error]);
+        return stepPage(step, session.user.email);
+      },
+    },
+  ];
 }

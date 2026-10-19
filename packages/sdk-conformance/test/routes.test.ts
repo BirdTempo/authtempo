@@ -40,6 +40,14 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "POST",
+    path: "/oauth/device_authorization",
+    reason:
+      "a device with no browser calls it (RFC 8628); no SDK of this repository runs on such a device (plan 12e Task 14)",
+  },
+  { method: "GET", path: "/oauth/device", reason: "core's device page; a browser opens it" },
+  { method: "POST", path: "/oauth/device", reason: "the form of core's device page" },
+  {
+    method: "POST",
     path: "/oauth/userinfo",
     reason: "the POST form of userinfo; the OAuth client calls the GET",
   },

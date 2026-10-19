@@ -23,7 +23,7 @@ export interface SweepResult {
   totpSetups: number;
   /** Limiter windows that ended. 0 when the limiter has no sweep. */
   limits: number;
-  /** Device grants past `expiresAt` (plan 12e, RFC 8628). Always 0 until the device grant of plan 12e Task 14. */
+  /** Device grants past `expiresAt` (plan 12e, RFC 8628): pending, decided, and spent alike. */
   oauthDevices: number;
   /** Session links to clients whose session is gone (plan 12e). Always 0 until plan 12e Task 16. */
   oauthSessionLinks: number;
@@ -147,6 +147,11 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     [{ field: "previousSecretUntil", op: "lt", value: now }],
     { previousSecretHash: null, previousSecretUntil: null, updatedAt: now },
   );
+  // A poll of an expired device row answers expired_token. After the
+  // expiry the row holds hashes that no flow reads, so it goes.
+  const oauthDevices = await storage.delete("oauthDevice", [
+    { field: "expiresAt", op: "lt", value: now },
+  ]);
   // A setup that no enable confirmed stays until the user's next setup.
   // After 15 minutes the enable refuses it, so it holds a sealed secret that
   // no flow uses. `createdAt` is the setup time: a new setup rewrites it.
@@ -169,8 +174,8 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     oauthClients,
     totpSetups,
     limits,
-    // Plan 12e Tasks 14 and 16 write these deletes.
-    oauthDevices: 0,
+    oauthDevices,
+    // Plan 12e Task 16 writes these deletes.
     oauthSessionLinks: 0,
     oauthLogouts: 0,
     oauthClientSecrets,

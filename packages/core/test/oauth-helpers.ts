@@ -244,3 +244,35 @@ export function exchange(
     ...extra,
   });
 }
+
+/**
+ * A device grant of `clientId` that the session of `cookie` approves,
+ * through the routes (plan 12e Task 14). The client holds the device grant.
+ * Answers the device code.
+ */
+export async function approvedDevice(
+  h: Handle,
+  clientId: string,
+  cookie: string,
+  scope = "mcp:read",
+): Promise<string> {
+  const formPost = (path: string, body: Record<string, string>, headers = {}) =>
+    new Request(`${BASE_URL}/auth${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams(body).toString(),
+    });
+  const started = await h.auth.handle(
+    formPost("/oauth/device_authorization", { client_id: clientId, scope, resource: RESOURCE }),
+  );
+  if (started.status !== 200) throw new Error(`device_authorization answered ${started.status}`);
+  const { device_code, user_code } = (await started.json()) as {
+    device_code: string;
+    user_code: string;
+  };
+  const done = await h.auth.handle(
+    formPost("/oauth/device", { user_code, decision: "allow" }, { cookie, origin: BASE_URL }),
+  );
+  if (!(await done.text()).includes("The device is connected.")) throw new Error("no approval");
+  return device_code;
+}

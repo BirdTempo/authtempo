@@ -59,7 +59,11 @@ export function everyFeature(): ResolvedConfig {
     handoff: { schemes: ["example://"] },
     organizations: {},
     password: {},
-    oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false, dynamic: true } },
+    oauth: {
+      resources: [`${BASE}/mcp`],
+      registration: { cimd: false, dynamic: true },
+      device: {},
+    },
     operator: { secretHash: "0".repeat(64) },
     openapi: true,
   });

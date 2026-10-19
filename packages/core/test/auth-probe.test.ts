@@ -122,8 +122,10 @@ describe("the auth probe (plan 11g)", () => {
     const expected: Record<string, Answer> = {};
     for (const key of needs) {
       const auth = authOf(key);
-      // A page route sends the browser to the sign-in page: a redirect with no error.
-      if (CONTRACT[key]?.answer.kind === "html") expected[key] = { status: 302, code: null };
+      // A page GET sends the browser to the sign-in page: a redirect with no error. A page
+      // POST (the device page, plan 12e) answers 401, as the consent POST does.
+      if (CONTRACT[key]?.answer.kind === "html" && key.startsWith("GET "))
+        expected[key] = { status: 302, code: null };
       else if (auth.includes("accessToken")) expected[key] = { status: 401, code: "invalid_token" };
       else expected[key] = { status: 401, code: "unauthorized" };
     }

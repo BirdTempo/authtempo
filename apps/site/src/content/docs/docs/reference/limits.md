@@ -75,6 +75,10 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |
 | `oauth-token-origin:ip:<ip>` | 15 minutes | 60 | The origin check of a foreign origin at the token endpoint and its preflight |
+| `oauth-device:ip:<ip>` | 15 minutes | 30 | The device authorization request, before the client auth, so a failed auth counts too |
+| `oauth-device-verify:ip:<ip>` | 15 minutes | 20 | Each post of the device page from one IP |
+| `oauth-device-verify:session:<sessionId>` | 15 minutes | 5 | Each post of the device page from one session: a guessed user code costs one |
+| `oauth-device-verify:code:<hash>` | 15 minutes | 10 | Each post of the device page that finds one live user code, by its keyed hash. It bounds how many sessions see the consent of one code |
 | `oauth-introspect:ip:<ip>` | 1 minute | 600 | OAuth introspection, before the client auth, so a failed auth counts too |
 | `oauth-introspect:client:<clientId>` | 1 minute | 600 | OAuth introspection by one resource server, after its client auth |
 | `oauth-credentials:client:<clientId>` | 1 minute | 120 | The `client_credentials` grant of one client, after its client auth. `oauth-token:ip` counts each request first, so a service on one IP gets 60 tokens per 15 minutes. Keep the token until its `expires_in` ends, and ask for a new one only then |
@@ -118,6 +122,7 @@ These counts live in their rows, so they hold under every limiter.
 | OAuth authorization code | `oauth.codeTtlMinutes`, 5 minutes by default |
 | OAuth held request | 10 minutes |
 | OAuth refresh token | `oauth.refreshTtlDays`, 30 days by default |
+| OAuth device code and user code | `oauth.device.codeTtlMinutes`, 10 minutes by default |
 
 ## Next
 
