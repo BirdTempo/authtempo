@@ -39,6 +39,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   type RouteContract = import("../../src/http/contract/types.js").RouteContract;
   type AnswerKind = RouteContract["answer"];
   type RouteKey = import("../../src/http/route-list.js").RouteKey;
+  type RouteEntry = import("../../src/http/route-list.js").RouteEntry;
 
   // One file per worker process: vitest sets VITEST_WORKER_ID in each one.
   const node = (
@@ -48,7 +49,8 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     `../../.answers/${node?.pid ?? 0}-${node?.env.VITEST_WORKER_ID ?? "0"}.jsonl`,
     import.meta.url,
   );
-  const ENTRIES = new Map(ROUTES.map((r) => [`${r.method} ${r.path}`, r]));
+  // RouteEntry, not the frozen literals of ROUTES: a read of `auth` then takes any AuthForm.
+  const ENTRIES = new Map<string, RouteEntry>(ROUTES.map((r) => [`${r.method} ${r.path}`, r]));
   const CONTRACT: Record<string, RouteContract> = ROUTE_CONTRACT;
   const ROUTER = new Set<string>(ROUTER_CODES);
 
