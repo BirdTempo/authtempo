@@ -96,9 +96,10 @@ describe("api.oauth.clients (plan 12e)", () => {
     if (!made.ok) throw new Error(made.error);
     expect(made.value.clientSecret).toBeUndefined();
     expect(made.value.client.jwks).toEqual({ keys: [pub] });
+    // No oauth.fetch: core could never read the set (ruling 21 I1).
     expect(
-      (await clients.create({ ...base, jwksUri: "https://client.example.com/jwks.json" })).ok,
-    ).toBe(true);
+      await clients.create({ ...base, jwksUri: "https://client.example.com/jwks.json" }),
+    ).toEqual(METADATA_ERROR);
     for (const bad of [
       // OIDC Registration section 2: never both.
       { jwks: { keys: [pub] }, jwksUri: "https://client.example.com/jwks.json" },

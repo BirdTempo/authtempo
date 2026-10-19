@@ -1,13 +1,24 @@
 import type { ResolvedConfig } from "../config.js";
+import { sha256Hex } from "../primitives/crypto.js";
+import {
+  decodeForeignJws,
+  FOREIGN_ALGS,
+  type ForeignJws,
+  keyFitsAlg,
+  verifyForeign,
+} from "../primitives/foreign-jwk.js";
+import { newId } from "../primitives/ids.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
+import { StorageError } from "../storage/port.js";
+import { issuerOf } from "./jwt.js";
 import { secretMatches } from "./oauth-client-secret.js";
-import { findClient } from "./oauth-clients.js";
+import { CLIENT_KEYS_MAX, fetchClientJwks, findClient } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
 
 /**
  * The client auth of every client-facing endpoint (plan 12e, spec 8.16):
- * `client_secret_basic`, `client_secret_post`, and `none` for a public
- * client. RFC 6749 section 2.3: one method per request. A client with a
+ * `client_secret_basic`, `client_secret_post`, `private_key_jwt` (RFC 7523),
+ * and `none` for a public client. RFC 6749 section 2.3: one method per request. A client with a
  * secret takes either secret method. Section 2.3.1 makes Basic a MUST for
  * it, and the form stays for clients that cannot send Basic. `none` and
  * `private_key_jwt` take their own method only. No per-client limit on a failed auth: a secret of 256
@@ -24,6 +35,19 @@ export interface AuthedClient {
   /** OAuth 2.1 section 2.1: a client with credentials. */
   confidential: boolean;
 }
+
+/** RFC 7523 section 2.2: the type of a JWT client assertion. */
+export const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+/**
+ * The longest life of a client assertion, in seconds. RFC 7523 section 3
+ * lets the server refuse an `exp` far ahead or an `iat` far back. A short
+ * life bounds the replay store and the use of a stolen assertion.
+ */
+export const ASSERTION_MAX_LIFE_S = 300;
+/** The clock skew that each time claim of a client JWT allows, in seconds. */
+export const CLOCK_SKEW_S = 30;
+/** The longest `jti`: a bound on the replay key, which core hashes. */
+const JTI_MAX = 256;
 
 const BASIC_RE = /^basic /i;
 const SECRET_METHODS: ReadonlySet<AuthMethod> = new Set([
@@ -68,7 +92,8 @@ export function namesClient(request: Request, form: URLSearchParams): boolean {
     BASIC_RE.test(request.headers.get("authorization") ?? "") ||
     form.has("client_id") ||
     formSecretOf(form) !== null ||
-    form.has("client_assertion_type")
+    form.has("client_assertion_type") ||
+    form.has("client_assertion")
   );
 }
 
@@ -92,11 +117,10 @@ export async function authenticateClient(
   const isBasic = BASIC_RE.test(header);
   const fail = (error: "invalid_request" | "invalid_client") => oauthFail<AuthedClient>(error);
   const formSecret = formSecretOf(form);
-  const assertion = form.has("client_assertion_type");
+  const assertion = form.has("client_assertion_type") || form.has("client_assertion");
   const present = [isBasic, formSecret !== null, assertion].filter(Boolean).length;
   if (present > 1) return fail("invalid_request");
-  // Plan 12e Task 5 checks the assertion (RFC 7523); until then no client uses it.
-  if (assertion) return fail("invalid_client");
+  if (assertion) return assertionClient(config, form, known);
   let method: AuthMethod = "none";
   let id = form.get("client_id") ?? "";
   let secret: string | null = formSecret;
@@ -117,6 +141,96 @@ export async function authenticateClient(
   if (secret !== null && !(await secretMatches(client, secret, config.clock.now())))
     return fail("invalid_client");
   return oauthOk({ client, method, confidential: method !== "none" });
+}
+
+/** A NumericDate of RFC 7519 section 2: a finite number of seconds. */
+const isTime = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * True when the claims of a client assertion hold, at `now` in seconds
+ * (RFC 7523 section 3 with rfc7523bis-11). The signature is not checked here.
+ */
+function claimsHold(p: Record<string, unknown>, clientId: string, issuer: string, now: number) {
+  if (p.iss !== clientId || p.sub !== clientId) return false;
+  // rfc7523bis-11, read 2026-10-19: the issuer as the sole value; the token
+  // endpoint URL is the audience injection that the draft closes.
+  const aud = p.aud;
+  if (!(aud === issuer || (Array.isArray(aud) && aud.length === 1 && aud[0] === issuer)))
+    return false;
+  if (!isTime(p.exp) || p.exp <= now - CLOCK_SKEW_S) return false;
+  if (p.exp > now + ASSERTION_MAX_LIFE_S + CLOCK_SKEW_S) return false;
+  if (p.iat !== undefined && (!isTime(p.iat) || p.iat < now - ASSERTION_MAX_LIFE_S - CLOCK_SKEW_S))
+    return false;
+  // RFC 7523 section 3 item 5: never before nbf (ruling 21).
+  if (p.nbf !== undefined && (!isTime(p.nbf) || p.nbf > now + CLOCK_SKEW_S)) return false;
+  return typeof p.jti === "string" && p.jti.length >= 1 && p.jti.length <= JTI_MAX;
+}
+
+/** True when a key of the client's set verifies `decoded`: the key of its `kid`, or at most 10 keys of its alg. */
+async function signedByClient(
+  config: ResolvedConfig,
+  client: OAuthClientRow,
+  decoded: ForeignJws,
+): Promise<boolean> {
+  const { alg, kid } = decoded.header;
+  const keys = await fetchClientJwks(config, client, { kid });
+  if (!keys) return false;
+  const fits = (k: Record<string, unknown>) =>
+    kid !== null
+      ? k.kid === kid
+      : FOREIGN_ALGS.some((a) => (a as string) === alg && keyFitsAlg(k, a));
+  for (const key of keys.filter(fits).slice(0, CLIENT_KEYS_MAX))
+    if (await verifyForeign(decoded, key, FOREIGN_ALGS)) return true;
+  return false;
+}
+
+/**
+ * The client of a JWT client assertion (RFC 7523 section 2.2, RFC 7521
+ * section 4.2). The order: the type, one JWS, the client, the claims, the
+ * signature, and last the replay row, so a refused assertion spends no
+ * `jti`. Each refusal is `invalid_client` (RFC 7523 section 3.2). The
+ * assertion never reaches a log or an answer.
+ */
+async function assertionClient(
+  config: ResolvedConfig,
+  form: URLSearchParams,
+  known: OAuthClientRow | undefined,
+): Promise<OAuthResult<AuthedClient>> {
+  const refused = oauthFail<AuthedClient>("invalid_client");
+  if (form.get("client_assertion_type") !== CLIENT_ASSERTION_TYPE) return refused;
+  const decoded = decodeForeignJws(form.get("client_assertion") ?? "");
+  if (!decoded) return refused;
+  const sub = decoded.payload.sub;
+  if (typeof sub !== "string") return refused;
+  // RFC 7521 section 4.2: a client_id must name the client of the assertion (ruling 21).
+  const formId = form.get("client_id");
+  if (formId !== null && formId !== sub) return refused;
+  const client = known?.id === sub ? known : await findClient(config, sub);
+  if (client?.authMethod !== "private_key_jwt") return refused;
+  const now = Math.floor(config.clock.now().getTime() / 1000);
+  if (!claimsHold(decoded.payload, client.id, issuerOf(config), now)) return refused;
+  if (!(await signedByClient(config, client, decoded))) return refused;
+  // The replay store: the unique key on valueHash refuses a second use of a
+  // jti on every instance over the same storage, until exp plus the skew.
+  const at = config.clock.now();
+  try {
+    await config.storage.create("verification", {
+      id: newId(at),
+      purpose: "client-assertion",
+      identifier: client.id,
+      valueHash: await sha256Hex(`${client.id}:${decoded.payload.jti as string}`),
+      expiresAt: new Date(((decoded.payload.exp as number) + CLOCK_SKEW_S) * 1000),
+      consumedAt: null,
+      data: null,
+      createdAt: at,
+      updatedAt: at,
+      secretVersion: config.keyring.current,
+    });
+  } catch (e) {
+    if (e instanceof StorageError && e.code === "unique_violation") return refused;
+    throw e;
+  }
+  return oauthOk({ client, method: "private_key_jwt", confidential: true });
 }
 
 /**

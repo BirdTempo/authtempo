@@ -221,12 +221,20 @@ export async function signJws(input: {
   return `${signingInput}.${toBase64Url(new Uint8Array(sig))}`;
 }
 
+/** The parts of a compact JWS before any header rule: two JSON objects, the signing input, and the signature. */
+export interface ParsedJws {
+  header: Record<string, unknown>;
+  payload: Record<string, unknown>;
+  signingInput: string;
+  signature: Uint8Array<ArrayBuffer>;
+}
+
 /**
- * The parts of a compact JWS, or null. The header must be a JSON object
- * with a string `alg` and `kid`, and no `crit`: core understands no
- * critical header parameter (RFC 7515 section 4.1.11). Nothing is verified here.
+ * The parse of a compact JWS that `decodeJws` and the foreign decode share,
+ * or null. The header must hold a string `alg` and no `crit`: core
+ * understands no critical header parameter (RFC 7515 section 4.1.11).
  */
-export function decodeJws(token: string): DecodedJws | null {
+export function parseJws(token: string): ParsedJws | null {
   if (token.length > TOKEN_MAX) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
@@ -237,14 +245,9 @@ export function decodeJws(token: string): DecodedJws | null {
     const header: unknown = JSON.parse(dec.decode(fromBase64Url(h)));
     const payload: unknown = JSON.parse(dec.decode(fromBase64Url(p)));
     if (!isObject(header) || !isObject(payload)) return null;
-    if (typeof header.alg !== "string" || typeof header.kid !== "string") return null;
-    if (header.crit !== undefined) return null;
+    if (typeof header.alg !== "string" || header.crit !== undefined) return null;
     return {
-      header: {
-        alg: header.alg,
-        kid: header.kid,
-        typ: typeof header.typ === "string" ? header.typ : null,
-      },
+      header,
       payload,
       signingInput: `${h}.${p}`,
       signature: fromBase64Url(s) as Uint8Array<ArrayBuffer>,
@@ -252,6 +255,28 @@ export function decodeJws(token: string): DecodedJws | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The parts of a compact JWS that core signed, or null. The header must
+ * hold a string `kid` too: every token of core names its key. Nothing is
+ * verified here.
+ */
+export function decodeJws(token: string): DecodedJws | null {
+  const parsed = parseJws(token);
+  if (!parsed) return null;
+  const { header } = parsed;
+  if (typeof header.alg !== "string" || typeof header.kid !== "string") return null;
+  return {
+    header: {
+      alg: header.alg,
+      kid: header.kid,
+      typ: typeof header.typ === "string" ? header.typ : null,
+    },
+    payload: parsed.payload,
+    signingInput: parsed.signingInput,
+    signature: parsed.signature,
+  };
 }
 
 function jwkForImport(jwk: PublicJwk): JsonWebKey {

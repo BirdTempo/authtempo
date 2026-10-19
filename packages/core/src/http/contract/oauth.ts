@@ -73,12 +73,15 @@ export const signInQuery = z.object({ next: z.string().min(1) });
  * the audience of RFC 8707, and `scope` narrows a refresh. A
  * `client_secret_post` client sends `client_secret`; a
  * `client_secret_basic` client sends its id in the header and may omit
- * `client_id` (plan 12e).
+ * `client_id`. A `private_key_jwt` client sends `client_assertion_type`
+ * and `client_assertion` (plan 12e).
  */
 export const tokenBody = z.object({
   grant_type: z.enum(["authorization_code", "refresh_token"]),
   client_id: z.string().min(1).max(2048).optional(),
   client_secret: z.string().optional(),
+  client_assertion_type: z.string().optional(),
+  client_assertion: z.string().optional(),
   code: z.string().optional(),
   code_verifier: z.string().optional(),
   redirect_uri: z.string().optional(),
@@ -92,6 +95,8 @@ export const revokeBody = z.object({
   token: z.string(),
   client_id: z.string().optional(),
   client_secret: z.string().optional(),
+  client_assertion_type: z.string().optional(),
+  client_assertion: z.string().optional(),
 });
 
 /** The token answer of RFC 6749 section 5.1. `id_token` comes with the `openid` scope. */

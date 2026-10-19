@@ -253,10 +253,15 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     expect(vi.mocked(secretMatches)).toHaveBeenCalled();
     // A public client and a private_key_jwt client take no secret by either method.
     const open = await registered(h);
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
+    const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as Record<string, unknown>;
     const made = await h.auth.api.oauth?.clients.create({
       redirectUris: [REDIRECT],
       authMethod: "private_key_jwt",
-      jwksUri: "https://client.example.com/jwks.json",
+      jwks: { keys: [{ kty: "OKP", crv: "Ed25519", x: jwk.x, kid: "k1" }] },
     });
     if (!made?.ok) throw new Error("the create failed");
     const keyed = made.value.client.id;

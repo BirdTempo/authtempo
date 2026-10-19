@@ -28,7 +28,7 @@ import {
   type UserHooks,
 } from "./engine/hooks.js";
 import { defaultNoticeMail, type NoticeMailInput } from "./engine/notices.js";
-import type { CimdEntry } from "./engine/oauth-clients.js";
+import type { CimdEntry, JwksEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
@@ -613,6 +613,8 @@ export interface ResolvedOAuth {
   codeTtlMinutes: number;
   /** The metadata documents this isolate read, by URL, each for one hour. */
   cimdCache: Map<string, CimdEntry>;
+  /** The `jwks_uri` key sets of `private_key_jwt` clients that this isolate read, by URL, each for one hour (plan 12e). */
+  jwksCache: Map<string, JwksEntry>;
 }
 
 export interface LegacyVerifyConfig {
@@ -1664,6 +1666,7 @@ function resolveOAuth(
     refreshTtlDays: integerIn("oauth.refreshTtlDays", input.refreshTtlDays ?? 30, 1, 365),
     codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
     cimdCache: new Map(),
+    jwksCache: new Map(),
   };
 }
 

@@ -1,7 +1,7 @@
 import type { ResolvedConfig, ResolvedOAuth } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
-import { JWK_PRIVATE_MEMBERS } from "../primitives/jwk.js";
+import { FOREIGN_ALGS, keyFitsAlg } from "../primitives/foreign-jwk.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
@@ -46,10 +46,17 @@ const AUTH_METHODS: readonly ClientAuthMethod[] = [
   "client_secret_post",
   "private_key_jwt",
 ];
-/** The algs of a client key: the four of a client assertion (plan 12e Task 5). */
-const CLIENT_KEY_ALGS: readonly string[] = ["EdDSA", "ES256", "RS256", "PS256"];
 /** A client key set holds 1 to 10 keys: room for a rotation, and a bound on each assertion check. */
-const CLIENT_KEYS_MAX = 10;
+export const CLIENT_KEYS_MAX = 10;
+/** The key sets of `jwks_uri` that one isolate keeps, each for one hour. The oldest goes first. */
+const JWKS_CACHE_MAX = 500;
+const JWKS_CACHE_MS = 3_600_000;
+/**
+ * A `kid` that the kept set does not hold reads the set again, at most once
+ * per 30 seconds per URL. A client that rotates its key gets the new key
+ * soon, and a stranger's unknown kid cannot make core fetch on each request.
+ */
+const JWKS_REREAD_MS = 30_000;
 
 /**
  * The fields of schema version 11 for a public client with no secret (plan
@@ -104,6 +111,15 @@ const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
 const PRIVATE_SUFFIXES: readonly string[] = [".local", ".home.arpa", ".internal"];
 /** A parsed IPv4 host. The URL parser writes every IPv4 form (`127.1`, `0x7f.0.0.1`) as four decimal parts. */
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+
+/** One key set of a `jwks_uri` in the isolate cache. */
+export interface JwksEntry {
+  keys: Record<string, unknown>[];
+  /** Epoch milliseconds by the config clock. */
+  until: number;
+  /** The last read of the URL, in epoch milliseconds: the bound of a read for an unknown kid. */
+  readAt: number;
+}
 
 export interface CimdEntry {
   name: string | null;
@@ -243,19 +259,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * One public key of a client: an Ed25519, P-256, or RSA key with its public
- * members and no private member. An `alg`, when present, is an alg of a
- * client assertion. Plan 12e Task 5 moves the member check into `publicMembersOnly`.
+ * One public key of a client: a key of one alg of a client assertion, with
+ * its public members and no private member (`publicMembersOnly`). An
+ * Ed448 key and an RSA key under 2048 bits fit no alg.
  */
-function clientKey(value: unknown): boolean {
-  if (!isObject(value)) return false;
-  if (JWK_PRIVATE_MEMBERS.some((m) => m in value)) return false;
-  if (value.alg !== undefined && !CLIENT_KEY_ALGS.includes(value.alg as string)) return false;
-  if (value.kty === "OKP") return value.crv === "Ed25519" && typeof value.x === "string";
-  if (value.kty === "EC")
-    return value.crv === "P-256" && typeof value.x === "string" && typeof value.y === "string";
-  if (value.kty === "RSA") return typeof value.n === "string" && typeof value.e === "string";
-  return false;
+function clientKey(value: unknown): value is Record<string, unknown> {
+  return isObject(value) && FOREIGN_ALGS.some((alg) => keyFitsAlg(value, alg));
 }
 
 /** A JWK Set of 1 to 10 public client keys, or null. */
@@ -323,6 +332,8 @@ export function validClientMetadata(
   if (!absent(m.jwks_uri)) {
     if (typeof m.jwks_uri !== "string" || !validCimdUrl(m.jwks_uri, config.baseURL))
       return oauthFail("invalid_client_metadata");
+    // With no fetch, core can never read the set, and the client could never authenticate.
+    if (!oauth.fetch) return oauthFail("invalid_client_metadata");
     jwksUri = m.jwks_uri;
   }
   if (authMethod === "private_key_jwt" && !jwks && !jwksUri)
@@ -547,21 +558,16 @@ async function readCapped(res: Response, max: number, signal: AbortSignal): Prom
 }
 
 /**
- * The fields core reads from a client ID metadata document, or null with
- * one log line that names the reason and never the document. The fetch is
- * the app's guarded fetch; core adds `redirect: "manual"`, a 10-second
- * timeout for the answer and the body, and a 64 KB cap. The document must
- * name its own URL as `client_id` (the draft, section 4, read 2026-10-13).
+ * The JSON object at `url`, or the reason of a refusal. The fetch is the
+ * app's guarded fetch; core adds `redirect: "manual"`, a 10-second timeout
+ * for the answer and the body, and a 64 KB cap. It needs status 200 and
+ * `application/json`. The body never reaches a log.
  */
-export async function fetchCimd(
+async function guardedJson(
   fetchFn: typeof fetch | null,
   url: string,
-): Promise<{ name: string | null; redirectUris: string[] } | null> {
-  const refuse = (why: string) => {
-    console.error("authtempo: client metadata document refused", why);
-    return null;
-  };
-  if (!fetchFn) return refuse("no fetch");
+): Promise<{ doc: Record<string, unknown> } | { why: string }> {
+  if (!fetchFn) return { why: "no fetch" };
   const ctrl = new AbortController();
   // setTimeout, not AbortSignal.timeout: a test moves it with fake timers.
   const timer = setTimeout(() => ctrl.abort(), CIMD_TIMEOUT_MS);
@@ -574,39 +580,121 @@ export async function fetchCimd(
         signal: ctrl.signal,
       });
     } catch {
-      return refuse("the fetch failed or timed out");
+      return { why: "the fetch failed or timed out" };
     }
     if (res.status !== 200) {
       await res.body?.cancel().catch(() => {});
-      return refuse(`status ${res.status}`);
+      return { why: `status ${res.status}` };
     }
     const type = (res.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
     if (type !== "application/json") {
       await res.body?.cancel().catch(() => {});
-      return refuse("not application/json");
+      return { why: "not application/json" };
     }
     const text = await readCapped(res, CIMD_MAX_BYTES, ctrl.signal);
-    if (text === null) return refuse("larger than 64 KB, not UTF-8, or not in time");
+    if (text === null) return { why: "larger than 64 KB, not UTF-8, or not in time" };
     let doc: unknown;
     try {
       doc = JSON.parse(text);
     } catch {
-      return refuse("not JSON");
+      return { why: "not JSON" };
     }
-    if (typeof doc !== "object" || doc === null || Array.isArray(doc))
-      return refuse("not a JSON object");
-    const d = doc as Record<string, unknown>;
-    if (d.client_id !== url) return refuse("client_id is not the document URL");
-    const redirectUris = redirectList(d.redirect_uris);
-    if (!redirectUris) return refuse("redirect_uris");
-    const name = clientName(d.client_name);
-    if (name === undefined) return refuse("client_name");
-    if (d.token_endpoint_auth_method !== undefined && d.token_endpoint_auth_method !== "none")
-      return refuse("token_endpoint_auth_method is not none: core serves public clients only");
-    return { name, redirectUris };
+    if (!isObject(doc)) return { why: "not a JSON object" };
+    return { doc };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * The fields core reads from a client ID metadata document, or null with
+ * one log line that names the reason and never the document. The guards
+ * are those of `guardedJson`. The document must name its own URL as
+ * `client_id` (the draft, section 4, read 2026-10-13).
+ */
+export async function fetchCimd(
+  fetchFn: typeof fetch | null,
+  url: string,
+): Promise<{ name: string | null; redirectUris: string[] } | null> {
+  const refuse = (why: string) => {
+    console.error("authtempo: client metadata document refused", why);
+    return null;
+  };
+  const got = await guardedJson(fetchFn, url);
+  if ("why" in got) return refuse(got.why);
+  const d = got.doc;
+  if (d.client_id !== url) return refuse("client_id is not the document URL");
+  const redirectUris = redirectList(d.redirect_uris);
+  if (!redirectUris) return refuse("redirect_uris");
+  const name = clientName(d.client_name);
+  if (name === undefined) return refuse("client_name");
+  if (d.token_endpoint_auth_method !== undefined && d.token_endpoint_auth_method !== "none")
+    return refuse("token_endpoint_auth_method is not none: core serves public clients only");
+  return { name, redirectUris };
+}
+
+/**
+ * The keys of a client's `jwks_uri` set that fit an alg of a client
+ * assertion, or null with one log line that names the reason, never the
+ * set. A key that fits no alg (an encryption key, an Ed448 key) is left
+ * out, so one odd key does not break the client.
+ */
+async function fetchJwks(
+  fetchFn: typeof fetch | null,
+  url: string,
+): Promise<Record<string, unknown>[] | null> {
+  const refuse = (why: string) => {
+    console.error("authtempo: client key set refused", why);
+    return null;
+  };
+  const got = await guardedJson(fetchFn, url);
+  if ("why" in got) return refuse(got.why);
+  const raw = got.doc.keys;
+  if (!Array.isArray(raw)) return refuse("no keys array");
+  const keys = raw.filter(clientKey);
+  if (keys.length === 0) return refuse("no public signing key");
+  return keys;
+}
+
+/**
+ * The key set of a `private_key_jwt` client: `jwks` of the row, or the set
+ * of `jwks_uri` through the guards of `guardedJson` and the host rule of
+ * `validCimdUrl`. The isolate keeps a read set for one hour. A `kid` that
+ * the kept set lacks reads again at most once per 30 seconds per URL. A
+ * failed read is not kept; a kept set outlives it until its hour ends.
+ */
+export async function fetchClientJwks(
+  config: ResolvedConfig,
+  client: Pick<OAuthClientRow, "jwks" | "jwksUri">,
+  want: { kid: string | null },
+): Promise<Record<string, unknown>[] | null> {
+  if (client.jwks) {
+    const keys = client.jwks.keys;
+    return Array.isArray(keys) ? keys.filter(clientKey) : null;
+  }
+  const oauth = config.oauth;
+  const url = client.jwksUri;
+  if (!oauth || url === null || !validCimdUrl(url, config.baseURL)) return null;
+  const now = config.clock.now().getTime();
+  const kept = oauth.jwksCache.get(url);
+  const live = kept && kept.until > now ? kept : null;
+  if (live) {
+    const known = want.kid === null || live.keys.some((k) => k.kid === want.kid);
+    if (known || now - live.readAt < JWKS_REREAD_MS) return live.keys;
+  }
+  const keys = await fetchJwks(oauth.fetch, url);
+  if (!keys) {
+    // The failure is not kept, but it counts as a read for the 30-second bound.
+    if (live) live.readAt = now;
+    return live?.keys ?? null;
+  }
+  oauth.jwksCache.delete(url);
+  if (oauth.jwksCache.size >= JWKS_CACHE_MAX) {
+    const oldest = oauth.jwksCache.keys().next().value;
+    if (oldest !== undefined) oauth.jwksCache.delete(oldest);
+  }
+  oauth.jwksCache.set(url, { keys, until: now + JWKS_CACHE_MS, readAt: now });
+  return keys;
 }
 
 /** Writes or refreshes the row of a document that this call read. */
