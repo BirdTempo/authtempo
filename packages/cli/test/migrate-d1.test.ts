@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, chmodSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MIGRATE_JSON_KEYS } from "../src/json.js";
@@ -14,6 +14,10 @@ const ADAPTER_FILES = readdirSync(ADAPTER)
 const ADAPTER_ENTRIES = readdirSync(ADAPTER).sort();
 const CORE = ADAPTER_FILES.map((f) => f.slice(0, -".sql".length));
 const COMPAT_DIR = join(PKG, "../compat-better-auth/migrations/d1");
+/** The seven compat files of the package, in order. */
+const COMPAT_FILES = readdirSync(COMPAT_DIR)
+  .filter((f) => f.endsWith(".sql"))
+  .sort();
 const BA_SQLITE = readFileSync(
   join(PKG, "../compat-better-auth/test/fixtures/better-auth-1.7.2.sqlite.sql"),
   "utf8",
@@ -137,6 +141,120 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     const again = migrate(p.dir, ["--tables", "compat"]);
     expect(again.status).toBe(0);
     expect(linesOf(again.stdout)).toEqual(["version before: 10; version after: 10"]);
+  });
+
+  // Plan 11f Task 5 (spec 23 item 11): the database's compat version decides the copies, and an edited copy stops the run.
+  it("stops on an edited copy before any write, also with --dry-run", () => {
+    // The app's folder holds the seven copies under a dry run's names, written from the package's files, and none is applied.
+    const files: Record<string, string> = { "migrations/0001_better_auth.sql": BA_SQLITE };
+    for (const [i, f] of COMPAT_FILES.entries())
+      files[`migrations/${String(i + 2).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`] =
+        readFileSync(join(COMPAT_DIR, f), "utf8");
+    files["migrations/0002_compat_better_auth.sql"] += "-- the app's change\n";
+    const p = d1Project({ migrationsDir: "migrations", files });
+    const dir = join(p.dir, "migrations");
+    const snapshot = () =>
+      Object.fromEntries(
+        readdirSync(dir)
+          .sort()
+          .map((f) => [f, readFileSync(join(dir, f), "utf8")]),
+      );
+    const before = snapshot();
+    expect(Object.keys(before)).toHaveLength(8);
+    for (const extra of [["--dry-run"], []]) {
+      const r = migrate(p.dir, ["--tables", "compat", ...extra]);
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(linesOf(r.stderr).at(-1)).toBe(
+        `stopped: ${join(dir, "0002_compat_better_auth.sql")} differs from the compat file 0001_compat_better_auth.sql; restore its text, and put the app's change in a new migration; nothing was written`,
+      );
+      expect(snapshot()).toEqual(before);
+    }
+    // No apply ran: wrangler's table and ta_meta do not exist.
+    expect(
+      readLocal(
+        p.dir,
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('d1_migrations', 'ta_meta')",
+      ),
+    ).toEqual([]);
+  });
+
+  it("copies nothing on a database at compat version 7, also with the files renamed", () => {
+    const p = d1Project({
+      migrationsDir: "migrations",
+      files: { "migrations/0001_better_auth.sql": BA_SQLITE },
+    });
+    const first = migrate(p.dir, ["--tables", "compat"]);
+    expect(first.status, first.stderr).toBe(0);
+    expect(readLocal(p.dir, "SELECT value FROM ta_meta WHERE key = 'compat_better_auth'")).toEqual([
+      { value: "7" },
+    ]);
+    // The app renumbers its copies from 0090. wrangler keys its table by file name, so the app renames the rows too.
+    const dir = join(p.dir, "migrations");
+    const copies = readdirSync(dir)
+      .filter((f) => f.includes("_compat_"))
+      .sort();
+    expect(copies).toHaveLength(7);
+    const renamed: string[] = [];
+    for (const [i, f] of copies.entries()) {
+      const name = `${String(90 + i).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`;
+      renameSync(join(dir, f), join(dir, name));
+      readLocal(p.dir, `UPDATE d1_migrations SET name = '${name}' WHERE name = '${f}'`);
+      renamed.push(name);
+    }
+    expect(renamed[0]).toBe("0090_compat_better_auth.sql");
+    appendFileSync(join(dir, "0090_compat_better_auth.sql"), "-- renumbered by the app\n");
+    const again = migrate(p.dir, ["--tables", "compat"]);
+    expect(again.status, again.stderr).toBe(0);
+    expect(linesOf(again.stdout)).toEqual(["version before: 10; version after: 10"]);
+    expect(readdirSync(dir).sort()).toEqual(["0001_better_auth.sql", ...renamed]);
+    expect(
+      readLocal(p.dir, "SELECT name FROM d1_migrations ORDER BY id").map((row) => row.name),
+    ).toEqual(["0001_better_auth.sql", ...renamed]);
+  });
+
+  it("stops on two files with one compat name", () => {
+    const text = readFileSync(join(COMPAT_DIR, "0001_compat_better_auth.sql"), "utf8");
+    const p = d1Project({
+      migrationsDir: "migrations",
+      files: {
+        "migrations/0003_compat_better_auth.sql": text,
+        "migrations/0005_compat_better_auth.sql": text,
+      },
+    });
+    for (const extra of [["--dry-run"], []]) {
+      const r = migrate(p.dir, ["--tables", "compat", ...extra]);
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(linesOf(r.stderr).at(-1)).toBe(
+        `stopped: migrations_dir ${join(p.dir, "migrations")} holds 0003_compat_better_auth.sql and 0005_compat_better_auth.sql for the compat file 0001_compat_better_auth.sql; keep one`,
+      );
+    }
+    expect(readdirSync(join(p.dir, "migrations")).sort()).toEqual([
+      "0003_compat_better_auth.sql",
+      "0005_compat_better_auth.sql",
+    ]);
+  });
+
+  it("stops on a compat version that is not a number", () => {
+    const p = d1Project({
+      migrationsDir: "migrations",
+      files: { "migrations/0001_better_auth.sql": BA_SQLITE },
+    });
+    const first = migrate(p.dir, ["--tables", "compat"]);
+    expect(first.status, first.stderr).toBe(0);
+    readLocal(p.dir, "UPDATE ta_meta SET value = 'x' WHERE key = 'compat_better_auth'");
+    const before = readdirSync(join(p.dir, "migrations")).sort();
+    expect(before).toHaveLength(8);
+    for (const extra of [["--dry-run"], []]) {
+      const r = migrate(p.dir, ["--tables", "compat", ...extra]);
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(linesOf(r.stderr).at(-1)).toBe(
+        'stopped: ta_meta holds compat_better_auth "x", which is not a version number; nothing was written',
+      );
+    }
+    expect(readdirSync(join(p.dir, "migrations")).sort()).toEqual(before);
   });
 
   it("refuses --tables compat when migrations_dir is the adapter's own folder, and writes into no package", () => {

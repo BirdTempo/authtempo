@@ -59,7 +59,7 @@ export const MIGRATE_HELP: HelpText = {
     },
     {
       code: 2,
-      says: "A usage error, a newer database, a database that does not answer, or a migration that failed.",
+      says: "A usage error, a newer database, a database that does not answer, an edited compat copy, or a migration that failed.",
     },
   ],
 };

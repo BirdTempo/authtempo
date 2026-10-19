@@ -115,7 +115,7 @@ export function importGate(
 }
 
 /** The name of a migration file without its number and `.sql`: `0003_schema_v3.sql` gives `schema_v3`. */
-const stem = (name: string) => name.replace(/\.sql$/, "").replace(/^\d+_/, "");
+export const stem = (name: string) => name.replace(/\.sql$/, "").replace(/^\d+_/, "");
 
 /**
  * The count of applied D1 migrations that are ours: a file of the adapter or

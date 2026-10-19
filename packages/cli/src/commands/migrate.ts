@@ -6,17 +6,19 @@ import { Stop, UsageError } from "../errors.js";
 import { MIGRATE_HELP } from "../help/migrate.js";
 import type { MigrateJson } from "../json.js";
 import { type Ctx, describeUrl, printJson, sayer } from "../output.js";
-import { gate, readableVersion, readD1Version } from "../schema-version.js";
+import { gate, readableVersion, readD1Version, stem } from "../schema-version.js";
 import {
   adapterD1Dir,
   applyD1,
   compatD1Dir,
   type D1Target,
   findWranglerConfig,
+  readD1CompatText,
   readD1Project,
   wranglerOf,
 } from "../seams/d1.js";
 import {
+  COMPAT_META_KEY,
   CORE_MIGRATIONS,
   compatMigrationNames,
   openPostgres,
@@ -142,12 +144,42 @@ function checkCompatDir(ctx: Ctx, dir: string): void {
 }
 
 /**
- * The compat target on D1 (spec 16, the D1 step of the compat README): each
- * compat file goes into the app's migrations_dir under the app's next
- * number. A file whose text the folder holds already is the same migration,
- * so a second run copies nothing. A dry run names the copies and writes none.
+ * The compat mapping version of a D1 database from the text of its row: 0
+ * when the row is missing. A value that is not a whole number stops the
+ * run before any write, as `readableVersion` stops on such a schema_version.
  */
-function copyCompat(ctx: Ctx, dir: string, before17: boolean, dryRun: boolean): string[] {
+function compatVersionOf(raw: string | null): number {
+  if (raw === null) return 0;
+  if (!/^\d+$/.test(raw))
+    throw new Stop(
+      `ta_meta holds ${COMPAT_META_KEY} ${JSON.stringify(raw)}, which is not a version number; nothing was written`,
+    );
+  return Number(raw);
+}
+
+/**
+ * The plan of the compat copy on D1 (spec 16, the D1 step of the compat
+ * README; spec 23 item 11). Each compat file goes into the app's
+ * migrations_dir under the app's next number. The plan is complete before
+ * the first write. Compat file n is the n-th file of the package's folder.
+ * The database decides: a file at or below `compatVersion` is applied
+ * already. It is not copied, and the app's files are not read for it, also
+ * when the app renamed its copies. For each other file, the app's folder is
+ * read by the stem, the name without the number and `.sql`. Two files with
+ * the stem stop the run. One file with the same text is a copy that is not
+ * applied yet. One file with another text stops the run. A file of another
+ * name with the same text is the same migration (the rule of plan 11c,
+ * kept). Else the file is copied. A compat file is a record of the package
+ * (append-only). An edited copy is a second migration with the same name.
+ * wrangler would apply it again, or fail on it at a worse moment (plan 11c
+ * deferral, closed by spec 23 item 11).
+ */
+export function planCompatCopy(
+  ctx: Ctx,
+  dir: string,
+  before17: boolean,
+  compatVersion: number,
+): { name: string; text: string }[] {
   if (!ctx.exists(dir))
     throw new Stop(
       `migrations_dir ${dir} does not exist; with --tables compat it holds the Better Auth table migration of the app`,
@@ -157,21 +189,34 @@ function copyCompat(ctx: Ctx, dir: string, before17: boolean, dryRun: boolean): 
     .listDir(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  const texts = new Set(present.map((f) => ctx.readFile(join(dir, f))));
+  const textOf = new Map(present.map((f) => [f, ctx.readFile(join(dir, f))]));
   let next = present.reduce((n, f) => Math.max(n, Number(/^(\d+)_/.exec(f)?.[1] ?? "0")), 0);
-  const copied: string[] = [];
-  for (const f of ctx
+  const copies: { name: string; text: string }[] = [];
+  const files = ctx
     .listDir(source)
     .filter((x) => x.endsWith(".sql"))
-    .sort()) {
+    .sort();
+  for (const [i, f] of files.entries()) {
+    if (i + 1 <= compatVersion) continue;
     const text = ctx.readFile(join(source, f));
-    if (texts.has(text)) continue;
+    const s = stem(f);
+    const named = present.filter((p) => stem(p) === s);
+    if (named.length > 1)
+      throw new Stop(
+        `migrations_dir ${dir} holds ${named.join(" and ")} for the compat file ${f}; keep one`,
+      );
+    const [own] = named;
+    if (own !== undefined) {
+      if (textOf.get(own) === text) continue;
+      throw new Stop(
+        `${join(dir, own)} differs from the compat file ${f}; restore its text, and put the app's change in a new migration; nothing was written`,
+      );
+    }
+    if ([...textOf.values()].includes(text)) continue;
     next += 1;
-    const name = `${String(next).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`;
-    if (!dryRun) ctx.writeNew(join(dir, name), text);
-    copied.push(name.slice(0, -".sql".length));
+    copies.push({ name: `${String(next).padStart(4, "0")}_${s}.sql`, text });
   }
-  return copied;
+  return copies;
 }
 
 async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
@@ -186,11 +231,19 @@ async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<Migrat
   plan.note(`reading the ${t.remote ? "remote" : "local"} D1 database ${t.database}`);
   const { version: before, applied: appliedBefore } = await readD1Version(ctx, t);
   gate(before);
-  // After the gate: the copy is the first write of a compat run.
-  const copied =
+  // After the gate: the plan is complete before the copy, the first write of a compat run.
+  const copies =
     plan.tables === "compat"
-      ? copyCompat(ctx, project.migrationsDir, v["before-1.7"] === true, plan.dryRun)
+      ? planCompatCopy(
+          ctx,
+          project.migrationsDir,
+          v["before-1.7"] === true,
+          compatVersionOf(await readD1CompatText(ctx, t)),
+        )
       : [];
+  if (!plan.dryRun)
+    for (const c of copies) ctx.writeNew(join(project.migrationsDir, c.name), c.text);
+  const copied = copies.map((c) => c.name.slice(0, -".sql".length));
   const done = new Set(appliedBefore);
   const files = ctx
     .listDir(project.migrationsDir)
