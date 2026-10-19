@@ -68,21 +68,25 @@ function withPageHeaders(res: Response): Response {
 
 /**
  * Start again: deletes each live sandbox that the cookie names, clears the
- * cookie, and goes to the home page. No Origin check: the cookie names
- * SameSite=Lax, so a post from another site carries no sandbox id. The
- * attribute is explicit, because Chrome lets a cookie with no SameSite
- * attribute ride a cross-site post for its first two minutes (ruling 35).
+ * cookie, and goes to the home page. Two guards keep another site from a
+ * reset (ruling 36). First, a post with Sec-Fetch-Site cross-site or
+ * same-site gets 403. A browser sends that header also under no-referrer.
+ * Second, the answer clears the cookie only when the request named one.
+ * Chrome sends no Lax cookie on a cross-site post, but it stores a cookie
+ * of the answer, so an unconditional clear resets the visitor.
  */
 async function reset(request: Request, env: Cloudflare.Env, origin: string): Promise<Response> {
   if (request.method !== "POST") return json(405, { error: "method_not_allowed" });
-  for (const id of cookieIds(request)) {
+  const site = request.headers.get("sec-fetch-site");
+  if (site === "cross-site" || site === "same-site") return json(403, { error: "cross_site" });
+  const ids = cookieIds(request);
+  const home = { location: `${origin}/` };
+  if (ids.length === 0) return new Response(null, { status: 303, headers: home });
+  for (const id of ids) {
     const stub = env.SANDBOX.get(env.SANDBOX.idFromName(id));
     if (await stub.exists()) await stub.destroy();
   }
-  return new Response(null, {
-    status: 303,
-    headers: { location: `${origin}/`, "set-cookie": CLEAR_COOKIE },
-  });
+  return new Response(null, { status: 303, headers: { ...home, "set-cookie": CLEAR_COOKIE } });
 }
 
 /** Every answer of the script but the assets. */

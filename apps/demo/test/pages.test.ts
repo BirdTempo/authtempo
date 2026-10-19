@@ -200,23 +200,35 @@ describe("the demo pages", () => {
     expect(sandboxId(jar)).not.toBe(id);
   });
 
-  it("resets nothing on a cross-site post to /reset with no sandbox cookie", async () => {
+  it("refuses a cross-site post to /reset and sets no cookie", async () => {
     const jar = await newSandbox();
     const id = sandboxId(jar);
     await signInByLink(jar, "pat@example.com");
-    // The cookie names SameSite=Lax. Chrome gives a cookie with no SameSite
-    // attribute two minutes of cross-site posts; an explicit Lax has none.
+    // The cookie names SameSite=Lax, so a browser sends it on no cross-site post.
     const first = await call({ cookies: new Map() }, "GET", "/");
     expect(first.headers.get("set-cookie")).toContain("; SameSite=Lax;");
-    // A browser sends no Lax cookie on a cross-site post, so the post names no sandbox.
-    const res = await call({ cookies: new Map() }, "POST", "/reset", new URLSearchParams(), {
-      origin: "https://evil.example",
-      "sec-fetch-site": "cross-site",
-    });
-    expect(res.status).toBe(303);
+    // Chrome sends no Lax cookie on a cross-site form post, and it stores a cookie of the answer.
+    for (const site of ["cross-site", "same-site"]) {
+      const res = await call({ cookies: new Map() }, "POST", "/reset", new URLSearchParams(), {
+        origin: "https://evil.example",
+        "sec-fetch-site": site,
+      });
+      expect(res.headers.get("set-cookie"), site).toBeNull();
+      expect(res.status, site).toBe(403);
+    }
     expect(await stub(id).exists()).toBe(true);
     expect(await rowsIn(jar, "SELECT count(*) AS n FROM ta_user")).toEqual([{ n: 1 }]);
     expect((await call(jar, "GET", "/whoami")).status).toBe(200);
+  });
+
+  it("clears no cookie when a post to /reset names no sandbox", async () => {
+    const jar = await newSandbox();
+    const id = sandboxId(jar);
+    const res = await call({ cookies: new Map() }, "POST", "/reset", new URLSearchParams());
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(`${ORIGIN}/`);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(await stub(id).exists()).toBe(true);
   });
 
   it("links each method page to its guide", async () => {
