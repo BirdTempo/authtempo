@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { guardReports } from "../scripts/lib/guard.ts";
+import { guardHint, guardReports } from "../scripts/lib/guard.ts";
 import { SITE } from "../scripts/lib/paths.ts";
+import type { CheckReport } from "../scripts/lib/report.ts";
 
 // Ruling 14 of the plan 11b lane: wrangler runs the build command before each
 // deploy and dry run. The guard fails a dist without the written headers, so
@@ -32,5 +33,37 @@ describe("the deploy guard", () => {
     });
     expect(reports.map((r) => r.name)).toEqual(["check-csp", "check-feed"]);
     expect(reports[1]?.failures).toEqual(["dist/feed.xml is missing"]);
+  });
+
+  // Ruling 16: the hint names the template when the written headers fail.
+  it("names the next step: the build, the template, or the feed data", () => {
+    const report = (name: string, failures: string[]): CheckReport => ({
+      name,
+      counts: {},
+      failures,
+    });
+    const ok = report("check-feed", []);
+    expect(
+      guardHint({
+        reports: [report("check-csp", ["dist/_headers is missing"]), ok],
+        headers: null,
+        feed: "x",
+      }),
+    ).toBe("run `pnpm --filter @authtempo/site build`; it writes dist/_headers and dist/feed.xml");
+    const left = "dist/_headers.template exists; write-headers.ts deletes it after the write";
+    expect(
+      guardHint({ reports: [report("check-csp", [left]), ok], headers: "h", feed: "x" }),
+    ).toMatch(/^run `pnpm --filter/);
+    const wrong = "the policy lacks frame-ancestors 'none'";
+    expect(
+      guardHint({ reports: [report("check-csp", [wrong]), ok], headers: "h", feed: "x" }),
+    ).toBe("fix public/_headers.template, then run the build again");
+    const feed = report("check-feed", ["the row x of RELEASE_DATES is y"]);
+    expect(guardHint({ reports: [report("check-csp", []), feed], headers: "h", feed: "x" })).toBe(
+      "fix RELEASE_DATES or the changelog that check-feed names, then run the build again",
+    );
+    expect(
+      guardHint({ reports: [report("check-csp", []), feed], headers: "h", feed: null }),
+    ).toMatch(/^run `pnpm --filter/);
   });
 });
