@@ -94,7 +94,8 @@ export function checkFacts(input: {
   providers: readonly string[];
   built: string;
   files: ReadonlySet<string>;
-  tracked: ReadonlySet<string>;
+  /** The files that git tracks, or the error of git ls-files (lib/tracked.ts). */
+  tracked: { files: ReadonlySet<string> } | { error: string };
   today: Date;
 }): CheckReport {
   const r: CheckReport = {
@@ -102,6 +103,10 @@ export function checkFacts(input: {
     counts: { rows: input.rows.length, models: input.models.length, oldest_days: 0 },
     failures: [],
   };
+  const tracked = "files" in input.tracked ? input.tracked.files : new Set<string>();
+  // With no list of tracked files, the rule of the sources fails once, with the reason.
+  if ("error" in input.tracked)
+    r.failures.push(`the sources are not checked: ${input.tracked.error}`);
   const today = Math.floor(input.today.getTime() / DAY_MS);
   const todayIso = new Date(today * DAY_MS).toISOString().slice(0, 10);
   const facts = [
@@ -115,7 +120,7 @@ export function checkFacts(input: {
     if (f.source.trim() === "") r.failures.push(`${f.id} names no source`);
     else
       for (const part of f.source.split("; "))
-        if (!PUBLIC_SOURCE.test(part) && !input.tracked.has(part))
+        if (!PUBLIC_SOURCE.test(part) && !tracked.has(part) && !("error" in input.tracked))
           r.failures.push(`${f.id} names "${part}", which is not public and not a tracked file`);
     const day = dayOf(f.read);
     if (day === null) {
@@ -166,6 +171,9 @@ export function checkFacts(input: {
   if (main === undefined) r.failures.push('the page has no <main id="main"> element');
   const price = PRICE.exec(textOfHtml(main ?? ""));
   if (price !== null) r.failures.push(`the page names a price: "${price[0].trim()}"`);
-  r.counts.tracked = input.tracked.size;
-  return requireCounts(r, ["rows", "models", "tracked"]);
+  r.counts.tracked = tracked.size;
+  return requireCounts(
+    r,
+    "error" in input.tracked ? ["rows", "models"] : ["rows", "models", "tracked"],
+  );
 }

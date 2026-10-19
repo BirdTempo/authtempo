@@ -1,10 +1,15 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { checkFacts } from "../scripts/check-facts.ts";
 import { checkSentences } from "../scripts/check-sentences.ts";
 import { checkTerms } from "../scripts/check-terms.ts";
 import { COMPARE_PROSE_PATH, compareProsePage } from "../scripts/lib/compare-prose.ts";
 import { docsPages } from "../scripts/lib/load.ts";
+import { REPO } from "../scripts/lib/paths.ts";
 import { prosePages } from "../scripts/lib/prose.ts";
+import { trackedFiles } from "../scripts/lib/tracked.ts";
 import { COMPARE_ROWS, type CompareRow, type HostedModel } from "../src/data/compare.ts";
 
 /** The build day of every test (plan 11b Task 6). */
@@ -98,7 +103,7 @@ function run(
     providers: over.providers ?? ["clerk"],
     built: over.built ?? page(),
     files: over.files ?? FILES,
-    tracked: over.tracked ?? TRACKED,
+    tracked: { files: over.tracked ?? TRACKED },
     today: TODAY,
   });
 }
@@ -164,6 +169,30 @@ describe("checkFacts (plan 11b Task 6)", () => {
     );
     expect(run({ rows: other }).failures).toHaveLength(1);
     expect(run({ tracked: new Set() }).failures).toContain("read 0 tracked");
+  });
+
+  it("fails with the reason of git, and only once, outside a git checkout (re-review R1)", () => {
+    // A folder of the OS temp area is no git checkout, as a copy made by git archive.
+    const outside = trackedFiles(mkdtempSync(join(tmpdir(), "authtempo-no-git-")));
+    expect("error" in outside && outside.error).toMatch(
+      /^git ls-files failed: fatal: not a git repository/,
+    );
+    const r = checkFacts({
+      rows: rows(),
+      models: models(),
+      providers: ["clerk"],
+      built: page(),
+      files: FILES,
+      tracked: outside,
+      today: TODAY,
+    });
+    expect(r.failures).toHaveLength(1);
+    expect(r.failures[0]).toMatch(
+      /^the sources are not checked: git ls-files failed: fatal: not a git repository/,
+    );
+    // In this checkout, git lists its files.
+    const inside = trackedFiles(REPO);
+    expect("files" in inside && inside.files.has("apps/site/scripts/check-facts.ts")).toBe(true);
   });
 
   it("fails a duplicate id", () => {
@@ -265,7 +294,7 @@ describe("checkFacts (plan 11b Task 6)", () => {
       providers: ["clerk"],
       built: pageRead("2026-04-17"),
       files: FILES,
-      tracked: TRACKED,
+      tracked: { files: TRACKED },
       today: late,
     });
     expect(r.failures).toEqual([]);
