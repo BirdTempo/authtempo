@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The tests of vitest.node.config.ts and the source they import. They run in
+  // Node and read files of the repo. The site checks are .ts files that import
+  // with the .ts extension, so this config allows it.
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "allowImportingTsExtensions": true,
+    // TypeScript 7 loads no @types package unless "types" names it. The tests read node:fs.
+    "types": ["node"]
+  },
+  "include": ["test/node"]
+}

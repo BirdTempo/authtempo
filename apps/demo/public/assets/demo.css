@@ -1,0 +1,179 @@
+/*
+ * The styles of the demo pages (plan 11b Task 10). Each color, font, and
+ * space is a token of tokens.css (brand spec 4 to 6), which the layout
+ * loads first. test/node/assets.test.ts fails a literal color here and a
+ * token name that tokens.css does not define.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--at-paper);
+  color: var(--at-ink);
+  font-family: var(--at-font-sans);
+  font-size: var(--at-text-body);
+  line-height: var(--at-leading-body);
+  overflow-wrap: anywhere;
+}
+a {
+  color: var(--at-accent-text);
+}
+code,
+pre {
+  font-family: var(--at-font-mono);
+  font-size: var(--at-text-mono);
+  line-height: var(--at-leading-mono);
+}
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--at-unit) calc(var(--at-unit) * 3);
+  padding: calc(var(--at-unit) * 2) var(--at-margin);
+  border-bottom: 1px solid var(--at-line);
+}
+.brand {
+  color: var(--at-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.top ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--at-unit) calc(var(--at-unit) * 2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--at-text-small);
+  line-height: var(--at-leading-small);
+}
+.top a[aria-current="page"] {
+  color: var(--at-ink);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: var(--at-rail) solid var(--at-accent);
+}
+main {
+  max-width: calc(var(--at-measure) + var(--at-margin) * 2);
+  padding: var(--at-rhythm) var(--at-margin) calc(var(--at-rhythm) * 2);
+}
+h1 {
+  margin: var(--at-rhythm) 0 var(--at-unit);
+  font-size: var(--at-text-h1);
+  line-height: var(--at-leading-h1);
+  letter-spacing: var(--at-tracking-h1);
+  font-weight: 600;
+}
+h2 {
+  margin: 0 0 var(--at-unit);
+  font-size: var(--at-text-h3);
+  line-height: var(--at-leading-h3);
+  letter-spacing: var(--at-tracking-h3);
+  font-weight: 600;
+}
+p {
+  margin: 0 0 calc(var(--at-unit) * 2);
+}
+.notice {
+  padding: var(--at-unit) calc(var(--at-unit) * 2);
+  border-left: var(--at-rail) solid var(--at-accent);
+  background: var(--at-surface);
+  font-size: var(--at-text-small);
+  line-height: var(--at-leading-small);
+}
+.lede {
+  font-size: var(--at-text-h3);
+  line-height: var(--at-leading-h3);
+}
+.warn,
+.cost,
+.meta {
+  color: var(--at-mute);
+  font-size: var(--at-text-small);
+  line-height: var(--at-leading-small);
+}
+.warn {
+  color: var(--at-ink);
+}
+form.call,
+.panel,
+.mail,
+.exchange {
+  margin: 0 0 var(--at-rhythm);
+  padding: calc(var(--at-unit) * 2);
+  border: 1px solid var(--at-line);
+  background: var(--at-surface);
+}
+form.call + .cost {
+  margin-top: calc(var(--at-rhythm) * -1 + var(--at-unit));
+  margin-bottom: var(--at-rhythm);
+}
+.session {
+  margin: var(--at-rhythm) 0;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--at-unit) * 2);
+}
+.row form.call {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+label {
+  display: block;
+  margin: 0 0 calc(var(--at-unit) * 2);
+}
+input {
+  display: block;
+  width: 100%;
+  margin-top: var(--at-unit);
+  padding: var(--at-unit);
+  border: 1px solid var(--at-mute);
+  background: var(--at-paper);
+  color: var(--at-ink);
+  font: inherit;
+}
+button {
+  padding: var(--at-unit) calc(var(--at-unit) * 2);
+  border: 1px solid var(--at-ink);
+  background: var(--at-ink);
+  color: var(--at-paper);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.reset button {
+  border-color: var(--at-line);
+  background: var(--at-surface);
+  color: var(--at-ink);
+}
+.identities,
+.methods {
+  margin: 0 0 var(--at-rhythm);
+  padding: 0;
+  list-style: none;
+}
+.identities li,
+.methods li {
+  margin: 0 0 var(--at-unit);
+}
+pre {
+  margin: 0;
+  padding: calc(var(--at-unit) * 2);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  background: var(--at-code);
+  color: var(--at-code-ink);
+}
+.panel code {
+  font-size: var(--at-text-h3);
+}
+[hidden] {
+  display: none;
+}

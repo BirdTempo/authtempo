@@ -1,0 +1,11 @@
+# The headers of the asset files of the demo (plan 11b Task 10). An asset
+# answers before the Worker script runs, so the script cannot set them.
+# test/node/assets.test.ts holds each CSP line to PAGE_POLICY of src/html.ts.
+/assets/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'; object-src 'none'
+  X-Content-Type-Options: nosniff
+
+# The fonts that tokens.css names (ruling 6 of the plan 11b lane).
+/fonts/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'; object-src 'none'
+  X-Content-Type-Options: nosniff

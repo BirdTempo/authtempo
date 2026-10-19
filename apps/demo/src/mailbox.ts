@@ -1,4 +1,7 @@
 import type { MailPort } from "@authtempo/core";
+import type { DemoMail } from "./mail.js";
+
+export type { DemoMail };
 
 /** The mailbox keeps the newest mails of a sandbox only (Task 11 moves the number into DEMO_LIMITS). */
 const KEEP = 50;
@@ -6,14 +9,6 @@ const KEEP = 50;
 /** The mail table of a sandbox. create() of the sandbox runs it. */
 export const MAILBOX_DDL =
   "CREATE TABLE demo_mail (id INTEGER PRIMARY KEY, to_addr TEXT NOT NULL, subject TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL)";
-
-export interface DemoMail {
-  id: number;
-  to: string;
-  subject: string;
-  text: string;
-  at: number;
-}
 
 export interface Mailbox {
   send: MailPort["send"];

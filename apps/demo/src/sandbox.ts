@@ -3,6 +3,8 @@ import type { Auth } from "@authtempo/core";
 import { demoAuth } from "./auth.js";
 import { createMailbox, MAILBOX_DDL, type Mailbox } from "./mailbox.js";
 import { MIGRATIONS } from "./migrations.gen.js";
+import { DEMO_BODIES } from "./pages/index.js";
+import { DEMO_PAGES, page } from "./pages/layout.js";
 import { PROVIDER_DDL, providerRoute } from "./provider.js";
 import { sqliteD1 } from "./sqlite-d1.js";
 
@@ -79,13 +81,34 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
       return res;
     }
     if (url.pathname.startsWith("/provider/")) return providerRoute(request, db);
-    if (url.pathname === "/mailbox" && request.method === "GET") {
-      // Task 10 adds the HTML page of the mailbox.
-      if (!(request.headers.get("accept") ?? "").includes("application/json"))
-        return json(406, { error: "not_acceptable" });
+    const accept = request.headers.get("accept") ?? "";
+    if (
+      url.pathname === "/mailbox" &&
+      request.method === "GET" &&
+      accept.includes("application/json")
+    )
       return json(200, { mail: mailbox.list() });
-    }
-    return new Response("ok", { headers: { "content-type": "text/plain; charset=utf-8" } });
+    const entry = DEMO_PAGES.find((p) => p.path === url.pathname);
+    if (entry === undefined) return json(404, { error: "not_found" });
+    // A call form posts to its own page only when no script runs. The page script makes each call.
+    if (request.method !== "GET") return json(405, { error: "method_not_allowed" });
+    const { body, script } = DEMO_BODIES[entry.path];
+    const state = { resetAt: this.resetAt(), mail: mailbox.list(), origin: this.env.DEMO_ORIGIN };
+    return page({
+      title: entry.title,
+      path: entry.path,
+      resetAt: state.resetAt,
+      body: body(state),
+      script,
+    });
+  }
+
+  /** The reset time that create() wrote, in ms since the epoch. */
+  private resetAt(): number {
+    const row = this.ctx.storage.sql
+      .exec<{ value: string }>("SELECT value FROM demo_meta WHERE key = 'reset_at'")
+      .one();
+    return Number(row.value);
   }
 
   /** Deletes the store at once. deleteAll() also deletes the alarm (deviation 10). */

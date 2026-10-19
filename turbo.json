@@ -51,6 +51,28 @@
         "$TURBO_ROOT$/examples/worker-postgres/wrangler.jsonc"
       ]
     },
+    // The demo build copies the token file and the fonts of the site into its
+    // assets (plan 11b Task 10). No package of the site is a dependency of the
+    // demo, so without these inputs a cache hit serves old tokens or fonts.
+    "@authtempo/demo#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/site/src/styles/tokens.css",
+        "$TURBO_ROOT$/apps/site/public/fonts/*"
+      ]
+    },
+    // The demo typecheck also reads the site checks that test/node/prose.test.ts imports.
+    "@authtempo/demo#typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/site/src/styles/tokens.css",
+        "$TURBO_ROOT$/apps/site/public/fonts/*",
+        "$TURBO_ROOT$/apps/site/scripts/**"
+      ]
+    },
     "typecheck": { "dependsOn": ["^build"] },
     "test": { "dependsOn": ["^build"], "cache": false },
     "//#typecheck:configs": { "cache": false }

@@ -7,5 +7,6 @@ import { defineConfig } from "vitest/config";
 // holds the date and the flags.
 export default defineConfig({
   plugins: [cloudflareTest({ wrangler: { configPath: "./wrangler.jsonc" } })],
-  test: { include: ["test/**/*.test.ts"] },
+  // vitest.node.config.ts runs test/node in Node.
+  test: { include: ["test/**/*.test.ts"], exclude: ["test/node/**"] },
 });

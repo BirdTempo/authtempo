@@ -1,4 +1,7 @@
 import type { OAuth2Entry, SocialProfile } from "@authtempo/core";
+import { DEMO_IDENTITIES, type Identity, MAX_EMAIL } from "./identities.js";
+import { page } from "./pages/layout.js";
+import { PROVIDER_TITLE, providerBody } from "./pages/provider.js";
 
 /**
  * The demo provider (plan 11b Task 9): a fake OAuth2 provider of the demo,
@@ -7,30 +10,17 @@ import type { OAuth2Entry, SocialProfile } from "@authtempo/core";
  * Its codes live in the store of the sandbox, never in a module variable.
  * One isolate holds many sandboxes, and a code of one must not sign in to another.
  */
+export { DEMO_IDENTITIES };
 export const DEMO_PROVIDER = "demo";
 const CLIENT_ID = "demo-provider-client";
 /** The one fixed value of the demo. It guards nothing; the secret scan of Task 12 allows it by name. */
 const CLIENT_SECRET = "demo-provider-secret-not-a-secret";
 const ACCESS_PREFIX = "dat_";
 const CODE_PREFIX = "dpc_";
-const MAX_EMAIL = 254;
 
 /** The code table of a sandbox. create() of the sandbox runs it. */
 export const PROVIDER_DDL =
   "CREATE TABLE demo_provider_code (code TEXT PRIMARY KEY, identity TEXT NOT NULL, challenge TEXT NOT NULL, redirect TEXT NOT NULL, spent INTEGER NOT NULL)";
-
-interface Identity {
-  subject: string;
-  email: string;
-  name: string;
-}
-
-/** The three fixed test identities, by the value of their button. */
-export const DEMO_IDENTITIES: Readonly<Record<string, Identity>> = Object.freeze({
-  ada: { subject: "demo-ada", email: "ada@example.com", name: "Ada Lovelace" },
-  grace: { subject: "demo-grace", email: "grace@example.com", name: "Grace Hopper" },
-  alan: { subject: "demo-alan", email: "alan@example.com", name: "Alan Turing" },
-});
 
 /** The provider entry of the demo config. Its user call goes through the fetch that core passes. */
 export function demoProvider(origin: string): OAuth2Entry {
@@ -74,7 +64,7 @@ export async function providerRoute(request: Request, db: D1Database): Promise<R
   if (url.pathname === "/provider/authorize") {
     const q = authorizeQuery(url);
     if (q === null) return text(400, "bad authorize request");
-    if (request.method === "GET") return page(url);
+    if (request.method === "GET") return pickPage(url, db);
     if (request.method !== "POST") return text(405, "method not allowed");
     const form = new URLSearchParams(await request.text());
     const identity = pickIdentity(form);
@@ -149,37 +139,22 @@ function pickIdentity(form: URLSearchParams): Identity | null {
   return { subject: `demo-free-${email}`, email, name: email.split("@")[0] ?? email };
 }
 
-/** The pick page. Task 10 writes its design; here a plain form. */
-function page(url: URL): Response {
-  const action = escapeHtml(`${url.pathname}${url.search}`);
-  const buttons = Object.entries(DEMO_IDENTITIES)
-    .map(
-      ([key, id]) =>
-        `<button type="submit" name="identity" value="${escapeHtml(key)}">${escapeHtml(id.name)} (${escapeHtml(id.email)})</button>`,
-    )
-    .join("\n");
-  const html = `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Demo provider</title></head>
-<body>
-<h1>Demo provider: pick a test identity</h1>
-<form method="post" action="${action}">
-${buttons}
-<label>Another address <input type="email" name="email" maxlength="${MAX_EMAIL}"></label>
-<button type="submit" name="identity" value="free">Continue with this address</button>
-</form>
-</body>
-</html>`;
-  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+/** The pick page, in the layout of the demo pages. The reset time comes from the store of the sandbox. */
+async function pickPage(url: URL, db: D1Database): Promise<Response> {
+  const row = await db
+    .prepare("SELECT value FROM demo_meta WHERE key = 'reset_at'")
+    .first<{ value: string }>();
+  return page({
+    title: PROVIDER_TITLE,
+    path: url.pathname,
+    resetAt: Number(row?.value ?? 0),
+    body: providerBody({
+      action: `${url.pathname}${url.search}`,
+      identities: DEMO_IDENTITIES,
+      maxEmail: MAX_EMAIL,
+    }),
+    script: null,
+  });
 }
 
 function text(status: number, body: string): Response {

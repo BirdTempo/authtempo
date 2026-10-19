@@ -85,7 +85,7 @@ describe("the demo Worker and its sandboxes", () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toBeNull();
-    expect(await res.text()).toBe("ok");
+    expect(await res.text()).toContain("<h1>authtempo demo</h1>");
   });
 
   it("takes the first cookie of the name that names a live sandbox", async () => {
@@ -96,11 +96,8 @@ describe("the demo Worker and its sandboxes", () => {
       `__Host-demo_sandbox=${unknown}; __Host-demo_sandbox=${id}`,
     ]) {
       const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual", headers: { cookie } });
-      expect({ cookie, status: res.status, body: await res.text() }).toEqual({
-        cookie,
-        status: 200,
-        body: "ok",
-      });
+      const home = (await res.text()).includes("<h1>authtempo demo</h1>");
+      expect({ cookie, status: res.status, home }).toEqual({ cookie, status: 200, home: true });
     }
     expect(await stubOf(unknown).exists()).toBe(false);
   });

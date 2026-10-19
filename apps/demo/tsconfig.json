@@ -7,5 +7,7 @@
     "lib": ["ES2023"],
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The page modules run in the browser, with the DOM: tsconfig.browser.json checks them.
+  "exclude": ["src/browser"]
 }

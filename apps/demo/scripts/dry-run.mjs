@@ -30,7 +30,8 @@ const ENV = {
 const ENTRY = "worker.js";
 
 // wrangler 4.148.0 refuses a dry run when assets.directory does not exist
-// (seen 2026-10-20). Task 10 fills the folder; until then it is empty (ruling 31).
+// (seen 2026-10-20, ruling 31). The test script runs copy-assets.mjs first,
+// which fills the folder; this line serves a run of this file alone.
 mkdirSync(join(PKG, "dist", "public"), { recursive: true });
 
 const out = mkdtempSync(join(tmpdir(), "authtempo-demo-dry-run-"));

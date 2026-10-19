@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The module scripts of the demo pages, to dist/public/assets/js. A module
+  // imports the copied assets by relative URLs, such as ../client/index.js.
+  // tsconfig paths does not map a relative import (TS2307 with tsc 7.0.2,
+  // 2026-10-20). rootDirs joins src and types as one tree, so each URL reads
+  // the declarations in types/, and tsc writes the URL as it is.
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false,
+    "rootDir": "src/browser",
+    "outDir": "dist/public/assets/js",
+    "rootDirs": ["src", "types"],
+    "lib": ["ES2023", "DOM"],
+    "types": []
+  },
+  "include": ["src/browser"]
+}

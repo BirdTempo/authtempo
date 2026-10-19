@@ -8,5 +8,7 @@
     "lib": ["ES2023"],
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  // tsconfig.browser.json checks src/browser, and tsconfig.node.json checks the Node tests.
+  "exclude": ["src/browser", "test/node"]
 }
