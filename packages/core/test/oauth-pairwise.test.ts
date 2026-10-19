@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { subjectFor } from "../src/engine/oauth-subject.js";
 import { fromBase64Url } from "../src/primitives/crypto.js";
 import { HTTP_LOOPBACK, isLocalHost } from "../src/primitives/host.js";
@@ -21,6 +21,11 @@ const A = "https://a.example.com/callback";
 const A2 = "https://a.example.com/other";
 const B = "https://b.example.com/callback";
 const SCOPE = "openid mcp:read offline_access";
+const DROPPED_LOG = "authtempo: client metadata member dropped";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** A fake `oauth.fetch` that answers from a map and counts its calls. */
 function fakeFetch() {
@@ -357,6 +362,7 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
         subject_type: "pairwise",
         sector_identifier_uri: "https://sector.example.com/redirects.json",
       });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ada = await signedIn(h);
     const atDoc = await subOf(h, ada.cookie, docA, cb1);
     expect(atDoc).toMatch(/^ps_/);
@@ -373,6 +379,12 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
       ].sort(),
     );
     expect(f.calls.sort()).toEqual([docA, docA2].sort());
+    // Each document read logs the dropped member by its name, never its value (ruling 24).
+    expect(warn.mock.calls).toEqual([
+      [DROPPED_LOG, "sector_identifier_uri"],
+      [DROPPED_LOG, "sector_identifier_uri"],
+    ]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("sector.example.com");
   });
 
   it("maps a pairwise sub back for auth.caller and introspection", async () => {
