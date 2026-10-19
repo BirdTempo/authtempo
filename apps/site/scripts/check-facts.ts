@@ -9,15 +9,15 @@ import { type CheckReport, requireCounts } from "./lib/report.ts";
 const DAY_MS = 86_400_000;
 const SIDES: readonly CompareSide[] = ["authtempo", "parity", "better-auth"];
 /**
- * A price: a currency sign, code, or word before or after a number. The
- * text has no tags, so "$<span>25</span>" reads as "$25".
+ * A price: a currency sign, code, or word before or after a number. Each
+ * tag of the text is a space, so "$<span>25</span>" reads as "$ 25", and
+ * a cell never joins the word of the next cell.
  */
 const PRICE = new RegExp(
   [
     String.raw`[$€£¥]\s*\d[\d.,]*`,
     String.raw`\d[\d.,]*\s*[$€£¥]`,
-    // No \b before a code: a stripped tag can join it to the word before it.
-    String.raw`(?:USD|EUR|GBP|JPY)\s*\d[\d.,]*`,
+    String.raw`\b(?:USD|EUR|GBP|JPY)\s*\d[\d.,]*`,
     String.raw`\d[\d.,]*\s*(?:USD|EUR|GBP|JPY)\b`,
     String.raw`\d[\d.,]*\s*(?:US\s+)?(?:dollars?|euros?|pounds?|yen)\b`,
   ].join("|"),
@@ -139,7 +139,7 @@ export function checkFacts(input: {
   const main = input.built.split('<main id="main"')[1]?.split("</main>")[0];
   if (main === undefined) r.failures.push('the page has no <main id="main"> element');
   const text = (main ?? "")
-    .replace(/<[^>]*>/g, "")
+    .replace(/<[^>]*>/g, " ")
     .replace(/&#?\w+;/g, (e) => ENTITIES[e.toLowerCase()] ?? e);
   const price = PRICE.exec(text);
   if (price !== null) r.failures.push(`the page names a price: "${price[0].trim()}"`);

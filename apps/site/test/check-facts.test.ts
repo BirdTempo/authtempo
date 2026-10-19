@@ -187,7 +187,7 @@ describe("checkFacts (plan 11b Task 6)", () => {
 
   it.each([
     ["$25 a month", "$25"],
-    ["$<span>25</span> a month", "$25"],
+    ["$<span>25</span> a month", "$ 25"],
     ["&#36;25 a month", "$25"],
     ["€0.02 per user", "€0.02"],
     ["£25 a month", "£25"],
@@ -199,6 +199,17 @@ describe("checkFacts (plan 11b Task 6)", () => {
     ["25 US dollars a month", "25 US dollars"],
     ["9 euros a month", "9 euros"],
   ])("fails the price %s on the page", (cell, found) => {
+    const built = page().replace("<td>Cell</td>", `<td>${cell}</td>`);
+    expect(run({ built }).failures).toEqual([`the page names a price: "${found}"`]);
+  });
+
+  // A price at the end of a cell: the next cell must not join its last word.
+  it.each([
+    ["25 USD", "25 USD"],
+    ["25 US dollars", "25 US dollars"],
+    ["25 £", "25 £"],
+    ["300 ¥", "300 ¥"],
+  ])("fails the price %s as the whole cell", (cell, found) => {
     const built = page().replace("<td>Cell</td>", `<td>${cell}</td>`);
     expect(run({ built }).failures).toEqual([`the page names a price: "${found}"`]);
   });
