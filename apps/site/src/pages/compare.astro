@@ -1,0 +1,118 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// /compare/ of plan 11b (spec 24 item 2, owner decision 3), in the layout of
+// brand spec 10. The prose is the entry compare.md. Each row comes from
+// src/data/compare.ts with its source and its read date, and check-facts
+// holds each row id and each date of this page. The page shows no price and
+// no logo of another product.
+import { getEntry } from "astro:content";
+import PageHero from "../components/PageHero.astro";
+import { COMPARE_PAGE, COMPARE_ROWS, type CompareSide, HOSTED_MODELS } from "../data/compare.ts";
+import { entryParts, sectionOf } from "../data/entry.ts";
+import { renderMarkdown } from "../data/markdown.ts";
+import Site from "../layouts/Site.astro";
+
+const entry = await getEntry("site", "compare");
+if (entry === undefined) throw new Error("compare.astro: src/content/site/compare.md is missing");
+const parts = entryParts(entry.body ?? "");
+const where = "src/content/site/compare.md";
+// One table per side, in this order, under the heading of its entry section.
+const SIDE_HEADINGS: readonly [CompareSide, string][] = [
+  ["authtempo", "Where authtempo does more"],
+  ["parity", "Where both do the same"],
+  ["better-auth", "Where Better Auth does more today"],
+];
+const groups = SIDE_HEADINGS.map(([side, heading]) => ({
+  markdown: sectionOf(parts, heading, where),
+  rows: COMPARE_ROWS.filter((r) => r.side === side),
+}));
+const hosted = sectionOf(parts, "The hosted providers", where);
+const P = COMPARE_PAGE;
+---
+<Site title={entry.data.title} description={entry.data.description} path={entry.data.page}>
+  <PageHero title={entry.data.title}><Fragment set:html={await renderMarkdown(parts.lede)} /></PageHero>
+  <div class="cmp prose">
+    <Fragment set:html={await renderMarkdown(parts.intro)} />
+    <p>{P.age}</p>
+  </div>
+  {groups.map(async (g) => (
+    <section class="cmp">
+      <div class="prose"><Fragment set:html={await renderMarkdown(g.markdown)} /></div>
+      <table class="facts" role="table">
+        <thead role="rowgroup">
+          <tr role="row"><th scope="col" role="columnheader">{P.topic}</th><th scope="col" role="columnheader">{P.authtempo}</th><th scope="col" role="columnheader">{P.betterAuth}</th><th scope="col" role="columnheader">{P.read}</th></tr>
+        </thead>
+        <tbody role="rowgroup">
+          {g.rows.map((r) => (
+            <tr
+              id={`cmp-${r.id}`}
+              role="row"
+            >
+              <th scope="row" role="rowheader">{r.topic}</th>
+              <td role="cell" data-label={P.authtempo}>{r.authtempo}</td>
+              <td role="cell" data-label={P.betterAuth}>{r.betterAuth}</td>
+              <td role="cell" class="read">{P.read} {r.read}<span class="source">{r.source}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  ))}
+  <section class="cmp">
+    <div class="prose"><Fragment set:html={await renderMarkdown(hosted)} /></div>
+    <table class="facts hosted" role="table">
+      <thead role="rowgroup">
+        <tr role="row"><th scope="col" role="columnheader">{P.provider}</th><th scope="col" role="columnheader">{P.users}</th><th scope="col" role="columnheader">{P.signIn}</th><th scope="col" role="columnheader">{P.importer}</th><th scope="col" role="columnheader">{P.read}</th></tr>
+      </thead>
+      <tbody role="rowgroup">
+        {HOSTED_MODELS.map((m) => (
+          <tr
+            id={`host-${m.provider}`}
+            role="row"
+          >
+            <th scope="row" role="rowheader"><a href={m.guide}>{m.name}</a></th>
+            <td role="cell" data-label={P.users}>{m.users}</td>
+            <td role="cell" data-label={P.signIn}>{m.signIn}</td>
+            <td role="cell" data-label={P.importer}>{m.importer === null ? P.noImporter : <code>{m.importer}</code>}</td>
+            <td role="cell" class="read">{P.read} {m.read}<span class="source">{m.source}</span></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+</Site>
+<style is:global>
+  /*
+   * Global, with each selector under the class cmp of each top block. A
+   * scoped style puts a class on each cell, and those classes take about a
+   * fifth of the page weight that check-weight holds.
+   */
+  .cmp.prose, .cmp .prose { max-width: var(--at-measure); }
+  section.cmp { margin-bottom: calc(var(--at-rhythm) * 2); }
+  .cmp.prose p, .cmp .prose p { margin: 0 0 var(--at-rhythm); }
+  .cmp .prose h2 { margin: calc(var(--at-rhythm) * 2) 0 var(--at-rhythm); font-size: var(--at-text-h2); line-height: var(--at-leading-h2); letter-spacing: var(--at-tracking-h2); font-weight: 600; }
+  /* The hairline rules of brand spec 6. A long name or path breaks, so no cell widens the page. */
+  .cmp table { width: 100%; border-collapse: collapse; }
+  .cmp th, .cmp td { padding: var(--at-unit) calc(var(--at-unit) * 2) var(--at-unit) 0; border-bottom: 1px solid var(--at-line); text-align: start; vertical-align: top; overflow-wrap: anywhere; }
+  .cmp thead th { color: var(--at-mute); font-size: var(--at-text-small); font-weight: 500; }
+  .cmp tbody th { font-weight: 600; }
+  .cmp .read { color: var(--at-mute); font-size: var(--at-text-small); white-space: nowrap; }
+  .cmp .source { display: block; white-space: normal; font-family: var(--at-font-mono); }
+  .cmp code { font-family: var(--at-font-mono); font-size: var(--at-text-small); }
+  .cmp .facts:not(.hosted) tbody th { width: 18%; }
+  /*
+   * Below 48rem a row is a block: the topic, then each cell with its label,
+   * so a cell keeps the width of the phone. The header row stays for a
+   * screen reader only, and the roles keep the table semantics.
+   */
+  @media (max-width: 47.99rem) {
+    .cmp thead tr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .cmp table, .cmp tbody, .cmp tr, .cmp th, .cmp td { display: block; }
+    .cmp tr { padding-block: var(--at-unit); border-bottom: 1px solid var(--at-line); }
+    .cmp th, .cmp td { border-bottom: 0; padding: calc(var(--at-unit) / 2) 0; }
+    .cmp .facts:not(.hosted) tbody th { width: auto; }
+    .cmp td[data-label]::before { content: attr(data-label); display: block; color: var(--at-mute); font-size: var(--at-text-small); font-weight: 500; }
+    .cmp .read { white-space: normal; }
+  }
+</style>

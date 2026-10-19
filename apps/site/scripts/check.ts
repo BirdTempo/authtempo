@@ -5,11 +5,13 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
+import { PROVIDERS } from "@authtempo/cli/program";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
 import { ROUTES } from "@authtempo/core/routes";
 import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
+import { COMPARE_ROWS, HOSTED_MODELS } from "../src/data/compare.ts";
 import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
@@ -22,6 +24,7 @@ import { checkErrorLinks, errorLinks } from "./check-error-links.ts";
 import { checkErrors } from "./check-errors.ts";
 import { checkExports, readExports } from "./check-exports.ts";
 import { checkExternal } from "./check-external.ts";
+import { checkFacts } from "./check-facts.ts";
 import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
 import { checkFeatures } from "./check-features.ts";
 import { checkFences } from "./check-fences.ts";
@@ -328,6 +331,20 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         routes: ROUTES,
         packages: PACKAGE_FEATURES,
         exempt: PACKAGE_EXEMPT,
+      }),
+  },
+  // Plan 11b Task 6: each fact of /compare/ has a source, and a read date at most FACT_MAX_DAYS old.
+  // `today` is the build time, so a fact grows old with no change of the tree.
+  {
+    name: "check-facts",
+    run: () =>
+      checkFacts({
+        rows: COMPARE_ROWS,
+        models: HOSTED_MODELS,
+        providers: PROVIDERS,
+        built: distPageOrEmpty("/compare/"),
+        files: distFiles(),
+        today: new Date(),
       }),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
