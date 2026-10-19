@@ -173,6 +173,47 @@ describe("no secret in the demo", () => {
     expect(credentials(`parts_${key} tk_${"a".repeat(19)}`)).toEqual([]);
   });
 
+  it("has the config keys of this list only, with observability off", () => {
+    // Final review m3 and the Task 12 re-review (Low 1) of plan 11b. The
+    // recorder of vitest.config.ts sees fetch only, so a new binding (a
+    // service, send_email, or ai) could send a request past it. Spec 24
+    // item 11: the demo logs no request, and core writes console.error lines.
+    const config = JSON.parse(stripComments(readFileSync(join(PKG, "wrangler.jsonc"), "utf8"))) as {
+      observability?: unknown;
+      durable_objects?: { bindings?: unknown };
+    };
+    expect(Object.keys(config).sort()).toEqual([
+      "$schema",
+      "assets",
+      "compatibility_date",
+      "compatibility_flags",
+      "durable_objects",
+      "main",
+      "migrations",
+      "name",
+      "observability",
+      "preview_urls",
+      "vars",
+      "workers_dev",
+    ]);
+    expect(config.observability).toEqual({ enabled: false });
+    expect(config.durable_objects?.bindings).toEqual([
+      { name: "SANDBOX", class_name: "Sandbox" },
+      { name: "GATE", class_name: "Gate" },
+    ]);
+  });
+
+  it("opens no socket", () => {
+    // A connect() of cloudflare:sockets passes the fetch recorder unseen (Task 12 re-review, probe K1).
+    const sources = files(SRC).filter((f) => f.endsWith(".ts"));
+    const bundle = files(BUNDLE).filter((f) => /\.m?js$/.test(f));
+    expect(bundle.length).toBeGreaterThan(0);
+    const found = [...sources, ...bundle].filter((f) =>
+      readFileSync(f, "utf8").includes("cloudflare:sockets"),
+    );
+    expect(found.map((f) => relative(PKG, f))).toEqual([]);
+  });
+
   it("logs nothing", () => {
     const sources = files(SRC).filter((f) => f.endsWith(".ts"));
     expect(sources.length).toBeGreaterThan(0);
