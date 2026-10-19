@@ -89,7 +89,7 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
       type: "http",
       scheme: "basic",
       description:
-        "The client id and the client secret of a `client_secret_basic` client as HTTP Basic. Each half is form-encoded first (RFC 6749 section 2.3.1).",
+        "The client id and the client secret of a client with a secret, as HTTP Basic. Each half is form-encoded first (RFC 6749 section 2.3.1).",
     },
   };
 }

@@ -7,8 +7,10 @@ import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
 /**
  * The client auth of every client-facing endpoint (plan 12e, spec 8.16):
  * `client_secret_basic`, `client_secret_post`, and `none` for a public
- * client. RFC 6749 section 2.3: one method per request, and the method is
- * the client's own. No per-client limit on a failed auth: a secret of 256
+ * client. RFC 6749 section 2.3: one method per request. A client with a
+ * secret takes either secret method. Section 2.3.1 makes Basic a MUST for
+ * it, and the form stays for clients that cannot send Basic. `none` and
+ * `private_key_jwt` take their own method only. No per-client limit on a failed auth: a secret of 256
  * bits does not fall to guesses. A limit per client would let a stranger
  * lock a real client out. The per-IP limit of the token endpoint stays (plan 12e).
  */
@@ -17,13 +19,26 @@ export type AuthMethod = ClientAuthMethod;
 
 export interface AuthedClient {
   client: OAuthClientRow;
-  /** The method of this request, which is the client's own. */
+  /** The method of this request. A client with a secret may use either secret method. */
   method: AuthMethod;
   /** OAuth 2.1 section 2.1: a client with credentials. */
   confidential: boolean;
 }
 
 const BASIC_RE = /^basic /i;
+const SECRET_METHODS: ReadonlySet<AuthMethod> = new Set([
+  "client_secret_basic",
+  "client_secret_post",
+]);
+
+/**
+ * `client_secret` of the form, or null. RFC 6749 section 2.3.1 lets a client
+ * omit an empty secret, so an empty value counts as omitted.
+ */
+function formSecretOf(form: URLSearchParams): string | null {
+  const secret = form.get("client_secret");
+  return secret === "" ? null : secret;
+}
 
 /**
  * The id and the secret of a Basic token (the part after `Basic `), or null
@@ -52,7 +67,7 @@ export function namesClient(request: Request, form: URLSearchParams): boolean {
   return (
     BASIC_RE.test(request.headers.get("authorization") ?? "") ||
     form.has("client_id") ||
-    form.has("client_secret") ||
+    formSecretOf(form) !== null ||
     form.has("client_assertion_type")
   );
 }
@@ -61,9 +76,8 @@ export function namesClient(request: Request, form: URLSearchParams): boolean {
  * The client of the request, authenticated. The methods present are an
  * `Authorization: Basic` header, `client_secret` in the form, and
  * `client_assertion_type` in the form. More than one is `invalid_request`.
- * With none, `client_id` of the form names a public client. The method
- * present must be the client's own: a public client with a secret, and a
- * confidential client with none, are `invalid_client`. The route adds the
+ * With none, `client_id` of the form names a public client. A public client
+ * with a secret, and a confidential client with none, are `invalid_client`. The route adds the
  * Basic challenge to each `invalid_client` (RFC 6749 section 5.2). `known`
  * is a row of the named id that the caller already read, so a CIMD client
  * is not read twice.
@@ -77,7 +91,7 @@ export async function authenticateClient(
   const header = request.headers.get("authorization") ?? "";
   const isBasic = BASIC_RE.test(header);
   const fail = (error: "invalid_request" | "invalid_client") => oauthFail<AuthedClient>(error);
-  const formSecret = form.get("client_secret");
+  const formSecret = formSecretOf(form);
   const assertion = form.has("client_assertion_type");
   const present = [isBasic, formSecret !== null, assertion].filter(Boolean).length;
   if (present > 1) return fail("invalid_request");
@@ -96,7 +110,10 @@ export async function authenticateClient(
   } else if (formSecret !== null) method = "client_secret_post";
   const client = known?.id === id ? known : await findClient(config, id);
   if (!client) return fail("invalid_client");
-  if (client.authMethod !== method) return fail("invalid_client");
+  const allowed =
+    method === client.authMethod ||
+    (SECRET_METHODS.has(method) && SECRET_METHODS.has(client.authMethod));
+  if (!allowed) return fail("invalid_client");
   if (secret !== null && !(await secretMatches(client, secret, config.clock.now())))
     return fail("invalid_client");
   return oauthOk({ client, method, confidential: method !== "none" });

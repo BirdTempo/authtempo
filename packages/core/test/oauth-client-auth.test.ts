@@ -209,7 +209,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     );
   });
 
-  it("refuses a method other than the client's own", async () => {
+  it("takes either secret method from a client with a secret, and holds none and private_key_jwt to their own (RFC 6749 2.3.1)", async () => {
     const h = oauthHandle();
     const s = await signedIn(h);
     const basic = await confidential(h, "client_secret_basic");
@@ -222,11 +222,66 @@ describe("client auth at the token endpoint (plan 12e)", () => {
         client_secret: basic.secret,
       }),
     );
-    expect(await answer(inForm)).toEqual(CLIENT);
+    expect(inForm.status).toBe(200);
     const inHeader = await h.auth.handle(
       withBasic(codeBody(await codeOf(h, s.cookie, form.clientId)), form.clientId, form.secret),
     );
-    expect(await answer(inHeader)).toEqual(CLIENT);
+    expect(inHeader.status).toBe(200);
+    // A public client and a private_key_jwt client take no secret by either method.
+    const open = await registered(h);
+    const made = await h.auth.api.oauth?.clients.create({
+      redirectUris: [REDIRECT],
+      authMethod: "private_key_jwt",
+      jwksUri: "https://client.example.com/jwks.json",
+    });
+    if (!made?.ok) throw new Error("the create failed");
+    const keyed = made.value.client.id;
+    const secret = `cs_${"A".repeat(43)}`;
+    for (const clientId of [open, keyed]) {
+      const c = await codeOf(h, s.cookie, clientId);
+      for (const req of [
+        tokenPost({ ...codeBody(c), client_id: clientId, client_secret: secret }),
+        withBasic(codeBody(c), clientId, secret),
+      ])
+        expect({ clientId, answer: await answer(await h.auth.handle(req)) }).toEqual({
+          clientId,
+          answer: CLIENT,
+        });
+    }
+  });
+
+  it("counts an empty client_secret as omitted (RFC 6749 2.3.1)", async () => {
+    const h = oauthHandle();
+    const s = await signedIn(h);
+    const open = await registered(h);
+    const basic = await confidential(h, "client_secret_basic");
+    const empty = { client_secret: "" };
+    const pub = await h.auth.handle(
+      tokenPost({ ...codeBody(await codeOf(h, s.cookie, open)), client_id: open, ...empty }),
+    );
+    expect(pub.status).toBe(200);
+    // A revoke with only an empty client_secret names no client.
+    const { refresh_token } = (await pub.json()) as { refresh_token: string };
+    const dropped = await h.auth.handle(revoke({ token: refresh_token, ...empty }));
+    expect(await answer(dropped)).toEqual({ status: 200, body: {} });
+    // Beside Basic, an empty client_secret is not a second method.
+    const both = await h.auth.handle(
+      withBasic(
+        { ...codeBody(await codeOf(h, s.cookie, basic.clientId)), ...empty },
+        basic.clientId,
+        basic.secret,
+      ),
+    );
+    expect(both.status).toBe(200);
+    // A confidential client with an empty secret sent no secret.
+    const bare = await h.auth.handle(
+      tokenPost({
+        ...codeBody(await codeOf(h, s.cookie, basic.clientId)),
+        client_id: basic.clientId,
+        ...empty,
+      }),
+    );
+    expect(await answer(bare)).toEqual(CLIENT);
   });
 
   it("refuses a confidential client with no auth and a public client with a secret, and spends nothing", async () => {
