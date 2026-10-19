@@ -118,6 +118,8 @@ export interface SessionInput {
   userAgent: string | null;
   /** Set only through `openSession`, after the membership check of a hook's patch (plan 9d). */
   activeOrganizationId?: string | null;
+  /** The last sign-in, when it is older than the session: a handoff (plan 12e ruling 41). Default now. */
+  freshAt?: Date;
 }
 
 /** What an engine flow passes to `openSession` (plan 9d). */
@@ -126,6 +128,12 @@ export interface SessionOpen {
   ip: string | null;
   userAgent: string | null;
   via: SessionVia;
+  /**
+   * The time of the sign-in that this session carries on, when no
+   * credential was checked now: a handoff takes the browser session's
+   * sign-in (plan 12e ruling 41). Default now.
+   */
+  signedInAt?: Date;
 }
 
 export interface ResolvedSession {
@@ -162,7 +170,7 @@ export async function createSession(
     ip: input.ip,
     userAgent: input.userAgent,
     activeOrganizationId: input.activeOrganizationId ?? null,
-    freshAt: now,
+    freshAt: input.freshAt ?? now,
     createdAt: now,
     updatedAt: now,
   });
@@ -253,7 +261,10 @@ export async function prepareSession(
     user: input.user,
     via: input.via,
   });
-  const prepared = { input: await patchedInput(config, storage, draft, patch) };
+  const patched = await patchedInput(config, storage, draft, patch);
+  const prepared = {
+    input: input.signedInAt ? { ...patched, freshAt: input.signedInAt } : patched,
+  };
   // After the hook: the hold is a write, and a before hook runs before the
   // first write (the D1 undo). Before the flow's other writes: the lock order.
   // Not for an unverified user: a claim can verify that row during the

@@ -115,16 +115,19 @@ export interface OAuthRequestData {
 }
 
 /**
- * The time of the session's last sign-in, in epoch milliseconds. With 12a,
- * a re-authentication counts as a sign-in.
+ * The time of the session's last sign-in, in epoch milliseconds: `freshAt`,
+ * else `createdAt` (a session of schema 9 or older). With 12a, a
+ * re-authentication counts as a sign-in. A handoff session holds the
+ * browser session's sign-in in `freshAt`, older than its `createdAt`, so
+ * `createdAt` never wins (plan 12e ruling 41).
  */
 function authAtMs(session: SessionRow): number {
-  return Math.max(session.createdAt.getTime(), (session.freshAt ?? session.createdAt).getTime());
+  return (session.freshAt ?? session.createdAt).getTime();
 }
 
 /**
- * The `auth_time` of OIDC Core 1.0 section 2, in seconds: the later of
- * `createdAt` and `freshAt`. With 12a, a re-authentication counts as a sign-in.
+ * The `auth_time` of OIDC Core 1.0 section 2, in seconds: `freshAt`, else
+ * `createdAt`. With 12a, a re-authentication counts as a sign-in.
  */
 export function authTimeOf(session: SessionRow): number {
   return Math.floor(authAtMs(session) / 1000);

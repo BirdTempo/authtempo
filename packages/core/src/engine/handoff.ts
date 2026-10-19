@@ -50,6 +50,12 @@ interface CodeData {
    * of the user says. A code without the flag counts as unverified.
    */
   emailVerified?: boolean;
+  /**
+   * The browser session's last sign-in in epoch ms: its `freshAt`, else its
+   * `createdAt` (plan 12e ruling 41). The handoff checks no credential, so
+   * the new session keeps this time, not now.
+   */
+  signedInAt: number;
 }
 
 /** The path the browser visits after any sign-in completes. It stays on the API origin. */
@@ -192,10 +198,17 @@ export async function continueHandoff(
       // Read before the code row is written: a claim after this read deletes
       // the code row, or the redeem guard sees the claim's flip.
       const user = await tx.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
+      // The same where as the check below: a session of another user gives no time.
+      const browser = await tx.findOne("session", [
+        { field: "id", op: "eq", value: input.sessionId },
+        { field: "userId", op: "eq", value: input.userId },
+      ]);
+      if (!browser) throw new ClaimRacedError();
       const codeData: CodeData = {
         challenge: data.challenge,
         redirect: data.redirect,
         emailVerified: user?.emailVerified === true,
+        signedInAt: (browser.freshAt ?? browser.createdAt).getTime(),
       };
       await tx.create("verification", {
         id: newId(now),
@@ -252,7 +265,9 @@ export async function redeemHandoff(
   // Defense in depth: the hs_ and hc_ prefixes already keep a start row and a code row apart, so this branch is unreachable through the public API and has no test.
   if (row.value.identifier === START_ID) return fail("invalid_token");
   const data = row.value.data as CodeData | null;
-  if (!data || typeof data.challenge !== "string") return fail("invalid_token");
+  // A code of a core before ruling 41 has no sign-in time. It lives 2 minutes, and a new code works.
+  if (!data || typeof data.challenge !== "string" || !Number.isSafeInteger(data.signedInAt))
+    return fail("invalid_token");
   if (!constantTimeEqual(await sha256Base64Url(input.verifier), data.challenge))
     return fail("invalid_token");
   const userId = row.value.identifier;
@@ -266,7 +281,13 @@ export async function redeemHandoff(
           if (!user) return fail("invalid_token");
           const { token, session } = await openSession(
             config,
-            { user, ip: input.ip, userAgent: input.userAgent, via: "handoff" },
+            {
+              user,
+              ip: input.ip,
+              userAgent: input.userAgent,
+              via: "handoff",
+              signedInAt: new Date(data.signedInAt),
+            },
             tx,
           );
           // The flag from the mint, not this read: a claim can commit between
