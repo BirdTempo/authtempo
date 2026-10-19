@@ -1,8 +1,9 @@
 /**
- * The credential facts for an SDK (plan 11d, spec 20): the token prefixes,
- * the JWT `typ` values, the cookie names and their rule, the bearer and
- * cookie rule, the compact JWS check on Web Crypto, the DPoP proof check (plan 12e), and the resource rules. A resource server
- * verifies with this code, so no supplier holds the check.
+ * The credential facts for an SDK (plan 11d, spec 20). They are the token
+ * prefixes, the JWT `typ` values, the cookie names and their rule, and the
+ * bearer and cookie rule. They are also the compact JWS check on Web
+ * Crypto, the DPoP proof check (plan 12e), and the resource rules. A
+ * resource server verifies with this code, so no supplier holds the check.
  */
 export {
   ACCESS_TOKEN_TYPE,
