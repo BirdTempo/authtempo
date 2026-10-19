@@ -79,6 +79,13 @@ describe("checkRoutes", () => {
     ]);
   });
 
+  it("fails when the Errors cell links one code twice", () => {
+    const link =
+      '<a href="/docs/reference/errors/#token_limit"><code dir="auto">token_limit</code></a>';
+    const r = checkRoutes(edit(link, `${link}, ${link}`), routes, doc);
+    expect(r.failures).toEqual(["POST /tokens: Errors links token_limit more than once"]);
+  });
+
   it("fails when the Needs cell differs from auth", () => {
     const r = checkRoutes(
       edit(
@@ -101,6 +108,20 @@ describe("checkRoutes", () => {
       doc,
     );
     expect(r.failures).toEqual(["POST /sign-out: Needs names none; ROUTES says none, session"]);
+  });
+
+  it("fails when the Needs cell names the forms of auth in another order", () => {
+    const r = checkRoutes(
+      edit(
+        'Nothing; or a session cookie, or a <code dir="auto">ts_</code> bearer token. A call',
+        'A session cookie, or a <code dir="auto">ts_</code> bearer token; or nothing. A call',
+      ),
+      routes,
+      doc,
+    );
+    expect(r.failures).toEqual([
+      "POST /sign-out: Needs names session, none; ROUTES says none, session",
+    ]);
   });
 
   it("fails when the Input cell differs from the document", () => {

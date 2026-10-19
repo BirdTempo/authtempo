@@ -29,7 +29,7 @@ sources:
 | Server | `{origin}{basePath}`, with `basePath` set to `/auth` |
 | Cross-origin read | The file answers with `access-control-allow-origin: *` and no credentials |
 
-The file has one operation for each route, in the order of the routes page. The `operationId` of an operation is the anchor of its route on the routes page, and `externalDocs` links that anchor. The file holds no example value: no token, no cookie value, and no code.
+The file has one operation for each route. The operations follow the order of `ROUTES`, grouped by path: a GET and a POST of one path share one path item. The `operationId` of an operation is the anchor of its route on the routes page, and `externalDocs` links that anchor. The file holds no example value: no token, no cookie value, and no code.
 
 A local tool, such as Scalar, Swagger UI, Postman, or Insomnia, opens the file on your machine. Set its server to your deployment.
 
@@ -80,7 +80,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `Error` | `{ error, message? }`. `message` is present only on `hook_refused` | A code of `ERRORS` |
 | `OAuthError` | `{ error }` | A code of `OAUTH_ERRORS` |
 
-Each operation has one response for each status of its codes, with an `enum` of those codes. Each code links its anchor on [Error codes](/docs/reference/errors/). Every operation also has the codes of the router: `not_found`, `origin_not_trusted`, and `internal`.
+Each operation has one response for each status of its codes, with an `enum` of those codes. Each code links its anchor on [Error codes](/docs/reference/errors/). Every operation also has two codes of the router, `not_found` and `internal`. Each POST also has `origin_not_trusted`, except Apple's form post callback, which takes a cross-site form.
 
 ## The route of a deployment
 

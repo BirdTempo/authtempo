@@ -280,6 +280,9 @@ export function checkRoutes(
           for (const a of new Set(linked))
             if (!declared.includes(a))
               r.failures.push(`${name}: Errors names ${a}; the route does not declare it`);
+          for (const a of new Set(linked))
+            if (linked.indexOf(a) !== linked.lastIndexOf(a))
+              r.failures.push(`${name}: Errors links ${a} more than once`);
         }
         r.counts.cells = (r.counts.cells ?? 0) + 1;
       }

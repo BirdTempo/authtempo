@@ -142,6 +142,27 @@ try {
     ),
   );
   await expectAnswer("/docs/start/index.md", (res) => agentAnswer(res, null));
+  // The OpenAPI document of plan 11g: public/_headers gives this one path a CORS
+  // header with no credentials, so a browser tool on another origin reads it.
+  await expectAnswer("/docs/reference/openapi.json", (res) => {
+    const type = res.headers.get("content-type") ?? "(none)";
+    const origin = res.headers.get("access-control-allow-origin");
+    const credentials = res.headers.get("access-control-allow-credentials");
+    console.log(
+      `preview-smoke: /docs/reference/openapi.json status=${res.status} content-type=${type} access-control-allow-origin=${origin ?? "(none)"}`,
+    );
+    if (res.status !== 200) return `status ${res.status}`;
+    if (!type.startsWith("application/json")) return `content-type ${type}`;
+    if (origin !== "*") return `access-control-allow-origin ${origin ?? "(none)"}, not *`;
+    if (credentials !== null) return `access-control-allow-credentials ${credentials}`;
+    return null;
+  });
+  // The rule names one path: a page has no CORS header.
+  await expectAnswer("/docs/reference/routes/", (res) => {
+    const origin = res.headers.get("access-control-allow-origin");
+    if (res.status !== 200) return `status ${res.status}`;
+    return origin === null ? null : `access-control-allow-origin ${origin} on a page`;
+  });
 } catch (e) {
   failures.push(e instanceof Error ? e.message : String(e));
 } finally {

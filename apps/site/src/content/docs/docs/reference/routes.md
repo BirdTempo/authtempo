@@ -257,13 +257,13 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user is verified. The callback needs the binding cookie and the session cookie of that session. Apple's form post needs no session cookie while it is `Lax` |
 | Input | JSON or form `{ next? }` |
 | Answer | JSON: `{ url }` and the binding cookie; the client navigates to `url`. A form: 303 to the provider. The callback links the identity to the session's user and redirects to `next`. It sets no session cookie. A failure at the callback redirects to `/?auth_error=<code>` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`oauth_failed`](/docs/reference/errors/#oauth_failed) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed). The callback answers the codes of [`GET /social/:provider/callback`](#get-social-provider-callback) |
 
 <h3 id="get-social-provider-callback"><code>GET /social/:provider/callback</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | Nothing. The binding cookie |
+| Needs | Nothing. The callback reads the binding cookie |
 | Input | Query `{ code?, state?, error? }`. `code` and `state`, or `error`, come from the provider. The browser sends the trust cookie of a trusted device |
 | Answer | 302 to `appURL` plus `next`, with the session cookie. For a user with the second factor on, a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge) with no session cookie. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict) |
@@ -272,7 +272,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 
 | Field | Value |
 | --- | --- |
-| Needs | Nothing. The binding cookie. The Origin check is skipped |
+| Needs | Nothing. The callback reads the binding cookie. The Origin check is skipped |
 | Input | JSON or form `{ code?, state?, error?, user?, id_token? }`. Apple sends a form with `code`, `state`, and `user?` |
 | Answer | The same as the GET callback. A cross-site post carries no trust cookie, so a user with the second factor on goes to the challenge page, which offers the trusted device |
 | Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict) |
