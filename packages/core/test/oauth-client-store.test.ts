@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deleteClient, secretMatches } from "../src/engine/oauth-client-store.js";
+import { secretMatches } from "../src/engine/oauth-client-secret.js";
+import { deleteClient } from "../src/engine/oauth-client-store.js";
 import type { ModelName } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { post } from "./helpers.js";

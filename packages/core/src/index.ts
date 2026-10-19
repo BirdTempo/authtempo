@@ -99,11 +99,8 @@ export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export { defaultNoticeMail, type NoticeEvent, type NoticeMailInput } from "./engine/notices.js";
-export {
-  CLIENT_SECRET_PREFIX,
-  type ClientInput,
-  type ClientSummary,
-} from "./engine/oauth-client-store.js";
+export { CLIENT_SECRET_PREFIX } from "./engine/oauth-client-secret.js";
+export type { ClientInput, ClientSummary } from "./engine/oauth-client-store.js";
 export type { ClientFields, RegisteredClient } from "./engine/oauth-clients.js";
 export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
 export type { OAuthResult } from "./engine/oauth-result.js";

@@ -5,7 +5,7 @@ import { JWK_PRIVATE_MEMBERS } from "../primitives/jwk.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
-import { newClientSecret } from "./oauth-client-store.js";
+import { newClientSecret } from "./oauth-client-secret.js";
 import { BUILT_IN_SCOPES, type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
 
 /**

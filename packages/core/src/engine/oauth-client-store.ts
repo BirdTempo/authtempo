@@ -1,7 +1,8 @@
 import type { ResolvedConfig } from "../config.js";
-import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
+import { randomToken } from "../primitives/crypto.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import type { Where } from "../storage/port.js";
+import { newClientSecret } from "./oauth-client-secret.js";
 import { CLIENT_ID_PREFIX, type ClientFields, validClientMetadata } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
 
@@ -9,14 +10,10 @@ import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
  * The in-process client API of the provider (plan 12e, `api.oauth.clients`).
  * No route serves it: an app calls it from its own admin code.
  *
- * A client secret is `cs_` plus 32 random bytes (256 bits). The row holds its
- * SHA-256 hex, compared in constant time. A keyed hash adds nothing to 256
- * bits, and with no key an app secret rotation never ends a client secret
- * (spec 22 item 11). The secret leaves the server once, in the answer of
- * create or rotate.
+ * The secret rule is in `oauth-client-secret.ts`. The secret leaves the
+ * server once, in the answer of create or rotate.
  */
 
-export const CLIENT_SECRET_PREFIX = "cs_";
 /** The page size of `listClients`: the default and the most. */
 const LIST_MAX = 100;
 /**
@@ -65,36 +62,6 @@ const METADATA_NAMES: Readonly<Record<keyof ClientInput, string>> = {
   subjectType: "subject_type",
   dpopBound: "dpop_bound_access_tokens",
 };
-
-/** A new secret and its hash for a secret method, or null for `none` and `private_key_jwt`. */
-export async function newClientSecret(
-  method: ClientAuthMethod,
-): Promise<{ secret: string; hash: string } | null> {
-  if (method !== "client_secret_basic" && method !== "client_secret_post") return null;
-  const secret = randomToken(CLIENT_SECRET_PREFIX);
-  return { secret, hash: await sha256Hex(secret) };
-}
-
-/**
- * True when `secret` is the client's secret, or its previous secret while
- * `previousSecretUntil` is after `now`. Both compares run in every case, so
- * the time does not tell which one passed.
- */
-export async function secretMatches(
-  row: Pick<OAuthClientRow, "secretHash" | "previousSecretHash" | "previousSecretUntil">,
-  secret: string,
-  now: Date,
-): Promise<boolean> {
-  const hash = await sha256Hex(secret);
-  const current = constantTimeEqual(hash, row.secretHash ?? "");
-  const previous = constantTimeEqual(hash, row.previousSecretHash ?? "");
-  const previousLive =
-    row.previousSecretUntil !== null && row.previousSecretUntil.getTime() > now.getTime();
-  return (
-    (row.secretHash !== null && current) ||
-    (row.previousSecretHash !== null && previousLive && previous)
-  );
-}
 
 function summaryOf(row: OAuthClientRow): ClientSummary {
   const { secretHash: _s, previousSecretHash: _p, ...summary } = row;
