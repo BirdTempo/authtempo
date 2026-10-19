@@ -300,7 +300,15 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
       }),
   },
   // Plan 11b Task 3: no page loads a file of another origin, and the site sets no cookie.
-  { name: "check-external", run: () => checkExternal(distPages(), distHeaders()) },
+  {
+    name: "check-external",
+    run: () =>
+      checkExternal(
+        distPages(),
+        distHeaders(),
+        new Map([...distTexts()].filter(([path]) => path.endsWith(".css"))),
+      ),
+  },
   // The CSP that write-headers.ts wrote, held to the inline scripts of this build.
   { name: "check-csp", run: () => checkCsp(distPages(), distHeaders(), distFiles()) },
   { name: "check-weight", run: () => checkWeight(rootPages(), distBytes) },

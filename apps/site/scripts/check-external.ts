@@ -11,6 +11,12 @@ const LOADS: readonly { tag: string; attr: string; label: string; rel?: string }
   { tag: "link", attr: "href", label: "link stylesheet", rel: "stylesheet" },
   { tag: "link", attr: "href", label: "link preload", rel: "preload" },
   { tag: "link", attr: "href", label: "link modulepreload", rel: "modulepreload" },
+  // Ruling 13 of the plan 11b lane: each other link that makes the browser fetch or connect.
+  { tag: "link", attr: "href", label: "link icon", rel: "icon" },
+  { tag: "link", attr: "href", label: "link apple-touch-icon", rel: "apple-touch-icon" },
+  { tag: "link", attr: "href", label: "link manifest", rel: "manifest" },
+  { tag: "link", attr: "href", label: "link preconnect", rel: "preconnect" },
+  { tag: "link", attr: "href", label: "link prefetch", rel: "prefetch" },
   { tag: "img", attr: "src", label: "img src" },
   { tag: "img", attr: "srcset", label: "img srcset" },
   { tag: "source", attr: "src", label: "source src" },
@@ -18,6 +24,9 @@ const LOADS: readonly { tag: string; attr: string; label: string; rel?: string }
   { tag: "iframe", attr: "src", label: "iframe src" },
   { tag: "video", attr: "src", label: "video src" },
   { tag: "audio", attr: "src", label: "audio src" },
+  { tag: "video", attr: "poster", label: "video poster" },
+  { tag: "object", attr: "data", label: "object data" },
+  { tag: "embed", attr: "src", label: "embed src" },
 ];
 
 /** The value of one attribute of a start tag, or null. */
@@ -45,16 +54,16 @@ export function isExternal(url: string): boolean {
   }
 }
 
-/** Each url() and @import target of a CSS text, with its label. */
-function cssUrls(css: string): { url: string; label: string }[] {
+/** Each url() and @import target of a CSS text, with its label: `style` in a page, `css` in a file. */
+function cssUrls(css: string, kind: "style" | "css" = "style"): { url: string; label: string }[] {
   const out: { url: string; label: string }[] = [];
   for (const m of css.matchAll(/@import\s+(?:url\(\s*)?(?:"([^"]*)"|'([^']*)'|([^\s;)]+))/gi))
-    out.push({ url: m[1] ?? m[2] ?? m[3] ?? "", label: "style @import" });
+    out.push({ url: m[1] ?? m[2] ?? m[3] ?? "", label: `${kind} @import` });
   for (const m of css.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/gi)) {
     // An @import url(...) target is counted once, as the @import above.
     const before = css.slice(Math.max(0, (m.index ?? 0) - 12), m.index ?? 0);
     if (/@import\s+$/i.test(before)) continue;
-    out.push({ url: m[1] ?? m[2] ?? m[3] ?? "", label: "style url" });
+    out.push({ url: m[1] ?? m[2] ?? m[3] ?? "", label: `${kind} url` });
   }
   return out;
 }
@@ -63,15 +72,17 @@ function cssUrls(css: string): { url: string; label: string }[] {
  * No page loads a file of another origin (plan 11b Global Constraints): no
  * web font, CDN, image, frame, or media. The site sets no cookie, so a
  * Set-Cookie line in dist/_headers fails. An `<a href>` to another origin
- * passes, and the count external_links shows each one.
+ * passes, and the count external_links shows each one. `styles` is each
+ * .css file of dist by its path.
  */
 export function checkExternal(
   pages: ReadonlyMap<string, string>,
   headers: string | null,
+  styles: ReadonlyMap<string, string>,
 ): CheckReport {
   const r: CheckReport = {
     name: "check-external",
-    counts: { pages: pages.size, external_links: 0 },
+    counts: { pages: pages.size, styles: styles.size, external_links: 0 },
     failures: [],
   };
   if (headers === null) r.failures.push("dist/_headers is missing");
@@ -109,5 +120,9 @@ export function checkExternal(
     for (const m of html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi))
       for (const c of cssUrls(m[1] ?? "")) if (isExternal(c.url)) fail(c.url, c.label);
   }
-  return requireCounts(r, ["pages"]);
+  // Each built style sheet: a url() or an @import in it loads a file as a page does.
+  for (const [file, css] of styles)
+    for (const c of cssUrls(css, "css"))
+      if (isExternal(c.url)) r.failures.push(`${file} loads ${c.url} (${c.label})`);
+  return requireCounts(r, ["pages", "styles"]);
 }
