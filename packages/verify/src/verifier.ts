@@ -18,7 +18,6 @@ import { type DpopOptions, resolveDpop, resourceProofHolds } from "./dpop.js";
 import { ownedFetch, TIMEOUT_DEFAULT_MS, TIMEOUT_MAX_MS, TIMEOUT_MIN_MS } from "./fetch.js";
 import { checkIntrospect, type IntrospectOptions, introspectActive } from "./introspect.js";
 import { createKeyCache } from "./jwks.js";
-import { sha256HexSync } from "./sha256.js";
 import {
   bearerChallenge,
   type ChallengeInput,
@@ -80,13 +79,13 @@ export type VerifyResult = { ok: true; value: Caller | null } | ClientFailure;
 
 /** The longest `tk_` answer cache. A revoke then takes effect within a minute at most. */
 export const API_TOKEN_CACHE_MAX_SECONDS = 60;
-/** The refused proofs whose signature hash a verifier keeps, for the 401 of a clone of the request. */
+/** The refused proofs whose signature a verifier keeps, for the 401 of a clone of the request. */
 const REFUSED_PROOFS_MAX = 1000;
 /**
  * The longest signature part that the record keeps: a 4096-bit RSA
  * signature is 512 bytes, so 683 base64url characters. A longer part is no
- * real proof, and the record keeps nothing for it, so its memory has a
- * bound in bytes too.
+ * real proof, and the record keeps nothing for it. So 1000 entries hold at
+ * most about 1.4 MB.
  */
 const SIGNATURE_MAX = 683;
 /** The `tk_` answers a verifier keeps at most; the oldest goes first. */
@@ -376,18 +375,16 @@ export function createVerifier(options: VerifierOptions): Verifier {
    */
   const refusals = new WeakMap<Request, "passed" | "invalid_dpop_proof">();
   /**
-   * The SHA-256 of the signature of each refused proof, so a clone of a
-   * refused request gets its error too. A signature names its proof. The
-   * oldest goes first above `REFUSED_PROOFS_MAX`, and each key is 64
-   * characters, so the memory has a bound in bytes.
+   * The signature part of each refused proof, so a clone of a refused
+   * request gets its error too. A signature names its proof. The oldest
+   * goes first above `REFUSED_PROOFS_MAX`, and each key is at most
+   * `SIGNATURE_MAX` characters, so the memory has a bound in bytes.
    */
   const refusedProofs = new Set<string>();
-  /** The key of a proof in the record: a hash of its signature part, or null for none or a long one. */
+  /** The key of a proof in the record: its signature part, or null for none or a long one. */
   const proofKey = (proof: string | null): string | null => {
     const signature = proof?.split(".")[2];
-    return signature === undefined || signature.length > SIGNATURE_MAX
-      ? null
-      : sha256HexSync(signature);
+    return signature === undefined || signature.length > SIGNATURE_MAX ? null : signature;
   };
   const refuseProof = (request: Request) => {
     refusals.set(request, "invalid_dpop_proof");
