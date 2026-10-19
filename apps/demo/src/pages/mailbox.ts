@@ -21,8 +21,8 @@ function codes(text: string): Html[] {
 
 /**
  * One line of a mail. A URL of the demo origin is a link. Any other URL
- * stays text: a mail can hold a name that a visitor typed, and the page
- * must not make a link to another site from it.
+ * stays text. A mail can hold a name that a visitor typed. The page must
+ * not make a link to another site from that name.
  */
 function line(text: string, origin: string): Html[] {
   const out: Html[] = [];

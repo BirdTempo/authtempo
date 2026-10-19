@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { SOURCES } from "../../scripts/copy-assets.mjs";
 import { cutTokens } from "../../src/browser/cut.ts";
 import { escapeHtml, html, PAGE_HEADERS, PAGE_POLICY } from "../../src/html.ts";
-import { DEMO_PAGES } from "../../src/pages/layout.ts";
+import { DEMO_PAGES, page } from "../../src/pages/layout.ts";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPO = resolve(PKG, "../..");
@@ -106,6 +106,16 @@ describe("the page rules", () => {
       );
       expect(found, p.guide).toBe(true);
     }
+  });
+});
+
+describe("the script name of page()", () => {
+  it("takes a name of lower-case letters and hyphens, and refuses a path", () => {
+    const input = { title: "T", path: "/", resetAt: 0, body: html`<p>x</p>` };
+    const doc = page({ ...input, script: "second-factor" });
+    expect(doc.status).toBe(200);
+    for (const script of ["../x", "a.js", "x/y", "Password", "-a", ""])
+      expect(() => page({ ...input, script }), script).toThrow(`demo: bad script name ${script}`);
   });
 });
 

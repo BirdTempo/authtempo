@@ -100,8 +100,8 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
     const { body, script } = DEMO_BODIES[entry.path];
     const state = { resetAt: this.resetAt(), mail: mailbox.list(), origin: this.env.DEMO_ORIGIN };
     // RFC 9110 9.3.2: HEAD answers as GET. The runtime sends no body for a
-    // HEAD answer (a break that returns the full page still gives an empty
-    // body, 2026-10-20), so HEAD takes the GET answer.
+    // HEAD answer, so HEAD takes the GET answer. A probe of 2026-10-20 gave an
+    // empty body also for a page answer with a body.
     return page({
       title: entry.title,
       path: entry.path,

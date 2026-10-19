@@ -1,6 +1,6 @@
 /**
  * The HTML of the demo pages (plan 11b Task 10). Every value goes through
- * `html`, which escapes it, so a name, an address, or a mail body that a
+ * `html`, which escapes it. So a name, an address, or a mail body that a
  * visitor sets is text and never markup. No other function makes `Html`.
  */
 export interface Html {
