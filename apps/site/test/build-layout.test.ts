@@ -1,12 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
+import { STACK_INFO, STACKS } from "@authtempo/cli/stacks";
 import { ROUTES } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
 import { walk } from "../scripts/lib/files.ts";
 import { pageCss } from "../scripts/lib/html.ts";
 import { DIST, SITE } from "../scripts/lib/paths.ts";
 import { parseTokens } from "../scripts/lib/tokens.ts";
+import { PLATFORM_COSTS } from "../src/data/costs.ts";
 import { FEATURES, featureOrder, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
+import { readRepoText } from "../src/data/repo.ts";
 import { SIDEBAR_ICONS } from "../src/data/sidebar-icons.ts";
 
 // `pnpm test` runs `astro build` before vitest, so dist is newer than the change.
@@ -24,6 +27,41 @@ const read = (href: string) => {
 /** Each tag of a kind, as its source text. */
 const tags = (html: string, tag: string) =>
   [...html.matchAll(new RegExp(`<${tag}\\b[^>]*>`, "g"))].map((m) => m[0]);
+/** The text of an HTML fragment: no tags, the spaces joined. */
+const textOf = (html: string) =>
+  html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+/** The part of main of a root page. */
+const mainOf = (path: string) => page(path).split('<main id="main"')[1]?.split("</main>")[0] ?? "";
+/**
+ * The hero of brand spec 10 (ruling 17 of the plan 11b lane). The first element
+ * of main holds the rail, the h1, and a lede of one sentence.
+ */
+function expectHero(path: string, title: string): void {
+  const hero =
+    /^[^>]*>\s*<div class="hero[ "][^>]*>([\s\S]*?)<\/p>\s*<\/div>\s*<\/div>/.exec(
+      mainOf(path),
+    )?.[1] ?? "";
+  const rail = /<div class="rail[ "][^>]*>([\s\S]*?)<\/div>/.exec(hero)?.[1] ?? "";
+  expect({ path, marks: rail.match(/<span\b/g)?.length }).toEqual({ path, marks: 5 });
+  expect({ path, accent: rail.match(/rail-accent/g)?.length }).toEqual({ path, accent: 1 });
+  expect({ path, h1: new RegExp(`<h1\\b[^>]*>${title}</h1>`).test(hero) }).toEqual({
+    path,
+    h1: true,
+  });
+  const lede = (hero.split(/<div class="lede[ "][^>]*>/)[1] ?? "").replace(/<[^>]+>/g, "").trim();
+  const sentences = lede.split(/(?<=[.?!])\s+/).filter((t) => t.length > 0);
+  expect({ path, sentences: sentences.length, words: lede.split(/\s+/).length <= 25 }).toEqual({
+    path,
+    sentences: 1,
+    words: true,
+  });
+}
 /** True when one tag of the kind has each attribute with its value, in any order. */
 const hasTag = (html: string, tag: string, attrs: Record<string, string>) =>
   tags(html, tag).some((t) => Object.entries(attrs).every(([k, v]) => t.includes(` ${k}="${v}"`)));
@@ -35,6 +73,8 @@ describe("the build layout (plan 11a)", () => {
       "404.html",
       "features/index.html",
       "index.html",
+      "pricing/index.html",
+      "security/index.html",
     ]);
     expect(html.some((p) => p.startsWith("docs/docs/"))).toBe(false);
   });
@@ -184,6 +224,14 @@ describe("the root layout (plan 11b)", () => {
     expect(footer).toMatch(/<a\b[^>]* href="\/features\/"[^>]*>Features<\/a>/);
   });
 
+  it("links the pricing and security pages in the footer, after Features", () => {
+    const footer = page("index.html").split('class="site-footer')[1] ?? "";
+    const labels = [...footer.matchAll(/<a\b[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
+    expect(labels.slice(0, 3)).toEqual(["Features", "Pricing", "Security"]);
+    expect(footer).toMatch(/<a\b[^>]* href="\/pricing\/"[^>]*>Pricing<\/a>/);
+    expect(footer).toMatch(/<a\b[^>]* href="\/security\/"[^>]*>Security<\/a>/);
+  });
+
   it("marks the link of the current page, and no other link, in the header and the footer", () => {
     // The path prop of Site.astro names the page; the lockup of the header is not a nav link.
     const current = (path: string) =>
@@ -198,22 +246,7 @@ describe("the root layout (plan 11b)", () => {
 describe("the features page (plan 11b)", () => {
   // Brand spec 10 (ruling 17 of the plan 11b lane): the nav and the footer, then a hero with the rail and a one-line lede.
   it("opens with the hero of brand spec 10: the rail, the h1, and a lede of one sentence", () => {
-    const html = page("features/index.html");
-    const main = html.split('<main id="main"')[1]?.split("</main>")[0] ?? "";
-    // The hero is the first element of main, before each section of the page.
-    const hero =
-      /^[^>]*>\s*<div class="hero[ "][^>]*>([\s\S]*?)<\/p>\s*<\/div>\s*<\/div>/.exec(main)?.[1] ??
-      "";
-    const rail = /<div class="rail[ "][^>]*>([\s\S]*?)<\/div>/.exec(hero)?.[1] ?? "";
-    expect(rail.match(/<span\b/g)?.length).toBe(5);
-    expect(rail.match(/rail-accent/g)?.length).toBe(1);
-    expect(/<h1\b[^>]*>Features<\/h1>/.test(hero)).toBe(true);
-    const lede = (hero.split(/<div class="lede[ "][^>]*>/)[1] ?? "").replace(/<[^>]+>/g, "").trim();
-    const sentences = lede.split(/(?<=[.?!])\s+/).filter((t) => t.length > 0);
-    expect({ sentences: sentences.length, words: lede.split(/\s+/).length <= 25 }).toEqual({
-      sentences: 1,
-      words: true,
-    });
+    expectHero("features/index.html", "Features");
   });
 
   it("lists one section per feature in route order, then one per package folder", () => {
@@ -237,6 +270,92 @@ describe("the features page (plan 11b)", () => {
         line: true,
       });
     }
+  });
+});
+
+describe("the pricing and security pages (plan 11b)", () => {
+  it.each([
+    ["pricing/index.html", "Free and owned"],
+    ["security/index.html", "Security"],
+  ])("opens %s with the hero of brand spec 10", (path, title) => {
+    expectHero(path, title);
+  });
+
+  it("states the license, or that it is not set", () => {
+    const root = JSON.parse(readRepoText("package.json") ?? "{}") as { license?: string };
+    const text = textOf(mainOf("pricing/index.html"));
+    const line =
+      root.license === undefined
+        ? "The license is not set yet."
+        : `The license is ${root.license}.`;
+    expect({ line, found: text.includes(line) }).toEqual({ line, found: true });
+    expect(text.includes("The license is")).toBe(true);
+  });
+
+  it("states the reporting channel, or that it is not set", () => {
+    const policy = readRepoText("SECURITY.md");
+    const text = textOf(mainOf("security/index.html"));
+    const section = text.split("Report a fault")[1] ?? "";
+    const empty = "The reporting channel is not set yet. It comes with the first release.";
+    if (policy === null) expect(section.trim()).toBe(empty);
+    else {
+      // The first line of prose of SECURITY.md, after its headings, is in the section.
+      const first = policy.split("\n").find((l) => l.trim() !== "" && !l.startsWith("#")) ?? "";
+      expect({ first, found: section.includes(textOf(first)) }).toEqual({ first, found: true });
+      expect(section.includes(empty)).toBe(false);
+    }
+  });
+
+  it("links each platform cost to a page of the build", () => {
+    const table = mainOf("pricing/index.html").split("<table")[1]?.split("</table>")[0] ?? "";
+    const rows = table.split("<tr").slice(2);
+    expect(rows.length).toBe(PLATFORM_COSTS.length);
+    PLATFORM_COSTS.forEach((cost, i) => {
+      const href = `${cost.page}${cost.anchor === undefined ? "" : `#${cost.anchor}`}`;
+      const row = rows[i] ?? "";
+      const target = `${cost.page.slice(1)}index.html`;
+      const built = existsSync(`${DIST}${target}`) ? page(target) : "";
+      expect({
+        fact: cost.fact,
+        inRow: textOf(row).includes(cost.fact),
+        linked: tags(row, "a").some((t) => t.includes(` href="${href}"`)),
+        page: built !== "",
+        anchor: cost.anchor === undefined || built.includes(` id="${cost.anchor}"`),
+      }).toEqual({ fact: cost.fact, inRow: true, linked: true, page: true, anchor: true });
+    });
+  });
+
+  it("holds each platform cost to a sentence of its docs section", () => {
+    // Ruling 19 of the plan 11b lane: a row whose page does not state its fact fails.
+    for (const cost of PLATFORM_COSTS) {
+      const target = `${cost.page.slice(1)}index.html`;
+      const body = existsSync(`${DIST}${target}`)
+        ? (page(target).split("data-pagefind-body")[1] ?? "")
+        : "";
+      // The section runs from the heading with the anchor to the next h2.
+      const section =
+        cost.anchor === undefined
+          ? body
+          : (body.split(` id="${cost.anchor}"`)[1]?.split(/<h2\b/)[0] ?? "");
+      expect({ fact: cost.fact, held: textOf(section).includes(cost.quote) }).toEqual({
+        fact: cost.fact,
+        held: true,
+      });
+    }
+  });
+
+  it("links the threat model, the limits, and the cookies under Read more, by their titles", () => {
+    const main = mainOf("security/index.html");
+    const section = main.split(/<h2\b[^>]*>Read more<\/h2>/)[1]?.split(/<h2\b/)[0] ?? "";
+    const links = [...section.matchAll(/<a\b[^>]* href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map((m) => [
+      m[1],
+      m[2],
+    ]);
+    expect(links).toEqual([
+      ["/docs/concepts/threat-model/", "The threat model"],
+      ["/docs/reference/limits/", "Limits"],
+      ["/docs/reference/cookies/", "Cookies"],
+    ]);
   });
 });
 
@@ -276,6 +395,41 @@ describe("the home page (brand spec 9)", () => {
     expect(home.match(/ class="at-icon (?:astro-\w+ )?at-draw"/g)?.length).toBe(
       featureOrder(ROUTES).length,
     );
+  });
+
+  it("lists each stack of STACKS on the home page with a page of the build", () => {
+    const home = page("index.html");
+    const ids = [...home.matchAll(/ id="stack-([a-z0-9-]+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual([...STACKS]);
+    for (const stack of STACKS) {
+      const row = home.split(` id="stack-${stack}"`)[1]?.split("</li>")[0] ?? "";
+      const href = `/docs/start/${STACK_INFO[stack].page}/`;
+      expect({
+        stack,
+        linked: new RegExp(`<a\\b[^>]* href="${href}"[^>]*>${STACK_INFO[stack].label}</a>`).test(
+          row,
+        ),
+        command: new RegExp(`<code\\b[^>]*>authtempo init my-app --stack ${stack}</code>`).test(
+          row,
+        ),
+        built: existsSync(`${DIST}${href.slice(1)}index.html`),
+      }).toEqual({ stack, linked: true, command: true, built: true });
+    }
+    // The workers-postgres stack has the tutorial workers-hyperdrive (STACK_INFO).
+    expect(home).toContain('href="/docs/start/workers-hyperdrive/"');
+  });
+
+  it("lists each feature on the home page with its anchor", () => {
+    const home = page("index.html");
+    const features = page("features/index.html");
+    for (const f of featureOrder(ROUTES)) {
+      const row = home.split(`id="feature-${f}"`)[1]?.split("</li>")[0] ?? "";
+      expect({
+        f,
+        linked: tags(row, "a").some((t) => t.includes(` href="/features/#${f}"`)),
+        anchor: features.includes(`<section id="${f}"`),
+      }).toEqual({ f, linked: true, anchor: true });
+    }
   });
 
   it("delays the draw of each feature row after the first by 0.1 s more", () => {

@@ -1,0 +1,68 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// /pricing/ of plan 11b (spec 24 item 2, "Free and owned"), in the layout of
+// brand spec 10. The prose is the entry pricing.md. Each platform cost comes
+// from a docs page (src/data/costs.ts, ruling 19 of the plan 11b lane), and
+// the license comes from the root package.json. The page claims no price of
+// another product.
+import { getEntry } from "astro:content";
+import PageHero from "../components/PageHero.astro";
+import { licenseLine, PLATFORM_COSTS, PRICING_PAGE } from "../data/costs.ts";
+import { entryParts, sectionOf } from "../data/entry.ts";
+import { renderMarkdown } from "../data/markdown.ts";
+import { readRepoText, rootLicense } from "../data/repo.ts";
+import { REPO_URL } from "../data/site.ts";
+import Site from "../layouts/Site.astro";
+
+const entry = await getEntry("site", "pricing");
+if (entry === undefined) throw new Error("pricing.astro: src/content/site/pricing.md is missing");
+const parts = entryParts(entry.body ?? "");
+const where = "src/content/site/pricing.md";
+const costs = sectionOf(parts, "What your platform costs", where);
+const owned = sectionOf(parts, "The code is yours", where);
+// The title of each docs page of a cost, so no link label is typed twice.
+const costRows = await Promise.all(
+  PLATFORM_COSTS.map(async (cost) => {
+    const doc = await getEntry("docs", cost.page.replace(/^\/|\/$/g, ""));
+    if (doc === undefined) throw new Error(`pricing.astro: no docs page ${cost.page}`);
+    const href = cost.anchor === undefined ? cost.page : `${cost.page}#${cost.anchor}`;
+    return { fact: cost.fact, href, title: doc.data.title };
+  }),
+);
+const license = rootLicense();
+// A link to the license file needs both the file and the public repository (deviation 12).
+const licenseHref =
+  license !== null && readRepoText("LICENSE") !== null && REPO_URL !== null
+    ? `${REPO_URL}/blob/main/LICENSE`
+    : null;
+---
+<Site title={entry.data.title} description={entry.data.description} path={entry.data.page}>
+  <PageHero title={entry.data.title}><Fragment set:html={await renderMarkdown(parts.lede)} /></PageHero>
+  <div class="prose"><Fragment set:html={await renderMarkdown(parts.intro)} /></div>
+  <section class="prose">
+    <Fragment set:html={await renderMarkdown(costs)} />
+    <table>
+      <thead><tr><th scope="col">{PRICING_PAGE.cost}</th><th scope="col">{PRICING_PAGE.source}</th></tr></thead>
+      <tbody>
+        {costRows.map((row) => (
+          <tr><td>{row.fact}</td><td><a href={row.href}>{row.title}</a></td></tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+  <section class="prose">
+    <Fragment set:html={await renderMarkdown(owned)} />
+    <p class="license">{licenseHref === null ? licenseLine(license) : <a href={licenseHref}>{licenseLine(license)}</a>}</p>
+  </section>
+</Site>
+<style>
+  .prose { max-width: var(--at-measure); }
+  section { margin-bottom: calc(var(--at-rhythm) * 2); }
+  .prose :global(p) { margin: 0 0 var(--at-rhythm); }
+  .prose :global(h2) { margin: calc(var(--at-rhythm) * 2) 0 var(--at-rhythm); font-size: var(--at-text-h2); line-height: var(--at-leading-h2); letter-spacing: var(--at-tracking-h2); font-weight: 600; }
+  /* The hairline rules of brand spec 6. */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: var(--at-unit) calc(var(--at-unit) * 2) var(--at-unit) 0; border-bottom: 1px solid var(--at-line); text-align: start; vertical-align: top; }
+  th { color: var(--at-mute); font-size: var(--at-text-small); font-weight: 500; }
+</style>

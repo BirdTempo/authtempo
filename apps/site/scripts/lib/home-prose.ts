@@ -32,6 +32,7 @@ export function homeProsePage(): Page {
     HOME.lede,
     ...HOME.claims,
     HOME.cta,
+    HOME.start,
     HOME.featuresTitle,
     ...Object.values(FEATURES).flatMap((f) => [f.title, f.line]),
     HOME.numbers.routes,

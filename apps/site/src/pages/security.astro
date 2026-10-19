@@ -1,0 +1,53 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// /security/ of plan 11b (spec 24 item 2), in the layout of brand spec 10.
+// The prose is the entry security.md, and each sentence restates spec 9.
+// "Read more" links three docs pages by their titles. "Report a fault" shows
+// SECURITY.md of the repository root, or the stated empty state while the
+// file is absent (spec 24 item 3).
+import { getEntry } from "astro:content";
+import PageHero from "../components/PageHero.astro";
+import { entryParts, sectionOf } from "../data/entry.ts";
+import { renderMarkdown } from "../data/markdown.ts";
+import { readRepoText } from "../data/repo.ts";
+import { READ_MORE, SECURITY_PAGE } from "../data/security.ts";
+import Site from "../layouts/Site.astro";
+
+const entry = await getEntry("site", "security");
+if (entry === undefined) throw new Error("security.astro: src/content/site/security.md is missing");
+const parts = entryParts(entry.body ?? "");
+const where = "src/content/site/security.md";
+const readMore = sectionOf(parts, "Read more", where);
+const report = sectionOf(parts, "Report a fault", where);
+const links = await Promise.all(
+  READ_MORE.map(async (href) => {
+    const doc = await getEntry("docs", href.replace(/^\/|\/$/g, ""));
+    if (doc === undefined) throw new Error(`security.astro: no docs page ${href}`);
+    return { href, title: doc.data.title };
+  }),
+);
+const policy = readRepoText("SECURITY.md");
+---
+<Site title={entry.data.title} description={entry.data.description} path={entry.data.page}>
+  <PageHero title={entry.data.title}><Fragment set:html={await renderMarkdown(parts.lede)} /></PageHero>
+  <div class="prose"><Fragment set:html={await renderMarkdown(parts.intro)} /></div>
+  <section class="prose">
+    <Fragment set:html={await renderMarkdown(readMore)} />
+    <ul>{links.map((link) => <li><a href={link.href}>{link.title}</a></li>)}</ul>
+  </section>
+  <section class="prose">
+    <Fragment set:html={await renderMarkdown(report)} />
+    {policy === null
+      ? <p>{SECURITY_PAGE.noChannel}</p>
+      : <div class="policy"><Fragment set:html={await renderMarkdown(policy)} /></div>}
+  </section>
+</Site>
+<style>
+  .prose { max-width: var(--at-measure); }
+  section { margin-bottom: calc(var(--at-rhythm) * 2); }
+  .prose :global(p) { margin: 0 0 var(--at-rhythm); }
+  .prose :global(h2) { margin: calc(var(--at-rhythm) * 2) 0 var(--at-rhythm); font-size: var(--at-text-h2); line-height: var(--at-leading-h2); letter-spacing: var(--at-tracking-h2); font-weight: 600; }
+  ul { margin: 0; padding-inline-start: calc(var(--at-unit) * 3); }
+  li + li { margin-top: var(--at-unit); }
+</style>

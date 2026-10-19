@@ -10,7 +10,7 @@
 import { getEntry, render } from "astro:content";
 import { ROUTES } from "@authtempo/core/routes";
 import Icon from "../components/Icon.astro";
-import Rail from "../components/Rail.astro";
+import PageHero from "../components/PageHero.astro";
 import {
   FEATURES,
   FEATURES_PAGE,
@@ -27,13 +27,7 @@ const { Content } = await render(entry);
 const features = featureOrder(ROUTES);
 ---
 <Site title={entry.data.title} description={entry.data.description} path={entry.data.page}>
-  <div class="hero">
-    <Rail />
-    <div class="hero-text">
-      <h1>{entry.data.title}</h1>
-      <div class="lede"><Content /></div>
-    </div>
-  </div>
+  <PageHero title={entry.data.title}><Content /></PageHero>
   <h2 id="route-features">{FEATURES_PAGE.routes}</h2>
   <div class="cards">
     {features.map((f) => (
@@ -56,13 +50,6 @@ const features = featureOrder(ROUTES);
   </div>
 </Site>
 <style>
-  /* The hero of the home, with no mark: a rail column, then the text column (brand spec 9 and 10). */
-  .hero { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: var(--at-rhythm); padding-block: calc(var(--at-rhythm) * 2) var(--at-rhythm); }
-  @media (min-width: 48rem) { .hero { grid-template-columns: 3rem minmax(0, 1fr); } }
-  .hero :global(.rail) { padding-top: var(--at-unit); }
-  h1 { margin: 0; font-size: var(--at-text-h1); line-height: var(--at-leading-h1); letter-spacing: var(--at-tracking-h1); font-weight: 600; }
-  .lede { max-width: var(--at-measure); color: var(--at-mute); font-size: var(--at-text-h3); line-height: var(--at-leading-h3); }
-  .lede :global(p) { margin: var(--at-rhythm) 0 0; }
   h2 { margin: calc(var(--at-rhythm) * 2) 0 var(--at-rhythm); font-size: var(--at-text-h2); line-height: var(--at-leading-h2); letter-spacing: var(--at-tracking-h2); font-weight: 600; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: calc(var(--at-unit) * 2); margin-bottom: calc(var(--at-rhythm) * 2); }
   .card { display: flex; flex-direction: column; gap: var(--at-unit); padding: calc(var(--at-unit) * 3); border: 1px solid var(--at-line); border-radius: 0.75rem; background: var(--at-surface); }

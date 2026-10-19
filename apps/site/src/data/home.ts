@@ -11,6 +11,8 @@ export const HOME = {
   lede: "One Worker, your database, every limit enforced by code you own.",
   claims: ["Owned, not rented.", "Built for the edge.", "Security you can read."],
   cta: "Read the docs",
+  /** The heading of the stacks of `authtempo init` (spec 24 item 2; plan 11b Task 5). */
+  start: "Start",
   featuresTitle: "Every piece, drawn to one grid.",
   numbers: { routes: "routes", vendors: "vendors in the path" },
   skip: "Skip to the content",

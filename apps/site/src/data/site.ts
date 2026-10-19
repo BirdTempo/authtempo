@@ -26,11 +26,13 @@ export const NAV_LINKS: readonly { label: string; href: string }[] = [
 /**
  * The links of the root footer (plan 11b, ruling 7 of its lane): Features,
  * Pricing, Security, the changelog, and the feed. Each one joins with its
- * page, as a header link does. Task 4 of plan 11b adds Features, and Tasks 5
- * and 7 add the others.
+ * page, as a header link does. Task 4 of plan 11b adds Features, Task 5 adds
+ * Pricing and Security, and Task 7 adds the feed.
  */
 export const FOOTER_LINKS: readonly { label: string; href: string }[] = [
   { label: "Features", href: "/features/" },
+  { label: "Pricing", href: "/pricing/" },
+  { label: "Security", href: "/security/" },
   { label: "Changelog", href: `${SITE.docs}changelog/` },
 ];
 

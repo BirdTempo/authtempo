@@ -5,12 +5,12 @@
 // its pages on it. The one inline script of the root pages is the theme toggle.
 // The template reads Astro.props in place: Biome 2.5.15 lints this
 // frontmatter and not the template, so a destructured prop reads as unused.
-import rootPackage from "../../../../package.json";
 import corePackage from "../../../../packages/core/package.json";
 import { parseTokens } from "../../scripts/lib/tokens.ts";
 import Icon from "../components/Icon.astro";
 import Lockup from "../components/Lockup.astro";
 import { HOME } from "../data/home.ts";
+import { rootLicense } from "../data/repo.ts";
 import { FOOTER_LINKS, NAV_LINKS, REPO_URL, SITE } from "../data/site.ts";
 import toggle from "../scripts/theme-toggle.js?raw";
 import "../styles/tokens.css";
@@ -28,11 +28,9 @@ const canonical = new URL(Astro.props.path, SITE.origin).href;
 const current = (href: string): "page" | undefined =>
   href === Astro.props.path ? "page" : undefined;
 // One source per fact (design spec 24 item 3): the license of the root
-// package.json, or the stated empty state until plan 12j sets it.
-const license: string =
-  "license" in rootPackage && typeof rootPackage.license === "string"
-    ? rootPackage.license
-    : HOME.noLicense;
+// package.json, or the stated empty state until plan 12j sets it. /pricing/
+// reads the same function.
+const license: string = rootLicense() ?? HOME.noLicense;
 ---
 <!doctype html>
 <html lang="en">

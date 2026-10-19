@@ -1,0 +1,27 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// The hero of a root page other than the home (brand spec 10, ruling 17 of
+// the plan 11b lane). It has the rail column, then the h1 and a lede of one
+// sentence. The page puts the lede in the slot.
+import Rail from "./Rail.astro";
+
+interface Props {
+  title: string;
+}
+---
+<div class="hero">
+  <Rail />
+  <div class="hero-text">
+    <h1>{Astro.props.title}</h1>
+    <div class="lede"><slot /></div>
+  </div>
+</div>
+<style>
+  /* The hero of the home, with no mark: a rail column, then the text column (brand spec 9 and 10). */
+  .hero { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: var(--at-rhythm); padding-block: calc(var(--at-rhythm) * 2) var(--at-rhythm); }
+  @media (min-width: 48rem) { .hero { grid-template-columns: 3rem minmax(0, 1fr); } }
+  .hero :global(.rail) { padding-top: var(--at-unit); }
+  h1 { margin: 0; font-size: var(--at-text-h1); line-height: var(--at-leading-h1); letter-spacing: var(--at-tracking-h1); font-weight: 600; }
+  .lede { max-width: var(--at-measure); color: var(--at-mute); font-size: var(--at-text-h3); line-height: var(--at-leading-h3); }
+  .lede :global(p) { margin: var(--at-rhythm) 0 0; }
+</style>
