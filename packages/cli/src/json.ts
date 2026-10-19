@@ -144,9 +144,44 @@ export const SECRET_JSON_KEYS = {
   stopped: true,
 } as const satisfies Record<keyof SecretJson, true>;
 
+/** `authtempo secret status --json` (plan 11c2): the counts of api.secrets.status(), with its key names. */
+export interface SecretStatusJson extends RunKeys {
+  versions: {
+    version: number;
+    configured: boolean;
+    current: boolean;
+    totpSecrets: number;
+    backupCodes: number;
+    signingKeys: number;
+    emailCodes: number;
+  }[];
+}
+export const SECRET_STATUS_JSON_KEYS = {
+  versions: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof SecretStatusJson, true>;
+
+/** `authtempo secret rewrap --json` (plan 11c2): the sums of each call of the run. */
+export interface SecretRewrapJson extends RunKeys {
+  calls: number;
+  resealed: number;
+  failed: number;
+  /** The `more` of the last call: true while a row under a configured old version remains. */
+  more: boolean;
+}
+export const SECRET_REWRAP_JSON_KEYS = {
+  calls: true,
+  resealed: true,
+  failed: true,
+  more: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof SecretRewrapJson, true>;
+
 /**
  * The document of a usage error or a thrown stop under `--json`, for each
- * command (plan 11e deviation 19). Each other key holds its empty value: "",
+ * command and each subcommand, by the key of `helpOf` (plan 11e deviation 19). Each other key holds its empty value: "",
  * [], null, false, or a zero summary. `main` prints it with `stopped` set to
  * the message. `--version` has no stop, so the version has no entry.
  */
@@ -186,6 +221,8 @@ export const STOP_JSON = {
     exit: 2,
     stopped: null,
   },
+  "secret status": { versions: [], exit: 2, stopped: null },
+  "secret rewrap": { calls: 0, resealed: 0, failed: 0, more: false, exit: 2, stopped: null },
 } satisfies {
   init: InitJson;
   migrate: MigrateJson;
@@ -194,4 +231,6 @@ export const STOP_JSON = {
   keys: KeysJson;
   mcp: McpJson;
   secret: SecretJson;
+  "secret status": SecretStatusJson;
+  "secret rewrap": SecretRewrapJson;
 };

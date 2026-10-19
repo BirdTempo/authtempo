@@ -70,3 +70,5 @@ The document of a stop or a usage error holds `kind: "app"`, each other key empt
 ## Next
 
 - [Secrets](/docs/operations/secrets/)
+- [authtempo secret status](/docs/reference/cli/secret-status/)
+- [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/)

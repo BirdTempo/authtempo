@@ -1,4 +1,25 @@
-import { COMMON_FLAGS, type HelpText } from "./types.js";
+import { COMMON_FLAGS, type HelpFlag, type HelpText } from "./types.js";
+
+/**
+ * The four flags of a command that calls an operator route (plan 11c2):
+ * `keys rotate`, `secret status`, and `secret rewrap`. One list, so the
+ * three helps say the same words.
+ */
+export const OPERATOR_FLAGS: readonly HelpFlag[] = [
+  {
+    flag: "--token-env <NAME>",
+    says: "The variable that holds the operator secret. The default is AUTHTEMPO_OPERATOR_SECRET.",
+  },
+  {
+    flag: "--token-file <path>",
+    says: "The file that holds the operator secret. A dash reads stdin, and then the command needs --yes.",
+  },
+  { flag: "--base-path <path>", says: "The basePath of the deployment. The default is /auth." },
+  {
+    flag: "--timeout <seconds>",
+    says: "The time limit of each request, from 1 to 120 seconds. The default is 10.",
+  },
+];
 
 export const KEYS_HELP: HelpText = {
   command: "keys rotate",
@@ -17,19 +38,7 @@ export const KEYS_HELP: HelpText = {
     },
   ],
   flags: [
-    {
-      flag: "--token-env <NAME>",
-      says: "The variable that holds the operator secret. The default is AUTHTEMPO_OPERATOR_SECRET.",
-    },
-    {
-      flag: "--token-file <path>",
-      says: "The file that holds the operator secret. A dash reads stdin, and then the command needs --yes.",
-    },
-    { flag: "--base-path <path>", says: "The basePath of the deployment. The default is /auth." },
-    {
-      flag: "--timeout <seconds>",
-      says: "The time limit of each request, from 1 to 120 seconds. The default is 10.",
-    },
+    ...OPERATOR_FLAGS,
     { flag: "--yes", says: "Rotate with no question. A run with no terminal needs it." },
     { flag: "--no-input", says: "Never ask a question. Without --yes, the command then stops." },
     ...COMMON_FLAGS,

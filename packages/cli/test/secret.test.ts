@@ -175,7 +175,7 @@ describe("authtempo secret (plan 11c2)", () => {
         ["--operator", "--version", "2"],
         "--operator makes an operator secret: do not give --version",
       ],
-      [["status"], "unexpected argument status"],
+      [["nonsense"], "secret has the subcommands status and rewrap, or no positional"],
     ];
     for (const [args, line] of cases) {
       let draws = 0;

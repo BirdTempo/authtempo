@@ -44,6 +44,34 @@ describe("the live runs (spec 19)", () => {
     expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
   });
 
+  it("reads the secret status of the example Worker, and exits 0", () => {
+    const r = runBin(["secret", "status", base(), "--json"], {
+      env: { AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const doc = JSON.parse(r.stdout) as {
+      versions: { version: number; configured: boolean; current: boolean; signingKeys: number }[];
+      exit: number;
+      stopped: string | null;
+    };
+    // The example holds one secret, `secret: env.AUTH_SECRET`, which is version 1.
+    expect(doc.versions).toHaveLength(1);
+    expect(doc.versions[0]).toMatchObject({ version: 1, configured: true, current: true });
+    expect(doc.versions[0]?.signingKeys).toBeGreaterThanOrEqual(1);
+    expect(doc).toMatchObject({ exit: 0, stopped: null });
+    expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
+  });
+
+  it("reseals on the example Worker until more is false, and exits 0", () => {
+    const r = runBin(["secret", "rewrap", base(), "--yes", "--json"], {
+      env: { AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const doc = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(doc).toMatchObject({ calls: 1, failed: 0, more: false, exit: 0, stopped: null });
+    expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
+  });
+
   it("stops with exit 2 for a wrong operator secret", () => {
     const r = runBin(["keys", "rotate", base(), "--yes"], {
       env: { AUTHTEMPO_OPERATOR_SECRET: "wrong-secret-wrong-secret-wrong-secret-00" },

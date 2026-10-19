@@ -14,6 +14,8 @@ import {
   MCP_JSON_KEYS,
   MIGRATE_JSON_KEYS,
   SECRET_JSON_KEYS,
+  SECRET_REWRAP_JSON_KEYS,
+  SECRET_STATUS_JSON_KEYS,
   STOP_JSON,
   VERSION_JSON_KEYS,
 } from "../src/json.js";
@@ -337,6 +339,57 @@ describe("authtempo secret", () => {
   });
 });
 
+describe("authtempo secret status", () => {
+  it("prints the stop document when the host gives no answer and on a usage error", async () => {
+    const port = await closedPort();
+    const secret = "s".repeat(40);
+    const stop = runBin(["secret", "status", `http://127.0.0.1:${port}`, "--json"], {
+      env: { AUTHTEMPO_OPERATOR_SECRET: secret },
+    });
+    const doc = stopDoc(stop, SECRET_STATUS_JSON_KEYS, false);
+    expect(doc.versions).toEqual([]);
+    expect(doc.stopped).toContain("no answer");
+    expect(stop.stdout).not.toContain(secret);
+
+    const usage = runBin([
+      "secret",
+      "status",
+      "https://api.example.com",
+      "--timeout",
+      "x",
+      "--json",
+    ]);
+    expect(stopDoc(usage, SECRET_STATUS_JSON_KEYS, true).versions).toEqual([]);
+    expect(usage.stderr).toContain("Usage: authtempo secret status");
+  });
+});
+
+describe("authtempo secret rewrap", () => {
+  it("prints the stop document when the host gives no answer and on a usage error", async () => {
+    const port = await closedPort();
+    const secret = "s".repeat(40);
+    const stop = runBin(["secret", "rewrap", `http://127.0.0.1:${port}`, "--yes", "--json"], {
+      env: { AUTHTEMPO_OPERATOR_SECRET: secret },
+    });
+    const doc = stopDoc(stop, SECRET_REWRAP_JSON_KEYS, false);
+    expect(doc).toMatchObject({ calls: 0, resealed: 0, failed: 0, more: false });
+    expect(doc.stopped).toContain("no answer");
+    expect(stop.stdout).not.toContain(secret);
+
+    const usage = runBin([
+      "secret",
+      "rewrap",
+      "https://api.example.com",
+      "--yes",
+      "--timeout",
+      "x",
+      "--json",
+    ]);
+    expect(stopDoc(usage, SECRET_REWRAP_JSON_KEYS, true).calls).toBe(0);
+    expect(usage.stderr).toContain("Usage: authtempo secret rewrap");
+  });
+});
+
 describe("STOP_JSON", () => {
   it("holds STOP_JSON to each key list", () => {
     const lists: Record<keyof typeof STOP_JSON, object> = {
@@ -347,9 +400,21 @@ describe("STOP_JSON", () => {
       keys: KEYS_JSON_KEYS,
       mcp: MCP_JSON_KEYS,
       secret: SECRET_JSON_KEYS,
+      "secret status": SECRET_STATUS_JSON_KEYS,
+      "secret rewrap": SECRET_REWRAP_JSON_KEYS,
     };
     expect(Object.keys(STOP_JSON).sort()).toEqual(
-      ["check", "import", "init", "keys", "mcp", "migrate", "secret"].sort(),
+      [
+        "check",
+        "import",
+        "init",
+        "keys",
+        "mcp",
+        "migrate",
+        "secret",
+        "secret status",
+        "secret rewrap",
+      ].sort(),
     );
     for (const [name, list] of Object.entries(lists)) {
       const shape = STOP_JSON[name as keyof typeof STOP_JSON];
@@ -365,9 +430,13 @@ describe("STOP_JSON", () => {
 });
 
 describe("STOP_JSON and the commands", () => {
-  it("has a stop document for each command of COMMANDS", () => {
-    // A new command with no entry would print no document on a stop.
-    expect(Object.keys(STOP_JSON).sort()).toEqual(Object.keys(COMMANDS).sort());
+  it("has a stop document for each command and each subcommand of COMMANDS", () => {
+    // A new command or subcommand with no entry would print no document on a stop.
+    const keys = Object.entries(COMMANDS).flatMap(([name, c]) => [
+      name,
+      ...Object.keys(c.subcommands ?? {}).map((sub) => `${name} ${sub}`),
+    ]);
+    expect(Object.keys(STOP_JSON).sort()).toEqual(keys.sort());
   });
 });
 
