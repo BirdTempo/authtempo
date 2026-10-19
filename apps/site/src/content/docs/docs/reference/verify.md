@@ -93,7 +93,9 @@ With `dpop`, the verifier reads `Authorization: DPoP <token>` and the `DPoP` hea
 With `introspect`, each access token that passes the offline check costs one call to `POST /oauth/introspect`, with `client_secret_basic`. A bad token costs no call.
 
 - `active: false` answers `null`.
-- A call with no answer gives `network`. A status other than 200 gives `unexpected` with that status.
+- An auth app with two or more `oauth.resources` must name this client in `oauth.introspection`. Without that entry, core answers `active: false`, and the verifier answers `null` for every token.
+- Core counts each call on `oauth-introspect:ip:<ip>` and `oauth-introspect:client:<clientId>`, 600 per 60 s each ([Limits](/docs/reference/limits/)). Each request costs one call. Above about 10 requests per second the verifier gets 429 and answers `unexpected`, and `requireMcpAuth` answers 503.
+- A call with no answer gives `network`. A status other than 200 gives `unexpected` with that status. A body over `INTROSPECT_MAX_BYTES` gives `unexpected` with status 200.
 
 ## The key set
 
@@ -109,11 +111,13 @@ With `introspect`, each access token that passes the offline check costs one cal
 
 - `verifier.unauthorized({ resource, scope })` answers 401 with `WWW-Authenticate: Bearer resource_metadata="…", scope="…"`. An MCP client reads the protected-resource document and the scopes to ask for.
 - `invalidToken: true` adds `error="invalid_token"`. Pass it when the request held a token that you refused.
-- `verifier.insufficientScope({ resource, scope, description })` answers 403 with `error="insufficient_scope"`. Name every scope of the operation in one challenge.
+- `verifier.insufficientScope({ resource, scope, description })` answers 403 with `error="insufficient_scope"`. Name every scope of the operation in one challenge. With `dpop` and a DPoP `request`, the `DPoP` challenge carries the error.
 - A scope with a quote, or `offline_access`, throws: `offline_access` is not a resource scope.
 - A `resource` that is not a URL throws too. So does a `description` with a quote, a backslash, or a control character.
 - The input of both is a `ChallengeInput`. `verifier.unauthorized` also takes `request` (the type `UnauthorizedInput`): the error then goes into the challenge of the request's scheme.
 - With `dpop`, the 401 holds a `DPoP` challenge after the `Bearer` one, with `algs`, `resource_metadata`, and `scope`. A refused proof gives `error="invalid_dpop_proof"`.
+- A verifier with no `dpop` answers a DPoP request with the plain challenge and no error code (RFC 6750 section 3.1).
+- Pass the request that `verifyRequest` read, or a clone of it: the verifier finds a refused proof by the request or by its signature.
 
 ## Exports
 

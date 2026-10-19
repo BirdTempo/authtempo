@@ -14,7 +14,6 @@ Publication is on hold. In this workspace, add it with `"workspace:*"`.
 ## Verify a request
 
 ```ts
-import { readBearer } from "@authtempo/core/credentials";
 import { createVerifier } from "@authtempo/verify";
 
 const verifier = createVerifier({
@@ -24,8 +23,8 @@ const verifier = createVerifier({
 
 const r = await verifier.verifyRequest(request);
 if (!r.ok) return new Response("try again", { status: 503 });
-// invalidToken: the request held a bearer, and the verifier refused it.
-if (r.value === null) return verifier.unauthorized({ invalidToken: readBearer(request) !== null });
+// The verifier reads the scheme of the request, so a refused token gets its error.
+if (r.value === null) return verifier.unauthorized({ request });
 ```
 
 ## The caller kinds
@@ -147,9 +146,16 @@ secret (RFC 6749 section 2.3.1). The client must be a confidential client of
 the auth app with `introspect: true`.
 
 - `active: false` answers null, so a revoked grant ends access at once.
+- An auth app with two or more `oauth.resources` must name this client in
+  `oauth.introspection` (RFC 7662 section 4). Without that entry, core
+  answers `active: false`, and the verifier answers null for every token.
+- Core counts each call on `oauth-introspect:ip:<ip>` and
+  `oauth-introspect:client:<clientId>`, 600 per 60 s each. Each request
+  costs one call. Above about 10 requests per second the verifier gets 429,
+  so it answers `unexpected`, and `requireMcpAuth` answers 503.
 - A call with no answer gives `network`. A status other than 200 gives
-  `unexpected` with that status. A body with no boolean `active` gives
-  `unexpected` with status 200.
+  `unexpected` with that status. A body with no boolean `active`, or a body
+  over `INTROSPECT_MAX_BYTES` (64 KiB), gives `unexpected` with status 200.
 
 ## The 401 and the 403
 
@@ -157,15 +163,23 @@ the auth app with `introspect: true`.
   `WWW-Authenticate: Bearer resource_metadata="…", scope="…"`. An MCP client
   reads the protected-resource document and the scopes to ask for from it.
   Add `invalidToken: true` when the request held a token that you refused.
-- Pass `request` in place of `invalidToken`: the verifier then reads the
-  scheme of the request, and the error goes into the challenge of that
-  scheme (RFC 9449 section 7.2).
+- Pass `request` in place of `invalidToken`. The verifier then reads the
+  scheme of the request. The error goes into the challenge of that scheme
+  (RFC 9449 section 7.2).
+- A verifier with no `dpop` does not read the DPoP scheme. It answers a
+  DPoP request with the plain challenge and no error code (RFC 6750
+  section 3.1).
 - With `dpop`, a `DPoP` challenge follows the `Bearer` one:
   `DPoP algs="…", resource_metadata="…"`. A refused proof adds
   `error="invalid_dpop_proof"`, and a refused DPoP token adds
   `error="invalid_token"`. `dpopChallenge` writes the text alone.
+- The verifier keeps the result of each proof check by the request, and the
+  signature of each refused proof. A clone of a refused request then gets
+  its error too. Pass the request that `verifyRequest` read, or a clone.
 - `verifier.insufficientScope({ resource, scope })` answers 403
   `insufficient_scope`. Name every scope of the operation in one challenge.
+  With `dpop` and a DPoP `request`, the `DPoP` challenge carries the error,
+  with `algs`, `resource_metadata`, and `scope`.
 - `offline_access` is not a resource scope: the functions refuse it.
 - `unauthorizedResponse`, `insufficientScopeResponse`, and `bearerChallenge`
   do the same with no verifier, for a server that checks the caller with
@@ -231,8 +245,11 @@ The rules:
 - A DPoP request passes through the wrapper with no new option. A `Verifier`
   source needs `dpop`; core's `auth` reads the DPoP scheme itself.
 - The wrapper checks one proof per request, so a second request with the
-  same proof gets 401. With a `Verifier` source, the 401 comes from
-  `verifier.unauthorized` with the request. Core's `auth` gives the wrapper no
-  algs, so that source writes the `Bearer` challenge alone.
+  same proof gets 401. With a `Verifier` source, the 401 and the 403 come
+  from `verifier.unauthorized` and `verifier.insufficientScope` with the
+  request.
+- Core's `auth` gives the wrapper no algs. For a DPoP request, that source
+  writes the `DPoP` challenge with no `algs`, a SHOULD of RFC 9449. That
+  challenge follows the `Bearer` one in a 401, and stands alone in a 403.
 - A token of the `client_credentials` grant gets 401: the wrapper needs a
   person.
