@@ -591,8 +591,9 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
         exchange(await codeOf(h, person.cookie, id), await assertion(h, k1, id)),
       );
       expect({ guardUrl, answer: await answer(refused) }).toEqual({ guardUrl, answer: REFUSED });
-      // The answer is not kept: a good set at the next request passes, with a new read.
+      // The failure is kept 30 seconds only: then a good set passes, with a new read.
       fake.answers.set(guardUrl, () => Response.json({ keys: [k1.jwk] }));
+      h.clock.advance(30_000);
       const passed = await h.auth.handle(
         exchange(await codeOf(h, person.cookie, id), await assertion(h, k1, id)),
       );
@@ -603,6 +604,111 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
     const logged = JSON.stringify(errors.mock.calls);
     expect(logged).not.toMatch(/eyJ/);
     expect(logged).not.toContain(String(k1.jwk.x));
+  });
+
+  it("keeps a set through a failed read for an unknown kid, and reads again once per 30 seconds", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fake = fakeFetch();
+    const { h } = setup(fake.fn);
+    const person = await signedIn(h);
+    const k1 = await keyOf("ES256", "k1");
+    const k2 = await keyOf("ES256", "k2");
+    const url = "https://client.example.com/jwks.json";
+    fake.answers.set(url, () => Response.json({ keys: [k1.jwk] }));
+    const clientId = await keyClient(h, { jwks_uri: url });
+    const run = async (key: Key) =>
+      answer(
+        await h.auth.handle(
+          exchange(await codeOf(h, person.cookie, clientId), await assertion(h, key, clientId)),
+        ),
+      );
+    expect(await run(k1)).toEqual(PASSED);
+    expect(fake.calls.length).toBe(1);
+    // The client's host goes down.
+    fake.answers.set(url, () => new Response("down", { status: 503 }));
+    h.clock.advance(30_000);
+    expect(await run(k2)).toEqual(REFUSED);
+    expect(fake.calls.length).toBe(2);
+    // The failed read counts as a read: no fetch for 30 seconds.
+    expect(await run(k2)).toEqual(REFUSED);
+    expect(fake.calls.length).toBe(2);
+    // The kept set still serves its own key, with no fetch.
+    expect(await run(k1)).toEqual(PASSED);
+    expect(fake.calls.length).toBe(2);
+  });
+
+  it("reads a failed jwks_uri once per 30 seconds when no set is kept", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fake = fakeFetch();
+    const { h } = setup(fake.fn);
+    const person = await signedIn(h);
+    const url = "https://down.example.com/jwks.json";
+    fake.answers.set(url, () => new Response("down", { status: 503 }));
+    const clientId = await keyClient(h, { jwks_uri: url });
+    for (let i = 0; i < 5; i++) {
+      const key = await keyOf("ES256", `k${i}`);
+      const res = await h.auth.handle(
+        exchange(await codeOf(h, person.cookie, clientId), await assertion(h, key, clientId)),
+      );
+      expect({ i, answer: await answer(res) }).toEqual({ i, answer: REFUSED });
+      h.clock.advance(200);
+    }
+    expect(fake.calls.length).toBe(1);
+    // After 30 seconds the URL is read again, and a good set passes.
+    const k1 = await keyOf("ES256", "k1");
+    fake.answers.set(url, () => Response.json({ keys: [k1.jwk] }));
+    h.clock.advance(29_000);
+    const res = await h.auth.handle(
+      exchange(await codeOf(h, person.cookie, clientId), await assertion(h, k1, clientId)),
+    );
+    expect(await answer(res)).toEqual(PASSED);
+    expect(fake.calls.length).toBe(2);
+  });
+
+  it("reads no jwks_uri that the host rule refuses at fetch time", async () => {
+    const fake = fakeFetch();
+    const { h, input } = setup(fake.fn);
+    const person = await signedIn(h);
+    const k1 = await keyOf("ES256", "k1");
+    const url = "https://client.example.com/jwks.json";
+    fake.answers.set(url, () => Response.json({ keys: [k1.jwk] }));
+    const clientId = await keyClient(h, { jwks_uri: url });
+    expect(
+      await answer(
+        await h.auth.handle(
+          exchange(await codeOf(h, person.cookie, clientId), await assertion(h, k1, clientId)),
+        ),
+      ),
+    ).toEqual(PASSED);
+    expect(fake.calls.length).toBe(1);
+    // The same storage behind a core whose own host is the host of the set:
+    // validCimdUrl refuses that URL now, so no fetch runs.
+    const moved = createAuth({ ...input, baseURL: "https://client.example.com" });
+    const token = await jws(
+      k1,
+      { alg: "ES256", kid: "k1" },
+      {
+        iss: clientId,
+        sub: clientId,
+        aud: "https://client.example.com/auth",
+        exp: nowS(h) + 60,
+        jti: randomBase64Url(16),
+      },
+    );
+    const res = await moved.handle(
+      new Request("https://client.example.com/auth/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: "oc_none",
+          client_assertion_type: ASSERTION_TYPE,
+          client_assertion: token,
+        }).toString(),
+      }),
+    );
+    expect(await answer(res)).toEqual(REFUSED);
+    expect(fake.calls.length).toBe(1);
   });
 
   it("refuses a jwks_uri client while oauth.fetch is null", async () => {

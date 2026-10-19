@@ -114,7 +114,8 @@ const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 /** One key set of a `jwks_uri` in the isolate cache. */
 export interface JwksEntry {
-  keys: Record<string, unknown>[];
+  /** The keys, or null for a failed read of a URL with no set: a 30-second negative entry. */
+  keys: Record<string, unknown>[] | null;
   /** Epoch milliseconds by the config clock. */
   until: number;
   /** The last read of the URL, in epoch milliseconds: the bound of a read for an unknown kid. */
@@ -635,9 +636,9 @@ export async function fetchCimd(
 
 /**
  * The keys of a client's `jwks_uri` set that fit an alg of a client
- * assertion, or null with one log line that names the reason, never the
- * set. A key that fits no alg (an encryption key, an Ed448 key) is left
- * out, so one odd key does not break the client.
+ * assertion, or null. A refusal writes one log line that names the reason,
+ * never the set. A key that fits no alg (an encryption key, an Ed448 key)
+ * is left out, so one odd key does not break the client.
  */
 async function fetchJwks(
   fetchFn: typeof fetch | null,
@@ -661,7 +662,10 @@ async function fetchJwks(
  * of `jwks_uri` through the guards of `guardedJson` and the host rule of
  * `validCimdUrl`. The isolate keeps a read set for one hour. A `kid` that
  * the kept set lacks reads again at most once per 30 seconds per URL. A
- * failed read is not kept; a kept set outlives it until its hour ends.
+ * failed read leaves a kept set in place until its hour ends. With no kept
+ * set, a failed read is kept as a negative entry for 30 seconds. So a
+ * stranger who points a client at a host that fails makes one fetch per 30
+ * seconds, not one per request.
  */
 export async function fetchClientJwks(
   config: ResolvedConfig,
@@ -679,22 +683,33 @@ export async function fetchClientJwks(
   const kept = oauth.jwksCache.get(url);
   const live = kept && kept.until > now ? kept : null;
   if (live) {
+    if (live.keys === null) return null;
     const known = want.kid === null || live.keys.some((k) => k.kid === want.kid);
     if (known || now - live.readAt < JWKS_REREAD_MS) return live.keys;
   }
   const keys = await fetchJwks(oauth.fetch, url);
-  if (!keys) {
-    // The failure is not kept, but it counts as a read for the 30-second bound.
-    if (live) live.readAt = now;
-    return live?.keys ?? null;
+  if (keys) {
+    keepJwks(oauth, url, { keys, until: now + JWKS_CACHE_MS, readAt: now });
+    return keys;
   }
+  if (live) {
+    // Only an unknown kid reads a live set again, so no kept key can verify
+    // it. The set stays for its hour, and this failure counts as a read.
+    live.readAt = now;
+    return null;
+  }
+  keepJwks(oauth, url, { keys: null, until: now + JWKS_REREAD_MS, readAt: now });
+  return null;
+}
+
+/** Keeps one entry of the key set cache. The oldest entry goes first past 500. */
+function keepJwks(oauth: ResolvedOAuth, url: string, entry: JwksEntry): void {
   oauth.jwksCache.delete(url);
   if (oauth.jwksCache.size >= JWKS_CACHE_MAX) {
     const oldest = oauth.jwksCache.keys().next().value;
     if (oldest !== undefined) oauth.jwksCache.delete(oldest);
   }
-  oauth.jwksCache.set(url, { keys, until: now + JWKS_CACHE_MS, readAt: now });
-  return keys;
+  oauth.jwksCache.set(url, entry);
 }
 
 /** Writes or refreshes the row of a document that this call read. */
