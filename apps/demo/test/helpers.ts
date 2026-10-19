@@ -12,6 +12,25 @@ export const PASSWORD = "correct horse battery";
  */
 export interface Jar {
   cookies: Map<string, string>;
+  /** The cf-connecting-ip of this visitor. call() sets a new one at the first request. */
+  ip?: string;
+}
+
+let ips = 0;
+
+/**
+ * A new address in 198.18.0.0/15 (RFC 2544, a test range) for each visitor.
+ * The gate admits 5 sandboxes per IP, so one address for all tests fails.
+ */
+export function nextIp(): string {
+  ips += 1;
+  return `198.18.${(ips >> 8) & 255}.${ips & 255}`;
+}
+
+/** The address of the visitor of `jar`, set at its first use. */
+export function ipOf(jar: Jar): string {
+  if (jar.ip === undefined) jar.ip = nextIp();
+  return jar.ip;
 }
 
 /** A first visit: the Worker makes a sandbox and sets its cookie. */
@@ -27,7 +46,7 @@ export async function newSandbox(): Promise<Jar> {
 export function sameSandbox(jar: Jar): Jar {
   const id = jar.cookies.get(SANDBOX_COOKIE);
   if (id === undefined) throw new Error("the jar has no sandbox");
-  return { cookies: new Map([[SANDBOX_COOKIE, id]]) };
+  return { cookies: new Map([[SANDBOX_COOKIE, id]]), ip: nextIp() };
 }
 
 /** The id of the sandbox of `jar`. */
@@ -60,8 +79,10 @@ function keep(jar: Jar, res: Response): void {
 
 /**
  * One request through the Worker, with the cookies of `jar` and the demo
- * origin. An object body goes as JSON, a URLSearchParams body as a form. The
- * Set-Cookie lines of the answer go into the jar. No redirect is followed.
+ * origin and IP. Cloudflare always sets cf-connecting-ip, so each call sends
+ * it unless `headers` names it. An object body goes as JSON, a
+ * URLSearchParams body as a form. The Set-Cookie lines of the answer go into
+ * the jar. No redirect is followed.
  */
 export async function call(
   jar: Jar,
@@ -72,6 +93,7 @@ export async function call(
 ): Promise<Response> {
   const h = new Headers(headers);
   if (!h.has("origin")) h.set("origin", ORIGIN);
+  if (!h.has("cf-connecting-ip")) h.set("cf-connecting-ip", ipOf(jar));
   const cookie = [...jar.cookies].map(([n, v]) => `${n}=${v}`).join("; ");
   if (cookie !== "") h.set("cookie", cookie);
   let payload: string | null = null;

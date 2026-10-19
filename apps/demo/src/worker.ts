@@ -1,4 +1,5 @@
 import { CLIENT_IP_HEADER } from "./auth.js";
+import { DEMO_LIMITS } from "./facts.js";
 import { Gate } from "./gate.js";
 import { PAGE_HEADERS } from "./html.js";
 import { Sandbox } from "./sandbox.js";
@@ -40,12 +41,43 @@ function newId(): string {
  * x-demo-client-ip and sets it from cf-connecting-ip, which only Cloudflare
  * sets. So a visitor cannot choose the IP that core's limits count.
  */
-function forSandbox(request: Request): Request {
+function forSandbox(request: Request, ip: string): Request {
   const forwarded = new Request(request);
   forwarded.headers.delete(CLIENT_IP_HEADER);
-  const ip = request.headers.get("cf-connecting-ip");
-  if (ip) forwarded.headers.set(CLIENT_IP_HEADER, ip);
+  forwarded.headers.set(CLIENT_IP_HEADER, ip);
   return forwarded;
+}
+
+/**
+ * The request with its body read into memory, or null when the body is
+ * above bodyBytes. A content-length above the cap stops the request before
+ * any read. A body with no content-length stops at byte bodyBytes + 1, so
+ * the Worker never holds more than the cap and one chunk.
+ */
+async function capped(request: Request): Promise<Request | null> {
+  const cap = DEMO_LIMITS.bodyBytes;
+  if (Number(request.headers.get("content-length") ?? "0") > cap) return null;
+  if (request.body === null) return request;
+  const reader = request.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > cap) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  const body = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    body.set(part, at);
+    at += part.byteLength;
+  }
+  return new Request(request, { body });
 }
 
 function json(status: number, body: unknown): Response {
@@ -94,22 +126,21 @@ async function reset(request: Request, env: Cloudflare.Env, origin: string): Pro
   return new Response(null, { status: 303, headers: { ...home, "set-cookie": CLEAR_COOKIE } });
 }
 
-/** Every answer of the script but the assets. */
-async function route(request: Request, env: Cloudflare.Env): Promise<Response> {
+/** Every answer of the script but the assets, for the visitor at `ip`. */
+async function route(request: Request, env: Cloudflare.Env, ip: string): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === "/reset") return reset(request, env, url.origin);
 
   // The first value that names a live sandbox takes the request.
   for (const id of cookieIds(request)) {
     const stub = env.SANDBOX.get(env.SANDBOX.idFromName(id));
-    if (await stub.exists()) return stub.handle(forSandbox(request));
+    if (await stub.exists()) return stub.handle(forSandbox(request, ip));
   }
   // A form post never lands in a new sandbox by surprise.
   if (request.method !== "GET" && request.method !== "HEAD")
     return json(409, { error: "sandbox_reset" });
 
   const gate = env.GATE.get(env.GATE.idFromName("gate"));
-  const ip = request.headers.get("cf-connecting-ip") ?? "";
   const admitted = await gate.admit(ip, Date.now());
   if (!admitted.ok) return json(429, { error: "demo_limit", limit: admitted.limit });
 
@@ -119,7 +150,7 @@ async function route(request: Request, env: Cloudflare.Env): Promise<Response> {
     status: 303,
     headers: {
       location: `${url.origin}${url.pathname}${url.search}`,
-      "set-cookie": `${COOKIE}=${fresh}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600`,
+      "set-cookie": `${COOKIE}=${fresh}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${DEMO_LIMITS.sandboxLifeMs / 1000}`,
     },
   });
 }
@@ -129,6 +160,12 @@ export default {
     const { pathname } = new URL(request.url);
     // A file of the build. public/_headers sets the headers of these answers.
     if (ASSET_PREFIXES.some((p) => pathname.startsWith(p))) return env.ASSETS.fetch(request);
-    return withPageHeaders(await route(request, env));
+    // On Cloudflare the header is always set. A missing one means that
+    // another path reached the script, so no IP can be counted.
+    const ip = request.headers.get("cf-connecting-ip");
+    if (ip === null || ip === "") return withPageHeaders(json(400, { error: "no_client_ip" }));
+    const bounded = await capped(request);
+    if (bounded === null) return withPageHeaders(json(413, { error: "body_too_large" }));
+    return withPageHeaders(await route(bounded, env, ip));
   },
 } satisfies ExportedHandler<Cloudflare.Env>;

@@ -6,6 +6,7 @@ import {
   lastCode,
   lastLink,
   newSandbox,
+  nextIp,
   ORIGIN,
   rowsIn,
   SANDBOX_COOKIE,
@@ -235,8 +236,13 @@ describe("the demo pages", () => {
     const jar = await newSandbox();
     const cookie = `${SANDBOX_COOKIE}=${sandboxId(jar)}`;
     for (const path of ["/password", "/mailbox", PROVIDER_PAGE]) {
-      const get = await SELF.fetch(`${ORIGIN}${path}`, { headers: { cookie } });
-      const head = await SELF.fetch(`${ORIGIN}${path}`, { method: "HEAD", headers: { cookie } });
+      const get = await SELF.fetch(`${ORIGIN}${path}`, {
+        headers: { cookie, "cf-connecting-ip": nextIp() },
+      });
+      const head = await SELF.fetch(`${ORIGIN}${path}`, {
+        method: "HEAD",
+        headers: { cookie, "cf-connecting-ip": nextIp() },
+      });
       expect(head.status, path).toBe(200);
       expect(head.headers.get("content-type"), path).toBe(get.headers.get("content-type"));
       expect(head.headers.get("content-security-policy"), path).toBe(POLICY);
@@ -257,7 +263,7 @@ describe("the demo pages", () => {
     for (const [method, path, allow] of cases) {
       const res = await SELF.fetch(`${ORIGIN}${path}`, {
         method,
-        headers: { cookie, origin: ORIGIN },
+        headers: { cookie, origin: ORIGIN, "cf-connecting-ip": nextIp() },
         redirect: "manual",
       });
       expect(res.status, `${method} ${path}`).toBe(405);

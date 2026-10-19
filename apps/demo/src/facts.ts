@@ -30,3 +30,28 @@ export const DEMO_EXEMPT = {
 
 /** The owner sets this to true at publication (plan 11b, deviation 11). */
 export const DEMO_PUBLISHED = false;
+
+/**
+ * Every limit of the demo, in one place, each with its reason. Code of the
+ * demo enforces each one, and no Cloudflare setting holds a limit alone.
+ * gate.ts checks the gate limits, and limits.ts checks the sandbox limits.
+ */
+export const DEMO_LIMITS = {
+  /** New sandboxes per IP per hour. Gate key sandbox:ip:<ip>. One visitor rarely needs more than one. */
+  sandboxesPerIp: 5,
+  /** New sandboxes in total per hour. Gate key sandbox:all. Holds the platform cost of the demo. */
+  sandboxesTotal: 600,
+  /** The window of both gate counts. The gate also deletes each IP at its end (spec 24 item 11). */
+  windowMs: 3_600_000,
+  /** The life of a sandbox from its creation. No extension on use. */
+  sandboxLifeMs: 3_600_000,
+  /** Users in one sandbox, through each route that can make a user (USER_ROUTES). */
+  usersPerSandbox: 10,
+  passkeysPerSandbox: 10,
+  tokensPerSandbox: 10,
+  organizationsPerSandbox: 10,
+  /** The mailbox keeps the newest mails of a sandbox only. */
+  mailsKept: 50,
+  /** A body above this answers 413 before the parse. The largest demo form is under 2 KiB. */
+  bodyBytes: 16_384,
+} as const;

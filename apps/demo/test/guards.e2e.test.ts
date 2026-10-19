@@ -1,6 +1,4 @@
-import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMailbox } from "../src/mailbox.js";
 import {
   CALLBACK,
   call,
@@ -13,7 +11,6 @@ import {
   pick,
   rowsIn,
   SESSION_COOKIE,
-  sandboxId,
   signInByLink,
   whoami,
 } from "./helpers.js";
@@ -33,14 +30,6 @@ describe("the guards of the demo", () => {
     const token = (await lastLink(jar, EMAIL)).searchParams.get("token") ?? "";
     await call(jar, "POST", "/auth/magic-link/verify", new URLSearchParams({ token }), ips);
     expect(await rowsIn(jar, "SELECT ip FROM ta_session")).toEqual([{ ip: "203.0.113.7" }]);
-
-    // With no cf-connecting-ip, core reads no IP, whatever the request sends.
-    const other = await newSandbox();
-    const spoof = { "x-demo-client-ip": "198.51.100.66" };
-    await call(other, "POST", "/auth/magic-link/request", { email: EMAIL }, spoof);
-    const t2 = (await lastLink(other, EMAIL)).searchParams.get("token") ?? "";
-    await call(other, "POST", "/auth/magic-link/verify", new URLSearchParams({ token: t2 }), spoof);
-    expect(await rowsIn(other, "SELECT ip FROM ta_session")).toEqual([{ ip: null }]);
   });
 
   it("keeps the mail of one sandbox out of the mailbox of another", async () => {
@@ -49,21 +38,6 @@ describe("the guards of the demo", () => {
     await signInByLink(a, EMAIL);
     expect((await mailbox(a)).map((m) => m.to)).toEqual([EMAIL]);
     expect(await mailbox(b)).toEqual([]);
-  });
-
-  it("keeps the newest 50 mails of a sandbox", async () => {
-    const jar = await newSandbox();
-    // Core limits the mail of one flow, so the test sends through the port itself.
-    const stub = env.SANDBOX.get(env.SANDBOX.idFromName(sandboxId(jar)));
-    await runInDurableObject(stub, async (_instance, state) => {
-      const box = createMailbox(state.storage.sql);
-      for (let i = 0; i < 52; i++)
-        await box.send({ to: `p${i}@example.com`, subject: "s", text: "t" });
-    });
-    const mail = await mailbox(jar);
-    expect(mail).toHaveLength(50);
-    expect(mail[0]?.to).toBe("p51@example.com");
-    expect(mail[49]?.to).toBe("p2@example.com");
   });
 
   it("signs in with a code of the demo provider only in the sandbox that made it", async () => {

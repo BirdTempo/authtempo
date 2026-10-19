@@ -1,10 +1,8 @@
 import type { MailPort } from "@authtempo/core";
+import { DEMO_LIMITS } from "./facts.js";
 import type { DemoMail } from "./mail.js";
 
 export type { DemoMail };
-
-/** The mailbox keeps the newest mails of a sandbox only (Task 11 moves the number into DEMO_LIMITS). */
-const KEEP = 50;
 
 /** The mail table of a sandbox. create() of the sandbox runs it. */
 export const MAILBOX_DDL =
@@ -32,7 +30,7 @@ export function createMailbox(sql: SqlStorage): Mailbox {
       );
       sql.exec(
         "DELETE FROM demo_mail WHERE id NOT IN (SELECT id FROM demo_mail ORDER BY id DESC LIMIT ?)",
-        KEEP,
+        DEMO_LIMITS.mailsKept,
       );
     },
     list() {

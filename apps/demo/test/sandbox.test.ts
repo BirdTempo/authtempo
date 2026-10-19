@@ -4,6 +4,7 @@ import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import type { Sandbox } from "../src/sandbox.js";
 import { sqliteD1 } from "../src/sqlite-d1.js";
+import { nextIp } from "./helpers.js";
 
 const ORIGIN = "https://demo.authtempo.com";
 const COOKIE_RE =
@@ -11,7 +12,10 @@ const COOKIE_RE =
 
 /** A first visit with no cookie: the Worker makes a sandbox through the gate and answers its id. */
 async function visit(): Promise<string> {
-  const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual" });
+  const res = await SELF.fetch(`${ORIGIN}/`, {
+    redirect: "manual",
+    headers: { "cf-connecting-ip": nextIp() },
+  });
   const id = COOKIE_RE.exec(res.headers.get("set-cookie") ?? "")?.[1];
   if (res.status !== 303 || id === undefined) throw new Error(`no sandbox: ${res.status}`);
   return id;
@@ -65,7 +69,10 @@ function gateAlarm(): Promise<{ alarm: number | null; oldest: number }> {
 
 describe("the demo Worker and its sandboxes", () => {
   it("makes a sandbox on the first visit and sets the cookie", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual" });
+    const res = await SELF.fetch(`${ORIGIN}/`, {
+      redirect: "manual",
+      headers: { "cf-connecting-ip": nextIp() },
+    });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`${ORIGIN}/`);
     expect(res.headers.get("set-cookie")).toMatch(COOKIE_RE);
@@ -81,7 +88,7 @@ describe("the demo Worker and its sandboxes", () => {
     const id = await visit();
     const res = await SELF.fetch(`${ORIGIN}/`, {
       redirect: "manual",
-      headers: { cookie: `__Host-demo_sandbox=${id}` },
+      headers: { cookie: `__Host-demo_sandbox=${id}`, "cf-connecting-ip": nextIp() },
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toBeNull();
@@ -95,7 +102,10 @@ describe("the demo Worker and its sandboxes", () => {
       `__Host-demo_sandbox=x; __Host-demo_sandbox=${id}`,
       `__Host-demo_sandbox=${unknown}; __Host-demo_sandbox=${id}`,
     ]) {
-      const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual", headers: { cookie } });
+      const res = await SELF.fetch(`${ORIGIN}/`, {
+        redirect: "manual",
+        headers: { cookie, "cf-connecting-ip": nextIp() },
+      });
       const home = (await res.text()).includes("<h1>authtempo demo</h1>");
       expect({ cookie, status: res.status, home }).toEqual({ cookie, status: 200, home: true });
     }
@@ -106,7 +116,10 @@ describe("the demo Worker and its sandboxes", () => {
     const id = await visit();
     const unknown = ["1", "2", "3", "4"].map((d) => d.repeat(32));
     const cookie = [...unknown, id].map((v) => `__Host-demo_sandbox=${v}`).join("; ");
-    const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual", headers: { cookie } });
+    const res = await SELF.fetch(`${ORIGIN}/`, {
+      redirect: "manual",
+      headers: { cookie, "cf-connecting-ip": nextIp() },
+    });
     expect(res.status).toBe(303);
   });
 
@@ -114,7 +127,7 @@ describe("the demo Worker and its sandboxes", () => {
     const unknown = "0123456789abcdef0123456789abcdef";
     const res = await SELF.fetch(`${ORIGIN}/`, {
       redirect: "manual",
-      headers: { cookie: `__Host-demo_sandbox=${unknown}` },
+      headers: { cookie: `__Host-demo_sandbox=${unknown}`, "cf-connecting-ip": nextIp() },
     });
     expect(res.status).toBe(303);
     const fresh = COOKIE_RE.exec(res.headers.get("set-cookie") ?? "")?.[1];
@@ -132,7 +145,10 @@ describe("the demo Worker and its sandboxes", () => {
     const res = await SELF.fetch(`${ORIGIN}/`, {
       method: "POST",
       redirect: "manual",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "cf-connecting-ip": nextIp(),
+      },
       body: "email=a%40example.com",
     });
     expect(res.status).toBe(409);
@@ -171,7 +187,7 @@ describe("the demo Worker and its sandboxes", () => {
     expect(await rowsIn(id, "SELECT name FROM sqlite_master WHERE type = 'table'")).toEqual([]);
     const res = await SELF.fetch(`${ORIGIN}/`, {
       redirect: "manual",
-      headers: { cookie: `__Host-demo_sandbox=${id}` },
+      headers: { cookie: `__Host-demo_sandbox=${id}`, "cf-connecting-ip": nextIp() },
     });
     expect(res.status).toBe(303);
   });

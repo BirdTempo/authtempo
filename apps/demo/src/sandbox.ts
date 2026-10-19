@@ -1,15 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Auth } from "@authtempo/core";
 import { demoAuth } from "./auth.js";
+import { DEMO_LIMITS } from "./facts.js";
+import { checkSandboxLimit, routeOf } from "./limits.js";
 import { createMailbox, MAILBOX_DDL, type Mailbox } from "./mailbox.js";
 import { MIGRATIONS } from "./migrations.gen.js";
 import { DEMO_BODIES } from "./pages/index.js";
 import { DEMO_PAGES, page } from "./pages/layout.js";
 import { PROVIDER_DDL, providerRoute } from "./provider.js";
 import { sqliteD1 } from "./sqlite-d1.js";
-
-/** The life of a sandbox: its alarm deletes the store 60 minutes after create() (decision 1). */
-export const SANDBOX_LIFE_MS = 3_600_000;
 
 const META_DDL = "CREATE TABLE demo_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)";
 
@@ -36,12 +35,16 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
   /** The auth of this sandbox, built once per object instance. */
   private demo: { auth: Auth; db: D1Database; mailbox: Mailbox } | null = null;
 
-  /** Makes the store: the alarm, then the shipped migrations, then the demo tables and the meta rows. */
+  /**
+   * Makes the store: the alarm at created_at + sandboxLifeMs, then the
+   * shipped migrations, then the demo tables and the meta rows. Use of the
+   * sandbox does not move the alarm (decision 1).
+   */
   async create(): Promise<{ resetAt: number }> {
     if (this.isLive()) throw new Error("demo: the sandbox exists");
     const sql = this.ctx.storage.sql;
     const createdAt = Date.now();
-    const resetAt = createdAt + SANDBOX_LIFE_MS;
+    const resetAt = createdAt + DEMO_LIMITS.sandboxLifeMs;
     // The alarm comes first. If the object stops part way, the alarm still
     // deletes the part store at the reset time (ruling 32).
     await this.ctx.storage.setAlarm(resetAt);
@@ -69,7 +72,14 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
     if (!this.isLive()) return json(404, { error: "no_sandbox" });
     const { auth, db, mailbox } = this.open();
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/auth/")) return auth.handle(request);
+    if (url.pathname.startsWith("/auth/")) {
+      // The demo limits come before core, so a refused request changes no row.
+      const route = routeOf(request.method, url.pathname);
+      const checked = route === null ? null : checkSandboxLimit(this.ctx.storage.sql, route);
+      if (checked !== null && !checked.ok)
+        return json(429, { error: "demo_limit", limit: checked.limit });
+      return auth.handle(request);
+    }
     if (url.pathname === "/whoami") {
       // As examples/worker: the session cookie, a ts_ bearer, or a tk_ bearer.
       const c = await auth.caller(request);
@@ -124,7 +134,11 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
     await this.ctx.storage.deleteAll();
   }
 
-  /** The reset: the alarm at reset_at deletes the whole store. */
+  /**
+   * The reset: the alarm at reset_at deletes the whole store. deleteAll()
+   * also deletes the alarm (deviation 10). The next request with the old
+   * cookie finds no sandbox and gets a new one through the gate.
+   */
   override async alarm(): Promise<void> {
     await this.ctx.storage.deleteAll();
   }
