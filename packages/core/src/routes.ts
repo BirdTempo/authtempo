@@ -5,6 +5,7 @@
  * `@authtempo/core/testing`, which also holds the soft authenticator.
  */
 
+export { DOCS_ORIGIN, type ErrorTable, errorAnchor, routeAnchor } from "./http/anchors.js";
 export { AUTH_ERROR_PARAM } from "./http/redirect.js";
 export {
   type AuthForm,

@@ -1,3 +1,4 @@
+import { DEFAULT_BASE_PATH } from "./bindings.js";
 import {
   CAPTCHA_FLOWS,
   type CaptchaConfig,
@@ -870,7 +871,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       limits: resolveLimits(o.limits),
     };
   }
-  const basePath = input.basePath ?? "/auth";
+  const basePath = input.basePath ?? DEFAULT_BASE_PATH;
   if (!basePath.startsWith("/") || basePath.endsWith("/")) {
     throw new ConfigError("basePath must start with / and not end with /");
   }

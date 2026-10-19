@@ -8,6 +8,7 @@ import { safeNext } from "./http/safe-next.js";
  * entries. A binding fits it to its framework; the rule itself lives here once.
  */
 
+/** The default `basePath`. `resolveConfig` and the OpenAPI document read this one copy (plan 11g). */
 export const DEFAULT_BASE_PATH = "/auth";
 
 /**

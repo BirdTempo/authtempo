@@ -175,6 +175,9 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `ROUTER_CODES`, `RouterCode` | The codes that the router answers for every route: `not_found`, `origin_not_trusted`, and `internal`. An entry's `codes` never repeats them. |
 | `PROVIDER_NAME_RE` | The name rule of `:provider`. |
 | `AUTH_ERROR_PARAM` | The query parameter of a browser flow failure, `auth_error`. |
+| `routeAnchor` | The anchor of a route on [Routes](/docs/reference/routes/): the method, then the path with each run of other characters as one hyphen. |
+| `errorAnchor`, `ErrorTable` | The anchor of a code on [Errors](/docs/reference/errors/), and the table of the code: `core` or `oauth`. |
+| `DOCS_ORIGIN` | The origin of the docs, `https://authtempo.com`. |
 
 ## The credential entry
 

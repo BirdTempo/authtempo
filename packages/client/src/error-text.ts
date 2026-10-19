@@ -1,4 +1,5 @@
 import type { ErrorCode, OAuthErrorCode } from "@authtempo/core/errors";
+import { DOCS_ORIGIN, type ErrorTable, errorAnchor } from "@authtempo/core/routes";
 import type { ClientCode, OAuthClientCode } from "./result.js";
 
 /**
@@ -9,14 +10,11 @@ import type { ClientCode, OAuthClientCode } from "./result.js";
  * holds each text to the glossary and each link to an anchor of the build.
  */
 
-/** The origin of the docs. A link goes to a page under `/docs/`. */
-export const DOCS_ORIGIN = "https://authtempo.com";
+/** The docs origin, the table of a code, and the errors anchor live in core (plan 11g); this package re-exports them. */
+export { DOCS_ORIGIN, type ErrorTable, errorAnchor };
 
 /** The codes that only an SDK answers. `redirect_mismatch` is the handoff's and the OAuth client's. */
 export type SdkCode = "network" | "unexpected" | "cancelled" | "redirect_mismatch";
-
-/** The table of a code: `ERRORS` or `OAUTH_ERRORS`. Two codes are in both. */
-export type ErrorTable = "core" | "oauth";
 
 const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   invalid_body: "The request has a field that is missing or wrong.",
@@ -140,16 +138,6 @@ export function resolveLocale(tag: string | null | undefined): Locale {
 }
 
 const isSdk = (code: string): code is SdkCode => Object.hasOwn(SDK_TEXT, code);
-
-/**
- * The anchor of a code on `/docs/reference/errors/`: the code for `ERRORS`,
- * `oauth-` and the code for `OAUTH_ERRORS`, because `invalid_token` and
- * `rate_limited` are in both and one page cannot hold one id twice (spec 18
- * rule 8). The site's checks import this one copy.
- */
-export function errorAnchor(code: string, table: ErrorTable): string {
-  return table === "core" ? code : `oauth-${code}`;
-}
 
 /**
  * The sentence for a code in a locale (default English): a core code, an SDK
