@@ -296,6 +296,13 @@ describe("the skill pack", () => {
         `${provider}: ${order.join(", ")}`,
       ).toBe(true);
     }
+    // The limit of a real database that holds an earlier import, and its remedy (ruling 17).
+    for (const provider of PROVIDERS) {
+      const body = files.find((x) => x.folder === `authtempo-migrate-${provider}`)?.body ?? "";
+      expect(body, provider).toContain(
+        "- The real database holds an earlier import: a change in the old system after it is not carried, and verify does not see it. Each user who changed the password resets it.",
+      );
+    }
     // The Cognito guide signs in a second time, with capital letters in the address.
     const cognito = files.find((x) => x.folder === "authtempo-migrate-cognito")?.body ?? "";
     expect(cognito).toMatch(

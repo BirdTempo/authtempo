@@ -43,6 +43,7 @@ metadata:
 
 ## If it fails
 
+- The real database holds an earlier import: a change in the old system after it is not carried, and verify does not see it. Each user who changed the password resets it. [One real import](/docs/migrate/cutover/#one-real-import) tells why.
 - The answer has `isError` and "no held plan has this id": the plan expired or ran. Plan again against the database.
 - The answer has `isError` and "the input differs from the plan": give `migrate.run` the input of the plan.
 - The answer has `isError` and "changed since the plan": an export file changed. Plan again.
