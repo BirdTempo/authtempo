@@ -37,7 +37,7 @@ export const DEMO_PUBLISHED = false;
  * gate.ts checks the gate limits, and limits.ts checks the sandbox limits.
  */
 export const DEMO_LIMITS = {
-  /** New sandboxes per IP per hour. The gate counts the rows of its admit table with this ip. One visitor rarely needs more than one. */
+  /** New sandboxes per IP per hour. The gate counts the rows of its admit table with this ip (an IPv6 address by its /64). One visitor rarely needs more than one. */
   sandboxesPerIp: 5,
   /** New sandboxes in total per hour. The gate counts all rows of its admit table. Holds the platform cost of the demo. */
   sandboxesTotal: 600,

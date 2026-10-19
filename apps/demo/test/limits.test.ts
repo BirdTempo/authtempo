@@ -303,6 +303,20 @@ describe("the limits of the demo", () => {
     expect(await count(jar, "ta_user")).toBe(10);
   });
 
+  it("counts the addresses of one IPv6 /64 as one IP", async () => {
+    // One visitor holds a /64 or more, so an address that rotates in it still counts once.
+    for (let i = 1; i <= 5; i++) expect((await firstVisit(`2001:db8:1:2::${i}`)).status).toBe(303);
+    const sixth = await firstVisit("2001:db8:1:2:ffff:ffff:ffff:ffff");
+    expect(sixth.status).toBe(429);
+    expect(await sixth.json()).toEqual({ ...REFUSED, limit: "sandboxesPerIp" });
+    expect((await firstVisit("2001:db8:1:3::1")).status).toBe(303);
+    const seen = await gateIps();
+    expect(seen.filter((ip) => ip === "2001:db8:1:2::/64")).toHaveLength(5);
+    // No row keeps a whole address of the /64.
+    const whole = seen.filter((ip) => ip.startsWith("2001:db8:1:2:") && !ip.endsWith("/64"));
+    expect(whole).toEqual([]);
+  });
+
   it("refuses a body that reads as a known user one way and a new user the other", async () => {
     for (const [route, make] of Object.entries(TWO_WAY_CALLS)) {
       const jar = await newSandbox();

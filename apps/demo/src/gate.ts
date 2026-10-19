@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { ipKey } from "@authtempo/core";
 import { DEMO_LIMITS } from "./facts.js";
 
 /** The gate keeps an IP for one window at most (the demo stores no IP past one hour). */
@@ -19,7 +20,13 @@ export class Gate extends DurableObject<Cloudflare.Env> {
     );
   }
 
-  async admit(ip: string, now: number): Promise<{ ok: true } | { ok: false; limit: string }> {
+  /**
+   * Admits one new sandbox for the visitor at `address`. The row keeps the
+   * key of ipKey of core: an IPv4 address as it is, an IPv6 address as its
+   * /64. One visitor holds a /64 or more, so a rotated address counts once.
+   */
+  async admit(address: string, now: number): Promise<{ ok: true } | { ok: false; limit: string }> {
+    const ip = ipKey(address);
     const sql = this.ctx.storage.sql;
     sql.exec("DELETE FROM admit WHERE at <= ?", now - KEEP_MS);
     const perIp = sql.exec<{ n: number }>("SELECT count(*) AS n FROM admit WHERE ip = ?", ip).one();
