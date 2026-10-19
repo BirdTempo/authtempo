@@ -8,6 +8,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 **For:** a developer of a third-party app that signs a person in to an authtempo OAuth provider.
@@ -49,6 +50,8 @@ sources:
 
 `OAUTH_CALLS` is the table of these routes and of the metadata document.
 
+`continueAuthorizeURL({ baseURL, basePath?, requestId })` builds `<baseURL><basePath>/oauth/authorize?request_id=<requestId>` and fetches nothing. The app's own sign-in route (`oauth.signInURL`) sends the browser there after the sign-in. `basePath` is `/auth` by default. An id that is not an `oq_` id throws a `TypeError`.
+
 ## The answers
 
 Every call answers an `OAuthResult`: `{ ok: true, value }` or an `OAuthFailure` of `{ ok: false, code, status }`. The `code` is an `OAuthClientCode`: a code of the OAuth table, `network`, `unexpected`, `cancelled`, or `redirect_mismatch`.
@@ -77,6 +80,7 @@ Every call answers an `OAuthResult`: `{ ok: true, value }` or an `OAuthFailure` 
 | `makePkce`, `webCrypto`, `base64Url` | PKCE S256 and its codec. |
 | `parseReturnedUrl` | The parser of a URL that a redirect brought back, which answers a `Returned`. It does not use `URL`, which Hermes lacks in part. |
 | `OAUTH_CALLS` | The route table of the entry. |
+| `continueAuthorizeURL` | The way back from the app's own sign-in route to the held authorize request. |
 
 | Area | Types |
 | --- | --- |

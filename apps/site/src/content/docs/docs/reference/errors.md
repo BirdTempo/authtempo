@@ -507,7 +507,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-login_required"><code>login_required</code> 400</h3>
 
-- **Meaning:** `prompt=none` with no session, or `prompt=login` with a session.
+- **Meaning:** `prompt=none`, and the person must sign in: no session, or a sign-in older than `max_age`.
 - **Do:** Send the person through the authorize step with no `prompt`.
 
 | Routes |
@@ -518,6 +518,33 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 - **Meaning:** `prompt=none`, and no consent covers the scopes.
 - **Do:** Send the person through the authorize step with no `prompt`.
+
+| Routes |
+| --- |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize). |
+
+<h3 id="oauth-request_not_supported"><code>request_not_supported</code> 400</h3>
+
+- **Meaning:** The authorize request has a `request` parameter. Core takes no request object (OIDC Core 3.1.2.6).
+- **Do:** Send the parameters in the query.
+
+| Routes |
+| --- |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize). |
+
+<h3 id="oauth-request_uri_not_supported"><code>request_uri_not_supported</code> 400</h3>
+
+- **Meaning:** The authorize request has a `request_uri` parameter. Core takes no request URI (OIDC Core 3.1.2.6).
+- **Do:** Send the parameters in the query.
+
+| Routes |
+| --- |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize). |
+
+<h3 id="oauth-registration_not_supported"><code>registration_not_supported</code> 400</h3>
+
+- **Meaning:** The authorize request has a `registration` parameter. Core takes no client data in the request (OIDC Core 3.1.2.6).
+- **Do:** Register the client first, then send its `client_id`.
 
 | Routes |
 | --- |

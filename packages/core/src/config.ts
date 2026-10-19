@@ -612,6 +612,15 @@ export interface OAuthConfig {
    * pays nothing.
    */
   dpop?: { algs?: ForeignAlg[]; windowSeconds?: number };
+  /**
+   * The app's own sign-in route for the authorize step (plan 12e), in place
+   * of `GET /oauth/sign-in`. An https URL on the origin of `baseURL`,
+   * `appURL`, or an entry of `trustedOrigins`, or a path on `appURL`; no
+   * query and no fragment. The browser comes to `<signInURL>?request_id=oq_…`.
+   * After the sign-in, the app sends it to `continueAuthorizeURL` of
+   * `@authtempo/client/oauth`.
+   */
+  signInURL?: string;
 }
 
 export interface ResolvedOAuth {
@@ -631,6 +640,8 @@ export interface ResolvedOAuth {
   introspection: ReadonlyMap<string, readonly string[]> | null;
   /** The algs and the window of a DPoP proof (plan 12e). */
   dpop: { algs: readonly ForeignAlg[]; windowSeconds: number };
+  /** The absolute URL of the app's sign-in route, or null: core's own sign-in page (plan 12e). */
+  signInURL: string | null;
   /** The metadata documents this isolate read, by URL, each for one hour. */
   cimdCache: Map<string, CimdEntry>;
   /** The `jwks_uri` key sets of `private_key_jwt` clients that this isolate read, by URL, each for one hour (plan 12e). */
@@ -1048,7 +1059,11 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     emailOtp: resolveEmailOtp(input.emailOtp),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
     jwtMint,
-    oauth: resolveOAuth(input.oauth, jwtMint),
+    oauth: resolveOAuth(input.oauth, jwtMint, {
+      baseURL: input.baseURL,
+      appURL,
+      trustedOrigins: input.trustedOrigins,
+    }),
     operator: resolveOperator(input.operator),
     openapi,
     hooks: resolveHooks(input.hooks, organizations !== null),
@@ -1574,6 +1589,7 @@ const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
   codeTtlMinutes: true,
   introspection: true,
   dpop: true,
+  signInURL: true,
 };
 
 /** The longest client id: a `cl_` id or a metadata document URL (plan 11d). */
@@ -1641,6 +1657,45 @@ function resolveDpop(input: unknown): ResolvedOAuth["dpop"] {
   };
 }
 
+/**
+ * `oauth.signInURL` (plan 12e). Core adds `?request_id=oq_…` and nothing
+ * else, so a query or a fragment of the config has no place. The origin
+ * is one the app owns: the held request is the only state, so the
+ * parameter carries no URL and opens no redirect (plan 9h).
+ */
+function resolveSignInURL(
+  input: unknown,
+  origins: { baseURL: string; appURL: string; trustedOrigins: readonly string[] },
+): string | null {
+  if (input === undefined) return null;
+  const refuse = () =>
+    new ConfigError(
+      "oauth.signInURL must be an https URL on an origin of baseURL, appURL, or trustedOrigins, or a path on appURL; no query and no fragment",
+    );
+  if (typeof input !== "string" || hasControlChar(input) || input.includes("\\")) throw refuse();
+  // A path joins appURL. `//host` is a URL with another host, not a path.
+  const isPath = input.startsWith("/") && !input.startsWith("//");
+  let url: URL;
+  try {
+    url = new URL(isPath ? `${origins.appURL}${input}` : input);
+  } catch {
+    throw refuse();
+  }
+  const owned = [origins.baseURL, origins.appURL, ...origins.trustedOrigins];
+  if (
+    (isPath ? url.origin !== origins.appURL : url.protocol !== "https:") ||
+    !owned.includes(url.origin) ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    input.includes("?") ||
+    input.includes("#")
+  )
+    throw refuse();
+  return url.toString();
+}
+
 function integerIn(path: string, value: number, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max)
     throw new ConfigError(`${path} must be an integer from ${min} to ${max}`);
@@ -1651,13 +1706,14 @@ function integerIn(path: string, value: number, min: number, max: number): numbe
 function resolveOAuth(
   input: OAuthConfig | false | undefined,
   jwtMint: ResolvedJwtMint | null,
+  origins: { baseURL: string; appURL: string; trustedOrigins: readonly string[] },
 ): ResolvedOAuth | null {
   if (input === undefined || input === false) return null;
   if (!isPlainObject(input as unknown)) throw new ConfigError("oauth must be an object or false");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
       throw new ConfigError(
-        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, and dpop`,
+        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, and signInURL`,
       );
   if (!jwtMint)
     throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
@@ -1754,6 +1810,7 @@ function resolveOAuth(
     codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
     introspection: resolveIntrospection(input.introspection, resources as string[]),
     dpop: resolveDpop(input.dpop),
+    signInURL: resolveSignInURL(input.signInURL, origins),
     cimdCache: new Map(),
     jwksCache: new Map(),
   };

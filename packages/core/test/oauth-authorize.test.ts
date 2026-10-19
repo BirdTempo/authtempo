@@ -286,18 +286,20 @@ describe("the authorize step (plan 9g)", () => {
     expect(errorOf(await h.auth.handle(authorizeGet(input, s.cookie)))).toBe("consent_required");
   });
 
-  it("prompt=login answers login_required to a session; with no session the held request drops login, and the way back shows the page (OIDC Core 3.1.2.1)", async () => {
+  it("prompt=login sends a session to the sign-in step (plan 12e replaces the 9g fix wave line)", async () => {
     const h = oauthHandle();
     const s = await setup(h);
-    for (const prompt of ["login", "login consent", "consent login"])
-      expect({
+    h.clock.advance(1_000);
+    for (const prompt of ["login", "login consent", "consent login"]) {
+      const res = await h.auth.handle(
+        authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt }, s.cookie),
+      );
+      const location = new URL(res.headers.get("location") ?? "");
+      expect({ prompt, at: `${location.origin}${location.pathname}` }).toEqual({
         prompt,
-        error: errorOf(
-          await h.auth.handle(
-            authorizeGet({ clientId: s.clientId, challenge: s.challenge, prompt }, s.cookie),
-          ),
-        ),
-      }).toEqual({ prompt, error: "login_required" });
+        at: `${BASE_URL}/auth/oauth/sign-in`,
+      });
+    }
     expect(await codes(h)).toEqual([]);
     const nextOf = async (prompt: string) => {
       const res = await h.auth.handle(
@@ -309,9 +311,13 @@ describe("the authorize step (plan 9g)", () => {
     expect((await heldParams(h, idOfNext(await nextOf("login consent")))).get("prompt")).toBe(
       "consent",
     );
-    // After the sign-in the way back passes: the consent page, not login_required.
-    const back = await h.auth.handle(get(await nextOf("login"), { cookie: s.cookie }));
-    expect(back.status).toBe(200);
+    // The session from before the request gets the sign-in step again; a new sign-in passes.
+    const next = await nextOf("login");
+    const stale = await h.auth.handle(get(next, { cookie: s.cookie }));
+    expect(new URL(stale.headers.get("location") ?? "").pathname).toBe("/auth/oauth/sign-in");
+    h.clock.advance(1_000);
+    const again = await signedIn(h, "bea@example.com");
+    expect((await h.auth.handle(get(next, { cookie: again.cookie }))).status).toBe(200);
   });
 
   it("holds a request too long for next: the sign-in page lands back on it, and the code carries the state (plan 9h, Review Focus 2)", async () => {

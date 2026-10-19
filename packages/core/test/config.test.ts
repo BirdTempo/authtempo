@@ -836,7 +836,7 @@ describe("oauth (plan 9g)", () => {
       [{ resources: [R], fetch, consentPage: "html" }, "oauth.consentPage must be a function"],
       [
         { resources: [R], fetch, loginPage: "/login" },
-        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, and dpop",
+        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, and signInURL",
       ],
       [true, "oauth must be an object or false"],
     ];

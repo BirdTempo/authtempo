@@ -76,6 +76,8 @@ interface Grant {
   resource: string;
   nonce: string | null;
   sessionId: string | null;
+  /** The `auth_time` of the ID token in seconds, or null: none (plan 12e). */
+  authTime: number | null;
   /** The id of the code row at the code exchange; the family of the spent row at a refresh. */
   familyId: string;
   /** The spent refresh row at a refresh; null at the code exchange, which alone answers an ID token. */
@@ -99,6 +101,8 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
   const codeChallenge = nullable(d.codeChallenge);
   // A code of a core before plan 12e Task 9 has no dpopJkt and binds no key.
   const dpopJkt = d.dpopJkt === undefined ? null : nullable(d.dpopJkt);
+  // A code of a core before plan 12e Task 12 has no authTime: its ID token has no auth_time.
+  const authTime = d.authTime ?? null;
   if (
     typeof clientId !== "string" ||
     typeof redirectUri !== "string" ||
@@ -108,7 +112,8 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
     typeof userId !== "string" ||
     typeof sessionId !== "string" ||
     nonce === undefined ||
-    dpopJkt === undefined
+    dpopJkt === undefined ||
+    (authTime !== null && !Number.isSafeInteger(authTime))
   )
     return null;
   return {
@@ -121,6 +126,7 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
     nonce,
     sessionId,
     dpopJkt,
+    authTime: authTime as number | null,
   };
 }
 
@@ -280,6 +286,8 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
       at_hash: await tokenHashClaim(alg, access),
       ...(g.sessionId !== null ? { sid: g.sessionId } : {}),
       ...(g.nonce !== null ? { nonce: g.nonce } : {}),
+      // OIDC Core 1.0 section 2: the time of the sign-in, not of the request.
+      ...(g.authTime !== null ? { auth_time: g.authTime } : {}),
     };
     if (g.scopes.includes("email")) {
       claims.email = g.user.email;
@@ -360,6 +368,7 @@ export async function exchangeCode(
     resource: data.resource,
     nonce: data.nonce,
     sessionId: data.sessionId,
+    authTime: data.authTime,
     familyId: consumed.value.id,
     spentId: null,
     dpop: input.dpop,
@@ -472,6 +481,7 @@ export async function refreshGrant(
     resource: row.resource,
     nonce: null,
     sessionId: null,
+    authTime: null,
     familyId: row.familyId,
     spentId: row.id,
     dpop: input.dpop,

@@ -206,6 +206,7 @@ export const CONFIG_KEYS = {
     codeTtlMinutes: true,
     introspection: true,
     dpop: true,
+    signInURL: true,
   } satisfies Keys<OAuthConfig>,
   "oauth.dpop": {
     algs: true,

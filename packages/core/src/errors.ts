@@ -95,6 +95,11 @@ export const OAUTH_ERRORS = {
   access_denied: 400,
   login_required: 400,
   consent_required: 400,
+  // OIDC Core 1.0 section 3.1.2.6 (read 2026-10-20): core takes no request
+  // object, no request URI, and no registration parameter (plan 12e).
+  request_not_supported: 400,
+  request_uri_not_supported: 400,
+  registration_not_supported: 400,
   invalid_redirect_uri: 400,
   invalid_client_metadata: 400,
   // RFC 6750: the bearer of the userinfo endpoint. Not ERRORS.invalid_token (400), which is a mailed link.

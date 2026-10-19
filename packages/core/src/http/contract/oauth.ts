@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHALLENGE_RE, DPOP_JKT_RE } from "../../engine/oauth-authorize.js";
+import { CHALLENGE_RE, DPOP_JKT_RE, MAX_AGE_RE } from "../../engine/oauth-authorize.js";
 import type { RouteKey } from "../route-list.js";
 import { OkAnswer } from "./shapes.js";
 import type { RouteContract } from "./types.js";
@@ -56,6 +56,20 @@ export const authorizeQuery = z.object({
   nonce: z.string().max(512).optional(),
   prompt: z.string().optional(),
   dpop_jkt: z.string().regex(DPOP_JKT_RE).optional(),
+  // OIDC Core 1.0 section 3.1.2.1 (plan 12e): seconds since the last sign-in.
+  max_age: z.string().regex(MAX_AGE_RE).optional(),
+  // Read once each and ignored (OIDC Core 1.0 section 3.1.2.1).
+  display: z.string().optional(),
+  ui_locales: z.string().optional(),
+  claims_locales: z.string().optional(),
+  login_hint: z.string().optional(),
+  acr_values: z.string().optional(),
+  id_token_hint: z.string().optional(),
+  claims: z.string().optional(),
+  // Refused to the client (OIDC Core 1.0 section 3.1.2.6).
+  request: z.string().optional(),
+  request_uri: z.string().optional(),
+  registration: z.string().optional(),
   request_id: z.string().optional(),
 });
 

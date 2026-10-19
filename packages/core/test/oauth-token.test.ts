@@ -241,9 +241,11 @@ describe("the code exchange (plan 9g)", () => {
     const narrow = oauthHandle();
     const d = await codeFor(narrow, "openid mcp:read");
     const n = await tokens(await narrow.auth.handle(exchange(d.code, d.clientId, d.verifier)));
+    // auth_time is the time of the sign-in (plan 12e, OIDC Core 1.0 section 2).
     expect(Object.keys(decodeJws(n.id_token ?? "")?.payload ?? {}).sort()).toEqual([
       "at_hash",
       "aud",
+      "auth_time",
       "exp",
       "iat",
       "iss",

@@ -4,7 +4,7 @@ import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
-import type { OAuthClientRow, UserRow, VerificationRow } from "../schema.js";
+import type { OAuthClientRow, SessionRow, UserRow, VerificationRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { issuerOf } from "./jwt.js";
 import { pkceRequired } from "./oauth-client-auth.js";
@@ -36,6 +36,30 @@ const REQUEST_RE = /^oq_[A-Za-z0-9_-]{43}$/;
 /** A held request lives 10 minutes (owner decision 4a of 2026-10-14): the sign-in and the consent answer fit in it. */
 export const REQUEST_TTL_MS = 10 * 60_000;
 export const AUTHORIZE_PER_IP = { seconds: 900, max: 60 };
+/** `max_age` in seconds: 1 to 10 digits, so the value stays a safe integer. Exported for the contract. */
+export const MAX_AGE_RE = /^[0-9]{1,10}$/;
+/**
+ * OIDC Core 1.0 section 3.1.2.6 (read 2026-10-20): each of these asks for
+ * a feature that core does not serve, and goes back to the client.
+ */
+const REFUSED_PARAMS = [
+  ["request", "request_not_supported"],
+  ["request_uri", "request_uri_not_supported"],
+  ["registration", "registration_not_supported"],
+] as const;
+/**
+ * OIDC Core 1.0 section 3.1.2.1: each is OPTIONAL. Core reads each once,
+ * so a repeated one is `invalid_request`, and does nothing with it.
+ */
+const IGNORED_PARAMS = [
+  "display",
+  "ui_locales",
+  "claims_locales",
+  "login_hint",
+  "acr_values",
+  "id_token_hint",
+  "claims",
+] as const;
 
 export interface AuthorizeRequest {
   clientId: string;
@@ -50,6 +74,8 @@ export interface AuthorizeRequest {
   prompt: "none" | "consent" | null;
   /** `prompt` holds `login`: the person must sign in again (OIDC Core 1.0 section 3.1.2.1). */
   login: boolean;
+  /** `max_age` in seconds, or null. An older sign-in must be done again (OIDC Core 1.0 section 3.1.2.1). */
+  maxAge: number | null;
   /** The `dpop_jkt` of RFC 9449 section 10: the exchange needs a proof of this key. */
   dpopJkt: string | null;
 }
@@ -67,6 +93,11 @@ export interface OAuthCodeData {
   sessionId: string;
   /** The thumbprint of `dpop_jkt`, or null: the code binds no key (plan 12e). */
   dpopJkt: string | null;
+  /**
+   * `authTimeOf` the session that the code came from, in seconds: the ID
+   * token's `auth_time` (plan 12e). Null for a code of an older core.
+   */
+  authTime: number | null;
 }
 
 /** The data of an `oauth-request` verification row (plan 9h). */
@@ -75,6 +106,28 @@ export interface OAuthRequestData {
   params: string;
   /** The user the consent page showed the request to; null before the sign-in. */
   userId: string | null;
+  /**
+   * The earliest sign-in that may go on, in epoch milliseconds, or null
+   * (plan 12e). `prompt=login` and a `max_age` that the session does not
+   * meet set it to the time of the request.
+   */
+  minAuthTime: number | null;
+}
+
+/**
+ * The time of the session's last sign-in, in epoch milliseconds. With 12a,
+ * a re-authentication counts as a sign-in.
+ */
+function authAtMs(session: SessionRow): number {
+  return Math.max(session.createdAt.getTime(), (session.freshAt ?? session.createdAt).getTime());
+}
+
+/**
+ * The `auth_time` of OIDC Core 1.0 section 2, in seconds: the later of
+ * `createdAt` and `freshAt`. With 12a, a re-authentication counts as a sign-in.
+ */
+export function authTimeOf(session: SessionRow): number {
+  return Math.floor(authAtMs(session) / 1000);
 }
 
 export type AuthorizeStep =
@@ -138,6 +191,9 @@ export async function checkAuthorize(
   });
   const state = single(params, "state");
   if (!shortText(state)) return back("invalid_request", null);
+  for (const [name, error] of REFUSED_PARAMS) if (params.has(name)) return back(error, state);
+  for (const name of IGNORED_PARAMS)
+    if (single(params, name) === undefined) return back("invalid_request", state);
   const responseType = single(params, "response_type");
   if (responseType === undefined) return back("invalid_request", state);
   if (responseType !== "code") return back("unsupported_response_type", state);
@@ -165,6 +221,9 @@ export async function checkAuthorize(
   if (prompt === undefined) return back("invalid_request", state);
   const prompts = new Set((prompt ?? "").split(" ").filter((p) => p.length > 0));
   if (prompts.has("none") && prompts.size > 1) return back("invalid_request", state);
+  const maxAge = single(params, "max_age");
+  if (maxAge === undefined || (maxAge !== null && !MAX_AGE_RE.test(maxAge)))
+    return back("invalid_request", state);
   const dpopJkt = single(params, "dpop_jkt");
   if (dpopJkt === undefined || (dpopJkt !== null && !DPOP_JKT_RE.test(dpopJkt)))
     return back("invalid_request", state);
@@ -181,6 +240,7 @@ export async function checkAuthorize(
       nonce,
       prompt: prompts.has("none") ? "none" : prompts.has("consent") ? "consent" : null,
       login: prompts.has("login"),
+      maxAge: maxAge === null ? null : Number(maxAge),
       dpopJkt,
     },
   };
@@ -241,7 +301,7 @@ export async function grantConsent(
 /** A one-time code: an `oauth-code` verification row with the request, `codeTtlMinutes` long. */
 export async function issueCode(
   config: ResolvedConfig,
-  input: { request: AuthorizeRequest; userId: string; sessionId: string },
+  input: { request: AuthorizeRequest; userId: string; sessionId: string; authTime: number },
 ): Promise<string> {
   const oauth = oauthOf(config);
   const now = config.clock.now();
@@ -257,6 +317,7 @@ export async function issueCode(
     nonce: request.nonce,
     sessionId: input.sessionId,
     dpopJkt: request.dpopJkt,
+    authTime: input.authTime,
   };
   await config.storage.create("verification", {
     id: newId(now),
@@ -295,6 +356,7 @@ async function codeRedirect(
     request,
     userId: session.user.id,
     sessionId: session.session.id,
+    authTime: authTimeOf(session.session),
   });
   return {
     kind: "redirect",
@@ -324,10 +386,11 @@ async function holdRequest(
   clientId: string,
   params: URLSearchParams,
   userId: string | null,
+  minAuthTime: number | null,
 ): Promise<string> {
   const now = config.clock.now();
   const id = randomToken(REQUEST_PREFIX);
-  const data: OAuthRequestData = { params: params.toString(), userId };
+  const data: OAuthRequestData = { params: params.toString(), userId, minAuthTime };
   await config.storage.create("verification", {
     id: newId(now),
     purpose: "oauth-request",
@@ -355,10 +418,14 @@ async function readHeld(config: ResolvedConfig, id: string): Promise<HeldRequest
     return null;
   const params = row.data?.params;
   const userId = row.data?.userId;
+  // A row of a core before plan 12e has no minAuthTime and asks for no new sign-in.
+  const min = row.data?.minAuthTime ?? null;
   if (typeof params !== "string") return null;
-  if (userId === null) return { id, row, data: { params, userId: null } };
+  if (min !== null && !Number.isSafeInteger(min)) return null;
+  const minAuthTime = min as number | null;
+  if (userId === null) return { id, row, data: { params, userId: null, minAuthTime } };
   if (typeof userId !== "string") return null;
-  return { id, row, data: { params, userId } };
+  return { id, row, data: { params, userId, minAuthTime } };
 }
 
 /** Spends the held request in one conditional update: one request, one final answer, also for two parallel ones. */
@@ -401,7 +468,7 @@ async function bindHeld(
       { field: "consumedAt", op: "eq", value: null },
       { field: "updatedAt", op: "eq", value: held.row.updatedAt },
     ],
-    { data: { params: held.data.params, userId }, updatedAt: at },
+    { data: { ...held.data, userId }, updatedAt: at },
   );
   return n === 1;
 }
@@ -416,8 +483,19 @@ async function settle(
   return step();
 }
 
-/** Core's sign-in page, with `next` back to the held request. */
+/**
+ * The sign-in step. With `oauth.signInURL` the app's own route, with the
+ * held request's id alone. The held request is the only state, so the
+ * parameter carries no URL and opens no redirect (plan 9h). Else core's
+ * sign-in page, with `next` back to the held request.
+ */
 function signInStep(config: ResolvedConfig, requestId: string): AuthorizeStep {
+  const { signInURL } = oauthOf(config);
+  if (signInURL !== null) {
+    const url = new URL(signInURL);
+    url.searchParams.set("request_id", requestId);
+    return { kind: "sign-in", location: url.toString() };
+  }
   const next = `${config.basePath}/oauth/authorize?request_id=${requestId}`;
   return {
     kind: "sign-in",
@@ -469,8 +547,28 @@ async function sessionStep(
     return { kind: "error", error: "invalid_request" };
   const requestId = held
     ? held.id
-    : await holdRequest(config, request.clientId, params, session.user.id);
+    : await holdRequest(config, request.clientId, params, session.user.id, null);
   return { kind: "consent", request, client, user: session.user, requestId };
+}
+
+/**
+ * True when the session's last sign-in is at or after the held request's
+ * `minAuthTime`. A `prompt=login` or `max_age` request never goes on with
+ * the session it came with (OIDC Core 1.0 section 3.1.2.1).
+ */
+function signedInSince(session: ResolvedSession, held: HeldRequest): boolean {
+  return held.data.minAuthTime === null || authAtMs(session.session) >= held.data.minAuthTime;
+}
+
+/**
+ * True when the request needs a sign-in after the session's: `prompt=login`,
+ * `max_age=0` (OIDC Core 1.0 section 3.1.2.1 calls it `prompt=login`), or a
+ * sign-in more than `max_age` seconds ago.
+ */
+function needsSignIn(config: ResolvedConfig, request: AuthorizeRequest, session: SessionRow) {
+  if (request.login || request.maxAge === 0) return true;
+  if (request.maxAge === null) return false;
+  return config.clock.now().getTime() - authAtMs(session) > request.maxAge * 1000;
 }
 
 /**
@@ -495,7 +593,7 @@ async function heldStep(
     const { step } = c;
     return settle(config, held, () => Promise.resolve(step));
   }
-  if (!session) return signInStep(config, held.id);
+  if (!session || !signedInSince(session, held)) return signInStep(config, held.id);
   return sessionStep(config, c, params, session, held);
 }
 
@@ -519,18 +617,20 @@ export async function authorizeStep(
   const c = await checkAuthorize(config, input.params);
   if (!c.ok) return c.step;
   const { request } = c;
-  if (!input.session) {
-    if (request.prompt === "none") return denied(config, request, "login_required");
-    // The way back drops `login`, or the new session would answer `login_required`.
-    const back = request.login ? withoutLogin(input.params) : input.params;
-    return signInStep(config, await holdRequest(config, request.clientId, back, null));
-  }
-  // OIDC Core 1.0 section 3.1.2.1: with `login` the server must sign the
-  // person in again or answer an error. Core does not end a live session
-  // to sign it in again, so it answers `login_required`; the client may
-  // send the person to sign out first.
-  if (request.login) return denied(config, request, "login_required");
-  return sessionStep(config, c, input.params, input.session, null);
+  const fresh = request.login || request.maxAge !== null;
+  if (input.session && !needsSignIn(config, request, input.session.session))
+    return sessionStep(config, c, input.params, input.session, null);
+  // OIDC Core 1.0 section 3.1.2.1: `prompt=none` shows no page.
+  if (request.prompt === "none") return denied(config, request, "login_required");
+  // The held request needs a sign-in at or after now, so no session from
+  // before the request goes on. The held query drops `login`: `minAuthTime`
+  // holds the rule now.
+  const now = config.clock.now().getTime();
+  const back = request.login ? withoutLogin(input.params) : input.params;
+  return signInStep(
+    config,
+    await holdRequest(config, request.clientId, back, null, fresh ? now : null),
+  );
 }
 
 /**
@@ -547,6 +647,8 @@ export async function decideAuthorize(
   const held = await readHeld(config, input.requestId);
   if (!held || held.data.userId !== input.session.user.id)
     return { kind: "error", error: "invalid_request" };
+  // The same user's older session decides nothing and spends nothing (plan 12e).
+  if (!signedInSince(input.session, held)) return signInStep(config, held.id);
   if (!(await spendHeld(config, held))) return { kind: "error", error: "invalid_request" };
   const c = await checkAuthorize(config, new URLSearchParams(held.data.params));
   if (!c.ok) return c.step;

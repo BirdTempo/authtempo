@@ -7,6 +7,7 @@ export {
   type OAuthTokens,
   registerOAuthClient,
 } from "./client.js";
+export { continueAuthorizeURL } from "./continue.js";
 export {
   browserPendingStore,
   memoryPendingStore,

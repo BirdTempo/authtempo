@@ -1212,6 +1212,9 @@ export const ROUTES = Object.freeze([
       "access_denied",
       "consent_required",
       "login_required",
+      "request_not_supported",
+      "request_uri_not_supported",
+      "registration_not_supported",
     ],
   },
   {
