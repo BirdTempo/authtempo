@@ -28,7 +28,7 @@
  *
  * The gap: the name can answer another address at the connect than at this check
  * (DNS rebinding). Workers give no way to pin the address of a fetch. So core's own
- * host rules, `redirect: "manual"`, the 10-second timeout, and the 64 KB cap stay the
+ * host rules, `redirect: "manual"`, the 10-second timeout, and the 8 KB cap stay the
  * first line, and this check is the second.
  */
 
