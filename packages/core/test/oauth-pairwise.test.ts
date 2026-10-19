@@ -404,6 +404,29 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
     expect(userinfo.status).toBe(401);
   });
 
+  it("ends the tokens of a public client that turns pairwise", async () => {
+    const h = handle();
+    const ada = await signedIn(h);
+    const ask = await resourceServer(h);
+    const pub = await register(h, { redirect_uris: [A] });
+    const id = String(pub.body.client_id);
+    const t = await tokensOf(h, ada.cookie, id, A);
+    // A public client's token names the user id, and it resolves.
+    expect(claimsOf(t.access_token).sub).toBe(ada.user.id);
+    expect(await h.auth.caller(get("/mcp", bearer(t.access_token)))).toMatchObject({
+      kind: "oauth",
+      user: { id: ada.user.id },
+    });
+    const clients = h.auth.api.oauth?.clients;
+    if (!clients) throw new Error("oauth is off");
+    expect((await clients.update({ clientId: id, subjectType: "pairwise" })).ok).toBe(true);
+    // The client is pairwise now: a sub that is the user id names no user of it.
+    expect(await h.auth.caller(get("/mcp", bearer(t.access_token)))).toBeNull();
+    expect(await ask(t.access_token)).toEqual({ active: false });
+    const userinfo = await h.auth.handle(get("/auth/oauth/userinfo", bearer(t.access_token)));
+    expect(userinfo.status).toBe(401);
+  });
+
   it("uses the pairwise sub in the ID token, the access token, userinfo, and introspection", async () => {
     const h = handle();
     const ada = await signedIn(h);
