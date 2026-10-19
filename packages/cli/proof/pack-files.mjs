@@ -7,6 +7,7 @@
 // a test, a source file, a scaffold of the tests, or local state: a .env, a
 // .dev.vars, a .wrangler folder, or a node_modules folder.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const pkg = fileURLToPath(new URL("..", import.meta.url));
@@ -32,7 +33,20 @@ const NEEDED = [
   "dist/bin/authtempo.js",
   "dist/bin/authtempo-import.js",
   "dist/templates.json",
+  // Each target of the exports map, so a build that drops an entry file fails
+  // here (ruling 21 of the plan 11b lane). The map is the one source.
+  ...exportTargets(),
 ];
+
+/** Each path that the exports map of package.json names, with no leading "./". */
+function exportTargets() {
+  const { exports } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const targets = Object.values(exports).flatMap((entry) =>
+    typeof entry === "string" ? [entry] : Object.values(entry),
+  );
+  if (targets.length === 0) throw new Error("pack-files: the exports map names no file");
+  return [...new Set(targets.map((t) => t.replace(/^\.\//, "")))];
+}
 
 const failures = [];
 let paths = [];
@@ -59,5 +73,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `pack-files: PASS, ${paths.length} packed file(s) checked, each inside the allowlist, no local state`,
+  `pack-files: PASS, ${paths.length} packed file(s) checked, each inside the allowlist, no local state, ${NEEDED.length} needed file(s) present`,
 );
