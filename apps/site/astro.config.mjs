@@ -53,6 +53,11 @@ export default defineConfig({
   // Cloudflare docs read 2026-10-14). Every link in a page ends with /.
   trailingSlash: "always",
   build: { format: "directory" },
+  // Starlight 0.42.6 turns Astro's prefetch on when this key is absent, and
+  // Astro then puts its prefetch module script on every page (read 2026-10-19).
+  // A root page holds one script, the theme toggle, and check-script fails on
+  // any other (brand spec 12, decision 1). The docs pages lose hover prefetch.
+  prefetch: false,
   vite: {
     // The pages import sample files of examples/ with ?raw. The dev server
     // serves files under its root only, unless this list allows them.

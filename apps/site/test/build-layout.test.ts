@@ -11,6 +11,7 @@ const html = walk(DIST, (p) => p.endsWith(".html")).map((p) => p.slice(DIST.leng
 const docsPages = html.filter((p) => p.startsWith("docs/"));
 
 const tokens = parseTokens(readFileSync(`${SITE}src/styles/tokens.css`, "utf8"));
+const toggle = readFileSync(`${SITE}src/scripts/theme-toggle.js`, "utf8");
 const page = (path: string) => readFileSync(`${DIST}${path}`, "utf8");
 const read = (href: string) => {
   const file = `${DIST}${href.slice(1)}`;
@@ -133,6 +134,21 @@ describe("the root layout (plan 11b1)", () => {
       const defined = css.includes(`--at-paper:${tokens.light.get("--at-paper")}`);
       expect({ path, defined }).toEqual({ path, defined: true });
     }
+  });
+
+  it("puts the toggle script in the head and a labelled button in the header", () => {
+    const home = page("index.html");
+    expect(home.slice(0, home.indexOf("</head>"))).toContain(`<script>${toggle}</script>`);
+    const button = tags(home, "button").find((t) => t.includes(" data-theme-toggle"));
+    expect(button).toContain(' type="button"');
+    expect(button).toContain(' aria-label="Use the light theme"');
+    for (const name of ["half-disc", "sun", "moon"]) expect(home).toContain(`/icons.svg#${name}`);
+  });
+
+  it("hides the toggle until the script runs", () => {
+    expect(pageCss(page("index.html"), read).replace(/\s+/g, "")).toContain(
+      ":root:not([data-theme-choice])",
+    );
   });
 
   it("states the license and the version of core in the footer", () => {

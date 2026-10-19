@@ -2,15 +2,17 @@
 // biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
 // biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
 // The one layout of the root pages (brand spec 9 and 13). Plan 11b builds
-// its pages on it. Task 8 adds the one inline script, the theme toggle.
+// its pages on it. The one inline script of the root pages is the theme toggle.
 // The template reads Astro.props in place: Biome 2.5.15 lints this
 // frontmatter and not the template, so a destructured prop reads as unused.
 import rootPackage from "../../../../package.json";
 import corePackage from "../../../../packages/core/package.json";
 import { parseTokens } from "../../scripts/lib/tokens.ts";
+import Icon from "../components/Icon.astro";
 import Lockup from "../components/Lockup.astro";
 import { HOME } from "../data/home.ts";
 import { NAV_LINKS, REPO_URL, SITE } from "../data/site.ts";
+import toggle from "../scripts/theme-toggle.js?raw";
 import "../styles/tokens.css";
 import tokensCss from "../styles/tokens.css?raw";
 
@@ -44,6 +46,8 @@ const license: string =
     <meta property="og:title" content={Astro.props.title} />
     <meta property="og:description" content={Astro.props.description} />
     <meta property="og:image" content={`${SITE.origin}/og.png`} />
+    {/* The one inline script of the root pages (brand spec 12, decision of 2026-10-15). It sets data-theme before the first paint and cycles the toggle. check-script allows its SHA-256 only. */}
+    <script is:inline set:html={toggle}></script>
     <meta property="og:type" content="website" />
     <meta property="og:url" content={canonical} />
     <meta name="twitter:card" content="summary_large_image" />
@@ -56,6 +60,11 @@ const license: string =
         {NAV_LINKS.map((link) => <a href={link.href}>{link.label}</a>)}
         {REPO_URL !== null && <a class="mono" href={REPO_URL}>{SITE.repo}</a>}
       </nav>
+      <button type="button" class="at-toggle" data-theme-toggle aria-label="Use the light theme">
+        <Icon name="half-disc" class="at-toggle-auto" />
+        <Icon name="sun" class="at-toggle-light" />
+        <Icon name="moon" class="at-toggle-dark" />
+      </button>
     </header>
     <main id="main"><slot /></main>
     <footer class="site-footer">
@@ -80,4 +89,11 @@ const license: string =
   .site-header nav { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--at-unit) * 3); margin-inline-start: auto; }
   .site-header nav a { color: var(--at-ink); text-decoration: none; font-weight: 500; }
   .site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--at-rhythm); padding-block: var(--at-rhythm); border-top: 1px solid var(--at-line); color: var(--at-mute); font-size: var(--at-text-small); }
+  .at-toggle { display: inline-grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--at-line); border-radius: 0.5rem; background: transparent; color: var(--at-ink); cursor: pointer; }
+  .at-toggle :global(.at-icon) { display: none; grid-area: 1 / 1; width: 1.25rem; height: 1.25rem; }
+  :global(:root[data-theme-choice="auto"]) .at-toggle :global(.at-toggle-auto),
+  :global(:root[data-theme-choice="light"]) .at-toggle :global(.at-toggle-light),
+  :global(:root[data-theme-choice="dark"]) .at-toggle :global(.at-toggle-dark) { display: block; }
+  /* With no script, the page follows the system scheme, and the toggle hides (brand spec 12). */
+  :global(:root:not([data-theme-choice])) .at-toggle { display: none; }
 </style>

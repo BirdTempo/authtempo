@@ -22,6 +22,25 @@ export function distPages(): Map<string, string> {
   );
 }
 
+/** Each built HTML file outside docs/ and pagefind/, and not 404.html: the root pages (plan 11b Task 2). */
+export function rootPages(): Map<string, string> {
+  return new Map(
+    [...distPages()].filter(
+      ([p]) => !p.startsWith("docs/") && !p.startsWith("pagefind/") && p !== "404.html",
+    ),
+  );
+}
+
+/** Each .svg file of dist by its path, so the link check reads the symbol ids of the sprite. */
+export function distSvgs(): Map<string, string> {
+  return new Map(
+    walk(DIST, (p) => p.endsWith(".svg")).map((p) => [
+      p.slice(DIST.length),
+      readFileSync(p, "utf8"),
+    ]),
+  );
+}
+
 /** Every file of dist, by its path relative to dist. */
 export function distFiles(): Set<string> {
   return new Set(walk(DIST, () => true).map((p) => p.slice(DIST.length)));

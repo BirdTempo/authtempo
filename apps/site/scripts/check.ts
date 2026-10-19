@@ -28,6 +28,7 @@ import { checkMcp } from "./check-mcp.ts";
 import { checkMotion } from "./check-motion.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
+import { checkScript } from "./check-script.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
@@ -41,12 +42,14 @@ import {
   distPageOrEmpty,
   distPages,
   distRead,
+  distSvgs,
   distTexts,
   docsPages,
   fontDir,
   readFontManifest,
   readRepoFile,
   readSiteFile,
+  rootPages,
   sampleFiles,
   siteSources,
 } from "./lib/load.ts";
@@ -68,7 +71,11 @@ const MCP_BIN = `${REPO}packages/mcp/dist/bin/authtempo-mcp.js`;
 const mcpWire = await wireLists(MCP_BIN, `${DIST}agent/index.json`);
 
 export const CHECKS: { name: string; run: () => CheckReport }[] = [
-  { name: "check-links", run: () => checkLinks(distPages(), distFiles()) },
+  {
+    // The SVG files join the pages, so each <use href> of an icon must name a symbol of the sprite (plan 11b1).
+    name: "check-links",
+    run: () => checkLinks(new Map([...distPages(), ...distSvgs()]), distFiles()),
+  },
   { name: "check-frontmatter", run: () => checkFrontmatter(docsPages(), readRepoFile) },
   // The help texts of the CLI keep the same terms and sentence limits as the pages (plan 11c).
   { name: "check-terms", run: () => checkTerms([...docsPages(), ...cliHelpPages()]) },
@@ -216,6 +223,15 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     // Brand spec 8: one grid for every icon.
     name: "check-icons",
     run: () => checkIcons(readSiteFile("public/icons.svg") ?? "", ICON_NAMES),
+  },
+  {
+    // Brand spec 12: one hashed inline script on the root pages, and no other.
+    name: "check-script",
+    run: () =>
+      checkScript({
+        toggle: readSiteFile("src/scripts/theme-toggle.js") ?? "",
+        rootPages: rootPages(),
+      }),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },

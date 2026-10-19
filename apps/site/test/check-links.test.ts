@@ -47,6 +47,19 @@ describe("checkLinks", () => {
     ]);
   });
 
+  it("checks a fragment of an SVG file against its ids", () => {
+    const pages = new Map([
+      [
+        "index.html",
+        '<svg><use href="/icons.svg#sun"></use><use href="/icons.svg#sunn"></use></svg>',
+      ],
+      ["icons.svg", '<svg><symbol id="sun"></symbol></svg>'],
+    ]);
+    expect(checkLinks(pages, new Set(["index.html", "icons.svg"])).failures).toEqual([
+      "index.html: /icons.svg#sunn has no element with id sunn in icons.svg",
+    ]);
+  });
+
   it("fails when it reads no page and no link", () => {
     expect(checkLinks(new Map(), new Set()).failures).toEqual(["read 0 pages", "read 0 links"]);
   });
