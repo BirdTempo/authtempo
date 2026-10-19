@@ -13,11 +13,11 @@ import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { resourceOf } from "../primitives/resource.js";
 import type { OAuthClientRow, OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
-import { StorageError } from "../storage/port.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
+import { familyEnded, revokeFamily } from "./oauth-family.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { subjectFor, userOfSubject } from "./oauth-subject.js";
 import { consumeVerification } from "./verification.js";
@@ -174,20 +174,6 @@ export async function refreshRowOf(
   ]);
   if (row && (await familyEnded(config, row.familyId))) return null;
   return row;
-}
-
-const FAMILY_END = "oauth-family-end";
-
-/** The `valueHash` of the end mark of a family: the SHA-256 hex of `oauth-family-end:<familyId>`. */
-const familyEndHash = (familyId: string) => sha256Hex(`${FAMILY_END}:${familyId}`);
-
-/** True when a reuse or a revoke ended the family (ruling 40 of plan 12e). */
-async function familyEnded(config: ResolvedConfig, familyId: string): Promise<boolean> {
-  return (
-    (await config.storage.findOne("verification", [
-      { field: "valueHash", op: "eq", value: await familyEndHash(familyId) },
-    ])) !== null
-  );
 }
 
 async function writeRefresh(
@@ -411,51 +397,6 @@ async function verifierMatches(verifier: string | null, challenge: string | null
     VERIFIER_RE.test(verifier) &&
     constantTimeEqual(await sha256Base64Url(verifier), challenge)
   );
-}
-
-/**
- * Ends one authorization: it writes the end mark of the family, then
- * deletes every refresh row of the family (ruling 40 of plan 12e).
- *
- * Why a mark, not a row lock: D1 has no interactive transaction, so a lock
- * that spans two calls does not exist on every adapter. The mark needs only
- * what each adapter gives: a call outside a transaction commits before the
- * next call starts.
- *
- * The race it closes. A parallel request (the winner) writes a new row of
- * the family, then reads the mark (`stillGranted`). On Postgres, a DELETE
- * does not see a row that commits while the DELETE runs. Take the two
- * orders. The mark commits before the winner reads it: the winner sees it
- * and deletes its new row. Or the winner reads first. Then its new row
- * committed before the mark, so before the DELETE starts. The DELETE then
- * sees the row and deletes it. So in each order no row of the family is
- * live after the delete. A caller must not run this inside a transaction,
- * because the mark must commit before the DELETE starts.
- *
- * The mark lives `refreshTtlDays`, as long as the newest row of the family
- * can live. It holds the family id only, never a token.
- */
-export async function revokeFamily(config: ResolvedConfig, familyId: string): Promise<void> {
-  const now = config.clock.now();
-  try {
-    await config.storage.create("verification", {
-      id: newId(now),
-      purpose: FAMILY_END,
-      identifier: familyId,
-      valueHash: await familyEndHash(familyId),
-      expiresAt: new Date(now.getTime() + oauthOf(config).refreshTtlDays * DAY_MS),
-      consumedAt: null,
-      data: null,
-      // An unkeyed SHA-256: the version means nothing here.
-      secretVersion: 1,
-      createdAt: now,
-      updatedAt: now,
-    });
-  } catch (e) {
-    // A second reuse of one family finds the mark there already.
-    if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
-  }
-  await config.storage.delete("oauthToken", [{ field: "familyId", op: "eq", value: familyId }]);
 }
 
 /**

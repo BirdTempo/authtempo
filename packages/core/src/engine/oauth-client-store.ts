@@ -4,6 +4,7 @@ import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import type { Where } from "../storage/port.js";
 import { newClientSecret } from "./oauth-client-secret.js";
 import { CLIENT_ID_PREFIX, type ClientFields, validClientMetadata } from "./oauth-clients.js";
+import { deleteFamilies, endFamilies, familyEnds } from "./oauth-family.js";
 import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
 import { redirectSector, sectorOf } from "./oauth-subject.js";
 
@@ -237,7 +238,8 @@ export async function updateClient(
  * rows are the consents, the refresh tokens, the device grants, the session
  * links, and the back-channel logouts to deliver. The last three tables have no index
  * on `clientId`, so their deletes scan; this call is an admin action, not a
- * request path.
+ * request path. After the commit, each refresh family of the client ends
+ * with its mark (`endFamilies`, ruling 43 of plan 12e).
  */
 export async function deleteClient(
   config: ResolvedConfig,
@@ -246,14 +248,16 @@ export async function deleteClient(
   const row = await clientRow(config, input?.clientId);
   if (!row) return oauthFail("invalid_client");
   const byClient = [{ field: "clientId" as const, op: "eq" as const, value: row.id }];
+  const ends = familyEnds();
   await config.storage.transaction(async (tx) => {
     await tx.delete("oauthConsent", byClient);
-    await tx.delete("oauthToken", byClient);
+    await deleteFamilies(tx, byClient, ends);
     await tx.delete("oauthDevice", byClient);
     await tx.delete("oauthSessionClient", byClient);
     await tx.delete("oauthLogout", byClient);
     await tx.delete("oauthClient", [{ field: "id", op: "eq", value: row.id }]);
   });
+  await endFamilies(config, ends);
   return oauthOk({ ok: true });
 }
 

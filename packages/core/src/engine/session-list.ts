@@ -3,6 +3,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
 import { requireFresh } from "./fresh.js";
+import type { FamilyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { deleteTwoFactorChallenges } from "./second-factor.js";
 import {
@@ -155,15 +156,17 @@ export async function endOtherSessions(
  * This is the other access that a change of a credential ends. The password
  * change and the change of address call it, so the two lists cannot drift.
  * The OAuth delete comes after the session delete, as in a reset (plan 9g).
+ * The caller ends `families` after its commit (`endFamilies`).
  */
 export async function endOtherAccess(
   tx: StorageAdapter,
   userId: string,
   keepSessionId: string,
   ended: SessionRow[] | null,
+  families: FamilyEnds,
 ): Promise<number> {
   const n = await endOtherSessions(tx, userId, keepSessionId, ended);
-  await deleteOAuthTokens(tx, userId);
+  await deleteOAuthTokens(tx, userId, families);
   return n;
 }
 

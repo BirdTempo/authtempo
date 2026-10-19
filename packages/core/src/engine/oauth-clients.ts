@@ -8,6 +8,7 @@ import { hasControlChar } from "../primitives/text.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { newClientSecret } from "./oauth-client-secret.js";
+import { deleteFamilies, endFamilies, familyEnds } from "./oauth-family.js";
 import { BUILT_IN_SCOPES, type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
 import { redirectSector } from "./oauth-subject.js";
 
@@ -852,8 +853,9 @@ async function writeCimdRow(
  * confidential method to `none` revokes every refresh family of the client.
  * The revoke runs in the same write. A refresh token of that client was
  * issued after a client auth. Without the revoke, the client id alone would
- * refresh it (-02 section 8.2). The log names the client and the two
- * methods, never a token.
+ * refresh it (-02 section 8.2). After the commit, each family of the
+ * client ends with its mark (`endFamilies`, ruling 43 of plan 12e). The log
+ * names the client and the two methods, never a token.
  */
 async function refreshCimdRow(
   config: ResolvedConfig,
@@ -861,6 +863,7 @@ async function refreshCimdRow(
   data: Partial<Omit<OAuthClientRow, "id">> & Pick<OAuthClientRow, "authMethod">,
 ): Promise<OAuthClientRow | null> {
   const where = [{ field: "id" as const, op: "eq" as const, value: url }];
+  const ends = familyEnds();
   const done = await config.storage.transaction(async (tx) => {
     const current = await tx.findOne("oauthClient", where);
     if (!current) return null;
@@ -868,10 +871,11 @@ async function refreshCimdRow(
     // The delete comes first. Memory and D1 do not isolate a transaction, so
     // another request sees each write at once. A row of none beside a live
     // token would let a client id alone refresh it (ruling 26 of plan 12e).
-    if (drops) await tx.delete("oauthToken", [{ field: "clientId", op: "eq", value: url }]);
+    if (drops) await deleteFamilies(tx, [{ field: "clientId", op: "eq", value: url }], ends);
     await tx.update("oauthClient", where, data);
     return { row: { ...current, ...data }, from: drops ? current.authMethod : null };
   });
+  await endFamilies(config, ends);
   if (done?.from)
     console.error(
       "authtempo: client metadata document dropped its client auth; refresh tokens revoked",

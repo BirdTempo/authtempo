@@ -3,6 +3,7 @@ import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
 import { mintSessionJwt, sessionLive } from "../src/engine/jwt.js";
+import { familyEnds } from "../src/engine/oauth-family.js";
 import { changePassword, passwordSignIn } from "../src/engine/password.js";
 import { reauthenticate } from "../src/engine/reauth.js";
 import {
@@ -785,7 +786,9 @@ describe("endOtherAccess (plan 12a)", () => {
     const { auth, me, other, access } = await stocked();
     const ended: NonNullable<Parameters<typeof endOtherAccess>[3]> = [];
     expect(
-      await auth.storage.transaction((tx) => endOtherAccess(tx, me.user.id, me.session.id, ended)),
+      await auth.storage.transaction((tx) =>
+        endOtherAccess(tx, me.user.id, me.session.id, ended, familyEnds()),
+      ),
     ).toBe(1);
     expect(ended.map((s) => s.id)).toEqual([other.id]);
     expect(await access()).toEqual({

@@ -347,6 +347,15 @@ describe("api.oauth.clients (plan 12e)", () => {
       oauthClient: 1,
     };
     expect(await count(g.clientId)).toEqual(full);
+    const family = (
+      await h.storage.findOne("oauthToken", [{ field: "clientId", op: "eq", value: g.clientId }])
+    )?.familyId;
+    const marks = async () =>
+      (
+        await h.storage.findMany("verification", [
+          { field: "purpose", op: "eq", value: "oauth-family-end" },
+        ])
+      ).map((v) => v.identifier);
 
     // A storage whose transaction throws at the client delete, the last one.
     const failing: StorageAdapter = {
@@ -366,11 +375,15 @@ describe("api.oauth.clients (plan 12e)", () => {
       deleteClient({ ...h.config, storage: failing }, { clientId: g.clientId }),
     ).rejects.toThrow("storage down");
     expect(await count(g.clientId)).toEqual(full);
+    // A rollback ends no family.
+    expect(await marks()).toEqual([]);
 
     expect(await clientsOf(h).delete({ clientId: g.clientId })).toEqual({
       ok: true,
       value: { ok: true },
     });
+    // After the commit, the family of the client ends with its mark (ruling 43).
+    expect(await marks()).toEqual([family]);
     expect(await count(g.clientId)).toEqual({
       oauthConsent: 0,
       oauthToken: 0,

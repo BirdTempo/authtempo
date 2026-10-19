@@ -12,6 +12,7 @@ import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./
 import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard } from "./hooks.js";
 import { sendNotice } from "./notices.js";
+import { endFamilies, type FamilyEnds, familyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
@@ -1092,11 +1093,13 @@ export async function runReset(
   const made = createSteps(config, "password_reset", { signUpRule: false });
   // The verify hooks of an unverified user that the reset claims (plan 12a, Task 18).
   const verify = verifySteps(config, "password_reset");
+  // The refresh families that the reset deletes, to end after its commit (ruling 43 of plan 12e).
+  const families = familyEnds();
   let reset: Result<ResetResult> | null = null;
   for (let attempt = 0; reset === null; attempt++) {
     try {
       reset = await hookGuard(() =>
-        applyReset(config, input, proof, consume, hash, now, ended, trust, made, verify),
+        applyReset(config, input, proof, consume, hash, now, ended, trust, made, verify, families),
       );
     } catch (err) {
       // Caught outside the transaction, so its deletes are undone.
@@ -1123,6 +1126,8 @@ export async function runReset(
     }
   }
   if (reset.ok) {
+    // An ok answer means the transaction committed.
+    await endFamilies(config, families);
     // After the commit, before the session hooks and before a challenge answer (plan 12a).
     await verify.after(reset.value.user);
     await made.after(reset.value.user);
@@ -1210,11 +1215,14 @@ function applyReset(
   trust: { id: string | null },
   made: CreateSteps,
   verify: VerifySteps,
+  families: FamilyEnds,
 ): Promise<Result<ResetResult>> {
   return config.storage.transaction(async (tx): Promise<Result<ResetResult>> => {
     // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
     if (ended.claim) ended.claim.length = 0;
     if (ended.reset) ended.reset.length = 0;
+    families.ids.clear();
+    families.scopes.length = 0;
     trust.id = null;
     made.begin();
     verify.begin();
@@ -1330,7 +1338,7 @@ function applyReset(
     // The OAuth refresh tokens and codes end with the sessions: a reset after a
     // compromise must cut off every agent too. The consents stay, so the
     // person signs each client in again with no new consent (plan 9g final fix wave).
-    await deleteOAuthTokens(tx, user.id);
+    await deleteOAuthTokens(tx, user.id, families);
     // The other links and codes for this address. A person who reads the
     // mailbox later must not set a password with a second proof (plan 9e).
     await tx.delete("verification", [
@@ -1448,6 +1456,8 @@ export async function changePassword(
   const hash = await pw.hash.hash(input.newPassword);
   const now = config.clock.now();
   const ended = endedList(config);
+  // The refresh families that the change deletes, to end after its commit (ruling 43 of plan 12e).
+  const families = familyEnds();
   let changed: Result<{ ok: true }>;
   try {
     changed = await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
@@ -1504,7 +1514,7 @@ export async function changePassword(
       // refresh tokens and codes, in one function with the change of
       // address (plan 12a). The challenges go before the session delete, as
       // in a reset (plan 9f).
-      await endOtherAccess(tx, user.id, session.id, ended ?? null);
+      await endOtherAccess(tx, user.id, session.id, ended ?? null, families);
       // The pending reset links and codes of the address go, as in a reset.
       // A person who changes the password after a mailbox exposure must not
       // leave a live proof there that sets a password and ends every session.
@@ -1526,6 +1536,7 @@ export async function changePassword(
     throw err;
   }
   if (changed.ok) {
+    await endFamilies(config, families);
     await sessionsEnded(config, ended, "password_change");
     // After the commit (plan 12a). A first password is a change of a way in too.
     await sendNotice(config, {

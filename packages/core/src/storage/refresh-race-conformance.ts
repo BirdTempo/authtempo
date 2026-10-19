@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAuth } from "../create-auth.js";
 import { sha256Base64Url, sha256Hex } from "../primitives/crypto.js";
+import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
 import type { ConformanceTarget } from "./conformance.js";
 import type { StorageAdapter } from "./port.js";
 
@@ -13,8 +14,16 @@ import type { StorageAdapter } from "./port.js";
  * cannot see the winner's new row. This is how one slow DELETE statement
  * behaves. After the reuse answer, no row of the family may be live.
  * Memory and D1 have no such isolation, so there the gate only fixes the
- * order. Call it from an adapter's test file with a factory that opens a
- * fresh database.
+ * order.
+ *
+ * The second suite holds a grant revoke and a password reset beside a
+ * refresh in flight (ruling 43 of plan 12e). The refresh spends its row.
+ * The revoke's DELETE runs in its transaction. The refresh writes its new
+ * row and still sees its spent row. Then the revoke commits. After the
+ * revoke answers, no row of the family may be live.
+ *
+ * Call it from an adapter's test file with a factory that opens a fresh
+ * database.
  */
 export function runRefreshRaceConformance(
   name: string,
@@ -31,6 +40,17 @@ export function runRefreshRaceConformance(
         }
       });
   });
+  describe(`refresh revoke race: ${name}`, () => {
+    for (const scenario of REVOKES)
+      it(scenario.title, async () => {
+        const target = await factory();
+        try {
+          await revokeRun(target.adapter, scenario);
+        } finally {
+          await target.close();
+        }
+      });
+  });
 }
 
 const BASE = "https://api.example.com";
@@ -40,13 +60,56 @@ const RESOURCE = `${BASE}/mcp`;
 const GATE_MS = 2000;
 
 type Answer = { status: number; body: Record<string, unknown> };
+type Auth = ReturnType<typeof createAuth>;
+
+interface Grant {
+  clientId: string;
+  token: string;
+  familyId: string;
+  userId: string;
+}
 
 interface World {
-  /** A fresh grant: its client, its first refresh token, and its family id. */
-  grant(): Promise<{ clientId: string; token: string; familyId: string }>;
+  /** A fresh grant: its client, its first refresh token, its family id, and its user. */
+  grant(): Promise<Grant>;
   refresh(via: 0 | 1, clientId: string, token: string): Promise<Answer>;
   advance(ms: number): void;
+  /** The two instances on one storage. */
+  auths: readonly [Auth, Auth];
+  /** The text of each mail, in order. */
+  mail: string[];
 }
+
+interface RevokeScenario {
+  title: string;
+  /** The revoke, on instance 0, while the refresh is in flight. */
+  revoke(w: World, g: Grant): Promise<unknown>;
+}
+
+const REVOKES: RevokeScenario[] = [
+  {
+    title: "a grant revoke beside a refresh in flight leaves no live row",
+    revoke: async (w, g) => {
+      const r = await w.auths[0].api.oauth?.revoke({ userId: g.userId, clientId: g.clientId });
+      if (!r?.ok) throw new Error("refresh race: the grant revoke failed");
+    },
+  },
+  {
+    title: "a password reset beside a refresh in flight leaves no live row",
+    revoke: async (w, g) => {
+      const api = w.auths[0].api.password;
+      await api?.requestReset({ email: "ada@example.com", ip: null });
+      const token = /(pr_[A-Za-z0-9_-]{43})/.exec(w.mail.at(-1) ?? "")?.[1] ?? "";
+      const r = await api?.reset({
+        token,
+        password: "a new and long passphrase",
+        ip: null,
+        userAgent: null,
+      });
+      if (!r?.ok) throw new Error(`refresh race: the reset failed (${g.userId})`);
+    },
+  },
+];
 
 interface Scenario {
   title: string;
@@ -94,10 +157,10 @@ function signal() {
 const timeout = () => new Promise((r) => setTimeout(r, GATE_MS));
 
 /**
- * A storage that, while armed, holds the `oauthToken` events in one order:
- * both spends start together; the loser's family DELETE runs in a
- * transaction; the winner's new row waits for that DELETE; and the
- * transaction commits after `commitAfter` settles.
+ * A storage that, while armed, holds the `oauthToken` events in one order.
+ * Both spends start together. The loser's family DELETE runs in a
+ * transaction. The winner's new row waits for that DELETE. The transaction
+ * commits after `commitAfter` settles.
  */
 function gated(base: StorageAdapter) {
   let armed = false;
@@ -143,8 +206,110 @@ function gated(base: StorageAdapter) {
   };
 }
 
+/**
+ * A storage that, while armed, holds the events of a refresh beside a
+ * revoke. The refresh's spend signals `spent`. The `oauthToken` DELETE in
+ * a transaction signals `deleted`, then holds its transaction open until
+ * `commitAfter` settles. The refresh's new row waits for that DELETE.
+ */
+function revokeGated(base: StorageAdapter) {
+  let armed = false;
+  const spent = signal();
+  const deleted = signal();
+  let commitAfter: Promise<unknown> = Promise.resolve();
+  const inTx = (tx: StorageAdapter): StorageAdapter => ({
+    create: (model, data) => tx.create(model, data),
+    findOne: (model, where) => tx.findOne(model, where),
+    findMany: (model, where, opts) => tx.findMany(model, where, opts),
+    update: (model, where, data) => tx.update(model, where, data),
+    delete: async (model, where) => {
+      const n = await tx.delete(model, where);
+      if (armed && model === "oauthToken") {
+        deleted.resolve();
+        await Promise.race([commitAfter, timeout()]);
+      }
+      return n;
+    },
+    transaction: (fn) => tx.transaction((inner) => fn(inTx(inner))),
+  });
+  const storage: StorageAdapter = {
+    create: async (model, data) => {
+      if (armed && model === "oauthToken") await Promise.race([deleted.done, timeout()]);
+      return base.create(model, data);
+    },
+    findOne: (model, where) => base.findOne(model, where),
+    findMany: (model, where, opts) => base.findMany(model, where, opts),
+    update: async (model, where, data) => {
+      const n = await base.update(model, where, data);
+      if (armed && model === "oauthToken") spent.resolve();
+      return n;
+    },
+    delete: (model, where) => base.delete(model, where),
+    transaction: (fn) => base.transaction((tx) => fn(inTx(tx))),
+  };
+  return {
+    storage,
+    spent: spent.done,
+    arm(after: Promise<unknown>) {
+      armed = true;
+      commitAfter = after;
+    },
+    disarm() {
+      armed = false;
+    },
+  };
+}
+
+async function revokeRun(base: StorageAdapter, scenario: RevokeScenario): Promise<void> {
+  const gate = revokeGated(base);
+  const world = openWorld(base, gate.storage, 0);
+  const g = await world.grant();
+  const answered = signal();
+  gate.arm(answered.done);
+  const refresh = world.refresh(1, g.clientId, g.token);
+  void refresh.then(answered.resolve, answered.resolve);
+  // The revoke starts after the refresh spent its row, the reviewer's order.
+  await Promise.race([gate.spent, timeout()]);
+  const [answer] = await Promise.all([refresh, scenario.revoke(world, g)]);
+  gate.disarm();
+  const live = await base.findMany("oauthToken", [
+    { field: "familyId", op: "eq", value: g.familyId },
+    { field: "usedAt", op: "eq", value: null },
+  ]);
+  expect(live).toEqual([]);
+  if (answer.status === 200)
+    expect(await world.refresh(0, g.clientId, String(answer.body.refresh_token))).toEqual({
+      status: 400,
+      body: { error: "invalid_grant" },
+    });
+}
+
 async function raceRun(base: StorageAdapter, scenario: Scenario): Promise<void> {
   const gate = gated(base);
+  const world = openWorld(base, gate.storage, scenario.window);
+  const g = await world.grant();
+  const [t0, t1] = await scenario.setup(world, g);
+  // The loser's DELETE commits after the first answer, which is the winner's.
+  const firstAnswer = signal();
+  gate.arm(firstAnswer.done);
+  const requests = [world.refresh(0, g.clientId, t0), world.refresh(1, g.clientId, t1)];
+  void Promise.race(requests).then(firstAnswer.resolve, firstAnswer.resolve);
+  const answers = await Promise.all(requests);
+  gate.disarm();
+  const reuse = { status: 400, body: { error: "invalid_grant" } };
+  expect(answers).toContainEqual(reuse);
+  const live = await base.findMany("oauthToken", [
+    { field: "familyId", op: "eq", value: g.familyId },
+    { field: "usedAt", op: "eq", value: null },
+  ]);
+  expect(live).toEqual([]);
+  for (const a of answers)
+    if (a.status === 200)
+      expect(await world.refresh(0, g.clientId, String(a.body.refresh_token))).toEqual(reuse);
+}
+
+/** Two core instances on `storage`, with a reuse window of `window` seconds. `base` reads rows past the gate. */
+function openWorld(base: StorageAdapter, storage: StorageAdapter, window: number): World {
   let t = Date.parse("2026-10-20T00:00:00.000Z");
   const clock = { now: () => new Date(t) };
   const mail: string[] = [];
@@ -153,7 +318,7 @@ async function raceRun(base: StorageAdapter, scenario: Scenario): Promise<void> 
       baseURL: BASE,
       secret: "0123456789abcdef0123456789abcdef",
       trustedOrigins: [],
-      storage: gate.storage,
+      storage,
       // Every request passes: the race, not the limit, is under test.
       limiter: { allow: async () => true },
       clock,
@@ -165,8 +330,10 @@ async function raceRun(base: StorageAdapter, scenario: Scenario): Promise<void> 
       oauth: {
         resources: [RESOURCE],
         registration: { cimd: false, dynamic: true },
-        refreshReuseSeconds: scenario.window,
+        refreshReuseSeconds: window,
       },
+      // A fast hash: the race, not the hash, is under test.
+      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) },
     });
   // Two instances on one storage.
   const auths = [instance(), instance()] as const;
@@ -191,7 +358,9 @@ async function raceRun(base: StorageAdapter, scenario: Scenario): Promise<void> 
     );
   const rowOf = async (token: string) =>
     base.findOne("oauthToken", [{ field: "tokenHash", op: "eq", value: await sha256Hex(token) }]);
-  const world: World = {
+  return {
+    auths,
+    mail,
     async grant() {
       const reg = await json("/auth/oauth/register", {
         redirect_uris: [REDIRECT],
@@ -236,9 +405,9 @@ async function raceRun(base: StorageAdapter, scenario: Scenario): Promise<void> 
         resource: RESOURCE,
       });
       const token = String(((await issued.json()) as { refresh_token: unknown }).refresh_token);
-      const familyId = (await rowOf(token))?.familyId;
-      if (!familyId) throw new Error(`refresh race: no refresh row (${issued.status})`);
-      return { clientId, token, familyId };
+      const row = await rowOf(token);
+      if (!row) throw new Error(`refresh race: no refresh row (${issued.status})`);
+      return { clientId, token, familyId: row.familyId, userId: row.userId };
     },
     async refresh(via, clientId, token) {
       const res = await form(via, "/auth/oauth/token", {
@@ -252,23 +421,4 @@ async function raceRun(base: StorageAdapter, scenario: Scenario): Promise<void> 
       t += ms;
     },
   };
-  const g = await world.grant();
-  const [t0, t1] = await scenario.setup(world, g);
-  // The loser's DELETE commits after the first answer, which is the winner's.
-  const firstAnswer = signal();
-  gate.arm(firstAnswer.done);
-  const requests = [world.refresh(0, g.clientId, t0), world.refresh(1, g.clientId, t1)];
-  void Promise.race(requests).then(firstAnswer.resolve, firstAnswer.resolve);
-  const answers = await Promise.all(requests);
-  gate.disarm();
-  const reuse = { status: 400, body: { error: "invalid_grant" } };
-  expect(answers).toContainEqual(reuse);
-  const live = await base.findMany("oauthToken", [
-    { field: "familyId", op: "eq", value: g.familyId },
-    { field: "usedAt", op: "eq", value: null },
-  ]);
-  expect(live).toEqual([]);
-  for (const a of answers)
-    if (a.status === 200)
-      expect(await world.refresh(0, g.clientId, String(a.body.refresh_token))).toEqual(reuse);
 }

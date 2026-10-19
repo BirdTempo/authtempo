@@ -595,11 +595,20 @@ describe("a document that changes its method (ruling 25 of plan 12e)", () => {
     const { url, key, keyDoc, publicDoc } = await docs();
     const { a, b } = pair(url, keyDoc, publicDoc);
     const token = await refreshTokenOf(a, url, key);
-    expect(await a.storage.findMany("oauthToken", [])).toHaveLength(1);
+    const rows = await a.storage.findMany("oauthToken", []);
+    expect(rows).toHaveLength(1);
     // Instance B reads the public document at this refresh, and the revoke runs in that write.
     const res = await b.auth.handle(refresh(token, { client_id: url }));
     expect(await answer(res)).toEqual({ status: 400, body: { error: "invalid_grant" } });
     expect(await b.storage.findMany("oauthToken", [])).toEqual([]);
+    // After the commit, the family ends with its mark (ruling 43).
+    expect(
+      (
+        await b.storage.findMany("verification", [
+          { field: "purpose", op: "eq", value: "oauth-family-end" },
+        ])
+      ).map((v) => v.identifier),
+    ).toEqual(rows.map((r) => r.familyId));
     expect(
       await b.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: url }]),
     ).toMatchObject({ authMethod: "none" });

@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { requestResetOtp, resetPasswordWithOtp } from "../src/engine/email-otp.js";
+import { familyEnds } from "../src/engine/oauth-family.js";
 import { deleteOAuthTokens, revokeGrant } from "../src/engine/oauth-grants.js";
 import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
+import { sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { APP_ORIGIN, get, post } from "./helpers.js";
 import {
@@ -35,6 +38,25 @@ const OAUTH = {
 };
 const GRANT = { status: 400, body: { error: "invalid_grant" } };
 const answer = async (res: Response) => ({ status: res.status, body: await res.json() });
+
+/** The family of a live refresh token. */
+async function familyOf(h: { storage: StorageAdapter }, refresh: string | undefined) {
+  const row = await h.storage.findOne("oauthToken", [
+    { field: "tokenHash", op: "eq", value: await sha256Hex(refresh ?? "") },
+  ]);
+  if (!row) throw new Error("no refresh row");
+  return row.familyId;
+}
+
+/** The families that hold an end mark (ruling 43 of plan 12e): each one ended after its commit. */
+const endedFamilies = async (h: { storage: StorageAdapter }) =>
+  (
+    await h.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "oauth-family-end" },
+    ])
+  )
+    .map((v) => v.identifier)
+    .sort();
 
 /** The OAuth handle with password sign-in on and a mail list, so a test can reset the password. */
 function pwOAuth() {
@@ -107,6 +129,7 @@ describe("api.oauth.grants and api.oauth.revoke (plan 9g final fix wave)", () =>
     const h = oauthHandle();
     const c = await codeFor(h);
     const ada = await tokensOf(h, c);
+    const adaFamily = await familyOf(h, ada.refresh_token);
     const other = await secondGrant(h, c.cookie, "Other client", "mcp:read offline_access");
     const bob = await signedIn(h, "bob@example.com");
     const p = await pkce();
@@ -123,6 +146,8 @@ describe("api.oauth.grants and api.oauth.revoke (plan 9g final fix wave)", () =>
       ok: true,
       value: { ok: true },
     });
+    // Only the family of the user and the client ends with a mark.
+    expect(await endedFamilies(h)).toEqual([adaFamily]);
     const consents = await h.storage.findMany("oauthConsent", []);
     expect(consents.map((r) => [r.userId, r.clientId]).sort()).toEqual(
       [
@@ -364,7 +389,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
     const h = pwOAuth();
     const c = await codeFor(h);
     const tokens = await tokensOf(h, c);
-    return { h, c, tokens };
+    return { h, c, tokens, family: await familyOf(h, tokens.refresh_token) };
   }
 
   /** The authorize step again with a new cookie: the code comes at once, with no consent page. */
@@ -388,7 +413,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
   }
 
   it("a reset by link", async () => {
-    const { h, c, tokens } = await granted();
+    const { h, c, tokens, family } = await granted();
     await requestPasswordReset(h.config, { email: c.user.email, ip: null });
     const token = h.mails.at(-1)?.token ?? "";
     const writes = recordNextTransaction(h.storage);
@@ -402,6 +427,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
     if (!("token" in r.value)) throw new Error("the reset answered a challenge");
     expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
     await expectEnded(h, c, tokens.refresh_token ?? "");
+    expect(await endedFamilies(h)).toEqual([family]);
     await authorizeAgain(h, c.clientId, `__Host-tempo_session=${r.value.token}`);
   });
 
@@ -426,7 +452,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
   });
 
   it("a password change", async () => {
-    const { h, c, tokens } = await granted();
+    const { h, c, tokens, family } = await granted();
     const session = await resolveSession(h.config, c.token);
     if (!session) throw new Error("no session");
     const writes = recordNextTransaction(h.storage);
@@ -435,7 +461,88 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
     );
     expect(writes.indexOf("delete:oauthToken")).toBeGreaterThan(writes.indexOf("delete:session"));
     await expectEnded(h, c, tokens.refresh_token ?? "");
+    expect(await endedFamilies(h)).toEqual([family]);
     await authorizeAgain(h, c.clientId, c.cookie);
+  });
+
+  it("an email change ends the refresh families after its commit (ruling 43)", async () => {
+    const { h, c, tokens, family } = await granted();
+    const session = await resolveSession(h.config, c.token);
+    if (!session) throw new Error("no session");
+    const sent = await requestEmailChange(h.config, { session, newEmail: "ada@new.example.com" });
+    if (!sent.ok) throw new Error(sent.code);
+    const token = /token=(ec_[A-Za-z0-9_-]{43})/.exec(h.mails.at(-1)?.text ?? "")?.[1] ?? "";
+    const moved = await confirmEmailChange(h.config, { token, ip: null, userAgent: null });
+    if (!moved.ok) throw new Error(moved.code);
+    expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
+    expect(
+      await answer(await h.auth.handle(refreshWith(tokens.refresh_token ?? "", c.clientId))),
+    ).toEqual(GRANT);
+    expect(await endedFamilies(h)).toEqual([family]);
+  });
+
+  it("ends a family that a code exchange writes while a reset runs (ruling 43)", async () => {
+    const outer = pwOAuth();
+    // Inside the reset, after its refresh token delete, a code exchange of
+    // the same user runs and commits. Its new family is not in the list of
+    // the delete, so only the read after the commit finds it.
+    let during: (() => Promise<unknown>) | null = null;
+    const inTx = (tx: StorageAdapter): StorageAdapter =>
+      new Proxy(tx, {
+        get(target, key, receiver) {
+          const value = Reflect.get(target, key, receiver);
+          if (key !== "delete" || typeof value !== "function") return value;
+          return async (model: string, ...args: unknown[]) => {
+            const out = await (value as (...a: unknown[]) => Promise<unknown>).call(
+              target,
+              model,
+              ...args,
+            );
+            if (model === "oauthToken" && during) {
+              const run = during;
+              during = null;
+              await run();
+            }
+            return out;
+          };
+        },
+      }) as StorageAdapter;
+    const storage = new Proxy(outer.storage, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (key !== "transaction" || typeof value !== "function") return value;
+        return (fn: (tx: StorageAdapter) => Promise<unknown>) =>
+          (value as StorageAdapter["transaction"]).call(target, (tx) => fn(inTx(tx)));
+      },
+    }) as StorageAdapter;
+    const h = {
+      ...pwHandle({ hash: FAST }, { oauth: OAUTH, storage, clock: outer.clock }),
+      storage: outer.storage,
+    };
+    const c = await codeFor(h);
+    const first = await tokensOf(h, c);
+    const firstFamily = await familyOf(h, first.refresh_token);
+    const p = await pkce();
+    const late = await authorized(h, c.cookie, { clientId: c.clientId, challenge: p.challenge });
+    let lateAnswer: { status: number; body: unknown } | null = null;
+    during = async () => {
+      lateAnswer = await answer(
+        await outer.auth.handle(exchange(late.code, c.clientId, p.verifier)),
+      );
+    };
+    await requestPasswordReset(h.config, { email: c.user.email, ip: null });
+    const r = await resetPassword(h.config, {
+      token: h.mails.at(-1)?.token ?? "",
+      password: "a new long password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!r.ok) throw new Error(r.code);
+    expect(lateAnswer).toMatchObject({ status: 200 });
+    const lateFamily = (await endedFamilies(h)).find((f) => f !== firstFamily);
+    expect(lateFamily).toBeDefined();
+    expect((await endedFamilies(h)).length).toBe(2);
+    expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
   });
 
   it("a code issued before a reset or a change answers invalid_grant: the codes go too (round 2)", async () => {
@@ -495,7 +602,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
     const h = { ...oauthHandle({ storage, clock: outer.clock }), storage: outer.storage };
     const c = await codeFor(h);
     // The reset's own delete, with the consent kept, as a reset leaves it.
-    resetFirst = () => deleteOAuthTokens(outer.storage, c.user.id);
+    resetFirst = () => deleteOAuthTokens(outer.storage, c.user.id, familyEnds());
     expect(await answer(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)))).toEqual(
       GRANT,
     );

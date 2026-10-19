@@ -11,6 +11,7 @@ import { checkCode, consumeCode, issueCode, newestCode, verifyGate } from "./ema
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
+import { endFamilies, type FamilyEnds, familyEnds } from "./oauth-family.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
 import { endOtherAccess } from "./session-list.js";
@@ -212,6 +213,8 @@ interface Move {
   /** Spends the proof in the transaction. A failure undoes the move. */
   consume: (tx: StorageAdapter) => Promise<Result<VerificationRow>>;
   ended: SessionRow[] | undefined;
+  /** The refresh families that the move deletes, to end after its commit (ruling 43 of plan 12e). */
+  families: FamilyEnds;
 }
 
 /**
@@ -274,7 +277,7 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
               { field: "purpose", op: "eq", value: "account-delete" },
               { field: "identifier", op: "eq", value: previous.id },
             ]);
-            await endOtherAccess(tx, previous.id, move.keep, move.ended ?? null);
+            await endOtherAccess(tx, previous.id, move.keep, move.ended ?? null, move.families);
             return ok({
               previous,
               user: { ...previous, email: data.newEmail, emailVerified: true, updatedAt },
@@ -316,6 +319,7 @@ async function finish(
   ip: string | null,
   userAgent: string | null,
 ): Promise<void> {
+  await endFamilies(config, move.families);
   await runAfter(
     "user.afterUpdate",
     config.hooks.user.afterUpdate,
@@ -361,6 +365,7 @@ export async function confirmEmailChange(
     keep: data.sessionId,
     consume: (tx) => consumeVerification(tx, { purpose: "email-change", valueHash, now }),
     ended: endedList(config),
+    families: familyEnds(),
   };
   const applied = await applyChange(config, move);
   if (!applied.ok) return applied;
@@ -399,6 +404,7 @@ export async function verifyEmailChange(
     keep: session.id,
     consume: (tx) => consumeCode(tx, row, now),
     ended: endedList(config),
+    families: familyEnds(),
   };
   const applied = await applyChange(config, move);
   if (!applied.ok) return applied;
