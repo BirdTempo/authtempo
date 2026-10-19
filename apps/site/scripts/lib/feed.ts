@@ -133,49 +133,70 @@ export function atomFeed(entries: DatedEntry[], updated: string): string {
   return lines.join("\n");
 }
 
-/** The package folders of a tree that hold a package.json, sorted. */
-function folders(root: string): string[] {
-  const dir = join(root, "packages");
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && existsSync(join(dir, e.name, "package.json")))
-    .map((e) => e.name)
+/**
+ * The one list of the files outside apps/site that build-feed.ts reads, as
+ * globs from the repository root. readChangelogs and readVersions read only
+ * the files that these globs name. turbo.json lists each glob as an input of
+ * the site build, and turbo-inputs.test.ts holds both to this list.
+ */
+export const FEED_GLOBS = {
+  changelogs: "packages/*/CHANGELOG.md",
+  packages: "packages/*/package.json",
+} as const;
+
+/**
+ * Each file of a tree that a glob names, by its path from the root, sorted.
+ * A `*` names any one folder or file name, as a glob of turbo.json does.
+ */
+export function expandGlob(root: string, glob: string): string[] {
+  let paths = [""];
+  const parts = glob.split("/");
+  parts.forEach((part, i) => {
+    const last = i === parts.length - 1;
+    const re = new RegExp(
+      `^${part
+        .split("*")
+        .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+        .join("[^/]*")}$`,
+    );
+    paths = paths.flatMap((dir) => {
+      const abs = join(root, dir);
+      if (!existsSync(abs)) return [];
+      return readdirSync(abs, { withFileTypes: true })
+        .filter((e) => (last ? e.isFile() : e.isDirectory()) && re.test(e.name))
+        .map((e) => (dir === "" ? e.name : `${dir}/${e.name}`));
+    });
+  });
+  return paths.sort();
+}
+
+/** Each file that build-feed.ts reads, by its path from the root: the files of FEED_GLOBS. */
+export function feedSources(root: string): string[] {
+  return Object.values(FEED_GLOBS)
+    .flatMap((glob) => expandGlob(root, glob))
     .sort();
 }
 
-const packageOf = (root: string, folder: string) =>
-  JSON.parse(readFileSync(join(root, "packages", folder, "package.json"), "utf8")) as {
-    name: string;
-    version: string;
-  };
+const readJson = (root: string, path: string) =>
+  JSON.parse(readFileSync(join(root, path), "utf8")) as { name: string; version: string };
 
-/** Each packages/<folder>/CHANGELOG.md of a tree, with the name of its package. */
+/**
+ * Each changelog of FEED_GLOBS, with the name of the package.json beside it.
+ * A changelog with no package.json beside it throws, so the build fails closed.
+ */
 export function readChangelogs(root: string): { pkg: string; text: string }[] {
-  return folders(root)
-    .filter((f) => existsSync(join(root, "packages", f, "CHANGELOG.md")))
-    .map((f) => ({
-      pkg: packageOf(root, f).name,
-      text: readFileSync(join(root, "packages", f, "CHANGELOG.md"), "utf8"),
-    }));
-}
-
-/** The name and version of each package of a tree. */
-export function readVersions(root: string): { pkg: string; version: string }[] {
-  return folders(root).map((f) => {
-    const p = packageOf(root, f);
-    return { pkg: p.name, version: p.version };
+  const packages = new Set(expandGlob(root, FEED_GLOBS.packages));
+  return expandGlob(root, FEED_GLOBS.changelogs).map((path) => {
+    const pkgPath = path.replace(/[^/]+$/, "package.json");
+    if (!packages.has(pkgPath)) throw new Error(`${path} has no package.json beside it`);
+    return { pkg: readJson(root, pkgPath).name, text: readFileSync(join(root, path), "utf8") };
   });
 }
 
-/**
- * Each file that readChangelogs and readVersions read, by its path from the
- * root. turbo-inputs.test.ts holds each one to an input of the site build, so
- * a changed changelog misses the cache.
- */
-export function feedSources(root: string): string[] {
-  return folders(root).flatMap((f) => [
-    ...(existsSync(join(root, "packages", f, "CHANGELOG.md"))
-      ? [`packages/${f}/CHANGELOG.md`]
-      : []),
-    `packages/${f}/package.json`,
-  ]);
+/** The name and version of each package.json of FEED_GLOBS. */
+export function readVersions(root: string): { pkg: string; version: string }[] {
+  return expandGlob(root, FEED_GLOBS.packages).map((path) => {
+    const p = readJson(root, path);
+    return { pkg: p.name, version: p.version };
+  });
 }

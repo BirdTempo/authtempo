@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { checkFeed } from "../scripts/check-feed.ts";
 import {
@@ -158,6 +161,25 @@ describe("the feed writer (plan 11b Task 7)", () => {
 
   // Review of Task 7, Low 4: the drift rule of ruling 29 on this tree, not a literal.
   // A release adds a heading and a row, and the test holds without an edit.
+  it("reads a changelog only beside its package.json, and fails closed without one", () => {
+    const root = mkdtempSync(join(tmpdir(), "feed-"));
+    try {
+      mkdirSync(join(root, "packages/a"), { recursive: true });
+      mkdirSync(join(root, "packages/b"), { recursive: true });
+      writeFileSync(join(root, "packages/a/package.json"), '{"name":"@x/a","version":"0.1.0"}');
+      writeFileSync(join(root, "packages/a/CHANGELOG.md"), "# @x/a\n\n## 0.1.0\n\none\n");
+      writeFileSync(join(root, "packages/a/CHANGELOGxmd"), "not a changelog");
+      expect(feedSources(root)).toEqual(["packages/a/CHANGELOG.md", "packages/a/package.json"]);
+      expect(readChangelogs(root)).toEqual([{ pkg: "@x/a", text: "# @x/a\n\n## 0.1.0\n\none\n" }]);
+      writeFileSync(join(root, "packages/b/CHANGELOG.md"), "# b\n");
+      expect(() => readChangelogs(root)).toThrow(
+        "packages/b/CHANGELOG.md has no package.json beside it",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("holds a row of RELEASE_DATES for each heading of this tree, and a heading for each row", () => {
     const keys = releaseEntries(readChangelogs(REPO_ROOT)).map((e) => entryKey(e.pkg, e.version));
     expect(Object.keys(RELEASE_DATES).sort()).toEqual(keys.sort());
