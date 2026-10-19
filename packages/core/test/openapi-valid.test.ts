@@ -16,6 +16,8 @@ import schemaBaseText from "./fixtures/oas-3.1/schema-base.json?raw";
 type Json = Record<string, unknown>;
 
 const SCHEMA_BASE_ID = "https://spec.openapis.org/oas/3.1/schema-base/2026-08-03";
+const BASE_DIALECT = "https://spec.openapis.org/oas/3.1/dialect/2024-11-10";
+const DRAFT_2020 = "https://json-schema.org/draft/2020-12/schema";
 
 /** Each vendored file and its SHA-256 from the fixture README. */
 const FILES = [
@@ -42,10 +44,11 @@ const FILES = [
 ];
 
 // Ajv 8.20.0 resolves `$dynamicRef` only to a `$dynamicAnchor` at a schema root. The OpenAPI
-// files put the anchor "meta" under `$defs/schema`, so Ajv sends each "#meta" back to the object
+// files put the anchor "meta" under `$defs/schema`. So Ajv sends each "#meta" back to the object
 // that holds it, and every Schema Object fails. The validation starts at schema-base, whose
 // `$defs/schema` is the outermost "meta" anchor, so dynamic resolution always reaches it. Our
-// document declares the base dialect, so a static `$ref` to that anchor is the same rule.
+// document declares no dialect, so the default base dialect applies. A static `$ref` to that
+// anchor is then the same rule.
 const DYNAMIC_META = '"$dynamicRef": "#meta"';
 const STATIC_META = `"$ref": "${SCHEMA_BASE_ID}#/$defs/schema"`;
 
@@ -194,6 +197,31 @@ describe("the OpenAPI document against the OpenAPI 3.1 schema (plan 11g)", () =>
     { where: "a negative minLength", schema: { type: "string", minLength: -1 } },
   ])("refuses a schema with $where", ({ schema }) => {
     expect(validator()(oneSchemaDocument(schema))).toBe(false);
+  });
+
+  // The anchor of schema-base holds the `$schema` of each Schema Object to the base dialect. A
+  // target at the dialect root holds no `$schema`, so these probes pin the target of the rewrite.
+  it.each([
+    { where: "at the top", schema: { $schema: DRAFT_2020, type: "string" } },
+    {
+      where: "in properties",
+      schema: { type: "object", properties: { a: { $schema: DRAFT_2020, type: "string" } } },
+    },
+    { where: "in anyOf", schema: { anyOf: [{ $schema: DRAFT_2020, type: "string" }] } },
+  ])("refuses a schema that names the draft 2020-12 dialect $where", ({ schema }) => {
+    expect(validator()(oneSchemaDocument(schema))).toBe(false);
+  });
+
+  it("accepts a schema that names the base dialect at the top and nested", () => {
+    const validate = validator();
+    const valid = validate(
+      oneSchemaDocument({
+        $schema: BASE_DIALECT,
+        type: "object",
+        properties: { a: { $schema: BASE_DIALECT, type: "string" } },
+      }),
+    );
+    expect(valid, JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
 
   it("reads no URL", () => {

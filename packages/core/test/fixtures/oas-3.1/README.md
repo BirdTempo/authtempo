@@ -15,7 +15,7 @@ Read on 2026-10-19 from spec.openapis.org. Each `$id` equals its source URL.
 
 `schema-base.json` names `schema.json` and the base dialect `dialect.json`. The dialect names the base vocabulary `meta.json` and the draft 2020-12 meta-schema. Ajv's `Ajv2020` class holds the draft 2020-12 meta-schemas, so they are not here.
 
-Ajv 8.20.0 resolves `$dynamicRef` only to a `$dynamicAnchor` at a schema root, and these files put the anchor `meta` under `$defs/schema`. So the test reads `schema.json` with each of its four `"$dynamicRef": "#meta"` as a static `$ref` to `schema-base.json#/$defs/schema`, in memory only (ruling 11 of plan 11g). The validation starts at `schema-base`, so dynamic resolution reaches that anchor too, and our document declares the base dialect. The test counts the four refs, so a new file with more or fewer fails.
+Ajv 8.20.0 resolves `$dynamicRef` only to a `$dynamicAnchor` at a schema root, and these files put the anchor `meta` under `$defs/schema`. So the test reads `schema.json` with each of its four `"$dynamicRef": "#meta"` as a static `$ref` to `schema-base.json#/$defs/schema`, in memory only (ruling 11 of plan 11g). The validation starts at `schema-base`, so dynamic resolution reaches that anchor too. Our document declares no dialect, so the default base dialect applies. `openapi-valid.test.ts` pins this target: a schema that names the draft 2020-12 dialect fails, at the top and nested. The test counts the four refs, so a new file with more or fewer fails.
 
 The root `biome.json` excludes this folder. A format pass changes the bytes, and then the hashes above are false.
 
