@@ -70,14 +70,36 @@ export function rowsIn(jar: Jar, query: string, ...values: SqlStorageValue[]) {
  */
 export const SET_COOKIES: string[] = [];
 
+/** One request of this test file through the Worker, with its answer. */
+export interface Exchange {
+  method: string;
+  url: string;
+  /** The body of the request when it was a string, else "". */
+  sent: string;
+  status: number;
+  headers: [string, string][];
+  body: string;
+}
+
+/** Each exchange of fetchSelf() in this test file, in order. mailbox-only.test.ts reads them. */
+export const EXCHANGES: Exchange[] = [];
+
 /**
  * One request through the Worker. Every test request goes through here, so
- * the cookie rule reads each answer (test/node/rules.test.ts fails on
- * SELF.fetch in any other test file).
+ * the cookie rule and the mailbox rule read each answer (test/node/rules.test.ts
+ * fails on SELF.fetch in any other test file).
  */
 export async function fetchSelf(url: string, init: RequestInit = {}): Promise<Response> {
   const res = await SELF.fetch(url, init);
   SET_COOKIES.push(...res.headers.getSetCookie());
+  EXCHANGES.push({
+    method: init.method ?? "GET",
+    url,
+    sent: typeof init.body === "string" ? init.body : "",
+    status: res.status,
+    headers: [...res.headers],
+    body: await res.clone().text(),
+  });
   return res;
 }
 
