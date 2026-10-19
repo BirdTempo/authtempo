@@ -1,0 +1,144 @@
+{
+  "description": "authtempo example Worker, Basic OP, static clients (plan 12e Task 17)",
+  "alias": "authtempo",
+  "server": {
+    "discoveryUrl": "https://host.docker.internal:{PORT}/auth/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_id": "{CLIENT_ID}",
+    "client_secret": "{CLIENT_SECRET}"
+  },
+  "client2": {
+    "client_id": "{CLIENT2_ID}",
+    "client_secret": "{CLIENT2_SECRET}"
+  },
+  "browser": [
+    {
+      "match": "https://host.docker.internal:{PORT}/auth/oauth/*",
+      "tasks": [
+        {
+          "task": "Login",
+          "optional": true,
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/sign-in*",
+          "commands": [
+            [
+              "text",
+              "css",
+              "#password input[name=email]",
+              "conformance-user@example.test",
+              "optional"
+            ],
+            ["text", "css", "#password input[name=password]", "{PASSWORD}", "optional"],
+            ["click", "css", "#password button[type=submit]"]
+          ]
+        },
+        {
+          "task": "Consent",
+          "optional": true,
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/authorize*",
+          "commands": [["click", "css", "button[value=allow]"]]
+        },
+        {
+          "task": "Verify Complete",
+          "match": "*/test/*/callback*",
+          "commands": [["wait", "id", "submission_complete", 10]]
+        }
+      ]
+    }
+  ],
+  "override": {
+    "oidcc-prompt-login": {
+      "browser": [
+        {
+          "comment": "the second authorization asks for a new sign-in: the screenshot of the sign-in page",
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/*",
+          "tasks": [
+            {
+              "task": "Login",
+              "optional": true,
+              "match": "https://host.docker.internal:{PORT}/auth/oauth/sign-in*",
+              "commands": [
+                ["wait", "xpath", "//*", 10, "Sign in", "update-image-placeholder-optional"],
+                [
+                  "text",
+                  "css",
+                  "#password input[name=email]",
+                  "conformance-user@example.test",
+                  "optional"
+                ],
+                ["text", "css", "#password input[name=password]", "{PASSWORD}", "optional"],
+                ["click", "css", "#password button[type=submit]"]
+              ]
+            },
+            {
+              "task": "Consent",
+              "optional": true,
+              "match": "https://host.docker.internal:{PORT}/auth/oauth/authorize*",
+              "commands": [["click", "css", "button[value=allow]"]]
+            },
+            {
+              "task": "Verify Complete",
+              "match": "*/test/*/callback*",
+              "commands": [["wait", "id", "submission_complete", 10]]
+            }
+          ]
+        }
+      ]
+    },
+    "oidcc-max-age-1": {
+      "browser": [
+        {
+          "comment": "the second authorization asks for a new sign-in: the screenshot of the sign-in page",
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/*",
+          "tasks": [
+            {
+              "task": "Login",
+              "optional": true,
+              "match": "https://host.docker.internal:{PORT}/auth/oauth/sign-in*",
+              "commands": [
+                ["wait", "xpath", "//*", 10, "Sign in", "update-image-placeholder-optional"],
+                [
+                  "text",
+                  "css",
+                  "#password input[name=email]",
+                  "conformance-user@example.test",
+                  "optional"
+                ],
+                ["text", "css", "#password input[name=password]", "{PASSWORD}", "optional"],
+                ["click", "css", "#password button[type=submit]"]
+              ]
+            },
+            {
+              "task": "Consent",
+              "optional": true,
+              "match": "https://host.docker.internal:{PORT}/auth/oauth/authorize*",
+              "commands": [["click", "css", "button[value=allow]"]]
+            },
+            {
+              "task": "Verify Complete",
+              "match": "*/test/*/callback*",
+              "commands": [["wait", "id", "submission_complete", 10]]
+            }
+          ]
+        }
+      ]
+    },
+    "oidcc-ensure-registered-redirect-uri": {
+      "browser": [
+        {
+          "comment": "core shows its error page, not a redirect: a screenshot for review",
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/authorize*",
+          "tasks": [
+            {
+              "task": "Expect the error page",
+              "match": "https://host.docker.internal:{PORT}/auth/oauth/authorize*",
+              "commands": [
+                ["wait", "xpath", "//*", 10, "invalid_request", "update-image-placeholder"]
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

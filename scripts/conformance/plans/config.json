@@ -1,0 +1,15 @@
+{
+  "description": "authtempo example Worker, Config OP (plan 12e Task 17)",
+  "alias": "authtempo",
+  "server": {
+    "discoveryUrl": "https://host.docker.internal:{PORT}/auth/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_id": "{CLIENT_ID}",
+    "client_secret": "{CLIENT_SECRET}"
+  },
+  "client2": {
+    "client_id": "{CLIENT2_ID}",
+    "client_secret": "{CLIENT2_SECRET}"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "description": "authtempo example Worker, back-channel logout, dynamic clients (plan 12e Task 17)",
+  "server": {
+    "discoveryUrl": "https://host.docker.internal:{PORT}/auth/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_name": "conformance dynamic client"
+  },
+  "client2": {
+    "client_name": "conformance dynamic client 2"
+  },
+  "browser": [
+    {
+      "match": "https://host.docker.internal:{PORT}/auth/oauth/*",
+      "tasks": [
+        {
+          "task": "Login",
+          "optional": true,
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/sign-in*",
+          "commands": [
+            [
+              "text",
+              "css",
+              "#password input[name=email]",
+              "conformance-user@example.test",
+              "optional"
+            ],
+            ["text", "css", "#password input[name=password]", "{PASSWORD}", "optional"],
+            ["click", "css", "#password button[type=submit]"]
+          ]
+        },
+        {
+          "task": "Consent",
+          "optional": true,
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/authorize*",
+          "commands": [["click", "css", "button[value=allow]"]]
+        },
+        {
+          "task": "Verify Complete",
+          "match": "*/test/*/callback*",
+          "commands": [["wait", "id", "submission_complete", 10]]
+        }
+      ]
+    },
+    {
+      "match": "https://host.docker.internal:{PORT}/auth/oauth/end-session*",
+      "tasks": [
+        {
+          "task": "Confirm the sign-out",
+          "optional": true,
+          "match": "https://host.docker.internal:{PORT}/auth/oauth/end-session*",
+          "commands": [["click", "css", "form button[type=submit]"]]
+        },
+        {
+          "task": "Verify Complete",
+          "match": "*/test/*/post*"
+        }
+      ]
+    }
+  ]
+}
