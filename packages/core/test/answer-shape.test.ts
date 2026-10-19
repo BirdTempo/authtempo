@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ENTERED, NO_KEYS, shapeOf, shapePaths } from "./setup/answer-shape.js";
+import { ENTERED, NO_KEYS, shapeOf, shapePaths, shapeVerdict } from "./setup/answer-shape.js";
 
 // Two closed branches that differ only in the value of `state`, and one optional key.
 const byEnum = z.union([
@@ -51,6 +51,20 @@ describe("the shape walk of the answer check (plan 11g)", () => {
       shapeOf(z.strictObject({ last: byFormat }), { last: { at: "2026-10-19T00:00:00.000Z" } })
         .twoBranches,
     ).toEqual(["last"]);
+  });
+
+  it("fails the record of a body that fits two branches", () => {
+    // The recorder writes this verdict, and the check prints it beside the route key.
+    expect(shapeVerdict(byFormat, { at: "2026-10-19T00:00:00.000Z" })).toEqual({
+      verdict: "the body fits two branches of a union at the answer",
+      absent: ["note"],
+      nulls: [],
+    });
+    expect(shapeVerdict(byEnum, { state: "held", user: "u" })).toEqual({
+      verdict: "ok",
+      absent: ["note"],
+      nulls: [],
+    });
   });
 
   it("blocks each node that can hold keys and that the walk does not enter", () => {

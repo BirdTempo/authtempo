@@ -31,17 +31,17 @@ export const pageBody = z.object({
 });
 
 /**
- * The query of the challenge page (plan 12c). `method` is the method the
- * page shows, `backup=1` asks for the backup code form, and `error` is the
- * refusal after a wrong code. The route holds the challenge to the engine's
- * form.
- */
-/**
  * The refusal that the challenge page shows after a wrong code. The route,
  * the query, and the document read this one copy.
  */
 export const CHALLENGE_PAGE_ERROR = "invalid_code";
 
+/**
+ * The query of the challenge page (plan 12c). `method` is the method the
+ * page shows, `backup=1` asks for the backup code form, and `error` is the
+ * refusal after a wrong code. The route holds the challenge to the engine's
+ * form.
+ */
 export const challengeQuery = z.object({
   challenge: z.string().regex(TWO_FACTOR_TOKEN_RE),
   method: z.enum(["totp", "email"]).optional(),

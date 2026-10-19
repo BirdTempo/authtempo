@@ -28,7 +28,7 @@ const FS_MODULE = "node:fs";
 vi.mock("../../src/http/router.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/http/router.js")>();
   const { appendFileSync }: AppendFs = await import(/* @vite-ignore */ FS_MODULE);
-  const { shapeOf } = await import("./answer-shape.js");
+  const { shapeVerdict } = await import("./answer-shape.js");
   const { ERRORS, OAUTH_ERRORS } = await import("../../src/errors.js");
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { AUTH_ERROR_PARAM } = await import("../../src/http/redirect.js");
@@ -63,11 +63,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   }
 
   /** The shape of a 2xx JSON answer beside its verdict: the keys left out, and the keys set null. */
-  interface JsonJudged {
-    verdict: string;
-    absent: string[];
-    nulls: string[];
-  }
+  type JsonJudged = import("./answer-shape.js").ShapeJudged;
   const NO_SHAPE = { absent: [], nulls: [] };
 
   /** The key of the mounted route, or the entry of ROUTES whose feature is off (the router's `not_found`), or null. */
@@ -123,16 +119,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     }
     const parsed = fit.schema.safeParse(body);
     // The shape of the answer, so the check can hold the optional and nullable keys to the wire.
-    if (parsed.success) {
-      const { twoBranches, ...shape } = shapeOf(fit.schema, body);
-      // The walk can read such a body under the wrong branch and hide a key of the right one.
-      if (twoBranches.length > 0)
-        return {
-          verdict: `the body fits two branches of a union at ${twoBranches.join(", ")}`,
-          ...shape,
-        };
-      return { verdict: "ok", ...shape };
-    }
+    if (parsed.success) return shapeVerdict(fit.schema, body);
     const verdict = parsed.error.issues
       .map((i) => {
         const where = "keys" in i ? (i.keys as string[]).join(",") : i.path.join(".");

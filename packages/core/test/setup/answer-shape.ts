@@ -214,3 +214,23 @@ export function shapeOf(schema: z.ZodType, body: unknown): BodyShape {
     twoBranches: [...new Set(shape.twoBranches)],
   };
 }
+
+/** The verdict of a body that parses under its schema, beside its shape. */
+export interface ShapeJudged extends Shape {
+  verdict: string;
+}
+
+/**
+ * The record of a body that parses under its schema: the verdict `ok`, or a
+ * failure when the body fits two branches of a union. The walk can read such
+ * a body under the wrong branch and hide a key of the right one.
+ */
+export function shapeVerdict(schema: z.ZodType, body: unknown): ShapeJudged {
+  const { twoBranches, ...shape } = shapeOf(schema, body);
+  if (twoBranches.length > 0)
+    return {
+      verdict: `the body fits two branches of a union at ${twoBranches.join(", ")}`,
+      ...shape,
+    };
+  return { verdict: "ok", ...shape };
+}
