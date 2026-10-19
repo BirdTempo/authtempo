@@ -493,7 +493,10 @@ export const TOOLS: readonly ToolRow[] = [
         .regex(/^\//)
         .default("/auth")
         .describe("The basePath of the deployment's config, /auth by default."),
-      strict: z.boolean().default(false).describe("true: each skip counts as a failure."),
+      strict: z
+        .boolean()
+        .default(false)
+        .describe("true: each skip counts as a failure, except compat_database."),
     }),
     outputKeys: CHECK_KEYS,
   },

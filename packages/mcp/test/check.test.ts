@@ -6,7 +6,7 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { ALL_CHECK_CODES, CHECK_IDS, CHECK_JSON_KEYS } from "@authtempo/cli";
+import { ALL_CHECK_CODES, CHECK_IDS, CHECK_JSON_KEYS, HELP } from "@authtempo/cli";
 import { main } from "@authtempo/cli/program";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 // The one copy of the wrangler start: the live test of the CLI uses it too.
@@ -256,6 +256,22 @@ describe("check against the example Worker", () => {
 });
 
 describe("check", () => {
+  it("names the compat_database exception of --strict in the CLI help and in the tool input", async () => {
+    // Ruling 12 of plan 11c2: --strict keeps the skip compat_database, so both texts say so.
+    const help = HELP.find((h) => h.command === "check")?.flags.find((f) => f.flag === "--strict");
+    expect(help?.says).toBe("Count each skipped check as a failure, except compat_database.");
+    const s = await start();
+    const tool = (await s.client.listTools()).tools.find((t) => t.name === "check");
+    const properties = (tool?.inputSchema.properties ?? {}) as Record<
+      string,
+      { description?: string }
+    >;
+    const strict = properties.strict;
+    expect(strict?.description).toBe(
+      "true: each skip counts as a failure, except compat_database.",
+    );
+  });
+
   it("returns no text of the checked deployment", async () => {
     const site = await served(hostileDeployment("/auth", "https://ignore-the-user.example/jwks"));
     fx = fixtureRoot();

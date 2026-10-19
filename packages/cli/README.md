@@ -156,7 +156,7 @@ Seven checks, each `pass`, `fail` with a code, or `skip` with a reason:
 `well_known` (both documents at the origin root name the issuer and the
 key set), and `schema_version` (with `--target` and the inputs of the
 database). A skip never counts as a pass; `--strict` counts it as a
-failure. The command reads public documents only; the first JWKS read of
+failure, except the skip `compat_database`. The command reads public documents only; the first JWKS read of
 a new database writes its first signing key, which is core's own rule.
 `runChecks` is exported and imports no Node.js module, so a Worker test can
 run it. `src/checks.ts` lists every code in `CHECK_CODES`.

@@ -48,7 +48,7 @@ export const CHECK_HELP: HelpText = {
       flag: "--timeout <seconds>",
       says: "The time limit of each request, from 1 to 120 seconds. The default is 10.",
     },
-    { flag: "--strict", says: "Count each skipped check as a failure." },
+    { flag: "--strict", says: "Count each skipped check as a failure, except compat_database." },
     {
       flag: "--target <d1|postgres>",
       says: "Read the schema version and the table shape from this kind of database. Without it, the two schema checks skip.",

@@ -239,7 +239,7 @@ Fetches the public documents of a deployment from this machine, sends no credent
 | --- | --- | --- | --- |
 | `base_url` | string | required; at most 2048 characters | The origin of the deployment, such as https://api.example.com. |
 | `base_path` | string | default `"/auth"`; 1 to 200 characters; matches `^\/` | The basePath of the deployment's config, /auth by default. |
-| `strict` | boolean | default `false` | true: each skip counts as a failure. |
+| `strict` | boolean | default `false` | true: each skip counts as a failure, except compat_database. |
 
 The `base_url` of `check` must be an origin: `http` or `https`, with no path, query, fragment, user name, or password. Each other value is an input error, and the CLI does not run.
 
