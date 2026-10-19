@@ -8,7 +8,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
   - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
 sidebar:
-  order: 9
+  order: 8.5
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -30,14 +30,16 @@ import test from "../../../../../samples/migrate/workos.test.ts?raw";
 
 ### Export
 
-1. Run the script below in a folder that only you can read.
-2. The script writes `users.json`, `identities.json`, `memberships.json`, and `organizations.json`.
+1. Save the script below as `workos-export.sh` in a folder that only you can read.
+2. Run it with `bash workos-export.sh`. Do not paste it into a shell: `set -e` closes that shell at the first error.
+3. The script stops at the first failed call. `curl` prints the HTTP error, such as 401 for a wrong key.
+4. It writes `users.json`, `identities.json`, `memberships.json`, and `organizations.json`.
 
-```sh
+```sh title="workos-export.sh"
 set -euo pipefail
 umask 077
 api=https://api.workos.com
-page() { curl -sf -H "Authorization: Bearer $WORKOS_API_KEY" "$api$1"; }
+page() { curl -sSf -H "Authorization: Bearer $WORKOS_API_KEY" "$api$1"; }
 list() {
   after=""; : > "$2.ndjson"
   while :; do
@@ -48,23 +50,37 @@ list() {
   done
   jq -s 'add // []' "$2.ndjson" > "$2.json"
 }
+# A user that WorkOS deleted after the user list answers 404: write [] and a note.
+identities() {
+  code=$(curl -sS -o identity.tmp -w '%{http_code}' -H "Authorization: Bearer $WORKOS_API_KEY" "$api/user_management/users/$1/identities")
+  case "$code" in
+    200) cat identity.tmp ;;
+    404) echo "note: user $1 is deleted in WorkOS; it has no identities in the export" >&2; printf '[]' ;;
+    *) echo "error: the identities of user $1 answered HTTP $code" >&2; return 1 ;;
+  esac
+}
+trap 'rm -f ./*.ndjson ./m-*.json ./identity.tmp' EXIT
 list "/user_management/users?limit=100&order=asc" users
 list "/organizations?limit=100&order=asc" organizations
 : > memberships.ndjson
 for o in $(jq -r '.[].id' organizations.json); do
-  list "/user_management/organization_memberships?organization_id=$o&limit=100" "m-$o"
+  list "/user_management/organization_memberships?organization_id=$o&statuses=active,inactive,pending&limit=100" "m-$o"
   cat "m-$o.json" >> memberships.ndjson
 done
 jq -s 'add // []' memberships.ndjson > memberships.json
 for u in $(jq -r '.[].id' users.json); do
-  printf '{"%s":%s}\n' "$u" "$(page "/user_management/users/$u/identities")"
+  i=$(identities "$u")
+  printf '{"%s":%s}\n' "$u" "$i"
 done | jq -s 'add // {}' > identities.json
-rm -f ./*.ndjson ./m-*.json
+```
+
+```sh
+bash workos-export.sh
 ```
 
 ### Carry the passwords
 
-WorkOS exports no password hash, so no password moves. Each user signs in by a magic link, or sets a new password by a reset. The API turns on both, and organizations.
+WorkOS exports no password hash, so no password moves. Each user signs in by a magic link, or sets a new password by a reset. The API below turns on both, and the organizations feature.
 
 <Code code={config} lang="ts" title="The API after the import" />
 
@@ -116,7 +132,7 @@ WorkOS sends the person to its AuthKit page. authtempo has no page for a web app
 | --- | --- |
 | `getSignInUrl()`, `getSignUpUrl()` | The app's own form, with `client.magicLink.request` or `client.password.signIn`. |
 | `userManagement.authenticateWithPassword({ email, password })` | `client.password.signIn({ email, password })` |
-| `userManagement.sendMagicAuthCode({ email })` | `client.emailOtp.request({ email })`, or `client.magicLink.request({ email })` |
+| `userManagement.sendMagicAuthCode({ email })` | `client.magicLink.request({ email })` |
 | `userManagement.getAuthorizationUrl({ provider: "GoogleOAuth" })` | Send the browser to `/auth/social/google/start?next=/` on the API. |
 | `userManagement.sendPasswordResetEmail({ email })` | `client.password.requestReset({ email })` |
 | `userManagement.resetPassword({ token, newPassword })` | `client.password.reset({ token, password })`, with the token of the reset link |
@@ -133,10 +149,12 @@ WorkOS sends the person to its AuthKit page. authtempo has no page for a web app
 - An `OAuth` identity maps `GoogleOAuth` to Google, `AppleOAuth` to Apple, and `GitHubOAuth` to GitHub, with `idp_id` as the subject.
 - `LinkedInOAuth` is listed as `identity:linkedin_legacy`. Every other provider and every other type is dropped and listed.
 - Only an `active` membership imports. The role `admin` becomes admin, `member` becomes member, and the first admin becomes owner.
+- The membership of a user with an unverified address is skipped as `user_unverified`. The user imports, and the command exits 0.
 - An organization with no active admin gives `no_owner`, and the command exits 1.
-- A membership of another status is listed on its user as `member:<status>`.
+- The script reads the `active`, `inactive`, and `pending` memberships. Each `inactive` or `pending` membership is listed on its user as `member:<status>`.
 - A WorkOS SSO user and a directory user are not read. Directory sync is a later plan.
-- A user that WorkOS deleted between two calls of the script is absent from the user list, and its identities are not read.
+- A user that WorkOS deletes after the user list call still imports. Its identities call answers 404, and the script writes no identity and prints a note.
+- A membership of a user that the user list lacks is not read.
 
 :::caution
 Warning: the four files hold the address and the name of each user. Keep them in a folder that only you can read, and delete them after the cutover.

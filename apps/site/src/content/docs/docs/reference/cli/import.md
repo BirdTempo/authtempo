@@ -8,6 +8,8 @@ sources:
   - packages/import/README.md "The exit status and the report"
   - packages/import/README.md "Targets"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
+  - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
 sidebar:
   order: 4
 ---
@@ -166,7 +168,7 @@ Each conflict below has its remedy. The reason in the report is the anchor of it
 
 ### `unmatched_row`
 
-Two export files of one provider disagree on this id, such as the Clerk CSV and the API users. Export both files again at the same time, and run the import again.
+Two export files of one provider disagree on this id, such as the Clerk CSV and the API users. For Clerk, export both files again at the same time. For Auth0, request the hash file again from the support case, or export the users file again to match it.
 
 ### `duplicate_row`
 
@@ -202,7 +204,7 @@ No member of the organization maps to an owner. Map a source role to `owner` or 
 
 ### `duplicate_passkey`
 
-One record holds a passkey credential id twice, or another write took it. Core keeps one row per credential, so run the import again and read the report.
+One record holds a passkey credential id twice, or another write took it. Core keeps one row per credential. If the record holds the id twice, remove one row from the export. Else run the import again.
 
 ### `user_not_imported`
 

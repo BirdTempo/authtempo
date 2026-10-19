@@ -10,6 +10,8 @@ sources:
   - packages/compat-better-auth/README.md "Account operations"
   - packages/compat-better-auth/README.md "JWT and the OAuth provider"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
+  - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
 sidebar:
   order: 2
 ---
@@ -21,6 +23,10 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 **For:** a developer whose app runs Better Auth 1.7 and must keep its code and its tables.
 
 **What it does:** the Better Auth package names point at `@authtempo/compat-better-auth`. The app's code then runs on the engine of authtempo, on the app's own Better Auth tables.
+
+:::caution
+Warning: upgrade Better Auth to 1.7.7 or later before the move. Version 1.7.7 fixed a magic link takeover, and the old system stays the rollback target during the move.
+:::
 
 ## Before you start
 
@@ -160,7 +166,7 @@ Warning: a `secret` other than the app's value locks every user with the second 
 
 - `BetterAuthCompatError` at start: change each option in its list.
 - `relation "ta_limit" already exists`: the schema holds the tables of the Postgres adapter. Run the compatibility storage on a schema without them.
-- `no such column: issuer` on D1: the 1.7 file ran on older tables. Run the command again with `--before-1.7`.
+- `no such column: issuer` on D1: the 1.7 file ran on tables from before Better Auth 1.7. The failed run left its compat copies in `migrations_dir`. Delete each copy whose name ends in `_compat_better_auth.sql`, or in `_compat_schema_v5.sql` to `_compat_schema_v10.sql`. Then run the command again with `--before-1.7`.
 - [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link, an invitation, or a delete link from before the cutover. Send it again.
 
 ## Next
