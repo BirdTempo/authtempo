@@ -21,7 +21,8 @@ export function siteLabels(): string[] {
  * The prose of the root layout and the home page as one page, so check-terms
  * and check-sentences hold it (brand spec 2). Each string is one paragraph.
  * The title and the description are also in the body, because check-sentences
- * reads the body only. Plan 11b moves the root prose into its content collection `site`.
+ * reads the body only. The home keeps this source (ruling 5 of the plan 11b
+ * lane); each other root page of plan 11b keeps its prose in the collection `site`.
  */
 export function homeProsePage(): Page {
   const paragraphs = [

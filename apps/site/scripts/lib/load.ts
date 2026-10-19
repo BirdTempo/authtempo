@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { FontManifest } from "../check-fonts.ts";
 import { walk } from "./files.ts";
 import type { Page } from "./markdown.ts";
-import { DIST, DOCS, REPO, SITE } from "./paths.ts";
+import { DIST, DOCS, REPO, SITE, SITE_CONTENT } from "./paths.ts";
 
 /** Every page source under src/content/docs/. */
 export function docsPages(): Page[] {
@@ -22,10 +22,25 @@ export function distPages(): Map<string, string> {
   );
 }
 
+/**
+ * Each entry of the collection `site`, by the path site/<file>. The collection
+ * reads the .md files at the top of its folder only, so this does too. Until
+ * plan 11b Task 4 adds the first entry, the folder does not exist, because git
+ * keeps no empty folder. The list is then empty, and check-site-pages holds
+ * its length to MINIMUM_ENTRIES, so a lost entry or folder fails there.
+ */
+export function sitePages(dir: string = SITE_CONTENT): Page[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".md"))
+    .sort()
+    .map((name) => ({ path: `site/${name}`, source: readFileSync(`${dir}${name}`, "utf8") }));
+}
+
 /** Each built HTML file outside docs/ and pagefind/, and not 404.html: the root pages (plan 11b Task 2). */
-export function rootPages(): Map<string, string> {
+export function rootPages(pages: Map<string, string> = distPages()): Map<string, string> {
   return new Map(
-    [...distPages()].filter(
+    [...pages].filter(
       ([p]) => !p.startsWith("docs/") && !p.startsWith("pagefind/") && p !== "404.html",
     ),
   );

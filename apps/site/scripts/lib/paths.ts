@@ -8,3 +8,5 @@ export const REPO = fileURLToPath(new URL("../../../../", import.meta.url));
 export const DIST = `${SITE}dist/`;
 /** The page sources. Every page is under docs/, so its URL is under /docs/. */
 export const DOCS = `${SITE}src/content/docs/`;
+/** The prose of the root pages: the content collection `site` (plan 11b Task 2). */
+export const SITE_CONTENT = `${SITE}src/content/site/`;

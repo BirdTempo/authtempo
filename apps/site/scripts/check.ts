@@ -34,6 +34,7 @@ import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkScript } from "./check-script.ts";
 import { checkSentences } from "./check-sentences.ts";
+import { checkSitePages } from "./check-site-pages.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
 import { checkTokens } from "./check-tokens.ts";
@@ -56,6 +57,7 @@ import {
   readSiteFile,
   rootPages,
   sampleFiles,
+  sitePages,
   siteSources,
 } from "./lib/load.ts";
 import { wireLists } from "./lib/mcp-wire.ts";
@@ -94,15 +96,18 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     run: () => checkLinks(new Map([...distPages(), ...distSvgs()]), distFiles()),
   },
   { name: "check-frontmatter", run: () => checkFrontmatter(docsPages(), readRepoFile) },
+  // Each root page has the layout and its entry of the collection `site` (plan 11b).
+  { name: "check-site-pages", run: () => checkSitePages(sitePages(), rootPages()) },
   // The help texts of the CLI keep the same terms and sentence limits as the pages (plan 11c).
-  // The home prose keeps the docs rules (brand spec 2; plan 11b1).
+  // The home prose keeps the docs rules (brand spec 2; plan 11b1), and so do the
+  // entries of the collection `site` (plan 11b).
   {
     name: "check-terms",
-    run: () => checkTerms([...docsPages(), homeProsePage(), ...cliHelpPages()]),
+    run: () => checkTerms([...docsPages(), ...sitePages(), homeProsePage(), ...cliHelpPages()]),
   },
   {
     name: "check-sentences",
-    run: () => checkSentences([...docsPages(), homeProsePage(), ...cliHelpPages()]),
+    run: () => checkSentences([...docsPages(), ...sitePages(), homeProsePage(), ...cliHelpPages()]),
   },
   {
     name: "check-fences",
