@@ -77,7 +77,7 @@ function fromCore(c: unknown): McpCaller | null {
   // It stays so that a future core caller with these fields is never taken for an OAuth caller.
   if (!isObject(c) || c.kind !== "oauth" || !isObject(c.user)) return null;
   const { clientId, scopes, resource, tokenId, expiresAt } = c;
-  // The token subject, the value that the Verifier answers. A pairwise client never learns `user.id`.
+  // The token subject, as the Verifier answers it. A pairwise client must never see `user.id`.
   const userId = c.subject;
   if (
     typeof userId !== "string" ||
