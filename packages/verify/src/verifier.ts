@@ -145,7 +145,10 @@ function sessionClaimsPass(
  * `aud` is a string, and it is the resource that the request URL falls under, by `resourceOf`.
  * `exp` is a number after now with no clock skew.
  * `sub`, `client_id`, `scope`, and `jti` are strings.
- * Core also checks that the user exists; an offline check cannot.
+ * Core also makes checks that an offline check cannot make, because each one reads core's
+ * storage or config. For a user token: the user exists, and each scope is in `oauth.scopes`.
+ * For a client token: the client exists, it holds the `client_credentials` grant, and each
+ * scope is in its `credentialsScopes` and in `oauth.scopes` (plan 12e rulings 28 and 29).
  * THE COPIES MUST STAY EQUAL: `test/engine-parity.test.ts` pins them.
  */
 function accessClaimsPass(
