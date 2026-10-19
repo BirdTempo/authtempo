@@ -377,8 +377,10 @@ function readClientMetadata(
   // A client of client_credentials alone has no redirect. A registration and a document always have one.
   const needsRedirect =
     source !== "create" || grantTypes === null || grantTypes.includes("authorization_code");
-  const redirectUris =
-    needsRedirect || !absent(m.redirect_uris) ? redirectList(m.redirect_uris) : [];
+  // Such a client holds an empty list, and an update sends the whole row back: an empty list reads as absent.
+  const noRedirect =
+    absent(m.redirect_uris) || (Array.isArray(m.redirect_uris) && m.redirect_uris.length === 0);
+  const redirectUris = needsRedirect || !noRedirect ? redirectList(m.redirect_uris) : [];
   if (!redirectUris) return fail("invalid_redirect_uri", "redirect_uris");
   const name = clientName(m.client_name);
   if (name === undefined) return meta("client_name");
