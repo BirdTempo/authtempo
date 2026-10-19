@@ -415,6 +415,38 @@ describe("RP-initiated logout (plan 12e Task 15, OIDC RP-Initiated Logout 1.0)",
       );
   });
 
+  it("refuses a hint of another issuer on the same storage", async () => {
+    const h = oauthHandle();
+    // A second instance with another baseURL shares the storage, so it shares the signing key.
+    const other = oauthHandle({
+      baseURL: "https://other.example.com",
+      storage: h.storage,
+      clock: h.clock,
+    });
+    const s = await signedIn(h);
+    const hint = await idTokenOf(h, s.cookie, await client(h));
+    // The hint verifies under the shared key, and its sid and sub name this session.
+    // Only its iss refuses it: the page asks, nothing ends, and nothing redirects.
+    await expectConfirmPage(
+      await other.auth.handle(
+        new Request(
+          `https://other.example.com/auth/oauth/end-session?${new URLSearchParams({
+            id_token_hint: hint,
+            post_logout_redirect_uri: BYE,
+          })}`,
+          { headers: { cookie: s.cookie } },
+        ),
+      ),
+    );
+    expect(await live(h, s.session.id)).toBe(true);
+    // The same request at the issuer of the hint ends the session.
+    const done = await h.auth.handle(
+      endGet({ id_token_hint: hint, post_logout_redirect_uri: BYE }, { cookie: s.cookie }),
+    );
+    expect(done.headers.get("location")).toBe(BYE);
+    expect(await live(h, s.session.id)).toBe(false);
+  });
+
   it("fires afterEnd with oidc_logout", async () => {
     const ended: string[] = [];
     const h = oauthHandle({
