@@ -149,10 +149,23 @@ describe("api.oauth.clients (plan 12e)", () => {
       ok: true,
       value: { redirectUris: [], credentialsScopes: ["mcp:read"] },
     });
+    // A list that is not empty still gets every check of a redirect URI, and a valid one stays.
+    expect(
+      await clients.create({
+        authMethod: "client_secret_basic",
+        grantTypes: ["client_credentials"],
+        credentialsScopes: ["mcp:read"],
+        redirectUris: ["not a url"],
+      }),
+    ).toEqual({ ok: false, error: "invalid_redirect_uri", status: 400 });
     // The code grant still needs a redirect URI, so an empty list stays refused there.
     expect(
       await clients.update({ clientId, grantTypes: ["authorization_code", "client_credentials"] }),
     ).toEqual({ ok: false, error: "invalid_redirect_uri", status: 400 });
+    expect(await clients.update({ clientId, redirectUris: [REDIRECT] })).toMatchObject({
+      ok: true,
+      value: { redirectUris: [REDIRECT] },
+    });
   });
 
   it("refuses a built-in scope as a credentials scope", async () => {
