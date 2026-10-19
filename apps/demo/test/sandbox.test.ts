@@ -27,6 +27,41 @@ function rowsIn(id: string, query: string): Promise<Record<string, SqlStorageVal
   );
 }
 
+/** The gate of the Worker. Each gate test reads only its own TEST-NET-1 address. */
+function gate() {
+  return env.GATE.get(env.GATE.idFromName("gate"));
+}
+
+/** A first visit from one address, through the gate. */
+async function visitFrom(ip: string): Promise<void> {
+  const res = await SELF.fetch(`${ORIGIN}/`, {
+    redirect: "manual",
+    headers: { "cf-connecting-ip": ip },
+  });
+  expect(res.status).toBe(303);
+}
+
+/** One hour and 1 ms pass for the gate row of `ip`: its time moves back. */
+async function hourPasses(ip: string): Promise<void> {
+  await runInDurableObject(gate(), (_instance, state) => {
+    state.storage.sql.exec("UPDATE admit SET at = at - 3600001 WHERE ip = ?", ip);
+  });
+}
+
+function gateRows(ip: string): Promise<Record<string, SqlStorageValue>[]> {
+  return runInDurableObject(gate(), (_instance, state) =>
+    state.storage.sql.exec("SELECT ip FROM admit WHERE ip = ?", ip).toArray(),
+  );
+}
+
+/** The alarm of the gate, and the time of its oldest row (NaN with no row). */
+function gateAlarm(): Promise<{ alarm: number | null; oldest: number }> {
+  return runInDurableObject(gate(), async (_instance, state) => ({
+    alarm: await state.storage.getAlarm(),
+    oldest: Number(state.storage.sql.exec("SELECT min(at) AS m FROM admit").one().m ?? Number.NaN),
+  }));
+}
+
 describe("the demo Worker and its sandboxes", () => {
   it("makes a sandbox on the first visit and sets the cookie", async () => {
     const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual" });
@@ -142,18 +177,23 @@ describe("the demo Worker and its sandboxes", () => {
     expect(await rowsIn(b, query)).toEqual([]);
   });
 
-  it("keeps no IP in the gate past one hour", async () => {
-    // The gate of the Worker. Its other rows carry the time of this run, so the
-    // probe reads only its own two addresses of the TEST-NET-1 block.
-    const gate = env.GATE.get(env.GATE.idFromName("gate"));
-    const t0 = Date.parse("2026-01-01T00:00:00.000Z");
-    expect(await gate.admit("192.0.2.1", t0)).toEqual({ ok: true });
-    expect(await gate.admit("192.0.2.2", t0 + 3_600_000)).toEqual({ ok: true });
-    const ips = await runInDurableObject(gate, (_instance, state) =>
-      state.storage.sql
-        .exec("SELECT ip FROM admit WHERE ip LIKE '192.0.2.%' ORDER BY at")
-        .toArray(),
-    );
-    expect(ips).toEqual([{ ip: "192.0.2.2" }]);
+  it("deletes an IP at the next admit one hour after its visit", async () => {
+    await visitFrom("192.0.2.1");
+    await hourPasses("192.0.2.1");
+    await visitFrom("192.0.2.2");
+    expect(await gateRows("192.0.2.1")).toEqual([]);
+    expect(await gateRows("192.0.2.2")).toHaveLength(1);
+  });
+
+  it("deletes an IP by the gate alarm one hour after its visit, with no other visit", async () => {
+    await visitFrom("192.0.2.3");
+    const before = await gateAlarm();
+    expect(before.alarm).toBe(before.oldest + 3_600_000);
+    await hourPasses("192.0.2.3");
+    expect(await runDurableObjectAlarm(gate())).toBe(true);
+    expect(await gateRows("192.0.2.3")).toEqual([]);
+    // The alarm is set again for the next oldest row, or not at all.
+    const after = await gateAlarm();
+    expect(after.alarm).toBe(Number.isNaN(after.oldest) ? null : after.oldest + 3_600_000);
   });
 });
