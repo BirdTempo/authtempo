@@ -375,3 +375,135 @@ describe("the CIMD revision -02 (plan 12e Task 6)", () => {
     );
   });
 });
+
+describe("the members of a document that core does not serve (ruling 24 of plan 12e)", () => {
+  const DROPPED_LOG = "authtempo: client metadata member dropped";
+
+  it("reads the live VS Code document as a public client and drops the device grant", async () => {
+    const doc = await fixture("vscode");
+    const url = String(doc.client_id);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = fakeFetch();
+    f.answers.set(url, () => json(doc));
+    const h = instance(f.fn);
+    expect(await findClient(h.config, url)).toMatchObject({
+      id: url,
+      kind: "cimd",
+      name: "Visual Studio Code",
+      authMethod: "none",
+      redirectUris: ["http://127.0.0.1:33418/", "https://vscode.dev/redirect"],
+      grantTypes: ["authorization_code", "refresh_token"],
+    });
+    expect(warn.mock.calls).toEqual([[DROPPED_LOG, "grant_types"]]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("device_code");
+    const s = await signedIn(h);
+    const p = await pkce();
+    const redirect = "http://127.0.0.1:33418/";
+    const { code } = await authorized(h, s.cookie, {
+      clientId: url,
+      challenge: p.challenge,
+      redirectUri: redirect,
+    });
+    const res = await h.auth.handle(
+      tokenPost({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: p.verifier,
+        client_id: url,
+        redirect_uri: redirect,
+        resource: RESOURCE,
+      }),
+    );
+    expect(await answer(res)).toEqual({ status: 200, body: null });
+  });
+
+  it("drops each member that core does not serve, and logs its name, never its value", async () => {
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    const marker = "7f3a";
+    const cases: [Record<string, unknown>, string, Record<string, unknown>][] = [
+      [
+        { grant_types: ["authorization_code", "client_credentials", `urn:x:${marker}`] },
+        "grant_types",
+        { grantTypes: ["authorization_code"] },
+      ],
+      [{ response_types: ["code", `id_token${marker}`] }, "response_types", {}],
+      [
+        { backchannel_logout_uri: `https://app.example.com/bc-${marker}` },
+        "backchannel_logout_uri",
+        { backchannelLogoutUri: null },
+      ],
+      [
+        { backchannel_logout_session_required: true },
+        "backchannel_logout_session_required",
+        { backchannelLogoutSessionRequired: false },
+      ],
+      [{ id_token_signed_response_alg: `RS256${marker}` }, "id_token_signed_response_alg", {}],
+      [{ id_token_signed_response_alg: "RS256" }, "id_token_signed_response_alg", {}],
+    ];
+    for (const [over, member, row] of cases) {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const f = fakeFetch();
+      f.answers.set(url, () => json({ ...base, ...over }));
+      const h = instance(f.fn);
+      expect({ over, row: await findClient(h.config, url) }).toMatchObject({
+        over,
+        row: { id: url, authMethod: "none", ...row },
+      });
+      expect({ over, lines: warn.mock.calls }).toEqual({ over, lines: [[DROPPED_LOG, member]] });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(marker);
+      warn.mockRestore();
+    }
+  });
+
+  it("refuses a document with no code grant or no code response type", async () => {
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    for (const [over, why] of [
+      [{ grant_types: ["refresh_token"] }, "grant_types"],
+      [{ grant_types: [] }, "grant_types"],
+      [{ grant_types: "authorization_code" }, "grant_types"],
+      [{ response_types: ["id_token"] }, "response_types"],
+      [{ response_types: "code" }, "response_types"],
+    ] as const) {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const f = fakeFetch();
+      f.answers.set(url, () => json({ ...base, ...over }));
+      const h = instance(f.fn);
+      expect({ over, client: await findClient(h.config, url) }).toEqual({ over, client: null });
+      expect({ over, lines: log.mock.calls }).toEqual({ over, lines: [[REFUSED_LOG, why]] });
+      log.mockRestore();
+    }
+  });
+
+  it("names the member of each refusal in the log, never its value", async () => {
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    const marker = "7f3a";
+    const key = await keyOf("k-1");
+    const cases: [Record<string, unknown>, string][] = [
+      [{ client_name: `${marker}${"n".repeat(80)}` }, "client_name"],
+      [{ redirect_uris: [`http://client.example.com/${marker}`] }, "redirect_uris"],
+      [{ post_logout_redirect_uris: [`javascript:${marker}`] }, "post_logout_redirect_uris"],
+      [{ subject_type: `pairwise${marker}` }, "subject_type"],
+      [{ dpop_bound_access_tokens: marker }, "dpop_bound_access_tokens"],
+      [{ jwks: { keys: [{ kty: marker }] } }, "jwks"],
+      [
+        { jwks: { keys: [key.jwk] }, jwks_uri: `https://client.example.com/${marker}.json` },
+        "jwks_uri",
+      ],
+      [{ jwks_uri: `https://127.0.0.1/${marker}.json` }, "jwks_uri"],
+      [{ token_endpoint_auth_method: "private_key_jwt" }, "jwks"],
+    ];
+    for (const [over, why] of cases) {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const f = fakeFetch();
+      f.answers.set(url, () => json({ ...base, ...over }));
+      const h = instance(f.fn);
+      expect({ over, client: await findClient(h.config, url) }).toEqual({ over, client: null });
+      expect({ over, lines: log.mock.calls }).toEqual({ over, lines: [[REFUSED_LOG, why]] });
+      expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
+      log.mockRestore();
+    }
+  });
+});

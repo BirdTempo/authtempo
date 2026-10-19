@@ -1,4 +1,5 @@
 import type { ResolvedConfig, ResolvedOAuth } from "../config.js";
+import type { OAuthErrorCode } from "../errors.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { FOREIGN_ALGS, keyFitsAlg } from "../primitives/foreign-jwk.js";
@@ -301,85 +302,138 @@ function stringList(value: unknown, ok: (s: string) => boolean, max: number): st
   return new Set(value).size === value.length ? (value as string[]) : null;
 }
 
+/** A read of client metadata: the fields and the members a document dropped, or the refusal and its member. */
+type MetadataRead =
+  | { ok: true; fields: ClientFields; dropped: string[] }
+  | { ok: false; error: OAuthErrorCode; why: string };
+
+/**
+ * The grants of a document that core serves, in document order, once each,
+ * or null when the value is not a list of strings. A grant that core does
+ * not serve is dropped, and `dropped` gets the member name.
+ */
+function servedList(
+  value: unknown,
+  served: readonly string[],
+  member: string,
+  dropped: string[],
+): string[] | null {
+  if (!Array.isArray(value) || !value.every((x) => typeof x === "string")) return null;
+  const kept = [...new Set(value as string[])].filter((x) => served.includes(x));
+  if (kept.length < value.length) dropped.push(member);
+  return kept;
+}
+
 /**
  * The client metadata of RFC 7591 section 2 and OIDC Registration section 2,
  * as the fields of a client row (plan 12e). `register` reads a registration
  * body; `create` reads `api.oauth.clients`, which also takes
  * `client_credentials`, `credentials_scopes`, and `introspect`. A
  * registration ignores those two fields: they are no RFC 7591 metadata.
- * `cimd` reads a client metadata document with the rules of -02 section 4.1
- * (`cimdCredentialRule`) and the grants of a registration.
  */
 export function validClientMetadata(
   config: ResolvedConfig,
   m: Record<string, unknown>,
-  source: "register" | "create" | "cimd",
+  source: "register" | "create",
 ): OAuthResult<ClientFields> {
+  const read = readClientMetadata(config, m, source);
+  return read.ok ? oauthOk(read.fields) : oauthFail(read.error);
+}
+
+/**
+ * The one reader of client metadata. Each refusal names its member, never
+ * its value. `cimd` reads a client metadata document (ruling 24 of plan
+ * 12e). The rules of -02 section 4.1 and the key rules stay strict. A
+ * document cannot change at the request of this server. So a member that
+ * core does not serve is dropped, not refused. These members are another
+ * grant, another response type, `backchannel_logout_uri` (Task 16 decides),
+ * and an `id_token_signed_response_alg` other than `jwtMint.alg`.
+ */
+function readClientMetadata(
+  config: ResolvedConfig,
+  m: Record<string, unknown>,
+  source: "register" | "create" | "cimd",
+): MetadataRead {
+  const fail = (error: OAuthErrorCode, why: string): MetadataRead => ({ ok: false, error, why });
+  const meta = (why: string) => fail("invalid_client_metadata", why);
   const oauth = config.oauth;
-  if (!oauth) return oauthFail("invalid_request");
-  if (source === "cimd" && cimdCredentialRule(m) !== null)
-    return oauthFail("invalid_client_metadata");
+  if (!oauth) return fail("invalid_request", "oauth");
+  const cimd = source === "cimd";
+  const dropped: string[] = [];
+  if (cimd) {
+    const rule = cimdCredentialRule(m);
+    if (rule !== null) return meta(rule);
+  }
   const absent = (v: unknown) => v === undefined || v === null;
   const allowedGrants = source === "create" ? CREATE_GRANT_TYPES : GRANT_TYPES;
-  const grantTypes =
-    m.grant_types === undefined
-      ? [...GRANT_TYPES]
-      : stringList(m.grant_types, (g) => allowedGrants.includes(g), allowedGrants.length);
+  let grantTypes: string[] | null;
+  if (m.grant_types === undefined || (cimd && m.grant_types === null))
+    grantTypes = [...GRANT_TYPES];
+  else if (cimd) grantTypes = servedList(m.grant_types, GRANT_TYPES, "grant_types", dropped);
+  else
+    grantTypes = stringList(m.grant_types, (g) => allowedGrants.includes(g), allowedGrants.length);
+  // A document is a client of the code grant: core serves no other grant to a document.
+  if (cimd && !grantTypes?.includes("authorization_code")) return meta("grant_types");
   // A client of client_credentials alone has no redirect. A registration and a document always have one.
   const needsRedirect =
     source !== "create" || grantTypes === null || grantTypes.includes("authorization_code");
   const redirectUris =
     needsRedirect || !absent(m.redirect_uris) ? redirectList(m.redirect_uris) : [];
-  if (!redirectUris) return oauthFail("invalid_redirect_uri");
+  if (!redirectUris) return fail("invalid_redirect_uri", "redirect_uris");
   const name = clientName(m.client_name);
-  if (name === undefined) return oauthFail("invalid_client_metadata");
+  if (name === undefined) return meta("client_name");
   // RFC 7591 section 2 and OIDC Registration section 2 default to
   // client_secret_basic. Core keeps none, so an MCP client that omits the
   // field works as a public client (owner decision 4 of 2026-10-14, spec
   // 8.16 item 2).
   const method = m.token_endpoint_auth_method ?? "none";
-  if (!AUTH_METHODS.includes(method as ClientAuthMethod))
-    return oauthFail("invalid_client_metadata");
+  if (!AUTH_METHODS.includes(method as ClientAuthMethod)) return meta("token_endpoint_auth_method");
   const authMethod = method as ClientAuthMethod;
-  if (!grantTypes || grantTypes.length === 0) return oauthFail("invalid_client_metadata");
+  if (!grantTypes || grantTypes.length === 0) return meta("grant_types");
   // A public client has no credential, so no grant can name it alone.
   if (grantTypes.includes("client_credentials") && authMethod === "none")
-    return oauthFail("invalid_client_metadata");
-  if (!subsetOf(m.response_types, RESPONSE_TYPES)) return oauthFail("invalid_client_metadata");
+    return meta("grant_types");
+  if (cimd && !absent(m.response_types)) {
+    const kept = servedList(m.response_types, RESPONSE_TYPES, "response_types", dropped);
+    if (!kept?.includes("code")) return meta("response_types");
+  } else if (!subsetOf(m.response_types, RESPONSE_TYPES)) return meta("response_types");
   // OIDC Registration section 2: jwks and jwks_uri never together.
-  if (!absent(m.jwks) && !absent(m.jwks_uri)) return oauthFail("invalid_client_metadata");
+  if (!absent(m.jwks) && !absent(m.jwks_uri)) return meta("jwks_uri");
   const jwks = absent(m.jwks) ? null : clientKeySet(m.jwks);
-  if (!absent(m.jwks) && !jwks) return oauthFail("invalid_client_metadata");
+  if (!absent(m.jwks) && !jwks) return meta("jwks");
   let jwksUri: string | null = null;
   if (!absent(m.jwks_uri)) {
     if (typeof m.jwks_uri !== "string" || !validCimdUrl(m.jwks_uri, config.baseURL))
-      return oauthFail("invalid_client_metadata");
+      return meta("jwks_uri");
     // With no fetch, core can never read the set, and the client could never authenticate.
-    if (!oauth.fetch) return oauthFail("invalid_client_metadata");
+    if (!oauth.fetch) return meta("jwks_uri");
     jwksUri = m.jwks_uri;
   }
-  if (authMethod === "private_key_jwt" && !jwks && !jwksUri)
-    return oauthFail("invalid_client_metadata");
+  if (authMethod === "private_key_jwt" && !jwks && !jwksUri) return meta("jwks");
   const postLogoutRedirectUris = stringList(
     m.post_logout_redirect_uris,
     validRedirectUri,
     REDIRECT_MAX,
   );
-  if (!postLogoutRedirectUris) return oauthFail("invalid_client_metadata");
+  if (!postLogoutRedirectUris) return meta("post_logout_redirect_uris");
   // Plan 12e Task 16 adds the back-channel logout and its checks.
-  if (!absent(m.backchannel_logout_uri) || !absent(m.backchannel_logout_session_required))
-    return oauthFail("invalid_client_metadata");
+  for (const member of ["backchannel_logout_uri", "backchannel_logout_session_required"]) {
+    if (absent(m[member])) continue;
+    if (!cimd) return meta(member);
+    dropped.push(member);
+  }
   const subjectType = m.subject_type ?? "public";
-  if (subjectType !== "public" && subjectType !== "pairwise")
-    return oauthFail("invalid_client_metadata");
+  if (subjectType !== "public" && subjectType !== "pairwise") return meta("subject_type");
   // One key of one alg signs every token (owner decision 1).
   if (
     !absent(m.id_token_signed_response_alg) &&
     m.id_token_signed_response_alg !== config.jwtMint?.alg
-  )
-    return oauthFail("invalid_client_metadata");
+  ) {
+    if (!cimd) return meta("id_token_signed_response_alg");
+    dropped.push("id_token_signed_response_alg");
+  }
   const dpopBound = m.dpop_bound_access_tokens ?? false;
-  if (typeof dpopBound !== "boolean") return oauthFail("invalid_client_metadata");
+  if (typeof dpopBound !== "boolean") return meta("dpop_bound_access_tokens");
   let credentialsScopes: string[] = [];
   let introspect = false;
   if (source === "create") {
@@ -389,27 +443,31 @@ export function validClientMetadata(
       (s) => oauth.scopes.has(s) && !BUILT_IN_SCOPES.has(s),
       oauth.scopes.size,
     );
-    if (!scopes) return oauthFail("invalid_client_metadata");
+    if (!scopes) return meta("credentials_scopes");
     credentialsScopes = scopes;
     const flag = m.introspect ?? false;
-    if (typeof flag !== "boolean") return oauthFail("invalid_client_metadata");
+    if (typeof flag !== "boolean") return meta("introspect");
     introspect = flag;
   }
-  return oauthOk({
-    name,
-    redirectUris,
-    authMethod,
-    jwks,
-    jwksUri,
-    grantTypes,
-    credentialsScopes,
-    introspect,
-    postLogoutRedirectUris,
-    backchannelLogoutUri: null,
-    backchannelLogoutSessionRequired: false,
-    subjectType,
-    dpopBound,
-  });
+  return {
+    ok: true,
+    dropped,
+    fields: {
+      name,
+      redirectUris,
+      authMethod,
+      jwks,
+      jwksUri,
+      grantTypes,
+      credentialsScopes,
+      introspect,
+      postLogoutRedirectUris,
+      backchannelLogoutUri: null,
+      backchannelLogoutSessionRequired: false,
+      subjectType,
+      dpopBound,
+    },
+  };
 }
 
 /** The RFC 7591 answer of one client row. */
@@ -634,7 +692,7 @@ async function guardedJson(
  * The rule of -02 section 4.1 that a metadata document breaks, or null.
  * A document has no shared secret: no `client_secret`, no
  * `client_secret_expires_at`, and no method of a secret. The third rule of
- * 4.1, public keys only, is `clientKey` in `validClientMetadata`.
+ * 4.1, public keys only, is `clientKey` in `readClientMetadata`.
  */
 function cimdCredentialRule(m: Record<string, unknown>): string | null {
   if (m.client_secret !== undefined) return "client_secret is present (-02 section 4.1)";
@@ -650,9 +708,10 @@ function cimdCredentialRule(m: Record<string, unknown>): string | null {
  * The client fields of a client ID metadata document, or null with one log
  * line that names the reason and never the document. The guards are those
  * of `guardedJson` with the cap `CIMD_MAX_BYTES`. The document must name its
- * own URL as `client_id` (-02 section 4). Then `validClientMetadata` reads it
+ * own URL as `client_id` (-02 section 4). Then `readClientMetadata` reads it
  * with the rules of -02 section 4.1, so a `jwks_uri` gets the host rule of
- * `validCimdUrl` too (-02 section 8.6).
+ * `validCimdUrl` too (-02 section 8.6). Each dropped member writes one
+ * warning line with its name, never its value.
  */
 export async function fetchCimd(config: ResolvedConfig, url: string): Promise<ClientFields | null> {
   const refuse = (why: string) => {
@@ -663,12 +722,11 @@ export async function fetchCimd(config: ResolvedConfig, url: string): Promise<Cl
   if ("why" in got) return refuse(got.why);
   const d = got.doc;
   if (d.client_id !== url) return refuse("client_id is not the document URL");
-  const rule = cimdCredentialRule(d);
-  if (rule !== null) return refuse(rule);
-  const fields = validClientMetadata(config, d, "cimd");
-  if (!fields.ok)
-    return refuse(fields.error === "invalid_redirect_uri" ? "redirect_uris" : "metadata");
-  return fields.value;
+  const read = readClientMetadata(config, d, "cimd");
+  if (!read.ok) return refuse(read.why);
+  for (const member of read.dropped)
+    console.warn("authtempo: client metadata member dropped", member);
+  return read.fields;
 }
 
 /**
