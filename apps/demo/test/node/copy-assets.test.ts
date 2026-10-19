@@ -231,6 +231,7 @@ describe("the import reader of copy-assets.mjs", () => {
   });
 
   it("fails closed on an import that it cannot read", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the text is source for the reader, so ${x} must stay as typed.
     for (const form of ["const m=await import(`./${x}.js`);", "const m=await import(name);"]) {
       const client = clientOf(form);
       expect(() => run({ out: out(), client }), form).toThrow(
@@ -247,6 +248,7 @@ describe("the import reader of copy-assets.mjs", () => {
       'const t = `export * from "@x/template"`;',
       'const r = /import "@x\\/regex"/;',
       "const q = a / 2 / b;",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the text is source for the reader, so ${b} must stay as typed.
       'const w = `a${b}import "@x/substitution"`;',
       "const o = { import: 1, export: 2 };",
       "o.import(1); o?.export;",
