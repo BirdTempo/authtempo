@@ -10,11 +10,13 @@ import {
   boundToken,
   claimsOf,
   dpopKey,
+  FILES,
   ISSUER,
   MCP,
   makeClock,
   makeServer,
   type Server,
+  sessionJwt,
   signedIn,
   withBearer,
   withDpop,
@@ -213,6 +215,76 @@ describe("DPoP in the verifier (plan 12e Task 10)", () => {
     // Without required, the same Bearer token passes.
     const optional = await verifierOf(server).verifyRequest(withBearer(TOOLS, plain));
     expect(optional.ok && optional.value?.kind).toBe("oauth");
+  });
+
+  it("takes a proof only in an alg of dpop.algs (RFC 9449 section 4.3 item 5)", async () => {
+    const server = makeServer();
+    const { token, proof } = await bound(server);
+    // The helper key is ES256, so a server of EdDSA alone refuses its proof.
+    const eddsa = verifierOf(server, { algs: ["EdDSA"] });
+    const request = withDpop(TOOLS, token, await proof());
+    expect(await eddsa.verifyRequest(request)).toEqual({ ok: true, value: null });
+    expect(eddsa.unauthorized({ request }).headers.get("www-authenticate")).toBe(
+      'Bearer, DPoP error="invalid_dpop_proof", algs="EdDSA"',
+    );
+    const es256 = await verifierOf(server, { algs: ["ES256"] }).verifyRequest(
+      withDpop(TOOLS, token, await proof()),
+    );
+    expect(es256.ok && es256.value?.kind).toBe("oauth");
+  });
+
+  it("refuses a proof whose iat is outside dpop.windowSeconds (RFC 9449 section 11.1)", async () => {
+    const server = makeServer();
+    const { key, token } = await bound(server);
+    const old = () =>
+      key.proof(server, {
+        htm: "GET",
+        htu: TOOLS,
+        accessToken: token,
+        iat: Math.floor(server.clock.now().getTime() / 1000) - 30,
+      });
+    const short = verifierOf(server, { windowSeconds: 10 });
+    expect(await short.verifyRequest(withDpop(TOOLS, token, await old()))).toEqual({
+      ok: true,
+      value: null,
+    });
+    // The default window of 60 s takes the same age.
+    const wide = await verifierOf(server).verifyRequest(withDpop(TOOLS, token, await old()));
+    expect(wide.ok && wide.value?.kind).toBe("oauth");
+  });
+
+  it("keeps a spent proof in the store for the whole window", async () => {
+    const server = makeServer();
+    const { token, proof } = await bound(server);
+    const v = verifierOf(server);
+    const once = await proof();
+    const first = await v.verifyRequest(withDpop(TOOLS, token, once));
+    expect(first.ok && first.value?.kind).toBe("oauth");
+    // 59 s on, the iat check still passes, so only the store refuses the replay.
+    server.clock.advance(59_000);
+    expect(await v.verifyRequest(withDpop(TOOLS, token, once))).toEqual({ ok: true, value: null });
+  });
+
+  it("reads no session JWT under the DPoP scheme", async () => {
+    const server = makeServer();
+    const s = await signedIn(server);
+    const jwt = await sessionJwt(server, s.sessionToken);
+    const key = await dpopKey();
+    const v = createVerifier({
+      issuer: ISSUER,
+      audience: FILES,
+      resources: [MCP],
+      accept: ["session-jwt", "oauth"],
+      fetch: server.fetch,
+      clock: server.clock,
+      dpop: {},
+    });
+    const url = `${FILES}/doc`;
+    const proof = await key.proof(server, { htm: "GET", htu: url, accessToken: jwt });
+    expect(await v.verifyRequest(withDpop(url, jwt, proof))).toEqual({ ok: true, value: null });
+    // The same token as a Bearer passes: the DPoP scheme is for an access token only.
+    const bearer = await v.verifyRequest(withBearer(url, jwt));
+    expect(bearer.ok && bearer.value?.kind).toBe("session-jwt");
   });
 
   it("refuses a wrong dpop option at construction", () => {
