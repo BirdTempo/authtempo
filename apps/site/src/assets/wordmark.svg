@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 28" class="at-wordmark" role="img" aria-label="authtempo">
+  <g class="at-mark">
+    <rect x="3" y="14" width="3" height="8" rx="1.5" fill="currentColor"/>
+    <rect x="8" y="9" width="3" height="13" rx="1.5" fill="currentColor"/>
+    <rect class="at-mark-accent" x="13" y="2" width="3" height="20" rx="1.5" fill="currentColor"/>
+    <rect x="18" y="11" width="3" height="11" rx="1.5" fill="currentColor"/>
+  </g>
+  <text x="31" y="22" font-family="Inter, sans-serif" font-weight="600" font-size="22" letter-spacing="-0.44" fill="currentColor">authtempo</text>
+</svg>

@@ -332,3 +332,7 @@
     scroll-behavior: auto !important;
   }
 }
+/* The third bar of the mark is the accent (brand spec 3). */
+.at-mark-accent {
+  fill: var(--at-accent);
+}

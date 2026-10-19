@@ -1,0 +1,28 @@
+{
+  "chrome": "Google Chrome 155.0.8059.82",
+  "date": "2026-10-19T02:12:18.523Z",
+  "command": "node apps/site/scripts/render-assets.ts",
+  "files": [
+    {
+      "file": "favicon-192.png",
+      "width": 192,
+      "height": 192,
+      "bytes": 1686,
+      "sha256": "1285b101e1aab289729775251d27d439db8e3f7552d5b4e3763ee862a5f0cec2"
+    },
+    {
+      "file": "apple-touch-icon.png",
+      "width": 180,
+      "height": 180,
+      "bytes": 2003,
+      "sha256": "617d496731e37472ef0131a4a0377a0f9d12fd60dd3e57ce084dc477a6ec676f"
+    },
+    {
+      "file": "og.png",
+      "width": 1200,
+      "height": 630,
+      "bytes": 25248,
+      "sha256": "803d2fa50b8fb427c8666eddfc6e41fb182b08cb9cf59d79efeb8cdb09fd3858"
+    }
+  ]
+}

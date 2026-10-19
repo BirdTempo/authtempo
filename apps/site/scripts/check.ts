@@ -172,13 +172,13 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
       ),
   },
   {
-    // Brand spec 4 and 14. Task 6 passes the favicon; until then it is the placeholder of plan 11a.
+    // Brand spec 4 and 14. The favicon reads no token; its colors must be the ink and the accent.
     name: "check-tokens",
     run: () =>
       checkTokens({
         css: readSiteFile("src/styles/tokens.css") ?? "",
         sources: siteSources(),
-        favicon: null,
+        favicon: readSiteFile("public/favicon.svg"),
       }),
   },
   {
