@@ -52,8 +52,8 @@ export function demoEnd(published: boolean):
 
 /**
  * The IPv6 prefix length that one per-IP count of core covers. Core ipKey
- * writes it at the end of the key of an IPv6 address ("2001:db8:1:2::/64"),
- * so the page reads it from core at build time and types no number.
+ * writes it at the end of the key of an IPv6 address ("2001:db8:1:2::/64").
+ * So the page reads it from core at build time and types no number.
  */
 export function ipv6Prefix(key: (ip: string) => string = ipKey): number {
   const m = /\/(\d+)$/.exec(key("2001:db8:1:2:3:4:5:6"));

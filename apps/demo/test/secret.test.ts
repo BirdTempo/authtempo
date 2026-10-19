@@ -28,9 +28,9 @@ async function codeOf(jar: Jar, email: string) {
   return { secret: String(meta?.value), id: String(row?.id), hash: String(row?.value_hash), code };
 }
 
-// Spec 24 item 11 (Task 9 review of plan 11b, Low 3): each sandbox has its
-// own secret, and the auth of the sandbox reads it. Core stores an email code
-// as HMAC-SHA256 under the app secret of "<row id>:<code>" (engine/email-otp.ts).
+// Spec 24 item 11 and the Task 9 review of plan 11b, Low 3. Each sandbox has
+// its own secret, and the auth of the sandbox reads it. Core stores an email
+// code as HMAC-SHA256 under the app secret of "<row id>:<code>" (engine/email-otp.ts).
 describe("the secret of a sandbox", () => {
   it("is the key of each code hash of that sandbox, and of no other", async () => {
     const a = await codeOf(await newSandbox(), "pat@example.com");

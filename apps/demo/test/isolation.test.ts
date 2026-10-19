@@ -174,8 +174,8 @@ function refused(jar: Jar, res: Response): boolean {
 
 /**
  * Each item of `held` does nothing in the sandbox of `other`. The checks that
- * only read come first. `fresh` is true when `other` has made no data yet, so
- * a cross of the stores meets a named refusal here, not a step of hold().
+ * only read come first. `fresh` is true when `other` has made no data yet.
+ * Then a cross of the stores meets a named refusal here, not a step of hold().
  *
  * Two tables of core get no refusal of their own here (Task 12 re-review,
  * Low 4). ta_limit holds the limiter counts, and ta_identity holds a social

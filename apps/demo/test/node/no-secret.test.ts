@@ -108,15 +108,15 @@ const PUBLIC_RUNS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Each credential form in `text`, after each public PEM block. The forms:
- * - a token of a core prefix;
- * - a hex run of 32 characters or more (16 bytes, as a sandbox id, or 32 bytes);
- * - a base64url run of 43 characters or more with a digit, a capital, and a
- *   small letter (32 bytes or more, as a sandbox secret), quoted or not;
- * - 32 bytes in standard base64 with its padding (44 characters);
- * - a string that a name with "secret" in it takes.
- * A random value of 32 bytes in base64url has all three kinds of character,
- * so the rule of three misses almost none and passes plain words.
+ * Each credential form in `text`, after each public PEM block. The scan finds
+ * five forms. The first is a token of a core prefix. The second is a hex run
+ * of 32 characters or more, as a sandbox id. The third is a base64url run of
+ * 43 characters or more with a digit, a capital, and a small letter. That is
+ * 32 bytes or more, as a sandbox secret, quoted or not. The fourth is 32
+ * bytes in standard base64 with its padding. The last is a string that a
+ * name with "secret" in it takes. A random value of 32 bytes in base64url
+ * has all three kinds of character. So the rule of three misses almost none,
+ * and it passes plain words.
  */
 function credentials(text: string): string[] {
   const found: string[] = [];
