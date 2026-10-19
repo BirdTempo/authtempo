@@ -142,7 +142,7 @@ describe("prompt=login, max_age, and auth_time (plan 12e, OIDC Core 3.1.2.1)", (
     expect((await h.auth.handle(ask(s.input, { max_age: "2" }, s.cookie))).status).toBe(200);
     signInIdOf(await h.auth.handle(ask(s.input, { max_age: "0" }, fresh.cookie)));
     // A value that is not a count of seconds, or a repeated one, goes back as invalid_request.
-    for (const max_age of ["-1", "1.5", "1e3", "", " 1", "abc", "12345678901"])
+    for (const max_age of ["-1", "1.5", "1e3", " 1", "abc", "12345678901"])
       expect({
         max_age,
         error: errorOf(await h.auth.handle(ask(s.input, { max_age }, s.cookie))),
@@ -153,6 +153,42 @@ describe("prompt=login, max_age, and auth_time (plan 12e, OIDC Core 3.1.2.1)", (
     expect(errorOf(await h.auth.handle(ask(s.input, { max_age: "5" }, s.cookie, "max_age")))).toBe(
       "invalid_request",
     );
+  });
+
+  it("counts an empty max_age, request, request_uri, registration, or dpop_jkt as omitted (RFC 6749 3.1)", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    // The session is 2 s old: a max_age of 1 would send it to the sign-in step.
+    h.clock.advance(2_000);
+    for (const name of ["max_age", "request", "request_uri", "registration", "dpop_jkt"])
+      expect({
+        name,
+        status: (await h.auth.handle(ask(s.input, { [name]: "" }, s.cookie))).status,
+      }).toEqual({ name, status: 200 });
+    // Two empty copies are omitted too; an empty copy beside a value is one value.
+    expect((await h.auth.handle(ask(s.input, { max_age: "" }, s.cookie, "max_age"))).status).toBe(
+      200,
+    );
+    const p = new URLSearchParams(authorizeParams(s.input));
+    p.append("max_age", "");
+    p.append("max_age", "1");
+    signInIdOf(
+      await h.auth.handle(
+        new Request(`${BASE_URL}/auth/oauth/authorize?${p}`, { headers: { cookie: s.cookie } }),
+      ),
+    );
+    // An empty dpop_jkt binds no key: the code exchange needs no proof.
+    const page = await h.auth.handle(ask(s.input, { dpop_jkt: "" }, s.cookie));
+    const done = await h.auth.handle(
+      consentPost(
+        { request_id: requestIdOf(await page.text()), decision: "allow" },
+        {
+          cookie: s.cookie,
+        },
+      ),
+    );
+    const code = locationOf(done).searchParams.get("code") ?? "";
+    expect((await h.auth.handle(exchange(code, s.clientId, s.verifier))).status).toBe(200);
   });
 
   it("answers login_required to prompt=none with either case", async () => {

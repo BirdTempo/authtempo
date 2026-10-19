@@ -157,6 +157,16 @@ function single(params: URLSearchParams, name: string): string | null | undefine
   return all[0] ?? null;
 }
 
+/**
+ * `single`, with an empty value as absent: RFC 6749 section 3.1 (read
+ * 2026-10-20) treats a parameter sent without a value as omitted.
+ */
+function given(params: URLSearchParams, name: string): string | null | undefined {
+  const all = params.getAll(name).filter((v) => v !== "");
+  if (all.length > 1) return undefined;
+  return all[0] ?? null;
+}
+
 /** Absent, or at most 512 characters with no control character. */
 function shortText(value: string | null | undefined): value is string | null {
   if (value === undefined) return false;
@@ -194,7 +204,8 @@ export async function checkAuthorize(
   });
   const state = single(params, "state");
   if (!shortText(state)) return back("invalid_request", null);
-  for (const [name, error] of REFUSED_PARAMS) if (params.has(name)) return back(error, state);
+  for (const [name, error] of REFUSED_PARAMS)
+    if (given(params, name) !== null) return back(error, state);
   for (const name of IGNORED_PARAMS)
     if (single(params, name) === undefined) return back("invalid_request", state);
   const responseType = single(params, "response_type");
@@ -224,10 +235,10 @@ export async function checkAuthorize(
   if (prompt === undefined) return back("invalid_request", state);
   const prompts = new Set((prompt ?? "").split(" ").filter((p) => p.length > 0));
   if (prompts.has("none") && prompts.size > 1) return back("invalid_request", state);
-  const maxAge = single(params, "max_age");
+  const maxAge = given(params, "max_age");
   if (maxAge === undefined || (maxAge !== null && !MAX_AGE_RE.test(maxAge)))
     return back("invalid_request", state);
-  const dpopJkt = single(params, "dpop_jkt");
+  const dpopJkt = given(params, "dpop_jkt");
   if (dpopJkt === undefined || (dpopJkt !== null && !DPOP_JKT_RE.test(dpopJkt)))
     return back("invalid_request", state);
   return {
