@@ -1,0 +1,377 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AuthConfig } from "../src/config.js";
+import { resolveConfig } from "../src/config.js";
+import { createAuth } from "../src/create-auth.js";
+import { CIMD_REVISION, findClient } from "../src/engine/oauth-clients.js";
+import { createMemoryLimiter } from "../src/limiter/memory.js";
+import { randomBase64Url, toBase64Url } from "../src/primitives/crypto.js";
+import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
+import {
+  authorized,
+  type Handle,
+  ISSUER,
+  pkce,
+  RESOURCE,
+  SCOPES,
+  signedIn,
+  tokenPost,
+} from "./oauth-helpers.js";
+
+/**
+ * The node:fs read of the fixtures and of the source. Core's typecheck has
+ * no Node types, because core runs on Workers; vitest runs in Node. A
+ * specifier in a constant keeps the import out of the typecheck.
+ */
+interface SourceFs {
+  readFileSync(file: URL, encoding: "utf8"): string;
+}
+const FS_MODULE = "node:fs";
+const readText = async (path: string) => {
+  const { readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+};
+const fixture = async (name: string) =>
+  JSON.parse(await readText(`./fixtures/cimd/${name}.json`)) as Record<string, unknown>;
+
+const ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+const REFUSED_LOG = "authtempo: client metadata document refused";
+const enc = new TextEncoder();
+
+interface Key {
+  kid: string;
+  jwk: Record<string, unknown>;
+  privateKey: CryptoKey;
+}
+
+/** An Ed25519 key that this test generates, with its public JWK. */
+async function keyOf(kid: string): Promise<Key> {
+  const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as Record<string, unknown>;
+  return { kid, jwk: { ...jwk, kid }, privateKey: pair.privateKey };
+}
+
+/** A good client assertion of `clientId` (RFC 7523 section 3), signed by `key`. */
+async function assertion(h: Handle, key: Key, clientId: string): Promise<string> {
+  const now = Math.floor(h.clock.now().getTime() / 1000);
+  const header = { alg: "EdDSA", kid: key.kid, typ: "client-authentication+jwt" };
+  const payload = {
+    iss: clientId,
+    sub: clientId,
+    aud: ISSUER,
+    exp: now + 60,
+    iat: now,
+    jti: randomBase64Url(16),
+  };
+  const input = `${toBase64Url(enc.encode(JSON.stringify(header)))}.${toBase64Url(enc.encode(JSON.stringify(payload)))}`;
+  const sig = await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, enc.encode(input));
+  return `${input}.${toBase64Url(new Uint8Array(sig))}`;
+}
+
+const json = (body: unknown) =>
+  new Response(typeof body === "string" ? body : JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+/** A fake `oauth.fetch` that answers from a map and counts its calls. */
+function fakeFetch() {
+  const answers = new Map<string, () => Response>();
+  const calls: string[] = [];
+  const fn = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    const answer = answers.get(url);
+    if (!answer) throw new Error(`no fake answer for ${url}`);
+    return answer();
+  }) as typeof fetch;
+  return { fn, answers, calls };
+}
+
+/** One instance with CIMD on over `base`: each call has its own document cache. */
+function instance(fetchFn: typeof fetch, base = makeAuth()): Handle {
+  const input: AuthConfig = {
+    baseURL: BASE_URL,
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [APP_ORIGIN],
+    storage: base.storage,
+    mail: { send: async () => {} },
+    clock: base.clock,
+    limiter: createMemoryLimiter(base.clock),
+    oauth: { resources: [RESOURCE], scopes: SCOPES, fetch: fetchFn },
+  };
+  return {
+    auth: createAuth(input),
+    config: resolveConfig(input),
+    storage: base.storage,
+    clock: base.clock,
+  };
+}
+
+async function answer(res: Response) {
+  return { status: res.status, body: res.status === 200 ? null : await res.json() };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("the CIMD revision -02 (plan 12e Task 6)", () => {
+  it("accepts the -00 fixture as a public client", async () => {
+    const doc = await fixture("draft-00");
+    const url = String(doc.client_id);
+    const f = fakeFetch();
+    f.answers.set(url, () => json(doc));
+    const h = instance(f.fn);
+    expect(await findClient(h.config, url)).toMatchObject({
+      id: url,
+      kind: "cimd",
+      name: "Example MCP Client",
+      redirectUris: ["http://127.0.0.1:3000/callback", "http://localhost:3000/callback"],
+      authMethod: "none",
+      secretHash: null,
+      jwks: null,
+      jwksUri: null,
+      grantTypes: ["authorization_code"],
+    });
+    const s = await signedIn(h);
+    const p = await pkce();
+    const redirect = "http://127.0.0.1:3000/callback";
+    const { code } = await authorized(h, s.cookie, {
+      clientId: url,
+      challenge: p.challenge,
+      redirectUri: redirect,
+    });
+    const res = await h.auth.handle(
+      tokenPost({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: p.verifier,
+        client_id: url,
+        redirect_uri: redirect,
+        resource: RESOURCE,
+      }),
+    );
+    expect(await answer(res)).toEqual({ status: 200, body: null });
+  });
+
+  it("accepts the -02 fixture with private_key_jwt and jwks as a confidential client, and then needs an assertion", async () => {
+    const fixed = await fixture("draft-02");
+    const url = String(fixed.client_id);
+    const jwksUrl = String(fixed.jwks_uri);
+    const key = await keyOf("k-1");
+    const { jwks_uri: _uri, ...inline } = fixed;
+    // The fixture as it is (jwks_uri), and the same document with its set inline.
+    for (const [form, doc] of [
+      ["jwks_uri", fixed],
+      ["jwks", { ...inline, jwks: { keys: [key.jwk] } }],
+    ] as const) {
+      const f = fakeFetch();
+      f.answers.set(url, () => json(doc));
+      f.answers.set(jwksUrl, () => json({ keys: [key.jwk] }));
+      const h = instance(f.fn);
+      expect({ form, row: await findClient(h.config, url) }).toMatchObject({
+        form,
+        row: {
+          kind: "cimd",
+          authMethod: "private_key_jwt",
+          secretHash: null,
+          ...(form === "jwks_uri"
+            ? { jwks: null, jwksUri: jwksUrl }
+            : { jwks: { keys: [key.jwk] }, jwksUri: null }),
+        },
+      });
+      const s = await signedIn(h);
+      const p = await pkce();
+      const { code } = await authorized(h, s.cookie, { clientId: url, challenge: p.challenge });
+      const body = {
+        grant_type: "authorization_code",
+        code,
+        code_verifier: p.verifier,
+        redirect_uri: String((fixed.redirect_uris as string[])[0]),
+        resource: RESOURCE,
+      };
+      // A client_id alone is no auth for a confidential client. No Authorization header: 400 (ruling 19).
+      const bare = await h.auth.handle(tokenPost({ ...body, client_id: url }));
+      expect({ form, answer: await answer(bare) }).toEqual({
+        form,
+        answer: { status: 400, body: { error: "invalid_client" } },
+      });
+      // The refused auth spent nothing: the same code passes with an assertion.
+      const res = await h.auth.handle(
+        tokenPost({
+          ...body,
+          client_assertion_type: ASSERTION_TYPE,
+          client_assertion: await assertion(h, key, url),
+        }),
+      );
+      expect({ form, answer: await answer(res) }).toEqual({
+        form,
+        answer: { status: 200, body: null },
+      });
+      expect({ form, jwksReads: f.calls.filter((c) => c === jwksUrl).length }).toEqual({
+        form,
+        jwksReads: form === "jwks_uri" ? 1 : 0,
+      });
+    }
+  });
+
+  it("refuses a document with client_secret, client_secret_expires_at, or a shared-secret method (-02 section 4.1)", async () => {
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    const cases: [Record<string, unknown>, string][] = [
+      [{ client_secret: "doc-secret-0123456789" }, "client_secret is present (-02 section 4.1)"],
+      [{ client_secret_expires_at: 0 }, "client_secret_expires_at is present (-02 section 4.1)"],
+    ];
+    for (const method of ["client_secret_basic", "client_secret_post", "client_secret_jwt"])
+      cases.push([
+        { token_endpoint_auth_method: method },
+        "token_endpoint_auth_method is not none or private_key_jwt (-02 section 4.1)",
+      ]);
+    for (const [over, why] of cases) {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const f = fakeFetch();
+      const marker = "Doc name 7f3a";
+      f.answers.set(url, () => json({ ...base, ...over, client_name: marker }));
+      const h = instance(f.fn);
+      expect({ over, client: await findClient(h.config, url) }).toEqual({ over, client: null });
+      expect(await h.storage.findMany("oauthClient", [])).toEqual([]);
+      expect({ over, lines: log.mock.calls }).toEqual({ over, lines: [[REFUSED_LOG, why]] });
+      const logged = JSON.stringify(log.mock.calls);
+      expect(logged).not.toContain(marker);
+      expect(logged).not.toContain("doc-secret-0123456789");
+      log.mockRestore();
+    }
+  });
+
+  it("refuses private key material and a jwks_uri on an internal host (-02 sections 4.1 and 8.6)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixed = await fixture("draft-02");
+    const url = String(fixed.client_id);
+    const key = await keyOf("k-1");
+    const { jwks_uri: _uri, ...inline } = fixed;
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
+    const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+    for (const doc of [
+      { ...inline, jwks: { keys: [{ ...privateJwk, kid: "k-p" }] } },
+      { ...inline, jwks: { keys: [key.jwk, { ...privateJwk, kid: "k-p" }] } },
+      { ...fixed, jwks_uri: "https://127.0.0.1/jwks.json" },
+      { ...fixed, jwks_uri: "https://localhost/jwks.json" },
+      { ...fixed, jwks_uri: "https://svc.internal/jwks.json" },
+    ]) {
+      const f = fakeFetch();
+      f.answers.set(url, () => json(doc));
+      const h = instance(f.fn);
+      expect({ doc, client: await findClient(h.config, url) }).toEqual({ doc, client: null });
+      // Only the document is fetched: no URL inside a refused document is read.
+      expect(f.calls).toEqual([url]);
+    }
+  });
+
+  it("refuses a document over 8 KB and accepts one of 8 KB", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    const sized = (bytes: number) => {
+      const empty = JSON.stringify({ ...base, x_pad: "" });
+      return JSON.stringify({ ...base, x_pad: "x".repeat(bytes - empty.length) });
+    };
+    expect(enc.encode(sized(8192)).byteLength).toBe(8192);
+    expect(enc.encode(sized(8193)).byteLength).toBe(8193);
+    for (const [bytes, ok] of [
+      [8192, true],
+      [8193, false],
+    ] as const) {
+      const f = fakeFetch();
+      f.answers.set(url, () => json(sized(bytes)));
+      const h = instance(f.fn);
+      const row = await findClient(h.config, url);
+      expect({ bytes, found: row !== null }).toEqual({ bytes, found: ok });
+    }
+  });
+
+  it("never caches a failed fetch", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    // -02 section 5.2: no error answer and no invalid document is kept.
+    for (const refused of [
+      () => new Response("{}", { status: 500, headers: { "content-type": "application/json" } }),
+      () => json({ ...base, client_secret: "doc-secret-0123456789" }),
+    ]) {
+      const f = fakeFetch();
+      f.answers.set(url, refused);
+      const h = instance(f.fn);
+      expect(await findClient(h.config, url)).toBeNull();
+      expect(await findClient(h.config, url)).toBeNull();
+      expect(f.calls).toEqual([url, url]);
+      expect(h.config.oauth?.cimdCache.size).toBe(0);
+    }
+  });
+
+  it("refuses a code with no challenge when the client is not confidential at the exchange", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixed = await fixture("draft-02");
+    const url = String(fixed.client_id);
+    const key = await keyOf("k-1");
+    const { jwks_uri: _uri, ...inline } = fixed;
+    const keyDoc = { ...inline, jwks: { keys: [key.jwk] } };
+    const { jwks: _jwks, ...rest } = keyDoc;
+    const publicDoc = { ...rest, token_endpoint_auth_method: "none" };
+    const base = makeAuth();
+    // Instance A reads the private_key_jwt document. Instance B reads it later, after the client made it public.
+    const fa = fakeFetch();
+    fa.answers.set(url, () => json(keyDoc));
+    const a = instance(fa.fn, base);
+    const fb = fakeFetch();
+    fb.answers.set(url, () => json(publicDoc));
+    const b = instance(fb.fn, base);
+    const s = await signedIn(a);
+    // A confidential client may omit PKCE with openid and a nonce (RFC 9700 section 2.1.1).
+    const codeOf = async () =>
+      (
+        await authorized(a, s.cookie, {
+          clientId: url,
+          challenge: null,
+          scope: "openid",
+          nonce: "n-1",
+        })
+      ).code;
+    const body = (code: string) => ({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: String((fixed.redirect_uris as string[])[0]),
+      resource: RESOURCE,
+    });
+    // The confidential client passes with an assertion and no verifier.
+    const first = await codeOf();
+    const res = await a.auth.handle(
+      tokenPost({
+        ...body(first),
+        client_assertion_type: ASSERTION_TYPE,
+        client_assertion: await assertion(a, key, url),
+      }),
+    );
+    expect(await answer(res)).toEqual({ status: 200, body: null });
+    // The code of the confidential client reaches instance B, which reads the public document.
+    const second = await codeOf();
+    const late = await b.auth.handle(tokenPost({ ...body(second), client_id: url }));
+    expect(await answer(late)).toEqual({ status: 400, body: { error: "invalid_grant" } });
+    expect(
+      await b.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: url }]),
+    ).toMatchObject({ authMethod: "none" });
+  });
+
+  it("names the revision", async () => {
+    expect(CIMD_REVISION).toBe("draft-ietf-oauth-client-id-metadata-document-02");
+    const source = (await readText("../src/engine/oauth-clients.ts")).replace(/\n \* /g, " ");
+    expect(source).toContain(
+      "Core implements draft-ietf-oauth-client-id-metadata-document-02 (6 July 2026) and accepts the documents of -00, which MCP 2026-07-28 pins.",
+    );
+  });
+});

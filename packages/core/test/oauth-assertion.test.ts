@@ -737,7 +737,7 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
       new Response(JSON.stringify({ client_id: doc, redirect_uris: [REDIRECT] }), {
         headers: { "content-type": "application/jwk-set+json" },
       })) as unknown as typeof fetch;
-    expect(await fetchCimd(asSet, doc)).toBeNull();
+    expect(await fetchCimd(setup(asSet).h.config, doc)).toBeNull();
   });
 
   it("refuses a jwks_uri client while oauth.fetch is null", async () => {

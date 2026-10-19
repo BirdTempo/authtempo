@@ -278,6 +278,10 @@ export async function exchangeCode(
   const data = codeData(consumed.value);
   if (!data || data.clientId !== client.id || data.redirectUri !== input.redirectUri)
     return oauthFail("invalid_grant");
+  // A code with no challenge is a confidential client's (`pkceRequired`).
+  // A metadata document can change its method between the authorize step
+  // and this exchange, so the client must be confidential here too.
+  if (data.codeChallenge === null && !input.client.confidential) return oauthFail("invalid_grant");
   if (!(await verifierMatches(input.codeVerifier, data.codeChallenge)))
     return oauthFail("invalid_grant");
   if (input.resource !== null && input.resource !== data.resource)

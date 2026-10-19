@@ -393,9 +393,9 @@ describe("client ID metadata documents (plan 9g)", () => {
     );
   });
 
-  it("refuses a document over 64 KB, another content type, a status other than 200, a secret method, and a bad redirect URI", async () => {
+  it("refuses a document over 8 KB, another content type, a status other than 200, a secret method, and a bad redirect URI", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const big = JSON.stringify(doc({ padding: "x".repeat(65 * 1024) }));
+    const big = JSON.stringify(doc({ padding: "x".repeat(8 * 1024) }));
     const answers = [
       () => new Response(big, { status: 200, headers: { "content-type": "application/json" } }),
       () =>

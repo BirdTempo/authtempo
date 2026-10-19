@@ -13,8 +13,13 @@ import { BUILT_IN_SCOPES, type OAuthResult, oauthFail, oauthOk } from "./oauth-r
  * client is public (`none`, PKCE binds each code to it) or confidential (a
  * `cs_` secret or `private_key_jwt`). A registered client has a `cl_` id
  * from RFC 7591 or `api.oauth.clients`. A CIMD client is the URL of its own
- * metadata document (draft-ietf-oauth-client-id-metadata-document, read 2026-10-13).
+ * metadata document. Core implements draft-ietf-oauth-client-id-metadata-document-02
+ * (6 July 2026) and accepts the documents of -00, which MCP 2026-07-28 pins.
+ * Both drafts were read on 2026-10-19 (plan 12e Task 6).
  */
+
+/** The CIMD draft that core implements (plan 12e Task 6). */
+export const CIMD_REVISION = "draft-ietf-oauth-client-id-metadata-document-02";
 
 export const CLIENT_ID_PREFIX = "cl_";
 /** The kinds of a client with a `cl_` id: a registration's and an `api.oauth.clients` one's. */
@@ -22,7 +27,8 @@ const CL_KINDS: readonly OAuthClientRow["kind"][] = ["registered", "api"];
 const CLIENT_ID_RE = /^cl_[A-Za-z0-9_-]{43}$/;
 const REGISTER_PER_IP = { seconds: 3600, max: 10 };
 export const CIMD_TIMEOUT_MS = 10_000;
-export const CIMD_MAX_BYTES = 65_536;
+/** -02 section 8.7 recommends 5 KB; 8 KB keeps a margin for a long jwks (plan 12e). */
+export const CIMD_MAX_BYTES = 8192;
 export const CIMD_CACHE_MS = 3_600_000;
 /** The documents one isolate keeps. The oldest goes first. */
 const CIMD_CACHE_MAX = 500;
@@ -59,6 +65,14 @@ const JWKS_CACHE_MS = 3_600_000;
 const JWKS_REREAD_MS = 30_000;
 /** The media type of a client metadata document (the CIMD draft). */
 const CIMD_TYPES: readonly string[] = ["application/json"];
+/**
+ * The methods of a metadata document (-02 section 4.1): no method of a
+ * shared secret, because a document cannot hold one. With `private_key_jwt`
+ * the keys of the document make a confidential client.
+ */
+const CIMD_AUTH_METHODS: readonly unknown[] = ["none", "private_key_jwt"];
+/** The read cap of a `jwks_uri` set: ten RSA keys with long members fit with a margin. */
+const JWKS_MAX_BYTES = 65_536;
 /** A key set may also come as the JWK Set type that RFC 7517 section 8.5 registers. */
 const JWKS_TYPES: readonly string[] = ["application/json", "application/jwk-set+json"];
 
@@ -126,9 +140,8 @@ export interface JwksEntry {
   readAt: number;
 }
 
-export interface CimdEntry {
-  name: string | null;
-  redirectUris: string[];
+/** A read metadata document in the isolate cache: the fields of its row (plan 12e Task 6). */
+export interface CimdEntry extends ClientFields {
   /** Epoch milliseconds by the config clock. */
   until: number;
 }
@@ -294,23 +307,27 @@ function stringList(value: unknown, ok: (s: string) => boolean, max: number): st
  * body; `create` reads `api.oauth.clients`, which also takes
  * `client_credentials`, `credentials_scopes`, and `introspect`. A
  * registration ignores those two fields: they are no RFC 7591 metadata.
+ * `cimd` reads a client metadata document with the rules of -02 section 4.1
+ * (`cimdCredentialRule`) and the grants of a registration.
  */
 export function validClientMetadata(
   config: ResolvedConfig,
   m: Record<string, unknown>,
-  source: "register" | "create",
+  source: "register" | "create" | "cimd",
 ): OAuthResult<ClientFields> {
   const oauth = config.oauth;
   if (!oauth) return oauthFail("invalid_request");
+  if (source === "cimd" && cimdCredentialRule(m) !== null)
+    return oauthFail("invalid_client_metadata");
   const absent = (v: unknown) => v === undefined || v === null;
   const allowedGrants = source === "create" ? CREATE_GRANT_TYPES : GRANT_TYPES;
   const grantTypes =
     m.grant_types === undefined
       ? [...GRANT_TYPES]
       : stringList(m.grant_types, (g) => allowedGrants.includes(g), allowedGrants.length);
-  // A client of client_credentials alone has no redirect. A registration always has one.
+  // A client of client_credentials alone has no redirect. A registration and a document always have one.
   const needsRedirect =
-    source === "register" || grantTypes === null || grantTypes.includes("authorization_code");
+    source !== "create" || grantTypes === null || grantTypes.includes("authorization_code");
   const redirectUris =
     needsRedirect || !absent(m.redirect_uris) ? redirectList(m.redirect_uris) : [];
   if (!redirectUris) return oauthFail("invalid_redirect_uri");
@@ -565,13 +582,14 @@ async function readCapped(res: Response, max: number, signal: AbortSignal): Prom
 /**
  * The JSON object at `url`, or the reason of a refusal. The fetch is the
  * app's guarded fetch; core adds `redirect: "manual"`, a 10-second timeout
- * for the answer and the body, and a 64 KB cap. It needs status 200 and a
- * media type of `types`. The body never reaches a log.
+ * for the answer and the body, and a cap of `max` bytes. It needs status
+ * 200 and a media type of `types`. The body never reaches a log.
  */
 async function guardedJson(
   fetchFn: typeof fetch | null,
   url: string,
   types: readonly string[],
+  max: number,
 ): Promise<{ doc: Record<string, unknown> } | { why: string }> {
   if (!fetchFn) return { why: "no fetch" };
   const ctrl = new AbortController();
@@ -597,8 +615,8 @@ async function guardedJson(
       await res.body?.cancel().catch(() => {});
       return { why: `not ${types.join(" or ")}` };
     }
-    const text = await readCapped(res, CIMD_MAX_BYTES, ctrl.signal);
-    if (text === null) return { why: "larger than 64 KB, not UTF-8, or not in time" };
+    const text = await readCapped(res, max, ctrl.signal);
+    if (text === null) return { why: `larger than ${max} bytes, not UTF-8, or not in time` };
     let doc: unknown;
     try {
       doc = JSON.parse(text);
@@ -613,30 +631,44 @@ async function guardedJson(
 }
 
 /**
- * The fields core reads from a client ID metadata document, or null with
- * one log line that names the reason and never the document. The guards
- * are those of `guardedJson`. The document must name its own URL as
- * `client_id` (the draft, section 4, read 2026-10-13).
+ * The rule of -02 section 4.1 that a metadata document breaks, or null.
+ * A document has no shared secret: no `client_secret`, no
+ * `client_secret_expires_at`, and no method of a secret. The third rule of
+ * 4.1, public keys only, is `clientKey` in `validClientMetadata`.
  */
-export async function fetchCimd(
-  fetchFn: typeof fetch | null,
-  url: string,
-): Promise<{ name: string | null; redirectUris: string[] } | null> {
+function cimdCredentialRule(m: Record<string, unknown>): string | null {
+  if (m.client_secret !== undefined) return "client_secret is present (-02 section 4.1)";
+  if (m.client_secret_expires_at !== undefined)
+    return "client_secret_expires_at is present (-02 section 4.1)";
+  const method = m.token_endpoint_auth_method;
+  if (method !== undefined && !CIMD_AUTH_METHODS.includes(method))
+    return "token_endpoint_auth_method is not none or private_key_jwt (-02 section 4.1)";
+  return null;
+}
+
+/**
+ * The client fields of a client ID metadata document, or null with one log
+ * line that names the reason and never the document. The guards are those
+ * of `guardedJson` with the cap `CIMD_MAX_BYTES`. The document must name its
+ * own URL as `client_id` (-02 section 4). Then `validClientMetadata` reads it
+ * with the rules of -02 section 4.1, so a `jwks_uri` gets the host rule of
+ * `validCimdUrl` too (-02 section 8.6).
+ */
+export async function fetchCimd(config: ResolvedConfig, url: string): Promise<ClientFields | null> {
   const refuse = (why: string) => {
     console.error("authtempo: client metadata document refused", why);
     return null;
   };
-  const got = await guardedJson(fetchFn, url, CIMD_TYPES);
+  const got = await guardedJson(config.oauth?.fetch ?? null, url, CIMD_TYPES, CIMD_MAX_BYTES);
   if ("why" in got) return refuse(got.why);
   const d = got.doc;
   if (d.client_id !== url) return refuse("client_id is not the document URL");
-  const redirectUris = redirectList(d.redirect_uris);
-  if (!redirectUris) return refuse("redirect_uris");
-  const name = clientName(d.client_name);
-  if (name === undefined) return refuse("client_name");
-  if (d.token_endpoint_auth_method !== undefined && d.token_endpoint_auth_method !== "none")
-    return refuse("token_endpoint_auth_method is not none: core serves public clients only");
-  return { name, redirectUris };
+  const rule = cimdCredentialRule(d);
+  if (rule !== null) return refuse(rule);
+  const fields = validClientMetadata(config, d, "cimd");
+  if (!fields.ok)
+    return refuse(fields.error === "invalid_redirect_uri" ? "redirect_uris" : "metadata");
+  return fields.value;
 }
 
 /**
@@ -653,7 +685,7 @@ async function fetchJwks(
     console.error("authtempo: client key set refused", why);
     return null;
   };
-  const got = await guardedJson(fetchFn, url, JWKS_TYPES);
+  const got = await guardedJson(fetchFn, url, JWKS_TYPES, JWKS_MAX_BYTES);
   if ("why" in got) return refuse(got.why);
   const raw = got.doc.keys;
   if (!Array.isArray(raw)) return refuse("no keys array");
@@ -717,7 +749,11 @@ function keepJwks(oauth: ResolvedOAuth, url: string, entry: JwksEntry): void {
   oauth.jwksCache.set(url, entry);
 }
 
-/** Writes or refreshes the row of a document that this call read. */
+/**
+ * Writes or refreshes the row of a document that this call read. The row
+ * holds every client field of the document, its method and keys too. So
+ * the client auth reads the method of the last document.
+ */
 async function writeCimdRow(
   config: ResolvedConfig,
   url: string,
@@ -725,10 +761,10 @@ async function writeCimdRow(
   row: OAuthClientRow | null,
   now: Date,
 ): Promise<OAuthClientRow> {
+  const { until: _until, ...fields } = entry;
   const data = {
     kind: "cimd" as const,
-    name: entry.name,
-    redirectUris: entry.redirectUris,
+    ...fields,
     lastSeenAt: now,
     updatedAt: now,
   };
@@ -739,10 +775,10 @@ async function writeCimdRow(
   }
   try {
     return await config.storage.create("oauthClient", {
+      ...publicClientFields(),
       id: url,
       ...data,
       createdAt: now,
-      ...publicClientFields(),
     });
   } catch (e) {
     if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
@@ -769,7 +805,7 @@ async function cimdClient(
     // A row that the sweep deleted while the document lives in the cache comes back.
     return row ?? writeCimdRow(config, url, cached, null, now);
   }
-  const doc = await fetchCimd(oauth.fetch, url);
+  const doc = await fetchCimd(config, url);
   if (!doc) return null;
   const entry: CimdEntry = { ...doc, until: now.getTime() + CIMD_CACHE_MS };
   oauth.cimdCache.delete(url);
