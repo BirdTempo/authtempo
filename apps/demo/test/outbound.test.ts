@@ -1,12 +1,13 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { everyFlow } from "./flows.js";
+import { escapes, PROBE_ENTRY } from "./outbound-log.js";
 
 /**
- * A probe host under .invalid (RFC 6761): no DNS answers it, so the probe
- * reaches no real host even when the recorder is off.
+ * The probe goes to a host under .invalid (RFC 6761): no DNS answers it, so
+ * the probe reaches no real host even when the recorder is off.
  */
-const PROBE = "https://outbound-probe.invalid/";
+const PROBE = PROBE_ENTRY.replace(/^GET /, "");
 
 /** The requests that left the Worker in this run, from the recorder of vitest.config.ts. */
 async function recorded(): Promise<string[]> {
@@ -16,9 +17,9 @@ async function recorded(): Promise<string[]> {
 describe("outbound requests", () => {
   it("records a request that leaves the Worker", async () => {
     // Without this, a recorder that Miniflare never calls makes the next test pass on nothing.
-    const res = await fetch(`${PROBE}?from=test`);
+    const res = await fetch(PROBE);
     expect(res.status).toBe(599);
-    expect(await recorded()).toContain(`GET ${PROBE}?from=test`);
+    expect(await recorded()).toContain(PROBE_ENTRY);
   });
 
   it("sends no request out of the Worker", async () => {
@@ -30,7 +31,8 @@ describe("outbound requests", () => {
     } catch (e) {
       failure = e;
     }
-    expect((await recorded()).filter((r) => !r.includes(PROBE))).toEqual([]);
+    // The teardown of test/outbound-teardown.ts also reads the list after every file.
+    expect(escapes(await recorded())).toEqual([]);
     expect(failure).toBeNull();
   });
 });
