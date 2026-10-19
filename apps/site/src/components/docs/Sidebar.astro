@@ -1,0 +1,16 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// The sidebar of brand spec 11: Starlight's own pieces (Sidebar.astro of
+// 0.42.6), with a list that puts each top-level group's icon before its label.
+// The template reads the route in place: Biome 2.5.15 lints this frontmatter
+// and not the template, so a const reads as unused.
+import MobileMenuFooter from "@astrojs/starlight/components/MobileMenuFooter.astro";
+import SidebarPersister from "@astrojs/starlight/components/SidebarPersister.astro";
+import SidebarSublist from "./SidebarSublist.astro";
+---
+<SidebarPersister>
+  <SidebarSublist sublist={Astro.locals.starlightRoute.sidebar} />
+</SidebarPersister>
+<div class="md:sl-hidden">
+  <MobileMenuFooter />
+</div>

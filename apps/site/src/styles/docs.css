@@ -1,0 +1,17 @@
+/*
+ * Rules for Starlight's own elements in the brand theme (brand spec 11). The
+ * colors come from tokens.css only. The selectors are the custom elements
+ * and classes of Starlight 0.42.6 (TableOfContents, PageFrame).
+ */
+
+/* The table of contents marks the active heading with the 2 px accent rail. */
+starlight-toc a[aria-current="true"],
+mobile-starlight-toc a[aria-current="true"] {
+  color: var(--at-ink);
+  box-shadow: inset var(--at-rail) 0 0 var(--at-accent);
+}
+
+/* One surface: the header sits on paper over a hairline rule. */
+.header {
+  border-bottom: 1px solid var(--at-line);
+}

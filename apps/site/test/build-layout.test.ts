@@ -7,6 +7,7 @@ import { DIST, REPO, SITE } from "../scripts/lib/paths.ts";
 import { parseTokens } from "../scripts/lib/tokens.ts";
 import { FEATURES, featureOrder } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
+import { SIDEBAR_ICONS } from "../src/data/sidebar-icons.ts";
 import { vendorHosts } from "../src/data/vendors.ts";
 
 // `pnpm test` runs `astro build` before vitest, so dist is newer than the change.
@@ -236,5 +237,66 @@ describe("the home page (brand spec 9)", () => {
     expect(home).toMatch(/<pre class="code at-card at-lift[ "]/);
     for (const line of ["createAuth({", "trustedOrigins: [", "storage: deps.storage,"])
       expect({ line, found: home.includes(line) }).toEqual({ line, found: true });
+  });
+});
+
+describe("the docs theme (brand spec 11)", () => {
+  const docs = page("docs/index.html");
+  const css = (path: string) => pageCss(page(path), read).replace(/\s+/g, "");
+  const RAIL = "insetvar\\(--at-rail\\)00var\\(--at-accent\\)";
+
+  it("gives each top-level sidebar group its icon before its label", () => {
+    const sidebar =
+      docs.split("<sl-sidebar-state-persist")[1]?.split("</sl-sidebar-state-persist>")[0] ?? "";
+    for (const [label, icon] of Object.entries(SIDEBAR_ICONS)) {
+      const at = sidebar.indexOf(`>${label}</span>`);
+      // The icon sits in the group's summary, before the group-label span (SidebarSublist.astro).
+      const before = sidebar.slice(Math.max(0, sidebar.lastIndexOf("<summary", at)), at);
+      expect({ label, found: at > 0, icon: before.includes(`/icons.svg#${icon}`) }).toEqual({
+        label,
+        found: true,
+        icon: true,
+      });
+    }
+    expect(sidebar.match(/ class="at-icon group-icon(?: astro-\w+)?"/g)?.length).toBe(
+      Object.keys(SIDEBAR_ICONS).length,
+    );
+  });
+
+  it("puts the lockup in the docs header", () => {
+    const header = docs.split(/<header class="header[ "]/)[1]?.split("</header>")[0] ?? "";
+    expect(header).toMatch(/ class="at-lockup[ "]/);
+    expect(header).toContain('aria-label="authtempo"');
+  });
+
+  it("restyles Starlight's theme select with the three sprite icons", () => {
+    expect(docs).toContain("<starlight-theme-select");
+    const select =
+      docs.split(/ class="at-theme-select[ "]/)[1]?.split("</starlight-theme-select>")[0] ?? "";
+    expect(select).toContain("<starlight-theme-select");
+    for (const name of ["half-disc", "sun", "moon"])
+      expect({ name, found: select.includes(`/icons.svg#${name}`) }).toEqual({ name, found: true });
+  });
+
+  it("rings the theme select when its select has focus", () => {
+    expect(css("docs/index.html")).toMatch(
+      /\.at-theme-select[^{]*:has\(select:focus-visible\)\{outline:2pxsolidvar\(--at-accent\)/,
+    );
+  });
+
+  it("marks the active page and the active heading with the rail", () => {
+    const docsCss = css("docs/index.html");
+    expect(docsCss).toMatch(
+      new RegExp(`\\[aria-current=("?)page\\1\\][^{]*\\{[^}]*box-shadow:${RAIL}`),
+    );
+    expect(docsCss).toMatch(
+      new RegExp(`starlight-toca\\[aria-current=("?)true\\1\\][^{]*\\{[^}]*box-shadow:${RAIL}`),
+    );
+  });
+
+  it("sets the code block background to the code token", () => {
+    const codeCss = css("docs/start/first-sign-in/index.html");
+    expect(codeCss).toContain(".expressive-code");
+    expect(codeCss).toContain("var(--at-code)");
   });
 });

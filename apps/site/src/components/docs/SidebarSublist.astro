@@ -1,0 +1,81 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// Starlight's SidebarSublist.astro of 0.42.6 with three changes (brand spec
+// 11). Each top-level group shows its icon before its label. The active page
+// has no background. The 2 px accent rail sits at its left edge.
+// The icon sits before the group-label span, not in it. The agent index
+// (scripts/lib/agent.ts) reads the label span as the first child of that span.
+// The template reads Astro.props in place: Biome 2.5.15 lints this
+// frontmatter and not the template, so a destructured prop reads as unused.
+import { Badge, Icon as StarlightIcon } from "@astrojs/starlight/components";
+import SidebarRestorePoint from "@astrojs/starlight/components/SidebarRestorePoint.astro";
+import type { StarlightRouteData } from "@astrojs/starlight/route-data";
+import { sidebarIcon } from "../../data/sidebar-icons.ts";
+import Icon from "../Icon.astro";
+
+type Entry = StarlightRouteData["sidebar"][number];
+interface Props {
+  sublist: Entry[];
+  nested?: boolean;
+}
+// Starlight's sidebarGroupHasCurrent is in utils/navigation, which the package does not export.
+const hasCurrent = (e: Entry): boolean =>
+  e.type === "link" ? e.isCurrent : e.entries.some(hasCurrent);
+---
+<ul class:list={{ "top-level": Astro.props.nested !== true }}>
+  {
+    Astro.props.sublist.map((entry) => (
+      <li>
+        {entry.type === "link" ? (
+          <a
+            href={entry.href}
+            aria-current={entry.isCurrent ? "page" : undefined}
+            class:list={[{ large: Astro.props.nested !== true }, entry.attrs.class]}
+            {...entry.attrs}
+          >
+            <span>{entry.label}</span>
+            {entry.badge && <Badge variant={entry.badge.variant} class={entry.badge.class} text={entry.badge.text} />}
+          </a>
+        ) : (
+          <details open={hasCurrent(entry) || !entry.collapsed}>
+            <summary>
+              {Astro.props.nested !== true && <Icon name={sidebarIcon(entry.label)} class="group-icon" />}
+              <span class="group-label">
+                <span class="large">{entry.label}</span>
+                {entry.badge && <Badge variant={entry.badge.variant} class={entry.badge.class} text={entry.badge.text} />}
+              </span>
+              <StarlightIcon name="right-caret" class="caret" size="1.25rem" />
+            </summary>
+            <SidebarRestorePoint />
+            <Astro.self sublist={entry.entries} nested />
+          </details>
+        )}
+      </li>
+    ))
+  }
+</ul>
+<style>
+  ul { --sl-sidebar-item-padding-inline: 0.5rem; list-style: none; padding: 0; }
+  li { overflow-wrap: anywhere; }
+  ul ul li { margin-inline-start: var(--sl-sidebar-item-padding-inline); border-inline-start: 1px solid var(--at-line); padding-inline-start: var(--sl-sidebar-item-padding-inline); }
+  .large { font-size: var(--sl-text-lg); font-weight: 600; color: var(--at-ink); }
+  .top-level > li + li { margin-top: 0.75rem; }
+  summary { display: flex; align-items: center; gap: 0.5rem; padding: 0.2em var(--sl-sidebar-item-padding-inline); line-height: 1.4; cursor: pointer; user-select: none; }
+  summary::marker, summary::-webkit-details-marker { display: none; }
+  summary > :global(.group-icon) { width: 1.125rem; height: 1.125rem; flex-shrink: 0; color: var(--at-mute); }
+  .group-label > :global(*:not(:last-child)) { margin-inline-end: 0.25em; }
+  summary :global(.caret) { margin-inline-start: auto; transition: transform 0.2s ease-in-out; flex-shrink: 0; }
+  :global([dir="rtl"]) summary :global(.caret) { transform: rotateZ(180deg); }
+  [open] > summary :global(.caret) { transform: rotateZ(90deg); }
+  a { display: block; text-decoration: none; color: var(--at-mute); padding: 0.3em var(--sl-sidebar-item-padding-inline); line-height: 1.4; }
+  a > :global(*:not(:last-child)) { margin-inline-end: 0.25em; }
+  a:hover, a:focus-visible { color: var(--at-ink); }
+  /* Brand spec 11: the active page has no background, and the 2 px accent rail sits at its left edge. */
+  [aria-current="page"] { font-weight: 600; color: var(--at-ink); box-shadow: inset var(--at-rail) 0 0 var(--at-accent); }
+  @media (min-width: 50rem) {
+    .top-level > li + li { margin-top: 0.5rem; }
+    .large { font-size: var(--sl-text-base); }
+    a { font-size: var(--sl-text-sm); }
+  }
+</style>

@@ -1,0 +1,27 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// Starlight's own theme select, restyled to the toggle of brand spec 12. It
+// shows the sprite icon of the current choice, and the native select lies over it.
+// Starlight's script keeps the key starlight-theme, so a choice here holds on
+// the root pages, and a choice there holds here. The select keeps its label.
+import Default from "@astrojs/starlight/components/ThemeSelect.astro";
+import Icon from "../Icon.astro";
+---
+<div class="at-theme-select">
+  <Icon name="half-disc" class="at-choice-auto" />
+  <Icon name="sun" class="at-choice-light" />
+  <Icon name="moon" class="at-choice-dark" />
+  <Default />
+</div>
+<style>
+  .at-theme-select { position: relative; display: inline-grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid var(--at-line); border-radius: 0.5rem; color: var(--at-ink); }
+  .at-theme-select :global(.at-icon) { display: none; grid-area: 1 / 1; width: 1.25rem; height: 1.25rem; }
+  .at-theme-select:has(option[value="auto"]:checked) :global(.at-choice-auto),
+  .at-theme-select:has(option[value="light"]:checked) :global(.at-choice-light),
+  .at-theme-select:has(option[value="dark"]:checked) :global(.at-choice-dark) { display: block; }
+  .at-theme-select :global(starlight-theme-select), .at-theme-select :global(label) { position: absolute; inset: 0; }
+  .at-theme-select :global(select) { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  .at-theme-select :global(svg.label-icon), .at-theme-select :global(svg.caret) { display: none; }
+  /* The select is not seen, so the ring goes on the control (brand spec 14). */
+  .at-theme-select:has(select:focus-visible) { outline: 2px solid var(--at-accent); outline-offset: 2px; }
+</style>

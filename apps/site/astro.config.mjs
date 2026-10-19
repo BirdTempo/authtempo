@@ -68,7 +68,29 @@ export default defineConfig({
       title: "authtempo",
       sidebar,
       // Starlight reads the brand tokens (brand spec 11). The root pages import the same file in Site.astro.
-      customCss: ["./src/styles/tokens.css"],
+      customCss: ["./src/styles/tokens.css", "./src/styles/docs.css"],
+      // Brand spec 11. Each override keeps Starlight's behavior and reads its
+      // props from Astro.locals.starlightRoute (Starlight 0.42.6).
+      components: {
+        SiteTitle: "./src/components/docs/SiteTitle.astro",
+        ThemeSelect: "./src/components/docs/ThemeSelect.astro",
+        Sidebar: "./src/components/docs/Sidebar.astro",
+      },
+      // One dark theme in both schemes: brand spec 4 gives a code block the
+      // same ink in light and dark. The background is the code token, and the
+      // frame has no border and no shadow. The frames plugin takes its editor
+      // background from codeBackground.
+      expressiveCode: {
+        themes: ["starlight-dark"],
+        useStarlightDarkModeSwitch: false,
+        useStarlightUiThemeColors: false,
+        styleOverrides: {
+          codeBackground: "var(--at-code)",
+          codeFontFamily: "var(--at-font-mono)",
+          borderWidth: "0px",
+          frames: { frameBoxShadowCssValue: "none" },
+        },
+      },
       // Brand spec 13 on every docs page. Starlight already links /favicon.svg.
       head: [
         { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },

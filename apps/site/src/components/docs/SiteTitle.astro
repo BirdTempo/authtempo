@@ -1,0 +1,8 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// The lockup replaces Starlight's title (brand spec 11). It links where
+// Starlight's title links. The template reads the route in place: Biome 2.5.15
+// lints this frontmatter and not the template, so a const reads as unused.
+import Lockup from "../Lockup.astro";
+---
+<Lockup href={Astro.locals.starlightRoute.siteTitleHref} beat />
