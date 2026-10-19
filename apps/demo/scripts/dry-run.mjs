@@ -7,8 +7,8 @@
 //    and the entry name (worker.js, after main), not an output folder.
 // It prints `demo-dry-run: PASS bytes=<n>` with the bytes of the bundle files.
 // The bundle stays in dist/bundle/, and test/node/no-secret.test.ts scans it
-// (plan 11b Task 12). The test script runs this file before vitest, so the
-// scan reads a bundle of the same run.
+// (plan 11b Task 12). The build script runs this file last, and the test task
+// waits for the build (ruling 44). The scan holds the bundle newer than its inputs.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -32,7 +32,7 @@ const ENV = {
 const ENTRY = "worker.js";
 
 // wrangler 4.148.0 refuses a dry run when assets.directory does not exist
-// (seen 2026-10-20, ruling 31). The test script runs copy-assets.mjs first,
+// (seen 2026-10-20, ruling 31). The build script runs copy-assets.mjs first,
 // which fills the folder; this line serves a run of this file alone.
 mkdirSync(join(PKG, "dist", "public"), { recursive: true });
 

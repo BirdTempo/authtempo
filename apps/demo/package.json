@@ -11,9 +11,9 @@
   },
   "scripts": {
     "gen": "node scripts/gen-migrations.mjs",
-    "build": "node scripts/gen-migrations.mjs && tsc -p tsconfig.facts.json && node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check",
-    "typecheck": "node scripts/gen-migrations.mjs && node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.node.json",
-    "test": "node scripts/gen-migrations.mjs && node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check && node scripts/dry-run.mjs && vitest run && vitest run -c vitest.node.config.ts",
+    "build": "node scripts/gen-migrations.mjs && tsc -p tsconfig.facts.json && node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check && node scripts/dry-run.mjs",
+    "typecheck": "tsc -p tsconfig.browser.json --noEmit && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.node.json",
+    "test": "vitest run && vitest run -c vitest.node.config.ts",
     "dev": "node scripts/gen-migrations.mjs && node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check && node scripts/dev.mjs"
   },
   "dependencies": {

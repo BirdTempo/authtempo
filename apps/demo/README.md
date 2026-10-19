@@ -8,7 +8,7 @@ The sandbox runs the real `createD1Adapter` and `createD1Limiter` of `@authtempo
 
 Run each command from the repository root.
 
-- `pnpm turbo run test --filter=@authtempo/demo --force`: the asset copy and the page scripts, then `wrangler deploy --dry-run` and the bundle scan. Then the pool tests and the Node tests run.
+- `pnpm turbo run test --filter=@authtempo/demo --force`: Turbo runs the build first. The build writes `src/migrations.gen.ts`, the assets, the page scripts, and the bundle of `wrangler deploy --dry-run` with its scan. Then the pool tests and the Node tests read them. Only the build writes `dist` (ruling 44 of the plan 11b lane), so the test and the typecheck need it first.
 - `pnpm --filter @authtempo/demo typecheck`: the Worker source, the page scripts, and the tests.
 - `pnpm --filter @authtempo/demo dev`: the Worker on your machine. Open `https://localhost:8787/`. `scripts/dev.mjs` runs `wrangler dev` over local https on port 8787 and sets `DEMO_ORIGIN` to that origin. So core trusts the page origin, and each mail link and provider URL leads back to the local run. `DEMO_PORT` names another port. wrangler makes its own certificate, so the browser asks you to accept it. `test/node/dev.test.ts` starts the script on a free port and sends a magic-link request from the page origin.
 

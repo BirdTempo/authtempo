@@ -63,9 +63,18 @@
         "$TURBO_ROOT$/apps/site/public/fonts/*"
       ]
     },
+    // Ruling 44 of the plan 11b lane: only demo#build writes apps/demo/dist and
+    // src/migrations.gen.ts. One run starts the demo build (the site depends on
+    // the demo), test, and typecheck at once. So test and typecheck wait for
+    // the build and only read its output; two writers of one dist raced.
+    // apps/demo/test/node/scripts.test.ts holds the scripts and these lines.
+    "@authtempo/demo#test": {
+      "dependsOn": ["^build", "build"],
+      "cache": false
+    },
     // The demo typecheck also reads the site checks that test/node/prose.test.ts imports.
     "@authtempo/demo#typecheck": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/site/src/styles/tokens.css",

@@ -259,13 +259,14 @@ describe("the import reader of copy-assets.mjs", () => {
     expect(importsOf(text, "probe.js")).toEqual([]);
   });
 
-  it("runs the asset check after the page compile in each package script", () => {
+  it("runs the asset check after the page compile in each script that writes the assets", () => {
     const scripts = (
       JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as {
         scripts: Record<string, string>;
       }
     ).scripts;
-    for (const name of ["build", "typecheck", "test", "dev"])
+    // Ruling 44: test and typecheck write nothing; test/node/scripts.test.ts holds them.
+    for (const name of ["build", "dev"])
       expect(scripts[name], name).toContain(
         "node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check",
       );

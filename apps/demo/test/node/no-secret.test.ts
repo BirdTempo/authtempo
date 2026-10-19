@@ -7,8 +7,8 @@ import { DEMO_PLANNED_ORIGIN } from "../../src/facts.ts";
 
 // The demo holds no secret (plan 11b, Global Constraints). These tests read
 // wrangler.jsonc, the bundle that scripts/dry-run.mjs writes to dist/bundle/,
-// the copied assets of dist/public/, and the source. The test script runs the
-// dry run before vitest, so the bundle comes from the same run.
+// the copied assets of dist/public/, and the source. The build runs the dry
+// run, and the test task waits for the build (ruling 44 of the plan 11b lane).
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BUNDLE = join(PKG, "dist", "bundle");
 const PUBLIC = join(PKG, "dist", "public");
