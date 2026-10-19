@@ -64,6 +64,15 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     page: "/docs/reference/api/",
     headings: ["The secrets entry"],
   },
+  // The route contract and the OpenAPI generator (plan 11g), on the page of the document.
+  {
+    label: "core-openapi",
+    pkg: "@authtempo/core",
+    entry: "./openapi",
+    source: "packages/core/src/openapi/index.ts",
+    page: "/docs/reference/openapi/",
+    headings: ["Exports"],
+  },
   {
     label: "client",
     pkg: "@authtempo/client",
@@ -267,12 +276,6 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
     pkg: "@authtempo/core",
     entry: "./bindings",
     reason: "the gate of the server bindings; each binding page names it (plan 11d2)",
-  },
-  {
-    pkg: "@authtempo/core",
-    entry: "./openapi",
-    reason:
-      "the route contract and the OpenAPI generator; plan 11g Task 9 writes its reference page",
   },
   {
     pkg: "@authtempo/client",

@@ -77,7 +77,10 @@ export function checkLlms(
     }
     const path = pathOfTwin(url);
     if (path === null) {
-      r.failures.push(`a link names no file: ${url}`);
+      // A file of the build that is not a page, such as the OpenAPI document (plan 11g), is a tool.
+      const file = url.startsWith(`${SITE_ORIGIN}/`) ? url.slice(SITE_ORIGIN.length + 1) : null;
+      if (file === null || !files.has(file)) r.failures.push(`a link names no file: ${url}`);
+      else if (section !== "Tools") r.failures.push(`${url} is under ## ${section}, not ## Tools`);
       continue;
     }
     // The item lists its page even when the twin is missing, so one fault gives one failure.

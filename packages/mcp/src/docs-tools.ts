@@ -73,6 +73,14 @@ export function llmsText(index: AgentIndex): string {
   );
   const guide = index.pages.find((p) => p.path === AGENTS_GUIDE);
   if (guide) out.push(item(guide.title, twinUrl(guide.path), guide.description));
+  // The OpenAPI document of plan 11g is a file of the site build, not a page, so it has no twin.
+  out.push(
+    item(
+      "OpenAPI document",
+      `${SITE_ORIGIN}/docs/reference/openapi.json`,
+      "the OpenAPI 3.1 document of every route, for an API client or a code generator.",
+    ),
+  );
   const groups = new Map<string, AgentPage[]>();
   for (const page of index.pages) {
     if (page.path === AGENTS_GUIDE) continue;

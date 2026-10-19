@@ -1,0 +1,164 @@
+<!-- The routes page of the check-routes tests: six real entries, each with the three cells in the forms of plan 11g Task 9. -->
+<h2 id="sessions">Sessions</h2>
+<h3 id="post-sign-out"><code>POST /sign-out</code></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Needs</td>
+<td>Nothing; or a session cookie, or a <code dir="auto">ts_</code> bearer token. A call with no session answers too</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Answer</td>
+<td><code dir="auto">{ ok: true }</code></td>
+</tr>
+<tr>
+<td>Errors</td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<h3 id="post-magic-link-request"><code>POST /magic-link/request</code></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Needs</td>
+<td>Nothing</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>JSON <code dir="auto">{ email, next? }</code></td>
+</tr>
+<tr>
+<td>Answer</td>
+<td><code dir="auto">{ sent: true }</code></td>
+</tr>
+<tr>
+<td>Errors</td>
+<td><a href="/docs/reference/errors/#invalid_body"><code dir="auto">invalid_body</code></a>, <a href="/docs/reference/errors/#rate_limited"><code dir="auto">rate_limited</code></a>, <a href="/docs/reference/errors/#captcha_required"><code dir="auto">captcha_required</code></a>, <a href="/docs/reference/errors/#captcha_failed"><code dir="auto">captcha_failed</code></a>, <a href="/docs/reference/errors/#captcha_unavailable"><code dir="auto">captcha_unavailable</code></a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="get-magic-link-verify"><code>GET /magic-link/verify</code></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Needs</td>
+<td>Nothing. The token of the link is the credential</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>Query <code dir="auto">{ token }</code></td>
+</tr>
+<tr>
+<td>Answer</td>
+<td>A redirect</td>
+</tr>
+<tr>
+<td>Errors</td>
+<td><a href="/docs/reference/errors/#invalid_token"><code dir="auto">invalid_token</code></a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="post-tokens"><code>POST /tokens</code></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Needs</td>
+<td>A session cookie, or a <code dir="auto">ts_</code> bearer token. The session is fresh, and the address is verified</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>JSON <code dir="auto">{ name, expiresInDays?, organizationId? }</code></td>
+</tr>
+<tr>
+<td>Answer</td>
+<td><code dir="auto">{ token, apiToken }</code></td>
+</tr>
+<tr>
+<td>Errors</td>
+<td><a href="/docs/reference/errors/#unauthorized"><code dir="auto">unauthorized</code></a>, <a href="/docs/reference/errors/#session_not_fresh"><code dir="auto">session_not_fresh</code></a>, <a href="/docs/reference/errors/#invalid_body"><code dir="auto">invalid_body</code></a>, <a href="/docs/reference/errors/#email_unverified"><code dir="auto">email_unverified</code></a>, <a href="/docs/reference/errors/#rate_limited"><code dir="auto">rate_limited</code></a>, <a href="/docs/reference/errors/#token_limit"><code dir="auto">token_limit</code></a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="get-tokens-current"><code>GET /tokens/current</code></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Needs</td>
+<td>A <code dir="auto">tk_</code> bearer token</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Answer</td>
+<td><code dir="auto">{ token }</code></td>
+</tr>
+<tr>
+<td>Errors</td>
+<td><a href="/docs/reference/errors/#unauthorized"><code dir="auto">unauthorized</code></a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="post-oauth-revoke"><code>POST /oauth/revoke</code></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Needs</td>
+<td>Nothing</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>Form <code dir="auto">{ token, client_id? }</code></td>
+</tr>
+<tr>
+<td>Answer</td>
+<td>An empty 200</td>
+</tr>
+<tr>
+<td>Errors</td>
+<td><a href="/docs/reference/errors/#oauth-invalid_request"><code dir="auto">invalid_request</code></a>, <a href="/docs/reference/errors/#oauth-rate_limited"><code dir="auto">rate_limited</code></a>, <a href="/docs/reference/errors/#oauth-unauthorized_client"><code dir="auto">unauthorized_client</code></a></td>
+</tr>
+</tbody>
+</table>

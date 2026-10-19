@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
+import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
 import { ROUTES } from "@authtempo/core/routes";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
@@ -26,6 +27,7 @@ import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
 import { checkMcp } from "./check-mcp.ts";
 import { checkMotion } from "./check-motion.ts";
+import { checkOpenApi } from "./check-openapi.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkScript } from "./check-script.ts";
@@ -61,6 +63,18 @@ import { type CheckReport, summaryLine } from "./lib/report.ts";
 /** A file of dist, or "" when the build did not write it. The check then fails on what it lacks. */
 function distText(file: string): string {
   return existsSync(`${DIST}${file}`) ? readFileSync(`${DIST}${file}`, "utf8") : "";
+}
+
+/** The site's OpenAPI document in dist (plan 11g). */
+const OPENAPI_FILE = "docs/reference/openapi.json";
+
+/** The parsed document of dist, or null when the build did not write it or it is not JSON. */
+function openApiFile(): unknown {
+  try {
+    return JSON.parse(distText(OPENAPI_FILE)) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 /** The built MCP server. The site's Turbo test builds it first, through the dev dependency. */
@@ -135,8 +149,19 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     run: () => checkErrorLinks(errorLinks(), distPageOrEmpty),
   },
   {
+    // The Input cells read the built document; check-openapi holds its bytes to the generator (plan 11g).
     name: "check-routes",
-    run: () => checkRoutes(distPageOrEmpty("/docs/reference/routes/"), ROUTES),
+    run: () => checkRoutes(distPageOrEmpty("/docs/reference/routes/"), ROUTES, openApiFile()),
+  },
+  {
+    name: "check-openapi",
+    run: () =>
+      checkOpenApi(
+        existsSync(`${DIST}${OPENAPI_FILE}`) ? distText(OPENAPI_FILE) : null,
+        openApiJson(openApiDocument(openApiReferenceOptions())),
+        distPageOrEmpty("/docs/reference/openapi/"),
+        ROUTES.length,
+      ),
   },
   {
     name: "check-config",

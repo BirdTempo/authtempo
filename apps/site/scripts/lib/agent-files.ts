@@ -83,6 +83,14 @@ export function llmsText(index: AgentIndex, optional: readonly string[] = OPTION
   // The guide is listed here, and not again under its group, so each page has one line.
   const guide = index.pages.find((p) => p.path === AGENTS_GUIDE);
   if (guide) out.push(item(guide.title, twinUrl(guide.path), guide.description));
+  // The OpenAPI document of plan 11g is a file of the build, not a page, so it has no twin.
+  out.push(
+    item(
+      "OpenAPI document",
+      `${SITE_ORIGIN}/docs/reference/openapi.json`,
+      "the OpenAPI 3.1 document of every route, for an API client or a code generator.",
+    ),
+  );
   for (const s of llmsSections(index, optional)) {
     out.push("", `## ${s.heading}`, "");
     for (const p of s.pages) out.push(item(p.title, twinUrl(p.path), p.description));

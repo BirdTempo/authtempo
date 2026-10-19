@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,9 @@ function fresh(tree: readonly Page[] = pages, sidebar: readonly string[] = order
     groups,
   });
   buildAgentFiles(index, dist);
+  // The site build writes the OpenAPI document beside the pages (plan 11g), and llms.txt lists it.
+  mkdirSync(`${dist}docs/reference/`, { recursive: true });
+  writeFileSync(`${dist}${OPENAPI_FILE}`, "{}\n");
   const files = () => new Set(walk(dist, () => true).map((p) => p.slice(dist.length)));
   return {
     dist,
@@ -53,14 +56,16 @@ function fresh(tree: readonly Page[] = pages, sidebar: readonly string[] = order
 }
 
 const TWIN = "https://authtempo.com/docs/reference/codes/index.md";
+const OPENAPI_FILE = "docs/reference/openapi.json";
+const OPENAPI_URL = `https://authtempo.com/${OPENAPI_FILE}`;
 
 describe("checkLlms", () => {
   it("passes on a fresh build", () => {
     const b = fresh();
     const r = checkLlms(b.files(), b.llms, b.full, pages, order, groups);
     expect(r.failures).toEqual([]);
-    // Five pages, five twins, and the MCP server line.
-    expect(r.counts).toEqual({ pages: 5, links: 6, twins: 5 });
+    // Five pages, five twins, the MCP server line, and the OpenAPI document.
+    expect(r.counts).toEqual({ pages: 5, links: 7, twins: 5 });
     expect(r.exempt).toEqual([
       `${REMOTE_MCP_URL}: the remote MCP server is a planned address, not a file of the build`,
     ]);
@@ -85,7 +90,7 @@ describe("checkLlms", () => {
       checkLlms(without.files(), without.llms, without.full, pages, order, groups).counts,
     ).toEqual({
       pages: 5,
-      links: 6,
+      links: 7,
       twins: 5,
     });
 
@@ -99,8 +104,8 @@ describe("checkLlms", () => {
     const b = fresh(tree, sidebar);
     const r = checkLlms(b.files(), b.llms, b.full, tree, sidebar, groups);
     expect(r.failures).toEqual([]);
-    // One more page, one more link: links stay pages + 1.
-    expect(r.counts).toEqual({ pages: 6, links: 7, twins: 6 });
+    // One more page, one more link: links stay pages + 2.
+    expect(r.counts).toEqual({ pages: 6, links: 8, twins: 6 });
     const item =
       "- [Set up an agent](https://authtempo.com/docs/guides/agents/index.md): Install the MCP server in your editor.";
     const tools = b.llms.slice(
@@ -206,6 +211,36 @@ describe("checkLlms", () => {
     expect(checkLlms(b.files(), moved, b.full, pages, order, groups).failures).toContain(
       "llms.txt: the section Overview does not keep the sidebar order",
     );
+  });
+
+  it("lists the OpenAPI document under Tools, as a file of the build", () => {
+    const b = fresh();
+    const item = `- [OpenAPI document](${OPENAPI_URL}): the OpenAPI 3.1 document of every route, for an API client or a code generator.`;
+    const tools = b.llms.slice(
+      b.llms.indexOf("## Tools"),
+      b.llms.indexOf("\n## ", b.llms.indexOf("## Tools") + 1),
+    );
+    expect(tools).toContain(item);
+    expect(b.llms.split(item)).toHaveLength(2);
+    // The document is a file, not a page: llms-full.txt holds no text of it.
+    expect(b.full).not.toContain(OPENAPI_URL);
+  });
+
+  it("fails when a file item names no file of the build", () => {
+    const b = fresh();
+    rmSync(`${b.dist}${OPENAPI_FILE}`);
+    const r = checkLlms(b.files(), b.llms, b.full, pages, order, groups);
+    expect(r.failures).toEqual([`a link names no file: ${OPENAPI_URL}`]);
+  });
+
+  it("fails when a file item is under another H2", () => {
+    const b = fresh();
+    const line = b.llms.split("\n").find((l) => l.startsWith("- [OpenAPI document]")) ?? "";
+    const moved = `${b.llms.replace(`${line}\n`, "")}${line}\n`;
+    expect(moved).not.toBe(b.llms);
+    expect(checkLlms(b.files(), moved, b.full, pages, order, groups).failures).toEqual([
+      `${OPENAPI_URL} is under ## Optional, not ## Tools`,
+    ]);
   });
 
   it("fails when a link names no file", () => {
