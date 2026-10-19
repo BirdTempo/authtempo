@@ -961,11 +961,12 @@ describe("the route contract (plan 11g)", () => {
       },
       {
         // OIDC RP-Initiated Logout 1.0 section 2: the POST form of the same optional parameters.
+        // With no session it goes on as a GET of the same request (ruling 46 of plan 12e).
         key: "POST /oauth/end-session",
         media: "form",
         body: { client_id: clientId, state: "st-1" },
         required: [],
-        valid: { status: 200, code: null },
+        valid: { status: 303, code: null },
         missing: {},
       },
     ];

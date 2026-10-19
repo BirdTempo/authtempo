@@ -527,12 +527,23 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     if (!params) return oauthJson(oauthFail("invalid_request"));
     // An empty value counts as omitted (RFC 6749 section 3.1). logout_hint and ui_locales are ignored.
     const value = (name: string) => params.get(name) || null;
+    const resolved = await sessionFromRequest(config, ctx.request);
+    // The rule: no answer says signed out, or redirects as a done logout, when
+    // the request could not see the session. A cross-site POST carries no
+    // SameSite=Lax cookie, so a POST with no session goes on as a GET of the
+    // same request, without the yes. A top-level GET carries the Lax cookie.
+    if (!resolved && ctx.request.method === "POST") {
+      const query = new URLSearchParams(
+        [...params].filter(([name]) => name !== "confirm"),
+      ).toString();
+      const tail = query === "" ? "" : `?${query}`;
+      return redirect(`${config.baseURL}${config.basePath}/oauth/end-session${tail}`, 303);
+    }
     const hintText = value("id_token_hint");
     let hint = hintText === null ? null : await checkIdTokenHint(config, hintText);
     // Section 2: a client_id beside the hint must be the client of the hint.
     const clientId = value("client_id");
     if (hint && clientId !== null && clientId !== hint.clientId) hint = null;
-    const resolved = await sessionFromRequest(config, ctx.request);
     // A hint that names another user than this session's is a suspect request: no hint.
     if (hint && resolved && hint.sub !== resolved.user.id) hint = null;
     const target = await logoutRedirect(config, {
@@ -569,7 +580,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     }
     const res =
       target !== null
-        ? redirect(target)
+        ? redirect(target, ctx.request.method === "POST" ? 303 : 302)
         : new Response(defaultEndSessionPage({ kind: "signed-out", appName: config.appName }), {
             status: 200,
             headers: pageHeaders(config, noScriptPagePolicy(config)),

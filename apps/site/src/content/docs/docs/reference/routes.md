@@ -1023,7 +1023,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | --- | --- |
 | Needs | Nothing; or a session cookie, or a `ts_` bearer token. With a session and no valid hint of it, the page asks before the session ends (`OIDC RP-Initiated Logout 1.0` section 2) |
 | Input | Query `{ id_token_hint?, client_id?, post_logout_redirect_uri?, state?, logout_hint?, ui_locales? }`. `logout_hint` and `ui_locales` are read and ignored. A hint is an ID token of this issuer. Its signature, `iss`, and `aud` are checked, and an expired hint still counts. A `client_id` must equal the hint's `aud` |
-| Answer | A valid hint of this browser's session ends that session at once, and `session.afterEnd` fires with `oidc_logout`. Any other request with a session answers the confirmation page, and a GET ends nothing. With no session nothing ends. The answer is a 302 to the `post_logout_redirect_uri` with `state` only for a valid hint and an exact entry of the client's `post_logout_redirect_uris`. Else it is the signed-out page |
+| Answer | A valid hint of the session that the request carries ends that session at once, and `session.afterEnd` fires with `oidc_logout`. Any other request with a session answers the confirmation page, and a GET ends nothing. With no session nothing ends. The answer is a 302 to the `post_logout_redirect_uri` with `state` only for a valid hint and an exact entry of the client's `post_logout_redirect_uris`. Else it is the signed-out page |
 | Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
 
 <h3 id="post-oauth-end-session"><code>POST /oauth/end-session</code></h3>
@@ -1032,7 +1032,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | --- | --- |
 | Needs | Nothing; or a session cookie, or a `ts_` bearer token. With a session and no valid hint of it, the page asks before the session ends (`OIDC RP-Initiated Logout 1.0` section 2). The relying party's page may post the form from its own origin |
 | Input | Form `{ id_token_hint?, logout_hint?, client_id?, post_logout_redirect_uri?, state?, ui_locales?, confirm? }`. The fields of the GET, and `confirm=yes` from the confirmation page. The yes counts only with `Origin` equal to `baseURL` |
-| Answer | The same as the GET. The yes ends the session, and the answer then follows the GET rule for the redirect |
+| Answer | A POST that carries no session answers 303 to the GET of the same fields, without `confirm`. A browser sends no `SameSite=Lax` cookie on a cross-site POST, and the top-level GET carries it. So the relying party's form post becomes a GET, and only the GET ends the session. A POST with a session follows the GET rules. The yes ends the session. Each redirect of a POST is a 303 |
 | Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
 
 <h3 id="get-well-known-oauth-authorization-server"><code>GET /.well-known/oauth-authorization-server</code></h3>

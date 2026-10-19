@@ -1,8 +1,11 @@
 import type { ResolvedConfig } from "../config.js";
 
-/** A 302 that no cache keeps. Every auth redirect carries a secret or a result. */
-export function redirect(location: string): Response {
-  return new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } });
+/**
+ * A 302 that no cache keeps. Every auth redirect carries a secret or a
+ * result. A 303 answers a form post, so the browser follows with a GET.
+ */
+export function redirect(location: string, status: 302 | 303 = 302): Response {
+  return new Response(null, { status, headers: { location, "cache-control": "no-store" } });
 }
 
 /**

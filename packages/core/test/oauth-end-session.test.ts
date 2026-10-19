@@ -224,7 +224,8 @@ describe("RP-initiated logout (plan 12e Task 15, OIDC RP-Initiated Logout 1.0)",
       confirm: "yes",
     });
     const done = await h.auth.handle(endPost(fields, { cookie: s2.cookie, origin: BASE_URL }));
-    expect(done.status).toBe(302);
+    // A 303 answers the form post, so the browser follows with a GET.
+    expect(done.status).toBe(303);
     expect(done.headers.get("location")).toBe(`${BYE}?state=st-10`);
     expect(await live(h, s2.session.id)).toBe(false);
   });
@@ -345,6 +346,56 @@ describe("RP-initiated logout (plan 12e Task 15, OIDC RP-Initiated Logout 1.0)",
     expect(await live(h, s.session.id)).toBe(true);
   });
 
+  it("answers a POST that sees no session with a 303 to the GET of the same request (SameSite=Lax)", async () => {
+    const h = oauthHandle();
+    const s = await signedIn(h);
+    const clientId = await client(h);
+    const hint = await idTokenOf(h, s.cookie, clientId);
+    // The relying party's form post: a browser sends no SameSite=Lax cookie on a cross-site POST.
+    const res = await h.auth.handle(
+      endPost(
+        { id_token_hint: hint, post_logout_redirect_uri: BYE, state: "st-7" },
+        { origin: RP_ORIGIN },
+      ),
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const location = res.headers.get("location") ?? "";
+    const url = new URL(location);
+    expect(`${url.origin}${url.pathname}`).toBe(PATH);
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      id_token_hint: hint,
+      post_logout_redirect_uri: BYE,
+      state: "st-7",
+    });
+    // No redirect to the client yet: the session lives.
+    expect(await live(h, s.session.id)).toBe(true);
+    // The browser follows with a top-level GET, which carries the Lax cookie.
+    const done = await h.auth.handle(new Request(location, { headers: { cookie: s.cookie } }));
+    expect(done.status).toBe(302);
+    expect(done.headers.get("location")).toBe(`${BYE}?state=st-7`);
+    expect(await live(h, s.session.id)).toBe(false);
+    // A cross-site yes with no cookie: the 303 drops the yes, and no page says signed out.
+    const s2 = await signedIn(h, "grace@example.com");
+    const yes = await h.auth.handle(
+      endPost({ confirm: "yes", state: "st-8" }, { origin: RP_ORIGIN }),
+    );
+    expect(yes.status).toBe(303);
+    expect(yes.headers.get("location")).toBe(`${PATH}?state=st-8`);
+    expect(await yes.text()).toBe("");
+    // The GET with the cookie asks first, and nothing ends.
+    await expectConfirmPage(
+      await h.auth.handle(
+        new Request(yes.headers.get("location") ?? "", { headers: { cookie: s2.cookie } }),
+      ),
+    );
+    expect(await live(h, s2.session.id)).toBe(true);
+    // An empty form goes on to the bare path.
+    const bare = await h.auth.handle(endPost({}, { origin: RP_ORIGIN }));
+    expect(bare.status).toBe(303);
+    expect(bare.headers.get("location")).toBe(PATH);
+  });
+
   it("fires afterEnd with oidc_logout", async () => {
     const ended: string[] = [];
     const h = oauthHandle({
@@ -371,8 +422,9 @@ describe("RP-initiated logout (plan 12e Task 15, OIDC RP-Initiated Logout 1.0)",
     const h = oauthHandle();
     const ip = { "cf-connecting-ip": "203.0.113.9" };
     for (let i = 0; i < 60; i++) {
+      // A POST with no session goes on to the GET as a 303.
       const res = await h.auth.handle(i % 2 === 0 ? endGet({}, ip) : endPost({}, ip));
-      expect(res.status, `request ${i + 1}`).toBe(200);
+      expect(res.status, `request ${i + 1}`).toBe(i % 2 === 0 ? 200 : 303);
     }
     const refused = await h.auth.handle(endGet({}, ip));
     expect(refused.status).toBe(429);
