@@ -3,8 +3,8 @@
 // The lockup replaces Starlight's title (brand spec 11). It links where
 // Starlight's title links. The template reads the route in place: Biome 2.5.15
 // lints this frontmatter and not the template, so a const reads as unused.
-// The span keeps translate="no" of Starlight's title, so a page translator
+// The link keeps translate="no" of Starlight's title, so a page translator
 // leaves the name as it is.
 import Lockup from "../Lockup.astro";
 ---
-<span class="at-site-title" translate="no"><Lockup href={Astro.locals.starlightRoute.siteTitleHref} beat /></span>
+<Lockup href={Astro.locals.starlightRoute.siteTitleHref} beat translate="no" />

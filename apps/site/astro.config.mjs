@@ -87,6 +87,8 @@ export default defineConfig({
         useStarlightUiThemeColors: false,
         styleOverrides: {
           codeBackground: "var(--at-code)",
+          // Brand spec 4: the code text is the code ink token. The theme keeps the syntax colors.
+          codeForeground: "var(--at-code-ink)",
           codeFontFamily: "var(--at-font-mono)",
           borderWidth: "0px",
           frames: {

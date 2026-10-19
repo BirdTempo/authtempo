@@ -10,9 +10,11 @@ import Wordmark from "../assets/wordmark.svg";
 interface Props {
   href: string;
   beat?: boolean;
+  /** "no" keeps a page translator off the name (Starlight's title carries it). */
+  translate?: "no";
 }
 ---
-<a class:list={["at-lockup", { "at-beat": Astro.props.beat === true }]} href={Astro.props.href}><Wordmark class="at-wordmark" /></a>
+<a class:list={["at-lockup", { "at-beat": Astro.props.beat === true }]} href={Astro.props.href} translate={Astro.props.translate}><Wordmark class="at-wordmark" /></a>
 <style>
   .at-lockup { display: inline-flex; align-items: center; color: var(--at-ink); text-decoration: none; }
   .at-lockup :global(.at-wordmark) { display: block; height: 1.75rem; width: auto; }

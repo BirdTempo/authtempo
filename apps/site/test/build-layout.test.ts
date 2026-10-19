@@ -268,7 +268,8 @@ describe("the docs theme (brand spec 11)", () => {
     expect(header).toMatch(/ class="at-lockup[ "]/);
     expect(header).toContain('aria-label="authtempo"');
     // Starlight's title carries translate="no", so a page translator leaves the name.
-    expect(header).toMatch(/ translate="no"[^>]*><a class="at-lockup[ "]/);
+    const lockup = tags(header, "a").find((t) => / class="at-lockup[ "]/.test(t)) ?? "";
+    expect(lockup).toContain(' translate="no"');
   });
 
   it("restyles Starlight's theme select with the three sprite icons", () => {
@@ -325,7 +326,7 @@ describe("the docs theme (brand spec 11)", () => {
     // Starlight's header.header has the hairline. A bare .header rule also
     // matches the inner header div and each code frame caption.
     expect(css("docs/start/first-sign-in/index.html")).not.toMatch(
-      /(^|[},])\.header(,[^{]*)?\{[^}]*border-bottom/,
+      /(^|[{},])\.header(,[^{]*)?\{[^}]*border-bottom/,
     );
   });
 
@@ -346,6 +347,7 @@ describe("the docs theme (brand spec 11)", () => {
       [...codeCss.matchAll(new RegExp(`${name}:([^;}]*)`, "g"))].map((m) => m[1]);
     for (const [name, want] of [
       ["--ec-codeBg", "var(--at-code)"],
+      ["--ec-codeFg", "var(--at-code-ink)"],
       ["--ec-frm-edBg", "var(--at-code)"],
       ["--ec-frm-trmBg", "var(--at-code)"],
       ["--ec-frm-trmTtbBg", "var(--at-code)"],
