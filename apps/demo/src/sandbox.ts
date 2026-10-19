@@ -26,14 +26,17 @@ function json(status: number, body: unknown): Response {
  * an id from a cookie never makes a store.
  */
 export class Sandbox extends DurableObject<Cloudflare.Env> {
-  /** Makes the store: the shipped migrations, then the meta rows, then the alarm. */
+  /** Makes the store: the alarm, then the shipped migrations, then the meta rows. */
   async create(): Promise<{ resetAt: number }> {
     if (this.isLive()) throw new Error("demo: the sandbox exists");
     const sql = this.ctx.storage.sql;
-    // One exec runs each file of several statements; no file holds ";" in a string (Task 8 Step 1).
-    for (const m of MIGRATIONS) this.ctx.storage.transactionSync(() => sql.exec(m.sql));
     const createdAt = Date.now();
     const resetAt = createdAt + SANDBOX_LIFE_MS;
+    // The alarm comes first. If the object stops part way, the alarm still
+    // deletes the part store at the reset time (ruling 32).
+    await this.ctx.storage.setAlarm(resetAt);
+    // One exec runs each file of several statements; no file holds ";" in a string (Task 8 Step 1).
+    for (const m of MIGRATIONS) this.ctx.storage.transactionSync(() => sql.exec(m.sql));
     this.ctx.storage.transactionSync(() => {
       sql.exec(META_DDL);
       const put = "INSERT INTO demo_meta (key, value) VALUES (?, ?)";
@@ -41,7 +44,6 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
       sql.exec(put, "reset_at", String(resetAt));
       sql.exec(put, "secret", randomSecret());
     });
-    await this.ctx.storage.setAlarm(resetAt);
     return { resetAt };
   }
 

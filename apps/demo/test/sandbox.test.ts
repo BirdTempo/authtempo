@@ -2,6 +2,7 @@ import { env, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare
 import { createD1Adapter } from "@authtempo/adapter-d1";
 import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
+import type { Sandbox } from "../src/sandbox.js";
 import { sqliteD1 } from "../src/sqlite-d1.js";
 
 const ORIGIN = "https://demo.authtempo.com";
@@ -175,6 +176,21 @@ describe("the demo Worker and its sandboxes", () => {
     const query = "SELECT id FROM ta_user";
     expect(await rowsIn(a, query)).toEqual([{ id: "u-a" }]);
     expect(await rowsIn(b, query)).toEqual([]);
+  });
+
+  it("refuses create() on a live sandbox and keeps its store and alarm", async () => {
+    const id = await visit();
+    const read = () =>
+      runInDurableObject(stubOf(id), async (_instance, state) => ({
+        meta: state.storage.sql.exec("SELECT key, value FROM demo_meta ORDER BY key").toArray(),
+        alarm: await state.storage.getAlarm(),
+      }));
+    const before = await read();
+    // The call runs on the instance: a throw of an RPC method of the stub also
+    // reaches the pool as an unhandled error of the object (seen 2026-10-20).
+    const second = runInDurableObject(stubOf(id), (instance: Sandbox) => instance.create());
+    await expect(second).rejects.toThrow("demo: the sandbox exists");
+    expect(await read()).toEqual(before);
   });
 
   it("deletes an IP at the next admit one hour after its visit", async () => {
