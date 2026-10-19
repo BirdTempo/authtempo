@@ -3,18 +3,30 @@ import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** Brand spec 12: the toggle is under 30 lines. */
 export const SCRIPT_MAX_LINES = 29;
-/** What the toggle never does: no request, no loaded code, no written markup. */
+/**
+ * What the toggle never does: no request, no loaded code, no written markup,
+ * no navigation, and no code from a string. The hash is the first guard; this
+ * list names the forms by which a new toggle text could leave the page.
+ */
 export const SCRIPT_FORBIDDEN: readonly RegExp[] = [
   /\bfetch\s*\(/,
   /XMLHttpRequest/,
   /sendBeacon/,
   /WebSocket/,
+  /EventSource/,
+  /\bImage\b/,
   /\bimport\b/,
   /https?:/,
+  /\/\//,
+  /\blocation\b/,
+  /\bopen\s*\(/,
   /\beval\s*\(/,
   /new\s+Function/,
+  /set(?:Timeout|Interval)\s*\(\s*["'`]/,
   /document\.write/,
   /innerHTML/,
+  /insertAdjacentHTML/,
+  /createElement/,
 ];
 
 /** The CSP source of a script: `sha256-` and the base64 of the SHA-256 of its text. */
@@ -53,9 +65,18 @@ export function checkScript(input: {
       );
     for (const s of scripts) {
       r.counts.scripts = (r.counts.scripts ?? 0) + 1;
-      const src = /\ssrc="([^"]*)"/.exec(s[1] ?? "")?.[1];
-      if (src !== undefined)
-        r.failures.push(`${page} loads the script file ${src}; a root page loads none`);
+      const attrs = (s[1] ?? "").trim();
+      const src = /\ssrc=(?:"([^"]*)"|'([^']*)')/.exec(s[1] ?? "");
+      if (src !== null)
+        r.failures.push(
+          `${page} loads the script file ${src[1] ?? src[2] ?? ""}; a root page loads none`,
+        );
+      // A module, deferred, or async script runs after the parse, so the
+      // theme would set after the first paint. The toggle tag has no attribute.
+      else if (attrs !== "")
+        r.failures.push(
+          `${page} has a script with the attributes ${attrs}; the toggle tag has none`,
+        );
       else if (scriptHash(s[2] ?? "") !== allowed)
         r.failures.push(
           `${page} has an inline script ${scriptHash(s[2] ?? "")}, which is not the theme toggle`,
