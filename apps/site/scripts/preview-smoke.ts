@@ -142,7 +142,7 @@ try {
     ),
   );
   await expectAnswer("/docs/start/index.md", (res) => agentAnswer(res, null));
-  // The OpenAPI document of plan 11g: public/_headers gives this one path a CORS
+  // The OpenAPI document of plan 11g. public/_headers gives this one path a CORS
   // header with no credentials, so a browser tool on another origin reads it.
   await expectAnswer("/docs/reference/openapi.json", (res) => {
     const type = res.headers.get("content-type") ?? "(none)";

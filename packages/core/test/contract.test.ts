@@ -252,8 +252,8 @@ interface BodyRow {
 }
 
 /**
- * The bodies of every POST that parses with its schema, each one accepted by
- * the schema, with the session it needs and the answer of a refused body.
+ * The bodies of every POST that parses with its schema. Each body is one that
+ * the schema accepts, with the session it needs and the answer of a refused body.
  * The order matters. The account delete goes last, since it ends the
  * session's user, and the password change goes before it.
  */
@@ -832,8 +832,9 @@ describe("the route contract (plan 11g)", () => {
     // A code of a second request, for the token exchange.
     const { code, verifier } = await codeOf(w, cookie, clientId);
     /**
-     * Each POST that reads its body by hand: the media, a valid body, and the keys the schema
-     * requires with the answer of each one's absence. `valid` is the answer of the valid body.
+     * Each POST that reads its body by hand, with its media and a valid body. It also has the
+     * keys that the schema requires, with the answer when each one is absent. `valid` is the
+     * answer of the valid body.
      * The valid body runs first, so a spent code shapes the later answers of the token route.
      * `fresh` makes a new valid body for each probe, where the valid body spends a request.
      */

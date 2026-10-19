@@ -340,7 +340,7 @@ export type _covered = Expect<
 
 /**
  * A row with `select` and a `:name` path fails the compile (plan 11g Task 4
- * review, Low 3): `part` sends the row's path with no fill. The error line
+ * review, Low 3). `part` sends the row's path with no fill. The error line
  * below is the test; it fails the compile the day the type admits the row.
  */
 export const TEMPLATE_REFUSED = [

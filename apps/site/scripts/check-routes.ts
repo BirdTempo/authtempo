@@ -243,9 +243,9 @@ function documentRules(doc: unknown): string[] {
 }
 
 /**
- * The document's rules and the page's rules are one list (plan 11g): each rule
- * of the document is an item of the page, and each item of the page is a rule
- * of the document or a rule of the cells.
+ * The document's rules and the page's rules are one list (plan 11g). Each rule
+ * of the document is an item of the page. Each item of the page is a rule of
+ * the document or a rule of the cells.
  */
 function ruleFailures(html: string, doc: unknown): { held: number; failures: string[] } {
   const page = pageRules(html);
@@ -266,8 +266,8 @@ function ruleFailures(html: string, doc: unknown): { held: number; failures: str
 /**
  * Every route of ROUTES has an h3 anchor whose heading names it, and every h3
  * anchor names a route. The table after each heading holds three cells to
- * the entry (plan 11g): Errors to `codes` and `oauthCodes`, Needs to `auth`,
- * and Input to the operation's query and body in the built document `doc`.
+ * the entry (plan 11g). Errors holds to `codes` and `oauthCodes`, Needs to
+ * `auth`, and Input to the operation's query and body in the built document `doc`.
  * The rules section of the page holds the rules of the document's description.
  */
 export function checkRoutes(
