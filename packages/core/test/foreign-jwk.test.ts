@@ -172,7 +172,7 @@ describe("foreign keys (plan 12e Task 5)", () => {
     }
   });
 
-  it("computes the RFC 7638 thumbprint of its example", async () => {
+  it("computes the RFC 7638 thumbprint of its example, and the RFC 8037 and RFC 9449 ones", async () => {
     // RFC 7638 section 3.1, read 2026-10-19.
     const key = {
       kty: "RSA",
@@ -190,6 +190,15 @@ describe("foreign keys (plan 12e Task 5)", () => {
         x: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
       }),
     ).toBe("kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k");
+    // RFC 9449 Figures 4 and 9 (read 2026-10-19): the EC key of a DPoP proof and its jkt.
+    expect(
+      await jwkThumbprint({
+        kty: "EC",
+        x: "l8tFrhx-34tV3hRICRDY9zCkDlpBhF42UQUfWVAWBFs",
+        y: "9VE4jf_Ok_o64zbTTlcuNJajHmt6v9TDVrU0CdvGRDA",
+        crv: "P-256",
+      }),
+    ).toBe("0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I");
     // A missing required member, and a key type with no rule.
     expect(await jwkThumbprint({ kty: "RSA", n: key.n })).toBeNull();
     expect(await jwkThumbprint({ kty: "oct", k: "AAAA" })).toBeNull();
