@@ -1,0 +1,89 @@
+import { env, runInDurableObject } from "cloudflare:test";
+import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
+import type { LimiterPort, StorageAdapter } from "@authtempo/core";
+import { runAdapterConformance } from "@authtempo/core/conformance";
+import { type ManualClock, runLimiterConformance } from "@authtempo/core/limiter-conformance";
+import type { Sandbox } from "../src/sandbox.js";
+import { sqliteD1 } from "../src/sqlite-d1.js";
+
+/** A sandbox id as the Worker makes one: 16 random bytes in lower-case hex. */
+function freshId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * A new sandbox, made by its own create(). The answer is its name, not a
+ * stub. A stub is an I/O object of the context that made it, so each call
+ * takes a new one.
+ */
+async function newSandbox(): Promise<string> {
+  const name = freshId();
+  await stubOf(name).create();
+  return name;
+}
+
+function stubOf(name: string): DurableObjectStub<Sandbox> {
+  return env.SANDBOX.get(env.SANDBOX.idFromName(name));
+}
+
+/**
+ * Runs `fn` inside the sandbox with the shim over its store. A SqlStorage
+ * handle taken out of runInDurableObject throws on its next use ("Cannot
+ * perform I/O on behalf of a different Durable Object", seen 2026-10-20).
+ * So each call of the suite opens its own runInDurableObject (the fallback of
+ * Task 8 Step 4).
+ */
+function inside<R>(name: string, fn: (db: D1Database) => Promise<R>) {
+  return runInDurableObject(stubOf(name), (_instance, state) =>
+    fn(sqliteD1(state.storage.sql, (f) => state.storage.transactionSync(f))),
+  );
+}
+
+/** The D1 adapter of the sandbox, with each method call forwarded into the object. */
+function forwardedAdapter(name: string): StorageAdapter {
+  const on = (db: D1Database) => createD1Adapter(db);
+  return {
+    create: (model, data) => inside(name, (db) => on(db).create(model, data)),
+    findOne: (model, where) => inside(name, (db) => on(db).findOne(model, where)),
+    findMany: (model, where, opts) => inside(name, (db) => on(db).findMany(model, where, opts)),
+    update: (model, where, data) => inside(name, (db) => on(db).update(model, where, data)),
+    delete: (model, where) => inside(name, (db) => on(db).delete(model, where)),
+    // The whole transaction runs inside one call, with the adapter of that call.
+    transaction: (fn) => inside(name, (db) => on(db).transaction(fn)),
+  };
+}
+
+/** The D1 limiter of the sandbox, with each call forwarded into the object. */
+function forwardedLimiter(name: string, clock: ManualClock): LimiterPort {
+  return {
+    allow: (key, window) => inside(name, (db) => createD1Limiter(db, clock).allow(key, window)),
+    sweep: (now) =>
+      inside(name, async (db) => {
+        const limiter = createD1Limiter(db, clock);
+        if (limiter.sweep === undefined) throw new Error("the D1 limiter has no sweep");
+        return limiter.sweep(now);
+      }),
+  };
+}
+
+function manualClock(): ManualClock {
+  let t = new Date("2026-01-01T00:00:00.000Z").getTime();
+  return {
+    now: () => new Date(t),
+    advance: (ms: number) => {
+      t += ms;
+    },
+  };
+}
+
+runAdapterConformance("demo sqlite shim", async () => {
+  const name = await newSandbox();
+  return { adapter: forwardedAdapter(name), close: () => stubOf(name).destroy() };
+});
+
+runLimiterConformance("demo sqlite shim", async () => {
+  const name = await newSandbox();
+  const clock = manualClock();
+  return { limiter: forwardedLimiter(name, clock), clock, close: () => stubOf(name).destroy() };
+});

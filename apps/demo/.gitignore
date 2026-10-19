@@ -1,0 +1,2 @@
+# Written by scripts/gen-migrations.mjs from the migrations of @authtempo/adapter-d1.
+src/migrations.gen.ts

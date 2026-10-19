@@ -1,0 +1,31 @@
+{
+  "name": "@authtempo/demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./facts": {
+      "types": "./dist/facts.d.ts",
+      "default": "./dist/facts.js"
+    }
+  },
+  "scripts": {
+    "gen": "node scripts/gen-migrations.mjs",
+    "build": "node scripts/gen-migrations.mjs",
+    "typecheck": "node scripts/gen-migrations.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "node scripts/gen-migrations.mjs && vitest run && node scripts/dry-run.mjs",
+    "dev": "node scripts/gen-migrations.mjs && mkdir -p dist/public && CI=1 WRANGLER_SEND_METRICS=false NO_COLOR=1 WRANGLER_HIDE_BANNER=true wrangler dev"
+  },
+  "dependencies": {
+    "@authtempo/adapter-d1": "workspace:*",
+    "@authtempo/client": "workspace:*",
+    "@authtempo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "@cloudflare/workers-types": "5.20261007.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}

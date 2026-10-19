@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "authtempo-demo",
+  "main": "src/worker.ts",
+  // Publication is the owner's call: the owner turns these on at publication
+  // and sets the custom domain demo.authtempo.com (decision 2 of 2026-10-14).
+  "workers_dev": false,
+  "preview_urls": false,
+  // The date and the two flags of examples/worker: the demo runs without Node compatibility.
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  // The one var. The demo holds no secret: each sandbox makes its own.
+  "vars": { "DEMO_ORIGIN": "https://demo.authtempo.com" },
+  // The demo stores no IP past one hour and logs no request.
+  "observability": { "enabled": false },
+  "durable_objects": {
+    "bindings": [
+      { "name": "SANDBOX", "class_name": "Sandbox" },
+      { "name": "GATE", "class_name": "Gate" }
+    ]
+  },
+  // Workers Free supports SQLite-backed classes only (Durable Objects changelog
+  // of 2026-07-09, read 2026-10-14).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Sandbox", "Gate"] }],
+  // A file of dist/public answers at its own path, before the script runs, so
+  // dist/public/assets/x.js answers /assets/x.js and _headers applies to it.
+  // wrangler refuses a missing folder, so dry-run.mjs and the dev script make
+  // it empty until Task 10 fills it (ruling 31 of the plan 11b lane).
+  "assets": { "directory": "./dist/public", "binding": "ASSETS" }
+  // No route and no custom domain. Plan 11b never deploys this Worker.
+}

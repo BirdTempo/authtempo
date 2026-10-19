@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The Worker source with the Workers types only. A Node type in src fails this check.
+  "compilerOptions": {
+    "noEmit": true,
+    // The base config adds DOM. workers-types declares the same globals and conflicts with it.
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src"]
+}

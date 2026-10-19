@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The pool tests and the source they import, with the types of cloudflare:test.
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    // The base config adds DOM. workers-types declares the same globals and conflicts with it.
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
+  },
+  "include": ["src", "test"]
+}
