@@ -80,18 +80,18 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     expect(r.status, r.stderr).toBe(0);
     expect(linesOf(r.stdout)).toEqual([
       ...CORE.map((n) => `applied ${n}`),
-      "version before: none; version after: 10",
+      "version before: none; version after: 11",
     ]);
     // The direct read: wrangler's own table and ta_meta in the local database.
     expect(
       readLocal(p.dir, "SELECT name FROM d1_migrations ORDER BY id").map((row) => row.name),
     ).toEqual(ADAPTER_FILES);
     expect(readLocal(p.dir, "SELECT value FROM ta_meta WHERE key = 'schema_version'")).toEqual([
-      { value: "10" },
+      { value: "11" },
     ]);
     const again = migrate(p.dir);
     expect(again.status).toBe(0);
-    expect(linesOf(again.stdout)).toEqual(["version before: 10; version after: 10"]);
+    expect(linesOf(again.stdout)).toEqual(["version before: 11; version after: 11"]);
   });
 
   it("stops with exit 2 and names both folders when migrations_dir is not the adapter's folder", () => {
@@ -121,6 +121,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
       "0006_compat_schema_v8",
       "0007_compat_schema_v9",
       "0008_compat_schema_v10",
+      "0009_compat_schema_v11",
     ];
     const r = migrate(p.dir, ["--tables", "compat"]);
     expect(r.status, r.stderr).toBe(0);
@@ -128,7 +129,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
       ...copied.map((n) => `copied ${n}`),
       "applied 0001_better_auth",
       ...copied.map((n) => `applied ${n}`),
-      "version before: none; version after: 10",
+      "version before: none; version after: 11",
     ]);
     const shipped = readdirSync(COMPAT_DIR)
       .filter((f) => f.endsWith(".sql"))
@@ -140,7 +141,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
       );
     const again = migrate(p.dir, ["--tables", "compat"]);
     expect(again.status).toBe(0);
-    expect(linesOf(again.stdout)).toEqual(["version before: 10; version after: 10"]);
+    expect(linesOf(again.stdout)).toEqual(["version before: 11; version after: 11"]);
   });
 
   // Plan 11f Task 5 (spec 23 item 11): the database's compat version decides the copies, and an edited copy stops the run.
@@ -272,29 +273,29 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
         `stopped: migrations_dir ${join(p.dir, "node_modules/@authtempo/adapter-d1/migrations")} is the folder of @authtempo/adapter-d1; with --tables compat, point migrations_dir at a folder of the app`,
       );
       expect(readdirSync(ADAPTER).sort()).toEqual(ADAPTER_ENTRIES);
-      expect(ADAPTER_FILES).toHaveLength(10);
+      expect(ADAPTER_FILES).toHaveLength(11);
     }
   });
 
-  it("stops after a run that leaves the database at version 11, and before any write on the next run", () => {
+  it("stops after a run that leaves the database at version 12, and before any write on the next run", () => {
     const files = Object.fromEntries(
       ADAPTER_FILES.map((f) => [`migrations/${f}`, readFileSync(join(ADAPTER, f), "utf8")]),
     );
-    const future = readFileSync(join(PKG, "test/fixtures/d1/0011_future.sql"), "utf8");
+    const future = readFileSync(join(PKG, "test/fixtures/d1/0012_future.sql"), "utf8");
     const p = d1Project({
       migrationsDir: "migrations",
-      files: { ...files, "migrations/0011_future.sql": future },
+      files: { ...files, "migrations/0012_future.sql": future },
     });
     const first = migrate(p.dir);
     expect(first.status).toBe(2);
     expect(linesOf(first.stderr).at(-1)).toBe(
-      "stopped: the database is at version 11 after the run; this CLI expects version 10",
+      "stopped: the database is at version 12 after the run; this CLI expects version 11",
     );
     const second = migrate(p.dir);
     expect(second.status).toBe(2);
     expect(second.stdout).toBe("");
     expect(linesOf(second.stderr).at(-1)).toBe(
-      "stopped: the database is at version 11; this CLI knows version 10; use a newer CLI",
+      "stopped: the database is at version 12; this CLI knows version 11; use a newer CLI",
     );
   });
 
@@ -404,7 +405,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     wranglerLocal(p.dir, ["d1", "migrations", "apply", "cli-d1", "--local"]);
     const r = migrate(p.dir, ["--tables", "compat"]);
     expect(r.status, r.stderr).toBe(0);
-    expect(linesOf(r.stdout).at(-1)).toBe("version before: none; version after: 10");
+    expect(linesOf(r.stdout).at(-1)).toBe("version before: none; version after: 11");
   });
 
   it("shows the usage line of each target on a usage error", () => {

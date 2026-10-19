@@ -70,8 +70,12 @@ function checkUnique(
   others: Iterable<Record<string, unknown>>,
   row: Record<string, unknown>,
 ): void {
+  // One array for every key: an iterator such as Map.values() is spent after
+  // the first key, and a model with two unique keys (plan 12e) then never
+  // checks its second key.
+  const rows = [...others];
   for (const key of schema[model].unique as readonly (readonly string[])[]) {
-    for (const other of others) {
+    for (const other of rows) {
       if (sameUniqueKey(key, other, row)) {
         throw new StorageError("unique_violation", model, key);
       }

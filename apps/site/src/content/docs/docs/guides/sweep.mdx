@@ -46,6 +46,9 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `oauthTokens` | Refresh tokens past their expiry. |
 | `oauthClients` | Up to 100 OAuth clients unseen for 90 days, with no consent and no refresh token. |
 | `limits` | The limit windows that ended, when the limiter has a sweep. |
+| `oauthDevices` | Device grants past their expiry. Always 0 until the device grant of plan 12e. |
+| `oauthSessionLinks` | Links of a session to a client whose session is gone. Always 0 until the back-channel sign-out of plan 12e. |
+| `oauthLogouts` | Back-channel sign-out messages that are delivered or given up. Always 0 until the back-channel sign-out of plan 12e. |
 
 ## How it behaves
 

@@ -23,6 +23,12 @@ export interface SweepResult {
   totpSetups: number;
   /** Limiter windows that ended. 0 when the limiter has no sweep. */
   limits: number;
+  /** Device grants past `expiresAt` (plan 12e, RFC 8628). Always 0 until the device grant of plan 12e Task 14. */
+  oauthDevices: number;
+  /** Session links to clients whose session is gone (plan 12e). Always 0 until plan 12e Task 16. */
+  oauthSessionLinks: number;
+  /** Back-channel logouts delivered or given up (plan 12e). Always 0 until plan 12e Task 16. */
+  oauthLogouts: number;
 }
 
 // The first delete removes every verification row past `expiresAt`,
@@ -150,5 +156,9 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     oauthClients,
     totpSetups,
     limits,
+    // Plan 12e Tasks 14 and 16 write these deletes.
+    oauthDevices: 0,
+    oauthSessionLinks: 0,
+    oauthLogouts: 0,
   };
 }

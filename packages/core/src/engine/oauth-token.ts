@@ -125,6 +125,9 @@ async function writeRefresh(
     resource: g.resource,
     expiresAt: new Date(now.getTime() + oauth.refreshTtlDays * DAY_MS),
     usedAt: null,
+    // Plan 12e Tasks 9 and 13 set these: the DPoP key and the spent parent row.
+    parentId: null,
+    dpopJkt: null,
     createdAt: now,
     updatedAt: now,
   });

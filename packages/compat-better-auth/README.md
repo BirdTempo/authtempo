@@ -133,7 +133,7 @@ number lower than the Better Auth table migration makes every new database
 
 - Better Auth 1.7 tables: copy `node_modules/@authtempo/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`.
 - Tables from before Better Auth 1.7 (no `account.issuer` column): copy the file of the same name from `migrations/d1-before-1.7/`.
-- Every app: then copy each later file of the same directory (`0002_compat_schema_v5.sql` to `0007_compat_schema_v10.sql`), in order, and give each the next number.
+- Every app: then copy each later file of the same directory (`0002_compat_schema_v5.sql` to `0008_compat_schema_v11.sql`), in order, and give each the next number.
 - Tables with other names: write the 0001 file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`. Write the 0006 file from `compatMigration0006Sql("sqlite", storage.names)`, not from the shipped file. The shipped 0006 adds `taSecretVersion` to Better Auth's default `verification` table, so on other names it fails with `no such table`. Write the 0007 file from `compatMigration0007Sql("sqlite", storage.names)` for the same reason: the shipped 0007 adds `taFreshAt` to the default `session` table.
 
 `wrangler d1 migrations apply` rolls back a file that fails (wrangler

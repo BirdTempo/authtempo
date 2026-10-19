@@ -8,6 +8,7 @@ import shipped0004 from "../migrations/d1/0004_compat_schema_v7.sql?raw";
 import shipped0005 from "../migrations/d1/0005_compat_schema_v8.sql?raw";
 import shipped0006 from "../migrations/d1/0006_compat_schema_v9.sql?raw";
 import shipped0007 from "../migrations/d1/0007_compat_schema_v10.sql?raw";
+import shipped0008 from "../migrations/d1/0008_compat_schema_v11.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -15,14 +16,19 @@ import shipped0004Before17 from "../migrations/d1-before-1.7/0004_compat_schema_
 import shipped0005Before17 from "../migrations/d1-before-1.7/0005_compat_schema_v8.sql?raw";
 import shipped0006Before17 from "../migrations/d1-before-1.7/0006_compat_schema_v9.sql?raw";
 import shipped0007Before17 from "../migrations/d1-before-1.7/0007_compat_schema_v10.sql?raw";
+import shipped0008Before17 from "../migrations/d1-before-1.7/0008_compat_schema_v11.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
   COMPAT_MIGRATION_0004_SQL,
   COMPAT_MIGRATION_0005_SQL,
+  COMPAT_MIGRATION_NAMES,
   compatMigration0006Sql,
   compatMigration0007Sql,
+  compatMigration0008Sql,
   compatMigrationSql,
+  MIGRATION_0007_NAME,
+  MIGRATION_0008_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { before17 } from "./d1/sql.js";
@@ -42,7 +48,35 @@ function sqlite(schema: string): DatabaseSync {
  * test of an earlier migration holds the table to the columns it had then.
  */
 const columnsBefore9 = (model: Parameters<typeof columnsOf>[0]) =>
-  columnsOf(model).filter((c) => c !== "secret_version");
+  columnsBefore11(model).filter((c) => c !== "secret_version");
+
+/**
+ * The columns of a model before schema version 11. Migration 0008 (plan 12e)
+ * adds its columns last to ta_oauth_client and ta_oauth_token.
+ */
+const ADDED_IN_11: ReadonlySet<string> = new Set([
+  "auth_method",
+  "secret_hash",
+  "secret_expires_at",
+  "previous_secret_hash",
+  "previous_secret_until",
+  "jwks",
+  "jwks_uri",
+  "grant_types",
+  "credentials_scopes",
+  "introspect",
+  "post_logout_redirect_uris",
+  "backchannel_logout_uri",
+  "backchannel_logout_session_required",
+  "subject_type",
+  "dpop_bound",
+  "parent_id",
+  "dpop_jkt",
+]);
+const columnsBefore11 = (model: Parameters<typeof columnsOf>[0]) =>
+  model === "oauthClient" || model === "oauthToken"
+    ? columnsOf(model).filter((c) => !ADDED_IN_11.has(c))
+    : columnsOf(model);
 
 /** The ta tables in the database, by name. */
 const taTables = (db: DatabaseSync) =>
@@ -390,6 +424,85 @@ describe("migration 0007 (plan 12a)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "7" },
       { key: "schema_version", value: "10" },
+    ]);
+  });
+});
+
+describe("migration 0008 (plan 12e)", () => {
+  it("ships both D1 files as the SQLite text of compatMigration0008Sql", () => {
+    const text = compatMigration0008Sql("sqlite");
+    expect(normalize(shipped0008)).toBe(normalize(text));
+    expect(normalize(shipped0008Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0007, and the step writes '8'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0008_NAME)).toBe(names.indexOf(MIGRATION_0007_NAME) + 1);
+    expect(MIGRATION_0008_NAME).toBe("0008_compat_schema_v11");
+    for (const dialect of ["postgres", "sqlite"] as const)
+      expect(compatMigration0008Sql(dialect)).toContain(
+        "UPDATE ta_meta SET value = '8' WHERE key = 'compat_better_auth';",
+      );
+  });
+
+  it("adds core's version 11 columns and tables with their defaults, and moves the versions to 11 and 8", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+    ])
+      db.exec(text);
+    // A client and a token of version 10, before the file: 0008 must give them the defaults.
+    db.exec(
+      `INSERT INTO ta_oauth_client (id, created_at, updated_at, kind, name, redirect_uris, last_seen_at) VALUES ('cl_10', 1, 1, 'registered', NULL, '["https://app.example.com/cb"]', 1)`,
+    );
+    db.exec(
+      `INSERT INTO ta_oauth_token (id, created_at, updated_at, token_hash, family_id, user_id, client_id, scopes, resource, expires_at, used_at) VALUES ('t10', 1, 1, 'h10', 'f10', 'u10', 'cl_10', '["offline_access"]', 'https://api.example.com/mcp', 2, NULL)`,
+    );
+    db.exec(shipped0008);
+    for (const model of [
+      "oauthClient",
+      "oauthToken",
+      "oauthDevice",
+      "oauthSubject",
+      "oauthSessionClient",
+      "oauthLogout",
+    ] as const) {
+      const cols = (
+        db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
+      ).map((c) => c.name);
+      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+    }
+    expect(
+      db
+        .prepare(
+          "SELECT auth_method, secret_hash, grant_types, credentials_scopes, introspect, post_logout_redirect_uris, backchannel_logout_session_required, subject_type, dpop_bound FROM ta_oauth_client",
+        )
+        .all(),
+    ).toEqual([
+      {
+        auth_method: "none",
+        secret_hash: null,
+        grant_types: '["authorization_code","refresh_token"]',
+        credentials_scopes: "[]",
+        introspect: 0,
+        post_logout_redirect_uris: "[]",
+        backchannel_logout_session_required: 0,
+        subject_type: "public",
+        dpop_bound: 0,
+      },
+    ]);
+    expect(db.prepare("SELECT parent_id, dpop_jkt FROM ta_oauth_token").all()).toEqual([
+      { parent_id: null, dpop_jkt: null },
+    ]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "8" },
+      { key: "schema_version", value: "11" },
     ]);
   });
 });

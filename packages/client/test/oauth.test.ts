@@ -27,6 +27,22 @@ async function grantedBrowser() {
     lastSeenAt: now,
     createdAt: now,
     updatedAt: now,
+    // A public client, as plan 12e's schema version 11 reads a row of version 10.
+    authMethod: "none",
+    secretHash: null,
+    secretExpiresAt: null,
+    previousSecretHash: null,
+    previousSecretUntil: null,
+    jwks: null,
+    jwksUri: null,
+    grantTypes: ["authorization_code", "refresh_token"],
+    credentialsScopes: [],
+    introspect: false,
+    postLogoutRedirectUris: [],
+    backchannelLogoutUri: null,
+    backchannelLogoutSessionRequired: false,
+    subjectType: "public",
+    dpopBound: false,
   });
   await server.storage.create("oauthConsent", {
     id: "consent-1",
@@ -46,6 +62,8 @@ async function grantedBrowser() {
     resource: RESOURCE,
     expiresAt: new Date(now.getTime() + 86_400_000),
     usedAt: null,
+    parentId: null,
+    dpopJkt: null,
     createdAt: now,
     updatedAt: now,
   });

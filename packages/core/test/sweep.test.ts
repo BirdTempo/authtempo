@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { publicClientFields } from "../src/engine/oauth-clients.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { setupTotp } from "../src/engine/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -111,6 +112,7 @@ describe("sweepExpired", () => {
         lastSeenAt,
         createdAt: now,
         updatedAt: now,
+        ...publicClientFields(),
       });
     const refresh = (id: string, clientId: string, expiresAt: Date) =>
       storage.create("oauthToken", {
@@ -123,6 +125,8 @@ describe("sweepExpired", () => {
         resource: "https://api.example.com/mcp",
         expiresAt,
         usedAt: null,
+        parentId: null,
+        dpopJkt: null,
         createdAt: now,
         updatedAt: now,
       });
@@ -181,6 +185,9 @@ describe("sweepExpired", () => {
       oauthClients: 1,
       totpSetups: 0,
       limits: 1,
+      oauthDevices: 0,
+      oauthSessionLinks: 0,
+      oauthLogouts: 0,
     });
 
     const ids = (await storage.findMany("verification", [])).map((r) => r.id).sort();
@@ -212,6 +219,9 @@ describe("sweepExpired", () => {
       oauthClients: 0,
       totpSetups: 0,
       limits: 0,
+      oauthDevices: 0,
+      oauthSessionLinks: 0,
+      oauthLogouts: 0,
     });
   });
 
@@ -244,6 +254,7 @@ describe("sweepExpired", () => {
         lastSeenAt,
         createdAt: now,
         updatedAt: now,
+        ...publicClientFields(),
       });
 
     it("moves a kept idle client out of the idle set, so the bounded read reaches a deletable client behind 100 kept ones (fix round 1)", async () => {

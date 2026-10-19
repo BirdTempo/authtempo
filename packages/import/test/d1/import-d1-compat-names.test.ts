@@ -3,6 +3,7 @@ import {
   betterAuthSchemaStorage,
   compatMigration0006Sql,
   compatMigration0007Sql,
+  compatMigration0008Sql,
   resolveNames,
 } from "@authtempo/compat-better-auth";
 import { expect, it } from "vitest";
@@ -65,6 +66,8 @@ await env.DB.batch(
     env.DB.prepare(s),
   ),
 );
+// 0008 names ta_ tables only, so its text is the same for every naming (plan 12e).
+await env.DB.batch(statements(compatMigration0008Sql("sqlite")).map((s) => env.DB.prepare(s)));
 
 const count = async (table: string) =>
   (await env.DB.prepare(`SELECT count(*) AS n FROM "${table}"`).first<number>("n")) ?? -1;

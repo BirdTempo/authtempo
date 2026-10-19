@@ -10,6 +10,10 @@ import type {
   JwkRow,
   OAuthClientRow,
   OAuthConsentRow,
+  OAuthDeviceRow,
+  OAuthLogoutRow,
+  OAuthSessionClientRow,
+  OAuthSubjectRow,
   OAuthTokenRow,
   PasskeyRow,
   SecondFactorRow,
@@ -58,6 +62,31 @@ function verification(id: string, at: Date, consumedAt: Date | null): Verificati
 }
 
 /** A second-factor row of plan 12c, for the version tests (plan 12b). */
+/**
+ * The client fields of schema version 11 (plan 12e) as migration 0011 fills
+ * them on a row of version 10: a public client with no secret.
+ */
+const PUBLIC_CLIENT_V11: Omit<
+  OAuthClientRow,
+  "id" | "createdAt" | "updatedAt" | "kind" | "name" | "redirectUris" | "lastSeenAt"
+> = {
+  authMethod: "none",
+  secretHash: null,
+  secretExpiresAt: null,
+  previousSecretHash: null,
+  previousSecretUntil: null,
+  jwks: null,
+  jwksUri: null,
+  grantTypes: ["authorization_code", "refresh_token"],
+  credentialsScopes: [],
+  introspect: false,
+  postLogoutRedirectUris: [],
+  backchannelLogoutUri: null,
+  backchannelLogoutSessionRequired: false,
+  subjectType: "public",
+  dpopBound: false,
+};
+
 function secondFactor(id: string, at: Date): Omit<SecondFactorRow, "secretVersion"> {
   return {
     id,
@@ -892,6 +921,7 @@ export function runAdapterConformance(
         lastSeenAt: at,
         createdAt: at,
         updatedAt: at,
+        ...PUBLIC_CLIENT_V11,
       };
       await db.create("oauthClient", client);
       await expect(db.create("oauthClient", client)).rejects.toMatchObject({
@@ -926,6 +956,8 @@ export function runAdapterConformance(
         resource: "https://api.example.com/mcp",
         expiresAt: new Date(at.getTime() + 1000),
         usedAt: null,
+        parentId: null,
+        dpopJkt: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -985,6 +1017,202 @@ export function runAdapterConformance(
         await db.findOne("secondFactor", [{ field: "userId", op: "eq", value: "u1" }]),
       ).toEqual({ ...factor, ...change });
       expect(await db.delete("secondFactor", [{ field: "userId", op: "eq", value: "u1" }])).toBe(1);
+    });
+
+    it("writes and reads each new model with every field (plan 12e)", async () => {
+      const at = new Date("2026-10-19T00:00:00.000Z");
+      const later = new Date(at.getTime() + 60_000);
+      const client: OAuthClientRow = {
+        id: "cl_confidential",
+        kind: "registered",
+        name: "Billing",
+        redirectUris: ["https://billing.example.com/cb"],
+        lastSeenAt: at,
+        authMethod: "private_key_jwt",
+        secretHash: "s1",
+        secretExpiresAt: later,
+        previousSecretHash: "s0",
+        previousSecretUntil: later,
+        jwks: { keys: [{ kty: "EC", crv: "P-256", x: "x1", y: "y1", kid: "j1" }] },
+        jwksUri: "https://billing.example.com/jwks.json",
+        grantTypes: ["authorization_code", "refresh_token", "client_credentials"],
+        credentialsScopes: ["billing:read"],
+        introspect: true,
+        postLogoutRedirectUris: ["https://billing.example.com/bye"],
+        backchannelLogoutUri: "https://billing.example.com/logout",
+        backchannelLogoutSessionRequired: true,
+        subjectType: "pairwise",
+        dpopBound: true,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthClient", client);
+      expect(
+        await db.findOne("oauthClient", [{ field: "id", op: "eq", value: client.id }]),
+      ).toEqual(client);
+      const token: OAuthTokenRow = {
+        id: "t2",
+        tokenHash: "h2",
+        familyId: "f1",
+        userId: "u1",
+        clientId: client.id,
+        scopes: ["offline_access"],
+        resource: "https://api.example.com/mcp",
+        expiresAt: later,
+        usedAt: null,
+        parentId: "t1",
+        dpopJkt: "jkt1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthToken", token);
+      expect(
+        await db.findOne("oauthToken", [{ field: "parentId", op: "eq", value: "t1" }]),
+      ).toEqual(token);
+      const device: OAuthDeviceRow = {
+        id: "d1",
+        deviceCodeHash: "dc1",
+        userCodeHash: "uc1",
+        secretVersion: 2,
+        clientId: client.id,
+        scopes: ["openid"],
+        resource: "https://api.example.com/mcp",
+        status: "approved",
+        userId: "u1",
+        sessionId: "s1",
+        interval: 10,
+        lastPolledAt: at,
+        dpopJkt: "jkt1",
+        expiresAt: later,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthDevice", device);
+      expect(
+        await db.findOne("oauthDevice", [{ field: "deviceCodeHash", op: "eq", value: "dc1" }]),
+      ).toEqual(device);
+      const subject: OAuthSubjectRow = {
+        id: "p1",
+        userId: "u1",
+        sector: "billing.example.com",
+        subject: "sub1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthSubject", subject);
+      expect(
+        await db.findOne("oauthSubject", [{ field: "subject", op: "eq", value: "sub1" }]),
+      ).toEqual(subject);
+      const link: OAuthSessionClientRow = {
+        id: "l1",
+        sessionId: "s1",
+        clientId: client.id,
+        userId: "u1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthSessionClient", link);
+      expect(
+        await db.findOne("oauthSessionClient", [{ field: "sessionId", op: "eq", value: "s1" }]),
+      ).toEqual(link);
+      const logout: OAuthLogoutRow = {
+        id: "o1",
+        clientId: client.id,
+        userId: "u1",
+        sessionId: "s1",
+        attempts: 1,
+        nextAttemptAt: later,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthLogout", logout);
+      expect(
+        await db.findMany("oauthLogout", [{ field: "nextAttemptAt", op: "lte", value: later }]),
+      ).toEqual([logout]);
+    });
+
+    it("keeps one row per unique key of the new models (plan 12e)", async () => {
+      const at = new Date("2026-10-19T00:00:00.000Z");
+      const device: OAuthDeviceRow = {
+        id: "d1",
+        deviceCodeHash: "dc1",
+        userCodeHash: "uc1",
+        secretVersion: 1,
+        clientId: "cl_1",
+        scopes: [],
+        resource: "https://api.example.com/mcp",
+        status: "pending",
+        userId: null,
+        sessionId: null,
+        interval: 5,
+        lastPolledAt: null,
+        dpopJkt: null,
+        expiresAt: new Date(at.getTime() + 60_000),
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthDevice", device);
+      await expect(
+        db.create("oauthDevice", { ...device, id: "d2", userCodeHash: "uc2" }),
+      ).rejects.toMatchObject({ code: "unique_violation", fields: ["deviceCodeHash"] });
+      await expect(
+        db.create("oauthDevice", { ...device, id: "d3", deviceCodeHash: "dc3" }),
+      ).rejects.toMatchObject({ code: "unique_violation", fields: ["userCodeHash"] });
+
+      const subject: OAuthSubjectRow = {
+        id: "p1",
+        userId: "u1",
+        sector: "a.example.com",
+        subject: "sub1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthSubject", subject);
+      await expect(
+        db.create("oauthSubject", { ...subject, id: "p2", subject: "sub2" }),
+      ).rejects.toMatchObject({ code: "unique_violation", fields: ["sector", "userId"] });
+      await expect(
+        db.create("oauthSubject", { ...subject, id: "p3", sector: "b.example.com" }),
+      ).rejects.toMatchObject({ code: "unique_violation", fields: ["subject"] });
+      // Another sector of the same user is a second subject.
+      await db.create("oauthSubject", {
+        ...subject,
+        id: "p4",
+        sector: "b.example.com",
+        subject: "sub4",
+      });
+
+      const link: OAuthSessionClientRow = {
+        id: "l1",
+        sessionId: "s1",
+        clientId: "cl_1",
+        userId: "u1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthSessionClient", link);
+      await expect(db.create("oauthSessionClient", { ...link, id: "l2" })).rejects.toMatchObject({
+        code: "unique_violation",
+        fields: ["sessionId", "clientId"],
+      });
+      await db.create("oauthSessionClient", { ...link, id: "l3", clientId: "cl_2" });
+
+      // The outbox has no unique key: two logouts of one session and client both stay.
+      const logout: OAuthLogoutRow = {
+        id: "o1",
+        clientId: "cl_1",
+        userId: "u1",
+        sessionId: "s1",
+        attempts: 0,
+        nextAttemptAt: at,
+        createdAt: at,
+        updatedAt: at,
+      };
+      await db.create("oauthLogout", logout);
+      await db.create("oauthLogout", { ...logout, id: "o2" });
+      expect(
+        await db.findMany("oauthLogout", [{ field: "userId", op: "eq", value: "u1" }]),
+      ).toHaveLength(2);
     });
 
     it("round-trips secretVersion on the four keyed models and filters by it (plan 12b)", async () => {

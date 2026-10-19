@@ -91,6 +91,19 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
   return w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: id }]);
 }
 
+/**
+ * The child models of schema version 11 that no flow writes yet (plan 12e
+ * Task 1). A seeded row would be a state the product cannot reach. Tasks 11,
+ * 14, and 16 of plan 12e write the flows, and each one takes its model out
+ * of this set.
+ */
+const NO_FLOW_YET: ReadonlySet<string> = new Set([
+  "oauthDevice",
+  "oauthSubject",
+  "oauthSessionClient",
+  "oauthLogout",
+]);
+
 /** The rows of `model` that name `userId`. */
 function childRows(w: World, model: (typeof USER_CHILD_MODELS)[number], userId: string) {
   // Each model of the list has a `userId` field; the port's types cannot see that over a union.
@@ -255,7 +268,7 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
       ).ok,
     ).toBe(true);
     // Every child model holds a row of the user, so each check below can fail.
-    for (const model of USER_CHILD_MODELS)
+    for (const model of USER_CHILD_MODELS.filter((m) => !NO_FLOW_YET.has(m)))
       expect((await childRows(w, model, me.user.id)).length, model).toBeGreaterThan(0);
     const proofs = () =>
       w.auth.storage.findMany("verification", [

@@ -67,6 +67,8 @@ Version 9 (plan 12b, 2026-10-15) adds `secret_version` to `ta_totp`, `ta_second_
 
 Version 10 (plan 12a, 2026-10-15) adds `fresh_at` to `ta_session`: the time a sign-in or a re-authentication last proved the person. It is nullable, with no default and no fill. A session of version 9 holds null, and null is never fresh, so that session re-authenticates once before its first sensitive change. Apply `0010_schema_v10` before you deploy a core at version 10; the adapter refuses a database at version 9.
 
+Version 11 (plan 12e, 2026-10-19) is the OAuth provider's second version. It adds the columns of a confidential client to `ta_oauth_client`, `parent_id` and `dpop_jkt` to `ta_oauth_token`, and the tables `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, and `ta_oauth_logout`. Each new NOT NULL client column has a default, so each client row of version 10 reads as the public client it was. Apply `0011_schema_v11` before you deploy a core at version 11; the adapter refuses a database at version 10.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

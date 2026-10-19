@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export interface BaseRow {
   id: string;
@@ -73,6 +73,19 @@ export type VerificationPurpose =
    * Lives 10 minutes; spent at the decision, the code, or another final answer.
    */
   | "oauth-request"
+  /**
+   * A spent client assertion of `private_key_jwt` (plan 12e, RFC 7523).
+   * identifier: the client id; valueHash: the SHA-256 hex of
+   * `<clientId>:<jti>`; data: null. Lives to the assertion's `exp` plus 30
+   * seconds. The unique key on `valueHash` refuses a replay on every adapter.
+   */
+  | "client-assertion"
+  /**
+   * A spent DPoP proof (plan 12e, RFC 9449 section 11.1). identifier: the JWK
+   * thumbprint; valueHash: the SHA-256 hex of `<thumbprint>:<jti>`; data:
+   * null. Lives twice the DPoP window.
+   */
+  | "dpop-proof"
   /**
    * A re-authentication code (plan 12a), as `email-otp`: identifier the
    * address, data { attempts }, valueHash the keyed hash of `<id>:<code>`.
@@ -255,6 +268,16 @@ export interface JwkRow extends BaseRow {
   secretVersion: number;
 }
 
+/** How a client proves itself at the token endpoint (plan 12e). `none` is a public client. */
+export type ClientAuthMethod =
+  | "none"
+  | "client_secret_basic"
+  | "client_secret_post"
+  | "private_key_jwt";
+
+/** The state of one device grant (plan 12e, RFC 8628). */
+export type DeviceStatus = "pending" | "approved" | "denied";
+
 /** An OAuth client (plan 9g). */
 export interface OAuthClientRow extends BaseRow {
   /** `registered`: the id is a `cl_` token. `cimd`: the id is the https URL of the client's metadata document. */
@@ -264,6 +287,36 @@ export interface OAuthClientRow extends BaseRow {
   redirectUris: string[];
   /** Moved at most once a day. The sweep deletes a client unseen for 90 days with no consent and no refresh token. */
   lastSeenAt: Date;
+  /** The client's auth method at the token endpoint (plan 12e). A row of version 10 reads `none`. */
+  authMethod: ClientAuthMethod;
+  /** SHA-256 hex of the `cs_` secret (plan 12e). Null for a client with no secret. The clear secret is never stored. */
+  secretHash: string | null;
+  /** Always null in plan 12e: a secret does not expire (OIDC Registration 3.2, `client_secret_expires_at` 0). */
+  secretExpiresAt: Date | null;
+  /** SHA-256 hex of the secret before the last rotation (plan 12e). It is valid until `previousSecretUntil`. */
+  previousSecretHash: string | null;
+  /** The end of the overlap of the previous secret (plan 12e). Null when no rotation is in progress. */
+  previousSecretUntil: Date | null;
+  /** The client's public key set for `private_key_jwt` (plan 12e). Not together with `jwksUri`. */
+  jwks: Record<string, unknown> | null;
+  /** The https URL of the client's public key set for `private_key_jwt` (plan 12e). Not together with `jwks`. */
+  jwksUri: string | null;
+  /** The grants this client may use (plan 12e). A row of version 10 reads `authorization_code` and `refresh_token`. */
+  grantTypes: string[];
+  /** The scopes this client may ask on the `client_credentials` grant (plan 12e). */
+  credentialsScopes: string[];
+  /** True when this client may call the introspection endpoint (plan 12e, RFC 7662). */
+  introspect: boolean;
+  /** The exact URIs of an RP-initiated logout redirect (plan 12e). */
+  postLogoutRedirectUris: string[];
+  /** The URI that gets the back-channel logout token (plan 12e). Null: no back-channel logout. */
+  backchannelLogoutUri: string | null;
+  /** True when the logout token of this client must hold `sid` (plan 12e). */
+  backchannelLogoutSessionRequired: boolean;
+  /** `pairwise`: the `sub` of this client comes from `oauthSubject` (plan 12e, OIDC Core 8). */
+  subjectType: "public" | "pairwise";
+  /** True when every token of this client must be DPoP-bound (plan 12e, RFC 9449 section 10). */
+  dpopBound: boolean;
 }
 
 /** The scopes one user allowed one client (plan 9g). A request for any other scope asks again. */
@@ -287,6 +340,62 @@ export interface OAuthTokenRow extends BaseRow {
   expiresAt: Date;
   /** Set when the token was exchanged. A second exchange deletes the family. */
   usedAt: Date | null;
+  /** The spent row that issued this one (plan 12e, the reuse window). Null for the first row of a family. */
+  parentId: string | null;
+  /** The JWK thumbprint of a public client's DPoP key (plan 12e, RFC 9449 section 5). Null: no binding. */
+  dpopJkt: string | null;
+}
+
+/**
+ * One device grant (plan 12e, RFC 8628). The table holds the hashes of the
+ * device code and the user code, never the codes.
+ */
+export interface OAuthDeviceRow extends BaseRow {
+  /** SHA-256 hex of the device code. */
+  deviceCodeHash: string;
+  /** The keyed hash of the user code under the secret of `secretVersion`. */
+  userCodeHash: string;
+  /** The version of the app secret that keys `userCodeHash` (spec 22). */
+  secretVersion: number;
+  clientId: string;
+  scopes: string[];
+  /** The resource indicator (RFC 8707) of the grant. */
+  resource: string;
+  status: DeviceStatus;
+  /** The user that decided. Null while the grant is pending. */
+  userId: string | null;
+  /** The session of the decision. Null while the grant is pending. */
+  sessionId: string | null;
+  /** The poll interval in seconds. A poll that comes too early adds 5 (RFC 8628 section 3.5). */
+  interval: number;
+  lastPolledAt: Date | null;
+  /** The JWK thumbprint of the DPoP key of the device request. Null: no binding. */
+  dpopJkt: string | null;
+  expiresAt: Date;
+}
+
+/** One pairwise subject (plan 12e, OIDC Core 8): a random subject per user and sector. */
+export interface OAuthSubjectRow extends BaseRow {
+  userId: string;
+  /** The host of the client's redirect URI. */
+  sector: string;
+  subject: string;
+}
+
+/** One link of a session to a client that got tokens in it (plan 12e). The logout of the session reaches the client. */
+export interface OAuthSessionClientRow extends BaseRow {
+  sessionId: string;
+  clientId: string;
+  userId: string;
+}
+
+/** One back-channel logout to deliver (plan 12e): the outbox. The sweep retries a failed delivery. */
+export interface OAuthLogoutRow extends BaseRow {
+  clientId: string;
+  userId: string;
+  sessionId: string;
+  attempts: number;
+  nextAttemptAt: Date;
 }
 
 export interface Models {
@@ -306,6 +415,10 @@ export interface Models {
   oauthClient: OAuthClientRow;
   oauthConsent: OAuthConsentRow;
   oauthToken: OAuthTokenRow;
+  oauthDevice: OAuthDeviceRow;
+  oauthSubject: OAuthSubjectRow;
+  oauthSessionClient: OAuthSessionClientRow;
+  oauthLogout: OAuthLogoutRow;
   secondFactor: SecondFactorRow;
 }
 
@@ -509,6 +622,24 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       name: { type: "string", nullable: true },
       redirectUris: { type: "json" },
       lastSeenAt: { type: "date" },
+      // A default makes each row of version 10 read as the public client it
+      // was (plan 12e). The defaults live in migration 0011 only: a field
+      // here has no default, and core writes every field on each insert.
+      authMethod: { type: "string" },
+      secretHash: { type: "string", nullable: true },
+      secretExpiresAt: { type: "date", nullable: true },
+      previousSecretHash: { type: "string", nullable: true },
+      previousSecretUntil: { type: "date", nullable: true },
+      jwks: { type: "json", nullable: true },
+      jwksUri: { type: "string", nullable: true },
+      grantTypes: { type: "json" },
+      credentialsScopes: { type: "json" },
+      introspect: { type: "boolean" },
+      postLogoutRedirectUris: { type: "json" },
+      backchannelLogoutUri: { type: "string", nullable: true },
+      backchannelLogoutSessionRequired: { type: "boolean" },
+      subjectType: { type: "string" },
+      dpopBound: { type: "boolean" },
     },
     unique: [],
     indexes: [],
@@ -541,10 +672,75 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       resource: { type: "string" },
       expiresAt: { type: "date" },
       usedAt: { type: "date", nullable: true },
+      parentId: { type: "string", nullable: true },
+      dpopJkt: { type: "string", nullable: true },
     },
     unique: [["tokenHash"]],
     // clientId: the sweep looks up the refresh tokens of one client.
-    indexes: [["userId"], ["familyId"], ["clientId"]],
+    // parentId: the reuse window finds the child of a spent row (plan 12e).
+    indexes: [["userId"], ["familyId"], ["clientId"], ["parentId"]],
+  },
+  // plan 12e: one row per device grant. The table holds the hashes, never the codes.
+  oauthDevice: {
+    fields: {
+      ...base,
+      deviceCodeHash: { type: "string" },
+      userCodeHash: { type: "string" },
+      secretVersion: { type: "integer" },
+      clientId: { type: "string" },
+      scopes: { type: "json" },
+      resource: { type: "string" },
+      status: { type: "string" },
+      userId: { type: "string", nullable: true },
+      sessionId: { type: "string", nullable: true },
+      interval: { type: "integer" },
+      lastPolledAt: { type: "date", nullable: true },
+      dpopJkt: { type: "string", nullable: true },
+      expiresAt: { type: "date" },
+    },
+    unique: [["deviceCodeHash"], ["userCodeHash"]],
+    // expiresAt: the sweep deletes the grants past their expiry.
+    indexes: [["expiresAt"]],
+  },
+  // plan 12e: one pairwise subject per user and sector.
+  oauthSubject: {
+    fields: {
+      ...base,
+      userId: { type: "string" },
+      sector: { type: "string" },
+      subject: { type: "string" },
+    },
+    // (sector, userId): the token endpoint reads the subject of one user.
+    // subject: the userinfo and the logout read the user of one subject.
+    unique: [["sector", "userId"], ["subject"]],
+    // userId: a user delete removes the user's subjects.
+    indexes: [["userId"]],
+  },
+  // plan 12e: the clients that got tokens in one session.
+  oauthSessionClient: {
+    fields: {
+      ...base,
+      sessionId: { type: "string" },
+      clientId: { type: "string" },
+      userId: { type: "string" },
+    },
+    unique: [["sessionId", "clientId"]],
+    // userId: the end of a user's sessions reads the user's links.
+    indexes: [["userId"]],
+  },
+  // plan 12e: the back-channel logouts to deliver.
+  oauthLogout: {
+    fields: {
+      ...base,
+      clientId: { type: "string" },
+      userId: { type: "string" },
+      sessionId: { type: "string" },
+      attempts: { type: "integer" },
+      nextAttemptAt: { type: "date" },
+    },
+    unique: [],
+    // nextAttemptAt: the sweep reads the due rows. userId: a flow delivers the user's due rows.
+    indexes: [["nextAttemptAt"], ["userId"]],
   },
   // plan 12c: one second factor per user, apart from its methods. The TOTP
   // secret stays in `totp`; the method list and the backup codes are here.

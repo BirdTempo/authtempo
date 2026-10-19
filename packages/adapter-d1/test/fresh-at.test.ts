@@ -13,9 +13,13 @@ describe("schema version 10 on D1 (plan 12a)", () => {
       type: "INTEGER",
       notnull: 0,
     });
+    // env.DB holds every migration (0011 since plan 12e), so read the version that 0010 itself writes.
+    const m0010 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0010_"));
     expect(
-      await env.DB.prepare("SELECT value FROM ta_meta WHERE key = 'schema_version'").first("value"),
-    ).toBe("10");
+      m0010?.queries.some((q) =>
+        q.includes("UPDATE ta_meta SET value = '10' WHERE key = 'schema_version'"),
+      ),
+    ).toBe(true);
   });
 
   it("reads freshAt null on a session row that version 9 wrote before 0010", async () => {

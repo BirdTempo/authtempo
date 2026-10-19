@@ -107,6 +107,34 @@ describe("schema_shape on Postgres (plan 11c2)", () => {
     expect(r.report.warnings).toEqual([]);
   });
 
+  it("passes schema_shape with no warning after 0011 moves a database of version 10 with an OAuth client to 11 (plan 12e)", async () => {
+    // An adapter of version 10: its migrations, each with its row, and a client row that it wrote.
+    await db.sql.unsafe(
+      "CREATE TABLE ta_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
+    );
+    const i0011 = MIGRATIONS.findIndex((m) => m.name === "0011_schema_v11");
+    expect(i0011).toBe(10);
+    for (const m of MIGRATIONS.slice(0, i0011))
+      await db.sql.begin(async (tx) => {
+        await tx.unsafe(m.sql);
+        await tx.unsafe("INSERT INTO ta_migrations (name) VALUES ($1)", [m.name]);
+      });
+    await db.sql.unsafe(
+      `INSERT INTO ta_oauth_client (id, created_at, updated_at, kind, name, redirect_uris, last_seen_at) VALUES ('cl_10', now(), now(), 'registered', NULL, '["https://app.example.com/cb"]'::jsonb, now())`,
+    );
+    await migrate();
+    const r = await pg();
+    expect(r.code).toBe(0);
+    expect(result(r.report, "schema_version")?.status).toBe("pass");
+    expect(result(r.report, "schema_shape")).toEqual({
+      id: "schema_shape",
+      status: "pass",
+      code: null,
+      detail: "each table of the adapter's migrations has its columns, its keys, and its indexes",
+    });
+    expect(r.report.warnings).toEqual([]);
+  });
+
   it("warns on an extra column and fails on a dropped unique index", async () => {
     await migrate();
     await db.sql.unsafe("ALTER TABLE ta_user ADD COLUMN nickname text");

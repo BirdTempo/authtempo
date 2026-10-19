@@ -204,6 +204,8 @@ export type { Keyring, SecretVersion } from "./primitives/keyring.js";
 export type { Result } from "./result.js";
 export {
   type ApiTokenRow,
+  type ClientAuthMethod,
+  type DeviceStatus,
   type IdentityRow,
   type InvitationRow,
   type JwkRow,
@@ -212,6 +214,10 @@ export {
   type Models,
   type OAuthClientRow,
   type OAuthConsentRow,
+  type OAuthDeviceRow,
+  type OAuthLogoutRow,
+  type OAuthSessionClientRow,
+  type OAuthSubjectRow,
   type OAuthTokenRow,
   type OrganizationRow,
   type PasskeyRow,

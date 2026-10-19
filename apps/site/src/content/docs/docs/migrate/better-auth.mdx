@@ -130,6 +130,7 @@ Warning: upgrade Better Auth to 1.7.7 or later before the move. Version 1.7.7 fi
 | `0005_compat_schema_v8.sql` | Adds `ta_second_factor`, copies each enabled `ta_totp` row, and deletes each setup that no enable confirmed. |
 | `0006_compat_schema_v9.sql` | Adds `secret_version` to `ta_totp`, `ta_second_factor`, and `ta_jwk`, and `taSecretVersion` to `verification`, default 1. Tables with other names take the text of `compatMigration0006Sql("sqlite", storage.names)`. |
 | `0007_compat_schema_v10.sql` | Adds `taFreshAt` to `session`, nullable, with no fill. Tables with other names take the text of `compatMigration0007Sql("sqlite", storage.names)`. |
+| `0008_compat_schema_v11.sql` | Adds the version 11 columns to `ta_oauth_client` and `ta_oauth_token`, and adds `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, and `ta_oauth_logout`. The same text for every naming. |
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 

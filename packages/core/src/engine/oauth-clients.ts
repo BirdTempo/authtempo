@@ -29,6 +29,35 @@ const NAME_MAX = 80;
 const LAST_SEEN_EVERY_MS = 86_400_000;
 const GRANT_TYPES = ["authorization_code", "refresh_token"];
 const RESPONSE_TYPES = ["code"];
+
+/**
+ * The fields of schema version 11 for a public client with no secret (plan
+ * 12e). Migration 0011 gives each row of version 10 the same values, so a
+ * client of this plan's registration and an old row read alike. A new
+ * object per call: no two rows share an array.
+ */
+export function publicClientFields(): Omit<
+  OAuthClientRow,
+  "id" | "createdAt" | "updatedAt" | "kind" | "name" | "redirectUris" | "lastSeenAt"
+> {
+  return {
+    authMethod: "none",
+    secretHash: null,
+    secretExpiresAt: null,
+    previousSecretHash: null,
+    previousSecretUntil: null,
+    jwks: null,
+    jwksUri: null,
+    grantTypes: [...GRANT_TYPES],
+    credentialsScopes: [],
+    introspect: false,
+    postLogoutRedirectUris: [],
+    backchannelLogoutUri: null,
+    backchannelLogoutSessionRequired: false,
+    subjectType: "public",
+    dpopBound: false,
+  };
+}
 /** Schemes that run code or read local data in a browser: never a redirect target. */
 const BLOCKED_SCHEMES: ReadonlySet<string> = new Set([
   "javascript:",
@@ -185,6 +214,7 @@ export async function registerClient(
     lastSeenAt: now,
     createdAt: now,
     updatedAt: now,
+    ...publicClientFields(),
   });
   return oauthOk({
     client_id: row.id,
@@ -368,7 +398,12 @@ async function writeCimdRow(
     return { ...row, ...data };
   }
   try {
-    return await config.storage.create("oauthClient", { id: url, ...data, createdAt: now });
+    return await config.storage.create("oauthClient", {
+      id: url,
+      ...data,
+      createdAt: now,
+      ...publicClientFields(),
+    });
   } catch (e) {
     if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
     // A parallel request wrote the row first: this document's values win, and

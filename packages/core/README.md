@@ -1310,6 +1310,9 @@ It answers one count for each kind of row:
 - `oauthTokens`: refresh tokens past their expiry.
 - `oauthClients`: up to 100 OAuth clients unseen for 90 days with no consent and no refresh token.
 - `limits`: limit windows that ended; 0 when the limiter has no `sweep`.
+- `oauthDevices`: device grants past their expiry. Always 0 until the device grant of plan 12e.
+- `oauthSessionLinks`: links of a session to a client whose session is gone. Always 0 until the back-channel logout of plan 12e.
+- `oauthLogouts`: back-channel logouts that are delivered or given up. Always 0 until the back-channel logout of plan 12e.
 
 ```ts
 export default {
@@ -1474,6 +1477,7 @@ writes each value under version 1.
 - Warning: a Worker at version 7 still runs between `0008_schema_v8` and the deploy. Its second-factor writes do not reach `ta_second_factor`. Deploy core at version 8 at once after the migration. Then run the three checks of the adapter README ("Migrations") immediately after the deploy. They list an enabled `ta_totp` row with no factor row, a factor row that lists `totp` with no enabled `ta_totp` row, and a version 1 factor row whose backup codes differ from its `ta_totp` row.
 - Core at version 9 needs the `0009_schema_v9` migration in both adapters, and the compatibility package needs `0006_compat_schema_v9`. Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). The column is `NOT NULL DEFAULT 1`, so every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 - Core at version 10 needs the `0010_schema_v10` migration in both adapters. Version 10 adds `ta_session.fresh_at`, the time a sign-in or a re-authentication last proved the person (plan 12a). A session of an earlier version holds null and re-authenticates once before its first sensitive change. The compat package's migration is `0007_compat_schema_v10`.
+- Core at version 11 needs the `0011_schema_v11` migration in both adapters (plan 12e). Version 11 adds the columns of a confidential client to `ta_oauth_client`, two columns to `ta_oauth_token`, and four tables of the OAuth provider's second version. Each client row of an earlier version reads as a public client. The compat package's migration is `0008_compat_schema_v11`.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

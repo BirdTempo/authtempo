@@ -125,6 +125,7 @@ describe("the Better Auth mapping on postgres", () => {
       "0005_compat_schema_v8",
       "0006_compat_schema_v9",
       "0007_compat_schema_v10",
+      "0008_compat_schema_v11",
     ]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
@@ -133,8 +134,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 10; a new core version needs migration 0008 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(10);
+  it("serves core schema version 11; a new core version needs migration 0009 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(11);
   });
 
   it("names only columns the table field list knows", () => {
@@ -494,7 +495,7 @@ describe("the compat migration on postgres", () => {
     }
   });
 
-  it("creates exactly core's eight ta_ tables (plans 9f and 9g)", async () => {
+  it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, and 12e)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const before = await pg.sql.unsafe<{ t: string }[]>(
@@ -514,14 +515,18 @@ describe("the compat migration on postgres", () => {
         "ta_meta",
         "ta_oauth_client",
         "ta_oauth_consent",
+        "ta_oauth_device",
+        "ta_oauth_logout",
+        "ta_oauth_session_client",
+        "ta_oauth_subject",
         "ta_oauth_token",
         "ta_second_factor",
         "ta_totp",
         "ta_trusted_device",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "7" },
-        { key: "schema_version", value: "10" },
+        { key: "compat_better_auth", value: "8" },
+        { key: "schema_version", value: "11" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [
@@ -532,6 +537,10 @@ describe("the compat migration on postgres", () => {
         "oauthConsent",
         "oauthToken",
         "secondFactor",
+        "oauthDevice",
+        "oauthSubject",
+        "oauthSessionClient",
+        "oauthLogout",
       ] as const) {
         const cols = await pg.sql.unsafe<{ c: string }[]>(
           "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
@@ -556,6 +565,10 @@ describe("the compat migration on postgres", () => {
         "oauthConsent",
         "oauthToken",
         "secondFactor",
+        "oauthDevice",
+        "oauthSubject",
+        "oauthSessionClient",
+        "oauthLogout",
       ] as const) {
         const cols = await pg.sql.unsafe<
           { column_name: string; is_nullable: string; data_type: string }[]
@@ -595,6 +608,10 @@ describe("the compat migration on postgres", () => {
         "oauthConsent",
         "oauthToken",
         "secondFactor",
+        "oauthDevice",
+        "oauthSubject",
+        "oauthSessionClient",
+        "oauthLogout",
       ] as const) {
         const rows = await pg.sql.unsafe<{ indexname: string; indexdef: string }[]>(
           "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",
@@ -678,8 +695,12 @@ describe("the compat undo of a created user", () => {
         " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = ?)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_device WHERE user_id = ?)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_subject WHERE user_id = ?)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = ?)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)",
-      params: ["u4", 0, "u4", "u4", "u4", "u4", "u4", "u4", "u4", "u4", "u4"],
+      params: ["u4", 0, ...Array(13).fill("u4")],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
       sql:
@@ -692,8 +713,12 @@ describe("the compat undo of a created user", () => {
         " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = $7)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = $8)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = $9)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = $10)",
-      params: ["u5", "u5", "u5", "u5", "u5", "u5", "u5", "u5", "u5", "u5"],
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_device WHERE user_id = $10)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_subject WHERE user_id = $11)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = $12)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = $13)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = $14)",
+      params: Array(14).fill("u5"),
     });
   });
 
