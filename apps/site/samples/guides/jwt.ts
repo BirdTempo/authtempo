@@ -9,7 +9,7 @@ export function createJwtAuth(deps: { storage: StorageAdapter; mail: MailPort; s
     mail: deps.mail,
     // JWT minting is on by default. `jwtMint: false` removes /jwks, /token, and api.jwt.
     jwtMint: {
-      // EdDSA (Ed25519) is the default. ES256 is the other choice.
+      // EdDSA (Ed25519) is the default. ES256 and RS256 are the other choices.
       alg: "EdDSA",
       // The server that takes the token. The default is baseURL.
       audience: "https://files.example.com",

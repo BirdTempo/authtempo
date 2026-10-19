@@ -216,9 +216,9 @@ Another key of `jwtMint` is refused.
 | `jwtMint.claims` | function of the user and the session | none | Answers an object of claims. Core sets the reserved claims itself. |
 | `jwtMint.rotateEvery` | number of days | none: no timer | A whole number from 1 to 365. The first signature with a key this old makes a new key. A JWKS read never rotates. |
 
-`jwtMint.alg: "RS256"` costs more CPU than EdDSA or ES256. One RSA key generation took tens of ms in local workerd. One RS256 signature took less than 1 ms. These are wall times on a loaded machine, measured on 2026-10-19.
+`jwtMint.alg: "RS256"` costs more CPU than EdDSA or ES256. One RSA key generation took 20 to 129 ms of wall time in local workerd. One RS256 signature took less than 1 ms. These are wall times on a loaded machine, measured on 2026-10-19.
 
-On Workers Free, a deployment with RS256 makes its first key at deploy time, with `api.jwt.rotate()` or `authtempo keys rotate`. A `rotateEvery` rotation or a change of `jwtMint.alg` makes a key inside a request. That request can pass the 10 ms CPU limit of Workers Free.
+On Workers, every RS256 key generation runs inside a Worker invocation, a request or a scheduled event. The first signature with no key makes a key. A `rotateEvery` rotation, a change of `jwtMint.alg`, and `api.jwt.rotate()` make a key too. `authtempo keys rotate` calls `POST <basePath>/operator/keys/rotate`, which is a Worker request. A new app `secret` opens no old key: the key retires, and the next signature makes a key. Workers Free allows 10 ms of CPU per invocation, so it can refuse each of these.
 
 ## OAuth provider
 

@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.12
   - packages/core/README.md "JWT minting"
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -41,7 +42,7 @@ import test from "../../../../../samples/guides/jwt.test.ts?raw";
 ## How it behaves
 
 - The claims are `iss` (`baseURL` plus `basePath`), `sub`, `aud`, `iat`, `exp`, `sid`, `email`, `email_verified`, `name`, and `org`.
-- The key is EdDSA (Ed25519) by default, or ES256. Core writes the first key at the first use and seals its private half under `secret`.
+- The key is EdDSA (Ed25519) by default, ES256, or RS256 (`jwtMint.alg`). Core writes the first key at the first use and seals its private half under `secret`.
 - `api.jwt.rotate()` makes a new signing key. The old key verifies for 24 hours and signs nothing.
 - `GET /auth/jwks` answers the public keys with `cache-control: public, max-age=300`.
 - The same key signs OAuth access tokens, with `typ: "at+jwt"`. A server that skips the `typ` check can take one kind for the other.
