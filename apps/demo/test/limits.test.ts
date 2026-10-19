@@ -15,6 +15,7 @@ import {
   nextIp,
   ORIGIN,
   PASSWORD,
+  pick,
   rowsIn,
   SANDBOX_COOKIE,
   sameSandbox,
@@ -260,6 +261,46 @@ describe("the limits of the demo", () => {
       });
       expect(await count(jar, "ta_user")).toBe(10);
     }
+  });
+
+  it("lets a linked identity sign in at 10 users after its user changed address", async () => {
+    // The sign-in of a fixed identity of the demo provider.
+    const signInAsAda = async (jar: Jar) => {
+      const start = await call(jar, "GET", "/auth/social/demo/start");
+      const authorize = new URL(start.headers.get("location") ?? "");
+      const back = await pick(jar, `${authorize.pathname}${authorize.search}`, "ada");
+      return call(jar, "GET", `${back.pathname}${back.search}`);
+    };
+    const jar = await newSandbox();
+    expect((await signInAsAda(jar)).status).toBe(302);
+    // The account feature changes the address, so only the identity names the user.
+    const change = await call(jar, "POST", "/auth/user/change-email", {
+      newEmail: "lovelace@example.com",
+    });
+    expect(change.status).toBe(200);
+    const token = await tokenTo(jar, "lovelace@example.com");
+    const confirm = await call(
+      jar,
+      "POST",
+      "/auth/user/change-email/confirm",
+      new URLSearchParams({ token }),
+    );
+    expect(confirm.status).toBe(302);
+    expect(await rowsIn(jar, "SELECT email FROM ta_user")).toEqual([
+      { email: "lovelace@example.com" },
+    ]);
+    for (let i = 0; i < 9; i++) {
+      const res = await call(sameSandbox(jar), "POST", "/auth/password/sign-up", {
+        email: `user${i}@example.com`,
+        password: PASSWORD,
+      });
+      expect(res.status).toBe(200);
+    }
+    expect(await count(jar, "ta_user")).toBe(10);
+    const again = await signInAsAda(sameSandbox(jar));
+    expect(again.status).toBe(302);
+    expect(again.headers.get("location") ?? "").not.toContain("auth_error");
+    expect(await count(jar, "ta_user")).toBe(10);
   });
 
   it("refuses a body that reads as a known user one way and a new user the other", async () => {
