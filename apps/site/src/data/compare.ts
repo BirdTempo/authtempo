@@ -14,8 +14,9 @@ export type CompareSide = "authtempo" | "parity" | "better-auth";
 /**
  * One row of the review `review-vs-better-auth.md` of 2026-10-14, shortened
  * to 25 words a cell at most. `id` is the review row. `source` names the
- * review row, and the merged plan file when a fresh read of its code moved
- * the row. `read` is an ISO date: the older read of the two cells.
+ * public source of the Better Auth cell (SOURCES), and the merged plan file
+ * when a fresh read of its code moved the row. Each part ends at "; ".
+ * `read` is an ISO date: the older read of the two cells.
  */
 export interface CompareRow {
   id: string;
@@ -50,10 +51,111 @@ const REVIEW_READ = "2026-10-14";
 /** The day of the fresh read of the merged plans 11g, 12a, 12b, and 12c, and of the guides. */
 const CODE_READ = "2026-10-19";
 
-const review = (id: string) => `review-vs-better-auth.md, row ${id}`;
-/** A row that a merged plan changed: the review row for Better Auth, the plan file for authtempo. */
+/** The docs of Better Auth (the sitemap of better-auth.com, read 2026-10-20). */
+const BA = "https://better-auth.com/docs";
+/** The package that the review read in code, at its version. */
+const NPM = "npm better-auth@1.7.2,";
+/** The releases of Better Auth on GitHub. */
+const RELEASES = "https://github.com/better-auth/better-auth/releases";
+
+/**
+ * The public source of each Better Auth cell (final review m4 of plan 11b).
+ * Each id is a row of the review review-vs-better-auth.md of 2026-10-14, an
+ * internal file. The review read each source below on that day, so the page
+ * names the source and keeps the date of the read. check-facts fails a
+ * source that is not public and not a tracked file of this repository.
+ */
+const SOURCES: Readonly<Record<string, readonly string[]>> = {
+  a1: [`${BA}/plugins/oauth-provider`],
+  a2: [`${BA}/plugins/oauth-provider`],
+  a4: [`${BA}/plugins/oauth-provider`],
+  a8: [`${BA}/plugins/oauth-provider`],
+  a9: [`${BA}/plugins/oauth-provider`],
+  a10: [`${BA}/plugins/oauth-provider`],
+  a11: [`${BA}/plugins/jwt`, `${NPM} dist/plugins/jwt/types.d.mts`],
+  a12: [`${BA}/plugins/oauth-provider`, `${RELEASES}/tag/v1.7.0`],
+  a13: [`${BA}/plugins/device-authorization`],
+  a18: [`${BA}/plugins/oauth-provider`],
+  a19: [`${BA}/plugins/oauth-provider`, `${RELEASES}/tag/v1.7.0`],
+  a20: [`${BA}/plugins/oauth-provider`],
+  a25: [`${BA}/plugins/mcp`],
+  a26: [`${BA}/plugins/2fa`],
+  a27: [`${BA}/plugins/passkey`],
+  a28: [`${BA}/plugins/scim`],
+  a29: [`${BA}/plugins/sso`],
+  a31: [
+    `${BA}/plugins/have-i-been-pwned`,
+    `${BA}/plugins/2fa`,
+    `${NPM} dist/api/routes/password.mjs`,
+  ],
+  a32: [`${BA}/concepts/session-management`, `${BA}/plugins/admin`],
+  b1: [`${BA}/authentication/email-password`],
+  b2: [`${BA}/concepts/oauth`, `${BA}/authentication/cloudflare`],
+  b3: [`${BA}/plugins/2fa`],
+  b4: [`${BA}/plugins/passkey`],
+  b5: [`${BA}/plugins/magic-link`],
+  b6: [`${BA}/plugins/email-otp`],
+  b8: [`${BA}/plugins/bearer`],
+  b9: [`${BA}/plugins/jwt`, `${NPM} dist/plugins/jwt/types.d.mts`],
+  b10: [`${BA}/plugins/oauth-provider`],
+  b13: [`${BA}/plugins/device-authorization`],
+  b14: [`${BA}/plugins/api-key`],
+  b15: [`${BA}/plugins/organization`],
+  b16: [`${BA}/plugins/admin`],
+  b17: [`${BA}/plugins/admin`],
+  b18: [`${BA}/plugins/anonymous`],
+  b19: [`${BA}/plugins/username`],
+  b20: [`${BA}/plugins/phone-number`],
+  b21: [`${BA}/plugins/one-tap`],
+  b22: [`${BA}/plugins/multi-session`],
+  b23: [`${BA}/plugins/last-login-method`],
+  b25: [`${BA}/plugins/oauth-proxy`],
+  b28: [`${BA}/plugins/captcha`],
+  b29: [`${BA}/plugins/have-i-been-pwned`],
+  b31: [`${BA}/plugins/open-api`],
+  b33: [`${BA}/plugins/sso`],
+  b34: [`${BA}/plugins/scim`],
+  b41: [`${BA}/concepts/users-accounts`, `${BA}/concepts/session-management`],
+  d1: [`${BA}/concepts/cli`],
+  d4: [`${BA}/plugins/admin`],
+  d5: [`${BA}/concepts/cli`],
+  d6: [`${BA}/concepts/cli`],
+  d11: [`${BA}/concepts/cli`],
+  d12: [`${BA}/plugins/jwt`],
+  e1: [`${BA}/plugins/open-api`],
+  e7: [`${BA}/reference/errors`],
+  e10: [`${BA}/guides/1-7-upgrade-guide`],
+  f2: [`${BA}/reference/security`, `${NPM} dist/context/secret-utils.mjs`],
+  f3: [`${BA}/reference/security`],
+  f4: [`${BA}/reference/options`],
+  f6: [`${BA}/concepts/cookies`],
+  f10: [`${BA}/plugins/have-i-been-pwned`],
+  f11: [`${BA}/plugins/captcha`],
+  f12: [`${BA}/reference/security`],
+  f15: ["https://github.com/better-auth/better-auth/blob/main/SECURITY.md"],
+  f16: [`${BA}/concepts/users-accounts`],
+  f18: [`${BA}/concepts/session-management`],
+  g1: [`${BA}/concepts/database`],
+  g2: [`${BA}/concepts/cli`],
+  g3: [`${RELEASES}/tag/v1.7.3`],
+  g6: [`${BA}/reference/telemetry`],
+  g7: [`${BA}/reference/instrumentation`],
+  g8: [`${BA}/concepts/hooks`],
+  g10: [RELEASES],
+  g11: [RELEASES],
+  // The review did not read Better Auth for this row; the authtempo cell comes from this proof.
+  g14: ["examples/worker/proof/bundle-no-node.mjs"],
+};
+
+/** The public source of the Better Auth cell of a row. */
+function review(id: string): string {
+  const parts = SOURCES[id];
+  if (parts === undefined) throw new Error(`compare.ts: row ${id} has no public source`);
+  return parts.join("; ");
+}
+/** A row that a merged plan changed: the Better Auth source, then the plan file for authtempo. */
 const merged = (id: string, plans: readonly string[]) =>
-  `${review(id)}; ${plans.map((p) => `docs/superpowers/plans/${p}`).join(", ")}`;
+  [review(id), ...plans.map((p) => `docs/superpowers/plans/${p}`)].join("; ");
 
 const P11D = "2026-10-14-11d-sdks.md";
 const P11G = "2026-10-14-11g-openapi.md";

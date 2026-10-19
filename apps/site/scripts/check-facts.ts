@@ -36,6 +36,20 @@ const ENTITIES: Readonly<Record<string, string>> = {
   "&#165;": "¥",
 };
 
+/**
+ * A public source of a fact (final review m4 of plan 11b): the Better Auth
+ * docs, its repository or releases on GitHub, or a file of its npm package
+ * at a version. Any other part of a source must be a tracked file of this
+ * repository, so a reader can open each source.
+ */
+const PUBLIC_SOURCE = new RegExp(
+  [
+    String.raw`^https://better-auth\.com/docs/[a-z0-9/-]+$`,
+    String.raw`^https://github\.com/better-auth/better-auth(?:/[A-Za-z0-9._/-]+)?$`,
+    String.raw`^npm better-auth@\d+\.\d+\.\d+, dist/[A-Za-z0-9._/-]+$`,
+  ].join("|"),
+);
+
 /** The text of an HTML part: each tag is a space, and each currency entity is its sign. */
 export function textOfHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/&#?\w+;/g, (e) => ENTITIES[e.toLowerCase()] ?? e);
@@ -71,6 +85,8 @@ function rowHtml(built: string, id: string): string {
  * 4. The built page has one `cmp-<id>` per row and one `host-<provider>` per
  *    model, each with "Read <date>", and no other such id. It has a main
  *    element, and its text names no price.
+ * 5. Each part of a source (split at "; ") is public (PUBLIC_SOURCE) or a
+ *    file that `tracked` lists (git ls-files).
  */
 export function checkFacts(input: {
   rows: readonly CompareRow[];
@@ -78,6 +94,7 @@ export function checkFacts(input: {
   providers: readonly string[];
   built: string;
   files: ReadonlySet<string>;
+  tracked: ReadonlySet<string>;
   today: Date;
 }): CheckReport {
   const r: CheckReport = {
@@ -96,6 +113,10 @@ export function checkFacts(input: {
   for (const [id, n] of seen) if (n > 1) r.failures.push(`${id} is the id of ${n} rows`);
   for (const f of facts) {
     if (f.source.trim() === "") r.failures.push(`${f.id} names no source`);
+    else
+      for (const part of f.source.split("; "))
+        if (!PUBLIC_SOURCE.test(part) && !input.tracked.has(part))
+          r.failures.push(`${f.id} names "${part}", which is not public and not a tracked file`);
     const day = dayOf(f.read);
     if (day === null) {
       r.failures.push(`${f.id} has the read date "${f.read}", not a YYYY-MM-DD day`);
@@ -145,5 +166,6 @@ export function checkFacts(input: {
   if (main === undefined) r.failures.push('the page has no <main id="main"> element');
   const price = PRICE.exec(textOfHtml(main ?? ""));
   if (price !== null) r.failures.push(`the page names a price: "${price[0].trim()}"`);
-  return requireCounts(r, ["rows", "models"]);
+  r.counts.tracked = input.tracked.size;
+  return requireCounts(r, ["rows", "models", "tracked"]);
 }

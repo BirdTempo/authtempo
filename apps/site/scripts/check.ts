@@ -2,6 +2,7 @@
 // `astro build`, so every check that reads dist reads a build that is newer
 // than the change. Each check prints one summary line. The run fails when one
 // check fails, and the last line counts the checks that passed.
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
@@ -84,6 +85,11 @@ function distText(file: string): string {
 }
 
 /** The site's OpenAPI document in dist (plan 11g). */
+/** Each file that git tracks, by its path from the repository root. A source of /compare/ names one. */
+function trackedFiles(): Set<string> {
+  return new Set(execFileSync("git", ["ls-files"], { cwd: REPO, encoding: "utf8" }).split("\n"));
+}
+
 const OPENAPI_FILE = "docs/reference/openapi.json";
 
 /** The parsed document of dist, or null when the build did not write it or it is not JSON. */
@@ -359,6 +365,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         providers: PROVIDERS,
         built: distPageOrEmpty("/compare/"),
         files: distFiles(),
+        tracked: trackedFiles(),
         today: new Date(),
       }),
   },

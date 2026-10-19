@@ -19,7 +19,7 @@ function rows(read = "2026-10-14"): CompareRow[] {
       authtempo: "The link opens a confirm page.",
       betterAuth: "Has a magic link.",
       side: "authtempo",
-      source: "review-vs-better-auth.md, row b5",
+      source: "https://better-auth.com/docs/plugins/magic-link",
       read,
     },
     {
@@ -28,7 +28,7 @@ function rows(read = "2026-10-14"): CompareRow[] {
       authtempo: "S256 on every code.",
       betterAuth: "S256 only.",
       side: "parity",
-      source: "review-vs-better-auth.md, row a4",
+      source: "https://better-auth.com/docs/plugins/oauth-provider; docs/superpowers/plans/x.md",
       read: "2026-10-14",
     },
     {
@@ -37,7 +37,7 @@ function rows(read = "2026-10-14"): CompareRow[] {
       authtempo: "No device grant.",
       betterAuth: "Has the device grant.",
       side: "better-auth",
-      source: "review-vs-better-auth.md, row a13",
+      source: "npm better-auth@1.7.2, dist/plugins/device-authorization/index.mjs",
       read: "2026-10-14",
     },
   ];
@@ -76,6 +76,11 @@ function page(
 const pageRead = (read: string) => page(undefined, read);
 
 const FILES = new Set(["docs/migrate/clerk/index.html"]);
+/** The tracked files of the repository that the fixture sources name. */
+const TRACKED = new Set([
+  "apps/site/src/content/docs/docs/migrate/clerk.mdx",
+  "docs/superpowers/plans/x.md",
+]);
 
 function run(
   over: Partial<{
@@ -84,6 +89,7 @@ function run(
     providers: string[];
     built: string;
     files: Set<string>;
+    tracked: Set<string>;
   }> = {},
 ) {
   return checkFacts({
@@ -92,6 +98,7 @@ function run(
     providers: over.providers ?? ["clerk"],
     built: over.built ?? page(),
     files: over.files ?? FILES,
+    tracked: over.tracked ?? TRACKED,
     today: TODAY,
   });
 }
@@ -100,7 +107,7 @@ describe("checkFacts (plan 11b Task 6)", () => {
   it("passes rows read today", () => {
     const r = run();
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ rows: 3, models: 1, oldest_days: 0 });
+    expect(r.counts).toEqual({ rows: 3, models: 1, oldest_days: 0, tracked: 2 });
   });
 
   it("fails a row read 181 days ago", () => {
@@ -137,6 +144,26 @@ describe("checkFacts (plan 11b Task 6)", () => {
     expect(run({ rows: blank }).failures).toEqual(["cmp-a4 names no source"]);
     const model = models().map((m) => ({ ...m, source: "" }));
     expect(run({ models: model }).failures).toEqual(["host-clerk names no source"]);
+  });
+
+  it("fails a source that is not public and not a tracked file (final review m4)", () => {
+    const internal = rows().map((x) =>
+      x.id === "b5" ? { ...x, source: "review-vs-better-auth.md, row b5" } : x,
+    );
+    expect(run({ rows: internal }).failures).toEqual([
+      'cmp-b5 names "review-vs-better-auth.md, row b5", which is not public and not a tracked file',
+    ]);
+    // Each part counts: a public first part does not carry an untracked second part.
+    expect(
+      run({ tracked: new Set(["apps/site/src/content/docs/docs/migrate/clerk.mdx"]) }).failures,
+    ).toEqual([
+      'cmp-a4 names "docs/superpowers/plans/x.md", which is not public and not a tracked file',
+    ]);
+    const other = rows().map((x) =>
+      x.id === "b5" ? { ...x, source: "https://better-auth.com.evil.example/docs/x" } : x,
+    );
+    expect(run({ rows: other }).failures).toHaveLength(1);
+    expect(run({ tracked: new Set() }).failures).toContain("read 0 tracked");
   });
 
   it("fails a duplicate id", () => {
@@ -229,6 +256,7 @@ describe("checkFacts (plan 11b Task 6)", () => {
       providers: ["clerk"],
       built: pageRead("2026-04-17"),
       files: FILES,
+      tracked: TRACKED,
       today: late,
     });
     expect(r.failures).toEqual([]);
