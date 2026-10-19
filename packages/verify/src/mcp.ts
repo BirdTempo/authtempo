@@ -2,9 +2,9 @@
  * `requireMcpAuth`: the guard of an app's own MCP server (plan 11e, spec 21).
  * The name follows Better Auth 1.7.7, read 2026-10-14; `withMcpAuth` is its pre-1.7 name.
  * The 401 and the 403 come from `unauthorized.ts`, so the challenge has one source.
- * DPoP and token introspection come with row 12e, through the `Verifier`, with no new call.
+ * DPoP and token introspection come through the `Verifier` (plan 12e), with no new option.
  */
-import { isResourceUrl, readBearer } from "@authtempo/core/credentials";
+import { isResourceUrl, readBearer, readDpopToken } from "@authtempo/core/credentials";
 import {
   bearerChallenge,
   insufficientScopeResponse,
@@ -97,6 +97,8 @@ async function callerOf(source: McpSource, request: Request): Promise<McpCaller 
       // Core's caller reads the session cookie first and then never reads the bearer.
       // A client in a page of the auth app's origin sends the cookie with each fetch.
       // So core gets a copy with no cookie, and the bearer alone decides.
+      // The copy keeps the DPoP header. Core spends the proof once for this one call,
+      // so a second request with the same proof is a replay (ruling 31 of plan 12e).
       const headers = new Headers(request.headers);
       headers.delete("cookie");
       const bare = new Request(request.url, { method: request.method, headers });
@@ -133,17 +135,23 @@ export function requireMcpAuth(
   if (scopes !== undefined) bearerChallenge({ resource, scope: scopes });
   if (challengeScopes !== undefined) bearerChallenge({ resource, scope: challengeScopes });
   const challenge = { resource, scope: challengeScopes };
+  // A Verifier writes its own 401: it knows the scheme of the request and its DPoP algs.
+  const verifier = "verifyRequest" in source ? source : null;
+  const refused = (request: Request): Response =>
+    verifier
+      ? verifier.unauthorized({ ...challenge, request })
+      : unauthorizedResponse({ ...challenge, invalidToken: true });
 
   return async (request) => {
-    // No bearer: the plain 401. A session cookie is no credential here.
-    if (readBearer(request) === null) return unauthorizedResponse(challenge);
+    // No bearer and no DPoP token: the plain 401. A session cookie is no credential here.
+    if (readBearer(request) === null && readDpopToken(request) === null)
+      return verifier ? verifier.unauthorized(challenge) : unauthorizedResponse(challenge);
     const caller = await callerOf(source, request);
     // The auth app or its database did not answer: 503, never 401, and no detail.
     if (caller === "failed") return new Response(null, { status: 503 });
-    if (caller === null) return unauthorizedResponse({ ...challenge, invalidToken: true });
+    if (caller === null) return refused(request);
     // A token for another resource of the same issuer.
-    if (caller.resource !== resource)
-      return unauthorizedResponse({ ...challenge, invalidToken: true });
+    if (caller.resource !== resource) return refused(request);
     // Spec 20 item 17: the 403 names every scope of the operation, not only the missing ones.
     if (scopes !== undefined && !scopes.every((s) => caller.scopes.includes(s)))
       return insufficientScopeResponse({ resource, scope: scopes });

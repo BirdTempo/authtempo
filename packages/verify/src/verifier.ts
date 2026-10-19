@@ -7,22 +7,33 @@ import {
   isResourceUrl,
   JWS_RE,
   readBearer,
+  readDpopToken,
   resourceOf,
   SESSION_JWT_TYPE,
   SESSION_TOKEN_PREFIX,
   verifyJws,
 } from "@authtempo/core/credentials";
 import { VERIFY_CALLS, type VerifyOperation } from "./calls.js";
+import { type DpopOptions, resolveDpop, resourceProofHolds } from "./dpop.js";
 import { ownedFetch, TIMEOUT_DEFAULT_MS, TIMEOUT_MAX_MS, TIMEOUT_MIN_MS } from "./fetch.js";
+import { checkIntrospect, type IntrospectOptions, introspectActive } from "./introspect.js";
 import { createKeyCache } from "./jwks.js";
 import {
+  bearerChallenge,
   type ChallengeInput,
+  dpopChallenge,
   insufficientScopeResponse,
-  unauthorizedResponse,
+  unauthorizedWith,
 } from "./unauthorized.js";
 
-export type CallerKind = "session-jwt" | "oauth" | "api-token" | "session-token";
-const KINDS: readonly CallerKind[] = ["session-jwt", "oauth", "api-token", "session-token"];
+export type CallerKind = "session-jwt" | "oauth" | "oauth-client" | "api-token" | "session-token";
+const KINDS: readonly CallerKind[] = [
+  "session-jwt",
+  "oauth",
+  "oauth-client",
+  "api-token",
+  "session-token",
+];
 
 /** The caller of a request, by the credential it carried (plan 11d). Mirrors `auth.caller` of core. */
 export type Caller =
@@ -46,6 +57,18 @@ export type Caller =
       resource: string;
       tokenId: string;
       expiresAt: Date;
+      /** The `cnf.jkt` of a DPoP-bound token that came with its proof, or null for a Bearer token. */
+      dpopJkt: string | null;
+    }
+  | {
+      /** A client that acts for no user: a token of the `client_credentials` grant (plan 12e). */
+      kind: "oauth-client";
+      clientId: string;
+      scopes: string[];
+      resource: string;
+      tokenId: string;
+      expiresAt: Date;
+      dpopJkt: string | null;
     }
   | { kind: "api-token"; user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }
   | { kind: "session-token"; user: PublicSession["user"]; session: PublicSession["session"] };
@@ -68,7 +91,7 @@ export interface VerifierOptions {
   issuer: string;
   /** The session JWT audience of this server: one or more `jwtMint.audience` entries. Needed for `session-jwt`. */
   audience?: string | readonly string[] | undefined;
-  /** The `oauth.resources` entries that this server serves. Needed for `oauth`. */
+  /** The `oauth.resources` entries that this server serves. Needed for `oauth` and `oauth-client`. */
   resources?: readonly string[] | undefined;
   /** The credential kinds to accept. Default `["session-jwt"]`. */
   accept?: readonly CallerKind[] | undefined;
@@ -82,13 +105,35 @@ export interface VerifierOptions {
   fetch?: ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) | undefined;
   /** Tests inject a clock. */
   clock?: { now(): Date } | undefined;
+  /**
+   * Accept `Authorization: DPoP` with a proof of RFC 9449, checked offline.
+   * Needs `oauth` or `oauth-client` in `accept`. Without it, a DPoP request answers null.
+   */
+  dpop?: DpopOptions | undefined;
+  /**
+   * Ask `POST /oauth/introspect` about each access token after its offline
+   * check passes (RFC 7662), as this confidential client. Needs `oauth` or `oauth-client`.
+   */
+  introspect?: IntrospectOptions | undefined;
 }
+
+/** The input of `Verifier.unauthorized`. */
+export type UnauthorizedInput = ChallengeInput & {
+  /**
+   * The refused request. The verifier then reads its scheme, and the error
+   * goes into the challenge of that scheme (RFC 9449 section 7.2).
+   */
+  request?: Request | undefined;
+};
 
 export interface Verifier {
   /** The caller of a request. Never throws for an answer. */
   verifyRequest(request: Request): Promise<VerifyResult>;
-  /** The 401 of a request with no valid credential (RFC 6750, RFC 9728). Pass the scope that the route needs. */
-  unauthorized(input?: ChallengeInput): Response;
+  /**
+   * The 401 of a request with no valid credential (RFC 6750, RFC 9728). Pass the scope that the
+   * route needs. With `dpop`, the `DPoP` challenge follows the `Bearer` one.
+   */
+  unauthorized(input?: UnauthorizedInput): Response;
   /** The 403 of a valid token without a scope that the operation needs. */
   insufficientScope(input: ChallengeInput & { scope: string | readonly string[] }): Response;
 }
@@ -222,7 +267,8 @@ export function createVerifier(options: VerifierOptions): Verifier {
       );
   if (accept.includes("session-jwt") && audience.length === 0)
     throw new Error("authtempo verify: accept holds session-jwt, so audience is required");
-  if (accept.includes("oauth") && resources.length === 0)
+  const oauthKinds = accept.includes("oauth") || accept.includes("oauth-client");
+  if (oauthKinds && resources.length === 0)
     throw new Error("authtempo verify: accept holds oauth, so resources is required");
   // Spec 8.12 (review I-2): one key signs both kinds of token with one issuer.
   // So a URL that is both could let one kind pass as the other where a check skips typ.
@@ -246,6 +292,11 @@ export function createVerifier(options: VerifierOptions): Verifier {
   const doFetch = ownedFetch(options.fetch ?? globalThis.fetch.bind(globalThis), timeoutMs);
   const clock = options.clock ?? { now: () => new Date() };
   const now = () => clock.now().getTime();
+  if ((options.dpop !== undefined || options.introspect !== undefined) && !oauthKinds)
+    throw new Error("authtempo verify: dpop and introspect need oauth or oauth-client in accept");
+  const dpop = options.dpop === undefined ? null : resolveDpop(options.dpop, clock);
+  if (options.introspect !== undefined) checkIntrospect(options.introspect);
+  const introspect = options.introspect ?? null;
   const keys = createKeyCache({ url: `${issuer}${pathOf("verify.jwks")}`, fetch: doFetch, now });
   const transport = (bearer: string) =>
     createTransport({
@@ -303,7 +354,27 @@ export function createVerifier(options: VerifierOptions): Verifier {
     };
   }
 
-  async function jwt(token: string, url: string): Promise<VerifyResult> {
+  /**
+   * The refusal of each DPoP request, by request, for the challenge of
+   * `unauthorized`. A request that passed has no entry.
+   */
+  const refusals = new WeakMap<Request, "invalid_token" | "invalid_dpop_proof">();
+  /**
+   * The answer of each DPoP request, so a second `verifyRequest` of one
+   * request answers the same. The proof's `jti` is spent at the first call,
+   * and a replay is another request.
+   */
+  const dpopAnswers = new WeakMap<Request, Promise<VerifyResult>>();
+
+  /**
+   * A session JWT or an access token. `scheme` is the scheme of the
+   * request: a DPoP request needs a bound access token and its proof.
+   */
+  async function jwt(
+    token: string,
+    request: Request,
+    scheme: "Bearer" | "DPoP",
+  ): Promise<VerifyResult> {
     const d = decodeJws(token);
     if (!d) return none;
     const kind =
@@ -312,7 +383,9 @@ export function createVerifier(options: VerifierOptions): Verifier {
         : d.header.typ === ACCESS_TOKEN_TYPE
           ? "oauth"
           : null;
-    if (kind === null || !accept.includes(kind)) return none;
+    if (kind === null || (kind === "session-jwt" ? !accept.includes(kind) : !oauthKinds))
+      return none;
+    if (scheme === "DPoP" && kind !== "oauth") return none;
     const k = await keys.key(d.header.kid);
     if (!k.ok) return k;
     if (!k.value || !(await verifyJws(d, k.value))) return none;
@@ -345,39 +418,120 @@ export function createVerifier(options: VerifierOptions): Verifier {
         },
       };
     }
-    const resource = resourceOf(resources, url);
+    const resource = resourceOf(resources, request.url);
     if (!accessClaimsPass(p, issuer, resource, nowSeconds) || resource === null) return none;
-    // RFC 9449 section 7.2, as callerFromRequest of core: a DPoP-bound token
-    // never passes as a bearer. This call reads the bearer only (plan 12e Task 9).
-    if (p.cnf !== undefined) return none;
+    // Core's rule (`resolveAccessToken`): a client token names the client as its subject.
+    // A user id is a ULID and a client id is a `cl_` token or an https URL, so they never collide.
+    const callerKind = p.sub === p.client_id ? "oauth-client" : "oauth";
+    if (!accept.includes(callerKind)) return none;
+    let dpopJkt: string | null = null;
+    if (scheme === "Bearer") {
+      // RFC 9449 section 7.2, as callerFromRequest of core: a DPoP-bound
+      // token never passes as a bearer (plan 12e Task 9).
+      if (p.cnf !== undefined) return none;
+      // RFC 9728 section 2: this server takes bound tokens only.
+      if (dpop?.required) return none;
+    } else {
+      // The DPoP scheme is read only with `dpop` set (verifyRequest).
+      if (!dpop) return none;
+      const jkt = isObject(p.cnf) && typeof p.cnf.jkt === "string" ? p.cnf.jkt : null;
+      if (jkt === null) return none;
+      // The proof is checked last, so a request that fails another check spends no `jti`.
+      let holds: boolean;
+      try {
+        holds = await resourceProofHolds(dpop, request, { token, jkt }, nowSeconds);
+      } catch {
+        // A shared store that does not answer: a failure, never a pass and never null.
+        return { ok: false, code: "network", status: 0 };
+      }
+      if (!holds) {
+        refusals.set(request, "invalid_dpop_proof");
+        return none;
+      }
+      dpopJkt = jkt;
+    }
+    // After the offline check, so a bad token costs no call (RFC 7662).
+    if (introspect) {
+      const active = await introspectActive(
+        doFetch,
+        `${issuer}${pathOf("verify.introspect")}`,
+        introspect,
+        token,
+      );
+      if (!active.ok) return active;
+      if (!active.value) return none;
+    }
+    const scopes = p.scope.split(" ").filter((s) => s.length > 0);
+    const expiresAt = new Date(p.exp * 1000);
     return {
       ok: true,
-      value: {
-        kind,
-        userId: p.sub,
-        clientId: p.client_id,
-        scopes: p.scope.split(" ").filter((s) => s.length > 0),
-        resource,
-        tokenId: p.jti,
-        expiresAt: new Date(p.exp * 1000),
-      },
+      value:
+        callerKind === "oauth"
+          ? {
+              kind: callerKind,
+              userId: p.sub,
+              clientId: p.client_id,
+              scopes,
+              resource,
+              tokenId: p.jti,
+              expiresAt,
+              dpopJkt,
+            }
+          : {
+              kind: callerKind,
+              clientId: p.client_id,
+              scopes,
+              resource,
+              tokenId: p.jti,
+              expiresAt,
+              dpopJkt,
+            },
     };
   }
 
+  /** The scheme of the credential of a request, or null for none. */
+  const schemeOf = (request: Request): "Bearer" | "DPoP" | null =>
+    readDpopToken(request) !== null ? "DPoP" : readBearer(request) !== null ? "Bearer" : null;
+
   return {
     async verifyRequest(request) {
-      // The bearer only (Task 1 review): a resource server never reads the session cookie.
-      // So a browser's cookie on a cross-site request is no credential here.
+      // The Authorization header only (Task 1 review): a resource server never reads the session
+      // cookie. So a browser's cookie on a cross-site request is no credential here.
+      const bound = readDpopToken(request);
+      if (bound !== null) {
+        if (!dpop) return none;
+        const seen = dpopAnswers.get(request);
+        if (seen) return seen;
+        const answer = JWS_RE.test(bound) ? jwt(bound, request, "DPoP") : Promise.resolve(none);
+        dpopAnswers.set(request, answer);
+        return answer;
+      }
       const bearer = readBearer(request);
       if (bearer === null) return none;
       if (bearer.startsWith(API_TOKEN_PREFIX))
         return accept.includes("api-token") ? apiToken(bearer) : none;
       if (bearer.startsWith(SESSION_TOKEN_PREFIX))
         return accept.includes("session-token") ? sessionToken(bearer) : none;
-      if (JWS_RE.test(bearer)) return jwt(bearer, request.url);
+      if (JWS_RE.test(bearer)) return jwt(bearer, request, "Bearer");
       return none;
     },
-    unauthorized: (input = {}) => unauthorizedResponse(input),
+    unauthorized(input = {}) {
+      const { request, ...challenge } = input;
+      // With the request, its scheme decides. Without it, `invalidToken` names a refused Bearer token.
+      const scheme = request ? schemeOf(request) : challenge.invalidToken ? "Bearer" : null;
+      // A server with no `dpop` reads no DPoP scheme, so it refuses a DPoP request as a token.
+      const bearerError = scheme === "Bearer" || (scheme === "DPoP" && !dpop);
+      const bearer = bearerChallenge({
+        ...challenge,
+        ...(bearerError ? { error: "invalid_token" as const } : {}),
+      });
+      if (!dpop) return unauthorizedWith(bearer);
+      const dpopError =
+        scheme === "DPoP" ? ((request && refusals.get(request)) ?? "invalid_token") : undefined;
+      return unauthorizedWith(
+        `${bearer}, ${dpopChallenge({ ...challenge, algs: dpop.algs, ...(dpopError ? { error: dpopError } : {}) })}`,
+      );
+    },
     insufficientScope: (input) => insufficientScopeResponse(input),
   };
 }

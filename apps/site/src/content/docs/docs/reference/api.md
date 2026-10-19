@@ -193,6 +193,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `sessionCookieNames`, `SessionCookieNames` | The cookie names of a `cookieName` setting, and their type. The old name is read only with the default name. |
 | `readSessionToken` | The session token of a request: the cookie, then the bearer header. |
 | `readBearer` | The value of `Authorization: Bearer <value>`, or null. |
+| `readDpopToken` | The value of `Authorization: DPoP <token>`, or null (RFC 9449 section 7.1). |
 | `JWS_RE`, `decodeJws`, `DecodedJws` | The shape of a compact JWS, and its parts with no check. |
 | `verifyJws`, `PublicJwk`, `JwsAlg` | The signature check on Web Crypto, for EdDSA, ES256, and RS256. The header must name the alg and the kid of the key. |
 | `JWS_ALGS`, `isPublicJwk`, `JWK_PRIVATE_MEMBERS` | The three values of `jwtMint.alg`, and the check of one public signing key: its members fit its alg, and it holds no private member. The private member names of RFC 7518. |

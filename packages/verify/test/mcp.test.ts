@@ -5,6 +5,8 @@ import { type McpCaller, McpScopeError, type McpSource, requireMcpAuth } from ".
 import {
   accessToken,
   BASE,
+  boundToken,
+  dpopKey,
   dpopProof,
   FILES,
   ISSUER,
@@ -14,6 +16,7 @@ import {
   sessionJwt,
   signedIn,
   withBearer,
+  withDpop,
 } from "./harness.js";
 
 /** The second resource of the same issuer. */
@@ -73,8 +76,11 @@ async function apiToken(server: Server, storage: StorageAdapter, userId: string)
 
 type SourceName = "verifier" | "core";
 
-/** The source of the wrapper: a Verifier that accepts every kind, or core's auth itself. */
-function sourceOf(name: SourceName, server: Server): McpSource {
+/**
+ * The source of the wrapper: a Verifier that accepts every kind, or core's auth itself.
+ * With `dpop`, the Verifier also reads the DPoP scheme; core always reads it.
+ */
+function sourceOf(name: SourceName, server: Server, dpop = false): McpSource {
   if (name === "core") return server.auth;
   return createVerifier({
     issuer: ISSUER,
@@ -83,6 +89,7 @@ function sourceOf(name: SourceName, server: Server): McpSource {
     accept: ["session-jwt", "oauth", "api-token", "session-token"],
     fetch: server.fetch,
     clock: server.clock,
+    ...(dpop ? { dpop: {} } : {}),
   });
 }
 
@@ -349,5 +356,48 @@ describe.each(["verifier", "core"] as const)("requireMcpAuth with the %s source"
     const open = recorder();
     const bare = requireMcpAuth(sourceOf(name, server), open.handler, { resource: MCP });
     expect(await bare(withBearer(MCP, at))).toBe(open.answer);
+  });
+
+  it("passes a DPoP request through requireMcpAuth", async () => {
+    const { server } = setup();
+    const s = await signedIn(server);
+    const key = await dpopKey();
+    const at = await boundToken(server, s.cookie, key, "openid mcp:tools");
+    const r = recorder();
+    const route = requireMcpAuth(sourceOf(name, server, true), r.handler, {
+      resource: MCP,
+      scopes: ["mcp:tools"],
+    });
+    const url = `${MCP}/tools`;
+    const proof = await key.proof(server, { htm: "GET", htu: url, accessToken: at });
+    expect(await route(withDpop(url, at, proof))).toBe(r.answer);
+    expect(r.seen.map((c) => c.userId)).toEqual([s.user.id]);
+  });
+
+  it("checks one proof per request: one proof does not serve two requests (ruling 31 of plan 12e)", async () => {
+    const { server } = setup();
+    const s = await signedIn(server);
+    const key = await dpopKey();
+    const at = await boundToken(server, s.cookie, key, "openid mcp:tools");
+    const r = recorder();
+    const route = requireMcpAuth(sourceOf(name, server, true), r.handler, {
+      resource: MCP,
+      scopes: ["mcp:tools"],
+    });
+    const url = `${MCP}/tools`;
+    const proof = await key.proof(server, { htm: "GET", htu: url, accessToken: at });
+    expect(await route(withDpop(url, at, proof))).toBe(r.answer);
+    const replay = await route(withDpop(url, at, proof));
+    expect(replay.status).toBe(401);
+    const metadata =
+      'resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"';
+    // The Verifier names the refused proof in the DPoP challenge. Core's auth gives no algs
+    // to the wrapper, so its source writes the Bearer challenge alone.
+    expect(replay.headers.get("www-authenticate")).toBe(
+      name === "verifier"
+        ? `Bearer ${metadata}, scope="mcp:tools", DPoP error="invalid_dpop_proof", algs="EdDSA Ed25519 ES256 RS256 PS256", ${metadata}, scope="mcp:tools"`
+        : `Bearer error="invalid_token", ${metadata}, scope="mcp:tools"`,
+    );
+    expect(r.seen).toHaveLength(1);
   });
 });

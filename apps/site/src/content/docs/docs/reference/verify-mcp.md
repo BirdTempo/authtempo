@@ -8,6 +8,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
   - docs/superpowers/plans/2026-10-14-11e-mcp.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 **For:** a developer of an app with its own MCP server that must accept only a valid access token.
@@ -37,7 +38,10 @@ The name follows Better Auth 1.7.7. Its older name `withMcpAuth` is not an expor
 | A `resource` that is not `https:`. Construction accepts `http:` only on `127.0.0.1` or `localhost`. | Construction throws. |
 | A `resource` with a query, a fragment, or user info | Construction throws. |
 | A scope with a quote or a space, `offline_access`, or an empty list | Construction throws. |
-| No bearer | 401 with the challenge of `resource` and `challengeScopes`. A session cookie is no credential here. |
+| No bearer and no DPoP token | 401 with the challenge of `resource` and `challengeScopes`. A session cookie is no credential here. |
+| A DPoP token with a valid proof | The caller passes. A `Verifier` source needs its `dpop` option. |
+| A second request with the same proof | 401: the wrapper checks one proof per request. |
+| A token of the `client_credentials` grant | 401 with `error="invalid_token"`: the wrapper needs a person. |
 | A bearer that is not an OAuth access token | The same 401 with `error="invalid_token"`. |
 | A token for another resource of the same issuer | The 401 with `error="invalid_token"`. |
 | A caller without every entry of `scopes` | 403 with `error="insufficient_scope"`. The challenge names every scope of the route. |
@@ -54,7 +58,7 @@ The 401 and the 403 come from `unauthorizedResponse` and `insufficientScopeRespo
 
 The second source fetches no key set. So a Worker does not fetch its own JWKS on its own host.
 
-DPoP and token introspection come with row 12e, through the `Verifier`, with no new call.
+DPoP and token introspection come through the `Verifier`, with no new option. With a `Verifier` source, the 401 comes from `verifier.unauthorized` with the request, so a refused proof names `invalid_dpop_proof` in the `DPoP` challenge. Core's `auth` gives the wrapper no algs, so that source writes the `Bearer` challenge alone.
 
 ## Exports
 

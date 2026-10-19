@@ -115,11 +115,8 @@ export async function resourceProofHolds(
   return (await proofOf(config, request, url, bound)) !== null;
 }
 
-/** The value of `Authorization: DPoP <token>`, or null (RFC 9449 section 7.1). */
-export function readDpopToken(request: Pick<Request, "headers">): string | null {
-  const m = /^DPoP\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");
-  return m?.[1] ?? null;
-}
+/** The DPoP scheme rule has one copy, in the credential facts of an SDK. */
+export { readDpopToken } from "../primitives/credentials.js";
 
 /** The `algs` parameter of a DPoP challenge (RFC 9449 section 7.1). */
 export const dpopAlgs = (config: ResolvedConfig): string =>

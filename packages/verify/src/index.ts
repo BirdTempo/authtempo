@@ -1,5 +1,12 @@
 export { VERIFY_CALLS, type VerifyOperation } from "./calls.js";
+export {
+  type DpopOptions,
+  memoryReplayStore,
+  REPLAY_STORE_DEFAULT_MAX,
+  type ReplayStore,
+} from "./dpop.js";
 export { TIMEOUT_DEFAULT_MS, TIMEOUT_MAX_MS, TIMEOUT_MIN_MS } from "./fetch.js";
+export type { IntrospectOptions } from "./introspect.js";
 export {
   FAILED_READ_PAUSE_MS,
   KEY_SET_DEFAULT_SECONDS,
@@ -12,6 +19,7 @@ export {
 export {
   bearerChallenge,
   type ChallengeInput,
+  dpopChallenge,
   insufficientScopeResponse,
   unauthorizedResponse,
 } from "./unauthorized.js";
@@ -20,6 +28,7 @@ export {
   type Caller,
   type CallerKind,
   createVerifier,
+  type UnauthorizedInput,
   type Verifier,
   type VerifierOptions,
   type VerifyResult,

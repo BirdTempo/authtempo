@@ -33,7 +33,8 @@ if (r.value === null) return verifier.unauthorized({ invalidToken: readBearer(re
 | Kind | The credential | The check |
 | --- | --- | --- |
 | `session-jwt` | A session JWT, `typ: "JWT"` | Offline: the signature against the key set, `iss`, `sub`, `sid`, `aud` (one of `audience`), and `exp` |
-| `oauth` | An access token, `typ: "at+jwt"` | Offline: the signature against the key set, `iss`, `sub`, `client_id`, `scope`, `jti`, and `exp`. `aud` must be the entry of `resources` that the request URL falls under |
+| `oauth` | An access token of a person, `typ: "at+jwt"` | Offline: the signature against the key set, `iss`, `sub`, `client_id`, `scope`, `jti`, and `exp`. `aud` must be the entry of `resources` that the request URL falls under. `dpopJkt` is the key of a DPoP request, else null |
+| `oauth-client` | An access token of the `client_credentials` grant, whose `sub` is its `client_id` | The checks of `oauth`. The caller has no `userId`: the client acts for no person |
 | `api-token` | A `tk_` bearer | One `GET <basePath>/tokens/current`; `cache.apiTokenSeconds` (0 to 60, default 0) keeps the answer |
 | `session-token` | A `ts_` bearer | One `GET <basePath>/session`. Off by default: it sends the person's session token to the auth app. Each check can extend the person's session, as a visit does |
 
@@ -52,12 +53,16 @@ that `accept` does not list answers null with no network call.
 | `cache.apiTokenSeconds` | 0 | an integer from 0 to 60 | How long the verifier keeps a `tk_` answer. |
 | `timeoutMs` | 5000 | an integer from 100 to 30000 | The deadline of each call to the auth app, and of the read of its body. |
 | `fetch` | the global `fetch` | a fetch function | Tests give a stub. |
+| `dpop` | none | see "DPoP" | Accept `Authorization: DPoP` with a proof. |
+| `introspect` | none | `{ clientId, clientSecret }` | Ask `POST <basePath>/oauth/introspect` about each access token. |
 
 `createVerifier` throws for a wrong config:
 
 - an issuer that is not an http or https URL, or that has a query, a
   fragment, or user info;
-- no `audience` for `session-jwt`, or no `resources` for `oauth`;
+- no `audience` for `session-jwt`, or no `resources` for `oauth` or
+  `oauth-client`;
+- `dpop` or `introspect` without `oauth` or `oauth-client` in `accept`;
 - a resource that core's resource rule refuses;
 - a URL that is both an audience and a resource;
 - a number outside its range.
@@ -109,12 +114,56 @@ reads the key set and sends each bearer over plain HTTP. Core accepts an
 - An offline access token check does not see a deleted user; core's
   `auth.caller` does.
 
+## DPoP
+
+With `dpop`, the verifier reads `Authorization: DPoP <token>` and the `DPoP`
+header of RFC 9449. The check runs offline with `checkDpopProof` of
+`@authtempo/core/credentials`, the same code as core's `auth.caller`.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `dpop.algs` | all of `FOREIGN_ALGS` | The algs of a proof, as `oauth.dpop.algs` of core. |
+| `dpop.windowSeconds` | 60 | How far the `iat` of a proof may be from now, 10 to 300. |
+| `dpop.replay` | `memoryReplayStore()` | The store of the proofs seen: `seen(key, ttlSeconds)`. |
+| `dpop.required` | `false` | True: an access token without the DPoP scheme answers null. |
+
+- The token must be bound (`cnf.jkt`), and the proof key must have that
+  thumbprint. The proof must hold `ath`, the method, and the URL.
+- A bound token sent as a Bearer answers null (RFC 9449 section 7.2).
+- The proof is checked last, so a request that fails another check spends
+  no proof. A second `verifyRequest` of one request answers the same.
+- Each proof key lives in the store to `ceil(iat)` plus twice the window.
+- The default store sees a replay only inside one isolate. A deployment with several isolates passes a shared store, or uses `auth.caller`, whose store is the database.
+- `memoryReplayStore(max)` keeps at most `max` keys, 10,000 by default
+  (`REPLAY_STORE_DEFAULT_MAX`). Above the bound it drops the oldest key.
+- A store that throws gives `network`, never null.
+
+## Introspection
+
+With `introspect`, each access token that passes the offline check costs one
+call to `POST <basePath>/oauth/introspect` (RFC 7662). A bad token costs no
+call. The verifier sends `client_secret_basic`: the form-encoded id and
+secret (RFC 6749 section 2.3.1). The client must be a confidential client of
+the auth app with `introspect: true`.
+
+- `active: false` answers null, so a revoked grant ends access at once.
+- A call with no answer gives `network`. A status other than 200 gives
+  `unexpected` with that status. A body with no boolean `active` gives
+  `unexpected` with status 200.
+
 ## The 401 and the 403
 
 - `verifier.unauthorized({ resource, scope })` answers 401 with
   `WWW-Authenticate: Bearer resource_metadata="…", scope="…"`. An MCP client
   reads the protected-resource document and the scopes to ask for from it.
   Add `invalidToken: true` when the request held a token that you refused.
+- Pass `request` in place of `invalidToken`: the verifier then reads the
+  scheme of the request, and the error goes into the challenge of that
+  scheme (RFC 9449 section 7.2).
+- With `dpop`, a `DPoP` challenge follows the `Bearer` one:
+  `DPoP algs="…", resource_metadata="…"`. A refused proof adds
+  `error="invalid_dpop_proof"`, and a refused DPoP token adds
+  `error="invalid_token"`. `dpopChallenge` writes the text alone.
 - `verifier.insufficientScope({ resource, scope })` answers 403
   `insufficient_scope`. Name every scope of the operation in one challenge.
 - `offline_access` is not a resource scope: the functions refuse it.
@@ -179,5 +228,11 @@ The rules:
   passes through.
 - A caller that passes gets the handler's answer, unchanged.
 
-DPoP and token introspection come with row 12e, through the `Verifier`, with
-no new call.
+- A DPoP request passes through the wrapper with no new option. A `Verifier`
+  source needs `dpop`; core's `auth` reads the DPoP scheme itself.
+- The wrapper checks one proof per request, so a second request with the
+  same proof gets 401. With a `Verifier` source, the 401 comes from
+  `verifier.unauthorized` with the request. Core's `auth` gives the wrapper no
+  algs, so that source writes the `Bearer` challenge alone.
+- A token of the `client_credentials` grant gets 401: the wrapper needs a
+  person.

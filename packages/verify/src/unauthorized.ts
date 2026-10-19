@@ -44,10 +44,10 @@ function metadataOf(resource: string): string {
   return `${r.origin}/.well-known/oauth-protected-resource${path}`;
 }
 
-/** The value of `WWW-Authenticate`. The order follows the examples of the MCP revision. */
-export function bearerChallenge(
+/** The parameters of a challenge, checked. The order follows the examples of the MCP revision. */
+function challengeParams(
   input: ChallengeInput & { error?: "invalid_token" | "insufficient_scope" | undefined },
-): string {
+): string[] {
   const scope = input.scope !== undefined ? `scope="${scopeList(input.scope).join(" ")}"` : null;
   const metadata =
     input.resource !== undefined ? `resource_metadata="${metadataOf(input.resource)}"` : null;
@@ -61,19 +61,54 @@ export function bearerChallenge(
     input.error === "insufficient_scope"
       ? [`error="insufficient_scope"`, scope, metadata, description]
       : [input.error ? `error="${input.error}"` : null, metadata, scope, description];
-  const params = parts.filter((p): p is string => p !== null);
+  return parts.filter((p): p is string => p !== null);
+}
+
+/** The value of `WWW-Authenticate`. */
+export function bearerChallenge(
+  input: ChallengeInput & { error?: "invalid_token" | "insufficient_scope" | undefined },
+): string {
+  const params = challengeParams(input);
   return params.length > 0 ? `Bearer ${params.join(", ")}` : "Bearer";
+}
+
+/** RFC 7515 section 4.1.1: an alg name. A quote, a space, or a comma would break the parameter. */
+const ALG = /^[A-Za-z0-9+._-]+$/;
+
+/**
+ * The value of a `DPoP` challenge (RFC 9449 section 7.1): `error` first, as
+ * Figure 16 of the RFC, then `algs` and the parameters of `bearerChallenge`.
+ * `algs` lists the algs that the server accepts for a proof.
+ */
+export function dpopChallenge(
+  input: ChallengeInput & {
+    algs: readonly string[];
+    error?: "invalid_dpop_proof" | "invalid_token" | undefined;
+  },
+): string {
+  if (input.algs.length === 0 || !input.algs.every((a) => ALG.test(a)))
+    throw new Error("authtempo verify: algs needs one or more alg names");
+  // The parameters after `algs` follow the Bearer rule, so a wrong scope throws here too.
+  const rest = challengeParams({ ...input, error: undefined });
+  const error = input.error ? [`error="${input.error}"`] : [];
+  return `DPoP ${[...error, `algs="${input.algs.join(" ")}"`, ...rest].join(", ")}`;
+}
+
+/** A 401 with the value of `WWW-Authenticate`. */
+export function unauthorizedWith(challenge: string): Response {
+  return Response.json(
+    { error: "unauthorized" },
+    { status: 401, headers: { "www-authenticate": challenge } },
+  );
 }
 
 /** 401: no valid credential. With `invalidToken`, the request held a token that the server refused. */
 export function unauthorizedResponse(input: ChallengeInput = {}): Response {
-  const challenge = bearerChallenge({
-    ...input,
-    ...(input.invalidToken ? { error: "invalid_token" as const } : {}),
-  });
-  return Response.json(
-    { error: "unauthorized" },
-    { status: 401, headers: { "www-authenticate": challenge } },
+  return unauthorizedWith(
+    bearerChallenge({
+      ...input,
+      ...(input.invalidToken ? { error: "invalid_token" as const } : {}),
+    }),
   );
 }
 

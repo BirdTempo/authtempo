@@ -11,6 +11,7 @@ export {
   DEFAULT_COOKIE_NAME,
   LEGACY_COOKIE_NAME,
   readBearer,
+  readDpopToken,
   readSessionToken,
   SESSION_JWT_TYPE,
   SESSION_TOKEN_PREFIX,

@@ -188,30 +188,71 @@ function b64url(bytes: Uint8Array): string {
 }
 
 /**
- * A DPoP proof of RFC 9449 section 4.2 for a token request, by a new ES256
- * key that the test generates. Core binds the token to that key.
+ * A DPoP key of RFC 9449 that the test generates: an ES256 pair. `proof`
+ * signs a proof of section 4.2 with a new `jti` for each call. `ath` binds
+ * the proof to an access token at a resource (section 7).
  */
-export async function dpopProof(server: Server): Promise<string> {
+export async function dpopKey() {
   const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
     "sign",
     "verify",
   ])) as CryptoKeyPair;
   const { kty, crv, x, y } = await crypto.subtle.exportKey("jwk", pair.publicKey);
   const enc = new TextEncoder();
-  const header = { typ: "dpop+jwt", alg: "ES256", jwk: { kty, crv, x, y } };
-  const claims = {
-    jti: b64url(crypto.getRandomValues(new Uint8Array(16))),
-    htm: "POST",
-    htu: `${ISSUER}/oauth/token`,
-    iat: Math.floor(server.clock.now().getTime() / 1000),
+  return {
+    async proof(
+      server: Server,
+      claims: { htm: string; htu: string; accessToken?: string; iat?: number },
+    ): Promise<string> {
+      const header = { typ: "dpop+jwt", alg: "ES256", jwk: { kty, crv, x, y } };
+      const payload = {
+        jti: b64url(crypto.getRandomValues(new Uint8Array(16))),
+        htm: claims.htm,
+        htu: claims.htu,
+        iat: claims.iat ?? Math.floor(server.clock.now().getTime() / 1000),
+        ...(claims.accessToken !== undefined ? { ath: await s256(claims.accessToken) } : {}),
+      };
+      const input = `${b64url(enc.encode(JSON.stringify(header)))}.${b64url(enc.encode(JSON.stringify(payload)))}`;
+      const sig = await crypto.subtle.sign(
+        { name: "ECDSA", hash: "SHA-256" },
+        pair.privateKey,
+        enc.encode(input),
+      );
+      return `${input}.${b64url(new Uint8Array(sig))}`;
+    },
   };
-  const input = `${b64url(enc.encode(JSON.stringify(header)))}.${b64url(enc.encode(JSON.stringify(claims)))}`;
-  const sig = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    pair.privateKey,
-    enc.encode(input),
-  );
-  return `${input}.${b64url(new Uint8Array(sig))}`;
+}
+
+export type DpopKey = Awaited<ReturnType<typeof dpopKey>>;
+
+/**
+ * A DPoP proof for a token request, by a new ES256 key that the test
+ * generates. Core binds the token to that key.
+ */
+export async function dpopProof(server: Server): Promise<string> {
+  return (await dpopKey()).proof(server, { htm: "POST", htu: `${ISSUER}/oauth/token` });
+}
+
+/** A request to a resource server with `Authorization: DPoP` and its proof. */
+export function withDpop(url: string, token: string, proof: string, method = "GET"): Request {
+  return new Request(url, { method, headers: { authorization: `DPoP ${token}`, dpop: proof } });
+}
+
+/** A DPoP-bound access token of `key`, through the real provider flow. */
+export async function boundToken(
+  server: Server,
+  cookie: string,
+  key: DpopKey,
+  scope = "openid",
+): Promise<string> {
+  const dpop = await key.proof(server, { htm: "POST", htu: `${ISSUER}/oauth/token` });
+  return accessToken(server, cookie, scope, MCP, { dpop });
+}
+
+/** The claims of a compact JWS, read here with no check. */
+export function claimsOf(token: string): Record<string, unknown> {
+  const part = token.split(".")[1] ?? "";
+  return JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/"))) as Record<string, unknown>;
 }
 
 /**

@@ -61,6 +61,15 @@ export function readBearer(request: Pick<Request, "headers">): string | null {
 }
 
 /**
+ * The value of `Authorization: DPoP <token>`, or null (RFC 9449 section 7.1).
+ * The one copy of the DPoP scheme rule: core and the verifier read it here.
+ */
+export function readDpopToken(request: Pick<Request, "headers">): string | null {
+  const m = /^DPoP\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "");
+  return m?.[1] ?? null;
+}
+
+/**
  * The cookie wins over the bearer header, so a web page cannot be overridden by a stray header.
  * Public from `@authtempo/core` since plan 9 Task 4, 2026-10-10: the Better Auth shim reads
  * the session token with this function, so the cookie and bearer rule has one copy. It reads
