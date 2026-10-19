@@ -84,26 +84,61 @@ function scanText(path: string): string {
 }
 
 /**
- * Each credential form in `text`. The forms are a token of a core prefix, a
- * 64-character hex string, and a 43-character base64url literal. That last
- * form is 32 random bytes, as a sandbox secret. A client secret is one more form.
+ * A PEM block of a public certificate: base64 lines and newline escapes only.
+ * The bundle holds the root certificates of WebAuthn attestation, which are
+ * public. The scan reads the text around each block, never across code.
+ */
+const PEM = /-----BEGIN ([A-Z ]+)-----(?:[A-Za-z0-9+/=\s]|\\n|\\r)*?-----END \1-----/g;
+
+/**
+ * Each long run of the scan alphabet that is public, with where it comes from.
+ * A new run fails the scan until it is named here (Task 12 re-review, Low 5).
+ */
+const PUBLIC_RUNS: Readonly<Record<string, string>> = {
+  // The base64 and base64url alphabets of a codec in the bundle.
+  ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789: "a base64 alphabet",
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_": "the base64url alphabet",
+  // A class field name of the X.509 code of the WebAuthn dependencies.
+  _Pkcs10CertificateRequest_signatureAlgorithm: "a field name",
+  // @simplewebauthn/server 14.0.3: the CBOR bytes of a known bad EdDSA key, and an AAGUID in a comment.
+  a301634f4b500327206745643235353139: "a CBOR constant",
+  adce000235bcc60a648b0b25f1f05503: "an example AAGUID",
+  // zod 4.6.5, core/visit.js, in the source map: a hex value in its source.
+  "7e15ae1984bb338c86eb5e452dee3010": "a hex value of zod",
+};
+
+/**
+ * Each credential form in `text`, after each public PEM block. The forms:
+ * - a token of a core prefix;
+ * - a hex run of 32 characters or more (16 bytes, as a sandbox id, or 32 bytes);
+ * - a base64url run of 43 characters or more with a digit, a capital, and a
+ *   small letter (32 bytes or more, as a sandbox secret), quoted or not;
+ * - 32 bytes in standard base64 with its padding (44 characters);
+ * - a string that a name with "secret" in it takes.
+ * A random value of 32 bytes in base64url has all three kinds of character,
+ * so the rule of three misses almost none and passes plain words.
  */
 function credentials(text: string): string[] {
   const found: string[] = [];
+  const open = text.replace(PEM, " ");
   for (const prefix of PREFIXES) {
     const token = new RegExp(`(?<![A-Za-z0-9_-])${prefix}[A-Za-z0-9_-]{20,}`, "g");
-    found.push(...(text.match(token) ?? []));
+    found.push(...(open.match(token) ?? []));
   }
-  found.push(...(text.match(/(?<![0-9A-Fa-f])[0-9A-Fa-f]{64}(?![0-9A-Fa-f])/g) ?? []));
-  for (const m of text.matchAll(/(["'`])([A-Za-z0-9_-]{43})\1/g)) found.push(m[2] ?? "");
+  for (const m of open.match(/(?<![0-9A-Fa-f])[0-9A-Fa-f]{32,}(?![0-9A-Fa-f])/g) ?? [])
+    if (PUBLIC_RUNS[m] === undefined) found.push(m);
+  for (const m of open.match(/(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43,}(?![A-Za-z0-9_-])/g) ?? [])
+    if (/\d/.test(m) && /[A-Z]/.test(m) && /[a-z]/.test(m) && PUBLIC_RUNS[m] === undefined)
+      found.push(m);
+  found.push(...(open.match(/(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=(?![A-Za-z0-9+/=])/g) ?? []));
   // A string that a name with "secret" in it takes, as `name = "v"` or `name: "v"`.
   // An empty string and a template with a value in it are no secret.
   const assigned = /[A-Za-z0-9_$]*secret[A-Za-z0-9_$]*["']?\s*[:=]\s*(["'`])([^"'`\n]*)\1/gi;
-  for (const m of text.matchAll(assigned)) {
+  for (const m of open.matchAll(assigned)) {
     const value = m[2] ?? "";
     if (value !== "" && !value.includes("${") && value !== DEMO_CLIENT_SECRET) found.push(value);
   }
-  return found;
+  return [...new Set(found)];
 }
 
 describe("no secret in the demo", () => {
@@ -160,17 +195,35 @@ describe("no secret in the demo", () => {
   });
 
   it("finds each credential form that the scan names", () => {
-    const key = "a".repeat(43);
+    // Not a hex letter, so a token of a prefix is one finding, not two.
+    const key = "x".repeat(43);
+    // 32 random bytes in base64url, in standard base64, and 16 bytes in hex, as the demo makes them.
+    const secret = "q3Vh8Kd0Lw_2fZpXr-9tNsYbG4mJcE1uAoIyTxWvR6k";
+    const padded = "q3Vh8Kd0Lw+2fZpXr/9tNsYbG4mJcE1uAoIyTxWvR6k=";
+    const id = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
     expect(credentials(`x = "ml_${key}"`)).toEqual([`ml_${key}`]);
-    expect(credentials(`const k = "${"B".repeat(43)}"`)).toEqual(["B".repeat(43)]);
     expect(credentials(`x = "ts_${key}"`)).toEqual([`ts_${key}`]);
     expect(credentials(`x = "tk_${key}"`)).toEqual([`tk_${key}`]);
+    expect(credentials(`const k = "${secret}"`)).toEqual([secret]);
+    // Unquoted, inside a URL, and longer: 64 bytes is 86 characters.
+    expect(credentials(`https://x.example/?s=${secret}&a=1`)).toEqual([secret]);
+    expect(credentials(`v=${secret}${secret}`)).toEqual([`${secret}${secret}`]);
+    expect(credentials(`k: "${padded}"`)).toEqual([padded]);
+    expect(credentials(`id=${id};`)).toEqual([id]);
     expect(credentials(`const k = "${"0f".repeat(32)}"`)).toEqual(["0f".repeat(32)]);
     expect(credentials(`clientSecret: "real-value"`)).toEqual(["real-value"]);
+    // The allowed forms: the client secret by name, an empty value, a word, a public run.
     expect(credentials(`const CLIENT_SECRET = "${DEMO_CLIENT_SECRET}"`)).toEqual([]);
     expect(credentials(`secretTypeId = ""`)).toEqual([]);
+    expect(credentials(`"authorization_response_iss_parameter_supported"`)).toEqual([]);
+    expect(credentials(`"sec-ordinary-object-internal-methods-and-slots-2"`)).toEqual([]);
+    expect(credentials(`var c = "${Object.keys(PUBLIC_RUNS)[1]}";`)).toEqual([]);
     // A prefix inside a longer name is no token, and 19 characters are too few.
     expect(credentials(`parts_${key} tk_${"a".repeat(19)}`)).toEqual([]);
+    // A PEM block is public. A secret after it in the same file is still found.
+    const pem = `-----BEGIN CERTIFICATE-----\\nMIIB${"Q".repeat(60)}\\n-----END CERTIFICATE-----`;
+    expect(credentials(`const root = "${pem}";`)).toEqual([]);
+    expect(credentials(`const root = "${pem}"; const k = "${secret}";`)).toEqual([secret]);
   });
 
   it("has the config keys of this list only, with observability off", () => {
