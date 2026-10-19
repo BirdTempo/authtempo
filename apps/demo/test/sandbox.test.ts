@@ -1,10 +1,10 @@
-import { env, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare:test";
+import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { createD1Adapter } from "@authtempo/adapter-d1";
 import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import type { Sandbox } from "../src/sandbox.js";
 import { sqliteD1 } from "../src/sqlite-d1.js";
-import { nextIp } from "./helpers.js";
+import { fetchSelf, nextIp } from "./helpers.js";
 
 const ORIGIN = "https://demo.authtempo.com";
 const COOKIE_RE =
@@ -12,7 +12,7 @@ const COOKIE_RE =
 
 /** A first visit with no cookie: the Worker makes a sandbox through the gate and answers its id. */
 async function visit(): Promise<string> {
-  const res = await SELF.fetch(`${ORIGIN}/`, {
+  const res = await fetchSelf(`${ORIGIN}/`, {
     redirect: "manual",
     headers: { "cf-connecting-ip": nextIp() },
   });
@@ -39,7 +39,7 @@ function gate() {
 
 /** A first visit from one address, through the gate. */
 async function visitFrom(ip: string): Promise<void> {
-  const res = await SELF.fetch(`${ORIGIN}/`, {
+  const res = await fetchSelf(`${ORIGIN}/`, {
     redirect: "manual",
     headers: { "cf-connecting-ip": ip },
   });
@@ -69,7 +69,7 @@ function gateAlarm(): Promise<{ alarm: number | null; oldest: number }> {
 
 describe("the demo Worker and its sandboxes", () => {
   it("makes a sandbox on the first visit and sets the cookie", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/`, {
+    const res = await fetchSelf(`${ORIGIN}/`, {
       redirect: "manual",
       headers: { "cf-connecting-ip": nextIp() },
     });
@@ -86,7 +86,7 @@ describe("the demo Worker and its sandboxes", () => {
 
   it("keeps the sandbox for the next visit", async () => {
     const id = await visit();
-    const res = await SELF.fetch(`${ORIGIN}/`, {
+    const res = await fetchSelf(`${ORIGIN}/`, {
       redirect: "manual",
       headers: { cookie: `__Host-demo_sandbox=${id}`, "cf-connecting-ip": nextIp() },
     });
@@ -102,7 +102,7 @@ describe("the demo Worker and its sandboxes", () => {
       `__Host-demo_sandbox=x; __Host-demo_sandbox=${id}`,
       `__Host-demo_sandbox=${unknown}; __Host-demo_sandbox=${id}`,
     ]) {
-      const res = await SELF.fetch(`${ORIGIN}/`, {
+      const res = await fetchSelf(`${ORIGIN}/`, {
         redirect: "manual",
         headers: { cookie, "cf-connecting-ip": nextIp() },
       });
@@ -116,7 +116,7 @@ describe("the demo Worker and its sandboxes", () => {
     const id = await visit();
     const unknown = ["1", "2", "3", "4"].map((d) => d.repeat(32));
     const cookie = [...unknown, id].map((v) => `__Host-demo_sandbox=${v}`).join("; ");
-    const res = await SELF.fetch(`${ORIGIN}/`, {
+    const res = await fetchSelf(`${ORIGIN}/`, {
       redirect: "manual",
       headers: { cookie, "cf-connecting-ip": nextIp() },
     });
@@ -125,7 +125,7 @@ describe("the demo Worker and its sandboxes", () => {
 
   it("an unknown id never initializes a sandbox", async () => {
     const unknown = "0123456789abcdef0123456789abcdef";
-    const res = await SELF.fetch(`${ORIGIN}/`, {
+    const res = await fetchSelf(`${ORIGIN}/`, {
       redirect: "manual",
       headers: { cookie: `__Host-demo_sandbox=${unknown}`, "cf-connecting-ip": nextIp() },
     });
@@ -142,7 +142,7 @@ describe("the demo Worker and its sandboxes", () => {
   });
 
   it("answers 409 to a form post with no sandbox", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/`, {
+    const res = await fetchSelf(`${ORIGIN}/`, {
       method: "POST",
       redirect: "manual",
       headers: {
@@ -185,7 +185,7 @@ describe("the demo Worker and its sandboxes", () => {
     expect(await runDurableObjectAlarm(stubOf(id))).toBe(true);
     expect(await stubOf(id).exists()).toBe(false);
     expect(await rowsIn(id, "SELECT name FROM sqlite_master WHERE type = 'table'")).toEqual([]);
-    const res = await SELF.fetch(`${ORIGIN}/`, {
+    const res = await fetchSelf(`${ORIGIN}/`, {
       redirect: "manual",
       headers: { cookie: `__Host-demo_sandbox=${id}`, "cf-connecting-ip": nextIp() },
     });

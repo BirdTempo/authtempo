@@ -1,8 +1,9 @@
-import { env, SELF } from "cloudflare:test";
+import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { DEMO_PAGES } from "../src/pages/layout.js";
 import {
   call,
+  fetchSelf,
   lastCode,
   lastLink,
   newSandbox,
@@ -236,10 +237,10 @@ describe("the demo pages", () => {
     const jar = await newSandbox();
     const cookie = `${SANDBOX_COOKIE}=${sandboxId(jar)}`;
     for (const path of ["/password", "/mailbox", PROVIDER_PAGE]) {
-      const get = await SELF.fetch(`${ORIGIN}${path}`, {
+      const get = await fetchSelf(`${ORIGIN}${path}`, {
         headers: { cookie, "cf-connecting-ip": nextIp() },
       });
-      const head = await SELF.fetch(`${ORIGIN}${path}`, {
+      const head = await fetchSelf(`${ORIGIN}${path}`, {
         method: "HEAD",
         headers: { cookie, "cf-connecting-ip": nextIp() },
       });
@@ -261,7 +262,7 @@ describe("the demo pages", () => {
       ["PUT", PROVIDER_PAGE, "GET, HEAD, POST"],
     ];
     for (const [method, path, allow] of cases) {
-      const res = await SELF.fetch(`${ORIGIN}${path}`, {
+      const res = await fetchSelf(`${ORIGIN}${path}`, {
         method,
         headers: { cookie, origin: ORIGIN, "cf-connecting-ip": nextIp() },
         redirect: "manual",

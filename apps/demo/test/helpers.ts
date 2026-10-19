@@ -65,14 +65,24 @@ export function rowsIn(jar: Jar, query: string, ...values: SqlStorageValue[]) {
 }
 
 /**
- * Each Set-Cookie line that an answer of call() carried in this test file,
- * in order. cookies.test.ts reads every attribute of each line.
+ * Each Set-Cookie line that an answer of fetchSelf() carried in this test
+ * file, in order. cookies.test.ts reads every attribute of each line.
  */
 export const SET_COOKIES: string[] = [];
 
+/**
+ * One request through the Worker. Every test request goes through here, so
+ * the cookie rule reads each answer (test/node/rules.test.ts fails on
+ * SELF.fetch in any other test file).
+ */
+export async function fetchSelf(url: string, init: RequestInit = {}): Promise<Response> {
+  const res = await SELF.fetch(url, init);
+  SET_COOKIES.push(...res.headers.getSetCookie());
+  return res;
+}
+
 function keep(jar: Jar, res: Response): void {
   for (const line of res.headers.getSetCookie()) {
-    SET_COOKIES.push(line);
     const pair = line.split(";")[0] ?? "";
     const at = pair.indexOf("=");
     if (at < 1) continue;
@@ -115,7 +125,7 @@ export async function call(
     payload = JSON.stringify(body);
   }
   const url = path.startsWith("https://") ? path : `${ORIGIN}${path}`;
-  const res = await SELF.fetch(url, { method, headers: h, body: payload, redirect: "manual" });
+  const res = await fetchSelf(url, { method, headers: h, body: payload, redirect: "manual" });
   keep(jar, res);
   return res;
 }

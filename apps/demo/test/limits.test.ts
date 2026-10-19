@@ -1,4 +1,4 @@
-import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { SoftAuthenticator } from "@authtempo/core/testing";
 import { describe, expect, it } from "vitest";
 import { DEMO_LIMITS } from "../src/facts.js";
@@ -7,6 +7,7 @@ import { CREATE_ROUTES, USER_ROUTES } from "../src/limits.js";
 import { createMailbox } from "../src/mailbox.js";
 import {
   call,
+  fetchSelf,
   type Jar,
   lastCode,
   lastLink,
@@ -419,7 +420,7 @@ describe("the limits of the demo", () => {
             },
           })
         : bytes;
-      return SELF.fetch(`${ORIGIN}/auth/password/sign-up`, {
+      return fetchSelf(`${ORIGIN}/auth/password/sign-up`, {
         method: "POST",
         headers: {
           cookie,
@@ -439,7 +440,7 @@ describe("the limits of the demo", () => {
       const at = await send(16_384, stream);
       expect({ stream, status: at.status }).toEqual({ stream, status: 400 });
     }
-    const lying = await SELF.fetch(`${ORIGIN}/`, {
+    const lying = await fetchSelf(`${ORIGIN}/`, {
       method: "POST",
       headers: { cookie, "content-length": "16385", "cf-connecting-ip": nextIp() },
       body: "x",
@@ -472,7 +473,7 @@ describe("the limits of the demo", () => {
     const jar = await newSandbox();
     const cookie = `${SANDBOX_COOKIE}=${sandboxId(jar)}`;
     for (const headers of [{}, { cookie }, { cookie, "x-demo-client-ip": "1.2.3.4" }]) {
-      const res = await SELF.fetch(`${ORIGIN}/`, { headers, redirect: "manual" });
+      const res = await fetchSelf(`${ORIGIN}/`, { headers, redirect: "manual" });
       expect(res.status).toBe(400);
       expect(res.headers.get("set-cookie")).toBeNull();
       expect(await res.json()).toEqual({ error: "no_client_ip" });
