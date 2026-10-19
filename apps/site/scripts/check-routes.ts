@@ -23,6 +23,7 @@ export const AUTH_WORDS: Record<AuthForm, string> = {
   apiToken: "A tk_ bearer token",
   sessionJwt: "A session JWT as the bearer",
   accessToken: "An access token of the OAuth provider as the bearer",
+  dpopAccessToken: "A DPoP-bound access token with its proof",
   operator: "The operator secret",
   initialAccessToken: "The initial access token as the bearer",
   clientSecretBasic: "The client id and secret as HTTP Basic",

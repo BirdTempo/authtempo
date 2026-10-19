@@ -8,6 +8,7 @@ import {
   sha256Base64Url,
   sha256Hex,
 } from "../primitives/crypto.js";
+import type { DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { resourceOf } from "../primitives/resource.js";
@@ -41,7 +42,8 @@ const DAY_MS = 86_400_000;
 
 export interface TokenAnswer {
   access_token: string;
-  token_type: "Bearer";
+  /** `DPoP` for a token bound to the key of a proof (RFC 9449 section 5). */
+  token_type: "Bearer" | "DPoP";
   expires_in: number;
   scope: string;
   refresh_token?: string;
@@ -58,6 +60,8 @@ export interface OAuthAccess {
   /** The token's `jti`. */
   tokenId: string;
   expiresAt: Date;
+  /** The `cnf.jkt` of a DPoP-bound token (RFC 9449 section 6.1), or null. */
+  dpopJkt: string | null;
 }
 
 interface Grant {
@@ -74,6 +78,10 @@ interface Grant {
   familyId: string;
   /** The spent refresh row at a refresh; null at the code exchange, which alone answers an ID token. */
   spentId: string | null;
+  /** The key of the request's proof: the access token gets `cnf.jkt` (plan 12e). */
+  dpop: DpopBinding | null;
+  /** The refresh row keeps the key of `dpop`: a public client's (RFC 9449 section 5). */
+  bindRefresh: boolean;
 }
 
 const strings = (v: unknown): v is string[] =>
@@ -87,6 +95,8 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
   const nullable = (v: unknown) => (v === null ? null : typeof v === "string" ? v : undefined);
   const nonce = nullable(d.nonce);
   const codeChallenge = nullable(d.codeChallenge);
+  // A code of a core before plan 12e Task 9 has no dpopJkt and binds no key.
+  const dpopJkt = d.dpopJkt === undefined ? null : nullable(d.dpopJkt);
   if (
     typeof clientId !== "string" ||
     typeof redirectUri !== "string" ||
@@ -95,10 +105,21 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
     typeof resource !== "string" ||
     typeof userId !== "string" ||
     typeof sessionId !== "string" ||
-    nonce === undefined
+    nonce === undefined ||
+    dpopJkt === undefined
   )
     return null;
-  return { clientId, redirectUri, codeChallenge, scopes, resource, userId, nonce, sessionId };
+  return {
+    clientId,
+    redirectUri,
+    codeChallenge,
+    scopes,
+    resource,
+    userId,
+    nonce,
+    sessionId,
+    dpopJkt,
+  };
 }
 
 /**
@@ -157,9 +178,12 @@ async function writeRefresh(
     resource: g.resource,
     expiresAt: new Date(now.getTime() + oauth.refreshTtlDays * DAY_MS),
     usedAt: null,
-    // Plan 12e Tasks 9 and 13 set these: the DPoP key and the spent parent row.
+    // Plan 12e Task 13 sets the spent parent row.
     parentId: null,
-    dpopJkt: null,
+    // RFC 9449 section 5: a public client's refresh token is bound to the key
+    // of its proof. A confidential client's stays unbound: the client auth at
+    // each refresh already ties it to the client.
+    dpopJkt: g.bindRefresh && g.dpop !== null ? g.dpop.jkt : null,
     createdAt: now,
     updatedAt: now,
   });
@@ -211,10 +235,11 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
     iat,
     exp,
     jti: randomBase64Url(16),
+    ...(g.dpop !== null ? { cnf: { jkt: g.dpop.jkt } } : {}),
   });
   const answer: TokenAnswer = {
     access_token: access,
-    token_type: "Bearer",
+    token_type: g.dpop !== null ? "DPoP" : "Bearer",
     expires_in: exp - iat,
     scope,
   };
@@ -287,6 +312,8 @@ export async function exchangeCode(
     client: AuthedClient;
     redirectUri: string;
     resource: string | null;
+    /** The key of the request's DPoP proof, or null (plan 12e). */
+    dpop: DpopBinding | null;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
   if (!CODE_RE.test(input.code)) return oauthFail("invalid_grant");
@@ -310,6 +337,9 @@ export async function exchangeCode(
   if (data.codeChallenge === null && !input.client.confidential) return oauthFail("invalid_grant");
   if (!(await verifierMatches(input.codeVerifier, data.codeChallenge)))
     return oauthFail("invalid_grant");
+  // RFC 9449 section 10: a code of `dpop_jkt` needs a proof of that key.
+  if (data.dpopJkt !== null && input.dpop?.jkt !== data.dpopJkt)
+    return oauthFail("invalid_dpop_proof");
   if (input.resource !== null && input.resource !== data.resource)
     return oauthFail("invalid_target");
   const user = await liveUser(config, data.userId);
@@ -328,6 +358,8 @@ export async function exchangeCode(
     sessionId: data.sessionId,
     familyId: consumed.value.id,
     spentId: null,
+    dpop: input.dpop,
+    bindRefresh: !input.client.confidential,
   });
 }
 
@@ -388,11 +420,17 @@ export async function refreshGrant(
     client: AuthedClient;
     scope: string | null;
     resource: string | null;
+    /** The key of the request's DPoP proof, or null (plan 12e). */
+    dpop: DpopBinding | null;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
   const client = input.client.client;
   const row = await refreshRowOf(config, input.refreshToken);
   if (!row || row.clientId !== client.id) return oauthFail("invalid_grant");
+  // RFC 9449 section 5: a bound token needs a proof of its key. This runs
+  // before the reuse check: a copy without the key cannot end the family.
+  if (row.dpopJkt !== null && input.dpop?.jkt !== row.dpopJkt)
+    return oauthFail("invalid_dpop_proof");
   if (row.usedAt !== null) return reuse(config, row);
   const now = config.clock.now();
   if (row.expiresAt.getTime() <= now.getTime()) return oauthFail("invalid_grant");
@@ -431,6 +469,8 @@ export async function refreshGrant(
     sessionId: null,
     familyId: row.familyId,
     spentId: row.id,
+    dpop: input.dpop,
+    bindRefresh: !input.client.confidential,
   });
 }
 
@@ -496,6 +536,9 @@ export async function resolveAccessToken(
     typeof p.jti !== "string"
   )
     return null;
+  // RFC 9449 section 6.1: a bound token names the thumbprint of its key.
+  const dpopJkt = cnfJkt(p.cnf);
+  if (dpopJkt === undefined) return null;
   const scopes = p.scope.split(" ").filter((s) => s.length > 0);
   // A user id is a ULID; a client id is a `cl_` token or an https URL. The two never collide (plan 12e).
   if (p.sub === p.client_id) {
@@ -505,6 +548,7 @@ export async function resolveAccessToken(
       resource: p.aud,
       jti: p.jti,
       exp: p.exp,
+      dpopJkt,
     });
     return access ? { kind: "oauth-client", access } : null;
   }
@@ -521,8 +565,17 @@ export async function resolveAccessToken(
       resource: p.aud,
       tokenId: p.jti,
       expiresAt: new Date(p.exp * 1000),
+      dpopJkt,
     },
   };
+}
+
+/** The `jkt` of a `cnf` claim: null with no claim, undefined for a claim of another shape. */
+function cnfJkt(cnf: unknown): string | null | undefined {
+  if (cnf === undefined) return null;
+  if (typeof cnf !== "object" || cnf === null) return undefined;
+  const jkt = (cnf as Record<string, unknown>).jkt;
+  return typeof jkt === "string" ? jkt : undefined;
 }
 
 /** The userinfo claims by scope (OIDC Core 1.0 section 5.3), or null without `openid`. */

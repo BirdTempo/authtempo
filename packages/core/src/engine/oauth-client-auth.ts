@@ -1,5 +1,4 @@
 import type { ResolvedConfig } from "../config.js";
-import { sha256Hex } from "../primitives/crypto.js";
 import {
   decodeForeignJws,
   FOREIGN_ALGS,
@@ -14,6 +13,7 @@ import { issuerOf } from "./jwt.js";
 import { secretMatches } from "./oauth-client-secret.js";
 import { CLIENT_KEYS_MAX, fetchClientJwks, findClient } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
+import { replayHash } from "./verification.js";
 
 /**
  * The client auth of every client-facing endpoint (plan 12e, spec 8.16):
@@ -225,7 +225,7 @@ async function assertionClient(
       id: newId(at),
       purpose: "client-assertion",
       identifier: client.id,
-      valueHash: await sha256Hex(`${client.id}:${decoded.payload.jti as string}`),
+      valueHash: await replayHash("client-assertion", client.id, decoded.payload.jti as string),
       expiresAt: new Date((Math.ceil(decoded.payload.exp as number) + CLOCK_SKEW_S + 1) * 1000),
       consumedAt: null,
       data: null,

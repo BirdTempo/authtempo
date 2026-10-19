@@ -42,6 +42,7 @@ export type AuthForm =
   | "apiToken" // a tk_ bearer
   | "sessionJwt" // a session JWT as the bearer (POST /token/live, plan 11d)
   | "accessToken" // an OAuth access token of the provider (userinfo)
+  | "dpopAccessToken" // a DPoP-bound access token with its proof, RFC 9449 section 7.1 (plan 12e)
   | "operator" // Authorization: Operator <secret>
   | "initialAccessToken" // the initial access token of RFC 7591 as the bearer (plan 12e)
   | "clientSecretBasic"; // the client id and secret as HTTP Basic, RFC 6749 section 2.3.1 (plan 12e)
@@ -1252,6 +1253,7 @@ export const ROUTES = Object.freeze([
       "invalid_target",
       "invalid_scope",
       "unauthorized_client",
+      "invalid_dpop_proof",
     ],
   },
   {
@@ -1274,7 +1276,7 @@ export const ROUTES = Object.freeze([
     method: "GET",
     path: "/oauth/userinfo",
     feature: "oauth",
-    auth: ["accessToken"],
+    auth: ["accessToken", "dpopAccessToken"],
     codes: [],
     oauthCodes: ["invalid_token", "insufficient_scope"],
   },
@@ -1282,7 +1284,7 @@ export const ROUTES = Object.freeze([
     method: "POST",
     path: "/oauth/userinfo",
     feature: "oauth",
-    auth: ["accessToken"],
+    auth: ["accessToken", "dpopAccessToken"],
     codes: [],
     oauthCodes: ["invalid_token", "insufficient_scope"],
   },

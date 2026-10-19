@@ -76,14 +76,16 @@ export type VerificationPurpose =
   /**
    * A spent client assertion of `private_key_jwt` (plan 12e, RFC 7523).
    * identifier: the client id; valueHash: the SHA-256 hex of
-   * `<clientId>:<jti>`; data: null. Lives to the assertion's `exp` plus 30
-   * seconds. The unique key on `valueHash` refuses a replay on every adapter.
+   * `client-assertion:<clientId>:<jti>` (`replayHash`); data: null. Lives
+   * to the ceiling of the assertion's `exp` plus 31 seconds. The unique key
+   * on `valueHash` refuses a replay on every adapter.
    */
   | "client-assertion"
   /**
    * A spent DPoP proof (plan 12e, RFC 9449 section 11.1). identifier: the JWK
-   * thumbprint; valueHash: the SHA-256 hex of `<thumbprint>:<jti>`; data:
-   * null. Lives twice the DPoP window.
+   * thumbprint; valueHash: the SHA-256 hex of `dpop-proof:<thumbprint>:<jti>`
+   * (`replayHash`); data: null. Lives to the ceiling of the proof's `iat`
+   * plus twice `oauth.dpop.windowSeconds`.
    */
   | "dpop-proof"
   /**

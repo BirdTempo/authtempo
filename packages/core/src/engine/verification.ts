@@ -1,6 +1,18 @@
+import { sha256Hex } from "../primitives/crypto.js";
 import { fail, ok, type Result } from "../result.js";
 import type { VerificationPurpose, VerificationRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
+
+/**
+ * The `valueHash` of a replay row: the SHA-256 hex of
+ * `<purpose>:<scope>:<jti>`. The unique key is on `valueHash` alone, so the
+ * purpose comes first and no two purposes can collide (ruling 23 of plan 12e).
+ */
+export const replayHash = (
+  purpose: "client-assertion" | "dpop-proof",
+  scope: string,
+  jti: string,
+): Promise<string> => sha256Hex(`${purpose}:${scope}:${jti}`);
 
 export interface ConsumeInput {
   purpose: VerificationPurpose;

@@ -7,7 +7,13 @@ import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { ApiTokenRow, UserRow } from "../schema.js";
 import type { OAuthClientAccess } from "./oauth-credentials.js";
-import { type OAuthAccess, requestResource, resolveAccessToken } from "./oauth-token.js";
+import { readDpopToken, resourceProofHolds } from "./oauth-dpop.js";
+import {
+  type OAuthAccess,
+  type ResolvedAccess,
+  requestResource,
+  resolveAccessToken,
+} from "./oauth-token.js";
 import { membership } from "./organizations.js";
 import {
   type ResolvedSession,
@@ -227,6 +233,35 @@ export async function revokeApiToken(
   return n === 0 ? fail("not_found") : ok({ ok: true });
 }
 
+/** The caller of a resolved access token. */
+const accessCaller = (r: ResolvedAccess): Caller =>
+  r.kind === "oauth" ? { kind: "oauth", ...r.access } : { kind: "oauth-client", ...r.access };
+
+/**
+ * The caller of each request with `Authorization: DPoP`, so a second
+ * `auth.caller` of one request answers the same. The proof's `jti` is spent
+ * at the first call, and a replay is another request.
+ */
+const dpopCallers = new WeakMap<Request, Promise<Caller | null>>();
+
+/**
+ * A DPoP-bound access token with its proof (RFC 9449 section 7.1), for the
+ * resource that this request falls under only. The proof is checked last,
+ * so a request that fails another check spends no `jti`.
+ */
+async function dpopCaller(
+  config: ResolvedConfig,
+  request: Request,
+  token: string,
+): Promise<Caller | null> {
+  if (!config.oauth) return null;
+  const r = await resolveAccessToken(config, token);
+  if (!r || r.access.dpopJkt === null) return null;
+  if (r.access.resource !== requestResource(config, request)) return null;
+  if (!(await resourceProofHolds(config, request, token, r.access.dpopJkt))) return null;
+  return accessCaller(r);
+}
+
 /**
  * The cookie first, then the bearer header, as `readSessionToken` reads
  * them: both call `sessionCookieToken`, so the cookie is `cookieName`, then
@@ -234,7 +269,8 @@ export async function revokeApiToken(
  * wins and the header is not read. A cookie resolves
  * as a session only. A `tk_` value counts only in the bearer header: a
  * browser sends a cookie on a cross-site request, and a script never has
- * one. A JWT bearer is an OAuth access token (plan 9g).
+ * one. A JWT bearer is an OAuth access token (plan 9g). `Authorization:
+ * DPoP` carries a DPoP-bound access token with its proof (plan 12e).
  */
 export async function callerFromRequest(
   config: ResolvedConfig,
@@ -244,6 +280,14 @@ export async function callerFromRequest(
   if (cookie) {
     const s = await resolveSession(config, cookie, readModeOf(config, request));
     return s ? { kind: "session", ...s } : null;
+  }
+  const dpop = readDpopToken(request);
+  if (dpop !== null) {
+    const seen = dpopCallers.get(request);
+    if (seen) return seen;
+    const caller = dpopCaller(config, request, dpop);
+    dpopCallers.set(request, caller);
+    return caller;
   }
   const bearer = readBearer(request);
   if (bearer === null) return null;
@@ -258,9 +302,9 @@ export async function callerFromRequest(
     if (!config.oauth) return null;
     const r = await resolveAccessToken(config, bearer);
     if (!r || r.access.resource !== requestResource(config, request)) return null;
-    return r.kind === "oauth"
-      ? { kind: "oauth", ...r.access }
-      : { kind: "oauth-client", ...r.access };
+    // RFC 9449 section 7.2: a bound token never passes as a Bearer token.
+    if (r.access.dpopJkt !== null) return null;
+    return accessCaller(r);
   }
   const s = await resolveSession(config, bearer, readModeOf(config, request));
   return s ? { kind: "session", ...s } : null;

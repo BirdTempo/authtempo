@@ -465,7 +465,10 @@ describe("userinfo and the endpoint's edges (plan 9g)", () => {
     expect(viaPost.status).toBe(200);
     const none = await h.auth.handle(get("/auth/oauth/userinfo"));
     expect(none.status).toBe(401);
-    expect(none.headers.get("www-authenticate")).toBe('Bearer error="invalid_token"');
+    // RFC 6750 section 3.1 and RFC 9449 section 7.2: no credential, so no error code.
+    expect(none.headers.get("www-authenticate")).toBe(
+      'Bearer, DPoP algs="EdDSA Ed25519 ES256 RS256 PS256"',
+    );
     for (const token of [`${t.access_token}x`, t.id_token ?? ""])
       expect(
         (await h.auth.handle(get("/auth/oauth/userinfo", { authorization: `Bearer ${token}` })))

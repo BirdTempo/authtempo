@@ -203,6 +203,7 @@ describe("openApiDocument (plan 11g)", () => {
       operator: ["operatorSecret"],
       initialAccessToken: ["initialAccessToken"],
       clientSecretBasic: ["clientSecretBasic"],
+      dpopAccessToken: ["oauthDpop"],
     };
     for (const { key, op } of operations(reference())) {
       const auth = entryOf(key).auth;
@@ -235,6 +236,15 @@ describe("openApiDocument (plan 11g)", () => {
     expect(reference().components.securitySchemes.clientSecretBasic).toMatchObject({
       type: "http",
       scheme: "basic",
+    });
+    // Plan 12e Task 9: userinfo takes a bearer, or a bound token under the DPoP scheme of RFC 9449.
+    expect(reference().paths["/oauth/userinfo"]?.get?.security).toEqual([
+      { oauth: [] },
+      { oauthDpop: [] },
+    ]);
+    expect(reference().components.securitySchemes.oauthDpop).toMatchObject({
+      type: "http",
+      scheme: "DPoP",
     });
     // Plan 12e: the register route takes no credential, or the initial access token.
     expect(reference().paths["/oauth/register"]?.post?.security).toEqual([

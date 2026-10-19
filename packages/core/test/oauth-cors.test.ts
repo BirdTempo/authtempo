@@ -134,8 +134,10 @@ describe("CORS on the token endpoint for a registered client's origin (plan 11d)
     expect(ok.status).toBe(204);
     expect(ok.headers.get("access-control-allow-origin")).toBe(CLIENT_ORIGIN);
     expect(ok.headers.get("access-control-allow-methods")).toBe("POST");
-    // The same header list as the router's preflight of a trusted origin (plan 12b).
-    expect(ok.headers.get("access-control-allow-headers")).toBe(`content-type, ${CAPTCHA_HEADER}`);
+    // The captcha header of the router's preflight (plan 12b), and the DPoP proof (plan 12e).
+    expect(ok.headers.get("access-control-allow-headers")).toBe(
+      `content-type, ${CAPTCHA_HEADER}, dpop`,
+    );
     expect(CAPTCHA_HEADER).toBe("x-captcha-response");
     expect(ok.headers.get("access-control-allow-credentials")).toBeNull();
     expect(ok.headers.get("vary")).toContain("Origin");

@@ -4,7 +4,12 @@ import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { fetchCimd } from "../src/engine/oauth-clients.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
-import { fromBase64Url, randomBase64Url, toBase64Url } from "../src/primitives/crypto.js";
+import {
+  fromBase64Url,
+  randomBase64Url,
+  sha256Hex,
+  toBase64Url,
+} from "../src/primitives/crypto.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
 import {
   authorized,
@@ -434,6 +439,13 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
     // A new assertion with the same jti.
     const again = await assertion(h, key, clientId, { jti: "one-jti", exp: nowS(h) + 90 });
     expect(await answer(await h.auth.handle(exchange(c, again)))).toEqual(REFUSED);
+    // The replay row hashes the purpose first, so no two purposes can collide (ruling 23).
+    const rows = await h.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "client-assertion" },
+    ]);
+    expect(rows.map((r) => r.valueHash)).toEqual([
+      await sha256Hex(`client-assertion:${clientId}:one-jti`),
+    ]);
     // A second core instance over the same storage refuses it too.
     const second = createAuth({ ...input, limiter: createMemoryLimiter(h.clock) });
     expect(await answer(await second.handle(exchange(c, token)))).toEqual(REFUSED);

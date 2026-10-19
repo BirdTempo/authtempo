@@ -48,6 +48,7 @@ import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import { sessionCookieNames } from "./primitives/credentials.js";
+import { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
 import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
 import {
   createKeyring,
@@ -603,6 +604,14 @@ export interface OAuthConfig {
    * `resources` has one entry, and no resource when it has more.
    */
   introspection?: Record<string, string[]>;
+  /**
+   * DPoP of RFC 9449 (plan 12e). `algs`: the algs of a proof, distinct
+   * values of EdDSA, Ed25519, ES256, RS256, and PS256; default all five.
+   * `windowSeconds`: how far the `iat` of a proof may be from now, 10 to
+   * 300; default 60. No key turns DPoP off: a client that sends no proof
+   * pays nothing.
+   */
+  dpop?: { algs?: ForeignAlg[]; windowSeconds?: number };
 }
 
 export interface ResolvedOAuth {
@@ -620,6 +629,8 @@ export interface ResolvedOAuth {
   codeTtlMinutes: number;
   /** The resources of each introspection client, by client id, or null: no map (plan 12e). */
   introspection: ReadonlyMap<string, readonly string[]> | null;
+  /** The algs and the window of a DPoP proof (plan 12e). */
+  dpop: { algs: readonly ForeignAlg[]; windowSeconds: number };
   /** The metadata documents this isolate read, by URL, each for one hour. */
   cimdCache: Map<string, CimdEntry>;
   /** The `jwks_uri` key sets of `private_key_jwt` clients that this isolate read, by URL, each for one hour (plan 12e). */
@@ -1562,6 +1573,7 @@ const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
   refreshTtlDays: true,
   codeTtlMinutes: true,
   introspection: true,
+  dpop: true,
 };
 
 /** The longest client id: a `cl_` id or a metadata document URL (plan 11d). */
@@ -1599,6 +1611,36 @@ function resolveIntrospection(
   return map;
 }
 
+/**
+ * `oauth.dpop` (plan 12e). RFC 9449 section 11.1 asks for a short window;
+ * 60 s covers a client clock that drifts. A replay row lives twice the
+ * window, so a longer window keeps more rows.
+ */
+function resolveDpop(input: unknown): ResolvedOAuth["dpop"] {
+  if (input === undefined) return { algs: FOREIGN_ALGS, windowSeconds: 60 };
+  if (!isPlainObject(input)) throw new ConfigError("oauth.dpop must be an object");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && key !== "algs" && key !== "windowSeconds")
+      throw new ConfigError(`oauth.dpop.${key} is not an option; core has algs and windowSeconds`);
+  const algs: unknown = input.algs ?? FOREIGN_ALGS;
+  if (
+    !Array.isArray(algs) ||
+    algs.length < 1 ||
+    new Set(algs).size !== algs.length ||
+    !algs.every((a) => (FOREIGN_ALGS as readonly unknown[]).includes(a))
+  )
+    throw new ConfigError(
+      "oauth.dpop.algs must be a list of distinct values of EdDSA, Ed25519, ES256, RS256, and PS256",
+    );
+  const seconds: unknown = input.windowSeconds ?? 60;
+  if (typeof seconds !== "number")
+    throw new ConfigError("oauth.dpop.windowSeconds must be an integer from 10 to 300");
+  return {
+    algs: [...(algs as ForeignAlg[])],
+    windowSeconds: integerIn("oauth.dpop.windowSeconds", seconds, 10, 300),
+  };
+}
+
 function integerIn(path: string, value: number, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max)
     throw new ConfigError(`${path} must be an integer from ${min} to ${max}`);
@@ -1615,7 +1657,7 @@ function resolveOAuth(
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
       throw new ConfigError(
-        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, and introspection`,
+        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, and dpop`,
       );
   if (!jwtMint)
     throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
@@ -1711,6 +1753,7 @@ function resolveOAuth(
     refreshTtlDays: integerIn("oauth.refreshTtlDays", input.refreshTtlDays ?? 30, 1, 365),
     codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
     introspection: resolveIntrospection(input.introspection, resources as string[]),
+    dpop: resolveDpop(input.dpop),
     cimdCache: new Map(),
     jwksCache: new Map(),
   };

@@ -121,6 +121,8 @@ export async function accessToken(
   cookie: string,
   scope = "openid",
   resource = MCP,
+  /** More headers of the token request, such as a `dpop` proof. */
+  tokenHeaders: Record<string, string> = {},
 ): Promise<string> {
   const post = (path: string, headers: Record<string, string>, body: string) =>
     server.auth.handle(new Request(`${ISSUER}${path}`, { method: "POST", headers, body }));
@@ -153,7 +155,7 @@ export async function accessToken(
   const code = new URL(allowed.headers.get("location") ?? "").searchParams.get("code") ?? "";
   const tokens = await post(
     "/oauth/token",
-    { "content-type": "application/x-www-form-urlencoded" },
+    { "content-type": "application/x-www-form-urlencoded", ...tokenHeaders },
     new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -183,6 +185,33 @@ function b64url(bytes: Uint8Array): string {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * A DPoP proof of RFC 9449 section 4.2 for a token request, by a new ES256
+ * key that the test generates. Core binds the token to that key.
+ */
+export async function dpopProof(server: Server): Promise<string> {
+  const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const { kty, crv, x, y } = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const enc = new TextEncoder();
+  const header = { typ: "dpop+jwt", alg: "ES256", jwk: { kty, crv, x, y } };
+  const claims = {
+    jti: b64url(crypto.getRandomValues(new Uint8Array(16))),
+    htm: "POST",
+    htu: `${ISSUER}/oauth/token`,
+    iat: Math.floor(server.clock.now().getTime() / 1000),
+  };
+  const input = `${b64url(enc.encode(JSON.stringify(header)))}.${b64url(enc.encode(JSON.stringify(claims)))}`;
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    pair.privateKey,
+    enc.encode(input),
+  );
+  return `${input}.${b64url(new Uint8Array(sig))}`;
 }
 
 /**

@@ -5,6 +5,7 @@ import { type McpCaller, McpScopeError, type McpSource, requireMcpAuth } from ".
 import {
   accessToken,
   BASE,
+  dpopProof,
   FILES,
   ISSUER,
   MCP,
@@ -202,6 +203,24 @@ describe.each(["verifier", "core"] as const)("requireMcpAuth with the %s source"
     const s = await signedIn(server);
     // Review focus 6: a token of the files resource, sent to the MCP route.
     const at = await accessToken(server, s.cookie, "openid mcp:tools", FILES_API);
+    const r = recorder();
+    const route = requireMcpAuth(sourceOf(name, server), r.handler, {
+      resource: MCP,
+      scopes: ["mcp:tools"],
+    });
+    const res = await route(withBearer(`${MCP}/tools`, at));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(
+      bearerChallenge({ resource: MCP, scope: ["mcp:tools"], error: "invalid_token" }),
+    );
+    expect(r.seen).toEqual([]);
+  });
+
+  it("refuses a DPoP-bound token as a bearer (RFC 9449 section 7.2, plan 12e Task 9)", async () => {
+    const { server } = setup();
+    const s = await signedIn(server);
+    const proof = { dpop: await dpopProof(server) };
+    const at = await accessToken(server, s.cookie, "openid mcp:tools", MCP, proof);
     const r = recorder();
     const route = requireMcpAuth(sourceOf(name, server), r.handler, {
       resource: MCP,

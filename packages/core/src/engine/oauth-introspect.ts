@@ -23,7 +23,11 @@ import {
  * another client all answer the same `{ active: false }`.
  */
 
-/** The answer of RFC 7662 section 2.2. Task 9 of plan 12e sets `DPoP` and `cnf`. */
+/**
+ * The answer of RFC 7662 section 2.2. A DPoP-bound access token answers
+ * `token_type: "DPoP"` and its `cnf` (RFC 9449 section 6.2). The resource
+ * server checks the proof itself.
+ */
 export type IntrospectAnswer =
   | { active: false }
   | {
@@ -101,7 +105,9 @@ async function accessAnswer(
     exp: seconds(access.expiresAt),
     iat,
     jti: access.tokenId,
-    token_type: "Bearer",
+    ...(access.dpopJkt !== null
+      ? { token_type: "DPoP" as const, cnf: { jkt: access.dpopJkt } }
+      : { token_type: "Bearer" as const }),
   };
 }
 
@@ -133,6 +139,8 @@ async function refreshAnswer(
     exp: seconds(row.expiresAt),
     iat: seconds(row.createdAt),
     jti: row.id,
+    // Only a public client's refresh row is bound (RFC 9449 section 5), and a
+    // public client never introspects; an update cannot change the method.
     token_type: "Bearer",
   };
 }

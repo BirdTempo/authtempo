@@ -177,8 +177,9 @@ export function responsesOf(
         },
       },
     };
-    // RFC 6750 section 3: the bearer route writes the challenge with these two codes.
-    // A router code of the same status (origin_not_trusted on a POST) has no challenge.
+    // RFC 6750 section 3 and RFC 9449 section 7.1: the access token route writes the
+    // challenge with these two codes. A router code of the same status
+    // (origin_not_trusted on a POST) has no challenge.
     const challenged = entry.auth.includes("accessToken")
       ? codes.filter(
           (c) =>
@@ -191,8 +192,8 @@ export function responsesOf(
         "WWW-Authenticate": {
           required: every,
           description: every
-            ? "The bearer challenge of RFC 6750 section 3, with the error code."
-            : `The bearer challenge of RFC 6750 section 3, with the error code. Only ${listed(challenged)} carries it.`,
+            ? "The Bearer challenge of RFC 6750 section 3 and the DPoP challenge of RFC 9449 section 7.1. The scheme of the request carries the error code."
+            : `The Bearer challenge of RFC 6750 section 3 and the DPoP challenge of RFC 9449 section 7.1. The scheme of the request carries the error code. Only ${listed(challenged)} carries it.`,
           schema: { type: "string" },
         },
       };

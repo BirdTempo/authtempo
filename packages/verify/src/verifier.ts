@@ -347,6 +347,9 @@ export function createVerifier(options: VerifierOptions): Verifier {
     }
     const resource = resourceOf(resources, url);
     if (!accessClaimsPass(p, issuer, resource, nowSeconds) || resource === null) return none;
+    // RFC 9449 section 7.2, as callerFromRequest of core: a DPoP-bound token
+    // never passes as a bearer. This call reads the bearer only (plan 12e Task 9).
+    if (p.cnf !== undefined) return none;
     return {
       ok: true,
       value: {

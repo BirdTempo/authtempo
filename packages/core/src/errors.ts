@@ -100,6 +100,9 @@ export const OAUTH_ERRORS = {
   // RFC 6750: the bearer of the userinfo endpoint. Not ERRORS.invalid_token (400), which is a mailed link.
   invalid_token: 401,
   insufficient_scope: 403,
+  // RFC 9449 section 5 (read 2026-10-20): a DPoP proof at the token endpoint
+  // fails a check of section 4.3. Or a client that must send a proof sent none.
+  invalid_dpop_proof: 400,
   rate_limited: 429,
 } as const;
 

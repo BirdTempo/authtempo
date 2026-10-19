@@ -19,6 +19,7 @@ import {
   registeredClient,
 } from "../../engine/oauth-clients.js";
 import { CREDENTIALS_GRANT, credentialsGrant } from "../../engine/oauth-credentials.js";
+import { dpopAlgs, readDpopToken, resourceProofHolds, tokenDpop } from "../../engine/oauth-dpop.js";
 import { listGrants, revokeGrant } from "../../engine/oauth-grants.js";
 import { introspect, introspectLimited } from "../../engine/oauth-introspect.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
@@ -241,6 +242,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       refused.headers.set("pragma", "no-cache");
       return refused;
     }
+    // RFC 9449 section 5: the proof is checked and spent before the grant, so a bad proof spends no code.
+    const dpop = await tokenDpop(config, request, authed.value.client);
+    if (!dpop.ok) return tokenAnswer(dpop);
     if (grant === "authorization_code")
       return tokenAnswer(
         await exchangeCode(config, {
@@ -249,6 +253,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           client: authed.value,
           redirectUri: form.get("redirect_uri") ?? "",
           resource: form.get("resource"),
+          dpop: dpop.value,
         }),
       );
     if (grant === CREDENTIALS_GRANT)
@@ -257,7 +262,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           client: authed.value,
           scope: form.get("scope"),
           resource: form.get("resource"),
-          dpop: null,
+          dpop: dpop.value,
         }),
       );
     return tokenAnswer(
@@ -266,23 +271,53 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         client: authed.value,
         scope: form.get("scope"),
         resource: form.get("resource"),
+        dpop: dpop.value,
       }),
     );
   };
+  /**
+   * A 401 or 403 of userinfo with its challenges. RFC 9449 section 7.2: the
+   * scheme of the request carries the error, and the other scheme is named
+   * beside it. A request with no credential gets no error in either.
+   */
+  const userinfoRefused = (
+    status: 401 | 403,
+    scheme: "Bearer" | "DPoP" | null,
+    error: "invalid_token" | "invalid_dpop_proof" | "insufficient_scope",
+  ) => {
+    const algs = dpopAlgs(config);
+    const params =
+      error === "insufficient_scope" ? `error="${error}", scope="openid"` : `error="${error}"`;
+    const challenge =
+      scheme === "DPoP"
+        ? `DPoP ${params}, ${algs}`
+        : scheme === "Bearer"
+          ? `Bearer ${params}, DPoP ${algs}`
+          : `Bearer, DPoP ${algs}`;
+    const code = error === "insufficient_scope" ? error : "invalid_token";
+    return json({ error: code }, status, { "www-authenticate": challenge });
+  };
   const userinfo = async (ctx: RouteContext): Promise<Response> => {
-    const bearer = readBearer(ctx.request);
+    const request = ctx.request;
+    const dpopToken = readDpopToken(request);
+    if (dpopToken !== null) {
+      // RFC 9449 section 7.1: a bound token with a proof of its key.
+      const r = await resolveAccessToken(config, dpopToken);
+      if (r?.kind !== "oauth" || r.access.dpopJkt === null)
+        return userinfoRefused(401, "DPoP", "invalid_token");
+      if (!(await resourceProofHolds(config, request, dpopToken, r.access.dpopJkt)))
+        return userinfoRefused(401, "DPoP", "invalid_dpop_proof");
+      const claims = userinfoClaims(r.access);
+      return claims ? json(claims) : userinfoRefused(403, "DPoP", "insufficient_scope");
+    }
+    const bearer = readBearer(request);
     // A client_credentials token names no user, so userinfo has no claims for it.
     const r = bearer ? await resolveAccessToken(config, bearer) : null;
-    const access = r?.kind === "oauth" ? r.access : null;
-    if (!access)
-      return json({ error: "invalid_token" }, 401, {
-        "www-authenticate": 'Bearer error="invalid_token"',
-      });
+    // RFC 9449 section 7.2: a bound token never passes as a Bearer token.
+    const access = r?.kind === "oauth" && r.access.dpopJkt === null ? r.access : null;
+    if (!access) return userinfoRefused(401, bearer ? "Bearer" : null, "invalid_token");
     const claims = userinfoClaims(access);
-    if (!claims)
-      return json({ error: "insufficient_scope" }, 403, {
-        "www-authenticate": 'Bearer error="insufficient_scope", scope="openid"',
-      });
+    if (!claims) return userinfoRefused(403, "Bearer", "insufficient_scope");
     return json(claims);
   };
   routes.push(
@@ -306,7 +341,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
             headers: {
               "access-control-allow-methods": "POST",
               // CAPTCHA_HEADER: the same captcha header as the router's preflight (plan 12b).
-              "access-control-allow-headers": `content-type, ${CAPTCHA_HEADER}`,
+              // dpop: a browser client sends its proof in this header (RFC 9449 section 4.1).
+              "access-control-allow-headers": `content-type, ${CAPTCHA_HEADER}, dpop`,
               "access-control-max-age": "600",
             },
           }),

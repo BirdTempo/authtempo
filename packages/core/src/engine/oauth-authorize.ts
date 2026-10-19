@@ -25,6 +25,8 @@ export const CODE_PREFIX = "oc_";
 export const CHALLENGE_RE = /^[A-Za-z0-9._~-]{43,128}$/;
 const PARAM_MAX = 512;
 const CLIENT_ID_MAX = 2048;
+/** RFC 9449 section 10: `dpop_jkt` is a SHA-256 thumbprint, 43 base64url characters. */
+const JKT_RE = /^[A-Za-z0-9_-]{43}$/;
 /** The short id of a held authorize request (plan 9h). Not `or_`: that is the refresh token's prefix. */
 export const REQUEST_PREFIX = "oq_";
 const REQUEST_RE = /^oq_[A-Za-z0-9_-]{43}$/;
@@ -45,6 +47,8 @@ export interface AuthorizeRequest {
   prompt: "none" | "consent" | null;
   /** `prompt` holds `login`: the person must sign in again (OIDC Core 1.0 section 3.1.2.1). */
   login: boolean;
+  /** The `dpop_jkt` of RFC 9449 section 10: the exchange needs a proof of this key. */
+  dpopJkt: string | null;
 }
 
 /** The data of an `oauth-code` verification row. */
@@ -58,6 +62,8 @@ export interface OAuthCodeData {
   userId: string;
   nonce: string | null;
   sessionId: string;
+  /** The thumbprint of `dpop_jkt`, or null: the code binds no key (plan 12e). */
+  dpopJkt: string | null;
 }
 
 /** The data of an `oauth-request` verification row (plan 9h). */
@@ -156,6 +162,9 @@ export async function checkAuthorize(
   if (prompt === undefined) return back("invalid_request", state);
   const prompts = new Set((prompt ?? "").split(" ").filter((p) => p.length > 0));
   if (prompts.has("none") && prompts.size > 1) return back("invalid_request", state);
+  const dpopJkt = single(params, "dpop_jkt");
+  if (dpopJkt === undefined || (dpopJkt !== null && !JKT_RE.test(dpopJkt)))
+    return back("invalid_request", state);
   return {
     ok: true,
     client,
@@ -169,6 +178,7 @@ export async function checkAuthorize(
       nonce,
       prompt: prompts.has("none") ? "none" : prompts.has("consent") ? "consent" : null,
       login: prompts.has("login"),
+      dpopJkt,
     },
   };
 }
@@ -243,6 +253,7 @@ export async function issueCode(
     userId: input.userId,
     nonce: request.nonce,
     sessionId: input.sessionId,
+    dpopJkt: request.dpopJkt,
   };
   await config.storage.create("verification", {
     id: newId(now),

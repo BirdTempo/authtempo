@@ -86,6 +86,7 @@ const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {
   invalid_client_metadata: "The registration data of the app is not valid.",
   invalid_token: "The access token is not valid, or it expired.",
   insufficient_scope: "The access token does not allow this action.",
+  invalid_dpop_proof: "The key proof of the app is not valid. Try again.",
   rate_limited: "There were too many tries. Wait a few minutes, then try again.",
 };
 

@@ -755,6 +755,8 @@ describe("oauth (plan 9g)", () => {
       refreshTtlDays: 30,
       codeTtlMinutes: 5,
       introspection: null,
+      // Plan 12e Task 9: every proof alg, and a window of 60 s.
+      dpop: { algs: ["EdDSA", "Ed25519", "ES256", "RS256", "PS256"], windowSeconds: 60 },
     });
     expect([...(on?.scopes.keys() ?? [])]).toEqual([
       "openid",
@@ -834,7 +836,7 @@ describe("oauth (plan 9g)", () => {
       [{ resources: [R], fetch, consentPage: "html" }, "oauth.consentPage must be a function"],
       [
         { resources: [R], fetch, loginPage: "/login" },
-        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, and introspection",
+        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, and dpop",
       ],
       [true, "oauth must be an object or false"],
     ];
@@ -876,6 +878,39 @@ describe("oauth (plan 9g)", () => {
           ...base,
           oauth: { resources: [R, R2], fetch, introspection: introspection as never },
         }),
+      ).toThrowError(message);
+  });
+
+  it("reads oauth.dpop and refuses a bad alg list or window (plan 12e Task 9)", () => {
+    const on = resolveConfig({
+      ...base,
+      oauth: { resources: [R], fetch, dpop: { algs: ["ES256", "EdDSA"], windowSeconds: 300 } },
+    }).oauth;
+    expect(on?.dpop).toEqual({ algs: ["ES256", "EdDSA"], windowSeconds: 300 });
+    expect(
+      resolveConfig({ ...base, oauth: { resources: [R], fetch, dpop: { windowSeconds: 10 } } })
+        .oauth?.dpop.windowSeconds,
+    ).toBe(10);
+    const ALGS =
+      "oauth.dpop.algs must be a list of distinct values of EdDSA, Ed25519, ES256, RS256, and PS256";
+    const WINDOW = "oauth.dpop.windowSeconds must be an integer from 10 to 300";
+    const bad: [unknown, string][] = [
+      [null, "oauth.dpop must be an object"],
+      [[], "oauth.dpop must be an object"],
+      [{ nonce: true }, "oauth.dpop.nonce is not an option; core has algs and windowSeconds"],
+      [{ algs: [] }, ALGS],
+      [{ algs: ["ES256", "ES256"] }, ALGS],
+      [{ algs: ["HS256"] }, ALGS],
+      [{ algs: ["none"] }, ALGS],
+      [{ algs: "ES256" }, ALGS],
+      [{ windowSeconds: 9 }, WINDOW],
+      [{ windowSeconds: 301 }, WINDOW],
+      [{ windowSeconds: 60.5 }, WINDOW],
+      [{ windowSeconds: "60" }, WINDOW],
+    ];
+    for (const [dpop, message] of bad)
+      expect(() =>
+        resolveConfig({ ...base, oauth: { resources: [R], fetch, dpop: dpop as never } }),
       ).toThrowError(message);
   });
 

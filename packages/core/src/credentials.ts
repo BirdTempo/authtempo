@@ -1,7 +1,7 @@
 /**
  * The credential facts for an SDK (plan 11d, spec 20): the token prefixes,
  * the JWT `typ` values, the cookie names and their rule, the bearer and
- * cookie rule, the compact JWS check on Web Crypto, and the resource rules. A resource server
+ * cookie rule, the compact JWS check on Web Crypto, the DPoP proof check (plan 12e), and the resource rules. A resource server
  * verifies with this code, so no supplier holds the check.
  */
 export {
@@ -16,6 +16,14 @@ export {
   type SessionCookieNames,
   sessionCookieNames,
 } from "./primitives/credentials.js";
+export {
+  checkDpopProof,
+  DPOP_TYP,
+  type DpopBinding,
+  type DpopCheck,
+  type DpopCheckInput,
+} from "./primitives/dpop.js";
+export { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
 export {
   type DecodedJws,
   decodeJws,

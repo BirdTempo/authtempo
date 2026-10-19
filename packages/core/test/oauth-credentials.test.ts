@@ -157,7 +157,9 @@ describe("the client_credentials grant (plan 12e Task 7)", () => {
     );
     expect(info.status).toBe(401);
     expect(await info.json()).toEqual({ error: "invalid_token" });
-    expect(info.headers.get("www-authenticate")).toBe('Bearer error="invalid_token"');
+    expect(info.headers.get("www-authenticate")).toBe(
+      'Bearer error="invalid_token", DPoP algs="EdDSA Ed25519 ES256 RS256 PS256"',
+    );
   });
 
   it("needs resource and refuses a scope outside credentialsScopes", async () => {
@@ -278,7 +280,8 @@ describe("the client_credentials grant (plan 12e Task 7)", () => {
     const token = String(((await res.json()) as Record<string, unknown>).access_token);
     const caller = await h.auth.caller(atResource(token));
     expect(caller).toMatchObject({ kind: "oauth", clientId: s.clientId, user: { id: s.user.id } });
-    expect(caller).not.toHaveProperty("dpopJkt");
+    // A user token with no DPoP proof is unbound (plan 12e Task 9).
+    expect(caller).toHaveProperty("dpopJkt", null);
   });
 
   it("keeps a registered client that uses the grant out of the idle sweep (Task 3 input)", async () => {

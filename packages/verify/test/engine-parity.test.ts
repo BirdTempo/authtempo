@@ -4,6 +4,7 @@ import { createVerifier, type Verifier } from "../src/index.js";
 import {
   accessToken,
   BASE,
+  dpopProof,
   expOf,
   FILES,
   ISSUER,
@@ -201,6 +202,24 @@ describe("the access token rule equals the engine's rule (plan 11d, Task 1 revie
     });
     server.clock.set(exp * 1000);
     expect(await oauthAnswers(server, v, `${MCP}/tools`, at)).toEqual({
+      engine: false,
+      verifier: false,
+    });
+  });
+
+  it("refuses a DPoP-bound token as a bearer, as auth.caller does (RFC 9449 section 7.2)", async () => {
+    const server = makeServer();
+    const s = await signedIn(server);
+    const proof = { dpop: await dpopProof(server) };
+    const bound = await accessToken(server, s.cookie, "openid", MCP, proof);
+    const v = createVerifier({
+      issuer: ISSUER,
+      resources: [MCP],
+      accept: ["oauth"],
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    expect(await oauthAnswers(server, v, `${MCP}/tools`, bound)).toEqual({
       engine: false,
       verifier: false,
     });

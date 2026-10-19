@@ -49,6 +49,7 @@ Each operation has one security requirement for each credential form that the ro
 | `operatorSecret` | `apiKey` | The operator secret in the `Authorization` header, as `Operator <secret>`. `Operator` is not a registered HTTP authentication scheme |
 | `initialAccessToken` | `http` | The initial access token of RFC 7591 as the bearer, for `POST /oauth/register` while `oauth.registration.initialAccessTokenHash` is set |
 | `clientSecretBasic` | `http` | The client id and secret of a client with a secret, as HTTP Basic, for `POST /oauth/token` and `POST /oauth/revoke`. Each half is form-encoded first |
+| `oauthDpop` | `http` | A DPoP-bound access token as `Authorization: DPoP <token>`, with a proof of its key in the `DPoP` header (RFC 9449 section 7.1), for the userinfo routes |
 
 ## Tags
 

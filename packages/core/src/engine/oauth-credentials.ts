@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { ACCESS_TOKEN_TYPE } from "../primitives/credentials.js";
 import { randomBase64Url } from "../primitives/crypto.js";
+import type { DpopBinding } from "../primitives/dpop.js";
 import type { OAuthClientRow } from "../schema.js";
 import { issuerOf, signToken } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
@@ -31,7 +32,7 @@ export interface OAuthClientAccess {
   /** The token's `jti`. */
   tokenId: string;
   expiresAt: Date;
-  /** The key thumbprint of a DPoP-bound token. Always null until plan 12e Task 9. */
+  /** The `cnf.jkt` of a DPoP-bound token (RFC 9449 section 6.1), or null. */
   dpopJkt: string | null;
 }
 
@@ -67,11 +68,17 @@ function holdsGrant(
  * `grant_type=client_credentials` for a client that `authenticateClient`
  * checked. `resource` is required: the token is for one resource (RFC
  * 8707). An absent `scope` gives every served scope. An asked scope that
- * is not served, or an empty set, is `invalid_scope` (RFC 6749 section 3.3). `dpop` is null until plan 12e Task 9 binds the token.
+ * is not served, or an empty set, is `invalid_scope` (RFC 6749 section 3.3).
+ * With `dpop`, the token is bound to that key (RFC 9449 section 5).
  */
 export async function credentialsGrant(
   config: ResolvedConfig,
-  input: { client: AuthedClient; scope: string | null; resource: string | null; dpop: null },
+  input: {
+    client: AuthedClient;
+    scope: string | null;
+    resource: string | null;
+    dpop: DpopBinding | null;
+  },
 ): Promise<OAuthResult<TokenAnswer>> {
   const oauth = oauthOf(config);
   const { client, confidential } = input.client;
@@ -99,8 +106,14 @@ export async function credentialsGrant(
     iat,
     exp,
     jti: randomBase64Url(16),
+    ...(input.dpop !== null ? { cnf: { jkt: input.dpop.jkt } } : {}),
   });
-  return oauthOk({ access_token: access, token_type: "Bearer", expires_in: exp - iat, scope });
+  return oauthOk({
+    access_token: access,
+    token_type: input.dpop !== null ? "DPoP" : "Bearer",
+    expires_in: exp - iat,
+    scope,
+  });
 }
 
 /**
@@ -110,7 +123,14 @@ export async function credentialsGrant(
  */
 export async function clientAccessOf(
   config: ResolvedConfig,
-  token: { clientId: string; scopes: string[]; resource: string; jti: string; exp: number },
+  token: {
+    clientId: string;
+    scopes: string[];
+    resource: string;
+    jti: string;
+    exp: number;
+    dpopJkt: string | null;
+  },
 ): Promise<OAuthClientAccess | null> {
   const client = await findClient(config, token.clientId);
   if (!client || !holdsGrant(config, client, token.scopes)) return null;
@@ -120,6 +140,6 @@ export async function clientAccessOf(
     resource: token.resource,
     tokenId: token.jti,
     expiresAt: new Date(token.exp * 1000),
-    dpopJkt: null,
+    dpopJkt: token.dpopJkt,
   };
 }

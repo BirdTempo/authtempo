@@ -205,7 +205,12 @@ export const CONFIG_KEYS = {
     refreshTtlDays: true,
     codeTtlMinutes: true,
     introspection: true,
+    dpop: true,
   } satisfies Keys<OAuthConfig>,
+  "oauth.dpop": {
+    algs: true,
+    windowSeconds: true,
+  } satisfies Keys<NonNullable<OAuthConfig["dpop"]>>,
   "oauth.registration": {
     dynamic: true,
     cimd: true,

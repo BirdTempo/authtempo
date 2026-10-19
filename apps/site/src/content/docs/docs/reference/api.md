@@ -168,7 +168,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `RouteEntry` | One row of `ROUTES`: `method`, `path`, `feature`, `auth`, `codes`, `oauthCodes`, and `crossSiteForm` on the one cross-site form post. |
 | `RouteFeature` | The config part that turns a route on. |
 | `ROUTE_FEATURES` | Every feature once, as a tuple. `RouteFeature` is one of its members. |
-| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `sessionJwt`, `accessToken`, `operator`, or `initialAccessToken`. |
+| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `sessionJwt`, `accessToken`, `dpopAccessToken`, `operator`, `initialAccessToken`, or `clientSecretBasic`. |
 | `RouteMethod` | `GET` or `POST`. |
 | `RouteLiteral` | One row of `ROUTES` with its literal method and path. |
 | `RoutePath` | A path that `ROUTES` holds for a method. An SDK types its paths with it, so a path that core does not serve fails the compile. |
@@ -197,6 +197,9 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `verifyJws`, `PublicJwk`, `JwsAlg` | The signature check on Web Crypto, for EdDSA, ES256, and RS256. The header must name the alg and the kid of the key. |
 | `JWS_ALGS`, `isPublicJwk`, `JWK_PRIVATE_MEMBERS` | The three values of `jwtMint.alg`, and the check of one public signing key: its members fit its alg, and it holds no private member. The private member names of RFC 7518. |
 | `JWKS_RETIRED_MAX` | The retired keys that the key set lists at most. |
+| `checkDpopProof`, `DpopCheckInput`, `DpopCheck`, `DpopBinding` | The checks of a DPoP proof of RFC 9449 section 4.3, with no store. The caller spends the `jti` in its own replay store. |
+| `DPOP_TYP` | `dpop+jwt`, the header `typ` of a DPoP proof. |
+| `FOREIGN_ALGS`, `ForeignAlg` | The algs of a key that a client sends: `EdDSA`, `Ed25519`, `ES256`, `RS256`, and `PS256`. |
 | `isResourceUrl`, `resourceOf` | The rule of an `oauth.resources` entry, and the entry that a request URL falls under. |
 
 ## The operator secret entry

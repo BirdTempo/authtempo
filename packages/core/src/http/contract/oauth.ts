@@ -42,6 +42,7 @@ export const registerBody = z.object({
  * sign-in; the engine refuses it beside another key. PKCE is optional only
  * for a confidential client that asks `openid` with a `nonce` (plan 12e,
  * `pkceRequired`). The engine refuses its absence for every other request.
+ * `dpop_jkt` binds the code to a DPoP key (RFC 9449 section 10).
  */
 export const authorizeQuery = z.object({
   response_type: z.literal("code"),
@@ -54,6 +55,10 @@ export const authorizeQuery = z.object({
   state: z.string().max(512).optional(),
   nonce: z.string().max(512).optional(),
   prompt: z.string().optional(),
+  dpop_jkt: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/)
+    .optional(),
   request_id: z.string().optional(),
 });
 
@@ -135,10 +140,13 @@ export const IntrospectAnswerJson = z.union([
   }),
 ]);
 
-/** The token answer of RFC 6749 section 5.1. `id_token` comes with the `openid` scope. */
+/**
+ * The token answer of RFC 6749 section 5.1. `id_token` comes with the
+ * `openid` scope. `token_type` is `DPoP` after a DPoP proof (RFC 9449 section 5).
+ */
 export const TokenAnswerJson = z.strictObject({
   access_token: z.string(),
-  token_type: z.literal("Bearer"),
+  token_type: z.enum(["Bearer", "DPoP"]),
   expires_in: z.number().int(),
   scope: z.string(),
   refresh_token: z.string().optional(),

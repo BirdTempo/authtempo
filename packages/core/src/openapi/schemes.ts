@@ -12,6 +12,7 @@ export const SCHEME_NAMES = [
   "operatorSecret",
   "initialAccessToken",
   "clientSecretBasic",
+  "oauthDpop",
 ] as const;
 export type SchemeName = (typeof SCHEME_NAMES)[number];
 
@@ -22,6 +23,7 @@ const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
   apiToken: ["apiToken"],
   sessionJwt: ["sessionJwt"],
   accessToken: ["oauth"],
+  dpopAccessToken: ["oauthDpop"],
   operator: ["operatorSecret"],
   initialAccessToken: ["initialAccessToken"],
   clientSecretBasic: ["clientSecretBasic"],
@@ -29,7 +31,7 @@ const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
 
 /**
  * The six security schemes of spec 25 item 8, and the initial access token
- * of the register route and the client Basic auth (plan 12e). The OAuth flow URLs are
+ * of the register route, the client Basic auth, and the DPoP scheme (plan 12e). The OAuth flow URLs are
  * absolute with a `serverUrl`; with none, they are absolute paths, which
  * resolve against the server of the document. A token prefix is in a
  * description only, never a value.
@@ -90,6 +92,12 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
       scheme: "basic",
       description:
         "The client id and the client secret of a client with a secret, as HTTP Basic. Each half is form-encoded first (RFC 6749 section 2.3.1).",
+    },
+    oauthDpop: {
+      type: "http",
+      scheme: "DPoP",
+      description:
+        "A DPoP-bound access token of the provider, as `Authorization: DPoP <token>`, with a proof of its key in the `DPoP` header (RFC 9449 section 7.1). A bound token never passes as a bearer.",
     },
   };
 }
