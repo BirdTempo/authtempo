@@ -35,10 +35,12 @@ export interface Route {
    */
   key?: RouteKey;
   /**
-   * Skip the Origin check on this POST. Only for a callback that a provider
-   * posts cross-site, such as Apple's `response_mode=form_post`. The route
-   * must bind the request to the browser another way; the social routes use
-   * the binding cookie and the state row.
+   * Skip the Origin check on this POST. Only for a form that another site
+   * posts: Apple's `response_mode=form_post`, and the end-session request of
+   * a relying party (plan 12e). The route must bind the request to the
+   * browser another way. The social routes use the binding cookie and the
+   * state row. The end-session route ends a session only for a valid hint of
+   * it, or for a yes posted from `baseURL`.
    */
   allowCrossSiteForm?: boolean;
   /**

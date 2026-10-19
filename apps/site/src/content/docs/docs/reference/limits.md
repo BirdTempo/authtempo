@@ -81,6 +81,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `oauth-device-verify:code:<hash>` | 15 minutes | 10 | Each post of the device page that finds one live user code, by its keyed hash. It bounds how many sessions see the consent of one code |
 | `oauth-introspect:ip:<ip>` | 1 minute | 600 | OAuth introspection, before the client auth, so a failed auth counts too |
 | `oauth-introspect:client:<clientId>` | 1 minute | 600 | OAuth introspection by one resource server, after its client auth |
+| `oauth-end-session:ip:<ip>` | 15 minutes | 60 | OIDC end-session, GET and POST together, before the hint check |
 | `oauth-credentials:client:<clientId>` | 1 minute | 120 | The `client_credentials` grant of one client, after its client auth. `oauth-token:ip` counts each request first, so a service on one IP gets 60 tokens per 15 minutes. Keep the token until its `expires_in` ends, and ask for a new one only then |
 
 For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.

@@ -563,7 +563,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(106);
+    expect(keys.length).toBe(108);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -784,6 +784,16 @@ describe("the route contract (plan 11g)", () => {
         valid: { status: 200, code: null },
         missing: { next: { status: 302, code: "invalid_request" } },
       },
+      {
+        // OIDC RP-Initiated Logout 1.0 section 2: every parameter is optional. With no session,
+        // and no valid hint, the signed-out page answers.
+        key: "GET /oauth/end-session",
+        path: "/oauth/end-session",
+        query: { client_id: clientId, state: "st-1", ui_locales: "en", logout_hint: "ada" },
+        required: [],
+        valid: { status: 200, code: null },
+        missing: {},
+      },
     ];
     const hand = Object.entries(CONTRACT)
       .filter(([, c]) => c.query?.parsedBy === "hand")
@@ -949,13 +959,22 @@ describe("the route contract (plan 11g)", () => {
         valid: { status: 200, code: null },
         missing: { token: { status: 400, code: "invalid_request" } },
       },
+      {
+        // OIDC RP-Initiated Logout 1.0 section 2: the POST form of the same optional parameters.
+        key: "POST /oauth/end-session",
+        media: "form",
+        body: { client_id: clientId, state: "st-1" },
+        required: [],
+        valid: { status: 200, code: null },
+        missing: {},
+      },
     ];
     const hand = Object.entries(CONTRACT)
       .filter(([, c]) => c.body?.parsedBy === "hand")
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_FORMS.map((row) => row.key).sort());
-    expect(hand.length).toBe(7);
+    expect(hand.length).toBe(8);
     for (const row of VALID_FORMS) {
       const contract = CONTRACT[row.key];
       const body = contract?.body;
@@ -1032,7 +1051,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 48, both: 9, form: 6 });
+    expect(counts).toEqual({ json: 48, both: 9, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);
@@ -1044,7 +1063,7 @@ describe("the route contract (plan 11g)", () => {
         expect(answer, `${row.key}: a form`).not.toEqual(INVALID_BODY);
       else expect(answer, `${row.key}: a form`).toEqual(INVALID_BODY);
     }
-    // The six hand-read forms refuse a JSON body, and the hand-read JSON refuses a form.
+    // The seven hand-read forms refuse a JSON body, and the hand-read JSON refuses a form.
     // The consent route checks its origin and the session before the body.
     const consent = { ...cookie, origin: BASE_URL };
     for (const key of [
@@ -1054,6 +1073,7 @@ describe("the route contract (plan 11g)", () => {
       "POST /oauth/introspect",
       "POST /oauth/device_authorization",
       "POST /oauth/device",
+      "POST /oauth/end-session",
     ] as const)
       expect(
         await answerOf(await w.handle(post(`/auth${key.slice(5)}`, {}, consent))),

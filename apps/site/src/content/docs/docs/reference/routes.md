@@ -1017,6 +1017,24 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Answer | `{ ok: true }`, also when nothing existed |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
+<h3 id="get-oauth-end-session"><code>GET /oauth/end-session</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing; or a session cookie, or a `ts_` bearer token. With a session and no valid hint of it, the page asks before the session ends (`OIDC RP-Initiated Logout 1.0` section 2) |
+| Input | Query `{ id_token_hint?, client_id?, post_logout_redirect_uri?, state?, logout_hint?, ui_locales? }`. `logout_hint` and `ui_locales` are read and ignored. A hint is an ID token of this issuer. Its signature, `iss`, and `aud` are checked, and an expired hint still counts. A `client_id` must equal the hint's `aud` |
+| Answer | A valid hint of this browser's session ends that session at once, and `session.afterEnd` fires with `oidc_logout`. Any other request with a session answers the confirmation page, and a GET ends nothing. With no session nothing ends. The answer is a 302 to the `post_logout_redirect_uri` with `state` only for a valid hint and an exact entry of the client's `post_logout_redirect_uris`. Else it is the signed-out page |
+| Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
+
+<h3 id="post-oauth-end-session"><code>POST /oauth/end-session</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing; or a session cookie, or a `ts_` bearer token. With a session and no valid hint of it, the page asks before the session ends (`OIDC RP-Initiated Logout 1.0` section 2). The relying party's page may post the form from its own origin |
+| Input | Form `{ id_token_hint?, logout_hint?, client_id?, post_logout_redirect_uri?, state?, ui_locales?, confirm? }`. The fields of the GET, and `confirm=yes` from the confirmation page. The yes counts only with `Origin` equal to `baseURL` |
+| Answer | The same as the GET. The yes ends the session, and the answer then follows the GET rule for the redirect |
+| Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
+
 <h3 id="get-well-known-oauth-authorization-server"><code>GET /.well-known/oauth-authorization-server</code></h3>
 
 | Field | Value |

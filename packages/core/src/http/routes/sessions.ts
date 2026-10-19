@@ -28,9 +28,21 @@ export async function signedOut(
   token: string | null,
   body: Readonly<Record<string, unknown>> = { ok: true },
 ): Promise<Response> {
-  const res = json(body, 200, {
-    "set-cookie": clearSessionCookie(config.cookieName, config.cookie.sameSite),
-  });
+  return clearSessionCookies(config, request, token, json(body));
+}
+
+/**
+ * Clears the session cookie on `res`, and with the cookie move of plan 12b
+ * ends and clears the old cookie too (see `signedOut`). The end-session
+ * route of plan 12e answers a page or a redirect, so it calls this alone.
+ */
+export async function clearSessionCookies(
+  config: ResolvedConfig,
+  request: Request,
+  token: string | null,
+  res: Response,
+): Promise<Response> {
+  res.headers.append("set-cookie", clearSessionCookie(config.cookieName, config.cookie.sameSite));
   const legacy = config.legacyCookieName;
   const old = legacy === null ? null : readCookie(request, legacy);
   if (legacy !== null && old !== null) {

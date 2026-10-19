@@ -69,7 +69,7 @@ export interface RouteEntry {
   readonly codes: readonly ErrorCode[];
   /** The codes of OAUTH_ERRORS that the route answers. Empty outside the provider routes. */
   readonly oauthCodes: readonly OAuthErrorCode[];
-  /** The POST skips the router's Origin check (Apple's form_post callback only). */
+  /** The POST skips the router's Origin check: Apple's form_post callback, and the end-session form of a relying party (plan 12e). */
   readonly crossSiteForm?: true;
 }
 
@@ -1345,6 +1345,24 @@ export const ROUTES = Object.freeze([
     auth: ["session"],
     codes: ["unauthorized", "invalid_body"],
     oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/oauth/end-session",
+    feature: "oauth",
+    auth: ["none", "session"],
+    codes: [],
+    oauthCodes: ["invalid_request", "rate_limited"],
+  },
+  {
+    // OIDC RP-Initiated Logout 1.0 section 2: the relying party's page posts the form cross-site.
+    method: "POST",
+    path: "/oauth/end-session",
+    feature: "oauth",
+    auth: ["none", "session"],
+    codes: [],
+    oauthCodes: ["invalid_request", "rate_limited"],
+    crossSiteForm: true,
   },
   {
     method: "GET",

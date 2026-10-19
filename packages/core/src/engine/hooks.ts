@@ -37,7 +37,9 @@ export type SessionEndReason =
   // plan 12a: a change of address ends every other session and grant.
   | "email_change"
   // plan 12a: the account delete ends every session of the user.
-  | "account_deleted";
+  | "account_deleted"
+  // plan 12e: a relying party asks for the end (OIDC RP-Initiated Logout 1.0).
+  | "oidc_logout";
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {

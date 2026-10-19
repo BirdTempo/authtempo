@@ -53,6 +53,16 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "GET",
+    path: "/oauth/end-session",
+    reason: "a relying party sends the browser to it (OIDC RP-Initiated Logout 1.0, plan 12e)",
+  },
+  {
+    method: "POST",
+    path: "/oauth/end-session",
+    reason: "a relying party's page posts the form, and the confirmation page posts the yes",
+  },
+  {
+    method: "GET",
     path: "/.well-known/openid-configuration",
     reason: "the same document as the authorization server metadata",
   },

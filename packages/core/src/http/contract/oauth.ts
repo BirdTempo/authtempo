@@ -247,6 +247,22 @@ export const GrantJson = z.strictObject({
   refreshTokens: z.number().int().min(0),
 });
 
+/**
+ * The request of OIDC RP-Initiated Logout 1.0 section 2, read by hand from
+ * the query (plan 12e). `logout_hint` and `ui_locales` are read and ignored.
+ */
+export const endSessionQuery = z.object({
+  id_token_hint: z.string().optional(),
+  logout_hint: z.string().optional(),
+  client_id: z.string().optional(),
+  post_logout_redirect_uri: z.string().optional(),
+  state: z.string().optional(),
+  ui_locales: z.string().optional(),
+});
+
+/** The same request as a form. `confirm` is the yes of the confirmation page, which only a POST takes. */
+export const endSessionForm = endSessionQuery.extend({ confirm: z.literal("yes").optional() });
+
 const userinfo = { answer: { kind: "json", schema: UserinfoJson } } as const;
 const metadata = (standard: "rfc8414" | "oidc-discovery") =>
   ({ answer: { kind: "metadata", standard } }) as const;
@@ -308,6 +324,17 @@ export const OAUTH_CONTRACT = {
   "POST /oauth/grants/revoke": {
     body: { schema: revokeGrantBody, media: ["json"], parsedBy: "zod" },
     answer: { kind: "json", schema: OkAnswer },
+  },
+  "GET /oauth/end-session": {
+    query: { schema: endSessionQuery, parsedBy: "hand" },
+    // The confirmation page or the signed-out page; with a valid hint, the client's exact redirect.
+    answer: { kind: "html" },
+    alt: { kind: "redirect" },
+  },
+  "POST /oauth/end-session": {
+    body: { schema: endSessionForm, media: ["form"], parsedBy: "hand" },
+    answer: { kind: "html" },
+    alt: { kind: "redirect" },
   },
   "GET /.well-known/oauth-authorization-server": metadata("rfc8414"),
   "GET /.well-known/openid-configuration": metadata("oidc-discovery"),

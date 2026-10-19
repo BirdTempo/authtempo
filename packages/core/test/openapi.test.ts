@@ -84,7 +84,7 @@ describe("openApiDocument (plan 11g)", () => {
     const keys = operations(doc).map((o) => o.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(106);
+    expect(keys.length).toBe(108);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -171,7 +171,7 @@ describe("openApiDocument (plan 11g)", () => {
       .map(({ key }) => key);
     expect(optional).toEqual(["POST /operator/secrets/rewrap"]);
     const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
-    expect(bodies.length).toBe(63);
+    expect(bodies.length).toBe(64);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -366,7 +366,7 @@ describe("openApiDocument (plan 11g)", () => {
         queries++;
       } else expect(params, key).toEqual([]);
     }
-    expect([answers, bodies, queries]).toEqual([84, 63, 15]);
+    expect([answers, bodies, queries]).toEqual([84, 64, 16]);
   });
 
   it("takes the request_id form of the authorize query", () => {

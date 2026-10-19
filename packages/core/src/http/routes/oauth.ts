@@ -41,6 +41,12 @@ import {
 } from "../../engine/oauth-dpop.js";
 import { listGrants, revokeGrant } from "../../engine/oauth-grants.js";
 import { introspect, introspectLimited } from "../../engine/oauth-introspect.js";
+import {
+  checkIdTokenHint,
+  endSession,
+  endSessionLimited,
+  logoutRedirect,
+} from "../../engine/oauth-logout.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
 import {
   exchangeCode,
@@ -51,19 +57,26 @@ import {
   tokenLimited,
   userinfoClaims,
 } from "../../engine/oauth-token.js";
-import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import {
+  readBearer,
+  readSessionToken,
+  renewedSessionCookie,
+  sessionFromRequest,
+} from "../../engine/sessions.js";
 import { INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, type OAuthErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import type { OAuthClientRow } from "../../schema.js";
 import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { DEVICE_WARNING, type DevicePageInput } from "../device-page.js";
+import { defaultEndSessionPage } from "../end-session-page.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import { originTrusted, type Route, type RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
 import { authorizationServerMetadata, PUBLIC_METADATA_HEADERS } from "../well-known.js";
+import { clearSessionCookies } from "./sessions.js";
 
 /** An OAuth answer: the value with `status`, or `{ error }` with the status of `OAUTH_ERRORS`. No cache keeps either. */
 export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {
@@ -503,6 +516,85 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           s.renewed,
         );
       },
+    },
+  );
+  // OIDC RP-Initiated Logout 1.0, read 2026-10-20 (final, 12 September 2022).
+  // Section 2: GET and POST. A POST comes cross-site from the relying party's
+  // page, so the route skips the router's Origin rule. The hint, or the yes
+  // from this origin, binds the end to the person.
+  const endSessionAnswer = async (ctx: RouteContext, params: URLSearchParams | null) => {
+    if (await endSessionLimited(config, ctx.ip)) return oauthJson(oauthFail("rate_limited"));
+    if (!params) return oauthJson(oauthFail("invalid_request"));
+    // An empty value counts as omitted (RFC 6749 section 3.1). logout_hint and ui_locales are ignored.
+    const value = (name: string) => params.get(name) || null;
+    const hintText = value("id_token_hint");
+    let hint = hintText === null ? null : await checkIdTokenHint(config, hintText);
+    // Section 2: a client_id beside the hint must be the client of the hint.
+    const clientId = value("client_id");
+    if (hint && clientId !== null && clientId !== hint.clientId) hint = null;
+    const resolved = await sessionFromRequest(config, ctx.request);
+    // A hint that names another user than this session's is a suspect request: no hint.
+    if (hint && resolved && hint.sub !== resolved.user.id) hint = null;
+    const target = await logoutRedirect(config, {
+      hint,
+      uri: value("post_logout_redirect_uri"),
+      state: value("state"),
+    });
+    let ended = false;
+    if (resolved) {
+      // Stricter than the router: only the page of this origin posts the yes. A GET never confirms.
+      const confirmed =
+        ctx.request.method === "POST" &&
+        params.get("confirm") === "yes" &&
+        ctx.request.headers.get("origin") === config.baseURL;
+      if (!confirmed && (hint === null || hint.sid !== resolved.session.id)) {
+        // Section 2: with no valid hint of this session, ask the person first.
+        const fields: Record<string, string> = {};
+        for (const name of ["id_token_hint", "client_id", "post_logout_redirect_uri", "state"]) {
+          const v = value(name);
+          if (v !== null) fields[name] = v;
+        }
+        const html = defaultEndSessionPage({
+          kind: "confirm",
+          action: `${config.basePath}/oauth/end-session`,
+          appName: config.appName,
+          fields,
+        });
+        // The yes can answer a redirect, and Chromium applies form-action to it.
+        const policy =
+          target === null ? noScriptPagePolicy(config) : consentPagePolicy(config, target);
+        return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
+      }
+      ended = await endSession(config, { session: resolved.session });
+    }
+    const res =
+      target !== null
+        ? redirect(target)
+        : new Response(defaultEndSessionPage({ kind: "signed-out", appName: config.appName }), {
+            status: 200,
+            headers: pageHeaders(config, noScriptPagePolicy(config)),
+          });
+    return ended
+      ? clearSessionCookies(config, ctx.request, readSessionToken(config, ctx.request), res)
+      : res;
+  };
+  routes.push(
+    {
+      method: "GET",
+      path: "/oauth/end-session",
+      key: "GET /oauth/end-session",
+      async handler(ctx) {
+        const params = ctx.url.searchParams;
+        const once = [...new Set(params.keys())].every((k) => params.getAll(k).length === 1);
+        return endSessionAnswer(ctx, once ? params : null);
+      },
+    },
+    {
+      method: "POST",
+      path: "/oauth/end-session",
+      key: "POST /oauth/end-session",
+      allowCrossSiteForm: true,
+      handler: async (ctx) => endSessionAnswer(ctx, await formParams(ctx.request)),
     },
   );
   // The issuer's own well-known paths under basePath (RFC 8414 as consumerb's

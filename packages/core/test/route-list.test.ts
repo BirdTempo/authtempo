@@ -49,7 +49,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(106);
+    expect(listed.length).toBe(108);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -238,7 +238,7 @@ describe("the entry fields and the module tie (plan 11g)", () => {
       .map((r) => `${r.method} ${r.path}`)
       .sort();
     expect(crossSite).toEqual(marked);
-    expect(marked).toEqual(["POST /social/apple/callback"]);
+    expect(marked).toEqual(["POST /oauth/end-session", "POST /social/apple/callback"]);
   });
 
   it("names each code once and no router code", () => {
