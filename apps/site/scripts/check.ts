@@ -8,6 +8,7 @@ import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { ROUTES } from "@authtempo/core/routes";
+import { ICON_NAMES } from "../src/data/icons.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
@@ -20,6 +21,7 @@ import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
 import { checkFences } from "./check-fences.ts";
 import { checkFonts } from "./check-fonts.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
+import { checkIcons } from "./check-icons.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
 import { checkMcp } from "./check-mcp.ts";
@@ -209,6 +211,11 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         pages: distPages(),
         read: distRead,
       }),
+  },
+  {
+    // Brand spec 8: one grid for every icon.
+    name: "check-icons",
+    run: () => checkIcons(readSiteFile("public/icons.svg") ?? "", ICON_NAMES),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },

@@ -1,0 +1,16 @@
+---
+// One icon of the sprite public/icons.svg (brand spec 8). The sprite is one
+// same-origin file, so the root pages and the docs share it, and no page
+// repeats a symbol id. Each icon is decorative: the text beside it names
+// the thing (brand spec 14). With draw, the icon runs the draw motion once.
+// The template reads Astro.props in place: Biome 2.5.15 lints this
+// frontmatter and not the template, so a destructured prop reads as unused.
+import type { IconName } from "../data/icons.ts";
+
+interface Props {
+  name: IconName;
+  class?: string;
+  draw?: boolean;
+}
+---
+<svg class:list={["at-icon", Astro.props.class, { "at-draw": Astro.props.draw === true }]} width="24" height="24" aria-hidden="true" focusable="false"><use href={`/icons.svg#${Astro.props.name}`}></use></svg>
