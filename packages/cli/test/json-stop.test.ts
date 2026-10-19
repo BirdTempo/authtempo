@@ -392,7 +392,7 @@ describe("authtempo secret rewrap", () => {
 });
 
 describe("authtempo info", () => {
-  it("prints the stop document on a usage error and on a stop before the report, and exit 0 on a success", () => {
+  it("prints the stop document on a usage error and on a stop before the report, and exits 0 on a success", () => {
     const usage = runBin(["info", "--url-env", "DATABASE_URL", "--json"]);
     expect(stopDoc(usage, INFO_JSON_KEYS, true)).toMatchObject({
       cli: "",

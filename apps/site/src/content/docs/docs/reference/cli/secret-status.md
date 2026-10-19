@@ -31,7 +31,7 @@ authtempo secret status https://api.example.com
 | --- | --- |
 | `<base url>` | The origin of the API, with no path. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
-| `--token-file <path>` | The file of the operator secret. A dash reads stdin, and then the command needs `--yes`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--token-file <path>` | The file of the operator secret. A dash reads stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--json` | Prints the document of [The JSON](#the-json). `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |

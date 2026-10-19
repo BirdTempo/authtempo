@@ -109,10 +109,15 @@ export const BODY_CAP_BYTES = 64 * 1024;
 
 /**
  * The body of an answer as text, read to its end, so no stream stays open.
- * A read fault gives "". A body over BODY_CAP_BYTES stops the run with a
- * fixed text that names the request and the cap, never the body.
+ * A read fault gives "". A body over `cap` bytes cancels the stream at the
+ * cap and throws a HostError with a fixed text that names the request and
+ * the cap, never the body. `operatorCall` reads with it too (plan 11c2).
  */
-async function textOf(res: Response, request: string): Promise<string> {
+export async function textOf(
+  res: Response,
+  request: string,
+  cap: number = BODY_CAP_BYTES,
+): Promise<string> {
   if (res.body === null) return "";
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -122,10 +127,10 @@ async function textOf(res: Response, request: string): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > BODY_CAP_BYTES) {
+      if (size > cap) {
         await reader.cancel().catch(() => {});
         throw new HostError(
-          `${request}: the answer body is over ${BODY_CAP_BYTES / 1024} KiB, the cap of one read`,
+          `${request}: the answer body is over ${cap / 1024} KiB, the cap of one read`,
         );
       }
       chunks.push(value);

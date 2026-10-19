@@ -115,6 +115,27 @@ describe("the common rules (spec 19)", () => {
           expect(`${name} --${flag} -${spec.short}`).toBe(`${name} --${flag} -${ALLOWED[flag]}`);
   });
 
+  it("names --yes in the text of a flag only in a help that lists --yes", () => {
+    const named = HELP.filter((h) =>
+      h.flags.some((f) => f.flag !== "--yes" && f.says.includes("--yes")),
+    ).map((h) => h.command);
+    const listed = HELP.filter((h) => h.flags.some((f) => f.flag === "--yes")).map(
+      (h) => h.command,
+    );
+    expect(named.filter((c) => !listed.includes(c))).toEqual([]);
+    const tokenFile = (command: string) =>
+      HELP.find((h) => h.command === command)?.flags.find((f) => f.flag === "--token-file <path>")
+        ?.says;
+    for (const command of ["keys rotate", "secret rewrap"])
+      expect(tokenFile(command)).toBe(
+        "The file that holds the operator secret. A dash reads stdin, and then the command needs --yes.",
+      );
+    for (const command of ["secret status", "info"])
+      expect(tokenFile(command)).toBe(
+        "The file that holds the operator secret. A dash reads stdin.",
+      );
+  });
+
   it("splits NAMES into the commands that need an argument and the ones that run bare, with no name in both", () => {
     const both = [...NEEDS_ARGUMENT, ...NO_ARGUMENT];
     expect(new Set(both)).toEqual(new Set(NAMES));

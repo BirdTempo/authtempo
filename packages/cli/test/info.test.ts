@@ -18,6 +18,7 @@ import { INFO_JSON_KEYS, type InfoJson } from "../src/json.js";
 import { main } from "../src/main.js";
 import { guarded } from "../src/output.js";
 import { adapterD1Dir } from "../src/seams/d1.js";
+import { CORE_MIGRATIONS } from "../src/seams/postgres.js";
 import { SCHEMA_VERSION } from "../src/version.js";
 import { assertFreshBuild, ESC, linesOf, runBin } from "./support/bin.js";
 import { d1Project, removeScaffolds } from "./support/d1-project.js";
@@ -248,10 +249,9 @@ describe("authtempo info (plan 11c2)", () => {
       expect(doc.database).toEqual({
         kind: "postgres",
         schemaVersion: SCHEMA_VERSION,
-        applied: doc.database?.applied,
+        applied: CORE_MIGRATIONS.length,
         compatVersion: null,
       });
-      expect(doc.database?.applied).toBeGreaterThan(0);
       expect(doc.unread).toEqual([]);
       expect(io.stderr).toEqual(["reading the postgres database"]);
       for (const line of [...io.stdout, ...io.stderr]) {
@@ -454,6 +454,60 @@ describe("authtempo info (plan 11c2)", () => {
     ]);
     for (const line of [...silent.stdout, ...silent.stderr])
       expect(line).not.toContain("api.example.com");
+  });
+
+  it("reads the operator secret before any part, so a missing secret costs no connection", async () => {
+    const io = fakeIo({
+      env: { DATABASE_URL: "postgres://tempo:wrong-pass-5@localhost:5439/none" },
+    });
+    expect(await main(["info", BASE, "--target", "postgres"], io)).toBe(2);
+    expect(io.stdout).toEqual([]);
+    expect(io.stderr[0]).toBe(
+      "set AUTHTEMPO_OPERATOR_SECRET to the operator secret, or give --token-env or --token-file",
+    );
+    expect(io.stderr).not.toContain("reading the postgres database");
+    expect(io.requests).toHaveLength(0);
+  });
+
+  it("names a connection string that is no URL as unread, and exits 1", async () => {
+    const io = fakeIo({ env: { DATABASE_URL: "nonsense" } });
+    expect(await main(["info", "--target", "postgres", "--json"], io)).toBe(1);
+    const doc = docOf(io.stdout);
+    expect(doc.database).toBeNull();
+    expect(doc.unread).toEqual([{ part: "database", reason: "storage: ERR_INVALID_URL" }]);
+    expect(io.stderr).toEqual(["reading the postgres database"]);
+  });
+
+  it("stops the read of a large answer at the cap, and pulls no more of the stream", async () => {
+    const chunk = new Uint8Array(16 * 1024).fill(0x61);
+    let sent = 0;
+    const stream = () =>
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          // One MiB in all: the whole body is a proof that the reader read past the cap.
+          if (sent >= 1024 * 1024) controller.close();
+          else {
+            controller.enqueue(chunk);
+            sent += chunk.byteLength;
+          }
+        },
+      });
+    const io = fakeIo({
+      env: { AUTHTEMPO_OPERATOR_SECRET: SECRET },
+      fetch: async () =>
+        new Response(stream(), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    expect(await main(["info", BASE, "--json"], io)).toBe(1);
+    expect(docOf(io.stdout).unread).toEqual([
+      {
+        part: "deployment",
+        reason: "GET /operator/info answered 200: the answer is larger than 64 KiB",
+      },
+    ]);
+    // The cap is 64 KiB: the reader cancels the stream on the chunk that passes
+    // it. The stream queues one chunk ahead of the reader, so two chunks at most.
+    expect(sent).toBeGreaterThan(64 * 1024);
+    expect(sent).toBeLessThanOrEqual(64 * 1024 + 2 * chunk.byteLength);
   });
 
   it("needs --target for the inputs of a database, and the base URL for the inputs of the deployment", async () => {

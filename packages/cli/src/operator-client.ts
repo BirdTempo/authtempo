@@ -1,6 +1,7 @@
 import { isOperatorSecret } from "@authtempo/core/operator-secret";
+import { textOf } from "./checks.js";
 import { Stop, UsageError } from "./errors.js";
-import { fetchWithin } from "./net.js";
+import { fetchWithin, HostError } from "./net.js";
 import type { Ctx } from "./output.js";
 import { DEFAULT_TOKEN_ENV, readSecret } from "./secrets.js";
 
@@ -73,9 +74,6 @@ export class OperatorStop extends Stop {
   }
 }
 
-/** The bytes of a text as UTF-8. */
-const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
-
 /**
  * The limit of the three routes of plan 11c2: 120 calls per IP per hour. A
  * copy of `OPERATOR_SECRETS_PER_IP.max` in core's `src/http/routes/operator.ts`
@@ -116,14 +114,18 @@ export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknow
     const why = `the operator routes allow ${CALLS_PER_HOUR} calls per IP per hour`;
     throw new OperatorStop(429, why, `${why}; wait, then run it again`);
   }
-  // The text first: a deployment answers untrusted text, and a caller with
-  // a limit refuses a large body before any parse.
-  const text = await res.text().catch(() => undefined);
-  if (text !== undefined && call.maxBytes !== undefined && byteLength(text) > call.maxBytes)
+  // The capped reader of the checks: it cancels the stream at the cap, so a
+  // deployment cannot push bytes into memory until the time limit ends.
+  let text: string;
+  try {
+    text = await textOf(res, `${call.method} ${url}`, call.maxBytes ?? Number.POSITIVE_INFINITY);
+  } catch (e) {
+    if (!(e instanceof HostError) || call.maxBytes === undefined) throw e;
     throw new OperatorStop(res.status, `the answer is larger than ${call.maxBytes / 1024} KiB`);
+  }
   let body: unknown;
   try {
-    body = text === undefined ? undefined : JSON.parse(text);
+    body = JSON.parse(text);
   } catch {
     body = undefined;
   }

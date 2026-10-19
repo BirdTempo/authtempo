@@ -12,7 +12,7 @@ import { OperatorStop, operatorCall, readOperatorSecret } from "../operator-clie
 import { type Ctx, printJson } from "../output.js";
 import { readableVersion, readD1Version } from "../schema-version.js";
 import { type D1Target, findWranglerConfig, readD1Project, wranglerOf } from "../seams/d1.js";
-import { openPostgres, storageCode } from "../seams/postgres.js";
+import { openPostgres, type PostgresSeam, storageCode } from "../seams/postgres.js";
 import { DEFAULT_TOKEN_ENV, DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { readTemplates } from "../templates.js";
 import { CLI_VERSION, SCHEMA_VERSION } from "../version.js";
@@ -195,8 +195,10 @@ function projectOf(ctx: Ctx, dir: string): NonNullable<InfoJson["project"]> {
  */
 async function readPostgres(ctx: Ctx, url: string): Promise<Database | Unread> {
   ctx.err("reading the postgres database");
-  const pg = openPostgres(url, 1);
+  // The open is inside the try: a string that is no URL throws there (ERR_INVALID_URL).
+  let pg: PostgresSeam | undefined;
   try {
+    pg = openPostgres(url, 1);
     await pg.ping();
     const applied = await pg.appliedCore();
     const text = await pg.schemaVersionText();
@@ -214,7 +216,7 @@ async function readPostgres(ctx: Ctx, url: string): Promise<Database | Unread> {
     const reason = e instanceof Stop ? e.message : `storage: ${storageCode(e)}`;
     return { part: "database", reason };
   } finally {
-    await pg.close();
+    await pg?.close();
   }
 }
 
@@ -367,6 +369,9 @@ export const infoCommand: Command = {
         throw new UsageError(`--${flag} needs the base URL of the deployment`);
     const basePath = basePathOf(v["base-path"]);
     const ms = timeoutOf(v.timeout);
+    // The operator secret right after the parse: a missing secret is a usage
+    // error that costs no connection, and the value is in the scrub list first.
+    const secret = base === undefined ? undefined : readOperatorSecret(ctx, v);
 
     // Before the first output line: each set secret joins the scrub list,
     // also when no part reads it (spec 19 item 5). The env part says set or unset only.
@@ -409,8 +414,7 @@ export const infoCommand: Command = {
     }
 
     let deployment: InfoJson["deployment"] = null;
-    if (base !== undefined) {
-      const secret = readOperatorSecret(ctx, v);
+    if (base !== undefined && secret !== undefined) {
       const r = await readDeployment(ctx, { base, basePath, secret, ms });
       if ("part" in r) unread.push(r);
       else deployment = r;
