@@ -169,7 +169,6 @@ const CALLBACKS: readonly RouteKey[] = [
   "GET /social/:provider/callback",
   "POST /social/apple/callback",
 ];
-const CALLBACK = "the callback needs a provider exchange";
 
 /**
  * Every declared code with no test that answers it through the router, one
@@ -251,79 +250,6 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "POST /user/update",
   ]),
 
-  // The provider callbacks: the codes of `completeSocial` after the exchange.
-  ...rows(
-    "email_mismatch",
-    `${CALLBACK}; link.test.ts proves completeSocial on the engine`,
-    CALLBACKS,
-  ),
-  ...rows(
-    "email_required",
-    `${CALLBACK}; social.test.ts proves completeSocial on the engine`,
-    CALLBACKS,
-  ),
-  ...rows(
-    "email_taken_unverified",
-    `${CALLBACK}; social.test.ts proves completeSocial on the engine`,
-    CALLBACKS,
-  ),
-  ...rows(
-    "sign_up_closed",
-    `${CALLBACK}; sign-up-rule.test.ts proves completeSocial on the engine`,
-    CALLBACKS,
-  ),
-  ...rows(
-    "token_expired",
-    `${CALLBACK}; social.test.ts proves completeSocial on the engine`,
-    CALLBACKS,
-  ),
-  ...rows(
-    "hook_refused",
-    `${CALLBACK}; session-hooks.test.ts and link.test.ts prove the hooks on the engine`,
-    CALLBACKS,
-  ),
-  ...rows(
-    "hook_failed",
-    `${CALLBACK}; session-hooks.test.ts and link.test.ts prove the hooks on the engine`,
-    CALLBACKS,
-  ),
-  ...rows("identity_taken", `${CALLBACK}; link.test.ts proves completeSocial on the engine`, [
-    "POST /social/apple/callback",
-  ]),
-  ...rows("oauth_denied", `${CALLBACK}; social.test.ts proves completeSocial on the engine`, [
-    "POST /social/apple/callback",
-  ]),
-  ...rows("oauth_failed", `${CALLBACK}; social.test.ts proves completeSocial on the engine`, [
-    "POST /social/apple/callback",
-  ]),
-  ...rows(
-    "oauth_failed",
-    "beginSocial answers it when the provider's discovery fails; social-oidc.test.ts proves the engine path",
-    ["POST /social/:provider/link"],
-  ),
-
-  // The hooks of a flow that needs a linked identity or a registered passkey.
-  ...rows(
-    "hook_refused",
-    "needs a linked identity; identities.test.ts proves the unlink hooks on the engine",
-    ["POST /identities/unlink"],
-  ),
-  ...rows(
-    "hook_failed",
-    "needs a linked identity; identities.test.ts proves the unlink hooks on the engine",
-    ["POST /identities/unlink"],
-  ),
-  ...rows(
-    "hook_refused",
-    "needs a registered passkey; session-hooks.test.ts proves session.beforeCreate on a passkey sign-in",
-    ["POST /passkey/authenticate/verify"],
-  ),
-  ...rows(
-    "hook_failed",
-    "needs a registered passkey; session-hooks.test.ts proves session.beforeCreate on a passkey sign-in",
-    ["POST /passkey/authenticate/verify"],
-  ),
-
   // A code that only a race, or a state that no flow reaches, answers.
   ...rows(
     "already_member",
@@ -339,26 +265,6 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "last_credential",
     "the register ceremony refuses an unverified user, so no flow leaves a passkey as the one credential; identities.test.ts proves the guard on the engine",
     ["POST /passkeys/delete"],
-  ),
-  ...rows(
-    "second_factor_last_method",
-    "needs the passkey method on with one passkey; passkeys.test.ts proves deletePasskey on the engine",
-    ["POST /passkeys/delete"],
-  ),
-  ...rows(
-    "invalid_token",
-    "checkSignInAssertionOf is a boolean, so the challenge's refusal answers passkey_failed; no request reaches it (as ruling 4 found for the TOTP routes)",
-    ["POST /second-factor/passkey/enable"],
-  ),
-  ...rows(
-    "token_expired",
-    "checkSignInAssertionOf is a boolean, so the challenge's refusal answers passkey_failed; no request reaches it (as ruling 4 found for the TOTP routes)",
-    ["POST /second-factor/passkey/enable"],
-  ),
-  ...rows(
-    "invalid_request",
-    "registerClient answers it with registration.dynamic off, and the route is not mounted then; no request reaches it",
-    ["POST /oauth/register"],
   ),
   ...rows(
     "invalid_client",
@@ -380,4 +286,95 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "the consent re-checks the held request; a response type that changed since the page answers it; oauth-authorize.test.ts proves checkAuthorize",
     ["POST /oauth/authorize"],
   ),
+];
+
+/**
+ * One optional or nullable key of one JSON answer that no test answers in
+ * that form (plan 11g Task 5, ruling 8). The reason names the engine test.
+ * The field is a path: a top-level key, or a key in a nested object or an
+ * array item (`sessions[].freshAt`). The recorder writes the paths each
+ * answer leaves out and the paths it sets null. The check holds each
+ * optional path to one absent record and each nullable path to one null
+ * record, or to a row here. A row that a record covers fails.
+ */
+export interface AnswerShapeExempt {
+  readonly key: RouteKey;
+  readonly field: string;
+  readonly form: "absent" | "null";
+  readonly reason: string;
+}
+
+/** One row per optional key of a WebAuthn options answer, for each options route. */
+function optionsRows(key: RouteKey, fields: readonly string[]): AnswerShapeExempt[] {
+  return fields.map((field) => ({
+    key,
+    field,
+    form: "absent",
+    reason:
+      "the WebAuthn seam always writes it, and the schema keeps it optional as the WebAuthn JSON standard does; webauthn-seam.test.ts proves the options",
+  }));
+}
+
+/** The optional keys of a request options answer that the seam always writes. */
+const REQUEST_OPTION_KEYS = [
+  "timeout",
+  "rpId",
+  "allowCredentials",
+  "userVerification",
+  "allowCredentials[].transports",
+] as const;
+
+export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
+  ...optionsRows("POST /passkey/register/options", [
+    "timeout",
+    "attestation",
+    "authenticatorSelection",
+    "excludeCredentials",
+    "extensions",
+    "hints",
+    "rp.id",
+    "authenticatorSelection.residentKey",
+    "authenticatorSelection.requireResidentKey",
+    "authenticatorSelection.userVerification",
+    "excludeCredentials[].transports",
+  ]),
+  ...optionsRows("POST /passkey/authenticate/options", REQUEST_OPTION_KEYS),
+  ...optionsRows("POST /reauth/passkey/options", REQUEST_OPTION_KEYS),
+  ...optionsRows("POST /second-factor/passkey/options", REQUEST_OPTION_KEYS),
+  {
+    key: "POST /passkeys/rename",
+    field: "passkey.name",
+    form: "null",
+    reason:
+      "the rename sets a name, so its answer always has one; GET /passkeys answers the null name; passkey-rename.test.ts proves the rename",
+  },
+  {
+    key: "GET /tokens/current",
+    field: "apiToken.lastUsedAt",
+    form: "null",
+    reason:
+      "the bearer check stamps lastUsedAt before the route answers; GET /tokens answers the null form; tokens.test.ts proves the stamp",
+  },
+  {
+    key: "GET /sessions",
+    field: "sessions[].freshAt",
+    form: "null",
+    reason:
+      "every sign-in writes freshAt, so only a session row from before schema version 10 has none; fresh.test.ts proves the null form on the engine",
+  },
+  // The enable answers the status after the write, where both keys are set.
+  {
+    key: "POST /totp/enable",
+    field: "enabledAt",
+    form: "null",
+    reason:
+      "the answer is the status after the write, where the key is set; GET /totp answers it null; totp.test.ts proves the enable",
+  },
+  {
+    key: "POST /totp/enable",
+    field: "backupCodesVersion",
+    form: "null",
+    reason:
+      "the answer is the status after the write, where the key is set; GET /totp answers it null; totp.test.ts proves the enable",
+  },
 ];

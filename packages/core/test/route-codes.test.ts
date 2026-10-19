@@ -10,6 +10,11 @@ import { inviteMember } from "../src/engine/invitations.js";
 import { mintSessionJwt } from "../src/engine/jwt.js";
 import { requestMagicLink } from "../src/engine/magic-link.js";
 import { addMember, createOrganization } from "../src/engine/organizations.js";
+import {
+  passkeyAuthenticationOptions,
+  passkeyRegistrationOptions,
+  verifyPasskeyRegistration,
+} from "../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/engine/password.js";
 import { requestReauthCode } from "../src/engine/reauth.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
@@ -22,10 +27,30 @@ import { AUTH_ERROR_PARAM } from "../src/http/redirect.js";
 import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { newId } from "../src/primitives/ids.js";
+import type { UserRow } from "../src/schema.js";
+import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { SOCIAL } from "./every-feature.js";
 import { BASE_URL, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
-import { pkce } from "./oauth-helpers.js";
+import {
+  authorized,
+  codeFor,
+  exchange,
+  oauthHandle,
+  pkce,
+  registered,
+  signedIn,
+} from "./oauth-helpers.js";
 import { FAST, upSession } from "./password-helpers.js";
+import {
+  APPLE,
+  type FakeIdToken,
+  fakeJwt,
+  GOOGLE,
+  googleClaims,
+  googleSignIn,
+  tokenEndpoint,
+} from "./social-helpers.js";
 import { codeNow, enrolled, PASSWORD, verifiedSession, wrongFor } from "./totp-helpers.js";
 
 /**
@@ -1158,5 +1183,429 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
     // The handoff pages carry the code in a redirect to the app.
     const redirects: RouteKey[] = ["GET /handoff/continue", "POST /handoff/continue"];
     expect(unlike(results, "token_expired", 400, redirects)).toEqual({});
+  });
+});
+
+/**
+ * A world whose Google and Apple exchange runs on the fake token endpoint
+ * and the fake jwt seam (as social.test.ts does). `tokens["idtok-default"]`
+ * is the ID token of the next callback; with none, the token does not verify.
+ */
+function socialWorld(extra: Partial<AuthConfig> = {}) {
+  const tokens: Record<string, FakeIdToken> = {};
+  const w = world({
+    social: { google: GOOGLE, apple: APPLE, fetch: tokenEndpoint("idtok-default").fetchFn },
+    jwt: fakeJwt(tokens),
+    ...extra,
+  });
+  return { ...w, tokens };
+}
+type SocialWorld = ReturnType<typeof socialWorld>;
+type Provider = "google" | "apple";
+
+/** The callback route of each provider of these tests: Google by GET, Apple by POST. */
+const CALLBACK_OF: Record<Provider, RouteKey> = {
+  google: "GET /social/:provider/callback",
+  apple: "POST /social/apple/callback",
+};
+
+/** A start through the router: the sign-in start, or the link start of `session`. The binding cookie, the state, and the nonce. */
+async function startOf(w: SocialWorld, provider: Provider, session?: Record<string, string>) {
+  const res = session
+    ? await w.handle(
+        new Request(`${BASE_URL}/auth/social/${provider}/link`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE_URL, ...session },
+          body: "{}",
+        }),
+      )
+    : await w.handle(new Request(`${BASE_URL}/auth/social/${provider}/start`));
+  const location = session
+    ? ((await res.json()) as { url?: string }).url
+    : res.headers.get("location");
+  if (!location) throw new Error(`the start answered ${res.status} with no location`);
+  const bind = res.headers
+    .getSetCookie()
+    .find((c) => c.includes("_oauth="))
+    ?.split(";")[0];
+  if (!bind) throw new Error("the start set no binding cookie");
+  const url = new URL(location);
+  return {
+    bind,
+    state: url.searchParams.get("state") ?? "",
+    nonce: url.searchParams.get("nonce") ?? "",
+  };
+}
+type Started = Awaited<ReturnType<typeof startOf>>;
+
+/** The ID token of `provider` for the flow's nonce, with `claims` over the defaults. */
+function idTokenOf(
+  provider: Provider,
+  nonce: string,
+  claims: Record<string, unknown>,
+): FakeIdToken {
+  if (provider === "google") return googleClaims(nonce, claims);
+  return {
+    audience: APPLE.clientId,
+    issuer: "https://appleid.apple.com",
+    claims: { sub: "001.a", email: "ada@example.com", email_verified: true, nonce, ...claims },
+  };
+}
+
+/** The callback through the router, from the browser that started: Google by GET, Apple by a form POST from Apple's origin. */
+async function callbackOf(
+  w: SocialWorld,
+  provider: Provider,
+  s: Started,
+  options: { error?: string; session?: Record<string, string> } = {},
+): Promise<Answer> {
+  const cookie = [s.bind, options.session?.cookie].filter(Boolean).join("; ");
+  const params = options.error
+    ? { error: options.error, state: s.state }
+    : { code: "c", state: s.state };
+  if (provider === "google")
+    return answerOf(
+      await w.handle(
+        new Request(`${BASE_URL}/auth/social/google/callback?${new URLSearchParams(params)}`, {
+          headers: { cookie },
+        }),
+      ),
+    );
+  return answerOf(
+    await w.handle(
+      new Request(`${BASE_URL}/auth/social/apple/callback`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://appleid.apple.com",
+          cookie,
+        },
+        body: new URLSearchParams(params).toString(),
+      }),
+    ),
+  );
+}
+
+/** A sign-in callback of a new address with `claims`, in a world of `extra`. */
+async function signInCallback(
+  provider: Provider,
+  claims: Record<string, unknown>,
+  extra: Partial<AuthConfig> = {},
+): Promise<Answer> {
+  const w = socialWorld(extra);
+  const s = await startOf(w, provider);
+  w.tokens["idtok-default"] = idTokenOf(provider, s.nonce, claims);
+  return callbackOf(w, provider, s);
+}
+
+/** A link callback of the signed-in `user` with `claims`. */
+async function linkCallback(
+  w: SocialWorld,
+  provider: Provider,
+  token: string,
+  claims: Record<string, unknown>,
+) {
+  const session = w.cookie(token);
+  const s = await startOf(w, provider, session);
+  w.tokens["idtok-default"] = idTokenOf(provider, s.nonce, claims);
+  return callbackOf(w, provider, s, { session });
+}
+
+/** A before hook that refuses, or throws. */
+function hookOf(mode: "refuse" | "throw") {
+  return () => {
+    if (mode === "refuse") throw hookRefusal("Not now.");
+    throw new Error("down");
+  };
+}
+
+/** A passkey by the register ceremony, as a settings page adds one (as identities.test.ts does). */
+async function addPasskey(w: World, user: UserRow) {
+  const soft = await SoftAuthenticator.create({ rpID: "api.example.com", origin: BASE_URL });
+  const options = must(await passkeyRegistrationOptions(w.auth.config, { user }));
+  const added = must(
+    await verifyPasskeyRegistration(w.auth.config, {
+      user,
+      response: await soft.register(options.challenge, new TextEncoder().encode(user.id)),
+    }),
+  );
+  return { id: added.id, soft };
+}
+
+describe("the codes of the provider callbacks (plan 11g)", () => {
+  for (const provider of ["google", "apple"] as const) {
+    it(`${CALLBACK_OF[provider]} answers each code of completeSocial through the router`, async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const results: Record<string, Answer> = {};
+      // The link of a signed-in user whose provider address differs.
+      const mismatch = socialWorld();
+      const ada = await verifiedSession(mismatch.auth, "ada@example.com");
+      results.email_mismatch = await linkCallback(mismatch, provider, ada.token, {
+        email: "other@example.com",
+      });
+      results.email_required = await signInCallback(provider, { email: undefined });
+      // A verified user holds the address; the provider does not verify it.
+      const taken = socialWorld();
+      await verifiedSession(taken.auth, "ada@example.com");
+      const s = await startOf(taken, provider);
+      taken.tokens["idtok-default"] = idTokenOf(provider, s.nonce, {
+        email: "ada@example.com",
+        email_verified: false,
+      });
+      results.email_taken_unverified = await callbackOf(taken, provider, s);
+      results.sign_up_closed = await signInCallback(
+        provider,
+        { email: "new@example.com" },
+        { signUp: false },
+      );
+      // The state row lives ten minutes.
+      const late = socialWorld();
+      const stale = await startOf(late, provider);
+      late.tokens["idtok-default"] = idTokenOf(provider, stale.nonce, {});
+      late.auth.clock.advance(11 * 60_000);
+      results.token_expired = await callbackOf(late, provider, stale);
+      for (const [mode, code] of [
+        ["refuse", "hook_refused"],
+        ["throw", "hook_failed"],
+      ] as const)
+        results[code] = await signInCallback(
+          provider,
+          { email: "new@example.com" },
+          { hooks: { user: { beforeCreate: hookOf(mode) } } },
+        );
+      if (provider === "apple") {
+        // The provider identity of one user, linked by another.
+        const held = socialWorld();
+        expect(await signInCallback("apple", { sub: "001.a", email: "first@example.com" })).toEqual(
+          { status: 302, code: null },
+        );
+        const first = await startOf(held, "apple");
+        held.tokens["idtok-default"] = idTokenOf("apple", first.nonce, {
+          sub: "001.a",
+          email: "first@example.com",
+        });
+        expect(await callbackOf(held, "apple", first)).toEqual({ status: 302, code: null });
+        const bob = await verifiedSession(held.auth, "bob@example.com");
+        results.identity_taken = await linkCallback(held, "apple", bob.token, { sub: "001.a" });
+        const denied = socialWorld();
+        results.oauth_denied = await callbackOf(denied, "apple", await startOf(denied, "apple"), {
+          error: "access_denied",
+        });
+        // No ID token registered: the token does not verify.
+        const failed = socialWorld();
+        results.oauth_failed = await callbackOf(failed, "apple", await startOf(failed, "apple"));
+      }
+      log.mockRestore();
+      const differing: Record<string, Answer> = {};
+      for (const [code, got] of Object.entries(results))
+        if (got.status !== 302 || got.code !== code) differing[code] = got;
+      expect(differing).toEqual({});
+      // Each code above is one the entry declares.
+      for (const code of Object.keys(results))
+        expect(entryOf(CALLBACK_OF[provider]).codes as readonly string[]).toContain(code);
+    });
+  }
+
+  it("POST /social/:provider/link answers oauth_failed when the provider's discovery fails", async () => {
+    const w = world({
+      social: {
+        oidc: [
+          {
+            name: "entra",
+            label: "Continue with Microsoft",
+            issuer: "https://login.acme.example/tenant-1/v2.0",
+            clientId: "entra-id",
+            clientSecret: "entra-secret",
+          },
+        ],
+        fetch: async () => new Response("down", { status: 503 }),
+      },
+    });
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await w.handle(
+      new Request(`${BASE_URL}/auth/social/entra/link`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE_URL, ...w.cookie(ada.token) },
+        body: "{}",
+      }),
+    );
+    log.mockRestore();
+    expect(await answerOf(res)).toEqual({ status: 400, code: "oauth_failed" });
+  });
+});
+
+describe("the hook codes of a linked identity and a passkey sign-in (plan 11g)", () => {
+  for (const [mode, code, status] of [
+    ["refuse", "hook_refused", 403],
+    ["throw", "hook_failed", 500],
+  ] as const) {
+    it(`POST /identities/unlink answers ${code} when identity.beforeUnlink ${mode}s`, async () => {
+      const tokens: Record<string, FakeIdToken> = {};
+      const w = world({
+        social: { google: GOOGLE, apple: APPLE, fetch: tokenEndpoint("idtok-default").fetchFn },
+        jwt: fakeJwt(tokens),
+        hooks: { identity: { beforeUnlink: hookOf(mode) } },
+      });
+      const me = await googleSignIn(w.auth, tokens);
+      const google = (
+        await w.auth.storage.findMany("identity", [
+          { field: "userId", op: "eq", value: me.user.id },
+          { field: "provider", op: "eq", value: "google" },
+        ])
+      )[0];
+      if (!google) throw new Error("no google identity");
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const got = await call(w, "POST /identities/unlink", w.cookie(me.token), { id: google.id });
+      log.mockRestore();
+      expect(got).toEqual({ status, code });
+    });
+
+    it(`POST /passkey/authenticate/verify answers ${code} when session.beforeCreate ${mode}s`, async () => {
+      const w = hookWorld(mode);
+      const me = await verifiedSession(w.auth, "ada@example.com");
+      const { soft } = await addPasskey(w, me.user);
+      const res = await w.handle(requestOf("POST /passkey/authenticate/options", {}, {}));
+      const { challenge } = (await res.json()) as { challenge: string };
+      const response = await soft.authenticate(challenge);
+      w.armed.on = true;
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const got = await call(w, "POST /passkey/authenticate/verify", {}, { response });
+      log.mockRestore();
+      expect(got).toEqual({ status, code });
+    });
+  }
+
+  it("POST /passkeys/delete answers second_factor_last_method for the one passkey of the passkey method", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const { id, soft } = await addPasskey(w, me.user);
+    const options = must(await passkeyAuthenticationOptions(w.auth.config, { ip: null }));
+    const cookie = w.cookie(me.token);
+    expect(
+      await call(w, "POST /second-factor/passkey/enable", cookie, {
+        password: PASSWORD,
+        response: await soft.authenticate(options.challenge),
+      }),
+    ).toEqual({ status: 200, code: null });
+    expect(await call(w, "POST /passkeys/delete", cookie, { id })).toEqual({
+      status: 409,
+      code: "second_factor_last_method",
+    });
+  });
+});
+
+/**
+ * The shapes of a JSON answer that the recorder holds to the wire (ruling
+ * 8): an optional key left out, a nullable key set null. Each test reaches
+ * the shape through the router, so the check sees it on that route.
+ */
+describe("the shapes of the OAuth answers (plan 11g)", () => {
+  it("the userinfo routes answer no email without the email scope, and a null name under profile", async () => {
+    const h = oauthHandle();
+    const bare = await codeFor(h, "openid mcp:read");
+    const bareTokens = (await (
+      await h.auth.handle(exchange(bare.code, bare.clientId, bare.verifier))
+    ).json()) as { access_token: string };
+    const userinfo = async (token: string, method: "GET" | "POST") =>
+      (
+        await h.auth.handle(
+          new Request(`${BASE_URL}/auth/oauth/userinfo`, {
+            method,
+            headers: { authorization: `Bearer ${token}` },
+          }),
+        )
+      ).json();
+    for (const method of ["GET", "POST"] as const)
+      expect(await userinfo(bareTokens.access_token, method)).toEqual({ sub: bare.user.id });
+    // A user with no name and no picture, under the profile scope.
+    const now = h.clock.now();
+    const user = await h.storage.create("user", {
+      id: newId(now),
+      email: "nil@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { token } = await createSession(h.config, { userId: user.id, ip: null, userAgent: null });
+    const clientId = await registered(h);
+    const p = await pkce();
+    const { code } = await authorized(h, `${h.config.cookieName}=${token}`, {
+      clientId,
+      challenge: p.challenge,
+      scope: "openid profile mcp:read",
+    });
+    const profileTokens = (await (
+      await h.auth.handle(exchange(code, clientId, p.verifier))
+    ).json()) as {
+      access_token: string;
+    };
+    for (const method of ["GET", "POST"] as const)
+      expect(await userinfo(profileTokens.access_token, method)).toEqual({
+        sub: user.id,
+        name: null,
+        picture: null,
+      });
+  });
+
+  it("POST /oauth/register answers no client_name when the metadata names none, and the grant of that client a null clientName", async () => {
+    const h = oauthHandle();
+    const res = await h.auth.handle(
+      new Request(`${BASE_URL}/auth/oauth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: ["https://client.example.com/callback"] }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const client = (await res.json()) as { client_id: string; client_name?: string };
+    expect("client_name" in client).toBe(false);
+    const s = await signedIn(h);
+    const p = await pkce();
+    await authorized(h, s.cookie, {
+      clientId: client.client_id,
+      challenge: p.challenge,
+      scope: "openid mcp:read",
+    });
+    const grants = await h.auth.handle(
+      new Request(`${BASE_URL}/auth/oauth/grants`, { headers: { cookie: s.cookie } }),
+    );
+    expect(await grants.json()).toMatchObject({
+      grants: [{ clientId: client.client_id, clientName: null }],
+    });
+  });
+});
+
+describe("the shapes of the account answers (plan 11g)", () => {
+  it("GET /passkeys answers a null name for a passkey registered with none", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    await addPasskey(w, me.user);
+    const res = await w.handle(requestOf("GET /passkeys", w.cookie(me.token), {}));
+    expect(await res.json()).toMatchObject({ passkeys: [{ name: null }] });
+  });
+
+  it("GET /tokens/current answers a null expiresAt for a token that never expires", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const made = await w.handle(
+      requestOf("POST /tokens", w.cookie(me.token), {}, { name: "forever", expiresInDays: null }),
+    );
+    const { token } = (await made.json()) as { token: string };
+    const res = await w.handle(
+      requestOf("GET /tokens/current", { authorization: `Bearer ${token}` }, {}),
+    );
+    expect(await res.json()).toMatchObject({ apiToken: { expiresAt: null } });
+  });
+
+  it("POST /user/update answers a null name when the patch clears it", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const res = await w.handle(
+      requestOf("POST /user/update", w.cookie(me.token), {}, { name: null }),
+    );
+    expect(await res.json()).toMatchObject({ user: { name: null } });
   });
 });

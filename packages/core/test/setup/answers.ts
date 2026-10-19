@@ -28,6 +28,7 @@ const FS_MODULE = "node:fs";
 vi.mock("../../src/http/router.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/http/router.js")>();
   const { appendFileSync }: AppendFs = await import(/* @vite-ignore */ FS_MODULE);
+  const { shapeOf } = await import("./answer-shape.js");
   const { ERRORS, OAUTH_ERRORS } = await import("../../src/errors.js");
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { AUTH_ERROR_PARAM } = await import("../../src/http/redirect.js");
@@ -55,7 +56,19 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     type: string;
     code: string | null;
     verdict: string;
+    /** The paths of the answer schema that a 2xx JSON body leaves out (ruling 8). */
+    absent: string[];
+    /** The paths that a 2xx JSON body sets to null. */
+    nulls: string[];
   }
+
+  /** The shape of a 2xx JSON answer beside its verdict: the keys left out, and the keys set null. */
+  interface JsonJudged {
+    verdict: string;
+    absent: string[];
+    nulls: string[];
+  }
+  const NO_SHAPE = { absent: [], nulls: [] };
 
   /** The key of the mounted route, or the entry of ROUTES whose feature is off (the router's `not_found`), or null. */
   function keyOf(
@@ -101,21 +114,23 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   }
 
   /** Rule 2: a 2xx JSON body parses under the strict schema of the `json` kind with that status. */
-  function jsonVerdict(contract: RouteContract, status: number, body: unknown): string {
+  function jsonVerdict(contract: RouteContract, status: number, body: unknown): JsonJudged {
     const json = kinds(contract).filter((k) => k.kind === "json");
     const fit = json.find((k) => (k.status ?? 200) === status);
     if (!fit) {
-      if (kinds(contract).some((k) => k.kind === "metadata")) return "ok";
-      return `a ${status} JSON answer fits no kind of the contract`;
+      if (kinds(contract).some((k) => k.kind === "metadata")) return { verdict: "ok", ...NO_SHAPE };
+      return { verdict: `a ${status} JSON answer fits no kind of the contract`, ...NO_SHAPE };
     }
     const parsed = fit.schema.safeParse(body);
-    if (parsed.success) return "ok";
-    return parsed.error.issues
+    // The shape of the answer, so the check can hold the optional and nullable keys to the wire.
+    if (parsed.success) return { verdict: "ok", ...shapeOf(fit.schema, body) };
+    const verdict = parsed.error.issues
       .map((i) => {
         const where = "keys" in i ? (i.keys as string[]).join(",") : i.path.join(".");
         return `${where}: ${i.message}`;
       })
       .join("; ");
+    return { verdict, ...NO_SHAPE };
   }
 
   async function judge(request: Request, res: Response, key: string | null): Promise<AnswerRecord> {
@@ -130,7 +145,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       const error = (body as { error?: unknown }).error;
       if (status >= 400 && typeof error === "string") code = error;
     }
-    const base = { key, status, type, code };
+    const base = { key, status, type, code, ...NO_SHAPE };
     if (key === null) return { ...base, verdict: "ok" };
     const contract = CONTRACT[key];
     if (!contract) return { ...base, verdict: `no contract for ${key}` };
@@ -144,8 +159,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     if (code !== null)
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, false) };
     if (status >= 400) return { ...base, verdict: `a ${status} ${type} answer carries no code` };
-    if (type === "application/json")
-      return { ...base, verdict: jsonVerdict(contract, status, body) };
+    if (type === "application/json") return { ...base, ...jsonVerdict(contract, status, body) };
     if (type === "text/html") {
       if (allowed.some((k) => k.kind === "html")) return { ...base, verdict: "ok" };
       return { ...base, verdict: "an HTML answer fits no kind of the contract" };

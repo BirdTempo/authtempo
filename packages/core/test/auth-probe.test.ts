@@ -153,6 +153,44 @@ describe("the auth probe (plan 11g)", () => {
     expect(await probe(w, sessionOnly, { authorization: `Bearer ${token}` })).toEqual(expected);
   });
 
+  it("answers 401 to a wrong credential of each form that a route takes", async () => {
+    const w = world();
+    const garbage = "B".repeat(43);
+    /** One wrong credential per form, and a bearer that is no token at all for every form. */
+    const wrong: Record<string, Record<string, string>> = {
+      "wrong cookie": { cookie: `${w.config.cookieName}=ts_${garbage}` },
+      "wrong ts_ bearer": { authorization: `Bearer ts_${garbage}` },
+      "wrong tk_ bearer": { authorization: `Bearer tk_${garbage}` },
+      "garbage JWT": { authorization: "Bearer not.a.jwt" },
+      "garbage access token": { authorization: `Bearer ${garbage}` },
+      "wrong operator secret": { authorization: `Operator ${garbage}` },
+      "garbage bearer": { authorization: "Bearer nope" },
+    };
+    const formsOf: Record<string, string[]> = {
+      session: ["wrong cookie", "wrong ts_ bearer"],
+      apiToken: ["wrong tk_ bearer"],
+      sessionJwt: ["garbage JWT"],
+      accessToken: ["garbage access token"],
+      operator: ["wrong operator secret"],
+    };
+    const needs = keys.filter((key) => !authOf(key).includes("none"));
+    const results: Record<string, Answer> = {};
+    const expected: Record<string, Answer> = {};
+    for (const key of needs) {
+      const auth = authOf(key);
+      const labels = [...auth.flatMap((form) => formsOf[form] ?? []), "garbage bearer"];
+      const code = auth.includes("accessToken") ? "invalid_token" : "unauthorized";
+      for (const label of labels) {
+        const headers = wrong[label];
+        if (!headers) throw new Error(`no credential ${label}`);
+        results[`${key} with a ${label}`] = await answerOf(await w.handle(requestOf(key, headers)));
+        expected[`${key} with a ${label}`] = { status: 401, code };
+      }
+    }
+    expect(Object.keys(results).length).toBeGreaterThan(needs.length);
+    expect(results).toEqual(expected);
+  });
+
   it("a session reaches no route that takes a tk_ bearer only", async () => {
     const w = world();
     const cookie = w.cookie(await w.session("bob@example.com"));

@@ -736,8 +736,6 @@ export const ROUTES = Object.freeze([
       "session_not_fresh",
       "rate_limited",
       "invalid_credentials",
-      "invalid_token",
-      "token_expired",
       "passkey_failed",
       "conflict",
     ],
@@ -1166,12 +1164,7 @@ export const ROUTES = Object.freeze([
     feature: "oauthRegistration",
     auth: ["none"],
     codes: [],
-    oauthCodes: [
-      "invalid_client_metadata",
-      "invalid_request",
-      "invalid_redirect_uri",
-      "rate_limited",
-    ],
+    oauthCodes: ["invalid_client_metadata", "invalid_redirect_uri", "rate_limited"],
   },
   {
     method: "GET",

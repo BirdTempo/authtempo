@@ -1,6 +1,9 @@
 import { afterAll, describe, expect, it } from "vitest";
+import { ROUTE_CONTRACT } from "../../src/http/contract/index.js";
+import type { RouteContract } from "../../src/http/contract/types.js";
 import { ROUTER_CODES, ROUTES, type RouteKey } from "../../src/http/route-list.js";
-import { ANSWERS_EXEMPT } from "../answers-exempt.js";
+import { ANSWER_SHAPE_EXEMPT, ANSWERS_EXEMPT } from "../answers-exempt.js";
+import { shapePaths } from "../setup/answer-shape.js";
 
 /**
  * The check run of plan 11g Task 5. The recorder of `test/setup/answers.ts`
@@ -17,6 +20,8 @@ interface AnswerRecord {
   type: string;
   code: string | null;
   verdict: string;
+  absent: string[];
+  nulls: string[];
 }
 
 const DIR = new URL("../../.answers/", import.meta.url);
@@ -64,6 +69,46 @@ const declared = ROUTES.flatMap((r) =>
 const exempt = new Set(ANSWERS_EXEMPT.map((row) => `${row.key} ${row.code}`));
 const covered = declared.filter((d) => answered.has(d) || exempt.has(d));
 
+/**
+ * The optional and the nullable paths of each JSON answer, as the generator
+ * writes them (ruling 8). A key outside `required` gives
+ * `"<route> <status> <path> absent"`. A key whose schema admits null gives
+ * `"<route> <status> <path> null"`. The walk goes through nested objects and
+ * array items. A loosened
+ * schema adds a path here that no record answers in that form, and the
+ * check fails on it.
+ */
+function shapesOf(): string[] {
+  const contract: Record<string, RouteContract> = ROUTE_CONTRACT;
+  const shapes: string[] = [];
+  for (const [key, c] of Object.entries(contract)) {
+    for (const kind of c.alt ? [c.answer, c.alt] : [c.answer]) {
+      if (kind.kind !== "json") continue;
+      for (const path of shapePaths(kind.schema))
+        shapes.push(`${key} ${kind.status ?? 200} ${path}`);
+    }
+  }
+  return shapes;
+}
+
+/** The id of an exempt shape row: the status of the route's json answer (200, or the register's 201). */
+function shapeIdOf(row: { key: string; field: string; form: string }): string {
+  const c = (ROUTE_CONTRACT as Record<string, RouteContract>)[row.key];
+  const status = c?.answer.kind === "json" ? (c.answer.status ?? 200) : 200;
+  return `${row.key} ${status} ${row.field} ${row.form}`;
+}
+
+const shapes = shapesOf();
+/** `"<route> <status> <key> <form>"` of every shape a 2xx JSON record answers. */
+const shaped = new Set(
+  records.flatMap((r) => [
+    ...r.absent.map((k) => `${r.key} ${r.status} ${k} absent`),
+    ...r.nulls.map((k) => `${r.key} ${r.status} ${k} null`),
+  ]),
+);
+const shapeExempt = new Set(ANSWER_SHAPE_EXEMPT.map((row) => shapeIdOf(row)));
+const shapesCovered = shapes.filter((s) => shaped.has(s) || shapeExempt.has(s));
+
 function fail(lines: string[]): void {
   for (const line of lines) console.error(`check-answers: FAIL ${line}`);
   expect(lines).toEqual([]);
@@ -72,6 +117,9 @@ function fail(lines: string[]): void {
 afterAll(() => {
   console.log(
     `check-answers: routes=${recorded.size} of ${keys.length} answers=${records.length} codes=${covered.length} of ${declared.length} exempt=${ANSWERS_EXEMPT.length}`,
+  );
+  console.log(
+    `check-shapes: keys=${shapesCovered.length} of ${shapes.length} exempt=${ANSWER_SHAPE_EXEMPT.length}`,
   );
 });
 
@@ -99,6 +147,37 @@ describe("the answers of the test run (plan 11g)", () => {
         return `${d.slice(0, at)} declares ${d.slice(at + 1)} and no test answers it`;
       }),
     );
+  });
+
+  it("answers each optional key absent and each nullable key null at least once, or has a row", () => {
+    const gaps = shapes.filter((s) => !shaped.has(s) && !shapeExempt.has(s));
+    fail(
+      gaps.map((s) => {
+        const parts = s.split(" ");
+        const [form, field, status] = [parts.pop(), parts.pop(), parts.pop()];
+        const key = parts.join(" ");
+        return form === "absent"
+          ? `${key} never answers ${status} without ${field}, which its schema calls optional`
+          : `${key} never answers ${status} with ${field} null, which its schema calls nullable`;
+      }),
+    );
+  });
+
+  it("needs every row of ANSWER_SHAPE_EXEMPT", () => {
+    const known = new Set(shapes);
+    const lines: string[] = [];
+    const seen = new Set<string>();
+    for (const row of ANSWER_SHAPE_EXEMPT) {
+      const id = shapeIdOf(row);
+      const calls = row.form === "absent" ? "optional" : "nullable";
+      if (shaped.has(id)) lines.push(`the shape row ${id} is not needed: a test answers it`);
+      if (!known.has(id))
+        lines.push(`the shape row ${id} names a key the schema does not call ${calls}`);
+      if (row.reason.trim() === "") lines.push(`the shape row ${id} has no reason`);
+      if (seen.has(id)) lines.push(`the shape row ${id} is listed twice`);
+      seen.add(id);
+    }
+    fail(lines);
   });
 
   it("needs every row of ANSWERS_EXEMPT", () => {
