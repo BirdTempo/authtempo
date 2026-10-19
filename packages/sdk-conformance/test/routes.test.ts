@@ -55,6 +55,21 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "GET",
+    path: "/operator/secrets/status",
+    reason: "the secret status command of the CLI calls it (plan 11c2)",
+  },
+  {
+    method: "POST",
+    path: "/operator/secrets/rewrap",
+    reason: "the secret rewrap command of the CLI calls it (plan 11c2)",
+  },
+  {
+    method: "GET",
+    path: "/operator/info",
+    reason: "the info command of the CLI calls it with the operator secret (plan 11c2)",
+  },
+  {
+    method: "GET",
     path: "/user/change-email/confirm",
     reason: "the confirm page of the mailed change-of-address link; a browser opens it (plan 12a)",
   },

@@ -1,6 +1,6 @@
 ---
 title: authtempo secret rewrap
-description: Reseal the rows of the old app secret versions under the current version through the operator route. The run ends when no old row remains, the pass ends, or it reaches --max-calls.
+description: Reseal the rows of old app secret versions under the current version. The run ends when no old row remains, the pass ends, or it reaches --max-calls.
 type: reference
 sources:
   - packages/cli/src/commands/secret.ts
