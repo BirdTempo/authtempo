@@ -145,7 +145,9 @@ The owner runs or decides each item below. No task of plan 11b runs one. This is
 
 - At publication, add a WAF rate rule on the demo zone, and choose the Workers plan. No owned limit holds the count of requests in full.
 - One request makes at most four Durable Object calls. The count of `apps/demo/src/flood.ts` takes 600 requests per IP per minute in each isolate, and it is weak, because each isolate counts alone.
-- Without the WAF rule, a flood across isolates can use up the 100,000 requests a day of Workers Free. The demo then stops for that day.
+- Workers Free has daily quotas of 100,000 requests, and also of 100,000 Durable Object requests and 100,000 rows written. A call over a quota fails until 00:00 UTC. The source is the Durable Objects pricing page, last updated 2026-10-18, read 2026-10-20.
+- With four Durable Object calls a request, a flood ends the Durable Object quota after about 25,000 requests. The demo then stops for the rest of that day.
+- One new sandbox writes 24 rows by the SQLite cursor counts of a local pool probe (2026-10-20), and each flow writes more. So on Workers Free, the rows-written quota ends after about 4,100 new sandboxes a day. At the gate total of 600 an hour, that is about seven hours. Choose the plan, or a lower gate total, with this number.
 - On Workers Paid, Cloudflare bills each request and each Durable Object call of such a flood.
 - The gate total of 600 sandboxes an hour is one pool for all visitors. One IPv6 /48 holds 65,536 /64 keys, so one host can fill the total in 120 requests. The /64 or /48 key of core `ipKey` is an owner choice.
 

@@ -25,6 +25,14 @@ import { readBodyField, readJsonField } from "./read-body.js";
  *   Workers Free and stop the demo for that day. On Workers Paid, Cloudflare
  *   bills each request and each Durable Object call. The WAF rate rule at
  *   publication is then the only control of such a flood: an owner input.
+ * - Durable Objects pricing page, last updated 2026-10-18 (re-review R9):
+ *   Workers Free has daily quotas of 100,000 Durable Object requests,
+ *   13,000 GB-s, 5 million rows read, and 100,000 rows written. A request
+ *   over a quota fails until 00:00 UTC. With four calls a request, the
+ *   Durable Object quota ends before the Workers quota. One create writes
+ *   24 rows by the SQLite cursor counts (a pool probe of 2026-10-20). So the
+ *   rows-written quota ends after about 4,100 new sandboxes a day, below the
+ *   gate total of 600 an hour. The flows write more: an owner input.
  */
 
 /** A route as "<METHOD> <path under /auth>", with :provider for a provider name. */
