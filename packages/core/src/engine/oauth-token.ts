@@ -12,12 +12,13 @@ import type { DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { resourceOf } from "../primitives/resource.js";
-import type { OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
+import type { OAuthClientRow, OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
+import { subjectFor, userOfSubject } from "./oauth-subject.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -66,7 +67,8 @@ export interface OAuthAccess {
 
 interface Grant {
   user: UserRow;
-  clientId: string;
+  /** The client of the grant: its id and its subject type. */
+  client: OAuthClientRow;
   /** The scopes of this access token. */
   scopes: string[];
   /** The scopes of the grant, which a new refresh row keeps. */
@@ -173,7 +175,7 @@ async function writeRefresh(
     tokenHash: await sha256Hex(token),
     familyId: g.familyId,
     userId: g.user.id,
-    clientId: g.clientId,
+    clientId: g.client.id,
     scopes: g.grantScopes,
     resource: g.resource,
     expiresAt: new Date(now.getTime() + oauth.refreshTtlDays * DAY_MS),
@@ -211,7 +213,7 @@ async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> 
     return false;
   return (
     (await config.storage.findOne("oauthConsent", [
-      { field: "clientId", op: "eq", value: g.clientId },
+      { field: "clientId", op: "eq", value: g.client.id },
       { field: "userId", op: "eq", value: g.user.id },
     ])) !== null
   );
@@ -226,11 +228,13 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
   const exp = iat + oauth.accessTtlMinutes * 60;
   const scope = g.scopes.join(" ");
   const issuer = issuerOf(config);
+  // The user id, or the pairwise subject of the client's sector (plan 12e).
+  const sub = await subjectFor(config, g.user.id, g.client);
   const access = await signToken(config, ACCESS_TOKEN_TYPE, {
     iss: issuer,
-    sub: g.user.id,
+    sub,
     aud: g.resource,
-    client_id: g.clientId,
+    client_id: g.client.id,
     scope,
     iat,
     exp,
@@ -269,8 +273,8 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
   if (g.spentId === null && g.scopes.includes("openid")) {
     const claims: Record<string, unknown> = {
       iss: issuer,
-      sub: g.user.id,
-      aud: g.clientId,
+      sub,
+      aud: g.client.id,
       iat,
       exp,
       at_hash: await tokenHashClaim(alg, access),
@@ -350,7 +354,7 @@ export async function exchangeCode(
     return oauthFail("invalid_grant");
   return issueTokens(config, {
     user,
-    clientId: client.id,
+    client,
     scopes: data.scopes,
     grantScopes: data.scopes,
     resource: data.resource,
@@ -461,7 +465,8 @@ export async function refreshGrant(
   if (spent !== 1) return reuse(config, row);
   return issueTokens(config, {
     user,
-    clientId: row.clientId,
+    // The same client as the row's: the check at the start compared the ids.
+    client,
     scopes,
     grantScopes: row.scopes,
     resource: row.resource,
@@ -505,7 +510,8 @@ export async function revokeToken(
 
 /** A valid access token: of a user (`oauth`), or of a client that acts for no user (`oauth-client`, plan 12e). */
 export type ResolvedAccess =
-  | { kind: "oauth"; access: OAuthAccess }
+  /** `subject`: the token's `sub`, a pairwise subject for a pairwise client (plan 12e). */
+  | { kind: "oauth"; access: OAuthAccess; subject: string }
   | { kind: "oauth-client"; access: OAuthClientAccess };
 
 /**
@@ -554,10 +560,18 @@ export async function resolveAccessToken(
   }
   // Each scope must still be a scope of this config, as for a client token (ruling 29 of plan 12e).
   if (!scopes.every((s) => oauth.scopes.has(s))) return null;
-  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: p.sub }]);
+  // The map back of a pairwise sub needs the client's sector (plan 12e Task 11).
+  const client = await config.storage.findOne("oauthClient", [
+    { field: "id", op: "eq", value: p.client_id },
+  ]);
+  if (!client) return null;
+  const userId = await userOfSubject(config, p.sub, client);
+  if (userId === null) return null;
+  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
   if (!user) return null;
   return {
     kind: "oauth",
+    subject: p.sub,
     access: {
       user,
       clientId: p.client_id,
@@ -578,12 +592,18 @@ function cnfJkt(cnf: unknown): string | null | undefined {
   return typeof jkt === "string" ? jkt : undefined;
 }
 
-/** The userinfo claims by scope (OIDC Core 1.0 section 5.3), or null without `openid`. */
-export function userinfoClaims(access: OAuthAccess): Record<string, unknown> | null {
+/**
+ * The userinfo claims by scope (OIDC Core 1.0 section 5.3), or null without
+ * `openid`. `subject` is the token's `sub`: the user id, or a pairwise subject.
+ */
+export function userinfoClaims(
+  access: OAuthAccess,
+  subject: string,
+): Record<string, unknown> | null {
   if (!access.scopes.includes("openid")) return null;
   const { user } = access;
   return {
-    sub: user.id,
+    sub: subject,
     ...(access.scopes.includes("email")
       ? { email: user.email, email_verified: user.emailVerified }
       : {}),

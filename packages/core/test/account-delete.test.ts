@@ -99,11 +99,10 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
  * The child models of schema version 11 that no flow writes yet (plan 12e
  * Task 1). A seeded row would be a state the product cannot reach. Tasks 11,
  * 14, and 16 of plan 12e write the flows, and each one takes its model out
- * of this set.
+ * of this set. Task 11 took `oauthSubject` out: a pairwise grant writes it.
  */
 const NO_FLOW_YET: ReadonlySet<(typeof USER_CHILD_MODELS)[number]> = new Set([
   "oauthDevice",
-  "oauthSubject",
   "oauthSessionClient",
   "oauthLogout",
 ]);
@@ -149,10 +148,17 @@ async function addPasskey(w: World, user: UserRow) {
   if (!added.ok) throw new Error(added.code);
 }
 
-/** An OAuth consent and a refresh token of the session's user, through the routes. */
-async function oauthGrant(w: World, token: string) {
+/**
+ * An OAuth consent and a refresh token of the session's user, through the
+ * routes. `subject_type` pairwise also writes the user's `oauthSubject` row.
+ */
+async function oauthGrant(w: World, token: string, subjectType: "public" | "pairwise" = "public") {
   const reg = await w.handle(
-    post("/auth/oauth/register", { redirect_uris: [REDIRECT], client_name: "Test" }),
+    post("/auth/oauth/register", {
+      redirect_uris: [REDIRECT],
+      client_name: "Test",
+      subject_type: subjectType,
+    }),
   );
   if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
   const clientId = ((await reg.json()) as { client_id: string }).client_id;
@@ -241,6 +247,7 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     if (!second.ok) throw new Error(second.code);
     expect((await createApiToken(w.auth.config, { user: me.user, name: "ci" })).ok).toBe(true);
     await oauthGrant(w, me.token);
+    await oauthGrant(w, me.token, "pairwise");
     // A solo organization, a team of Bob's where the user is an admin, and an
     // organization of Bob's that invites the user's address.
     const solo = await organization(w, me.user, "ada-solo");

@@ -4,6 +4,7 @@ import { decodeJws } from "../primitives/jwk.js";
 import { issuerOf } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
+import { subjectFor } from "./oauth-subject.js";
 import {
   liveUser,
   type OAuthAccess,
@@ -99,7 +100,8 @@ async function accessAnswer(
     active: true,
     scope: access.scopes.join(" "),
     client_id: access.clientId,
-    sub: resolved.kind === "oauth" ? resolved.access.user.id : access.clientId,
+    // A user token answers its own sub: a pairwise subject for a pairwise client.
+    sub: resolved.kind === "oauth" ? resolved.subject : access.clientId,
     aud: access.resource,
     iss: issuerOf(config),
     exp: seconds(access.expiresAt),
@@ -133,7 +135,8 @@ async function refreshAnswer(
     active: true,
     scope: served.join(" "),
     client_id: row.clientId,
-    sub: row.userId,
+    // The row holds the user id; the caller is the row's client, so it gets its own subject.
+    sub: await subjectFor(config, row.userId, caller.client),
     aud: row.resource,
     iss: issuerOf(config),
     exp: seconds(row.expiresAt),

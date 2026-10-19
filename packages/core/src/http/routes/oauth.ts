@@ -316,16 +316,16 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       const bound = { token: dpopToken, jkt: r.access.dpopJkt };
       if (!(await resourceProofHolds(config, request, url, bound)))
         return userinfoRefused(401, "DPoP", "invalid_dpop_proof");
-      const claims = userinfoClaims(r.access);
+      const claims = userinfoClaims(r.access, r.subject);
       return claims ? json(claims) : userinfoRefused(403, "DPoP", "insufficient_scope");
     }
     const bearer = readBearer(request);
     // A client_credentials token names no user, so userinfo has no claims for it.
     const r = bearer ? await resolveAccessToken(config, bearer) : null;
     // RFC 9449 section 7.2: a bound token never passes as a Bearer token.
-    const access = r?.kind === "oauth" && r.access.dpopJkt === null ? r.access : null;
+    const access = r?.kind === "oauth" && r.access.dpopJkt === null ? r : null;
     if (!access) return userinfoRefused(401, bearer ? "Bearer" : null, "invalid_token");
-    const claims = userinfoClaims(access);
+    const claims = userinfoClaims(access.access, access.subject);
     if (!claims) return userinfoRefused(403, "Bearer", "insufficient_scope");
     return json(claims);
   };

@@ -8,6 +8,7 @@ import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { newClientSecret } from "./oauth-client-secret.js";
 import { BUILT_IN_SCOPES, type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
+import { redirectSector } from "./oauth-subject.js";
 
 /**
  * The OAuth clients (plan 9g, spec 8.13 item 1; plan 12e, spec 8.16). A
@@ -426,6 +427,17 @@ function readClientMetadata(
   }
   const subjectType = m.subject_type ?? "public";
   if (subjectType !== "public" && subjectType !== "pairwise") return meta("subject_type");
+  if (subjectType === "pairwise") {
+    // `sector_identifier_uri` is not in plan 12e (OIDC Core 8.1). A document
+    // drops it: its sector is the host of its id (`sectorOf`). Elsewhere it
+    // is refused, because its sector would differ from the one core takes.
+    if (!absent(m.sector_identifier_uri)) {
+      if (!cimd) return meta("sector_identifier_uri");
+      dropped.push("sector_identifier_uri");
+    }
+    // A cl_ client needs one host over all its redirect URIs. A document's redirect hosts never set its sector.
+    if (!cimd && redirectSector(redirectUris) === null) return meta("subject_type");
+  }
   // One key of one alg signs every token (owner decision 1).
   if (
     !absent(m.id_token_signed_response_alg) &&
