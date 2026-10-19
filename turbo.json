@@ -5,6 +5,10 @@
     // The site build reads the root package.json, SECURITY.md, and LICENSE
     // (apps/site/src/data/repo.ts). Without these inputs, a cache hit serves a
     // stale license or a stale empty state (ruling 21 of the plan 11b lane).
+    // The docs pages also import each example file below with ?raw, and no
+    // example is a dependency of the site (ruling 22). The [...path] folder of
+    // next is a * here, because a glob reads [ ] as a set of characters.
+    // apps/site/test/turbo-inputs.test.ts holds the list to the imports.
     "@authtempo/site#build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"],
@@ -12,7 +16,35 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/package.json",
         "$TURBO_ROOT$/SECURITY.md",
-        "$TURBO_ROOT$/LICENSE"
+        "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/examples/elysia/src/app.ts",
+        "$TURBO_ROOT$/examples/elysia/test/app.test.ts",
+        "$TURBO_ROOT$/examples/mcp-server/src/auth.ts",
+        "$TURBO_ROOT$/examples/mcp-server/src/fetch.ts",
+        "$TURBO_ROOT$/examples/mcp-server/src/index.ts",
+        "$TURBO_ROOT$/examples/mcp-server/src/mcp.ts",
+        "$TURBO_ROOT$/examples/nestjs/src/app.ts",
+        "$TURBO_ROOT$/examples/nestjs/test/app.test.ts",
+        "$TURBO_ROOT$/examples/next/app/auth/*/route.ts",
+        "$TURBO_ROOT$/examples/next/app/layout.tsx",
+        "$TURBO_ROOT$/examples/next/app/page.tsx",
+        "$TURBO_ROOT$/examples/next/app/providers.tsx",
+        "$TURBO_ROOT$/examples/next/lib/auth.ts",
+        "$TURBO_ROOT$/examples/next/proxy.ts",
+        "$TURBO_ROOT$/examples/node/src/app.ts",
+        "$TURBO_ROOT$/examples/node/src/main.ts",
+        "$TURBO_ROOT$/examples/node/src/server-bun.ts",
+        "$TURBO_ROOT$/examples/node/src/server-node.ts",
+        "$TURBO_ROOT$/examples/node/test/e2e.ts",
+        "$TURBO_ROOT$/examples/react/src/App.tsx",
+        "$TURBO_ROOT$/examples/react/src/main.tsx",
+        "$TURBO_ROOT$/examples/worker-d1/src/index.ts",
+        "$TURBO_ROOT$/examples/worker-d1/test/sign-in.test.ts",
+        "$TURBO_ROOT$/examples/worker-d1/wrangler.jsonc",
+        "$TURBO_ROOT$/examples/worker-postgres/scripts/migrate.ts",
+        "$TURBO_ROOT$/examples/worker-postgres/src/index.ts",
+        "$TURBO_ROOT$/examples/worker-postgres/test/sign-in.test.ts",
+        "$TURBO_ROOT$/examples/worker-postgres/wrangler.jsonc"
       ]
     },
     "typecheck": { "dependsOn": ["^build"] },
