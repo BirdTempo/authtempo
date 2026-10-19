@@ -9,6 +9,7 @@ import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
 import { ROUTES } from "@authtempo/core/routes";
+import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
@@ -26,6 +27,7 @@ import { checkIcons } from "./check-icons.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
 import { checkMcp } from "./check-mcp.ts";
+import { checkMigrate } from "./check-migrate.ts";
 import { checkMotion } from "./check-motion.ts";
 import { checkOpenApi } from "./check-openapi.ts";
 import { checkRoutes } from "./check-routes.ts";
@@ -191,6 +193,18 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         helpRuns(),
         ALL_CHECK_CODES,
         (url) => docsPages().find((p) => pageUrl(p.path) === url)?.source ?? null,
+      ),
+  },
+  {
+    // The guide shape of spec 23 item 9 against the readers of the importer and the
+    // conflict anchors of the import page (plan 11f Task 10).
+    name: "check-migrate",
+    run: () =>
+      checkMigrate(
+        docsPages(),
+        Object.keys(PROVIDER_FILES),
+        distPageOrEmpty("/docs/reference/cli/import/"),
+        CONFLICT_REASONS,
       ),
   },
   {
