@@ -13,9 +13,9 @@ import { readBodyField, readJsonField } from "./read-body.js";
  *   storage per account on Workers Free. 600 sandboxes an hour, each with at
  *   most 10 rows of each counted table and 50 mails, stay far below it.
  * - Durable Objects limits page, last updated 2026-06-01: 100 bound
- *   parameters per query and 2 MB per row. No query here binds a value.
+ *   parameters per query and 2 MB per row. Each query here binds at most two values.
  * - Workers limits page, last updated 2026-10-12: a request body of 100 MB
- *   on the Free plan. The demo cap bodyBytes is 16 KiB.
+ *   on the Free and Pro Cloudflare plans. The demo cap bodyBytes is 16 KiB.
  * - Workers limits page, last updated 2026-10-12: 100,000 requests a day on
  *   Workers Free. The gate total holds the new sandboxes; the WAF rate rule
  *   at publication is an owner-run item and helps only.

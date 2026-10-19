@@ -6,7 +6,8 @@ const KEEP_MS = DEMO_LIMITS.windowMs;
 
 /**
  * The one gate of new sandboxes, at idFromName("gate"). It keeps one row per
- * admitted sandbox with its IP and time, and no other place stores an IP.
+ * admitted sandbox with its IP and time. No other place keeps an IP past one
+ * hour: each sandbox stores one in its own rows, and its alarm deletes them.
  * Per window, it admits sandboxesPerIp rows of one IP and sandboxesTotal
  * rows in all. Its alarm deletes each IP one hour after its visit (ruling 32).
  */
