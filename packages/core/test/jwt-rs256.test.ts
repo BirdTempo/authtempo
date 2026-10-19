@@ -2,7 +2,7 @@ import { createLocalJWKSet, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../src/config.js";
 import { publicKeySet, signToken, verifyLocal } from "../src/engine/jwt.js";
-import { sha256Hex } from "../src/primitives/crypto.js";
+import { sha256Hex, toBase64Url } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import { BASE_URL, get, makeAuth } from "./helpers.js";
 import { codeFor, exchange, ISSUER, oauthHandle, RESOURCE, signedIn } from "./oauth-helpers.js";
@@ -35,6 +35,13 @@ describe("jwtMint.alg RS256 (plan 12e, owner decision 1)", () => {
       const { protectedHeader } = await jwtVerify(token, keys, { issuer: ISSUER, currentDate });
       expect({ kind, alg: protectedHeader.alg }).toEqual({ kind, alg: "RS256" });
     }
+    // OIDC Core 3.1.3.6: under RS256 the at_hash is the left half of SHA-256 of the access token.
+    const digest = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t.access_token)),
+    );
+    const atHash = toBase64Url(digest.slice(0, 16));
+    expect(atHash).toHaveLength(22);
+    expect(decodeJws(t.id_token)?.payload.at_hash).toBe(atHash);
     // The access token still routes by its JWS shape, as kind oauth (plan 12e deviation 2).
     const bearer = { authorization: `Bearer ${t.access_token}` };
     expect(await h.auth.caller(get("/mcp", bearer))).toMatchObject({
