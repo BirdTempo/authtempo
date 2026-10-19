@@ -65,7 +65,7 @@ describe("move from Better Auth", () => {
     ]);
   });
 
-  it("keeps an old password row after the alias, and rehashes it at the first sign-in", async () => {
+  it("keeps an old password row after the alias, and rehashes it at the first right sign-in", async () => {
     // The rows of a Better Auth user with a credential account, as the
     // compatibility storage reads them from the app's tables after the alias.
     const storage = createMemoryAdapter();

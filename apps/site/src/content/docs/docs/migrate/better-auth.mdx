@@ -148,7 +148,7 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 - `autoSignIn: false` is refused unless `requireEmailVerification` is true. The sign-up answer stays Better Auth's: a session unless `requireEmailVerification` is true, and `USER_ALREADY_EXISTS` for a taken address.
 - Core refuses a secret under 32 characters, and a current secret under an estimated 100 bits of entropy, at start. Better Auth only warns.
 - `disableSignUp` maps to core's `signUp: false` only when every method and social provider that creates a user sets it. A mix is refused at start. A provider's `disableImplicitSignUp` is refused.
-- Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
+- Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first right sign-in.
 - The callback URL at each provider is `<baseURL><basePath>/social/<provider>/callback`, not `/api/auth/callback/<provider>`.
 - The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.
 - A Better Auth path that the app calls with its own `fetch` answers 404. Call the client method instead. The account paths and the email code paths are served in Better Auth's shapes.

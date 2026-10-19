@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { call, type Harness, harness } from "../support/harness.ts";
 import { createCognitoAuth } from "./cognito.ts";
 
-// The fixture export of the Cognito reader: Cara, one CONFIRMED user, with no hash.
+// The fixture export of the Cognito reader holds Cara, one CONFIRMED user, with no hash.
 const f = FIXTURE_EXPORTS.cognito;
 
 /** A fake Cognito: InitiateAuth passes for one password and refuses every other. */
@@ -23,7 +23,7 @@ function fakeCognito(password: string) {
   return { impl, calls };
 }
 
-/** The hash of the one password row in the database. */
+/** Reads the hash of the one password row in the database. */
 async function onlyHash(h: Harness): Promise<string> {
   const rows = await h.storage.findMany("password", []);
   expect(rows.length).toBe(1);
@@ -38,7 +38,7 @@ describe("move users from Amazon Cognito", () => {
       legacyVerify: true,
     });
     expect(report.created.password).toBe(1);
-    // The marker that core reads as "ask the old system".
+    // Core reads this marker as "ask the old system".
     expect(await onlyHash(h)).toBe(LEGACY_VERIFY_HASH);
 
     const cognito = fakeCognito("right horse battery");
