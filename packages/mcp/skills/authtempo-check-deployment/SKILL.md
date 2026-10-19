@@ -23,7 +23,7 @@ metadata:
 3. For each failure, call `docs.read` with the path `/docs/reference/cli/check/` and the code as the section.
 4. Fix the cause with the person, and deploy again.
 5. Call `check` again, until each check passes.
-6. The tool skips the schema check. Run that check in the shell, with the origin as the first argument.
+6. The tool skips the two schema checks. Run them in the shell, with the origin as the first argument.
 7. On D1, run `authtempo check --target d1 --database <name>` with the database name of the wrangler config.
 8. On Postgres, run `authtempo check --target postgres`. It reads the connection string from `DATABASE_URL`.
 

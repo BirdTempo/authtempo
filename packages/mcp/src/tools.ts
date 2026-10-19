@@ -461,7 +461,7 @@ export const TOOLS: readonly ToolRow[] = [
     name: "check",
     title: "Check a deployed authtempo API",
     description:
-      "Fetches the public documents of a deployment from this machine, sends no credential, and writes nothing. It runs authtempo check on base_url, and fetches no other origin. It answers each check as its id, status, code, and docs link, and each warning as its code. It answers no text of the deployment. The tool skips the schema check: run authtempo check with --target in the shell for it.",
+      "Fetches the public documents of a deployment from this machine, sends no credential, and writes nothing. It runs authtempo check on base_url, and fetches no other origin. It answers each check as its id, status, code, and docs link, and each warning as its code. It answers no text of the deployment. The tool skips the two schema checks: run authtempo check with --target in the shell for them.",
     surfaces: ["local"],
     wraps: {
       command: "check",

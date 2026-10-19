@@ -223,7 +223,7 @@ Writes the authtempo migrations into the Postgres database that the server's env
 
 <h3 id="tool-check"><code>check</code></h3>
 
-Fetches the public documents of a deployment from this machine, sends no credential, and writes nothing. It runs authtempo check on base_url, and fetches no other origin. It answers each check as its id, status, code, and docs link, and each warning as its code. It answers no text of the deployment. The tool skips the schema check: run authtempo check with --target in the shell for it.
+Fetches the public documents of a deployment from this machine, sends no credential, and writes nothing. It runs authtempo check on base_url, and fetches no other origin. It answers each check as its id, status, code, and docs link, and each warning as its code. It answers no text of the deployment. The tool skips the two schema checks: run authtempo check with --target in the shell for them.
 
 | Fact | Value |
 | --- | --- |
@@ -302,9 +302,9 @@ The `bindingPerMinute` limit is eventually consistent and local to a location. S
 
 The drift test of the package holds these lists, because `check-mcp` reads only the wire.
 
-- No tool runs `authtempo keys` or `authtempo mcp`. The first needs the operator secret and changes a live deployment. The second installs this server.
+- No tool runs `authtempo keys`, `authtempo mcp`, `authtempo secret`, or `authtempo info`. `keys` needs the operator secret and changes a live deployment. `mcp` installs this server. `secret` makes a secret, and a secret must not enter the context of an agent. `info` is a support report for a person.
 - D1 migrations stay a shell command: run `authtempo migrate --target d1`. The `schema.migrate` tool serves Postgres only.
-- The `check` tool skips the schema check, because that check needs a database. Run `authtempo check` with `--target` in the shell for it.
+- The `check` tool skips the two schema checks, because they need a database. Run `authtempo check` with `--target` in the shell for them.
 - No tool passes `--repair` to `authtempo import`. A repair writes into users that exist, so check each such user in the app, then run it in the shell.
 - The `check` tool keeps the timeout of the CLI, 10 s a request. So one call to a slow host can take about 70 s.
 
