@@ -4,7 +4,7 @@ import { requestResetOtp, resetPasswordWithOtp } from "../src/engine/email-otp.j
 import { familyEnds } from "../src/engine/oauth-family.js";
 import { deleteOAuthTokens, revokeGrant } from "../src/engine/oauth-grants.js";
 import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
-import { resolveSession } from "../src/engine/sessions.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { APP_ORIGIN, get, post } from "./helpers.js";
@@ -628,5 +628,95 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
     expect((await h.storage.findMany("oauthToken", [])).map((r) => r.userId)).toEqual([
       bob.user.id,
     ]);
+  });
+});
+
+describe("a family end that fails after the commit (ruling 45 of plan 12e)", () => {
+  /**
+   * A handle whose storage throws at the end mark of a family, with hooks
+   * that record each ended session and each user update. The reset, the
+   * change, and the move commit first; then the family end throws.
+   */
+  async function failingEnd() {
+    const outer = pwOAuth();
+    const events: string[] = [];
+    const storage = new Proxy(outer.storage, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (key !== "create" || typeof value !== "function") return value;
+        return async (model: string, data: { purpose?: string }) => {
+          if (model === "verification" && data.purpose === "oauth-family-end")
+            throw new Error("storage down");
+          return (value as (...a: unknown[]) => Promise<unknown>).call(target, model, data);
+        };
+      },
+    }) as StorageAdapter;
+    const h = {
+      ...pwHandle(
+        { hash: FAST },
+        {
+          oauth: OAUTH,
+          storage,
+          clock: outer.clock,
+          hooks: {
+            session: { afterEnd: (e) => void events.push(`afterEnd:${e.reason}`) },
+            user: { afterUpdate: (e) => void events.push(`afterUpdate:${e.via}`) },
+          },
+        },
+      ),
+      storage: outer.storage,
+    };
+    const c = await codeFor(h);
+    await tokensOf(h, c);
+    // A second session of the user, which the reset and the change end.
+    await createSession(h.config, { userId: c.user.id, ip: null, userAgent: null });
+    return { h, c, events };
+  }
+
+  const notices = (h: { mails: { subject: string }[] }) =>
+    h.mails.filter((m) => m.subject.startsWith("Security notice")).length;
+
+  it("a reset sends its notice and runs its hooks before the family end throws", async () => {
+    const { h, c, events } = await failingEnd();
+    await requestPasswordReset(h.config, { email: c.user.email, ip: null });
+    await expect(
+      resetPassword(h.config, {
+        token: h.mails.at(-1)?.token ?? "",
+        password: "a new long password",
+        ip: null,
+        userAgent: null,
+      }),
+    ).rejects.toThrow("storage down");
+    expect(notices(h)).toBe(1);
+    expect(events).toContain("afterEnd:password_reset");
+    // The reset committed: its token delete holds.
+    expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
+  });
+
+  it("a password change sends its notice and runs its hooks before the family end throws", async () => {
+    const { h, c, events } = await failingEnd();
+    const session = await resolveSession(h.config, c.token);
+    if (!session) throw new Error("no session");
+    await expect(
+      changePassword(h.config, { session, newPassword: "a new long password" }),
+    ).rejects.toThrow("storage down");
+    expect(notices(h)).toBe(1);
+    expect(events).toContain("afterEnd:password_change");
+    expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
+  });
+
+  it("an email change sends its notice and runs its hooks before the family end throws", async () => {
+    const { h, c, events } = await failingEnd();
+    const session = await resolveSession(h.config, c.token);
+    if (!session) throw new Error("no session");
+    const sent = await requestEmailChange(h.config, { session, newEmail: "ada@new.example.com" });
+    if (!sent.ok) throw new Error(sent.code);
+    const token = /token=(ec_[A-Za-z0-9_-]{43})/.exec(h.mails.at(-1)?.text ?? "")?.[1] ?? "";
+    await expect(
+      confirmEmailChange(h.config, { token, ip: null, userAgent: null }),
+    ).rejects.toThrow("storage down");
+    expect(notices(h)).toBe(1);
+    expect(events).toContain("afterUpdate:email_change");
+    expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
   });
 });

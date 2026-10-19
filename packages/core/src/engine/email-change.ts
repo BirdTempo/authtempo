@@ -319,7 +319,6 @@ async function finish(
   ip: string | null,
   userAgent: string | null,
 ): Promise<void> {
-  await endFamilies(config, move.families);
   await runAfter(
     "user.afterUpdate",
     config.hooks.user.afterUpdate,
@@ -334,6 +333,9 @@ async function finish(
     ip,
     userAgent,
   });
+  // Last, after the hook and the notice (ruling 45 of plan 12e). A storage
+  // throw here still answers 500, and the move is committed.
+  await endFamilies(config, move.families);
 }
 
 /** The confirm by link. It needs no session: the person may open the mail on another device. */

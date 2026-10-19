@@ -1126,8 +1126,6 @@ export async function runReset(
     }
   }
   if (reset.ok) {
-    // An ok answer means the transaction committed.
-    await endFamilies(config, families);
     // After the commit, before the session hooks and before a challenge answer (plan 12a).
     await verify.after(reset.value.user);
     await made.after(reset.value.user);
@@ -1148,6 +1146,10 @@ export async function runReset(
       ip: input.ip,
       userAgent: input.userAgent,
     });
+    // An ok answer means the transaction committed. The families end last
+    // (ruling 45 of plan 12e). A storage throw here still answers 500. The
+    // notice and the hooks have run then, and the deletes are committed.
+    await endFamilies(config, families);
   }
   return reset;
 }
@@ -1536,7 +1538,6 @@ export async function changePassword(
     throw err;
   }
   if (changed.ok) {
-    await endFamilies(config, families);
     await sessionsEnded(config, ended, "password_change");
     // After the commit (plan 12a). A first password is a change of a way in too.
     await sendNotice(config, {
@@ -1545,6 +1546,8 @@ export async function changePassword(
       ip: input.ip ?? null,
       userAgent: input.userAgent ?? null,
     });
+    // Last, after the notice and the hooks (ruling 45 of plan 12e).
+    await endFamilies(config, families);
   }
   return changed;
 }
