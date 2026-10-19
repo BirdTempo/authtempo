@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { startHandoff } from "../src/engine/handoff.js";
-import { passwordSignIn } from "../src/engine/password.js";
+import { CHALLENGE_RE, ID_RE, startHandoff } from "../src/engine/handoff.js";
+import { MAGIC_LINK_TOKEN_RE } from "../src/engine/magic-link.js";
+import {
+  PASSWORD_RESET_TOKEN_RE,
+  PASSWORD_VERIFY_TOKEN_RE,
+  passwordSignIn,
+} from "../src/engine/password.js";
+import { TWO_FACTOR_TOKEN_RE } from "../src/engine/second-factor.js";
 import { EMAIL_OTP_CONTRACT } from "../src/http/contract/email-otp.js";
 import { HANDOFF_CONTRACT } from "../src/http/contract/handoff.js";
 import { MAGIC_LINK_CONTRACT } from "../src/http/contract/magic-link.js";
@@ -63,6 +69,14 @@ async function answerOf(res: Response): Promise<Answer> {
 function requiredOf(schema: z.ZodType): string[] {
   const json = z.toJSONSchema(schema, { io: "input" }) as { required?: string[] };
   return json.required ?? [];
+}
+
+/** The `pattern` that the generator writes for one key of an object schema, or null. */
+function patternOf(schema: z.ZodType, key: string): string | null {
+  const json = z.toJSONSchema(schema, { io: "input" }) as {
+    properties?: Record<string, { pattern?: string }>;
+  };
+  return json.properties?.[key]?.pattern ?? null;
 }
 
 function query(params: Record<string, string>): string {
@@ -140,8 +154,8 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
     const SHORT = "A".repeat(42);
     /**
      * Each GET that reads its query by hand: a valid query, the keys the schema requires, and
-     * the two answers. `wrong` is one key with a value of a wrong form, and the answer of the
-     * route, for a GET whose schema holds a token to the engine's regex.
+     * the two answers. `wrong` is for a GET whose schema holds a token to the engine's regex. It
+     * names the key, a value of a wrong form, the answer of the route, and the engine's regex.
      */
     const VALID_QUERIES: {
       key: RouteKey;
@@ -150,7 +164,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
       required: readonly string[];
       valid: Answer;
       missing: Answer | null;
-      wrong?: { key: string; value: string; answer: Answer };
+      wrong?: { key: string; value: string; answer: Answer; regex: RegExp };
     }[] = [
       {
         key: "GET /magic-link/verify",
@@ -163,6 +177,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
           key: "token",
           value: `ml_${SHORT}`,
           answer: { status: 302, code: "invalid_token" },
+          regex: MAGIC_LINK_TOKEN_RE,
         },
       },
       {
@@ -192,6 +207,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
           key: "token",
           value: `pv_${SHORT}`,
           answer: { status: 302, code: "invalid_token" },
+          regex: PASSWORD_VERIFY_TOKEN_RE,
         },
       },
       {
@@ -205,6 +221,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
           key: "token",
           value: `pr_${SHORT}`,
           answer: { status: 302, code: "invalid_token" },
+          regex: PASSWORD_RESET_TOKEN_RE,
         },
       },
       {
@@ -218,6 +235,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
           key: "challenge",
           value: `tf_${SHORT}`,
           answer: { status: 302, code: "invalid_token" },
+          regex: TWO_FACTOR_TOKEN_RE,
         },
       },
       {
@@ -227,7 +245,12 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["challenge", "redirect"],
         valid: { status: 200, code: null },
         missing: { status: 400, code: "invalid_body" },
-        wrong: { key: "challenge", value: SHORT, answer: { status: 400, code: "invalid_body" } },
+        wrong: {
+          key: "challenge",
+          value: SHORT,
+          answer: { status: 400, code: "invalid_body" },
+          regex: CHALLENGE_RE,
+        },
       },
       {
         key: "GET /handoff/continue",
@@ -236,7 +259,12 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["h"],
         valid: { status: 200, code: null },
         missing: { status: 302, code: "invalid_token" },
-        wrong: { key: "h", value: "abc", answer: { status: 302, code: "invalid_token" } },
+        wrong: {
+          key: "h",
+          value: "abc",
+          answer: { status: 302, code: "invalid_token" },
+          regex: ID_RE,
+        },
       },
     ];
     const hand = Object.entries(MERGED)
@@ -264,6 +292,10 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
       }
       if (!row.wrong) continue;
       wrongForms += 1;
+      // The document's pattern is the engine's regex itself, so a copy of it fails here.
+      expect(patternOf(schema, row.wrong.key), `${row.key}: the pattern`).toBe(
+        row.wrong.regex.source,
+      );
       const wrong = { ...row.query, [row.wrong.key]: row.wrong.value };
       expect(schema.safeParse(wrong).success, `${row.key}: the wrong form`).toBe(false);
       const refused = await w.handle(get(`/auth${row.path}?${query(wrong)}`));
