@@ -8,7 +8,10 @@
     "index": { "dependsOn": ["build", "@authtempo/site#build"], "outputs": ["dist/agent/**"] },
     // The tests spawn dist/bin/authtempo-mcp.js and read dist/agent/index.json.
     "test": { "dependsOn": ["^build", "build", "index"] },
-    // tsconfig.test.json reads the dist types of @authtempo/cli/program.
-    "typecheck": { "dependsOn": ["^build"] }
+    // tsconfig.test.json reads the dist types of @authtempo/cli/program. It also
+    // reads apps/site/scripts/lib/agent.ts, which imports @authtempo/mcp/index-format
+    // from this package's own dist. So the build of mcp comes first: without it, a run
+    // that orders typecheck before build fails with TS2307 (plan 12e, review I2).
+    "typecheck": { "dependsOn": ["^build", "build"] }
   }
 }
