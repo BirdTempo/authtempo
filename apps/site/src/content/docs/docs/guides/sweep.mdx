@@ -47,7 +47,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `oauthClients` | Up to 100 OAuth clients unseen for 90 days, with no consent and no refresh token. A client of `api.oauth.clients.create` stays: you made it on purpose. |
 | `limits` | The limit windows that ended, when the limiter has a sweep. |
 | `oauthDevices` | Device grants past their expiry: pending, decided, and spent. A poll of such a code answers `expired_token` before the sweep, and `invalid_grant` after it. |
-| `oauthSessionLinks` | Links of OAuth clients to sessions that are gone, at most 50 in one sweep. Each link becomes a back-channel sign-out message: an expiry ends a session too. |
+| `oauthSessionLinks` | Links of OAuth clients to sessions that are gone, at most 250 in one sweep. Each link becomes a back-channel sign-out message: an expiry ends a session too. |
 | `oauthLogouts` | Back-channel sign-out messages, at most 50 in one sweep. Each due message gets one more attempt. The count holds the messages that a client took, and the messages that core deleted after their sixth attempt. |
 | `oauthClientSecrets` | Old OAuth client secrets past the overlap of a rotation. The sweep clears them from the client. |
 
@@ -56,12 +56,12 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 - The sweep is an `api` function, not a route. It is safe to run at any time.
 - Without a trigger, expired rows stay in the database forever.
 - The sweep fires no hook. A replayed token answers `invalid_token` after the sweep, because its row is gone.
-- The two back-channel steps run last: `oauthSessionLinks`, then `oauthLogouts`. One sweep with full caps makes about 370 storage calls at most. On D1 that needs Workers Paid, which allows 1000 queries in one run. Workers Free allows 50 (D1 limits page updated 21 April 2026, read 2026-10-20).
+- The two back-channel steps run last: `oauthSessionLinks`, then `oauthLogouts`. One sweep reads at most 250 links, in 5 pages of 50, and goes round all links. So a link whose session is gone waits at most ceil(links / 250) sweeps for its message. One sweep with full caps makes about 830 storage calls at most. On D1 that needs Workers Paid, which allows 1000 queries in one run. Workers Free allows 50 (D1 limits page updated 21 April 2026, read 2026-10-20).
 
 ## If it fails
 
 - The sweep answers no error code. A storage error throws, and the scheduled run fails in the Worker's logs.
-- A storage error in one of the two back-channel steps does not throw. The step writes one log line, `authtempo: the sweep link step stopped` or `authtempo: the sweep outbox step stopped`, and counts 0. The counts above it stay, and the next sweep goes on. On Workers Free this is what a run past 50 queries shows.
+- A storage error in one of the two back-channel steps does not throw. The step writes one log line, `authtempo: the sweep link step stopped` or `authtempo: the sweep outbox step stopped`, and counts 0. The counts above it stay, and the next sweep goes on. On Workers Free this is what a run past 50 queries shows. A stop loses no message: each link becomes a message in its own write, and a message that a stop holds before its post loses no attempt. Each sweep then sends a few messages, so they come later.
 - A `limits` count of 0 with the memory limiter is normal: the memory limiter deletes ended windows at each check.
 
 ## Next

@@ -694,6 +694,8 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(await live(w, actor.session.id)).toBe(false);
     expect(await linksOf(w, actor.session.id)).toHaveLength(1);
     expect(w.calls).toEqual([]);
+    // The sweep runs later than the link write.
+    w.auth.clock.advance(1_000);
     const swept = await sweepExpired(w.auth.config);
     expect(swept.oauthSessionLinks).toBe(1);
     expect(swept.oauthLogouts).toBe(1);
@@ -701,37 +703,48 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(await linksOf(w, actor.session.id)).toEqual([]);
   });
 
+  /** `count` live links of new sign-ins of `userId`, each one second older than the next. */
+  async function liveLinks(w: World, userId: string, clientId: string, count: number) {
+    for (let i = 0; i < count; i++) {
+      const s = await createSession(w.auth.config, { userId, ip: null, userAgent: null });
+      await linkIdToken(w.auth.config, { sessionId: s.session.id, clientId, userId });
+      w.auth.clock.advance(1_000);
+    }
+  }
+
   it("reads the links that it saw longest ago, so a live link never hides a link with no session", async () => {
     const w = world();
     const { actor } = await twoSessions(w);
     const bc = await bcClient(w, BC);
-    // 50 live links of 50 sign-ins, each one second older than the next.
-    for (let i = 0; i < 50; i++) {
-      const s = await createSession(w.auth.config, {
-        userId: actor.user.id,
-        ip: null,
-        userAgent: null,
-      });
-      await linkIdToken(w.auth.config, {
-        sessionId: s.session.id,
-        clientId: bc,
-        userId: actor.user.id,
-      });
-      w.auth.clock.advance(1_000);
-    }
-    // Then the raced link of a sign-out: the newest link, with no session.
+    // 250 live links: the 5 pages of one sweep. Then the raced link of a
+    // sign-out: the newest link, with no session.
+    await liveLinks(w, actor.user.id, bc, 250);
     const restore = await raceLink(w, actor, bc);
     await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
     restore();
     w.auth.clock.advance(1_000);
-    // The first sweep reads the 50 live links and moves each to now.
+    // The first sweep reads the 250 live links and moves each to now.
     expect((await sweepExpired(w.auth.config)).oauthSessionLinks).toBe(0);
     expect(w.calls).toEqual([]);
     w.auth.clock.advance(1_000);
-    // The second sweep reads the link with no session first.
+    // The second sweep reads the link with no session first: ceil(251 / 250) = 2 sweeps.
     expect((await sweepExpired(w.auth.config)).oauthSessionLinks).toBe(1);
     expect(w.calls.map((c) => decodeJwt(tokenOfCall(c)).sid)).toEqual([actor.session.id]);
-    expect(await w.auth.storage.findMany("oauthSessionClient", [])).toHaveLength(50);
+    expect(await w.auth.storage.findMany("oauthSessionClient", [])).toHaveLength(250);
+  });
+
+  it("reads more than one page of links in one sweep", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    // 60 live links fill the first page and part of the second; the orphan is in the second.
+    await liveLinks(w, actor.user.id, bc, 60);
+    const restore = await raceLink(w, actor, bc);
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    restore();
+    w.auth.clock.advance(1_000);
+    expect((await sweepExpired(w.auth.config)).oauthSessionLinks).toBe(1);
+    expect(w.calls.map((c) => decodeJwt(tokenOfCall(c)).sid)).toEqual([actor.session.id]);
   });
 
   it("sends the logout of a link with no session at the user's next session end", async () => {
@@ -1012,9 +1025,9 @@ describe("back-channel logout (plan 12e Task 16)", () => {
       const { actor } = await twoSessions(w);
       const bc = await bcClient(w, BC, { subject_type: subjectType });
       w.status.set(BC, 500);
-      // 200 links whose session expires, and 200 outbox rows that fail and
+      // 300 links whose session expires, and 200 outbox rows that fail and
       // are due again: more than each cap, so the caps bound the calls.
-      for (let i = 0; i < 400; i++) {
+      for (let i = 0; i < 500; i++) {
         const s = await createSession(w.auth.config, {
           userId: actor.user.id,
           ip: null,
@@ -1025,17 +1038,17 @@ describe("back-channel logout (plan 12e Task 16)", () => {
           clientId: bc,
           userId: actor.user.id,
         });
-        if (i >= 200) await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
+        if (i >= 300) await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
       }
       expect(await outbox(w)).toHaveLength(200);
       // Past the session life, and inside the 90 days of the idle client sweep.
       w.auth.clock.advance(60 * 24 * 60 * MINUTE);
       const count = countCalls(w.auth.storage);
       const swept = await sweepExpired(w.auth.config);
-      expect(swept.oauthSessionLinks).toBe(50);
+      expect(swept.oauthSessionLinks).toBe(250);
       expect(swept.oauthLogouts).toBe(0);
       expect((await outbox(w)).filter((r) => r.attempts === 2)).toHaveLength(50);
-      // Measured 2026-10-20 on the memory adapter: 317 calls public, 367 pairwise.
+      // Measured 2026-10-20 on the memory adapter: 775 calls public, 825 pairwise.
       expect(count.n, subjectType).toBeLessThan(1000);
     }
   });
@@ -1062,6 +1075,114 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     store.findMany = findMany;
     // The next sweep sends the row.
     expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(1);
+  });
+
+  it("burns no attempt on a throw between the claim and the post, and sends the token later", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    // The signing read fails after the claim, as at a storage limit.
+    const store = w.auth.storage;
+    const findOne = store.findOne.bind(store);
+    let failing = true;
+    store.findOne = ((model, where) =>
+      failing && model === "jwk"
+        ? Promise.reject(new Error("too many queries"))
+        : findOne(model, where)) as StorageAdapter["findOne"];
+    const findMany = store.findMany.bind(store);
+    store.findMany = ((model, where, opts) =>
+      failing && model === "jwk"
+        ? Promise.reject(new Error("too many queries"))
+        : findMany(model, where, opts)) as StorageAdapter["findMany"];
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    for (let i = 0; i < 8; i++) {
+      w.auth.clock.advance(MINUTE);
+      await sweepExpired(w.auth.config);
+    }
+    expect(w.calls).toEqual([]);
+    expect(await outbox(w)).toMatchObject([{ clientId: bc, attempts: 0 }]);
+    failing = false;
+    w.auth.clock.advance(MINUTE);
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(1);
+    expect(w.calls.map((c) => decodeJwt(tokenOfCall(c)).sid)).toEqual([actor.session.id]);
+    expect(await outbox(w)).toEqual([]);
+  });
+
+  it("loses no logout when each sweep stops at 50 storage calls, as on D1 Free (review Q1)", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    // 30 linked sessions that expire: 30 links, then 30 due rows.
+    const ids: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      const s = await createSession(w.auth.config, {
+        userId: actor.user.id,
+        ip: null,
+        userAgent: null,
+      });
+      await linkIdToken(w.auth.config, {
+        sessionId: s.session.id,
+        clientId: bc,
+        userId: actor.user.id,
+      });
+      ids.push(s.session.id);
+    }
+    w.auth.clock.advance(31 * 24 * 60 * MINUTE);
+    // Each storage call past 50 in one sweep throws, as D1 Free does.
+    const store = w.auth.storage;
+    const inner = { ...store };
+    let calls = 0;
+    const capped = <T>(f: () => Promise<T>): Promise<T> =>
+      ++calls > 50 ? Promise.reject(new Error("too many queries")) : f();
+    const wrap = (s: StorageAdapter): StorageAdapter => ({
+      create: (m, d) => capped(() => s.create(m, d)),
+      findOne: (m, wh) => capped(() => s.findOne(m, wh)),
+      findMany: (m, wh, o) => capped(() => s.findMany(m, wh, o)),
+      update: (m, wh, d) => capped(() => s.update(m, wh, d)),
+      delete: (m, wh) => capped(() => s.delete(m, wh)),
+      transaction: (fn) => s.transaction((tx) => fn(wrap(tx))),
+    });
+    Object.assign(store, wrap(inner));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (let sweep = 0; sweep < 20; sweep++) {
+      calls = 0;
+      await sweepExpired(w.auth.config);
+      w.auth.clock.advance(3 * 60 * MINUTE);
+    }
+    Object.assign(store, inner);
+    const sent = new Set(w.calls.map((c) => String(decodeJwt(tokenOfCall(c)).sid)));
+    expect(ids.filter((id) => !sent.has(id))).toEqual([]);
+    expect(logged.mock.calls.filter((c) => String(c[0]).includes("dropped"))).toEqual([]);
+    expect(await outbox(w)).toEqual([]);
+    expect(await w.auth.storage.findMany("oauthSessionClient", [])).toEqual([]);
+  });
+
+  it("keeps the counts above when the link step meets a storage error", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    w.auth.clock.advance(60 * 24 * 60 * MINUTE);
+    const store = w.auth.storage;
+    const findMany = store.findMany.bind(store);
+    // As D1 does past the query limit of one run.
+    store.findMany = ((model, where, opts) =>
+      model === "oauthSessionClient"
+        ? Promise.reject(new Error("too many queries"))
+        : findMany(model, where, opts)) as StorageAdapter["findMany"];
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const swept = await sweepExpired(w.auth.config);
+    expect(swept.sessions).toBe(3);
+    expect(swept.oauthSessionLinks).toBe(0);
+    expect(logged.mock.calls).toEqual([["authtempo: the sweep link step stopped", "Error"]]);
+    store.findMany = findMany;
+    // The next sweep makes the link a logout and sends it.
+    expect(await sweepExpired(w.auth.config)).toMatchObject({
+      oauthSessionLinks: 1,
+      oauthLogouts: 1,
+    });
   });
 
   it("refuses an endSessions call with no userId term: the outbox reads the user's links", async () => {

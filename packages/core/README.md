@@ -1332,8 +1332,8 @@ It answers one count for each kind of row:
 - `oauthClients`: up to 100 OAuth clients unseen for 90 days with no consent and no refresh token. A client of `api.oauth.clients.create` (kind `api`) stays: an operator made it on purpose.
 - `limits`: limit windows that ended; 0 when the limiter has no `sweep`.
 - `oauthDevices`: device grants past their expiry: pending, decided, and spent.
-- `oauthSessionLinks`: client links whose session is gone, at most 50 per sweep. Each one becomes a back-channel logout: an expiry ends a session too.
-- `oauthLogouts`: back-channel logouts, at most 50 per sweep. The two back-channel steps run last; one full sweep makes about 370 storage calls, so on D1 it needs Workers Paid (1000 queries per run; Free allows 50; D1 limits page of 21 April 2026, read 2026-10-20). A storage error in either step writes one log line and counts 0. Each due row gets one more attempt. The count holds the rows that a client took, and the rows deleted after their sixth attempt.
+- `oauthSessionLinks`: client links whose session is gone, at most 250 per sweep. The sweep reads all links in turn, so such a link waits at most ceil(links / 250) sweeps. Each one becomes a back-channel logout: an expiry ends a session too.
+- `oauthLogouts`: back-channel logouts, at most 50 per sweep. The two back-channel steps run last; one full sweep makes about 830 storage calls, so on D1 it needs Workers Paid (1000 queries per run; Free allows 50; D1 limits page of 21 April 2026, read 2026-10-20). A storage error in either step writes one log line and counts 0. A stop loses no logout: each link becomes a row in its own write, and only a post that went out and failed counts as an attempt. Each due row gets one more attempt. The count holds the rows that a client took, and the rows deleted after their sixth attempt.
 - `oauthClientSecrets`: old OAuth client secrets past the overlap of a rotation, cleared from the client.
 
 ```ts

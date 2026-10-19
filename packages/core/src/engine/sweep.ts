@@ -27,7 +27,7 @@ export interface SweepResult {
   limits: number;
   /** Device grants past `expiresAt` (plan 12e, RFC 8628): pending, decided, and spent alike. */
   oauthDevices: number;
-  /** Client links whose session is gone, each made an outbox row: at most 50 per sweep (plan 12e). */
+  /** Client links whose session is gone, each made an outbox row: at most 250 per sweep (plan 12e). */
   oauthSessionLinks: number;
   /** Back-channel logouts delivered, or deleted after their last attempt, at most 50 per sweep (plan 12e). */
   oauthLogouts: number;
@@ -97,43 +97,60 @@ async function sweepClients(storage: StorageAdapter, now: Date): Promise<number>
 }
 
 /**
- * The client links of one sweep (plan 12e Task 16, ruling 49). A link whose
- * session is gone means that the session ended: an expiry, a crash, or a
- * race between a link write and a session end. Each such link gets one
- * `oauthLogout` row in place of a silent delete. The sweep reads the links
- * that it saw longest ago, and moves each live link to now, so the next
- * sweep reads others. 50 ids and one more term stay under the 100 bound
- * parameters of a D1 statement (D1 limits page updated 21 April 2026, read
- * 2026-10-20). One step costs 4 statements, and 2 more per link with no
- * session: 104 at most. That fits the 1000 queries of Workers Paid. See
- * `LOGOUT_SWEEP_MAX` for the Free plan.
+ * The client links of one sweep (plan 12e Task 16, rulings 49 and 50). A
+ * link whose session is gone means that the session ended: an expiry, a
+ * crash, or a race between a link write and a session end. Each such link
+ * gets one `oauthLogout` row in place of a silent delete. The sweep reads
+ * the links that it saw longest ago, a page of `LINK_SWEEP_PAGE` at a time,
+ * and moves each live link to now. So the reads go round all links, and an
+ * orphan waits at most ceil(links / 250) sweeps.
+ *
+ * 50 ids and one more term stay under the 100 bound parameters of a D1
+ * statement. A page costs 3 statements, and 2 more per link with no
+ * session: 103 at most. 5 pages cost 515 at most. A full sweep with the
+ * outbox step (`LOGOUT_SWEEP_MAX`) made 825 calls at most in a test. That
+ * stays under the 1000 queries of Workers Paid (D1 limits page updated 21
+ * April 2026, read 2026-10-20).
  */
-export const LINK_SWEEP_MAX = 50;
+export const LINK_SWEEP_PAGE = 50;
+export const LINK_SWEEP_PAGES = 5;
 
 async function sweepLinks(storage: StorageAdapter, now: Date): Promise<number> {
-  const links = await storage.findMany("oauthSessionClient", [], {
-    sort: [
-      { field: "updatedAt", dir: "asc" },
-      { field: "id", dir: "asc" },
-    ],
-    limit: LINK_SWEEP_MAX,
-  });
-  if (links.length === 0) return 0;
-  const sessionIds = [...new Set(links.map((l) => l.sessionId))];
-  const live = new Set(
-    (await storage.findMany("session", [{ field: "id", op: "in", value: sessionIds }])).map(
-      (s) => s.id,
-    ),
-  );
-  const orphans = links.filter((l) => !live.has(l.sessionId));
-  // One transaction: a row and the delete of its link go together.
-  await storage.transaction((tx) => writeLogouts(tx, orphans, now));
-  const kept = links.filter((l) => live.has(l.sessionId)).map((l) => l.id);
-  if (kept.length > 0)
-    await storage.update("oauthSessionClient", [{ field: "id", op: "in", value: kept }], {
-      updatedAt: now,
-    });
-  return orphans.length;
+  let n = 0;
+  for (let page = 0; page < LINK_SWEEP_PAGES; page++) {
+    // Not yet seen in this sweep: a link that a page moved to now is left out.
+    const links = await storage.findMany(
+      "oauthSessionClient",
+      [{ field: "updatedAt", op: "lt", value: now }],
+      {
+        sort: [
+          { field: "updatedAt", dir: "asc" },
+          { field: "id", dir: "asc" },
+        ],
+        limit: LINK_SWEEP_PAGE,
+      },
+    );
+    if (links.length === 0) break;
+    const sessionIds = [...new Set(links.map((l) => l.sessionId))];
+    const live = new Set(
+      (await storage.findMany("session", [{ field: "id", op: "in", value: sessionIds }])).map(
+        (s) => s.id,
+      ),
+    );
+    // One transaction per link: a row and the delete of its link go
+    // together. A storage limit in the middle keeps the links done before it.
+    for (const link of links.filter((l) => !live.has(l.sessionId))) {
+      await storage.transaction((tx) => writeLogouts(tx, [link], now));
+      n++;
+    }
+    const kept = links.filter((l) => live.has(l.sessionId)).map((l) => l.id);
+    if (kept.length > 0)
+      await storage.update("oauthSessionClient", [{ field: "id", op: "in", value: kept }], {
+        updatedAt: now,
+      });
+    if (links.length < LINK_SWEEP_PAGE) break;
+  }
+  return n;
 }
 
 /**
