@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHALLENGE_RE } from "../../engine/handoff.js";
+import { CHALLENGE_RE, ID_RE } from "../../engine/handoff.js";
 import type { RouteKey } from "../route-list.js";
 import { SignedInAnswer } from "./shapes.js";
 import type { RouteContract } from "./types.js";
@@ -16,8 +16,8 @@ export const startQuery = z.object({
   redirect: z.string().min(1),
 });
 
-/** The query of the continue page: the handoff id that the start answered. */
-export const continueQuery = z.object({ h: z.string().max(64) });
+/** The query of the continue page: the handoff id that the start answered. The engine holds it to its form. */
+export const continueQuery = z.object({ h: z.string().regex(ID_RE) });
 
 /** The contract of `routes/handoff.ts` (plan 11g). */
 export const HANDOFF_CONTRACT = {

@@ -136,7 +136,13 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
       ip: "1.1.1.1",
     });
     if (!started.ok) throw new Error(started.code);
-    /** Each GET that reads its query by hand: a valid query, the keys the schema requires, and the two answers. */
+    /** 42 characters: one short of a token body, so a token regex refuses it. */
+    const SHORT = "A".repeat(42);
+    /**
+     * Each GET that reads its query by hand: a valid query, the keys the schema requires, and
+     * the two answers. `wrong` is one key with a value of a wrong form, and the answer of the
+     * route, for a GET whose schema holds a token to the engine's regex.
+     */
     const VALID_QUERIES: {
       key: RouteKey;
       path: string;
@@ -144,6 +150,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
       required: readonly string[];
       valid: Answer;
       missing: Answer | null;
+      wrong?: { key: string; value: string; answer: Answer };
     }[] = [
       {
         key: "GET /magic-link/verify",
@@ -152,6 +159,11 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["token"],
         valid: { status: 200, code: null },
         missing: { status: 302, code: "invalid_token" },
+        wrong: {
+          key: "token",
+          value: `ml_${SHORT}`,
+          answer: { status: 302, code: "invalid_token" },
+        },
       },
       {
         key: "GET /social/:provider/start",
@@ -176,6 +188,11 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["token"],
         valid: { status: 200, code: null },
         missing: { status: 302, code: "invalid_token" },
+        wrong: {
+          key: "token",
+          value: `pv_${SHORT}`,
+          answer: { status: 302, code: "invalid_token" },
+        },
       },
       {
         key: "GET /password/reset",
@@ -184,6 +201,11 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["token"],
         valid: { status: 200, code: null },
         missing: { status: 302, code: "invalid_token" },
+        wrong: {
+          key: "token",
+          value: `pr_${SHORT}`,
+          answer: { status: 302, code: "invalid_token" },
+        },
       },
       {
         key: "GET /totp/challenge",
@@ -192,6 +214,11 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["challenge"],
         valid: { status: 200, code: null },
         missing: { status: 302, code: "invalid_token" },
+        wrong: {
+          key: "challenge",
+          value: `tf_${SHORT}`,
+          answer: { status: 302, code: "invalid_token" },
+        },
       },
       {
         key: "GET /handoff/start",
@@ -200,6 +227,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["challenge", "redirect"],
         valid: { status: 200, code: null },
         missing: { status: 400, code: "invalid_body" },
+        wrong: { key: "challenge", value: SHORT, answer: { status: 400, code: "invalid_body" } },
       },
       {
         key: "GET /handoff/continue",
@@ -208,6 +236,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         required: ["h"],
         valid: { status: 200, code: null },
         missing: { status: 302, code: "invalid_token" },
+        wrong: { key: "h", value: "abc", answer: { status: 302, code: "invalid_token" } },
       },
     ];
     const hand = Object.entries(MERGED)
@@ -216,6 +245,7 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
     expect(hand.length).toBe(8);
+    let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = MERGED[row.key];
       const schema = contract?.query?.schema;
@@ -232,7 +262,15 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
         const refused = await w.handle(get(`/auth${row.path}?${query(without)}`));
         expect(await answerOf(refused), `${row.key} without ${key}`).toEqual(row.missing);
       }
+      if (!row.wrong) continue;
+      wrongForms += 1;
+      const wrong = { ...row.query, [row.wrong.key]: row.wrong.value };
+      expect(schema.safeParse(wrong).success, `${row.key}: the wrong form`).toBe(false);
+      const refused = await w.handle(get(`/auth${row.path}?${query(wrong)}`));
+      expect(await answerOf(refused), `${row.key}: the wrong form`).toEqual(row.wrong.answer);
     }
+    // The six GETs whose schema holds a token to the engine's regex.
+    expect(wrongForms).toBe(6);
   });
 
   it("uses the contract's schema in the route", async () => {
@@ -261,9 +299,9 @@ describe("the contract of part 1 (plan 11g Task 3)", () => {
     const INVALID_TOKEN: Answer = { status: 400, code: "invalid_token" };
     const PAGE_REFUSED: Answer = { status: 302, code: "invalid_token" };
     /**
-     * Each POST whose body the route parses with its schema: a body that the schema accepts, the
-     * session it needs, and the answer of a refused body. The password change goes last: it
-     * changes the password of the session's user.
+     * Each POST whose body the route parses with its schema. A row holds a body that the schema
+     * accepts, the session it needs, and the answer of a refused body. The password change goes
+     * last: it changes the password of the session's user.
      */
     const VALID_BODIES: {
       key: RouteKey;

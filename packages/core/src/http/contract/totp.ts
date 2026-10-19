@@ -31,9 +31,10 @@ export const pageBody = z.object({
 });
 
 /**
- * The query of the challenge page (plan 12c): the challenge, the method the
- * page shows, `backup=1` for the backup code form, and the refusal after a
- * wrong code. The route holds the challenge to the engine's form.
+ * The query of the challenge page (plan 12c). `method` is the method the
+ * page shows, `backup=1` asks for the backup code form, and `error` is the
+ * refusal after a wrong code. The route holds the challenge to the engine's
+ * form.
  */
 export const challengeQuery = z.object({
   challenge: z.string().regex(TWO_FACTOR_TOKEN_RE),

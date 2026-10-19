@@ -16,7 +16,7 @@ import { ClaimRacedError, undoSessionIfClaimed } from "./users.js";
 
 export const HANDOFF_ID_PREFIX = "hs_";
 export const HANDOFF_CODE_PREFIX = "hc_";
-const ID_RE = /^hs_[A-Za-z0-9_-]{43}$/;
+export const ID_RE = /^hs_[A-Za-z0-9_-]{43}$/;
 const CODE_RE = /^hc_[A-Za-z0-9_-]{43}$/;
 // RFC 7636 verifier: 43 to 128 characters of the unreserved set (letters, digits, "-", ".", "_", "~").
 const VERIFIER_RE = /^[A-Za-z0-9._~-]{43,128}$/;
