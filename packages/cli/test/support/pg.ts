@@ -1,3 +1,4 @@
+import { MIGRATIONS } from "@authtempo/adapter-postgres";
 import postgres, { type Sql } from "postgres";
 
 export const ADMIN_URL =
@@ -36,4 +37,22 @@ export async function freshDatabase(): Promise<{ url: string; sql: Sql; drop(): 
       }
     },
   };
+}
+
+/**
+ * The schema one version below the CLI's (plan 11f Task 3): every core
+ * migration but the last, by the steps of `applyPostgresMigrations` of
+ * `@authtempo/adapter-postgres` (the table `ta_migrations`, then each
+ * migration's `sql` and its name row). No lock: one test owns the database.
+ */
+export async function applyOneVersionBelow(sql: Sql): Promise<void> {
+  await sql.unsafe(
+    "CREATE TABLE IF NOT EXISTS ta_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
+  );
+  for (const m of MIGRATIONS.slice(0, -1)) {
+    await sql.begin(async (tx) => {
+      await tx.unsafe(m.sql);
+      await tx.unsafe("INSERT INTO ta_migrations (name) VALUES ($1)", [m.name]);
+    });
+  }
 }

@@ -7,6 +7,7 @@ import { UsageError } from "../errors.js";
 import { IMPORT_HELP } from "../help/import.js";
 import type { ImportJson } from "../json.js";
 import { describeUrl, printJson, sayer } from "../output.js";
+import { importGate, readableVersion } from "../schema-version.js";
 import { openPostgres } from "../seams/postgres.js";
 import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import {
@@ -171,6 +172,12 @@ export const importCommand: Command = {
         // A refused connection stops here, as "storage: ...; nothing was written".
         try {
           await pg.ping();
+          // Before the first row read or write: a database at another version
+          // stops the run with nothing written (spec 23 item 4).
+          importGate(
+            readableVersion(await pg.schemaVersionText(), (await pg.appliedCore()).length),
+            betterAuth ? "compat" : "core",
+          );
         } catch (e) {
           await pg.close();
           throw e;

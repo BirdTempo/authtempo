@@ -1,3 +1,4 @@
+import { gate } from "./commands/migrate.js";
 import { Stop } from "./errors.js";
 import type { Ctx } from "./output.js";
 import {
@@ -7,6 +8,7 @@ import {
   readD1Applied,
   readD1VersionText,
 } from "./seams/d1.js";
+import { SCHEMA_VERSION } from "./version.js";
 
 // The one rule that reads a schema version, for `migrate` and `check`
 // (spec 19, item 8; review of plan 11c Task 8): two copies would drift.
@@ -36,6 +38,29 @@ export function readableVersion(
       `ta_meta holds schema_version ${JSON.stringify(raw)}, which is not a version number; nothing was written`,
     );
   return Number(raw);
+}
+
+/**
+ * The gate of `authtempo import` (spec 23 item 4): an import writes only into
+ * a database at the CLI's own version, because an adapter of another version
+ * lacks a table or a column. `gate` of migrate stops only a newer database;
+ * this one also stops an older one and names the fix. The higher line comes
+ * from `gate` itself, so that text keeps one source.
+ */
+export function importGate(version: number | null, tables: "core" | "compat"): void {
+  const fix = `run authtempo migrate --target postgres${tables === "compat" ? " --tables compat" : ""} first`;
+  if (version === null)
+    throw new Stop(`the database has no schema of authtempo; ${fix}; nothing was written`);
+  if (version < SCHEMA_VERSION)
+    throw new Stop(
+      `the database is at version ${version}; this CLI writes version ${SCHEMA_VERSION}; ${fix}; nothing was written`,
+    );
+  try {
+    gate(version);
+  } catch (e) {
+    if (e instanceof Stop) throw new Stop(`${e.message}; nothing was written`);
+    throw e;
+  }
 }
 
 /** The name of a migration file without its number and `.sql`: `0003_schema_v3.sql` gives `schema_v3`. */

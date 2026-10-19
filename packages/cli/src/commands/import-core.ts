@@ -14,6 +14,7 @@ import {
   summary,
 } from "@authtempo/import";
 import { LEGACY_FORMATS, type LegacyFormat } from "@authtempo/legacy-hashes";
+import { Stop } from "../errors.js";
 import { storageFailure } from "../seams/postgres.js";
 
 // The parse checks and the run of the import CLI, moved from
@@ -295,7 +296,13 @@ export async function runParsed(parsed: ParsedImport, io: CliIo): Promise<Import
       ? await io.openMemory()
       : await io.openStorage(values.postgres as string, values["better-auth"] === true);
   } catch (e) {
-    return stop(`${storageFailure(e, values.postgres as string)}; nothing was written`, null);
+    // A Stop (the version gate) carries its own line; any other failure is the storage's.
+    return stop(
+      e instanceof Stop
+        ? e.message
+        : `${storageFailure(e, values.postgres as string)}; nothing was written`,
+      null,
+    );
   }
   try {
     const report = await importUsers(target.storage, source, parsed.options);

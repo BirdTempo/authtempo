@@ -26,6 +26,11 @@ export function summary(r: ImportReport): string[] {
       .join(", ")}`,
     `exists: user ${r.exists.user}, organization ${r.exists.organization}`,
     `refusals: ${r.refusals}`,
+    `hashes: ${
+      Object.entries(r.hashFormats)
+        .map(([k, v]) => `${k} ${v}`)
+        .join(", ") || "none"
+    }`,
   ];
   for (const s of r.skipped) lines.push(`skipped ${s.kind} ${s.sourceId}: ${s.reason}`);
   for (const h of r.refusedHashes) lines.push(`refused hash ${h.sourceId}: ${h.format}`);

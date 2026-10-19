@@ -155,9 +155,31 @@ function emptyReport(source: Source, dryRun: boolean): ImportReport {
     refusedHashes: [],
     dropped: [],
     refusals: 0,
+    hashFormats: {},
     partial: [],
     repaired: [],
   };
+}
+
+/** The key of a user record in `hashFormats`: the format of its hash, the reader's refused tag, or `none`. */
+function hashKey(r: ImportUser): string {
+  if (r.password === null) return "none";
+  return "refused" in r.password ? r.password.refused : formatName(r.password.hash);
+}
+
+/**
+ * Adds one to `counts[key]` as an own key. A reader's refused tag can come
+ * from the export (the Clerk hasher name), and a plain assignment of
+ * `__proto__` would set the prototype and count nothing.
+ */
+function addOne(counts: Record<string, number>, key: string): void {
+  const n = (Object.hasOwn(counts, key) ? (counts[key] ?? 0) : 0) + 1;
+  Object.defineProperty(counts, key, {
+    value: n,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
 }
 
 function skip(
@@ -272,8 +294,11 @@ export async function importUsers(
     slugs: new Set(),
   };
   for await (const record of source.records()) {
-    if (record.kind === "user") await importUser(storage, source, record, o, report, planned);
-    else await importOrganization(storage, source, record, o, report, planned);
+    if (record.kind === "user") {
+      // Before any skip rule: the line counts every user record of the export.
+      addOne(report.hashFormats, hashKey(record));
+      await importUser(storage, source, record, o, report, planned);
+    } else await importOrganization(storage, source, record, o, report, planned);
   }
   return report;
 }

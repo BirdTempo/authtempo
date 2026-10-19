@@ -118,6 +118,7 @@ function report(over: Partial<ImportReport>): ImportReport {
     refusedHashes: [],
     dropped: [],
     refusals: 0,
+    hashFormats: {},
     partial: [],
     repaired: [],
     ...over,

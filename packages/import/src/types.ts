@@ -252,6 +252,12 @@ export interface ImportReport {
   /** The number of `skipped` entries whose reason `isRefusal` names. */
   refusals: number;
   /**
+   * One count per user record of the export, by the format of its hash
+   * (`formatName`), the reader's refused tag, or `none`. Tags and counts only
+   * (spec 23 items 5 and 14).
+   */
+  hashFormats: Record<string, number>;
+  /**
    * A record whose id exists but whose rows are not all the rows the record
    * maps to. `missing` names each absent row kind, for example `password`,
    * `identity:email`, `passkey`, or `member`. Three causes give the same entry,

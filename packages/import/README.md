@@ -54,6 +54,10 @@ The conflicts are `unmatched_row`, `duplicate_row`, `status_compromised`,
 a taken address or identity skips the record, or with `--on-email-taken fail`
 stops the run.
 
+The summary prints one line of the hash formats of the export, for example
+`hashes: bcrypt 812, argon2id 4, none 31`. Check it against `--formats`
+before the real run.
+
 Run the import again at any time: a second run of the same export writes
 nothing, and a user that exists by its import id is never written again
 without `--repair`. Some re-runs can list a user as `partial`, with the
