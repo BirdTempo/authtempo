@@ -2,7 +2,11 @@ import { DurableObject } from "cloudflare:workers";
 import { ipKey } from "@authtempo/core";
 import { DEMO_LIMITS, type GateLimit } from "./facts.js";
 
-/** The gate keeps an IP for one window at most (the demo stores no IP past one hour). */
+/**
+ * The gate keeps an IP for one window at most, and its alarm deletes it. The
+ * platform can still restore a deleted row for 30 days by point-in-time
+ * recovery (read 2026-10-20). wrangler.jsonc and the README owner list say so.
+ */
 const KEEP_MS = DEMO_LIMITS.windowMs;
 
 /**

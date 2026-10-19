@@ -11,7 +11,11 @@
   "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
   // The one var. The demo holds no secret: each sandbox makes its own.
   "vars": { "DEMO_ORIGIN": "https://demo.authtempo.com" },
-  // The demo stores no IP past one hour and logs no request.
+  // The demo deletes each IP within one hour and logs no request. The
+  // platform keeps more. Cloudflare can restore the store of a Durable Object
+  // to any point of the past 30 days, by point-in-time recovery. The source is
+  // the SQLite storage API page, last updated 2026-09-21, read 2026-10-20.
+  // So the account can restore a deleted IP for 30 days: an owner input (README).
   "observability": { "enabled": false },
   "durable_objects": {
     "bindings": [
