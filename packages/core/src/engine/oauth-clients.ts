@@ -367,8 +367,8 @@ function readClientMetadata(
   const absent = (v: unknown) => v === undefined || v === null;
   const allowedGrants = source === "create" ? CREATE_GRANT_TYPES : GRANT_TYPES;
   let grantTypes: string[] | null;
-  if (m.grant_types === undefined || (cimd && m.grant_types === null))
-    grantTypes = [...GRANT_TYPES];
+  // A null list reads as an absent one, at every source (ruling 26 of plan 12e).
+  if (absent(m.grant_types)) grantTypes = [...GRANT_TYPES];
   else if (cimd) grantTypes = servedList(m.grant_types, GRANT_TYPES, "grant_types", dropped);
   else
     grantTypes = stringList(m.grant_types, (g) => allowedGrants.includes(g), allowedGrants.length);
@@ -866,9 +866,12 @@ async function refreshCimdRow(
   const done = await config.storage.transaction(async (tx) => {
     const current = await tx.findOne("oauthClient", where);
     if (!current) return null;
-    await tx.update("oauthClient", where, data);
     const drops = current.authMethod !== "none" && data.authMethod === "none";
+    // The delete comes first. Memory and D1 do not isolate a transaction, so
+    // another request sees each write at once. A row of none beside a live
+    // token would let a client id alone refresh it (ruling 26 of plan 12e).
     if (drops) await tx.delete("oauthToken", [{ field: "clientId", op: "eq", value: url }]);
+    await tx.update("oauthClient", where, data);
     return { row: { ...current, ...data }, from: drops ? current.authMethod : null };
   });
   if (done?.from)

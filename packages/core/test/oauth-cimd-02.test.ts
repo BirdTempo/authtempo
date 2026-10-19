@@ -5,11 +5,12 @@ import { createAuth } from "../src/create-auth.js";
 import { CIMD_REVISION, findClient } from "../src/engine/oauth-clients.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { randomBase64Url, toBase64Url } from "../src/primitives/crypto.js";
-import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
 import {
   authorized,
   type Handle,
   ISSUER,
+  oauthHandle,
   pkce,
   RESOURCE,
   SCOPES,
@@ -465,6 +466,28 @@ describe("the members of a document that core does not serve (ruling 24 of plan 
     expect(await findClient(h.config, url)).toMatchObject({ id: url, authMethod: "none" });
   });
 
+  it("reads a null grant_types as an absent one, in a document and at registration", async () => {
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    const f = fakeFetch();
+    f.answers.set(url, () => json({ ...base, grant_types: null }));
+    const h = instance(f.fn);
+    expect(await findClient(h.config, url)).toMatchObject({
+      grantTypes: ["authorization_code", "refresh_token"],
+    });
+    const r = oauthHandle();
+    const res = await r.auth.handle(
+      post("/auth/oauth/register", {
+        redirect_uris: ["https://client.example.com/callback"],
+        grant_types: null,
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      grant_types: ["authorization_code", "refresh_token"],
+    });
+  });
+
   it("refuses a document with no code grant or no code response type", async () => {
     const base = await fixture("draft-00");
     const url = String(base.client_id);
@@ -614,5 +637,57 @@ describe("a document that changes its method (ruling 25 of plan 12e)", () => {
       }),
     );
     expect(await answer(res)).toEqual({ status: 200, body: null });
+  });
+
+  it("leaves no gap between the method change and the revoke for a third instance", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { url, key, keyDoc, publicDoc } = await docs();
+    const base = makeAuth();
+    const on = (doc: unknown) => {
+      const f = fakeFetch();
+      f.answers.set(url, () => json(doc));
+      return instance(f.fn, base);
+    };
+    // A holds the key document, B reads the public one, and C keeps the key document in its cache.
+    const a = on(keyDoc);
+    const b = on(publicDoc);
+    const c = on(keyDoc);
+    const token = await refreshTokenOf(a, url, key);
+    await c.auth.handle(refresh("or_unknown", { client_id: url }));
+    // C sends a refresh with the client id alone while B's write runs, at the token delete.
+    const storage = base.storage;
+    const transaction = storage.transaction.bind(storage);
+    let racing: Promise<Response> | null = null;
+    storage.transaction = (<T>(fn: (tx: typeof storage) => Promise<T>) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          create: tx.create.bind(tx),
+          findOne: tx.findOne.bind(tx),
+          findMany: tx.findMany.bind(tx),
+          update: tx.update.bind(tx),
+          transaction: tx.transaction.bind(tx),
+          delete: async (model, where) => {
+            if (model === "oauthToken" && racing === null) {
+              racing = c.auth.handle(refresh(token, { client_id: url }));
+              // Memory runs one transaction at a time: a write of C that needs one waits for B.
+              await Promise.race([racing, new Promise((r) => setTimeout(r, 200))]);
+            }
+            return tx.delete(model, where);
+          },
+        }),
+      )) as typeof storage.transaction;
+    try {
+      const res = await b.auth.handle(refresh(token, { client_id: url }));
+      expect(await answer(res)).toEqual({ status: 400, body: { error: "invalid_grant" } });
+    } finally {
+      storage.transaction = transaction;
+    }
+    if (racing === null) throw new Error("no refresh ran in the write");
+    expect(await answer(await racing)).toEqual({
+      status: 400,
+      body: { error: "invalid_client" },
+    });
+    expect(await base.storage.findMany("oauthToken", [])).toEqual([]);
   });
 });
