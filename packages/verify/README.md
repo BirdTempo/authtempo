@@ -88,9 +88,13 @@ reads the key set and sends each bearer over plain HTTP. Core accepts an
   per request.
 - A key set body over 64 KiB gives `unexpected`. A set of more keys than
   core can list gives `unexpected` too. Core lists the signing key and at
-  most `JWKS_RETIRED_MAX` retired keys: 101 keys today, about 19 KB.
-- The verifier checks each key of the set when it reads the set. `kty`, `crv`, and `alg`
-  must be OKP, Ed25519, and EdDSA, or EC, P-256, and ES256. A key may leave
+  most `JWKS_RETIRED_MAX` retired keys: 101 keys today. Under RS256 that set
+  is 43,945 bytes (measured 2026-10-19), and the cap is about 1.49 times it.
+- The verifier checks each key of the set when it reads the set, with
+  `isPublicJwk` of `@authtempo/core/credentials`. `kty`, `crv`, and `alg`
+  must be OKP, Ed25519, and EdDSA; EC, P-256, and ES256; or RSA and RS256.
+  An RSA modulus must hold at least 2048 bits. A key with a private member
+  (`d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, or `k`) fails. A key may leave
   out `use`; when it has one, the value must be `sig`. A key may leave out
   `key_ops`; when it has one, the list must hold `verify`. The verifier drops
   a key that fails, so a token that the key signed answers null.

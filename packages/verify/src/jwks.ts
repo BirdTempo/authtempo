@@ -18,7 +18,8 @@ export const FAILED_READ_PAUSE_MS = 5000;
  * Measured on 2026-10-15 (memory adapter, Node 26.10.0, after 110 rotations):
  * - the implementer: EdDSA 101 keys 14,251 bytes; ES256 101 keys 18,998 bytes;
  * - the reviewer: ES256 101 keys 18,989 bytes.
- * The body cap of 64 KiB is about 3.4 times the largest of these.
+ * Measured on 2026-10-19 the same way (plan 12e): RS256 101 keys 43,945 bytes, by the implementer and the reviewer.
+ * The body cap of 64 KiB is about 1.49 times the largest of these, the RS256 set.
  */
 export const KEY_SET_MAX_BYTES = 65_536;
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createVerifier } from "../src/index.js";
+import { publicKeyOf } from "../src/jwks.js";
 import {
   accessToken,
   FILES,
@@ -36,6 +37,26 @@ describe("each fetched key is checked at run time (plan 11d, Task 1 review)", ()
       fetch: editedKeys(server, (keys) => keys.map((k) => ({ ...k, use: "enc" }))),
     });
     expect(await v.verifyRequest(withBearer(FILES, jwt))).toEqual({ ok: true, value: null });
+  });
+
+  it("takes a key with no use as a signing key (ruling 2 of plan 12e)", async () => {
+    const server = makeServer();
+    const s = await signedIn(server);
+    const jwt = await sessionJwt(server, s.sessionToken);
+    const v = createVerifier({
+      issuer: ISSUER,
+      audience: FILES,
+      clock: server.clock,
+      fetch: editedKeys(server, (keys) => keys.map(({ use: _use, ...k }) => k)),
+    });
+    const r = await v.verifyRequest(withBearer(FILES, jwt));
+    expect(r.ok && r.value?.kind).toBe("session-jwt");
+  });
+
+  it("drops a key whose kid is empty (ruling 2 of plan 12e)", async () => {
+    const key = { kty: "OKP", crv: "Ed25519", x: "AAAA", kid: "k1", alg: "EdDSA", use: "sig" };
+    expect(publicKeyOf(key)).toEqual(key);
+    expect(publicKeyOf({ ...key, kid: "" })).toBeNull();
   });
 
   it("drops the true key when its kty or crv does not match its alg, so its token answers null", async () => {

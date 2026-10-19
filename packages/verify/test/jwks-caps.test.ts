@@ -24,12 +24,14 @@ import {
  * - EdDSA: one key 151 bytes; the largest set 14,251 bytes with 101 keys.
  * - ES256: one key 198 bytes; the largest set 18,998 bytes with 101 keys.
  * The reviewer measured 18,989 bytes for 101 ES256 keys.
+ * Measured on 2026-10-19 the same way (plan 12e Task 2 review m2):
+ * - RS256: one key 434 bytes; the largest set 43,945 bytes with 101 keys. The reviewer measured the same.
  * Core lists the signing key and at most `JWKS_RETIRED_MAX` retired keys: the cap is that bound plus one.
- * The body cap of 64 KiB is about 3.4 times the largest measured set.
+ * The body cap of 64 KiB is about 1.49 times the largest measured set, which is RS256.
  */
 describe("the key set caps (Task 9 review M2)", () => {
-  it("verifies against core's largest set: ES256, at the key cap, under the body cap", async () => {
-    const server = makeServer({ jwtMint: { audience: [FILES], alg: "ES256" } });
+  it("verifies against core's largest set: RS256, at the key cap, under the body cap", async () => {
+    const server = makeServer({ jwtMint: { audience: [FILES], alg: "RS256" } });
     for (let i = 0; i < KEY_SET_MAX_KEYS + 9; i++) await server.auth.api.jwt?.rotate();
     const body = await (await server.auth.handle(new Request(`${ISSUER}/jwks`))).text();
     expect((JSON.parse(body) as { keys: unknown[] }).keys).toHaveLength(KEY_SET_MAX_KEYS);
