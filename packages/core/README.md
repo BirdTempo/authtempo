@@ -800,7 +800,8 @@ if (!c || c.kind === "oauth-client")
   return Response.json({ error: "unauthorized" }, { status: 401 });
 // c.kind === "session": c.user, c.session, c.refreshed
 // c.kind === "token":   c.user, c.apiToken, c.activeOrganizationId
-// c.kind === "oauth":   c.user, c.clientId, c.scopes, c.resource, c.tokenId, c.expiresAt (plan 9g), c.dpopJkt (plan 12e)
+// c.kind === "oauth":   c.user, c.clientId, c.scopes, c.resource, c.tokenId, c.expiresAt (plan 9g), c.dpopJkt, c.subject (plan 12e)
+//   c.subject is the token sub: the user id, or the pairwise subject of a pairwise client
 // c.kind === "oauth-client": c.clientId, c.scopes, c.resource, c.tokenId, c.expiresAt, c.dpopJkt (plan 12e)
 const res = Response.json({ id: c.user.id });
 // After a sliding refresh, renew the cookie or the browser drops it early.

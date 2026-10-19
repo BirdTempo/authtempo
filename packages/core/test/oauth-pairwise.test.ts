@@ -417,10 +417,12 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
     const t = await tokensOf(h, ada.cookie, a, A);
     const sub = String(claimsOf(t.access_token).sub);
     expect(sub).toMatch(/^ps_/);
+    // The caller keeps the user, and names the token subject beside it (ruling 34).
     expect(await h.auth.caller(get("/mcp", bearer(t.access_token)))).toMatchObject({
       kind: "oauth",
       clientId: a,
       user: { id: ada.user.id },
+      subject: sub,
     });
     expect(await ask(t.access_token)).toMatchObject({ active: true, sub, client_id: a });
     // Two updates move the client to another sector: to public, then back to
@@ -450,6 +452,7 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
     expect(await h.auth.caller(get("/mcp", bearer(t.access_token)))).toMatchObject({
       kind: "oauth",
       user: { id: ada.user.id },
+      subject: ada.user.id,
     });
     const clients = h.auth.api.oauth?.clients;
     if (!clients) throw new Error("oauth is off");

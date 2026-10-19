@@ -62,11 +62,14 @@ export interface ResolvedApiToken {
  * Who called: a person with a session, a script with an API token, or an
  * OAuth client for a person (plan 9g). `oauth-client` is an OAuth client
  * that acts for itself, with no user (`client_credentials`, plan 12e).
+ * The `subject` of an `oauth` caller is the token's `sub`: the user id for a
+ * public client, the pairwise subject for a pairwise client (ruling 34 of
+ * plan 12e). `user` is always the user.
  */
 export type Caller =
   | ({ kind: "session" } & ResolvedSession)
   | ({ kind: "token" } & ResolvedApiToken)
-  | ({ kind: "oauth" } & OAuthAccess)
+  | ({ kind: "oauth"; subject: string } & OAuthAccess)
   | ({ kind: "oauth-client" } & OAuthClientAccess);
 
 export interface ApiTokenCreate {
@@ -235,7 +238,9 @@ export async function revokeApiToken(
 
 /** The caller of a resolved access token. */
 const accessCaller = (r: ResolvedAccess): Caller =>
-  r.kind === "oauth" ? { kind: "oauth", ...r.access } : { kind: "oauth-client", ...r.access };
+  r.kind === "oauth"
+    ? { kind: "oauth", ...r.access, subject: r.subject }
+    : { kind: "oauth-client", ...r.access };
 
 /**
  * The caller of each request with `Authorization: DPoP`, by instance, so a

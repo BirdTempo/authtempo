@@ -31,7 +31,7 @@ sources:
 | --- | --- |
 | `handle(request)` | Serves the routes under `basePath`. Mount it for each path that starts with `basePath`. |
 | `session(request, options?)` | Answers the `ResolvedSession` of the cookie or the `ts_` bearer token, or null. A `tk_` token answers null. With `{ refresh: false }`, the read writes nothing: no sliding refresh and no delete of an ended row. |
-| `caller(request)` | Answers a `Caller`: a session, an API token, or an OAuth access token under its resource, or null. A `client_credentials` token answers `kind: "oauth-client"`, with no user. |
+| `caller(request)` | Answers a `Caller`: a session, an API token, or an OAuth access token under its resource, or null. A `client_credentials` token answers `kind: "oauth-client"`, with no user. An `oauth` caller has `user` and `subject`, the token's `sub`: the user id, or the pairwise subject of a pairwise client. |
 | `sessionCookie(request, resolved)` | Answers the `Set-Cookie` value after a sliding refresh, or null. Send it, or the browser drops the cookie early. |
 | `wellKnown(request)` | Serves the documents under `/.well-known/` at the origin root. 404 while `oauth` is off. |
 | `api` | The same operations in-process, as an `AuthApi`. |
