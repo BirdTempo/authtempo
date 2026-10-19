@@ -453,9 +453,9 @@ export type ResolvedAccess =
 /**
  * The caller of an access token, or null: a JWT that verifies under a key
  * of this instance, with `typ: "at+jwt"`, this issuer, an `aud` in
- * `oauth.resources`, and a live `exp`. Then a user that exists, or for a
- * `client_credentials` token a client that still holds the grant and each
- * scope. A session JWT of `GET /token` and an ID token have `typ: "JWT"`
+ * `oauth.resources`, and a live `exp`. Then a user that exists, with each
+ * scope still in `oauth.scopes`. For a `client_credentials` token, a client
+ * that still holds the grant and each scope. A session JWT of `GET /token` and an ID token have `typ: "JWT"`
  * and never pass.
  */
 export async function resolveAccessToken(
@@ -490,6 +490,8 @@ export async function resolveAccessToken(
     });
     return access ? { kind: "oauth-client", access } : null;
   }
+  // Each scope must still be a scope of this config, as for a client token (ruling 29 of plan 12e).
+  if (!scopes.every((s) => oauth.scopes.has(s))) return null;
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: p.sub }]);
   if (!user) return null;
   return {

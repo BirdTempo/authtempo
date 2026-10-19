@@ -371,6 +371,34 @@ describe("the refresh token (plan 9g)", () => {
   });
 });
 
+describe("the scopes of a user access token (ruling 29 of plan 12e)", () => {
+  it("refuses a user token with a scope that the config no longer names, on a second instance", async () => {
+    const h = oauthHandle();
+    const c = await codeFor(h, "openid mcp:read mcp:write");
+    const t = await tokens(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)));
+    const atResource = () =>
+      new Request(`${RESOURCE}/tools`, { headers: { authorization: `Bearer ${t.access_token}` } });
+    expect(await h.auth.caller(atResource())).toMatchObject({ kind: "oauth" });
+    // A deploy that drops mcp:write: the second instance names mcp:read only.
+    const other = oauthHandle({
+      storage: h.storage,
+      clock: h.clock,
+      oauth: {
+        resources: [RESOURCE, OTHER_RESOURCE],
+        scopes: { "mcp:read": "Read your documents" },
+        registration: { cimd: false },
+      },
+    });
+    expect(await other.auth.caller(atResource())).toBeNull();
+    const info = await other.auth.handle(
+      get("/auth/oauth/userinfo", { authorization: `Bearer ${t.access_token}` }),
+    );
+    expect(info.status).toBe(401);
+    // The first instance still names mcp:write, so the token still passes there.
+    expect(await h.auth.caller(atResource())).toMatchObject({ kind: "oauth" });
+  });
+});
+
 describe("userinfo and the endpoint's edges (plan 9g)", () => {
   it("answers the claims by scope on GET and POST; 401 for no token, a changed token, an expired one, and an ID token; 403 without openid", async () => {
     const h = oauthHandle();
