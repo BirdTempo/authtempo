@@ -1,24 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { type Cookie, parseCookie } from "./cookie-rules.js";
 import { everyFlow } from "./flows.js";
 import { SET_COOKIES } from "./helpers.js";
-
-/** One Set-Cookie line: its name, and each attribute by its lower-case name. */
-interface Cookie {
-  line: string;
-  name: string;
-  attrs: Map<string, string>;
-}
-
-function parse(line: string): Cookie {
-  const [pair = "", ...rest] = line.split(";");
-  const attrs = new Map<string, string>();
-  for (const part of rest) {
-    const at = part.indexOf("=");
-    const key = (at < 0 ? part : part.slice(0, at)).trim().toLowerCase();
-    attrs.set(key, at < 0 ? "" : part.slice(at + 1).trim());
-  }
-  return { line, name: pair.slice(0, pair.indexOf("=")).trim(), attrs };
-}
 
 let cookies: Cookie[] = [];
 
@@ -28,7 +11,7 @@ let cookies: Cookie[] = [];
 describe("the cookies of the demo", () => {
   beforeAll(async () => {
     await everyFlow();
-    cookies = SET_COOKIES.map(parse);
+    cookies = SET_COOKIES.map(parseCookie);
   });
 
   it("reads a cookie of each kind", () => {

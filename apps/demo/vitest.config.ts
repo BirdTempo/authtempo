@@ -30,5 +30,7 @@ export default defineConfig({
     exclude: ["test/node/**"],
     // The teardown fails the run on any request that left the Worker, from any file.
     globalSetup: ["./test/outbound-teardown.ts"],
+    // After each pool file, the cookie rule reads every Set-Cookie line of call().
+    setupFiles: ["./test/cookie-setup.ts"],
   },
 });

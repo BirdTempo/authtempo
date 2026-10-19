@@ -215,6 +215,11 @@ async function secondFactor(jar: Jar): Promise<void> {
     trustDevice: true,
   });
   expect(verify.status).toBe(200);
+  expect(trusted.cookies.has("tempo_totp_trust")).toBe(true);
+  // Forget the trusted devices: core clears the trust cookie on this answer.
+  const forget = await call(trusted, "POST", "/auth/totp/devices/revoke", {});
+  expect(forget.status).toBe(200);
+  expect(trusted.cookies.has("tempo_totp_trust")).toBe(false);
   const backup = sameSandbox(jar);
   const second = await call(backup, "POST", "/auth/password/sign-in", {
     email,
