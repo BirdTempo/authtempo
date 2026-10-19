@@ -71,24 +71,28 @@ const covered = declared.filter((d) => answered.has(d) || exempt.has(d));
 
 /**
  * The optional and the nullable paths of each JSON answer, as the generator
- * writes them (ruling 8). A key outside `required` gives
+ * writes them (rulings 8 and 9). A key outside `required` gives
  * `"<route> <status> <path> absent"`. A key whose schema admits null gives
- * `"<route> <status> <path> null"`. The walk goes through nested objects and
- * array items. A loosened
- * schema adds a path here that no record answers in that form, and the
- * check fails on it.
+ * `"<route> <status> <path> null"`. The walk goes through nested objects,
+ * array items, and each branch of a union. A loosened schema adds a path
+ * here that no record answers in that form, and the check fails on it. A
+ * node that the walk cannot enter goes in `blocked`, and the check fails on
+ * it by name.
  */
-function shapesOf(): string[] {
+function shapesOf(): { shapes: string[]; blocked: string[] } {
   const contract: Record<string, RouteContract> = ROUTE_CONTRACT;
   const shapes: string[] = [];
+  const blocked: string[] = [];
   for (const [key, c] of Object.entries(contract)) {
     for (const kind of c.alt ? [c.answer, c.alt] : [c.answer]) {
       if (kind.kind !== "json") continue;
-      for (const path of shapePaths(kind.schema))
-        shapes.push(`${key} ${kind.status ?? 200} ${path}`);
+      const status = kind.status ?? 200;
+      const walked = shapePaths(kind.schema);
+      for (const path of walked.paths) shapes.push(`${key} ${status} ${path}`);
+      for (const line of walked.blocked) blocked.push(`${key} ${status}: ${line}`);
     }
   }
-  return shapes;
+  return { shapes, blocked };
 }
 
 /** The id of an exempt shape row: the status of the route's json answer (200, or the register's 201). */
@@ -98,7 +102,7 @@ function shapeIdOf(row: { key: string; field: string; form: string }): string {
   return `${row.key} ${status} ${row.field} ${row.form}`;
 }
 
-const shapes = shapesOf();
+const { shapes, blocked } = shapesOf();
 /** `"<route> <status> <key> <form>"` of every shape a 2xx JSON record answers. */
 const shaped = new Set(
   records.flatMap((r) => [
@@ -147,6 +151,10 @@ describe("the answers of the test run (plan 11g)", () => {
         return `${d.slice(0, at)} declares ${d.slice(at + 1)} and no test answers it`;
       }),
     );
+  });
+
+  it("enters every node of each JSON answer schema", () => {
+    fail(blocked);
   });
 
   it("answers each optional key absent and each nullable key null at least once, or has a row", () => {

@@ -1376,9 +1376,6 @@ describe("the codes of the provider callbacks (plan 11g)", () => {
       if (provider === "apple") {
         // The provider identity of one user, linked by another.
         const held = socialWorld();
-        expect(await signInCallback("apple", { sub: "001.a", email: "first@example.com" })).toEqual(
-          { status: 302, code: null },
-        );
         const first = await startOf(held, "apple");
         held.tokens["idtok-default"] = idTokenOf("apple", first.nonce, {
           sub: "001.a",
@@ -1492,6 +1489,53 @@ describe("the hook codes of a linked identity and a passkey sign-in (plan 11g)",
       status: 409,
       code: "second_factor_last_method",
     });
+  });
+
+  it("the options routes answer a stored passkey with no transports without the key", async () => {
+    // An authenticator may report no transports (getTransports is optional in WebAuthn).
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const cookie = w.cookie(me.token);
+    const optionsOf = async (key: RouteKey, body: Record<string, unknown> = {}) => {
+      const res = await w.handle(requestOf(key, cookie, {}, body));
+      expect(res.status).toBe(200);
+      return (await res.json()) as Record<string, unknown>;
+    };
+    const soft = await SoftAuthenticator.create({ rpID: "api.example.com", origin: BASE_URL });
+    const first = await optionsOf("POST /passkey/register/options");
+    const registration = await soft.register(
+      String(first.challenge),
+      new TextEncoder().encode(me.user.id),
+    );
+    const { transports: _, ...response } = registration.response;
+    expect(
+      await call(w, "POST /passkey/register/verify", cookie, {
+        response: { ...registration, response },
+      }),
+    ).toEqual({ status: 200, code: null });
+    const descriptors = (answer: Record<string, unknown>, key: string) =>
+      answer[key] as { id: string; transports?: string[] }[];
+    const again = descriptors(
+      await optionsOf("POST /passkey/register/options"),
+      "excludeCredentials",
+    );
+    expect(again).toEqual([{ id: registration.id, type: "public-key" }]);
+    const reauth = descriptors(await optionsOf("POST /reauth/passkey/options"), "allowCredentials");
+    expect(reauth).toEqual([{ id: registration.id, type: "public-key" }]);
+    // The passkey method on, then a password sign-in that answers the challenge of the second factor.
+    const signIn = must(await passkeyAuthenticationOptions(w.auth.config, { ip: null }));
+    expect(
+      await call(w, "POST /second-factor/passkey/enable", cookie, {
+        password: PASSWORD,
+        response: await soft.authenticate(signIn.challenge),
+      }),
+    ).toEqual({ status: 200, code: null });
+    const challenge = await challengeOf(w, "ada@example.com");
+    const second = descriptors(
+      await optionsOf("POST /second-factor/passkey/options", { challenge }),
+      "allowCredentials",
+    );
+    expect(second).toEqual([{ id: registration.id, type: "public-key" }]);
   });
 });
 

@@ -316,13 +316,7 @@ function optionsRows(key: RouteKey, fields: readonly string[]): AnswerShapeExemp
 }
 
 /** The optional keys of a request options answer that the seam always writes. */
-const REQUEST_OPTION_KEYS = [
-  "timeout",
-  "rpId",
-  "allowCredentials",
-  "userVerification",
-  "allowCredentials[].transports",
-] as const;
+const REQUEST_OPTION_KEYS = ["timeout", "rpId", "allowCredentials", "userVerification"] as const;
 
 export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   ...optionsRows("POST /passkey/register/options", [
@@ -336,9 +330,15 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     "authenticatorSelection.residentKey",
     "authenticatorSelection.requireResidentKey",
     "authenticatorSelection.userVerification",
-    "excludeCredentials[].transports",
   ]),
   ...optionsRows("POST /passkey/authenticate/options", REQUEST_OPTION_KEYS),
+  {
+    key: "POST /passkey/authenticate/options",
+    field: "allowCredentials[].transports",
+    form: "absent",
+    reason:
+      "the sign-in options carry no credentials (passkeys.ts passkeyAuthenticationOptions), so no item exists; passkeys.test.ts proves the empty list",
+  },
   ...optionsRows("POST /reauth/passkey/options", REQUEST_OPTION_KEYS),
   ...optionsRows("POST /second-factor/passkey/options", REQUEST_OPTION_KEYS),
   {
