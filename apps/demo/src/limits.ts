@@ -1,6 +1,7 @@
 import { normalizeEmail } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { DEMO_LIMITS } from "./facts.js";
+import { readBodyField, readJsonField } from "./read-body.js";
 
 /*
  * The limits of one sandbox. Each count is a count of rows in the store of
@@ -73,22 +74,6 @@ export function routeOf(method: string, pathname: string): DemoRoute | null {
   return `${method} ${shape}`;
 }
 
-/** One string field of a JSON or form body, as core reads the two forms. */
-async function bodyField(request: Request, name: string): Promise<string | null> {
-  // The Worker caps the body at bodyBytes, so the copy is small.
-  const text = await request.clone().text();
-  if ((request.headers.get("content-type") ?? "").includes("application/json")) {
-    try {
-      const body: unknown = JSON.parse(text);
-      const value = typeof body === "object" && body !== null ? Reflect.get(body, name) : null;
-      return typeof value === "string" ? value : null;
-    } catch {
-      return null;
-    }
-  }
-  return new URLSearchParams(text).get(name);
-}
-
 /** SHA-256 in lower-case hex, the hash of a link token in ta_verification (core primitives/crypto.ts:40). */
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
@@ -121,15 +106,18 @@ async function namesKnownUser(sql: SqlStorage, route: DemoRoute, request: Reques
     return sql.exec(q, address).toArray().length > 0;
   };
   switch (route) {
+    // Each route reads its body as core reads it, so both read one address (review M1).
+    // Core reads these three with readJson (routes/password.ts:69, email-otp.ts:46 and :85).
     case "POST /password/sign-up":
     case "POST /otp/verify":
     case "POST /otp/reset":
-      return known(await bodyField(request, "email"));
-    // Core finds each link by the SHA-256 of its token (engine/magic-link.ts:95, password.ts:1043).
+      return known(await readJsonField(request, "email"));
+    // Core reads these two with readBody (routes/magic-link.ts:68, password.ts:202). It finds
+    // each link by the SHA-256 of its token (engine/magic-link.ts:95, password.ts:1043).
     case "POST /magic-link/verify":
-      return known(await linkAddress(sql, "magic-link", await bodyField(request, "token")));
+      return known(await linkAddress(sql, "magic-link", await readBodyField(request, "token")));
     case "POST /password/reset":
-      return known(await linkAddress(sql, "password-reset", await bodyField(request, "token")));
+      return known(await linkAddress(sql, "password-reset", await readBodyField(request, "token")));
     case "GET /social/:provider/callback": {
       // The code of the demo provider holds the picked identity (provider.ts).
       const url = new URL(request.url);

@@ -80,7 +80,7 @@ function keep(jar: Jar, res: Response): void {
 /**
  * One request through the Worker, with the cookies of `jar` and the demo
  * origin and IP. Cloudflare always sets cf-connecting-ip, so each call sends
- * it unless `headers` names it. An object body goes as JSON, a
+ * it unless `headers` names it. A string body goes as it is, an object body as JSON, a
  * URLSearchParams body as a form. The Set-Cookie lines of the answer go into
  * the jar. No redirect is followed.
  */
@@ -97,7 +97,10 @@ export async function call(
   const cookie = [...jar.cookies].map(([n, v]) => `${n}=${v}`).join("; ");
   if (cookie !== "") h.set("cookie", cookie);
   let payload: string | null = null;
-  if (body instanceof URLSearchParams) {
+  if (typeof body === "string") {
+    // A raw body keeps the content-type of `headers`, or none.
+    payload = body;
+  } else if (body instanceof URLSearchParams) {
     h.set("content-type", "application/x-www-form-urlencoded");
     payload = body.toString();
   } else if (body !== undefined) {
