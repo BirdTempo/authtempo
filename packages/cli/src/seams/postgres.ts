@@ -34,9 +34,17 @@ export const compatMigrationNames = (): string[] => [...COMPAT_MIGRATION_NAMES];
  * database by its host, its port, and its name only.
  */
 export function storageFailure(e: unknown, url: string): string {
+  return `storage: ${storageCode(e)} at ${describeUrl(url)}`;
+}
+
+/**
+ * The code of a driver error alone: the SQLSTATE or the errno code, else
+ * `an error`. `info` prints it with no host (plan 11c2): a support report
+ * goes into a public issue.
+ */
+export function storageCode(e: unknown): string {
   const code = (e as { code?: unknown } | null)?.code;
-  const shown = typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : "an error";
-  return `storage: ${shown} at ${describeUrl(url)}`;
+  return typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : "an error";
 }
 
 const isUndefinedTable = (e: unknown) => (e as { code?: unknown } | null)?.code === UNDEFINED_TABLE;

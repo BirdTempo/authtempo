@@ -20,7 +20,7 @@ const helpFlags = (flags: readonly { flag: string }[]) =>
   flags.flatMap((f) => [...f.flag.matchAll(/--([a-z0-9.-]+)/g)].map((m) => m[1] ?? ""));
 
 /** The command table in the order of the root help. Each task of plan 11c adds its command. */
-const NAMES = ["init", "migrate", "import", "check", "keys", "mcp", "secret"];
+const NAMES = ["init", "migrate", "import", "check", "keys", "mcp", "secret", "info"];
 
 /**
  * The commands that need an argument, so the bare command is a usage error
@@ -30,11 +30,11 @@ const NAMES = ["init", "migrate", "import", "check", "keys", "mcp", "secret"];
  */
 const NEEDS_ARGUMENT = ["init", "migrate", "import", "check", "keys", "mcp"] as const;
 
-/** The commands that run with no argument (ruling 5): `secret` prints a value. `info` joins it in Task 5. */
-const NO_ARGUMENT = ["secret"] as const;
+/** The commands that run with no argument (ruling 5): `secret` prints a value, and `info` prints a report. */
+const NO_ARGUMENT = ["secret", "info"] as const;
 
 describe("the common rules (spec 19)", () => {
-  it("has the seven commands in the order of the root help", () => {
+  it("has the eight commands in the order of the root help", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
   });
 

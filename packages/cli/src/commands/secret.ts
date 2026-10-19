@@ -14,10 +14,10 @@ import { Stop, UsageError } from "../errors.js";
 import { SECRET_HELP, SECRET_REWRAP_HELP, SECRET_STATUS_HELP } from "../help/secret.js";
 import type { SecretJson, SecretRewrapJson, SecretStatusJson } from "../json.js";
 import { baseOf, basePathOf, timeoutOf } from "../net.js";
-import { operatorCall } from "../operator-client.js";
+import { type OperatorValues, operatorCall, readOperatorSecret } from "../operator-client.js";
 import { type Ctx, printJson } from "../output.js";
 import { DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
-import { DEFAULT_TOKEN_ENV, readSecret } from "../secrets.js";
+import { DEFAULT_TOKEN_ENV } from "../secrets.js";
 
 const OPTIONS = {
   ...COMMON_OPTIONS,
@@ -96,14 +96,6 @@ function countOf(flag: string, value: string | undefined, max: number, fallback:
   return n;
 }
 
-/** The parsed values of the four operator flags of `OPERATOR_OPTIONS`. */
-interface OperatorValues {
-  "base-path"?: string | undefined;
-  "token-env"?: string | undefined;
-  "token-file"?: string | undefined;
-  timeout?: string | undefined;
-}
-
 /**
  * The target of an operator call: the base URL, the base path, and the time
  * limit. The base is https, or http on this machine only, because the
@@ -119,30 +111,6 @@ function readTarget(
     basePath: basePathOf(values["base-path"]),
     ms: timeoutOf(values.timeout),
   };
-}
-
-/**
- * The operator secret through `readSecret`, so it is in the scrub list. A
- * secret that fails core's own rule is refused before any request, as
- * `keys rotate` does.
- */
-function readOperatorSecret(ctx: Ctx, values: OperatorValues): string {
-  const secret = readSecret(ctx, {
-    envFlag: "token-env",
-    fileFlag: "token-file",
-    env: values["token-env"],
-    file: values["token-file"],
-    defaultEnv: DEFAULT_TOKEN_ENV,
-    what: "the operator secret",
-  });
-  // Core's own rule (one source). A value of another form costs one of the
-  // 120 calls per hour and reads as a refusal. And fetch refuses a header
-  // that is not ASCII with no answer.
-  if (!isOperatorSecret(secret))
-    throw new UsageError(
-      "the operator secret is 32 to 512 visible ASCII characters; the deployment refuses any other value",
-    );
-  return secret;
 }
 
 type VersionCount = SecretStatusJson["versions"][number];

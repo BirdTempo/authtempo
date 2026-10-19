@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CHECK_JSON_KEYS,
   IMPORT_JSON_KEYS,
+  INFO_JSON_KEYS,
   INIT_JSON_KEYS,
   KEYS_JSON_KEYS,
   MCP_JSON_KEYS,
@@ -390,6 +391,38 @@ describe("authtempo secret rewrap", () => {
   });
 });
 
+describe("authtempo info", () => {
+  it("prints the stop document on a usage error and on a stop before the report, and exit 0 on a success", () => {
+    const usage = runBin(["info", "--url-env", "DATABASE_URL", "--json"]);
+    expect(stopDoc(usage, INFO_JSON_KEYS, true)).toMatchObject({
+      cli: "",
+      schemaVersion: 0,
+      runtime: { node: "", platform: "", arch: "" },
+      packageManager: null,
+      packages: {},
+      adapters: [],
+      project: null,
+      env: {},
+      database: null,
+      deployment: null,
+      unread: [],
+    });
+    expect(usage.stderr).toContain("--url-env needs --target postgres");
+    const timeout = runBin(["info", "https://api.example.com", "--timeout", "x", "--json"]);
+    expect(stopDoc(timeout, INFO_JSON_KEYS, true).deployment).toBeNull();
+    expect(timeout.stderr).toContain("Usage: authtempo info");
+
+    // A stop before the report: no wrangler config in the folder.
+    const stop = runBin(["info", "--target", "d1", "--json"], { cwd: fresh() });
+    expect(stopDoc(stop, INFO_JSON_KEYS, false).database).toBeNull();
+    expect(stop.stderr).toContain("no wrangler.jsonc in");
+
+    const done = doneDoc(runBin(["info", "--json"]), INFO_JSON_KEYS, 0);
+    expect(done.unread).toEqual([]);
+    expect(done.cli).toBe("0.0.0");
+  });
+});
+
 describe("STOP_JSON", () => {
   it("holds STOP_JSON to each key list", () => {
     const lists: Record<keyof typeof STOP_JSON, object> = {
@@ -402,6 +435,7 @@ describe("STOP_JSON", () => {
       secret: SECRET_JSON_KEYS,
       "secret status": SECRET_STATUS_JSON_KEYS,
       "secret rewrap": SECRET_REWRAP_JSON_KEYS,
+      info: INFO_JSON_KEYS,
     };
     expect(Object.keys(STOP_JSON).sort()).toEqual(
       [
@@ -414,6 +448,7 @@ describe("STOP_JSON", () => {
         "secret",
         "secret status",
         "secret rewrap",
+        "info",
       ].sort(),
     );
     for (const [name, list] of Object.entries(lists)) {

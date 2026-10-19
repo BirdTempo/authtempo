@@ -1,4 +1,28 @@
-import { COMMON_FLAGS, type HelpText } from "./types.js";
+import { COMMON_FLAGS, type HelpFlag, type HelpText } from "./types.js";
+
+/**
+ * The five inputs of a database read (plan 11c2): `check` and `info` list
+ * them under `--target`. One list, so the two helps say the same words.
+ */
+export const DATABASE_FLAGS: readonly HelpFlag[] = [
+  {
+    flag: "--url-env <NAME>",
+    says: "Postgres: the variable that holds the connection string. The default is DATABASE_URL.",
+  },
+  {
+    flag: "--url-file <path>",
+    says: "Postgres: the file that holds the connection string. A dash reads stdin.",
+  },
+  { flag: "--database <name>", says: "D1: the database_name in the wrangler config." },
+  {
+    flag: "--config <path>",
+    says: "D1: the wrangler config of the project. The default is wrangler.jsonc.",
+  },
+  {
+    flag: "--remote",
+    says: "D1: read the database on Cloudflare. The default is the local database.",
+  },
+];
 
 export const CHECK_HELP: HelpText = {
   command: "check",
@@ -29,23 +53,7 @@ export const CHECK_HELP: HelpText = {
       flag: "--target <d1|postgres>",
       says: "Read the schema version from this kind of database. Without it, the schema check skips.",
     },
-    {
-      flag: "--url-env <NAME>",
-      says: "Postgres: the variable that holds the connection string. The default is DATABASE_URL.",
-    },
-    {
-      flag: "--url-file <path>",
-      says: "Postgres: the file that holds the connection string. A dash reads stdin.",
-    },
-    { flag: "--database <name>", says: "D1: the database_name in the wrangler config." },
-    {
-      flag: "--config <path>",
-      says: "D1: the wrangler config of the project. The default is wrangler.jsonc.",
-    },
-    {
-      flag: "--remote",
-      says: "D1: read the database on Cloudflare. The default is the local database.",
-    },
+    ...DATABASE_FLAGS,
     ...COMMON_FLAGS,
   ],
   exits: [

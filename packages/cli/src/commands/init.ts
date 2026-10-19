@@ -1,5 +1,4 @@
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
@@ -7,19 +6,9 @@ import { Stop, UsageError } from "../errors.js";
 import { INIT_HELP } from "../help/init.js";
 import type { InitJson } from "../json.js";
 import { printJson, sayer } from "../output.js";
-import {
-  STACK_INFO,
-  STACKS,
-  type Stack,
-  type TemplateFile,
-  UNPUBLISHED,
-  UNPUBLISHED_NOTE,
-} from "../templates.js";
+import { readTemplates, STACK_INFO, STACKS, UNPUBLISHED, UNPUBLISHED_NOTE } from "../templates.js";
 
 const OPTIONS = { ...COMMON_OPTIONS, stack: { type: "string" } } as const;
-
-/** dist/templates.json: the build renders it from the 11a examples (scripts/copy-templates.mjs). */
-const TEMPLATES = fileURLToPath(new URL("../templates.json", import.meta.url));
 
 /** A path as a shell reads it: in single quotes when it holds a space or a character of the shell. */
 export function shellPath(path: string): string {
@@ -51,8 +40,8 @@ export const initCommand: Command = {
       );
     const given = positionals[0] ?? ".";
     const dir = resolve(ctx.cwd, given);
-    const all = JSON.parse(ctx.readFile(TEMPLATES)) as Record<Stack, TemplateFile[]>;
-    const files = all[stack];
+    // dist/templates.json: the build renders it from the 11a examples (scripts/copy-templates.mjs).
+    const files = readTemplates((path) => ctx.readFile(path))[stack];
     const taken = files.filter((f) => ctx.exists(join(dir, f.path)));
     if (taken.length > 0) {
       for (const f of taken) ctx.err(`exists: ${join(dir, f.path)}`);

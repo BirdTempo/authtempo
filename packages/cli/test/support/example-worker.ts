@@ -8,7 +8,8 @@ const WORKER = join(REPO, "examples/worker");
 const WRANGLER = join(WORKER, "node_modules/.bin/wrangler");
 /** The secret whose SHA-256 hex the Worker gets as OPERATOR_SECRET_HASH (plan 11c Task 2). */
 export const OPERATOR_SECRET = "authtempo-example-operator-secret-0123456789";
-const OPERATOR_HASH = "9553f46eb9e964b487a02e36147c562555bf1a684cfa614904bcc0f5ab5f1c57";
+/** The SHA-256 hex of OPERATOR_SECRET: the Worker holds it, and no report may print it (plan 11c2 Task 5). */
+export const OPERATOR_HASH = "9553f46eb9e964b487a02e36147c562555bf1a684cfa614904bcc0f5ab5f1c57";
 // CI=1: wrangler takes the default of each question (examples/worker/proof/dev.mjs, read 2026-10-10).
 // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
 const ENV = {

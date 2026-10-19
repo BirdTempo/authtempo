@@ -182,6 +182,48 @@ export const SECRET_REWRAP_JSON_KEYS = {
   stopped: true,
 } as const satisfies Record<keyof SecretRewrapJson, true>;
 
+/** `authtempo info --json` (plan 11c2): a support report with no secret value and no host name. */
+export interface InfoJson extends RunKeys {
+  cli: string;
+  schemaVersion: number;
+  runtime: { node: string; platform: string; arch: string };
+  /** The first word of npm_config_user_agent, else the packageManager field of the nearest package.json, else null. */
+  packageManager: { name: string; version: string; source: "user-agent" | "package.json" } | null;
+  /** Each @authtempo package of the nearest package.json, with its installed version or null. */
+  packages: Record<string, string | null>;
+  adapters: string[];
+  /** The wrangler config beside the package.json, with each database_name and never a database_id. */
+  project: { wrangler: boolean; d1Databases: string[] } | null;
+  /** Each secret name of the templates, set or unset. Never a value. */
+  env: Record<string, "set" | "unset">;
+  /** The database of --target. compatVersion is read on Postgres only. */
+  database: {
+    kind: "postgres" | "d1";
+    schemaVersion: number | null;
+    applied: number;
+    compatVersion: number | null;
+  } | null;
+  /** The answer of GET /operator/info, with each key path that is no plain name dropped and counted. */
+  deployment: { core: string; schemaVersion: number; configKeys: string[]; dropped: number } | null;
+  /** Each part that a flag asked for and that gave no answer, with its reason. */
+  unread: { part: "database" | "deployment"; reason: string }[];
+}
+export const INFO_JSON_KEYS = {
+  cli: true,
+  schemaVersion: true,
+  runtime: true,
+  packageManager: true,
+  packages: true,
+  adapters: true,
+  project: true,
+  env: true,
+  database: true,
+  deployment: true,
+  unread: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof InfoJson, true>;
+
 /**
  * The document of a usage error or a thrown stop under `--json`, for each
  * command and each subcommand (plan 11e deviation 19). The key is the key
@@ -235,6 +277,21 @@ export const STOP_JSON = {
     exit: 2,
     stopped: null,
   },
+  info: {
+    cli: "",
+    schemaVersion: 0,
+    runtime: { node: "", platform: "", arch: "" },
+    packageManager: null,
+    packages: {},
+    adapters: [],
+    project: null,
+    env: {},
+    database: null,
+    deployment: null,
+    unread: [],
+    exit: 2,
+    stopped: null,
+  },
 } satisfies {
   init: InitJson;
   migrate: MigrateJson;
@@ -245,4 +302,5 @@ export const STOP_JSON = {
   secret: SecretJson;
   "secret status": SecretStatusJson;
   "secret rewrap": SecretRewrapJson;
+  info: InfoJson;
 };

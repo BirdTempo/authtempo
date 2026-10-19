@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { STACKS, type Stack } from "./stacks.js";
 
 /**
@@ -230,6 +231,21 @@ export function extraFiles(stack: Stack): TemplateFile[] {
 export interface TemplateFile {
   path: string;
   text: string;
+}
+
+/**
+ * dist/templates.json of this package: the build renders it
+ * (scripts/copy-templates.mjs). The path goes through `..`, so src and dist
+ * both reach the built file, as version.ts reads package.json.
+ */
+export const TEMPLATES_FILE = fileURLToPath(new URL("../dist/templates.json", import.meta.url));
+
+/**
+ * The rendered templates of each stack, one reader for `init` and `info`
+ * (plan 11c2). `init` reads through its io; `info` reads the file system.
+ */
+export function readTemplates(read: (path: string) => string): Record<Stack, TemplateFile[]> {
+  return JSON.parse(read(TEMPLATES_FILE)) as Record<Stack, TemplateFile[]>;
 }
 
 const byPath = (a: TemplateFile, b: TemplateFile) =>

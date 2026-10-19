@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertFreshBuild, linesOf, runBin } from "./support/bin.js";
-import { OPERATOR_SECRET, START_LIMIT_MS, startExampleWorker } from "./support/example-worker.js";
+import {
+  OPERATOR_HASH,
+  OPERATOR_SECRET,
+  START_LIMIT_MS,
+  startExampleWorker,
+} from "./support/example-worker.js";
 
 // The binary against `wrangler dev` of examples/worker (plan 11c): the real
 // network path that the Workers-pool test of the example cannot run.
@@ -77,6 +82,32 @@ describe("the live runs (spec 19)", () => {
       stopped: null,
     });
     expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
+  });
+
+  it("reports the example Worker with no secret value", () => {
+    const r = runBin(["info", base(), "--json"], {
+      env: { AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const doc = JSON.parse(r.stdout) as {
+      deployment: {
+        core: string;
+        schemaVersion: number;
+        configKeys: string[];
+        dropped: number;
+      } | null;
+      unread: unknown[];
+      exit: number;
+      stopped: string | null;
+    };
+    expect(doc.deployment?.configKeys).toContain("operator.secretHash");
+    expect(doc.deployment?.configKeys).toContain("secret");
+    expect(doc.deployment?.dropped).toBe(0);
+    expect(doc.deployment?.core).toMatch(/^\d+\.\d+\.\d+/);
+    expect(doc).toMatchObject({ unread: [], exit: 0, stopped: null });
+    // No secret, no hash, and no host of the person's own base URL.
+    for (const s of [OPERATOR_SECRET, OPERATOR_HASH, "localhost", "8797"])
+      expect(r.stdout + r.stderr, s).not.toContain(s);
   });
 
   it("stops with exit 2 for a wrong operator secret", () => {
