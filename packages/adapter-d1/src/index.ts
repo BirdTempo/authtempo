@@ -18,3 +18,4 @@ export function createD1Adapter(db: D1Database): StorageAdapter {
 export { createD1AdapterOn, type D1AdapterOptions } from "./adapter.js";
 export { toStorageError } from "./errors.js";
 export { createD1Limiter } from "./limiter.js";
+export { D1_SHAPE_SQL, d1ColumnType, expectedD1Shape, parseD1Shape } from "./shape.js";

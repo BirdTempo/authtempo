@@ -75,6 +75,42 @@ export function uniqueIndexName(model: ModelName, fields: readonly string[]): st
   return `ux_${TABLES[model]}__${fields.map(columnName).join("__")}`;
 }
 
+/** The name of a plain index of `fields`, the rule of the migrations: `ix_<table>__<col>__<col>`. */
+export function indexName(model: ModelName, fields: readonly string[]): string {
+  return `ix_${TABLES[model]}__${fields.map(columnName).join("__")}`;
+}
+
+/** One column as a migration makes it (plan 11c2). `type` is the database's own name: `bigint` on Postgres, `INTEGER` on D1. */
+export interface ShapeColumn {
+  name: string;
+  type: string;
+  notNull: boolean;
+}
+
+/** One index by its name and its columns in order. */
+export interface ShapeIndex {
+  name: string;
+  columns: readonly string[];
+}
+
+export interface ExpectedTable {
+  name: string;
+  columns: readonly ShapeColumn[];
+  primaryKey: readonly string[];
+  unique: readonly ShapeIndex[];
+  indexes: readonly ShapeIndex[];
+}
+
+/** The tables that an adapter's migrations make, sorted by name (plan 11c2). The adapters export it; the CLI reads it. */
+export type ExpectedShape = readonly ExpectedTable[];
+
+/** A live column also says whether it has a default: an extra NOT NULL column with no default fails each insert. */
+export interface LiveTable extends Omit<ExpectedTable, "columns"> {
+  columns: readonly (ShapeColumn & { hasDefault: boolean })[];
+}
+
+export type LiveShape = readonly LiveTable[];
+
 /** Parses an index or constraint name back to field names, or null when it is not ours. */
 export function fieldsFromUniqueIndex(model: ModelName, name: string): string[] | null {
   const table = TABLES[model];

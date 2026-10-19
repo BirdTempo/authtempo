@@ -1,8 +1,8 @@
 import { type ModelName, schema } from "@authtempo/core";
 import { runAdapterConformance } from "@authtempo/core/conformance";
-import { columnName, columnsOf, TABLES, uniqueIndexName } from "@authtempo/core/sql";
+import { columnsOf, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
-import { type CoreFieldType, createPostgresAdapter, postgresColumnType } from "../src/index.js";
+import { createPostgresAdapter, expectedPostgresShape, readPostgresShape } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 runAdapterConformance("postgres", async () => {
@@ -10,92 +10,50 @@ runAdapterConformance("postgres", async () => {
   return { adapter: createPostgresAdapter(db.sql), close: () => db.close() };
 });
 
-interface IndexShape {
-  name: string;
-  unique: boolean;
-  columns: string;
-}
-
-function expectedIndexes(model: ModelName): IndexShape[] {
-  const table = TABLES[model];
-  const cols = (fields: readonly string[]) => fields.map(columnName);
-  return [
-    ...schema[model].unique.map((f) => ({
-      name: uniqueIndexName(model, f),
-      unique: true,
-      columns: cols(f).join(", "),
-    })),
-    ...schema[model].indexes.map((f) => ({
-      name: `ix_${table}__${cols(f).join("__")}`,
-      unique: false,
-      columns: cols(f).join(", "),
-    })),
-  ].sort((a, b) => a.name.localeCompare(b.name));
-}
-
 describe("postgres migration matches the core schema", () => {
-  it("has every table with the columns core expects, in order", async () => {
+  it("the fresh database has the shape of expectedPostgresShape()", async () => {
     const db = await freshDatabase();
     try {
-      for (const [model, table] of Object.entries(TABLES)) {
-        const cols = await db.sql.unsafe<{ column_name: string }[]>(
-          "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
-          [table],
-        );
-        expect(cols.map((c) => c.column_name)).toEqual(columnsOf(model as ModelName));
-      }
+      const live = await readPostgresShape(db.sql);
+      // The expected shape holds no default, so compare the live shape without it.
+      const withoutDefault = live.map((t) => ({
+        ...t,
+        columns: t.columns.map((c) => ({ name: c.name, type: c.type, notNull: c.notNull })),
+      }));
+      expect(withoutDefault).toEqual(expectedPostgresShape());
     } finally {
       await db.close();
     }
   });
 
-  it("matches schema in NOT NULL and in column type", async () => {
-    const db = await freshDatabase();
-    try {
-      for (const model of Object.keys(schema) as ModelName[]) {
-        const cols = await db.sql.unsafe<
-          { column_name: string; is_nullable: string; data_type: string }[]
-        >(
-          "SELECT column_name, is_nullable, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1",
-          [TABLES[model]],
-        );
-        const actual = Object.fromEntries(
-          cols.map((c) => [c.column_name, `${c.data_type} ${c.is_nullable}`]),
-        );
-        const fields = schema[model].fields as Record<
-          string,
-          { type: CoreFieldType; nullable?: boolean }
-        >;
-        const expected = Object.fromEntries(
-          Object.entries(fields).map(([f, def]) => [
-            columnName(f),
-            `${postgresColumnType(f, def.type)} ${def.nullable ? "YES" : "NO"}`,
-          ]),
-        );
-        expect({ model, columns: actual }).toEqual({ model, columns: expected });
-      }
-    } finally {
-      await db.close();
+  it("lists the columns of each model in the order of schema", () => {
+    const shape = expectedPostgresShape();
+    for (const model of Object.keys(schema) as ModelName[]) {
+      const table = shape.find((t) => t.name === TABLES[model]);
+      expect({ model, columns: table?.columns.map((c) => c.name) }).toEqual({
+        model,
+        columns: columnsOf(model),
+      });
     }
   });
 
-  it("has every unique index and index that schema lists, with core's names and column order", async () => {
+  it("reads an extra column with its default", async () => {
     const db = await freshDatabase();
     try {
-      for (const model of Object.keys(schema) as ModelName[]) {
-        const rows = await db.sql.unsafe<{ indexname: string; indexdef: string }[]>(
-          "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",
-          [TABLES[model], `${TABLES[model]}_pkey`],
-        );
-        const actual = rows
-          .map((r) => ({
-            name: r.indexname,
-            unique: r.indexdef.includes("CREATE UNIQUE INDEX"),
-            columns: /\(([^)]*)\)$/.exec(r.indexdef)?.[1] ?? r.indexdef,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name));
-        expect({ model, indexes: actual }).toEqual({ model, indexes: expectedIndexes(model) });
-      }
+      await db.sql.unsafe("ALTER TABLE ta_user ADD COLUMN nickname text DEFAULT 'x'");
+      const user = (await readPostgresShape(db.sql)).find((t) => t.name === "ta_user");
+      expect(user?.columns.find((c) => c.name === "nickname")).toEqual({
+        name: "nickname",
+        type: "text",
+        notNull: false,
+        hasDefault: true,
+      });
+      expect(user?.columns.find((c) => c.name === "email")).toEqual({
+        name: "email",
+        type: "text",
+        notNull: true,
+        hasDefault: false,
+      });
     } finally {
       await db.close();
     }
