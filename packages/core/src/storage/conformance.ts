@@ -61,7 +61,6 @@ function verification(id: string, at: Date, consumedAt: Date | null): Verificati
   };
 }
 
-/** A second-factor row of plan 12c, for the version tests (plan 12b). */
 /**
  * The client fields of schema version 11 (plan 12e) as migration 0011 fills
  * them on a row of version 10: a public client with no secret.
@@ -87,6 +86,7 @@ const PUBLIC_CLIENT_V11: Omit<
   dpopBound: false,
 };
 
+/** A second-factor row of plan 12c, for the version tests (plan 12b). */
 function secondFactor(id: string, at: Date): Omit<SecondFactorRow, "secretVersion"> {
   return {
     id,

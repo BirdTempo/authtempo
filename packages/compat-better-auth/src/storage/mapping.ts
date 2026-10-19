@@ -89,11 +89,11 @@ function notCredential(provider: string): string {
  * has none yet: the plan that maps Better Auth's api-key plugin puts it on
  * the `apikey` table, so that the keys an app already holds keep working.
  * `UNMAPPED_MODELS` in statements.ts is the runtime half of this rule.
- * Core's `totp` and `trustedDevice` (plan 9f), `jwk`, `oauthClient`,
- * `oauthConsent`, and `oauthToken` (plan 9g), `secondFactor` (plan 12c), and
- * `oauthDevice`, `oauthSubject`, `oauthSessionClient`, and `oauthLogout`
- * (plan 12e) keep core's own tables beside the Better Auth tables: `CORE_TABLE_MODELS`
- * in statements.ts.
+ * Some core models keep core's own tables beside the Better Auth tables
+ * (`CORE_TABLE_MODELS` in statements.ts). Plan 9f added `totp` and
+ * `trustedDevice`. Plan 9g added `jwk`, `oauthClient`, `oauthConsent`, and
+ * `oauthToken`. Plan 12c added `secondFactor`. Plan 12e added
+ * `oauthDevice`, `oauthSubject`, `oauthSessionClient`, and `oauthLogout`.
  */
 export type MappedModel = Exclude<
   ModelName,

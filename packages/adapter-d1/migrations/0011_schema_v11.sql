@@ -2,10 +2,11 @@
 -- version (plan 12e). Append-only: never edit a shipped migration.
 -- ta_oauth_client gets the fields of a confidential client, the grants, the
 -- logout URIs, the subject type, and the DPoP flag. Each NOT NULL column has
--- a default, so each row of version 10 reads as the public client it was:
--- auth method none, the grants authorization_code and refresh_token, no
--- secret, no key set, public subjects, and no DPoP binding. The defaults are
--- here only: core writes every field on each insert. Booleans are INTEGER 0
+-- a default, so each row of version 10 reads as the public client it was.
+-- That client has the auth method none and the grants authorization_code and
+-- refresh_token. It has no secret, no key set, and no DPoP binding, and its
+-- subjects are public. The defaults are here only: core writes every field
+-- on each insert. Booleans are INTEGER 0
 -- or 1, JSON is TEXT, and dates are INTEGER epoch milliseconds. The columns
 -- keep the field order of the schema. The two new verification purposes
 -- need no DDL: purpose is a text column.

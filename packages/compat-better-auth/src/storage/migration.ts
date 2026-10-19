@@ -459,14 +459,14 @@ CREATE INDEX ix_ta_oauth_logout__user_id ON ta_oauth_logout (user_id);`,
 };
 
 /**
- * Migration 0008 (plan 12e): core's schema version 11. Core 11 adds the
- * client fields of the OAuth provider's second version on `oauthClient`,
- * two fields on `oauthToken`, and the models `oauthDevice`, `oauthSubject`,
- * `oauthSessionClient`, and `oauthLogout`. Each one is core's own table in
- * this database (`CORE_TABLE_MODELS`), so the text is core 0011's
- * statements, with the same defaults: each client row of today reads as
- * the public client it was. The text names `ta_` tables only, so it is the
- * same for every naming and for both D1 variants. Append-only.
+ * Migration 0008 (plan 12e): core's schema version 11. Core 11 adds client
+ * fields on `oauthClient` and two fields on `oauthToken`. It also adds the
+ * models `oauthDevice`, `oauthSubject`, `oauthSessionClient`, and
+ * `oauthLogout`. Each of these models is core's own table in this database
+ * (`CORE_TABLE_MODELS`). So the text is the statements of core 0011, with
+ * the same defaults. Each client row of today reads as the public client it
+ * was. The text names `ta_` tables only, so it is the same for every naming
+ * and for both D1 variants. Append-only.
  */
 export function compatMigration0008Sql(dialect: "postgres" | "sqlite"): string {
   return `${[
