@@ -99,7 +99,7 @@ it("stops before any write on a database with no schema", async () => {
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    `stopped: the database has no schema of authtempo; ${MIGRATE_FIRST}`,
+    "stopped: the database has no schema of authtempo; run authtempo migrate --target postgres first, or add --tables compat for the Better Auth tables of an app; nothing was written",
   );
   expect(await rowCounts()).toEqual({});
 });
@@ -219,6 +219,13 @@ describe("importGate and the two table sets", () => {
   it("names the other table set when the database holds only one", () => {
     expect(stopOf(10, "compat", 10, 0)).toBe(CORE_ONLY);
     expect(stopOf(10, "core", 0, 7)).toBe(COMPAT_ONLY);
+  });
+
+  it("names the compat set in the stop of a core import on a database with no schema", () => {
+    expect(stopOf(null, "core", 0, 0)).toBe(
+      "the database has no schema of authtempo; run authtempo migrate --target postgres first, or add --tables compat for the Better Auth tables of an app; nothing was written",
+    );
+    expect(stopOf(null, "compat", 0, 0)).toBe(`the database has no schema of authtempo; ${FIX}`);
   });
 
   it("reads the core version first, and passes a core import on core's tables", () => {

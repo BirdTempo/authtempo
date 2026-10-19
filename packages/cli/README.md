@@ -103,13 +103,19 @@ and names both folders, because wrangler would apply the wrong files and
 report success. With `--tables compat`, the command copies each file of the
 compatibility package (`migrations/d1/`, or `migrations/d1-before-1.7/` with
 `--before-1.7`) into the app's `migrations_dir` under the app's next
-number, then applies. A file whose text the folder holds is not copied
-again. The copied files hold Better Auth's default table and column names.
-An app with other names writes 0001 from `storage.migrationSql()` (or
-`storage.migrationSql("before-1.7")` for tables from before 1.7), 0006
-from `compatMigration0006Sql("sqlite", storage.names)`, and 0007 from
-`compatMigration0007Sql("sqlite", storage.names)`. The shipped files
-fail on its tables with `no such table`. Without `--remote`, the run is on
+number, then applies. It reads `compat_better_auth` of `ta_meta` first,
+and copies no compat file at or below that version. A file whose text the
+folder holds is not copied again. A copy above that version with another
+text stops the run with exit 2 before any write, and the line names the
+file. The copied files hold Better Auth's default table and column names.
+The shipped 0001, 0006, and 0007 fail on other names with `no such table`.
+An app with other names writes its own seven files: 0001 from
+`storage.migrationSql()` (or `storage.migrationSql("before-1.7")` for
+tables from before 1.7), 0002 to 0005 as shipped, 0006 from
+`compatMigration0006Sql("sqlite", storage.names)`, and 0007 from
+`compatMigration0007Sql("sqlite", storage.names)`. It applies them with
+`wrangler d1 migrations apply <database>` before this command. Then the
+compat version is 7, and the command copies nothing. Without `--remote`, the run is on
 the local database of `wrangler dev`. wrangler records each applied file in
 its table `d1_migrations` (`migrations_table`).
 

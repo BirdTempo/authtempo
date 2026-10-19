@@ -166,7 +166,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
       expect(r.status).toBe(2);
       expect(r.stdout).toBe("");
       expect(linesOf(r.stderr).at(-1)).toBe(
-        `stopped: ${join(dir, "0002_compat_better_auth.sql")} differs from the compat file 0001_compat_better_auth.sql; restore its text, and put the app's change in a new migration; nothing was written`,
+        `stopped: ${join(dir, "0002_compat_better_auth.sql")} differs from the compat file 0001_compat_better_auth.sql; restore its text, and put the app's change in a new migration; on tables with other names, apply the app's own compat files with wrangler d1 migrations apply first; nothing was written`,
       );
       expect(snapshot()).toEqual(before);
     }

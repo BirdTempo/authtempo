@@ -50,8 +50,8 @@ export function betterAuthWarning(
   const unreadable = `warning: cannot read the version of better-auth in ${path}; upgrade Better Auth to ${FIXED_TEXT} or later before the move`;
   let pkg: unknown;
   try {
-    // An io that refuses the path, such as the confined io of the MCP
-    // server on a link outside its root, throws here: the version is unread.
+    // An io that refuses the path throws here, and the version is unread.
+    // An example is the confined io of the MCP server on a link outside its root.
     if (!ctx.exists(path)) return null;
     pkg = JSON.parse(ctx.readFile(path));
   } catch {

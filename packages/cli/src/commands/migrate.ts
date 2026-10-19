@@ -174,7 +174,10 @@ function compatVersionOf(raw: string | null): number {
  * kept). Else the file is copied. A compat file is a record of the package
  * (append-only). An edited copy is a second migration with the same name.
  * wrangler would apply it again, or fail on it at a worse moment (plan 11c
- * deferral, closed by spec 23 item 11).
+ * deferral, closed by spec 23 item 11). An app with other table names
+ * writes its own compat files and applies them with wrangler first. Then the
+ * compat version is 7, and this plan copies nothing (the final review of
+ * plan 11f, m1).
  */
 export function planCompatCopy(
   ctx: Ctx,
@@ -211,7 +214,7 @@ export function planCompatCopy(
     if (own !== undefined) {
       if (textOf.get(own) === text) continue;
       throw new Stop(
-        `${join(dir, own)} differs from the compat file ${f}; restore its text, and put the app's change in a new migration; nothing was written`,
+        `${join(dir, own)} differs from the compat file ${f}; restore its text, and put the app's change in a new migration; on tables with other names, apply the app's own compat files with wrangler d1 migrations apply first; nothing was written`,
       );
     }
     if ([...textOf.values()].includes(text)) continue;

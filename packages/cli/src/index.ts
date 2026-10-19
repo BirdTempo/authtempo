@@ -2,6 +2,8 @@
 // module, so a Worker test or the docs site can read the help texts and the
 // JSON shapes (and, from Task 8, runChecks). The binary is src/bin/authtempo.ts.
 
+// The docs site holds the version of its Better Auth cautions to this export.
+export { BETTER_AUTH_FIXED } from "./better-auth-version.js";
 export {
   ALL_CHECK_CODES,
   CHECK_CODES,

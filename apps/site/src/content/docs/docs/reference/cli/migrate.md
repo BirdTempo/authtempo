@@ -72,9 +72,12 @@ authtempo migrate --target d1 --database my-app --remote
 - Another folder stops the run, and the message names both folders. wrangler would apply the wrong files and report success.
 - With `--tables compat`, the command copies each compat file into the `migrations_dir` of the app under its next number.
 - The command reads `compat_better_auth` of `ta_meta` first. It copies no compat file that the database holds already, also when the app renamed its copy.
-- The compat files hold the default table and column names of Better Auth. On tables with other names, the shipped 0001, 0006, and 0007 fail with `no such table`. Such an app writes 0001 from `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for tables from before 1.7. It writes 0006 from `compatMigration0006Sql("sqlite", storage.names)`, and 0007 from `compatMigration0007Sql("sqlite", storage.names)`.
+- The compat files hold the default table and column names of Better Auth. On tables with other names, the shipped 0001, 0006, and 0007 fail with `no such table`.
+- Such an app writes its own seven compat files. It writes 0001 from `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for tables from before 1.7. It copies 0002 to 0005 as the package ships them. It writes 0006 from `compatMigration0006Sql("sqlite", storage.names)`, and 0007 from `compatMigration0007Sql("sqlite", storage.names)`.
+- Such an app applies its own files with `wrangler d1 migrations apply <database>` before this command. Then the compat version is 7, and the command copies nothing. If not, the command stops on an own file with the name of a compat file, or copies the shipped 0001, which fails with `no such table`.
 - With `--tables compat`, a `migrations_dir` in a package or under `node_modules` stops the run with exit 2, before the first write. The default folder of a core D1 app is that of `@authtempo/adapter-d1`, so point `migrations_dir` at a folder of the app first.
 - A file whose text the folder holds already is not copied again.
+- A copy that is not applied yet and has another text stops the run with exit 2, before any write. The line names the file.
 - wrangler records each applied file in its table `d1_migrations`.
 - With `--tables compat`, the command prints one warning when the project holds `better-auth` below 1.7.7. Upgrade it first.
 

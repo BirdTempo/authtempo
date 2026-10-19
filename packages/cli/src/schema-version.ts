@@ -68,7 +68,10 @@ const COMPAT_VERSION = COMPAT_MIGRATION_NAMES.length;
  * database that only the compat run made names the compat set. A compat
  * import on a database that only core's migrations made names the core set.
  * A compat import also stops on compat tables of another mapping version:
- * that compat storage lacks a table too.
+ * that compat storage lacks a table too. A core import on a database with no
+ * schema also names the compat set. A Better Auth database has no schema
+ * before the compat run, and core's migrations would put `ta_meta` and
+ * `ta_limit` into it, so the compat run then stops on them.
  */
 export function importGate(
   version: number | null,
@@ -76,8 +79,11 @@ export function importGate(
   db: { appliedCore: number; compatVersion: number },
 ): void {
   const fix = `run authtempo migrate --target postgres${tables === "compat" ? " --tables compat" : ""} first`;
-  if (version === null)
-    throw new Stop(`the database has no schema of authtempo; ${fix}; nothing was written`);
+  if (version === null) {
+    const other =
+      tables === "core" ? ", or add --tables compat for the Better Auth tables of an app" : "";
+    throw new Stop(`the database has no schema of authtempo; ${fix}${other}; nothing was written`);
+  }
   if (version < SCHEMA_VERSION)
     throw new Stop(
       `the database is at version ${version}; this CLI writes version ${SCHEMA_VERSION}; ${fix}; nothing was written`,
