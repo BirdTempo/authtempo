@@ -396,6 +396,25 @@ describe("RP-initiated logout (plan 12e Task 15, OIDC RP-Initiated Logout 1.0)",
     expect(bare.headers.get("location")).toBe(PATH);
   });
 
+  it("escapes each reflected field on the confirmation page", async () => {
+    const h = oauthHandle();
+    const s = await signedIn(h);
+    const bad = '"><b>x</b>';
+    const html = await expectConfirmPage(
+      await h.auth.handle(
+        endGet(
+          { id_token_hint: bad, client_id: bad, post_logout_redirect_uri: bad, state: bad },
+          { cookie: s.cookie },
+        ),
+      ),
+    );
+    expect(html).not.toContain("<b>");
+    for (const name of ["id_token_hint", "client_id", "post_logout_redirect_uri", "state"])
+      expect(html, name).toContain(
+        `<input type="hidden" name="${name}" value="&quot;&gt;&lt;b&gt;x&lt;/b&gt;">`,
+      );
+  });
+
   it("fires afterEnd with oidc_logout", async () => {
     const ended: string[] = [];
     const h = oauthHandle({
