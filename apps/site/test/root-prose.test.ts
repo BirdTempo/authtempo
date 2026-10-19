@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { checkSentences } from "../scripts/check-sentences.ts";
 import { checkTerms } from "../scripts/check-terms.ts";
+import { DEMO_PROSE_PATH, demoProsePage } from "../scripts/lib/demo-prose.ts";
 import { parseFrontmatter } from "../scripts/lib/markdown.ts";
 import { prosePages } from "../scripts/lib/prose.ts";
 import { ROOT_PROSE_PATH, rootProsePage } from "../scripts/lib/root-prose.ts";
 import { licenseLine, PLATFORM_COSTS, PRICING_PAGE } from "../src/data/costs.ts";
+import { DEMO_OFF, DEMO_PAGE, limitRows } from "../src/data/demo.ts";
 import { licenseOf, rootLicense } from "../src/data/repo.ts";
 import { SECURITY_PAGE } from "../src/data/security.ts";
 
@@ -48,5 +50,25 @@ describe("the prose of /pricing/ and /security/ (plan 11b)", () => {
   it("states the license line, or the empty state of the footer as a sentence", () => {
     expect(licenseLine(null)).toBe("The license is not set yet.");
     expect(licenseLine("MIT")).toBe("The license is MIT.");
+  });
+});
+
+describe("the prose of /demo/ (plan 11b Task 12)", () => {
+  it("puts each reason, each part turned off, each limit, and the end lines in the prose page", () => {
+    const body = parseFrontmatter(demoProsePage().source)?.body ?? "";
+    const paragraphs = body.split("\n\n").map((p) => p.trim());
+    for (const text of [
+      ...DEMO_OFF.flatMap((x) => [x.name, x.reason]),
+      ...limitRows().map((r) => r.text),
+      DEMO_PAGE.notOpen,
+      DEMO_PAGE.open,
+      "It needs a native or desktop app on the visitor's device.",
+    ])
+      expect({ text, found: paragraphs.includes(text) }).toEqual({ text, found: true });
+  });
+
+  it("is one page of the list that check-terms and check-sentences read", () => {
+    expect(prosePages().filter((p) => p.path === DEMO_PROSE_PATH).length).toBe(1);
+    expect(checkSentences([demoProsePage()]).failures).toEqual([]);
   });
 });

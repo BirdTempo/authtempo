@@ -14,6 +14,9 @@ export const HOME = {
   /** The heading of the stacks of `authtempo init` (spec 24 item 2; plan 11b Task 5). */
   start: "Start",
   featuresTitle: "Every piece, drawn to one grid.",
+  /** The heading and the one link of the section Try it (plan 11b Task 12). */
+  tryIt: "Try it",
+  tryItLink: "Try each sign-in method in the demo",
   numbers: { routes: "routes", vendors: "vendors in the path" },
   skip: "Skip to the content",
   noLicense: "the license is not set yet",

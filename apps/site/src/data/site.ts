@@ -20,11 +20,13 @@ export const SITE = {
 /**
  * The links of the root header (brand spec 9). Each page of plan 11b adds
  * its link with the page, so no link names a page that does not exist.
- * Compare comes right after Docs (ruling 7 of the plan 11b lane).
+ * Compare comes right after Docs, and Demo right after Compare (ruling 7 of
+ * the plan 11b lane).
  */
 export const NAV_LINKS: readonly { label: string; href: string }[] = [
   { label: "Docs", href: SITE.docs },
   { label: "Compare", href: "/compare/" },
+  { label: "Demo", href: "/demo/" },
 ];
 
 /**

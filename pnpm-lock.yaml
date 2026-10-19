@@ -258,6 +258,9 @@ importers:
       '@authtempo/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@authtempo/demo':
+        specifier: workspace:*
+        version: link:../demo
       '@authtempo/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp

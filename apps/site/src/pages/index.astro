@@ -86,6 +86,10 @@ const stacks = STACKS.map((stack) => ({
       <pre class="code at-card at-lift"><code>{apiSample}</code></pre>
     </div>
   </section>
+  <section class="try" aria-labelledby="try-title">
+    <h2 id="try-title" class="at-enter">{HOME.tryIt}</h2>
+    <p class="try-link"><a href="/demo/">{HOME.tryItLink}</a></p>
+  </section>
   <section class="numbers">
     <dl>
       <div class="cell"><dt>{HOME.numbers.routes}</dt><dd class="mono">{ROUTES.length}</dd></div>
@@ -117,6 +121,7 @@ const stacks = STACKS.map((stack) => ({
   .feature-row :global(.at-icon) { grid-row: span 2; width: 1.5rem; height: 1.5rem; color: var(--at-ink); }
   .feature-name { font-weight: 600; color: var(--at-ink); text-decoration: none; }
   .feature-name:hover, .feature-name:focus-visible { color: var(--at-accent-text); text-decoration: underline; }
+  .try-link { margin: var(--at-rhythm) 0 0; font-weight: 500; }
   .stack-list { margin: var(--at-rhythm) 0 0; padding: 0; list-style: none; }
   .stack-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: var(--at-rhythm); row-gap: var(--at-unit); padding-block: calc(var(--at-unit) * 1.5); border-top: 1px solid var(--at-line); }
   .stack-row a { font-weight: 500; }

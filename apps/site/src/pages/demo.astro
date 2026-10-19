@@ -1,0 +1,70 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// /demo/ of plan 11b (spec 24 item 2, Task 12), in the layout of brand spec 10.
+// The prose is the entry demo.md. The lists and the limits come from
+// @authtempo/demo/facts at build time, so no count is typed by hand. While
+// DEMO_PUBLISHED is false, the page gives the local command and no link to
+// the planned host (deviation 11).
+import { getEntry } from "astro:content";
+import { DEMO_EXEMPT, DEMO_FEATURES, DEMO_PUBLISHED } from "@authtempo/demo/facts";
+import PageHero from "../components/PageHero.astro";
+import { DEMO_OFF, DEMO_PAGE, limitRows } from "../data/demo.ts";
+import { entryParts, sectionOf } from "../data/entry.ts";
+import { FEATURES } from "../data/features.ts";
+import { renderMarkdown } from "../data/markdown.ts";
+import Site from "../layouts/Site.astro";
+
+const entry = await getEntry("site", "demo");
+if (entry === undefined) throw new Error("demo.astro: src/content/site/demo.md is missing");
+const parts = entryParts(entry.body ?? "");
+const where = "src/content/site/demo.md";
+const shows = sectionOf(parts, "What the demo shows", where);
+const off = sectionOf(parts, "What the demo does not show", where);
+const limits = sectionOf(parts, "The limits", where);
+const exempt = (Object.entries(DEMO_EXEMPT) as [keyof typeof DEMO_EXEMPT, string][]).map(
+  ([feature, reason]) => ({ id: `off-${feature}`, name: FEATURES[feature].title, reason }),
+);
+---
+<Site title={entry.data.title} description={entry.data.description} path={entry.data.page}>
+  <PageHero title={entry.data.title}><Fragment set:html={await renderMarkdown(parts.lede)} /></PageHero>
+  <div class="prose"><Fragment set:html={await renderMarkdown(parts.intro)} /></div>
+  <section class="prose">
+    <Fragment set:html={await renderMarkdown(shows)} />
+    <ul class="shows">
+      {DEMO_FEATURES.map((f) => <li id={`shows-${f}`}><a href={`/features/#${f}`}>{FEATURES[f].title}</a></li>)}
+    </ul>
+  </section>
+  <section class="prose">
+    <Fragment set:html={await renderMarkdown(off)} />
+    <dl class="off">
+      {exempt.map((x) => <div id={x.id}><dt>{x.name}</dt><dd>{x.reason}</dd></div>)}
+      {DEMO_OFF.map((x) => <div class="off-fixed"><dt>{x.name}</dt><dd>{x.reason}</dd></div>)}
+    </dl>
+  </section>
+  <section class="prose">
+    <Fragment set:html={await renderMarkdown(limits)} />
+    <ul class="limits">
+      {limitRows().map((row) => <li id={`limit-${row.key}`}>{row.text}</li>)}
+    </ul>
+    {DEMO_PUBLISHED
+      ? <p class="end"><a href={DEMO_PAGE.host}>{DEMO_PAGE.open}</a></p>
+      : <p class="end">{DEMO_PAGE.notOpen} <code>{DEMO_PAGE.command}</code></p>}
+  </section>
+</Site>
+<style>
+  .prose { max-width: var(--at-measure); }
+  section { margin-bottom: calc(var(--at-rhythm) * 2); }
+  .prose :global(p) { margin: 0 0 var(--at-rhythm); }
+  .prose :global(h2) { margin: calc(var(--at-rhythm) * 2) 0 var(--at-rhythm); font-size: var(--at-text-h2); line-height: var(--at-leading-h2); letter-spacing: var(--at-tracking-h2); font-weight: 600; }
+  ul { margin: 0; padding-inline-start: calc(var(--at-unit) * 3); }
+  li + li { margin-top: var(--at-unit); }
+  /* Each item on a hairline rule (brand spec 6). */
+  .off { margin: 0; }
+  .off > div { padding-block: calc(var(--at-unit) * 1.5); border-top: 1px solid var(--at-line); }
+  .off dt { font-weight: 600; }
+  .off dd { margin: 0; color: var(--at-mute); }
+  /* .prose p sets the margin of each paragraph, so this rule names .prose too. */
+  .prose .end { margin-top: calc(var(--at-rhythm) * 2); }
+  .end code { font-size: var(--at-text-mono); overflow-wrap: anywhere; }
+</style>

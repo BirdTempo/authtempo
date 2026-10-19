@@ -64,8 +64,15 @@ export function rowsIn(jar: Jar, query: string, ...values: SqlStorageValue[]) {
   );
 }
 
+/**
+ * Each Set-Cookie line that an answer of call() carried in this test file,
+ * in order. cookies.test.ts reads every attribute of each line.
+ */
+export const SET_COOKIES: string[] = [];
+
 function keep(jar: Jar, res: Response): void {
   for (const line of res.headers.getSetCookie()) {
+    SET_COOKIES.push(line);
     const pair = line.split(";")[0] ?? "";
     const at = pair.indexOf("=");
     if (at < 1) continue;

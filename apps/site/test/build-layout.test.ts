@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { STACK_INFO, STACKS } from "@authtempo/cli/stacks";
 import { ROUTES } from "@authtempo/core/routes";
+import { DEMO_EXEMPT, DEMO_FEATURES, DEMO_LIMITS, DEMO_PUBLISHED } from "@authtempo/demo/facts";
 import { describe, expect, it } from "vitest";
 import { walk } from "../scripts/lib/files.ts";
 import { pageCss } from "../scripts/lib/html.ts";
@@ -95,6 +96,7 @@ describe("the build layout (plan 11a)", () => {
     expect(html.filter((p) => !p.startsWith("docs/")).sort()).toEqual([
       "404.html",
       "compare/index.html",
+      "demo/index.html",
       "features/index.html",
       "index.html",
       "pricing/index.html",
@@ -727,5 +729,134 @@ describe("the compare page (plan 11b Task 6)", () => {
     expect(tags(main, "img")).toEqual([]);
     expect(tags(main, "svg")).toEqual([]);
     expect(tags(main, "picture")).toEqual([]);
+  });
+});
+
+describe("the demo page (plan 11b Task 12)", () => {
+  const main = () => mainOf("demo/index.html");
+  /** The part of main from the h2 of `heading` to the next h2. */
+  const section = (heading: string) =>
+    main()
+      .split(new RegExp(`<h2\\b[^>]*>${heading}</h2>`))[1]
+      ?.split(/<h2\b/)[0] ?? "";
+
+  it("opens /demo/ with the hero of brand spec 10", () => {
+    expectHero("demo/index.html", "Demo");
+  });
+
+  it("links the demo page in the header right after Compare (ruling 7)", () => {
+    const header =
+      page("index.html").split('<header class="site-header')[1]?.split("</header>")[0] ?? "";
+    const links = [...header.matchAll(/<nav\b[\s\S]*?<\/nav>/g)][0]?.[0] ?? "";
+    const labels = [...links.matchAll(/<a\b[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["Docs", "Compare", "Demo"]);
+    expect(links).toMatch(/<a\b[^>]* href="\/demo\/"[^>]*>Demo<\/a>/);
+  });
+
+  it("links the demo page from the section Try it of the home", () => {
+    const home = page("index.html");
+    const tryIt = home.split('<section class="try')[1]?.split("</section>")[0] ?? "";
+    expect(tryIt).toMatch(/<h2\b[^>]*>Try it<\/h2>/);
+    expect(tags(tryIt, "a")).toHaveLength(1);
+    expect(tryIt).toMatch(/<a\b[^>]* href="\/demo\/"[^>]*>/);
+  });
+
+  it("lists each demo feature and each exemption from the demo facts", () => {
+    const shows = section("What the demo shows");
+    const items = [...shows.matchAll(/<li\b[^>]* id="shows-([^"]+)"[^>]*>([\s\S]*?)<\/li>/g)];
+    expect(items.map((m) => m[1])).toEqual([...DEMO_FEATURES]);
+    for (const [, feature = "", body = ""] of items) {
+      const f = feature as (typeof DEMO_FEATURES)[number];
+      expect({ f, body: textOf(body) }).toEqual({ f, body: FEATURES[f].title });
+      expect({ f, link: body.includes(`href="/features/#${f}"`) }).toEqual({ f, link: true });
+    }
+    // The twelve features of ruling 33, typed here, so a lost member fails this test too.
+    expect(items).toHaveLength(12);
+
+    const off = section("What the demo does not show");
+    const rows = [
+      ...off.matchAll(/<div\b([^>]*)><dt\b[^>]*>([^<]*)<\/dt><dd\b[^>]*>([^<]*)<\/dd><\/div>/g),
+    ];
+    const exempt = rows.filter((m) => / id="off-/.test(m[1] ?? ""));
+    expect(exempt.map((m) => / id="off-([^"]+)"/.exec(m[1] ?? "")?.[1])).toEqual(
+      Object.keys(DEMO_EXEMPT),
+    );
+    for (const m of exempt) {
+      const f = (/ id="off-([^"]+)"/.exec(m[1] ?? "")?.[1] ?? "") as keyof typeof DEMO_EXEMPT;
+      expect({ f, dt: textOf(m[2] ?? ""), dd: textOf(m[3] ?? "") }).toEqual({
+        f,
+        dt: FEATURES[f].title,
+        dd: textOf(DEMO_EXEMPT[f]),
+      });
+    }
+    // The five parts of the design that are no route feature, each with a reason.
+    const fixed = rows
+      .filter((m) => / class="off-fixed[ "]/.test(m[1] ?? ""))
+      .map((m) => textOf(m[2] ?? ""));
+    expect(fixed).toEqual([
+      "The breach check",
+      "The captcha",
+      "The hooks",
+      "The sweep",
+      "The Better Auth compatibility instance",
+    ]);
+    expect(rows.every((m) => textOf(m[3] ?? "").endsWith("."))).toBe(true);
+  });
+
+  it("states the sandbox life of DEMO_LIMITS", () => {
+    // The entry types "60 minutes" in its prose, so the test holds each such number to the facts.
+    const life = DEMO_LIMITS.sandboxLifeMs / 60_000;
+    const entry = readFileSync(`${SITE}src/content/site/demo.md`, "utf8");
+    const said = [...entry.matchAll(/(\d+) minutes/g)].map((m) => Number(m[1]));
+    expect(said).toHaveLength(2);
+    expect(said).toEqual([life, life]);
+    expect(textOf(main())).toContain(
+      `The demo deletes each sandbox ${life} minutes after it starts.`,
+    );
+  });
+
+  it("states each limit of DEMO_LIMITS in words, with its number", () => {
+    const limits = section("The limits");
+    const rows = [...limits.matchAll(/<li\b[^>]* id="limit-([^"]+)"[^>]*>([\s\S]*?)<\/li>/g)];
+    expect(rows.map((m) => m[1])).toEqual([
+      "sandboxesPerIp",
+      "sandboxesTotal",
+      "windowMs",
+      "sandboxLifeMs",
+      "usersPerSandbox",
+      "passkeysPerSandbox",
+      "tokensPerSandbox",
+      "organizationsPerSandbox",
+      "mailsKept",
+      "bodyBytes",
+    ]);
+    const shown = (key: keyof typeof DEMO_LIMITS) => {
+      const value = DEMO_LIMITS[key];
+      return key === "windowMs" || key === "sandboxLifeMs" ? value / 60_000 : value;
+    };
+    for (const [, key = "", body = ""] of rows) {
+      const k = key as keyof typeof DEMO_LIMITS;
+      // The IPv6 note names a prefix length, not a limit.
+      const words = textOf(body).replace("An IPv6 address counts by its /64.", "");
+      const numbers = (words.match(/\d+/g) ?? []).map(Number);
+      expect({ k, numbers }).toEqual({ k, numbers: [shown(k)] });
+    }
+    expect(textOf(rows[0]?.[2] ?? "")).toBe(
+      `${DEMO_LIMITS.sandboxesPerIp} new sandboxes per address per hour. An IPv6 address counts by its /64.`,
+    );
+  });
+
+  it("says that the hosted demo is not open while DEMO_PUBLISHED is false", () => {
+    const end = main().split('<p class="end')[1]?.split("</p>")[0] ?? "";
+    if (DEMO_PUBLISHED) {
+      expect(end).toMatch(/<a\b[^>]* href="https:\/\/demo\.authtempo\.com\/"/);
+      return;
+    }
+    expect(textOf(`<p${end}`)).toBe(
+      "The hosted demo is not open yet. Run it on your machine: pnpm --filter @authtempo/demo dev",
+    );
+    expect(end).toMatch(/<code\b[^>]*>pnpm --filter @authtempo\/demo dev<\/code>/);
+    // No page claims a host that does not answer (deviation 11).
+    expect(main()).not.toContain("demo.authtempo.com");
   });
 });
