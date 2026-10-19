@@ -1,6 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
+import { MIGRATIONS } from "@authtempo/adapter-postgres";
 import { columnsOf, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
+import core0011D1 from "../../adapter-d1/migrations/0011_schema_v11.sql?raw";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
@@ -504,5 +506,21 @@ describe("migration 0008 (plan 12e)", () => {
       { key: "compat_better_auth", value: "8" },
       { key: "schema_version", value: "11" },
     ]);
+  });
+});
+
+describe("migration 0008 and core 0011 (plan 12e)", () => {
+  /** The statements of a text, without comments, blank space, and the ta_meta version writes. */
+  const statementsOf = (text: string) =>
+    normalize(text)
+      .split(";")
+      .map((st) => st.trim())
+      .filter((st) => st !== "" && !st.startsWith("UPDATE ta_meta"));
+
+  it("holds core 0011's statements on Postgres and on D1, each with its defaults", () => {
+    const pg = MIGRATIONS.find((m) => m.name === "0011_schema_v11");
+    expect(pg).toBeDefined();
+    expect(statementsOf(compatMigration0008Sql("postgres"))).toEqual(statementsOf(pg?.sql ?? ""));
+    expect(statementsOf(compatMigration0008Sql("sqlite"))).toEqual(statementsOf(core0011D1));
   });
 });
