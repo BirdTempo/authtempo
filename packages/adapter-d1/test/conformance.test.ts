@@ -79,6 +79,46 @@ describe("d1 migration matches the core schema", () => {
     }
   });
 
+  it("reads the tables, columns, and indexes that an app adds as the app made them", async () => {
+    // An app can add each of these. A view and the table tax are no ta_ table.
+    // The database lives for the whole file, so the test removes them again.
+    const add = [
+      "CREATE VIEW ta_view AS SELECT id FROM ta_user",
+      "CREATE TABLE tax (id TEXT)",
+      'ALTER TABLE ta_user ADD COLUMN "NickName" TEXT',
+      'CREATE INDEX ix_app_nick ON ta_user ("NickName")',
+      "CREATE INDEX ix_app_expr ON ta_user (coalesce(name, email), id)",
+    ];
+    const remove = [
+      "DROP INDEX ix_app_expr",
+      "DROP INDEX ix_app_nick",
+      'ALTER TABLE ta_user DROP COLUMN "NickName"',
+      "DROP TABLE tax",
+      "DROP VIEW ta_view",
+    ];
+    for (const q of add) await env.DB.prepare(q).run();
+    try {
+      const live = await liveShape();
+      const names = live.map((t) => t.name);
+      expect(names).not.toContain("ta_view");
+      expect(names).not.toContain("tax");
+      expect(names).toEqual(expectedD1Shape().map((t) => t.name));
+      const user = live.find((t) => t.name === "ta_user");
+      expect(user?.columns.at(-1)).toEqual({
+        name: "NickName",
+        type: "TEXT",
+        notNull: false,
+        hasDefault: false,
+      });
+      expect(user?.indexes.filter((i) => i.name.startsWith("ix_app_"))).toEqual([
+        { name: "ix_app_expr", columns: ["(an expression)", "id"] },
+        { name: "ix_app_nick", columns: ["NickName"] },
+      ]);
+    } finally {
+      for (const q of remove) await env.DB.prepare(q).run();
+    }
+  });
+
   it("refuses a shape row with a field of the wrong type, and names the field", () => {
     const column = {
       tableName: "ta_user",
@@ -90,6 +130,7 @@ describe("d1 migration matches the core schema", () => {
     };
     expect(parseD1Shape([column], [])).toHaveLength(1);
     expect(() => parseD1Shape([{ ...column, notNull: "1" }], [])).toThrow(/notNull/);
+    expect(() => parseD1Shape([{ ...column, dflt: 0 }], [])).toThrow(/dflt/);
     const index = {
       tableName: "ta_user",
       name: "ux_ta_user__email",

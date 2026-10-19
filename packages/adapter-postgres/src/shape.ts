@@ -112,9 +112,13 @@ interface IndexRow {
 }
 
 // `ta\_%` escapes the underscore, so the pattern matches the prefix `ta_` only.
+// The columns of a view are also in `information_schema.columns`, so the read
+// keeps base tables only. D1 does the same with `type = 'table'`.
 const COLUMNS_SQL = `SELECT table_name, column_name, data_type, is_nullable, column_default
 FROM information_schema.columns
 WHERE table_schema = current_schema() AND table_name LIKE 'ta\\_%'
+AND table_name IN (SELECT table_name FROM information_schema.tables
+  WHERE table_schema = current_schema() AND table_type = 'BASE TABLE')
 ORDER BY table_name, ordinal_position`;
 
 const INDEXES_SQL = `SELECT tablename, indexname, indexdef

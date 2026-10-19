@@ -59,6 +59,36 @@ describe("postgres migration matches the core schema", () => {
     }
   });
 
+  it("reads the tables, columns, and indexes that an app adds as the app made them", async () => {
+    const db = await freshDatabase();
+    try {
+      // An app can add each of these. A view and the table tax are no ta_ table.
+      await db.sql.unsafe("CREATE VIEW ta_view AS SELECT id FROM ta_user");
+      await db.sql.unsafe("CREATE TABLE tax (id text)");
+      await db.sql.unsafe('ALTER TABLE ta_user ADD COLUMN "NickName" text');
+      await db.sql.unsafe('CREATE INDEX ix_app_nick ON ta_user ("NickName")');
+      await db.sql.unsafe("CREATE INDEX ix_app_expr ON ta_user (coalesce(name, email), id)");
+      const live = await readPostgresShape(db.sql);
+      const names = live.map((t) => t.name);
+      expect(names).not.toContain("ta_view");
+      expect(names).not.toContain("tax");
+      expect(names).toEqual(expectedPostgresShape().map((t) => t.name));
+      const user = live.find((t) => t.name === "ta_user");
+      expect(user?.columns.at(-1)).toEqual({
+        name: "NickName",
+        type: "text",
+        notNull: false,
+        hasDefault: false,
+      });
+      expect(user?.indexes.filter((i) => i.name.startsWith("ix_app_"))).toEqual([
+        { name: "ix_app_expr", columns: ["COALESCE(name, email)", "id"] },
+        { name: "ix_app_nick", columns: ["NickName"] },
+      ]);
+    } finally {
+      await db.close();
+    }
+  });
+
   it("stores a passkey counter above 2^31 - 1 and reads it back as a number", async () => {
     const db = await freshDatabase();
     try {

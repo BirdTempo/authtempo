@@ -17,9 +17,9 @@ import {
 type CoreFieldType = Parameters<typeof encodeValue>[1];
 
 /**
- * The D1 column type of each core field, the rule of the comment at the top
- * of `migrations/0001_schema_v1.sql`: a date is INTEGER epoch milliseconds, a
- * boolean is INTEGER 0 or 1, and JSON is TEXT.
+ * The D1 column type of each core field. The rule comes from the comment at
+ * the top of `migrations/0001_schema_v1.sql`. A date is INTEGER epoch
+ * milliseconds, a boolean is INTEGER 0 or 1, and JSON is TEXT.
  */
 export function d1ColumnType(type: CoreFieldType): "TEXT" | "INTEGER" {
   switch (type) {
@@ -120,7 +120,7 @@ export const D1_SHAPE_SQL: { columns: string; indexes: string } = {
   indexes: `SELECT m.name AS tableName, il.name AS name, il."unique" AS isUnique, il.origin AS origin, ii.seqno AS seqno, ii.name AS col FROM sqlite_master m, pragma_index_list(m.name) il, pragma_index_info(il.name) ii WHERE m.type = 'table' AND m.name LIKE 'ta\\_%' ESCAPE '\\' ORDER BY m.name, il.name, ii.seqno`,
 };
 
-/** Throws an Error that names the field of a shape row whose value has the wrong type. */
+/** Returns an Error that names the field of a shape row whose value has the wrong type. */
 function wrongType(name: string, kind: string): Error {
   return new Error(`d1 shape row: the field ${name} is not ${kind}`);
 }
