@@ -7,9 +7,9 @@
 // DEMO_PUBLISHED is false, the page gives the local command and no link to
 // the planned host (deviation 11).
 import { getEntry } from "astro:content";
-import { DEMO_EXEMPT, DEMO_FEATURES, DEMO_PUBLISHED } from "@authtempo/demo/facts";
+import { DEMO_EXEMPT, DEMO_FEATURES, DEMO_OFF, DEMO_PUBLISHED } from "@authtempo/demo/facts";
 import PageHero from "../components/PageHero.astro";
-import { DEMO_OFF, demoEnd, limitRows } from "../data/demo.ts";
+import { demoEnd, limitRows } from "../data/demo.ts";
 import { entryParts, sectionOf } from "../data/entry.ts";
 import { FEATURES } from "../data/features.ts";
 import { renderMarkdown } from "../data/markdown.ts";

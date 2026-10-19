@@ -50,5 +50,5 @@ The owner runs each item below. No task of plan 11b runs one.
 - Each release: add a `pkg@version` row with its date to `RELEASE_DATES` in `apps/site/src/data/releases.ts` (ruling 29 of the plan 11b lane). Without the row, `check-feed` fails the site build.
 - The owner inputs:
   - `openapi` is in `DEMO_EXEMPT` by the lead's default (ruling 33). The owner may move it.
-  - The reason texts of the parts turned off on `/demo/` (`DEMO_OFF` in `apps/site/src/data/demo.ts`) are implementer text. The owner may change them.
+  - The reason texts of the parts turned off on `/demo/` (`DEMO_OFF` in `src/facts.ts`) are implementer text. The owner may change them.
   - The gate counts an IPv6 address by its /64, the key of core `ipKey`. The owner may choose /48 in core.

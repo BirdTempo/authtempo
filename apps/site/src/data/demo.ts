@@ -22,31 +22,6 @@ export const DEMO_PAGE = {
 } as const;
 
 /**
- * The parts of authtempo that the design turns off in the demo, each with its
- * reason (plan 11b design, "Turned off in the demo"). No one of them is a
- * route feature.
- */
-export const DEMO_OFF: readonly { name: string; reason: string }[] = [
-  {
-    name: "The breach check",
-    reason: "It calls a service of another company, and the demo sends no request out.",
-  },
-  {
-    name: "The captcha",
-    reason: "A real Turnstile key is a key of a real provider, and the demo holds no secret.",
-  },
-  { name: "The hooks", reason: "A hook runs the code of an app, and the demo has no app code." },
-  {
-    name: "The sweep",
-    reason: "The alarm of each sandbox deletes its whole store, so no sweep is necessary.",
-  },
-  {
-    name: "The Better Auth compatibility instance",
-    reason: "It serves an app that moves from Better Auth, and the demo has no such app.",
-  },
-];
-
-/**
  * The end of the page: a link to the host once the owner sets DEMO_PUBLISHED,
  * else the local command and the address to open (plan 11b, deviation 11).
  * A test reads both values.

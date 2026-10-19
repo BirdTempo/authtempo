@@ -28,6 +28,51 @@ export const DEMO_EXEMPT = {
   openapi: "A machine document of the routes, not a sign-in method; the docs serve it.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
+/**
+ * Where a part that the demo turns off would live. "config" is a key path of
+ * the core config that demoConfig leaves unset. "cron" is a scheduled handler
+ * of the Worker. "package" is a workspace package that the demo does not depend on.
+ */
+export type DemoOffPlace =
+  | { kind: "config"; path: string }
+  | { kind: "cron" }
+  | { kind: "package"; name: string };
+
+/**
+ * The parts of authtempo that the design turns off in the demo, each with its
+ * reason (plan 11b design, "Turned off in the demo"). No one of them is a
+ * route feature. test/off.test.ts and test/node/off.test.ts hold each place
+ * (final review m3), so a part that the demo turns on makes the page false no more.
+ */
+export const DEMO_OFF: readonly { name: string; reason: string; place: DemoOffPlace }[] = [
+  {
+    name: "The breach check",
+    reason: "It calls a service of another company, and the demo sends no request out.",
+    place: { kind: "config", path: "password.breachCheck" },
+  },
+  {
+    name: "The captcha",
+    reason: "A real Turnstile key is a key of a real provider, and the demo holds no secret.",
+    place: { kind: "config", path: "captcha" },
+  },
+  {
+    name: "The hooks",
+    reason: "A hook runs the code of an app, and the demo has no app code.",
+    place: { kind: "config", path: "hooks" },
+  },
+  {
+    name: "The sweep",
+    reason: "The alarm of each sandbox deletes its whole store, so no sweep is necessary.",
+    // An app runs auth.sweepExpired() from a scheduled handler.
+    place: { kind: "cron" },
+  },
+  {
+    name: "The Better Auth compatibility instance",
+    reason: "It serves an app that moves from Better Auth, and the demo has no such app.",
+    place: { kind: "package", name: "@authtempo/compat-better-auth" },
+  },
+];
+
 /** The owner sets this to true at publication (plan 11b, deviation 11). */
 export const DEMO_PUBLISHED = false;
 

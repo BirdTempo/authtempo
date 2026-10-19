@@ -1,20 +1,31 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
-import { type Auth, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
+import { type Auth, type AuthConfig, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
 import type { Mailbox } from "./mailbox.js";
 import { demoProvider, demoProviderFetch } from "./provider.js";
 
 /** The header that carries the visitor IP from the Worker to the sandbox. */
 export const CLIENT_IP_HEADER = "x-demo-client-ip";
 
-/** The auth config of one sandbox: each method of the demo, on the store of the sandbox. */
-export function demoAuth(input: {
+/** What the config of one sandbox reads: its origin, its secret, its store, and its mailbox. */
+export interface DemoInput {
   origin: string;
   secret: string;
   db: D1Database;
   mailbox: Mailbox;
-}): Auth {
+}
+
+/** The auth of one sandbox: each method of the demo, on the store of the sandbox. */
+export function demoAuth(input: DemoInput): Auth {
+  return createAuth(demoConfig(input));
+}
+
+/**
+ * The auth config of one sandbox. test/off.test.ts reads it: each config path
+ * of DEMO_OFF in src/facts.ts stays unset, so the /demo/ page stays true.
+ */
+export function demoConfig(input: DemoInput): AuthConfig {
   const { origin, secret, db, mailbox } = input;
-  return createAuth({
+  return {
     baseURL: origin,
     basePath: "/auth",
     appName: "authtempo demo",
@@ -38,5 +49,5 @@ export function demoAuth(input: {
     totp: {},
     jwtMint: false,
     oauth: false,
-  });
+  };
 }

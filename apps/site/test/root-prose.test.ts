@@ -1,3 +1,4 @@
+import { DEMO_OFF } from "@authtempo/demo/facts";
 import { describe, expect, it } from "vitest";
 import { checkSentences } from "../scripts/check-sentences.ts";
 import { checkTerms } from "../scripts/check-terms.ts";
@@ -6,7 +7,7 @@ import { parseFrontmatter } from "../scripts/lib/markdown.ts";
 import { prosePages } from "../scripts/lib/prose.ts";
 import { ROOT_PROSE_PATH, rootProsePage } from "../scripts/lib/root-prose.ts";
 import { licenseLine, PLATFORM_COSTS, PRICING_PAGE } from "../src/data/costs.ts";
-import { DEMO_OFF, DEMO_PAGE, limitRows } from "../src/data/demo.ts";
+import { DEMO_PAGE, limitRows } from "../src/data/demo.ts";
 import { licenseOf, rootLicense } from "../src/data/repo.ts";
 import { SECURITY_PAGE } from "../src/data/security.ts";
 

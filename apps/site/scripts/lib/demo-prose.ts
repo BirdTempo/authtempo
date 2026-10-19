@@ -1,5 +1,5 @@
-import { DEMO_EXEMPT } from "@authtempo/demo/facts";
-import { DEMO_OFF, DEMO_PAGE, limitRows } from "../../src/data/demo.ts";
+import { DEMO_EXEMPT, DEMO_OFF } from "@authtempo/demo/facts";
+import { DEMO_PAGE, limitRows } from "../../src/data/demo.ts";
 import type { Page } from "./markdown.ts";
 
 /** The path that a failure of check-terms or check-sentences names for this prose. */
