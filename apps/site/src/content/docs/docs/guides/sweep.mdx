@@ -56,10 +56,12 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 - The sweep is an `api` function, not a route. It is safe to run at any time.
 - Without a trigger, expired rows stay in the database forever.
 - The sweep fires no hook. A replayed token answers `invalid_token` after the sweep, because its row is gone.
+- The two back-channel steps run last: `oauthSessionLinks`, then `oauthLogouts`. One sweep with full caps makes about 370 storage calls at most. On D1 that needs Workers Paid, which allows 1000 queries in one run. Workers Free allows 50 (D1 limits page updated 21 April 2026, read 2026-10-20).
 
 ## If it fails
 
 - The sweep answers no error code. A storage error throws, and the scheduled run fails in the Worker's logs.
+- A storage error in one of the two back-channel steps does not throw. The step writes one log line, `authtempo: the sweep link step stopped` or `authtempo: the sweep outbox step stopped`, and counts 0. The counts above it stay, and the next sweep goes on. On Workers Free this is what a run past 50 queries shows.
 - A `limits` count of 0 with the memory limiter is normal: the memory limiter deletes ended windows at each check.
 
 ## Next

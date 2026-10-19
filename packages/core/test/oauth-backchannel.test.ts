@@ -901,6 +901,101 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(decodeJwt(tokenOfCall(posts[0])).aud).toBe(DOC);
   });
 
+  /**
+   * Counts each storage call of one `sweepExpired`, inside a transaction
+   * too. On D1 each call is one query of the invocation.
+   */
+  function countCalls(store: StorageAdapter): { n: number } {
+    const count = { n: 0 };
+    const tick = () => {
+      count.n++;
+    };
+    const wrap = (s: StorageAdapter): StorageAdapter => ({
+      create: (m, d) => {
+        tick();
+        return s.create(m, d);
+      },
+      findOne: (m, w) => {
+        tick();
+        return s.findOne(m, w);
+      },
+      findMany: (m, w, o) => {
+        tick();
+        return s.findMany(m, w, o);
+      },
+      update: (m, w, d) => {
+        tick();
+        return s.update(m, w, d);
+      },
+      delete: (m, w) => {
+        tick();
+        return s.delete(m, w);
+      },
+      transaction: (fn) => s.transaction((tx) => fn(wrap(tx))),
+    });
+    const inner = { ...store };
+    Object.assign(store, wrap(inner));
+    return count;
+  }
+
+  it("keeps one sweep with full caps under 1000 storage calls, the D1 query limit of Workers Paid", async () => {
+    for (const subjectType of ["public", "pairwise"] as const) {
+      const w = world();
+      const { actor } = await twoSessions(w);
+      const bc = await bcClient(w, BC, { subject_type: subjectType });
+      w.status.set(BC, 500);
+      // 200 links whose session expires, and 200 outbox rows that fail and
+      // are due again: more than each cap, so the caps bound the calls.
+      for (let i = 0; i < 400; i++) {
+        const s = await createSession(w.auth.config, {
+          userId: actor.user.id,
+          ip: null,
+          userAgent: null,
+        });
+        await linkIdToken(w.auth.config, {
+          sessionId: s.session.id,
+          clientId: bc,
+          userId: actor.user.id,
+        });
+        if (i >= 200) await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
+      }
+      expect(await outbox(w)).toHaveLength(200);
+      // Past the session life, and inside the 90 days of the idle client sweep.
+      w.auth.clock.advance(60 * 24 * 60 * MINUTE);
+      const count = countCalls(w.auth.storage);
+      const swept = await sweepExpired(w.auth.config);
+      expect(swept.oauthSessionLinks).toBe(50);
+      expect(swept.oauthLogouts).toBe(0);
+      expect((await outbox(w)).filter((r) => r.attempts === 2)).toHaveLength(50);
+      // Measured 2026-10-20 on the memory adapter: 317 calls public, 367 pairwise.
+      expect(count.n, subjectType).toBeLessThan(1000);
+    }
+  });
+
+  it("keeps the counts above when a back-channel step meets a storage error", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    w.auth.clock.advance(60 * 24 * 60 * MINUTE);
+    const store = w.auth.storage;
+    const findMany = store.findMany.bind(store);
+    // As D1 does past the query limit of one run.
+    store.findMany = ((model, where, opts) =>
+      model === "oauthLogout"
+        ? Promise.reject(new Error("too many queries"))
+        : findMany(model, where, opts)) as StorageAdapter["findMany"];
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const swept = await sweepExpired(w.auth.config);
+    expect(swept.sessions).toBe(3);
+    expect(swept.oauthSessionLinks).toBe(1);
+    expect(swept.oauthLogouts).toBe(0);
+    expect(logged.mock.calls).toEqual([["authtempo: the sweep outbox step stopped", "Error"]]);
+    store.findMany = findMany;
+    // The next sweep sends the row.
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(1);
+  });
+
   it("refuses an endSessions call with no userId term: the outbox reads the user's links", async () => {
     const w = world();
     const { actor } = await twoSessions(w);

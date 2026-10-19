@@ -122,7 +122,16 @@ export const LOGOUT_BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000] as cons
  */
 export const LOGOUT_MAX_ATTEMPTS = 6;
 
-/** The due rows of one sweep. One sweep stays short; the next one takes the rest. */
+/**
+ * The due rows of one sweep. One sweep stays short; the next one takes the
+ * rest. The cap fits the D1 limit of Workers Paid: 1000 queries per
+ * invocation, 100 bound parameters per query (D1 limits page updated 21
+ * April 2026, read 2026-10-20). One sweep with more links to end and more
+ * failing rows than each cap made 317 storage calls for a public client and 367 for a
+ * pairwise one (a test, 2026-10-20). Each row costs about 5 calls. The
+ * Free plan has 50 queries per invocation, which no useful cap fits. There
+ * the step stops at the limit with one log line, and the next sweep goes on.
+ */
 export const LOGOUT_SWEEP_MAX = 50;
 
 /** The due rows of one delivery: one request per row, all in parallel. */

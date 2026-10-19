@@ -104,7 +104,9 @@ async function sweepClients(storage: StorageAdapter, now: Date): Promise<number>
  * that it saw longest ago, and moves each live link to now, so the next
  * sweep reads others. 50 ids and one more term stay under the 100 bound
  * parameters of a D1 statement (D1 limits page updated 21 April 2026, read
- * 2026-10-20). One step costs at most 4 statements and one row per link.
+ * 2026-10-20). One step costs 4 statements, and 2 more per link with no
+ * session: 104 at most. That fits the 1000 queries of Workers Paid. See
+ * `LOGOUT_SWEEP_MAX` for the Free plan.
  */
 export const LINK_SWEEP_MAX = 50;
 
