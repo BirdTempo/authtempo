@@ -1251,6 +1251,7 @@ export const ROUTES = Object.freeze([
       "invalid_client",
       "invalid_target",
       "invalid_scope",
+      "unauthorized_client",
     ],
   },
   {

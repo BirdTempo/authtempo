@@ -60,7 +60,7 @@ An access token is a JWT for one resource. Core signs it with the same key as a 
 1. A present session cookie wins, and resolves as a session only.
 2. Else the bearer header decides by its form.
 3. A `ts_` bearer resolves as a session, and a `tk_` bearer as an API token.
-4. A JWT bearer resolves as an access token, under the resource of the request URL.
+4. A JWT bearer resolves as an access token, under the resource of the request URL. A `client_credentials` token answers `kind: "oauth-client"`: it acts for a client and has no user.
 5. Any other request answers null.
 
 `auth.session(request)` answers sessions only. Use `caller` in a route that a script or an agent may call. Use `session` in a route for people.

@@ -102,6 +102,10 @@ export { defaultNoticeMail, type NoticeEvent, type NoticeMailInput } from "./eng
 export { CLIENT_SECRET_PREFIX } from "./engine/oauth-client-secret.js";
 export type { ClientInput, ClientSummary } from "./engine/oauth-client-store.js";
 export type { ClientFields, RegisteredClient } from "./engine/oauth-clients.js";
+export {
+  CREDENTIALS_PER_CLIENT,
+  type OAuthClientAccess,
+} from "./engine/oauth-credentials.js";
 export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
 export type { OAuthResult } from "./engine/oauth-result.js";
 export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";

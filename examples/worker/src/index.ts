@@ -167,7 +167,9 @@ export default {
     // above calls `session`, so it stays session-only and answers 401 to a token.
     if (url.pathname === "/whoami") {
       const c = await a.caller(request);
-      if (!c) return Response.json({ error: "unauthorized" }, { status: 401 });
+      // A client_credentials token acts for no user, so this route has no one to name (plan 12e).
+      if (!c || c.kind === "oauth-client")
+        return Response.json({ error: "unauthorized" }, { status: 401 });
       const res = Response.json({ kind: c.kind, id: c.user.id, email: c.user.email });
       // After a sliding refresh, renew the cookie or the browser drops it early.
       const renewed = c.kind === "session" ? a.sessionCookie(request, c) : null;

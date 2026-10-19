@@ -18,6 +18,7 @@ import {
   registerClient,
   registeredClient,
 } from "../../engine/oauth-clients.js";
+import { CREDENTIALS_GRANT, credentialsGrant } from "../../engine/oauth-credentials.js";
 import { listGrants, revokeGrant } from "../../engine/oauth-grants.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
 import {
@@ -215,7 +216,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       });
     return json({ error: r.error }, INVALID_CLIENT_NO_HEADER);
   };
-  const GRANTS = new Set(["authorization_code", "refresh_token"]);
+  const GRANTS = new Set(["authorization_code", "refresh_token", CREDENTIALS_GRANT]);
   /**
    * The grant of a form; the answer of the endpoint before any CORS header.
    * The client auth runs before the grant, so a failed auth spends nothing.
@@ -249,6 +250,15 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           resource: form.get("resource"),
         }),
       );
+    if (grant === CREDENTIALS_GRANT)
+      return tokenAnswer(
+        await credentialsGrant(config, {
+          client: authed.value,
+          scope: form.get("scope"),
+          resource: form.get("resource"),
+          dpop: null,
+        }),
+      );
     return tokenAnswer(
       await refreshGrant(config, {
         refreshToken: form.get("refresh_token") ?? "",
@@ -260,7 +270,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   };
   const userinfo = async (ctx: RouteContext): Promise<Response> => {
     const bearer = readBearer(ctx.request);
-    const access = bearer ? await resolveAccessToken(config, bearer) : null;
+    // A client_credentials token names no user, so userinfo has no claims for it.
+    const r = bearer ? await resolveAccessToken(config, bearer) : null;
+    const access = r?.kind === "oauth" ? r.access : null;
     if (!access)
       return json({ error: "invalid_token" }, 401, {
         "www-authenticate": 'Bearer error="invalid_token"',

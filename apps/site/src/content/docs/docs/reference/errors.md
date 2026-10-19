@@ -462,8 +462,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-unsupported_grant_type"><code>unsupported_grant_type</code> 400</h3>
 
-- **Meaning:** The `grant_type` is not `authorization_code` or `refresh_token`.
-- **Do:** Use one of the two grant types.
+- **Meaning:** The `grant_type` is not `authorization_code`, `refresh_token`, or `client_credentials`.
+- **Do:** Use one of the three grant types.
 
 | Routes |
 | --- |
@@ -471,7 +471,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_scope"><code>invalid_scope</code> 400</h3>
 
-- **Meaning:** A scope is unknown, the list is empty, or a refresh asks for more than the grant.
+- **Meaning:** A scope is unknown, the list is empty, or a refresh asks for more than the grant. A `client_credentials` request asks for a scope outside the client's `credentialsScopes`, or the client has none.
 - **Do:** Ask for known scopes only.
 
 | Routes |
@@ -480,7 +480,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_target"><code>invalid_target</code> 400</h3>
 
-- **Meaning:** The `resource` is not one of `oauth.resources`, or not the grant's resource.
+- **Meaning:** The `resource` is not one of `oauth.resources`, or not the grant's resource. A `client_credentials` request has no `resource`.
 - **Do:** Send the resource of the grant.
 
 | Routes |
@@ -570,12 +570,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-unauthorized_client"><code>unauthorized_client</code> 400</h3>
 
-- **Meaning:** A revoke named a `client_id` that is not the client of the refresh token. Nothing is revoked.
-- **Do:** Revoke with the client id of the token, or with no client id.
+- **Meaning:** A revoke named a `client_id` that is not the client of the refresh token. Nothing is revoked. Or a `client_credentials` request came from a public client, or from a client whose `grantTypes` do not hold the grant.
+- **Do:** Revoke with the client id of the token, or with no client id. For `client_credentials`, use a confidential client of `api.oauth.clients` with the grant.
 
 | Routes |
 | --- |
-| [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke). |
+| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke). |
 
 ## Other answers
 

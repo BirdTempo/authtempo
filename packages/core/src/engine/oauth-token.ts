@@ -15,6 +15,7 @@ import type { OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
+import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { consumeVerification } from "./verification.js";
 
@@ -440,16 +441,23 @@ export async function revokeToken(
   return oauthOk({ revoked: true });
 }
 
+/** A valid access token: of a user (`oauth`), or of a client that acts for no user (`oauth-client`, plan 12e). */
+export type ResolvedAccess =
+  | { kind: "oauth"; access: OAuthAccess }
+  | { kind: "oauth-client"; access: OAuthClientAccess };
+
 /**
  * The caller of an access token, or null: a JWT that verifies under a key
  * of this instance, with `typ: "at+jwt"`, this issuer, an `aud` in
- * `oauth.resources`, a live `exp`, and a user that exists. A session JWT of
- * `GET /token` and an ID token have `typ: "JWT"` and never pass.
+ * `oauth.resources`, and a live `exp`. Then a user that exists, or for a
+ * `client_credentials` token a client that still holds the grant and each
+ * scope. A session JWT of `GET /token` and an ID token have `typ: "JWT"`
+ * and never pass.
  */
 export async function resolveAccessToken(
   config: ResolvedConfig,
   token: string,
-): Promise<OAuthAccess | null> {
+): Promise<ResolvedAccess | null> {
   const oauth = config.oauth;
   if (!oauth) return null;
   const d = await verifyLocal(config, token);
@@ -466,15 +474,30 @@ export async function resolveAccessToken(
     typeof p.jti !== "string"
   )
     return null;
+  const scopes = p.scope.split(" ").filter((s) => s.length > 0);
+  // A user id is a ULID; a client id is a `cl_` token or an https URL. The two never collide (plan 12e).
+  if (p.sub === p.client_id) {
+    const access = await clientAccessOf(config, {
+      clientId: p.client_id,
+      scopes,
+      resource: p.aud,
+      jti: p.jti,
+      exp: p.exp,
+    });
+    return access ? { kind: "oauth-client", access } : null;
+  }
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: p.sub }]);
   if (!user) return null;
   return {
-    user,
-    clientId: p.client_id,
-    scopes: p.scope.split(" ").filter((s) => s.length > 0),
-    resource: p.aud,
-    tokenId: p.jti,
-    expiresAt: new Date(p.exp * 1000),
+    kind: "oauth",
+    access: {
+      user,
+      clientId: p.client_id,
+      scopes,
+      resource: p.aud,
+      tokenId: p.jti,
+      expiresAt: new Date(p.exp * 1000),
+    },
   };
 }
 

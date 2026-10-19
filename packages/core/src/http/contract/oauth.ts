@@ -74,10 +74,11 @@ export const signInQuery = z.object({ next: z.string().min(1) });
  * `client_secret_post` client sends `client_secret`; a
  * `client_secret_basic` client sends its id in the header and may omit
  * `client_id`. A `private_key_jwt` client sends `client_assertion_type`
- * and `client_assertion` (plan 12e).
+ * and `client_assertion` (plan 12e). The `client_credentials` grant takes
+ * `resource` and `scope?` from a confidential client (plan 12e).
  */
 export const tokenBody = z.object({
-  grant_type: z.enum(["authorization_code", "refresh_token"]),
+  grant_type: z.enum(["authorization_code", "refresh_token", "client_credentials"]),
   client_id: z.string().min(1).max(2048).optional(),
   client_secret: z.string().optional(),
   client_assertion_type: z.string().optional(),

@@ -6,6 +6,7 @@ import { JWS_RE } from "../primitives/jwk.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { ApiTokenRow, UserRow } from "../schema.js";
+import type { OAuthClientAccess } from "./oauth-credentials.js";
 import { type OAuthAccess, requestResource, resolveAccessToken } from "./oauth-token.js";
 import { membership } from "./organizations.js";
 import {
@@ -51,11 +52,16 @@ export interface ResolvedApiToken {
   activeOrganizationId: string | null;
 }
 
-/** Who called: a person with a session, a script with an API token, or an OAuth client for a person (plan 9g). */
+/**
+ * Who called: a person with a session, a script with an API token, or an
+ * OAuth client for a person (plan 9g). `oauth-client` is an OAuth client
+ * that acts for itself, with no user (`client_credentials`, plan 12e).
+ */
 export type Caller =
   | ({ kind: "session" } & ResolvedSession)
   | ({ kind: "token" } & ResolvedApiToken)
-  | ({ kind: "oauth" } & OAuthAccess);
+  | ({ kind: "oauth" } & OAuthAccess)
+  | ({ kind: "oauth-client" } & OAuthClientAccess);
 
 export interface ApiTokenCreate {
   user: UserRow;
@@ -250,10 +256,11 @@ export async function callerFromRequest(
   // JWT bearer answered null here before; it still does while oauth is off.
   if (JWS_RE.test(bearer)) {
     if (!config.oauth) return null;
-    const access = await resolveAccessToken(config, bearer);
-    return access && access.resource === requestResource(config, request)
-      ? { kind: "oauth", ...access }
-      : null;
+    const r = await resolveAccessToken(config, bearer);
+    if (!r || r.access.resource !== requestResource(config, request)) return null;
+    return r.kind === "oauth"
+      ? { kind: "oauth", ...r.access }
+      : { kind: "oauth-client", ...r.access };
   }
   const s = await resolveSession(config, bearer, readModeOf(config, request));
   return s ? { kind: "session", ...s } : null;
