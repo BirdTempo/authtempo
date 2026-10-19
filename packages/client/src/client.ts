@@ -14,7 +14,7 @@ import type {
 } from "@authtempo/core";
 import { ERRORS, type ErrorCode, type OAuthErrorCode } from "@authtempo/core/errors";
 import { PROVIDER_NAME_RE, type RouteMethod } from "@authtempo/core/routes";
-import { type ClientOperation, callOf } from "./calls.js";
+import { type ClientOperation, callOf, selected } from "./calls.js";
 import { readRedirectError } from "./redirect-error.js";
 import { type ClientFailure, type ClientResult, fail, ok } from "./result.js";
 import {
@@ -33,6 +33,13 @@ import {
 } from "./webauthn.js";
 
 export type PasskeySummaryJSON = Omit<PasskeySummary, "createdAt"> & { createdAt: string };
+
+/**
+ * The session answer of every route but `GET /session` (plan 11g): a
+ * sign-in, the refresh, and the active organization answer the user and the
+ * session, and never `needsRefresh`, which only the read carries.
+ */
+type PublicSessionJSON = Omit<PublicSession, "needsRefresh">;
 
 export type OrganizationJSON = Omit<OrganizationSummary, "createdAt"> & { createdAt: string };
 export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string };
@@ -81,7 +88,7 @@ export interface TotpStatusJSON {
   /** 1 for an old list of short codes; ask the person to make new codes. Null when the factor is off. */
   backupCodesVersion: number | null;
 }
-export type TwoFactorSessionJSON = { token: string } & PublicSession & {
+export type TwoFactorSessionJSON = { token: string } & PublicSessionJSON & {
     next: string;
     backupCodesLeft: number;
     /** Set when the verify asked for it. A native app sends `token` as `trustDevice` at the next sign-in. */
@@ -136,7 +143,7 @@ export type ClientSessionState = SessionState<PublicSession, ClientFailure>;
 
 /** The answer of `client.signIn.password` (plan 11d): a session, or the second factor step. */
 export type PasswordSignIn =
-  | { kind: "session"; session: { token: string } & PublicSession }
+  | { kind: "session"; session: { token: string } & PublicSessionJSON }
   | {
       kind: "second-factor";
       challenge: string;
@@ -167,7 +174,7 @@ export interface Client {
      * due, and renews the cookie. Call it when `session()` answers
      * `needsRefresh: true`. It answers as `session()` does, and the store reads again.
      */
-    refresh(): Promise<ClientResult<PublicSession | null>>;
+    refresh(): Promise<ClientResult<PublicSessionJSON | null>>;
   };
   signOut(): Promise<ClientResult<{ ok: true }>>;
   /**
@@ -221,13 +228,13 @@ export interface Client {
     verify(input: {
       token: string;
       trustDevice?: string | undefined;
-    }): Promise<ClientResult<PublicSession | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<PublicSessionJSON | TwoFactorChallengeJSON>>;
   };
   handoff: {
     redeem(input: {
       code: string;
       verifier: string;
-    }): Promise<ClientResult<{ token: string } & PublicSession>>;
+    }): Promise<ClientResult<{ token: string } & PublicSessionJSON>>;
   };
   passkey: {
     /** Needs a session. Registers a new passkey for the signed-in user. */
@@ -239,7 +246,7 @@ export interface Client {
      * webauthn"`; where the browser has no conditional mediation it answers
      * `cancelled` with no request (plan 11d).
      */
-    signIn(input?: { autofill?: boolean | undefined }): Promise<ClientResult<PublicSession>>;
+    signIn(input?: { autofill?: boolean | undefined }): Promise<ClientResult<PublicSessionJSON>>;
     /** Ends a waiting passkey ceremony, the autofill or another. It answers `cancelled`. */
     abort(): void;
   };
@@ -270,7 +277,7 @@ export interface Client {
       ClientResult<
         // The third shape is the default (plan 12b). The second: uniformSignUp off and
         // requireVerified on. Neither opens a session.
-        | ({ token: string } & PublicSession)
+        | ({ token: string } & PublicSessionJSON)
         | { user: PublicSession["user"]; verifyRequired: true }
         | { sent: true }
       >
@@ -287,7 +294,7 @@ export interface Client {
       next?: string | undefined;
       /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
       captchaToken?: string | undefined;
-    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
     /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
     resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
     /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
@@ -303,7 +310,7 @@ export interface Client {
       token: string;
       password: string;
       trustDevice?: string | undefined;
-    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
     change(input: {
       currentPassword?: string | undefined;
       newPassword: string;
@@ -325,7 +332,7 @@ export interface Client {
       email: string;
       code: string;
       trustDevice?: string | undefined;
-    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
     /** `captchaToken`: as in `request`. */
     requestReset(input: {
       email: string;
@@ -336,7 +343,7 @@ export interface Client {
       code: string;
       password: string;
       trustDevice?: string | undefined;
-    }): Promise<ClientResult<({ token: string } & PublicSession) | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
   };
   /** Every operation answers `not_found` when the server runs without the `organizations` config. */
   organizations: {
@@ -388,7 +395,7 @@ export interface Client {
       decline(input: { token: string }): Promise<ClientResult<{ ok: true }>>;
     };
     /** Answers the session, so the caller reads `session.activeOrganizationId` from it. `null` clears it. */
-    setActive(input: { organizationId: string | null }): Promise<ClientResult<PublicSession>>;
+    setActive(input: { organizationId: string | null }): Promise<ClientResult<PublicSessionJSON>>;
   };
   /**
    * API tokens for scripts and CLIs. `create`, `list`, and `revoke` need a
@@ -698,9 +705,34 @@ export function createClient(options: ClientOptions): Client {
     headers?: Readonly<Record<string, string>>,
     token?: string | null,
     params?: Readonly<Record<string, string>>,
-  ) => {
-    const c = filled(callOf(operation), params);
+  ) => sendRow<T>(filled(callOf(operation), params), body, query, headers, token);
+  /** The one raw call: `c` is a row of the table, with each `:name` of its path filled. */
+  function sendRow<T>(
+    c: { method: RouteMethod; path: string },
+    body?: unknown,
+    query?: Query,
+    headers?: Readonly<Record<string, string>>,
+    token?: string | null,
+  ) {
     return call<T>(c.method, c.path, body, query, headers, token);
+  }
+  /**
+   * One operation whose row names the part of the answer that the method
+   * answers (plan 11g): the row's `select`, read by `selected`. `is` guards
+   * the whole answer first, as `shaped` does; a 200 that fails it answers
+   * `unexpected` with status 200.
+   */
+  const part = async <T, O extends ClientOperation>(
+    operation: O,
+    body?: unknown,
+    query?: Query,
+    is?: (v: unknown) => v is T,
+  ) => {
+    const c = callOf(operation);
+    const r = await sendRow<T>(c, body, query);
+    if (!r.ok) return r;
+    if (is && !is(r.value)) return fail("unexpected", 200);
+    return ok(selected(c, r.value));
   };
   /** `session()` and `session.refresh()`: one read rule for the GET and the POST (plan 12a). */
   async function readSession(
@@ -859,7 +891,7 @@ export function createClient(options: ClientOptions): Client {
     signUp: ({ name, captchaToken, ...rest }) =>
       changes(
         send<
-          | ({ token: string } & PublicSession)
+          | ({ token: string } & PublicSessionJSON)
           | { user: PublicSession["user"]; verifyRequired: true }
           | { sent: true }
         >(
@@ -871,7 +903,7 @@ export function createClient(options: ClientOptions): Client {
       ),
     signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
       changes(
-        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>(
+        send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>(
           "password.signIn",
           {
             ...rest,
@@ -893,7 +925,7 @@ export function createClient(options: ClientOptions): Client {
       ),
     reset: ({ trustDevice, ...rest }) =>
       changes(
-        send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("password.reset", {
+        send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>("password.reset", {
           ...rest,
           ...(trustDevice !== undefined ? { trustDevice } : {}),
         }),
@@ -929,10 +961,7 @@ export function createClient(options: ClientOptions): Client {
     revokeTrustedDevices: () => send<{ ok: true }>("totp.revokeTrustedDevices", {}),
   };
   const sessions: Client["sessions"] = {
-    list: async () => {
-      const r = await shaped(send<unknown>("sessions.list"), isSessionList);
-      return r.ok ? ok(r.value.sessions) : r;
-    },
+    list: () => part("sessions.list", undefined, undefined, isSessionList),
     // The store reads again: the caller's own revoke ends its session. The answer's
     // `current` tells whose session ended. One read of the token (plan 11d Task 12 review, J1).
     revoke: ({ id }) =>
@@ -1056,7 +1085,10 @@ export function createClient(options: ClientOptions): Client {
         if (!("twoFactor" in v)) {
           if (!(isPublicSession(v) && typeof (v as { token?: unknown }).token === "string"))
             return fail("unexpected", 200);
-          return ok({ kind: "session", session: r.value as { token: string } & PublicSession });
+          return ok({
+            kind: "session",
+            session: r.value as { token: string } & PublicSessionJSON,
+          });
         }
         const t = v.twoFactor;
         if (
@@ -1092,7 +1124,7 @@ export function createClient(options: ClientOptions): Client {
         send<{ sent: true }>("magicLink.request", rest, undefined, captchaHeader(captchaToken)),
       verify: ({ token, trustDevice }) =>
         changes(
-          send<PublicSession | TwoFactorChallengeJSON>("magicLink.verify", {
+          send<PublicSessionJSON | TwoFactorChallengeJSON>("magicLink.verify", {
             token,
             ...(trustDevice !== undefined ? { trustDevice } : {}),
           }),
@@ -1102,7 +1134,7 @@ export function createClient(options: ClientOptions): Client {
       // The redeem answers the session and its bearer token: another shape is not a sign-in.
       redeem: (input) =>
         changes(
-          send<{ token: string } & PublicSession>("handoff.redeem", input).then((r) =>
+          send<{ token: string } & PublicSessionJSON>("handoff.redeem", input).then((r) =>
             r.ok && !(isPublicSession(r.value) && typeof r.value.token === "string")
               ? fail("unexpected", 200)
               : r,
@@ -1121,11 +1153,10 @@ export function createClient(options: ClientOptions): Client {
         if (!options.ok) return options;
         const response = await ceremony(() => webauthn.create(options.value));
         if (!response.ok) return response;
-        const r = await send<{ passkey: PasskeySummaryJSON }>("passkey.register.verify", {
-          response: response.value,
-          ...(input.name !== undefined ? { name: input.name } : {}),
-        });
-        return r.ok ? ok(r.value.passkey) : r;
+        return part<{ passkey: PasskeySummaryJSON }, "passkey.register.verify">(
+          "passkey.register.verify",
+          { response: response.value, ...(input.name !== undefined ? { name: input.name } : {}) },
+        );
       },
       async signIn(input = {}) {
         const response = await assertion(
@@ -1133,7 +1164,9 @@ export function createClient(options: ClientOptions): Client {
           input.autofill === true,
         );
         if (!response.ok) return response;
-        return changes(send<PublicSession>("passkey.signIn.verify", { response: response.value }));
+        return changes(
+          send<PublicSessionJSON>("passkey.signIn.verify", { response: response.value }),
+        );
       },
       abort() {
         pending?.abort();
@@ -1141,15 +1174,9 @@ export function createClient(options: ClientOptions): Client {
       },
     },
     passkeys: {
-      async list() {
-        const r = await send<{ passkeys: PasskeySummaryJSON[] }>("passkeys.list");
-        return r.ok ? ok(r.value.passkeys) : r;
-      },
+      list: () => part<{ passkeys: PasskeySummaryJSON[] }, "passkeys.list">("passkeys.list"),
       delete: (input) => send<{ ok: true }>("passkeys.delete", input),
-      async rename({ id, name }) {
-        const r = await shaped(send<unknown>("passkeys.rename", { id, name }), isPasskeyAnswer);
-        return r.ok ? ok(r.value.passkey) : r;
-      },
+      rename: ({ id, name }) => part("passkeys.rename", { id, name }, undefined, isPasskeyAnswer),
     },
     password,
     emailOtp: {
@@ -1157,11 +1184,14 @@ export function createClient(options: ClientOptions): Client {
         send<{ sent: true }>("emailOtp.request", { email }, undefined, captchaHeader(captchaToken)),
       verify: ({ email, code, trustDevice }) =>
         changes(
-          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.verify", {
-            email,
-            code,
-            ...(trustDevice !== undefined ? { trustDevice } : {}),
-          }),
+          send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>(
+            "emailOtp.verify",
+            {
+              email,
+              code,
+              ...(trustDevice !== undefined ? { trustDevice } : {}),
+            },
+          ),
         ),
       requestReset: ({ email, captchaToken }) =>
         send<{ sent: true }>(
@@ -1172,7 +1202,7 @@ export function createClient(options: ClientOptions): Client {
         ),
       reset: ({ email, code, password, trustDevice }) =>
         changes(
-          send<({ token: string } & PublicSession) | TwoFactorChallengeJSON>("emailOtp.reset", {
+          send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>("emailOtp.reset", {
             email,
             code,
             password,
@@ -1186,57 +1216,52 @@ export function createClient(options: ClientOptions): Client {
           ...rest,
           ...(metadata !== undefined ? { metadata } : {}),
         }),
-      async list() {
-        const r = await send<{
-          organizations: { organization: OrganizationJSON; role: string }[];
-        }>("organizations.list");
-        return r.ok ? ok(r.value.organizations) : r;
-      },
-      async update({ metadata, name, slug, organizationId }) {
-        const r = await send<{ organization: OrganizationJSON }>("organizations.update", {
+      list: () =>
+        part<
+          { organizations: { organization: OrganizationJSON; role: string }[] },
+          "organizations.list"
+        >("organizations.list"),
+      update: ({ metadata, name, slug, organizationId }) =>
+        part<{ organization: OrganizationJSON }, "organizations.update">("organizations.update", {
           organizationId,
           ...(name !== undefined ? { name } : {}),
           ...(slug !== undefined ? { slug } : {}),
           ...(metadata !== undefined ? { metadata } : {}),
-        });
-        return r.ok ? ok(r.value.organization) : r;
-      },
+        }),
       // Core clears the active organization when it is deleted, so the session data changes.
       delete: (input) => changes(send<{ ok: true }>("organizations.delete", input)),
       members: {
-        async list(input) {
-          const r = await send<{ members: MemberJSON[] }>("organizations.members.list", undefined, {
-            organizationId: input.organizationId,
-          });
-          return r.ok ? ok(r.value.members) : r;
-        },
-        async add(input) {
-          const r = await send<{ member: MemberJSON }>("organizations.members.add", input);
-          return r.ok ? ok(r.value.member) : r;
-        },
-        async role(input) {
-          const r = await send<{ member: MemberJSON }>("organizations.members.role", input);
-          return r.ok ? ok(r.value.member) : r;
-        },
+        list: (input) =>
+          part<{ members: MemberJSON[] }, "organizations.members.list">(
+            "organizations.members.list",
+            undefined,
+            { organizationId: input.organizationId },
+          ),
+        add: (input) =>
+          part<{ member: MemberJSON }, "organizations.members.add">(
+            "organizations.members.add",
+            input,
+          ),
+        role: (input) =>
+          part<{ member: MemberJSON }, "organizations.members.role">(
+            "organizations.members.role",
+            input,
+          ),
         // A member who leaves the active organization loses it from the session.
         remove: (input) => changes(send<{ ok: true }>("organizations.members.remove", input)),
       },
       invitations: {
-        async invite(input) {
-          const r = await send<{ invitation: InvitationJSON }>(
+        invite: (input) =>
+          part<{ invitation: InvitationJSON }, "organizations.invitations.invite">(
             "organizations.invitations.invite",
             input,
-          );
-          return r.ok ? ok(r.value.invitation) : r;
-        },
-        async list(input) {
-          const r = await send<{ invitations: InvitationJSON[] }>(
+          ),
+        list: (input) =>
+          part<{ invitations: InvitationJSON[] }, "organizations.invitations.list">(
             "organizations.invitations.list",
             undefined,
             { organizationId: input.organizationId },
-          );
-          return r.ok ? ok(r.value.invitations) : r;
-        },
+          ),
         revoke: (input) => send<{ ok: true }>("organizations.invitations.revoke", input),
         accept: (input) =>
           send<{ organization: OrganizationJSON; member: MemberJSON }>(
@@ -1245,7 +1270,7 @@ export function createClient(options: ClientOptions): Client {
           ),
         decline: (input) => send<{ ok: true }>("organizations.invitations.decline", input),
       },
-      setActive: (input) => changes(send<PublicSession>("organizations.setActive", input)),
+      setActive: (input) => changes(send<PublicSessionJSON>("organizations.setActive", input)),
     },
     tokens: {
       create: ({ expiresInDays, organizationId, ...rest }) =>
@@ -1254,10 +1279,7 @@ export function createClient(options: ClientOptions): Client {
           ...(expiresInDays !== undefined ? { expiresInDays } : {}),
           ...(organizationId !== undefined ? { organizationId } : {}),
         }),
-      async list() {
-        const r = await send<{ tokens: ApiTokenSummaryJSON[] }>("tokens.list");
-        return r.ok ? ok(r.value.tokens) : r;
-      },
+      list: () => part<{ tokens: ApiTokenSummaryJSON[] }, "tokens.list">("tokens.list"),
       revoke: (input) => send<{ ok: true }>("tokens.revoke", input),
       current: () =>
         send<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>("tokens.current"),
@@ -1266,10 +1288,7 @@ export function createClient(options: ClientOptions): Client {
       token: () => send<{ token: string }>("jwt.token"),
     },
     oauth: {
-      async grants() {
-        const r = await send<{ grants: OAuthGrantJSON[] }>("oauth.grants");
-        return r.ok ? ok(r.value.grants) : r;
-      },
+      grants: () => part<{ grants: OAuthGrantJSON[] }, "oauth.grants">("oauth.grants"),
       revoke: (input) => send<{ ok: true }>("oauth.revoke", { clientId: input.clientId }),
     },
     totp,

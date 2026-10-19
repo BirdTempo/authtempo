@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { requireFresh } from "../../engine/fresh.js";
 import {
@@ -14,17 +13,9 @@ import {
   resolveApiToken,
   revokeApiToken,
 } from "../../engine/tokens.js";
+import { createBody, revokeBody } from "../contract/tokens.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
-
-const createBody = z.object({
-  // The engine refuses more than 80 code units; this cap only bounds the body.
-  name: z.string().max(200),
-  expiresInDays: z.number().int().min(1).max(3650).nullable().optional(),
-  // `null` means no organization, the same as absent: the engine type takes both.
-  organizationId: z.string().min(1).max(64).nullable().optional(),
-});
-const revokeBody = z.object({ id: z.string().min(1).max(64) });
 
 /**
  * The token routes. Every route but `current` takes a session through

@@ -26,7 +26,6 @@ import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
 
 // The reauth routes read the credential schema from here (plan 11g: the schema lives in the contract).
-export { credentialJson } from "../contract/passkeys.js";
 
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];

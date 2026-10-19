@@ -1,11 +1,18 @@
 import type { RouteMethod, RoutePath } from "@authtempo/core/routes";
 
-/** One call of the client: its operation, and the method and path of the route it calls. */
+/**
+ * One call of the client: its operation, and the method and path of the
+ * route it calls. `select` names the one key of the route's answer that the
+ * client method answers (plan 11g): `passkeys.list` answers the `passkeys`
+ * of `{ passkeys }`. The call reads the key through `selected`, and the
+ * type test holds the method's answer to the same key of the contract.
+ */
 export type ClientCall = {
   [M in RouteMethod]: {
     readonly operation: string;
     readonly method: M;
     readonly path: RoutePath<M>;
+    readonly select?: string;
   };
 }[RouteMethod];
 
@@ -26,12 +33,17 @@ export const CLIENT_CALLS = [
   { operation: "social.start", method: "GET", path: "/social/:provider/start" },
   { operation: "handoff.redeem", method: "POST", path: "/handoff/redeem" },
   { operation: "passkey.register.options", method: "POST", path: "/passkey/register/options" },
-  { operation: "passkey.register.verify", method: "POST", path: "/passkey/register/verify" },
+  {
+    operation: "passkey.register.verify",
+    method: "POST",
+    path: "/passkey/register/verify",
+    select: "passkey",
+  },
   { operation: "passkey.signIn.options", method: "POST", path: "/passkey/authenticate/options" },
   { operation: "passkey.signIn.verify", method: "POST", path: "/passkey/authenticate/verify" },
-  { operation: "passkeys.list", method: "GET", path: "/passkeys" },
+  { operation: "passkeys.list", method: "GET", path: "/passkeys", select: "passkeys" },
   { operation: "passkeys.delete", method: "POST", path: "/passkeys/delete" },
-  { operation: "passkeys.rename", method: "POST", path: "/passkeys/rename" },
+  { operation: "passkeys.rename", method: "POST", path: "/passkeys/rename", select: "passkey" },
   { operation: "password.signUp", method: "POST", path: "/password/sign-up" },
   { operation: "password.signIn", method: "POST", path: "/password/sign-in" },
   { operation: "password.resendVerification", method: "POST", path: "/password/verify/resend" },
@@ -44,22 +56,53 @@ export const CLIENT_CALLS = [
   { operation: "emailOtp.requestReset", method: "POST", path: "/otp/reset/request" },
   { operation: "emailOtp.reset", method: "POST", path: "/otp/reset" },
   { operation: "organizations.create", method: "POST", path: "/organizations/create" },
-  { operation: "organizations.list", method: "GET", path: "/organizations" },
-  { operation: "organizations.update", method: "POST", path: "/organizations/update" },
+  {
+    operation: "organizations.list",
+    method: "GET",
+    path: "/organizations",
+    select: "organizations",
+  },
+  {
+    operation: "organizations.update",
+    method: "POST",
+    path: "/organizations/update",
+    select: "organization",
+  },
   { operation: "organizations.delete", method: "POST", path: "/organizations/delete" },
-  { operation: "organizations.members.list", method: "GET", path: "/organizations/members" },
-  { operation: "organizations.members.add", method: "POST", path: "/organizations/members/add" },
-  { operation: "organizations.members.role", method: "POST", path: "/organizations/members/role" },
+  {
+    operation: "organizations.members.list",
+    method: "GET",
+    path: "/organizations/members",
+    select: "members",
+  },
+  {
+    operation: "organizations.members.add",
+    method: "POST",
+    path: "/organizations/members/add",
+    select: "member",
+  },
+  {
+    operation: "organizations.members.role",
+    method: "POST",
+    path: "/organizations/members/role",
+    select: "member",
+  },
   {
     operation: "organizations.members.remove",
     method: "POST",
     path: "/organizations/members/remove",
   },
-  { operation: "organizations.invitations.invite", method: "POST", path: "/organizations/invite" },
+  {
+    operation: "organizations.invitations.invite",
+    method: "POST",
+    path: "/organizations/invite",
+    select: "invitation",
+  },
   {
     operation: "organizations.invitations.list",
     method: "GET",
     path: "/organizations/invitations",
+    select: "invitations",
   },
   {
     operation: "organizations.invitations.revoke",
@@ -78,11 +121,11 @@ export const CLIENT_CALLS = [
   },
   { operation: "organizations.setActive", method: "POST", path: "/organizations/active" },
   { operation: "tokens.create", method: "POST", path: "/tokens" },
-  { operation: "tokens.list", method: "GET", path: "/tokens" },
+  { operation: "tokens.list", method: "GET", path: "/tokens", select: "tokens" },
   { operation: "tokens.revoke", method: "POST", path: "/tokens/revoke" },
   { operation: "tokens.current", method: "GET", path: "/tokens/current" },
   { operation: "jwt.token", method: "GET", path: "/token" },
-  { operation: "oauth.grants", method: "GET", path: "/oauth/grants" },
+  { operation: "oauth.grants", method: "GET", path: "/oauth/grants", select: "grants" },
   { operation: "oauth.revoke", method: "POST", path: "/oauth/grants/revoke" },
   { operation: "totp.setup", method: "POST", path: "/totp/setup" },
   { operation: "totp.enable", method: "POST", path: "/totp/enable" },
@@ -116,7 +159,7 @@ export const CLIENT_CALLS = [
   // `reauth.passkey` send their proof to one route, so they share the row
   // "reauth". `GET /user/change-email/confirm` and `GET /user/delete/confirm`
   // are the pages of the mailed links, not client calls.
-  { operation: "sessions.list", method: "GET", path: "/sessions" },
+  { operation: "sessions.list", method: "GET", path: "/sessions", select: "sessions" },
   { operation: "sessions.revoke", method: "POST", path: "/sessions/revoke" },
   { operation: "sessions.revokeOthers", method: "POST", path: "/sessions/revoke-others" },
   { operation: "reauth", method: "POST", path: "/reauth" },
@@ -150,4 +193,17 @@ export function callOf<O extends ClientOperation>(operation: O): CallOf<O> {
   // Unreachable: the type of `operation` is a name of the table.
   if (!c) throw new Error(`authtempo client: no call ${operation}`);
   return c as CallOf<O>;
+}
+
+/** The part of an answer `V` that a row's `select` names, or the whole answer for a row with none. */
+export type Selected<V, S> = S extends keyof V ? V[S] : V;
+
+/**
+ * The part of a route's answer that the row's `select` names (plan 11g).
+ * The one place that reads the key, so the call and the type test agree.
+ */
+export function selected<V, R extends ClientCall>(row: R, value: V): Selected<V, R["select"]> {
+  const key = row.select;
+  if (key === undefined) return value as Selected<V, R["select"]>;
+  return (value as Record<string, unknown>)[key] as Selected<V, R["select"]>;
 }

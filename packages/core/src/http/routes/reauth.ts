@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import {
   type ReauthProof,
@@ -7,18 +7,10 @@ import {
   requestReauthCode,
 } from "../../engine/reauth.js";
 import { fail } from "../../result.js";
+import { reauthBody } from "../contract/reauth.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
-import { credentialJson } from "./passkeys.js";
-
-const reauthBody = z.strictObject({
-  // The engine refuses more than 128 code points; this cap bounds the body.
-  password: z.string().max(1024).optional(),
-  emailCode: z.string().min(1).max(16).optional(),
-  passkey: credentialJson.optional(),
-  code: z.string().min(1).max(64).optional(),
-});
 
 /** One first proof: exactly one of the three, and no `code` beside a passkey. */
 function proofOf(body: z.infer<typeof reauthBody>): ReauthProof | null {

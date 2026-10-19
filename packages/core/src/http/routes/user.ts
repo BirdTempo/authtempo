@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import {
   confirmAccountDelete,
@@ -16,29 +15,13 @@ import { readSessionToken } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { defaultAccountDeletePage } from "../account-delete-page.js";
 import { isJsonRequest, readBody } from "../body.js";
+import { changeBody, confirmBody, deleteBody, updateBody, verifyBody } from "../contract/user.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
 import { signedOut } from "./sessions.js";
-
-const updateBody = z.strictObject({
-  // The engine applies the name and image rules; these caps bound the body.
-  name: z.string().max(400).nullable().optional(),
-  image: z.string().max(4096).nullable().optional(),
-});
-const changeBody = z.strictObject({
-  // The engine normalizes the address; the cap bounds the body.
-  newEmail: z.string().max(320),
-  method: z.enum(["link", "code"]).optional(),
-  next: z.string().max(2048).optional(),
-});
-// Not strict: a form may carry the name of its button.
-const confirmBody = z.object({ token: z.string().max(64) });
-const verifyBody = z.strictObject({ code: z.string().min(1).max(16) });
-// No field: the fresh session is the proof. Strict, so a client that sends a password learns that core reads none.
-const deleteBody = z.strictObject({});
 
 /**
  * The user routes of a settings page (plan 12a). They exist in every

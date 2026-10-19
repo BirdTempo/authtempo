@@ -47,6 +47,10 @@
     "./bindings": {
       "types": "./dist/bindings.d.ts",
       "default": "./dist/bindings.js"
+    },
+    "./openapi": {
+      "types": "./dist/openapi/index.d.ts",
+      "default": "./dist/openapi/index.js"
     }
   },
   "files": [

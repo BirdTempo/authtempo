@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { requireFresh } from "../../engine/fresh.js";
 import {
@@ -13,16 +12,15 @@ import {
   renewedSessionCookie,
   sessionFromRequest,
 } from "../../engine/sessions.js";
+import {
+  challengeBody,
+  disableBody,
+  passkeyEnableBody,
+  passwordBody,
+} from "../contract/second-factor.js";
 import { clearTrustCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
-
-/** The sign-in's length bound applies in `checkUserPassword`; this cap only bounds the body. */
-const passwordField = z.string().max(1024);
-const passwordBody = z.object({ password: passwordField });
-const passkeyEnableBody = z.object({ password: passwordField, response: z.unknown() });
-const disableBody = z.object({ method: z.enum(["passkey", "email"]), password: passwordField });
-const challengeBody = z.object({ challenge: z.string().max(64) });
 
 /**
  * The second-factor method routes (plan 12c, spec 8.14). None without

@@ -24,11 +24,17 @@ export const SessionJson = z.strictObject({
 });
 
 /**
- * The JSON of `publicSession`: `GET /session`, the verify routes, and the
- * passkey sign-in. `needsRefresh` is in the answer of `GET /session` with
- * `session.deferRefresh` on only (plan 12a).
+ * The JSON of `publicSession`: the refresh, the verify routes, the passkey
+ * sign-in, and the active organization. No other key: only `GET /session`
+ * adds one (`SessionReadAnswer`).
  */
-export const SessionAnswer = z.strictObject({
+export const SessionAnswer = z.strictObject({ user: UserJson, session: SessionJson });
+
+/**
+ * The answer of `GET /session` alone: the session, and `needsRefresh` with
+ * `session.deferRefresh` on (plan 12a). A client reads it to call the refresh.
+ */
+export const SessionReadAnswer = z.strictObject({
   user: UserJson,
   session: SessionJson,
   needsRefresh: z.boolean().optional(),

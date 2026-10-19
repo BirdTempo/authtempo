@@ -269,6 +269,12 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
     reason: "the gate of the server bindings; each binding page names it (plan 11d2)",
   },
   {
+    pkg: "@authtempo/core",
+    entry: "./openapi",
+    reason:
+      "the route contract and the OpenAPI generator; plan 11g Task 9 writes its reference page",
+  },
+  {
     pkg: "@authtempo/client",
     entry: "./conformance",
     reason: "the error-shape suite, for an SDK's own tests; it imports vitest at run time",

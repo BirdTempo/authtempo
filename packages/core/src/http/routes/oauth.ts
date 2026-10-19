@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import {
@@ -27,6 +26,7 @@ import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engi
 import { OAUTH_ERRORS } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import type { OAuthClientRow } from "../../schema.js";
+import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
@@ -34,9 +34,6 @@ import { originTrusted, type Route, type RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
 import { authorizationServerMetadata, PUBLIC_METADATA_HEADERS } from "../well-known.js";
-
-/** A client id of either kind: a `cl_` id or a metadata document URL of at most 2048 characters. */
-const revokeGrantBody = z.object({ clientId: z.string().min(1).max(2048) });
 
 /** An OAuth answer: the value with `status`, or `{ error }` with the status of `OAUTH_ERRORS`. No cache keeps either. */
 export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {

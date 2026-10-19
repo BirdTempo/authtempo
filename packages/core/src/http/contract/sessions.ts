@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { RouteKey } from "../route-list.js";
-import { OkAnswer, SessionAnswer } from "./shapes.js";
+import { OkAnswer, SessionAnswer, SessionReadAnswer } from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 // A core session id has 26 characters (newId). The cap of 64 leaves a margin and bounds the read.
@@ -21,7 +21,7 @@ export const SessionSummary = z.strictObject({
 
 /** The contract of `routes/sessions.ts` (plan 11g). */
 export const SESSIONS_CONTRACT = {
-  "GET /session": { answer: { kind: "json", schema: SessionAnswer } },
+  "GET /session": { answer: { kind: "json", schema: SessionReadAnswer } },
   "POST /session/refresh": { answer: { kind: "json", schema: SessionAnswer } },
   "POST /sign-out": { answer: { kind: "json", schema: OkAnswer } },
   "GET /sessions": {

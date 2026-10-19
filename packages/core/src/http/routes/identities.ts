@@ -1,12 +1,9 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { listIdentities, unlinkIdentity } from "../../engine/identities.js";
+import { unlinkBody } from "../contract/identities.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
-
-// An identity id is a core id; the cap bounds the body.
-const unlinkBody = z.strictObject({ id: z.string().min(1).max(64) });
 
 /** The identity routes of a settings page (plan 12a). They exist in every deployment. */
 export function identityRoutes(config: ResolvedConfig): Route[] {

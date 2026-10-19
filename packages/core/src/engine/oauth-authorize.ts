@@ -20,8 +20,8 @@ import type { ResolvedSession } from "./sessions.js";
  */
 
 export const CODE_PREFIX = "oc_";
-/** RFC 7636 section 4.2: 43 to 128 unreserved characters. The S256 of a verifier is 43. */
-const CHALLENGE_RE = /^[A-Za-z0-9._~-]{43,128}$/;
+/** RFC 7636 section 4.2: 43 to 128 unreserved characters. The S256 of a verifier is 43. Exported for the contract. */
+export const CHALLENGE_RE = /^[A-Za-z0-9._~-]{43,128}$/;
 const PARAM_MAX = 512;
 const CLIENT_ID_MAX = 2048;
 /** The short id of a held authorize request (plan 9h). Not `or_`: that is the refresh token's prefix. */

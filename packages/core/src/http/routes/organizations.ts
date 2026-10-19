@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import {
   acceptInvitation,
@@ -20,47 +20,21 @@ import {
 } from "../../engine/organizations.js";
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail, type Result } from "../../result.js";
+import {
+  activeBody,
+  createBody,
+  id,
+  inviteBody,
+  memberBody,
+  orgBody,
+  removeBody,
+  revokeBody,
+  tokenBody,
+  updateBody,
+} from "../contract/organizations.js";
 import { json, readJson, respond } from "../json.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
-
-const id = z.string().min(1).max(64);
-const role = z.string().min(1).max(64);
-/** Every member reads metadata in GET /organizations, so its size is capped. */
-const METADATA_MAX_BYTES = 4096;
-const metadata = z
-  .record(z.string(), z.unknown())
-  .nullable()
-  .optional()
-  .refine(
-    (m) =>
-      m === undefined ||
-      m === null ||
-      new TextEncoder().encode(JSON.stringify(m)).length <= METADATA_MAX_BYTES,
-  );
-
-const createBody = z.object({
-  slug: z.string().min(1).max(64),
-  name: z.string().min(1).max(120),
-  metadata,
-});
-const updateBody = z.object({
-  organizationId: id,
-  name: z.string().min(1).max(120).optional(),
-  slug: z.string().min(1).max(64).optional(),
-  metadata,
-});
-const orgBody = z.object({ organizationId: id });
-const memberBody = z.object({ organizationId: id, userId: id, role });
-const removeBody = z.object({ organizationId: id, userId: id });
-const inviteBody = z.object({
-  organizationId: id,
-  email: z.string().min(1).max(320),
-  role,
-});
-const revokeBody = z.object({ organizationId: id, invitationId: id });
-const tokenBody = z.object({ token: z.string().min(1).max(64) });
-const activeBody = z.object({ organizationId: id.nullable() });
 
 export function organizationRoutes(config: ResolvedConfig): Route[] {
   if (!config.organizations) return [];

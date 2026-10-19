@@ -5,6 +5,7 @@ import { createClient } from "../src/client.js";
 // The text of client.ts, read by Vite (test/raw.d.ts types it). The client has no Node types.
 import clientSource from "../src/client.ts?raw";
 import type { BrowserWebAuthn } from "../src/webauthn.js";
+import { BODY_AS_INPUT, COMPARED, NOT_COMPARED } from "./contract.test-d.js";
 
 /** The operations that the client looks up in the table, in call order. */
 const looked = vi.hoisted(() => [] as string[]);
@@ -153,6 +154,22 @@ describe("the call table of the client (plan 11d)", () => {
     expect(clientSource).toContain(
       "return call<T>(c.method, c.path, body, query, headers, token);",
     );
+  });
+
+  it("compares the answer of 69 rows and the body of 37 with the contract, and names the 6 it does not (plan 11g)", () => {
+    const operations = CLIENT_CALLS.map((r) => r.operation).sort();
+    const notCompared = NOT_COMPARED.map((r) => r.operation);
+    // Every row is in one of the two lists, and no row is in both.
+    expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
+    expect(COMPARED).toHaveLength(69);
+    expect(NOT_COMPARED).toHaveLength(6);
+    for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
+    // A body row is a compared row.
+    expect(BODY_AS_INPUT).toHaveLength(37);
+    for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
+    // Every row with `select` is compared: the type test reads the key.
+    for (const r of CLIENT_CALLS)
+      if ("select" in r) expect(COMPARED, r.operation).toContain(r.operation);
   });
 
   it("sends a query apart from the path", async () => {
