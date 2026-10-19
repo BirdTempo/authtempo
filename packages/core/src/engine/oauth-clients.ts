@@ -698,8 +698,9 @@ function cimdCredentialRule(m: Record<string, unknown>): string | null {
   if (m.client_secret !== undefined) return "client_secret is present (-02 section 4.1)";
   if (m.client_secret_expires_at !== undefined)
     return "client_secret_expires_at is present (-02 section 4.1)";
-  const method = m.token_endpoint_auth_method;
-  if (method !== undefined && !CIMD_AUTH_METHODS.includes(method))
+  // A null method means none, as at registration (owner decision 4).
+  const method = m.token_endpoint_auth_method ?? "none";
+  if (!CIMD_AUTH_METHODS.includes(method))
     return "token_endpoint_auth_method is not none or private_key_jwt (-02 section 4.1)";
   return null;
 }

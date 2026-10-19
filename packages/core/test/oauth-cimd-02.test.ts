@@ -456,6 +456,15 @@ describe("the members of a document that core does not serve (ruling 24 of plan 
     }
   });
 
+  it("reads a null token_endpoint_auth_method as none, the same as a registration", async () => {
+    const base = await fixture("draft-00");
+    const url = String(base.client_id);
+    const f = fakeFetch();
+    f.answers.set(url, () => json({ ...base, token_endpoint_auth_method: null }));
+    const h = instance(f.fn);
+    expect(await findClient(h.config, url)).toMatchObject({ id: url, authMethod: "none" });
+  });
+
   it("refuses a document with no code grant or no code response type", async () => {
     const base = await fixture("draft-00");
     const url = String(base.client_id);
