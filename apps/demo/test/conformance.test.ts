@@ -34,10 +34,16 @@ function stubOf(name: string): DurableObjectStub<Sandbox> {
  * So each call of the suite opens its own runInDurableObject (the fallback of
  * Task 8 Step 4).
  */
-function inside<R>(name: string, fn: (db: D1Database) => Promise<R>) {
-  return runInDurableObject(stubOf(name), (_instance, state) =>
+function inside<R>(name: string, fn: (db: D1Database) => Promise<R>): Promise<R> {
+  const call = runInDurableObject(stubOf(name), (_instance, state) =>
     fn(sqliteD1(state.storage.sql, (f) => state.storage.transactionSync(f))),
   );
+  // The suite starts several calls that reject, then awaits them one at a time.
+  // A forwarded call rejects in a later turn, before its await, and vitest then
+  // fails the run with an unhandled rejection. This line marks it as handled;
+  // the caller still gets the rejection from the promise it awaits.
+  call.catch(() => {});
+  return call;
 }
 
 /** The D1 adapter of the sandbox, with each method call forwarded into the object. */
