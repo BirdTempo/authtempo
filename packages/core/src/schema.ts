@@ -280,8 +280,12 @@ export type DeviceStatus = "pending" | "approved" | "denied";
 
 /** An OAuth client (plan 9g). */
 export interface OAuthClientRow extends BaseRow {
-  /** `registered`: the id is a `cl_` token. `cimd`: the id is the https URL of the client's metadata document. */
-  kind: "registered" | "cimd";
+  /**
+   * `registered`: a `cl_` id from `POST /oauth/register`. `api`: a `cl_` id
+   * from `api.oauth.clients.create` (plan 12e); the idle sweep keeps it.
+   * `cimd`: the id is the https URL of the client's metadata document.
+   */
+  kind: "registered" | "cimd" | "api";
   /** The client's own name: a claim of the client, not a fact. */
   name: string | null;
   redirectUris: string[];

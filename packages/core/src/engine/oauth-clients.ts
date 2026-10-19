@@ -17,6 +17,8 @@ import { BUILT_IN_SCOPES, type OAuthResult, oauthFail, oauthOk } from "./oauth-r
  */
 
 export const CLIENT_ID_PREFIX = "cl_";
+/** The kinds of a client with a `cl_` id: a registration's and an `api.oauth.clients` one's. */
+const CL_KINDS: readonly OAuthClientRow["kind"][] = ["registered", "api"];
 const CLIENT_ID_RE = /^cl_[A-Za-z0-9_-]{43}$/;
 const REGISTER_PER_IP = { seconds: 3600, max: 10 };
 export const CIMD_TIMEOUT_MS = 10_000;
@@ -213,7 +215,7 @@ export async function registeredClient(
   if (!config.oauth || !CLIENT_ID_RE.test(clientId)) return null;
   return config.storage.findOne("oauthClient", [
     { field: "id", op: "eq", value: clientId },
-    { field: "kind", op: "eq", value: "registered" },
+    { field: "kind", op: "in", value: CL_KINDS },
   ]);
 }
 
@@ -687,7 +689,7 @@ export async function findClient(
   if (CLIENT_ID_RE.test(clientId)) {
     const row = await config.storage.findOne("oauthClient", [
       { field: "id", op: "eq", value: clientId },
-      { field: "kind", op: "eq", value: "registered" },
+      { field: "kind", op: "in", value: CL_KINDS },
     ]);
     if (row && now.getTime() - row.lastSeenAt.getTime() >= LAST_SEEN_EVERY_MS) {
       await config.storage.update("oauthClient", [{ field: "id", op: "eq", value: row.id }], {

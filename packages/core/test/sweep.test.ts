@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { publicClientFields } from "../src/engine/oauth-clients.js";
+import { findClient, publicClientFields } from "../src/engine/oauth-clients.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { setupTotp } from "../src/engine/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { makeAuth } from "./helpers.js";
+import { makeAuth, post } from "./helpers.js";
+import { oauthHandle } from "./oauth-helpers.js";
 import { enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 /**
@@ -247,6 +248,29 @@ describe("sweepExpired", () => {
   });
 
   describe("the idle OAuth clients (plan 9g)", () => {
+    it("deletes an idle client of the registration and keeps an idle client of api.oauth.clients (plan 12e)", async () => {
+      const h = oauthHandle();
+      const res = await h.auth.handle(
+        post("/auth/oauth/register", { redirect_uris: ["https://client.example.com/cb"] }),
+      );
+      expect(res.status).toBe(201);
+      const registeredId = ((await res.json()) as { client_id: string }).client_id;
+      const made = await h.auth.api.oauth?.clients.create({
+        redirectUris: ["https://client.example.com/cb"],
+      });
+      if (!made?.ok) throw new Error("create failed");
+      const apiId = made.value.client.id;
+      expect(made.value.client.kind).toBe("api");
+      // 91 days with no authorize, no consent, and no refresh token.
+      h.clock.advance(91 * DAY);
+      expect(await h.auth.api.sweepExpired()).toMatchObject({ oauthClients: 1 });
+      const left = (await h.storage.findMany("oauthClient", [])).map((c) => c.id);
+      expect(left).toEqual([apiId]);
+      expect(left).not.toContain(registeredId);
+      // The kept client still works: findClient reads a cl_ id of kind api.
+      expect(await findClient(h.config, apiId)).toMatchObject({ id: apiId, kind: "api" });
+    });
+
     const idleClient = (storage: StorageAdapter, id: string, lastSeenAt: Date, now: Date) =>
       storage.create("oauthClient", {
         id,

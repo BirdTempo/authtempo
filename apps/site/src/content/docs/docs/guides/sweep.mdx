@@ -44,7 +44,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `totpSetups` | Second factor setups that no enable confirmed within 15 minutes. |
 | `jwks` | Signing keys retired more than 24 hours ago. |
 | `oauthTokens` | Refresh tokens past their expiry. |
-| `oauthClients` | Up to 100 OAuth clients unseen for 90 days, with no consent and no refresh token. |
+| `oauthClients` | Up to 100 OAuth clients unseen for 90 days, with no consent and no refresh token. A client of `api.oauth.clients.create` stays: you made it on purpose. |
 | `limits` | The limit windows that ended, when the limiter has a sweep. |
 | `oauthDevices` | Device grants past their expiry. Always 0 until the device grant of plan 12e. |
 | `oauthSessionLinks` | Links of a session to a client whose session is gone. Always 0 until the back-channel sign-out of plan 12e. |

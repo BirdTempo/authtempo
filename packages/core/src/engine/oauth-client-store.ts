@@ -141,7 +141,7 @@ async function clientRow(
   return config.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: clientId }]);
 }
 
-/** A new registered client. A secret method answers its secret here, once. */
+/** A new client of kind `api`. A secret method answers its secret here, once. */
 export async function createClient(
   config: ResolvedConfig,
   input: ClientInput,
@@ -154,7 +154,8 @@ export async function createClient(
   const secret = await newClientSecret(fields.value.authMethod);
   const row = await config.storage.create("oauthClient", {
     id: randomToken(CLIENT_ID_PREFIX),
-    kind: "registered",
+    // An operator made this client on purpose: the 90-day idle sweep of plan 9g keeps it.
+    kind: "api",
     lastSeenAt: now,
     createdAt: now,
     updatedAt: now,
@@ -170,7 +171,7 @@ export async function createClient(
   });
 }
 
-/** One client of either kind, or `invalid_client`. */
+/** One client of any kind, or `invalid_client`. */
 export async function getClient(
   config: ResolvedConfig,
   input: { clientId: string },
@@ -180,7 +181,7 @@ export async function getClient(
 }
 
 /**
- * The clients of either kind, newest first, `limit` (1 to 100, default 100)
+ * The clients of every kind, newest first, `limit` (1 to 100, default 100)
  * per page. `next` is the cursor of the next page, or null on the last page.
  * The port has no OR, so a page past the cursor is two reads: the rest of
  * the cursor's own time, then the older times.
@@ -228,7 +229,8 @@ export async function listClients(
 }
 
 /**
- * Changes the fields that `input` names on a registered client. The id, the
+ * Changes the fields that `input` names on a `cl_` client. A CIMD client
+ * answers `invalid_client`: its document is the source of its fields. The id, the
  * method, and the secret never change here: `invalid_client_metadata` for
  * `authMethod` or any key that is not a field of `ClientInput`.
  */
@@ -239,7 +241,7 @@ export async function updateClient(
   if (!isRecord(input)) return oauthFail("invalid_client_metadata");
   const { clientId, ...patch } = input;
   const row = await clientRow(config, clientId);
-  if (row?.kind !== "registered") return oauthFail("invalid_client");
+  if (!row || row.kind === "cimd") return oauthFail("invalid_client");
   if ("authMethod" in patch) return oauthFail("invalid_client_metadata");
   const change = metadataOf(patch);
   const whole = metadataOf(inputOf(row));
@@ -289,7 +291,7 @@ export async function rotateClientSecret(
   input: { clientId: string; keepOldHours?: number },
 ): Promise<OAuthResult<{ client: ClientSummary; clientSecret: string }>> {
   const row = await clientRow(config, input?.clientId);
-  if (row?.kind !== "registered") return oauthFail("invalid_client");
+  if (!row || row.kind === "cimd") return oauthFail("invalid_client");
   const hours = input.keepOldHours ?? KEEP_OLD_HOURS_DEFAULT;
   if (!Number.isSafeInteger(hours) || hours < 0 || hours > KEEP_OLD_HOURS_MAX)
     return oauthFail("invalid_client_metadata");

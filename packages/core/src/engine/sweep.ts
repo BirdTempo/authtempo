@@ -44,7 +44,8 @@ const CONSUMED_GRACE_MS = 24 * 60 * 60 * 1000;
 // A client that no authorize and no metadata fetch saw for 90 days, and
 // that holds no consent and no refresh token, has nothing a user could lose:
 // no grant names it. Without this sweep every dynamic registration stays in
-// ta_oauth_client forever (spec 8.13 item 7, plan 9g).
+// ta_oauth_client forever (spec 8.13 item 7, plan 9g). A client of kind `api`
+// stays: an operator made it on purpose through `api.oauth.clients` (plan 12e).
 const CLIENT_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
 /** One sweep stays short; the next one takes the rest. */
 const CLIENT_SWEEP_MAX = 100;
@@ -60,7 +61,10 @@ async function sweepClients(storage: StorageAdapter, now: Date): Promise<number>
   let n = 0;
   const idle = await storage.findMany(
     "oauthClient",
-    [{ field: "lastSeenAt", op: "lt", value: before }],
+    [
+      { field: "lastSeenAt", op: "lt", value: before },
+      { field: "kind", op: "ne", value: "api" },
+    ],
     { limit: CLIENT_SWEEP_MAX },
   );
   for (const c of idle) {

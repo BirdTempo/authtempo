@@ -34,7 +34,7 @@ Each token is the prefix plus 43 base64url characters of 32 random bytes.
 | `tf_` | Second factor challenge | The sign-in answer, then the verify body | 5 minutes |
 | `td_` | Trusted device token | The trust cookie | `totp.trustDays` |
 | `inv_` | Invitation token | The link in the invitation mail. No answer of a route carries it. | `organizations.invitationTtlDays` |
-| `cl_` | OAuth client id | Every OAuth request of a registered client | 90 days unseen, with no consent and no refresh token |
+| `cl_` | OAuth client id | Every OAuth request of a registered client | 90 days unseen, with no consent and no refresh token. A client of `api.oauth.clients.create` lives until you delete it |
 | `oc_` | OAuth authorization code | The redirect to the client, then the token body | `oauth.codeTtlMinutes` |
 | `or_` | OAuth refresh token | The token answer and the token body | `oauth.refreshTtlDays` |
 | `oq_` | OAuth held request id | The `request_id` of the sign-in page and the consent page | 10 minutes |

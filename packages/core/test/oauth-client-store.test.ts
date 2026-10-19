@@ -62,7 +62,7 @@ describe("api.oauth.clients (plan 12e)", () => {
     expect(made.value.client).not.toHaveProperty("previousSecretHash");
     expect(made.value.client).toMatchObject({
       id: expect.stringMatching(/^cl_[A-Za-z0-9_-]{43}$/),
-      kind: "registered",
+      kind: "api",
       name: "Billing",
       authMethod: "client_secret_basic",
     });
