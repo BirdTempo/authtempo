@@ -24,11 +24,14 @@ const NAMES = ["init", "migrate", "import", "check", "keys", "mcp", "secret"];
 
 /**
  * The commands that need an argument, so the bare command is a usage error
- * (plan 11c2 ruling 4). `secret` runs with no argument and prints a value,
- * and `info` of Task 5 runs with no argument too, so this list is typed by
- * hand and is not read from NAMES.
+ * (plan 11c2 ruling 4). The list is typed by hand and is not read from
+ * NAMES, because some commands run with no argument. A test below holds
+ * the two lists to NAMES.
  */
-const NEEDS_ARGUMENT = ["init", "migrate", "import", "check", "keys", "mcp"];
+const NEEDS_ARGUMENT = ["init", "migrate", "import", "check", "keys", "mcp"] as const;
+
+/** The commands that run with no argument (ruling 5): `secret` prints a value. `info` joins it in Task 5. */
+const NO_ARGUMENT = ["secret"] as const;
 
 describe("the common rules (spec 19)", () => {
   it("has the seven commands in the order of the root help", () => {
@@ -110,6 +113,14 @@ describe("the common rules (spec 19)", () => {
       for (const [flag, spec] of Object.entries(c.options))
         if (spec.short !== undefined)
           expect(`${name} --${flag} -${spec.short}`).toBe(`${name} --${flag} -${ALLOWED[flag]}`);
+  });
+
+  it("splits NAMES into the commands that need an argument and the ones that run bare, with no name in both", () => {
+    const both = [...NEEDS_ARGUMENT, ...NO_ARGUMENT];
+    expect(new Set(both)).toEqual(new Set(NAMES));
+    expect(both.length).toBe(NAMES.length);
+    for (const name of NEEDS_ARGUMENT)
+      expect((NO_ARGUMENT as readonly string[]).includes(name), name).toBe(false);
   });
 
   it("prints the short help on stderr and exits 2 for a bare command that needs an argument", () => {
