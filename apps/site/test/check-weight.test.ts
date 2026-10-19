@@ -41,6 +41,22 @@ describe("checkWeight", () => {
     expect(r.failures).toEqual(["index.html weighs 71680 bytes; the limit is 65536"]);
   });
 
+  it("counts a style sheet linked by its absolute same-origin URL", () => {
+    const html = `<link rel="stylesheet" href="https://authtempo.com/_astro/a.css?v=1">${"x".repeat(KIB)}`;
+    const r = checkWeight(new Map([["index.html", html]]), sizes({ "/_astro/a.css": 64 * KIB }));
+    expect(r.failures).toEqual([
+      `index.html weighs ${html.length + 64 * KIB} bytes; the limit is 65536`,
+    ]);
+  });
+
+  it("counts a module preload, and skips a file of another origin", () => {
+    const html =
+      '<link rel="modulepreload" href="/_astro/m.js"><script src="https://cdn.example/x.js"></script>';
+    const r = checkWeight(new Map([["index.html", html]]), sizes({ "/_astro/m.js": 2 * KIB }));
+    expect(r.failures).toEqual([]);
+    expect(r.counts).toEqual({ pages: 1, largest_bytes: html.length + 2 * KIB });
+  });
+
   it("fails a page with a linked file that the build lacks", () => {
     const r = checkWeight(new Map([["index.html", pageOf(KIB, ["/_astro/gone.css"])]]), sizes({}));
     expect(r.failures).toEqual(["index.html links /_astro/gone.css, which the build lacks"]);
