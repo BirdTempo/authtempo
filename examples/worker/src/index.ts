@@ -206,7 +206,8 @@ export default {
       // openid calls them, and every app that copies this example inherits that.
       if (!c.scopes.includes("mcp:tools"))
         return insufficientScopeResponse({ resource, scope: "mcp:tools" });
-      return Response.json({ sub: c.user.id, clientId: c.clientId, scopes: c.scopes });
+      // c.user is for the app; c.subject is what the client may see.
+      return Response.json({ sub: c.subject, clientId: c.clientId, scopes: c.scopes });
     }
     // TEST_MODE only (plan 9c): the fake provider's authorize step, which the browser visits.
     if (url.pathname.startsWith("/__test/oauth/")) {

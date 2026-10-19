@@ -33,6 +33,7 @@ import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
 4. Mount `auth.wellKnown(request)` for every path that starts with `/.well-known/` at the origin root.
 5. In each resource route, read the caller with `auth.caller(request)`.
    - Answer 401 to a caller that is not `kind: "oauth"`.
+   - Answer `c.subject` to the client, never `c.user.id`. `c.subject` is the user id for a public client and the pairwise subject for a pairwise client. `c.user` is for the app.
 6. Check the scope of each tool in the route. A token with only `openid` must not call a tool.
 
 <Code code={config} lang="ts" title="The provider config and an MCP route" />

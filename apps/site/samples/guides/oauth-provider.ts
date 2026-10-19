@@ -55,5 +55,6 @@ export async function mcpRoute(auth: Auth, request: Request): Promise<Response> 
   // Check the scope of each tool: a token with only openid must not call it.
   if (!c.scopes.includes("mcp:tools"))
     return insufficientScopeResponse({ resource: RESOURCE, scope: "mcp:tools" });
-  return Response.json({ sub: c.user.id, clientId: c.clientId });
+  // c.user is for the app; c.subject is what the client may see.
+  return Response.json({ sub: c.subject, clientId: c.clientId });
 }

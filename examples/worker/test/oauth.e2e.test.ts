@@ -82,13 +82,26 @@ async function pkce() {
   return { verifier, challenge };
 }
 
-/** A fake MCP client: register, authorize with the user's session, allow, and exchange. */
-async function connect(email: string, scope: string, resource = RESOURCE) {
+/**
+ * A fake MCP client: register, authorize with the user's session, allow, and exchange.
+ * `client` gives another redirect URI and more registration fields, such as `subject_type`.
+ */
+async function connect(
+  email: string,
+  scope: string,
+  resource = RESOURCE,
+  client: { redirect?: string; metadata?: Record<string, unknown> } = {},
+) {
+  const redirect = client.redirect ?? REDIRECT;
   const cookie = await verifiedUser(email);
   const reg = await SELF.fetch(`${ISSUER}/oauth/register`, {
     method: "POST",
     headers: { "content-type": "application/json", ...IP },
-    body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: "Fake MCP client" }),
+    body: JSON.stringify({
+      redirect_uris: [redirect],
+      client_name: "Fake MCP client",
+      ...client.metadata,
+    }),
   });
   expect(reg.status).toBe(201);
   const { client_id: clientId } = (await reg.json()) as { client_id: string };
@@ -98,7 +111,7 @@ async function connect(email: string, scope: string, resource = RESOURCE) {
   const params = {
     response_type: "code",
     client_id: clientId,
-    redirect_uri: REDIRECT,
+    redirect_uri: redirect,
     code_challenge: challenge,
     code_challenge_method: "S256",
     scope,
@@ -125,7 +138,7 @@ async function connect(email: string, scope: string, resource = RESOURCE) {
       code: back.searchParams.get("code") ?? "",
       code_verifier: verifier,
       client_id: clientId,
-      redirect_uri: REDIRECT,
+      redirect_uri: redirect,
       resource,
     }),
   );
@@ -203,6 +216,37 @@ it("serves a fake MCP client end to end on D1: discovery, register, authorize, e
     .bind(c.clientId)
     .first<number>("n");
   expect(left).toBe(0);
+});
+
+it("answers the token subject at /mcp: the pairwise subject for a pairwise client (ruling 39 of plan 12e)", async () => {
+  // A redirect URI on a host, so the client has a sector. A loopback URI is no sector.
+  const c = await connect("mcp-p@example.com", "mcp:tools", RESOURCE, {
+    redirect: "https://rp.example.org/callback",
+    metadata: { subject_type: "pairwise" },
+  });
+  const sub = String((await verifiedPayload(c.tokens.access_token)).sub);
+  expect(sub).toMatch(/^ps_/);
+  const session = await SELF.fetch(`${ISSUER}/session`, { headers: { cookie: c.cookie, ...IP } });
+  const { user } = (await session.json()) as { user: { id: string } };
+  expect(sub).not.toBe(user.id);
+  // The route answers what the client may see, never the user id behind it.
+  const called = await SELF.fetch(`${BASE}/mcp/tools`, {
+    headers: { authorization: `Bearer ${c.tokens.access_token}` },
+  });
+  expect(called.status).toBe(200);
+  expect(await called.json()).toMatchObject({ sub, clientId: c.clientId });
+  // A public client's token names the user id, and the route answers it.
+  const pub = await connect("mcp-q@example.com", "mcp:tools");
+  const pubSub = String((await verifiedPayload(pub.tokens.access_token)).sub);
+  const pubCalled = await SELF.fetch(`${BASE}/mcp/tools`, {
+    headers: { authorization: `Bearer ${pub.tokens.access_token}` },
+  });
+  const pubSession = await SELF.fetch(`${ISSUER}/session`, {
+    headers: { cookie: pub.cookie, ...IP },
+  });
+  const { user: pubUser } = (await pubSession.json()) as { user: { id: string } };
+  expect(pubSub).toBe(pubUser.id);
+  expect(await pubCalled.json()).toMatchObject({ sub: pubSub });
 });
 
 it("answers 401 at /mcp to a session cookie, a tk_ token, and a token of another resource, and 403 to a token without mcp:tools", async () => {
