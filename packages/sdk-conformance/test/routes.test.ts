@@ -44,6 +44,12 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason: "the POST form of userinfo; the OAuth client calls the GET",
   },
   {
+    method: "POST",
+    path: "/oauth/introspect",
+    reason:
+      "a resource server calls it with its own client auth; @authtempo/verify calls it from plan 12e Task 10",
+  },
+  {
     method: "GET",
     path: "/.well-known/openid-configuration",
     reason: "the same document as the authorization server metadata",

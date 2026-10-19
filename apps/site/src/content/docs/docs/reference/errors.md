@@ -440,16 +440,16 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`GET /oauth/sign-in`](/docs/reference/routes/#get-oauth-sign-in), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`GET /oauth/sign-in`](/docs/reference/routes/#get-oauth-sign-in), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect). |
 
 <h3 id="oauth-invalid_client"><code>invalid_client</code> 401</h3>
 
-- **Meaning:** The `client_id` is unknown, or its metadata document failed. At the token and revoke routes, the client auth failed. The secret is wrong, or a confidential client sent no secret, or a public client sent one. A `private_key_jwt` client sent a secret, or its client assertion failed a check of RFC 7523. At those routes a request with an `Authorization` header gets the 401 with `WWW-Authenticate: Basic` and the issuer as the realm. A request with no header gets a 400 with no challenge, so a browser shows no sign-in dialog.
+- **Meaning:** The `client_id` is unknown, or its metadata document failed. At the token, revoke, and introspection routes, the client auth failed. At the introspection route, the caller is also not a confidential client with `introspect: true`. The secret is wrong, or a confidential client sent no secret, or a public client sent one. A `private_key_jwt` client sent a secret, or its client assertion failed a check of RFC 7523. At those routes a request with an `Authorization` header gets the 401 with `WWW-Authenticate: Basic` and the issuer as the realm. A request with no header gets a 400 with no challenge, so a browser shows no sign-in dialog.
 - **Do:** Register the client again, or fix its metadata document. Send the secret as HTTP Basic or as `client_secret` in the form, and send one method only.
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect). |
 
 <h3 id="oauth-invalid_grant"><code>invalid_grant</code> 400</h3>
 
@@ -561,12 +561,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-rate_limited"><code>rate_limited</code> 429</h3>
 
-- **Meaning:** A limit of the provider is full: register, authorize, or token for the IP.
+- **Meaning:** A limit of the provider is full: register, authorize, or token for the IP, or introspection for the IP or the client.
 - **Do:** Wait for the window to end.
 
 | Routes |
 | --- |
-| [`POST /oauth/register`](/docs/reference/routes/#post-oauth-register), [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke). |
+| [`POST /oauth/register`](/docs/reference/routes/#post-oauth-register), [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect). |
 
 <h3 id="oauth-unauthorized_client"><code>unauthorized_client</code> 400</h3>
 

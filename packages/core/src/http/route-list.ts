@@ -1263,6 +1263,14 @@ export const ROUTES = Object.freeze([
     oauthCodes: ["invalid_request", "rate_limited", "unauthorized_client", "invalid_client"],
   },
   {
+    method: "POST",
+    path: "/oauth/introspect",
+    feature: "oauth",
+    auth: ["none", "clientSecretBasic"],
+    codes: [],
+    oauthCodes: ["invalid_request", "rate_limited", "invalid_client"],
+  },
+  {
     method: "GET",
     path: "/oauth/userinfo",
     feature: "oauth",

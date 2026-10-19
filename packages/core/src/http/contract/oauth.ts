@@ -100,6 +100,41 @@ export const revokeBody = z.object({
   client_assertion: z.string().optional(),
 });
 
+/**
+ * The introspection request of RFC 7662 section 2.1, read by hand as a
+ * form. The caller authenticates as at the token route (plan 12e).
+ * `token_type_hint` orders the lookups only.
+ */
+export const introspectBody = z.object({
+  token: z.string(),
+  token_type_hint: z.string().optional(),
+  client_id: z.string().optional(),
+  client_secret: z.string().optional(),
+  client_assertion_type: z.string().optional(),
+  client_assertion: z.string().optional(),
+});
+
+/**
+ * The answer of RFC 7662 section 2.2, as `introspect` answers it. An
+ * inactive token answers `active` alone (plan 12e).
+ */
+export const IntrospectAnswerJson = z.union([
+  z.strictObject({ active: z.literal(false) }),
+  z.strictObject({
+    active: z.literal(true),
+    scope: z.string(),
+    client_id: z.string(),
+    sub: z.string(),
+    aud: z.string(),
+    iss: z.string(),
+    exp: z.number().int(),
+    iat: z.number().int(),
+    jti: z.string(),
+    token_type: z.enum(["Bearer", "DPoP"]),
+    cnf: z.strictObject({ jkt: z.string() }).optional(),
+  }),
+]);
+
 /** The token answer of RFC 6749 section 5.1. `id_token` comes with the `openid` scope. */
 export const TokenAnswerJson = z.strictObject({
   access_token: z.string(),
@@ -185,6 +220,10 @@ export const OAUTH_CONTRACT = {
     body: { schema: revokeBody, media: ["form"], parsedBy: "hand" },
     // RFC 7009 section 2.2: an empty object, for a revoked and for an unknown token.
     answer: { kind: "json", schema: z.strictObject({}) },
+  },
+  "POST /oauth/introspect": {
+    body: { schema: introspectBody, media: ["form"], parsedBy: "hand" },
+    answer: { kind: "json", schema: IntrospectAnswerJson },
   },
   "GET /oauth/userinfo": userinfo,
   "POST /oauth/userinfo": userinfo,

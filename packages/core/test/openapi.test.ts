@@ -84,7 +84,7 @@ describe("openApiDocument (plan 11g)", () => {
     const keys = operations(doc).map((o) => o.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(102);
+    expect(keys.length).toBe(103);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -166,7 +166,7 @@ describe("openApiDocument (plan 11g)", () => {
       .map(({ key }) => key);
     expect(optional).toEqual(["POST /operator/secrets/rewrap"]);
     const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
-    expect(bodies.length).toBe(60);
+    expect(bodies.length).toBe(61);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -219,6 +219,10 @@ describe("openApiDocument (plan 11g)", () => {
     const token = reference().paths["/oauth/token"]?.post;
     expect(token?.security).toEqual([{}, { clientSecretBasic: [] }]);
     expect(reference().paths["/oauth/revoke"]?.post?.security).toEqual([
+      {},
+      { clientSecretBasic: [] },
+    ]);
+    expect(reference().paths["/oauth/introspect"]?.post?.security).toEqual([
       {},
       { clientSecretBasic: [] },
     ]);
@@ -341,7 +345,7 @@ describe("openApiDocument (plan 11g)", () => {
         queries++;
       } else expect(params, key).toEqual([]);
     }
-    expect([answers, bodies, queries]).toEqual([82, 60, 14]);
+    expect([answers, bodies, queries]).toEqual([83, 61, 14]);
   });
 
   it("takes the request_id form of the authorize query", () => {
@@ -367,7 +371,7 @@ describe("openApiDocument (plan 11g)", () => {
     expect(header("/oauth/userinfo", "post", "403")?.required).toBe(false);
     expect(header("/oauth/userinfo", "post", "403")?.description).toContain("`insufficient_scope`");
     // Plan 12e, ruling 17: each invalid_client 401 carries the Basic challenge (RFC 7235 section 3.1).
-    for (const path of ["/oauth/token", "/oauth/revoke"]) {
+    for (const path of ["/oauth/token", "/oauth/revoke", "/oauth/introspect"]) {
       expect(header(path, "post", "401")?.required, path).toBe(true);
       expect(header(path, "post", "401")?.description, path).toContain("Basic challenge");
       // Ruling 19: with no Authorization header, invalid_client is a 400 with no challenge.

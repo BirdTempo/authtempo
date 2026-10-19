@@ -5,6 +5,7 @@ import { EMAIL_CHANGE_TOKEN_RE } from "../src/engine/email-change.js";
 import { CHALLENGE_RE, ID_RE, startHandoff } from "../src/engine/handoff.js";
 import { MAGIC_LINK_TOKEN_RE } from "../src/engine/magic-link.js";
 import { CHALLENGE_RE as PKCE_CHALLENGE_RE } from "../src/engine/oauth-authorize.js";
+import { createClient } from "../src/engine/oauth-client-store.js";
 import {
   PASSWORD_RESET_TOKEN_RE,
   PASSWORD_VERIFY_TOKEN_RE,
@@ -21,7 +22,7 @@ import { coreRouteModules, coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { everyFeature, SOCIAL } from "./every-feature.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
-import { pkce, requestIdOf } from "./oauth-helpers.js";
+import { basicHeader, pkce, requestIdOf } from "./oauth-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { codeNow, enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
@@ -561,7 +562,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(102);
+    expect(keys.length).toBe(103);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -830,6 +831,14 @@ describe("the route contract (plan 11g)", () => {
     const consent = { ...cookie, origin: BASE_URL };
     // A code of a second request, for the token exchange.
     const { code, verifier } = await codeOf(w, cookie, clientId);
+    // A resource server that may introspect (plan 12e).
+    const rs = await createClient(w.auth.config, {
+      authMethod: "client_secret_basic",
+      grantTypes: ["client_credentials"],
+      introspect: true,
+    });
+    if (!rs.ok || !rs.value.clientSecret) throw new Error("no resource server");
+    const rsBasic = { authorization: basicHeader(rs.value.client.id, rs.value.clientSecret) };
     /**
      * Each POST that reads its body by hand, with its media and a valid body. It also has the
      * keys that the schema requires, with the answer when each one is absent. `valid` is the
@@ -890,13 +899,23 @@ describe("the route contract (plan 11g)", () => {
         valid: { status: 200, code: null },
         missing: { token: { status: 200, code: null } },
       },
+      {
+        // RFC 7662 section 2.1: an unknown token answers active false; the token is required.
+        key: "POST /oauth/introspect",
+        media: "form",
+        body: { token: `or_${BODY43}` },
+        headers: rsBasic,
+        required: ["token"],
+        valid: { status: 200, code: null },
+        missing: { token: { status: 400, code: "invalid_request" } },
+      },
     ];
     const hand = Object.entries(CONTRACT)
       .filter(([, c]) => c.body?.parsedBy === "hand")
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_FORMS.map((row) => row.key).sort());
-    expect(hand.length).toBe(4);
+    expect(hand.length).toBe(5);
     for (const row of VALID_FORMS) {
       const contract = CONTRACT[row.key];
       const body = contract?.body;
@@ -973,7 +992,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 48, both: 9, form: 3 });
+    expect(counts).toEqual({ json: 48, both: 9, form: 4 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);
@@ -985,10 +1004,15 @@ describe("the route contract (plan 11g)", () => {
         expect(answer, `${row.key}: a form`).not.toEqual(INVALID_BODY);
       else expect(answer, `${row.key}: a form`).toEqual(INVALID_BODY);
     }
-    // The three hand-read forms refuse a JSON body, and the hand-read JSON refuses a form.
+    // The four hand-read forms refuse a JSON body, and the hand-read JSON refuses a form.
     // The consent route checks its origin and the session before the body.
     const consent = { ...cookie, origin: BASE_URL };
-    for (const key of ["POST /oauth/authorize", "POST /oauth/token", "POST /oauth/revoke"] as const)
+    for (const key of [
+      "POST /oauth/authorize",
+      "POST /oauth/token",
+      "POST /oauth/revoke",
+      "POST /oauth/introspect",
+    ] as const)
       expect(
         await answerOf(await w.handle(post(`/auth${key.slice(5)}`, {}, consent))),
         key,

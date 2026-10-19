@@ -109,9 +109,20 @@ export const tokenLimited = async (config: ResolvedConfig, ip: string | null) =>
   !(await config.limiter.allow(`oauth-token:ip:${ipKey(ip)}`, TOKEN_PER_IP));
 
 /** The user, while it exists and its address is verified. */
-async function liveUser(config: ResolvedConfig, userId: string): Promise<UserRow | null> {
+export async function liveUser(config: ResolvedConfig, userId: string): Promise<UserRow | null> {
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
   return user?.emailVerified ? user : null;
+}
+
+/** The refresh row of `token`, or null for a token of another form or an unknown one. */
+export async function refreshRowOf(
+  config: ResolvedConfig,
+  token: string,
+): Promise<OAuthTokenRow | null> {
+  if (!REFRESH_RE.test(token)) return null;
+  return config.storage.findOne("oauthToken", [
+    { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
+  ]);
 }
 
 async function writeRefresh(
@@ -365,11 +376,8 @@ export async function refreshGrant(
     resource: string | null;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
-  if (!REFRESH_RE.test(input.refreshToken)) return oauthFail("invalid_grant");
   const client = input.client.client;
-  const row = await config.storage.findOne("oauthToken", [
-    { field: "tokenHash", op: "eq", value: await sha256Hex(input.refreshToken) },
-  ]);
+  const row = await refreshRowOf(config, input.refreshToken);
   if (!row || row.clientId !== client.id) return oauthFail("invalid_grant");
   if (row.usedAt !== null) return reuse(config, row);
   const now = config.clock.now();
@@ -424,19 +432,15 @@ export async function revokeToken(
   config: ResolvedConfig,
   input: { token: string; client: AuthedClient | null },
 ): Promise<OAuthResult<{ revoked: true }>> {
-  if (REFRESH_RE.test(input.token)) {
-    const row = await config.storage.findOne("oauthToken", [
-      { field: "tokenHash", op: "eq", value: await sha256Hex(input.token) },
-    ]);
-    if (row) {
-      if (input.client === null) {
-        const owner = await config.storage.findOne("oauthClient", [
-          { field: "id", op: "eq", value: row.clientId },
-        ]);
-        if (owner !== null && owner.authMethod !== "none") return oauthFail("invalid_client");
-      } else if (input.client.client.id !== row.clientId) return oauthFail("unauthorized_client");
-      await revokeFamily(config, row.familyId);
-    }
+  const row = await refreshRowOf(config, input.token);
+  if (row) {
+    if (input.client === null) {
+      const owner = await config.storage.findOne("oauthClient", [
+        { field: "id", op: "eq", value: row.clientId },
+      ]);
+      if (owner !== null && owner.authMethod !== "none") return oauthFail("invalid_client");
+    } else if (input.client.client.id !== row.clientId) return oauthFail("unauthorized_client");
+    await revokeFamily(config, row.familyId);
   }
   return oauthOk({ revoked: true });
 }

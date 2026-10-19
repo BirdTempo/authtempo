@@ -20,6 +20,7 @@ import {
 } from "../../engine/oauth-clients.js";
 import { CREDENTIALS_GRANT, credentialsGrant } from "../../engine/oauth-credentials.js";
 import { listGrants, revokeGrant } from "../../engine/oauth-grants.js";
+import { introspect, introspectLimited } from "../../engine/oauth-introspect.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
 import {
   exchangeCode,
@@ -177,12 +178,12 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       },
     },
   );
-  /** RFC 6749 section 5.1: a token answer carries no-store and no-cache. */
-  const tokenAnswer = (r: OAuthResult<TokenAnswer>): Response => {
-    const res = oauthJson(r);
+  /** RFC 6749 section 5.1: an answer with a token carries no-store and no-cache. */
+  const noCache = (res: Response): Response => {
     res.headers.set("pragma", "no-cache");
     return res;
   };
+  const tokenAnswer = (r: OAuthResult<TokenAnswer>): Response => noCache(oauthJson(r));
   /** CORS for a client's own web origin (plan 11d): the exact origin, no credentials, and Vary for every cache. */
   const clientCors = (res: Response, origin: string): Response => {
     res.headers.set("access-control-allow-origin", origin);
@@ -350,6 +351,27 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         }
         const r = await revokeToken(config, { token: form.get("token") ?? "", client });
         return r.ok ? json({}) : clientRefused(ctx.request, r);
+      },
+    },
+    {
+      // RFC 7662: a resource server asks whether a token is live. The client auth is that of the token route.
+      method: "POST",
+      path: "/oauth/introspect",
+      key: "POST /oauth/introspect",
+      async handler(ctx) {
+        const form = await formParams(ctx.request);
+        if (!form) return noCache(oauthJson(oauthFail("invalid_request")));
+        if (await introspectLimited(config, ctx.ip))
+          return noCache(oauthJson(oauthFail("rate_limited")));
+        const authed = await authenticateClient(config, ctx.request, form);
+        const r = authed.ok
+          ? await introspect(config, {
+              caller: authed.value,
+              token: form.get("token"),
+              hint: form.get("token_type_hint"),
+            })
+          : authed;
+        return noCache(r.ok ? json(r.value) : clientRefused(ctx.request, r));
       },
     },
     { method: "GET", path: "/oauth/userinfo", key: "GET /oauth/userinfo", handler: userinfo },

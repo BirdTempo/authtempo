@@ -104,6 +104,7 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /magic-link/verify",
   "POST /oauth/authorize",
   "POST /oauth/grants/revoke",
+  "POST /oauth/introspect",
   "POST /oauth/register",
   "POST /oauth/revoke",
   "POST /oauth/token",
