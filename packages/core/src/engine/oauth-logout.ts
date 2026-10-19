@@ -111,7 +111,7 @@ export const LOGOUT_TOKEN_LIFE_S = 120;
 /**
  * The wait after failed attempt 1, 2, 3, and 4 or later: the last value
  * repeats. Section 2.5: send again only for an error that can pass, and
- * after a delay.
+ * after a delay (`retryable`).
  */
 export const LOGOUT_BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000] as const;
 
@@ -193,6 +193,17 @@ function backoffMs(attempts: number): number {
 }
 
 /**
+ * The result of one post. `retry` is an error that can pass: a throw, a
+ * timeout, 408, 429, or 5xx. Section 2.5 allows a retry only then. Any other
+ * status is a refusal: 400 says the client refused the token (section 2.8),
+ * and a redirect is not followed. Then the row goes.
+ */
+type Posted = { kind: "sent" } | { kind: "retry" } | { kind: "refused"; status: number };
+
+/** True for an answer that can pass with time (section 2.5). */
+const retryable = (status: number) => status === 408 || status === 429 || status >= 500;
+
+/**
  * Posts one logout token as a form (section 2.5). No redirect is followed.
  * The request has 2 seconds, and `deadline` can end it sooner. The wait
  * ends at the abort even when the app's fetch ignores the signal. Core
@@ -203,8 +214,9 @@ async function postLogoutToken(
   uri: string,
   token: string,
   deadline: AbortSignal,
-): Promise<boolean> {
-  if (!fetchFn) return false;
+): Promise<Posted> {
+  // The config can lose its fetch after the URI was registered: wait for it.
+  if (!fetchFn) return { kind: "retry" };
   const ctrl = new AbortController();
   const stop = () => ctrl.abort();
   // setTimeout, not AbortSignal.timeout: a test moves it with fake timers.
@@ -228,9 +240,10 @@ async function postLogoutToken(
       aborted,
     ]);
     await res.body?.cancel().catch(() => {});
-    return res.status === 200 || res.status === 204;
+    if (res.status === 200 || res.status === 204) return { kind: "sent" };
+    return retryable(res.status) ? { kind: "retry" } : { kind: "refused", status: res.status };
   } catch {
-    return false;
+    return { kind: "retry" };
   } finally {
     clearTimeout(timer);
     deadline.removeEventListener("abort", stop);
@@ -273,15 +286,22 @@ async function deliverRow(
   );
   if (claimed !== 1) return "skipped";
   const token = await logoutToken(config, row, client);
-  const ok = await postLogoutToken(
+  const posted = await postLogoutToken(
     config.oauth?.fetch ?? null,
     client.backchannelLogoutUri,
     token,
     deadline,
   );
-  if (!ok) return "failed";
+  if (posted.kind === "retry") return "failed";
   await storage.delete("oauthLogout", byId);
-  return "sent";
+  if (posted.kind === "sent") return "sent";
+  // The client id and the status only: never the token, the user, or the session.
+  console.error(
+    "authtempo: a back-channel logout is dropped: the client refused it",
+    row.clientId,
+    posted.status,
+  );
+  return "dropped";
 }
 
 /** Delivers `rows` in parallel inside `LOGOUT_DELIVERY_MS`. Answers the rows sent or dropped. */

@@ -716,17 +716,15 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(decodeJwt(tokenOfCall(w.calls[0])).sid).toBe(actor.session.id);
   });
 
-  it("fails an attempt on a throw, a redirect, or no answer in 2 seconds, and the session end stands", async () => {
+  it("keeps the row for a retry on a throw, no answer in 2 seconds, 408, 429, and 503, and the session end stands", async () => {
+    const status = (code: number) => async () => new Response(null, { status: code });
     const answers: [string, (init: RequestInit | undefined) => Promise<Response>][] = [
       ["a throw", () => Promise.reject(new TypeError("network down"))],
-      // A redirect is not followed: a 302 is the answer, and it is no success.
-      [
-        "a redirect",
-        async () =>
-          new Response(null, { status: 302, headers: { location: "https://x.example/" } }),
-      ],
       // A fetch that never answers and ignores the signal: the wait still ends at 2 seconds.
       ["no answer", () => new Promise<Response>(() => {})],
+      ["408", status(408)],
+      ["429", status(429)],
+      ["503", status(503)],
     ];
     for (const [name, fn] of answers) {
       const w = world();
@@ -745,6 +743,38 @@ describe("back-channel logout (plan 12e Task 16)", () => {
       }
       expect(await live(w, actor.session.id), name).toBe(false);
       expect(await outbox(w), name).toMatchObject([{ clientId: bc, attempts: 1 }]);
+    }
+  });
+
+  it("drops the row with one log line when the client refuses the token: 400 and a redirect (section 2.5)", async () => {
+    const answers: [string, () => Promise<Response>][] = [
+      // Section 2.8: the client refused the token.
+      ["400", async () => new Response(null, { status: 400 })],
+      // A redirect is not followed: a 302 is the answer, and no retry can change it.
+      [
+        "302",
+        async () =>
+          new Response(null, { status: 302, headers: { location: "https://x.example/" } }),
+      ],
+    ];
+    for (const [name, fn] of answers) {
+      const w = world();
+      const { actor } = await twoSessions(w);
+      const bc = await bcClient(w, BC);
+      await tokensOf(w, actor.token, bc);
+      w.answer.set(BC, fn);
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+      expect(await outbox(w), name).toEqual([]);
+      const lines = logged.mock.calls.filter((c) => String(c[0]).includes("back-channel"));
+      expect(lines, name).toEqual([
+        ["authtempo: a back-channel logout is dropped: the client refused it", bc, Number(name)],
+      ]);
+      logged.mockRestore();
+      // No later sweep sends it again.
+      w.auth.clock.advance(MINUTE);
+      await sweepExpired(w.auth.config);
+      expect(w.calls, name).toHaveLength(1);
     }
   });
 
