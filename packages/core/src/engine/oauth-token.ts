@@ -218,9 +218,10 @@ async function writeRefresh(
  * True while the grant still stands: at a refresh, the spent row exists;
  * at the code exchange, the code row (its id is the family id) and the
  * consent of the user for the client exist. At a device poll, the device
- * row and the consent exist. A grant revoke deletes the
- * consent and the refresh rows (`revokeGrant`); a reset or a password
- * change deletes the refresh rows and the code rows (`deleteOAuthTokens`).
+ * row and the consent exist. A grant revoke deletes the consent, the
+ * refresh rows, and the device rows (`revokeGrant`); a reset or a password
+ * change deletes the refresh rows, the code rows, and the device rows
+ * (`deleteOAuthTokens`).
  */
 async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> {
   // This read runs after the write of the new row. See revokeFamily for why it closes the race.
@@ -232,7 +233,8 @@ async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> 
       ])) !== null
     );
   if (g.deviceId !== null) {
-    // The device row stays after its spend, as a code row does.
+    // The device row stays after its spend, as a code row does. A reset, a
+    // change, or a grant revoke that ran during this poll deleted it.
     if (
       !(await config.storage.findOne("oauthDevice", [{ field: "id", op: "eq", value: g.deviceId }]))
     )

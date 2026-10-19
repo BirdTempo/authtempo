@@ -1184,6 +1184,8 @@ describe("changePassword", () => {
       "delete:oauthToken",
       // The user's OAuth codes (plan 9g final fix wave, round 2).
       "delete:verification",
+      // The device codes that the user decided (plan 12e Task 14).
+      "delete:oauthDevice",
       // The pending reset links of the address (plan 8 final review M-3).
       "delete:verification",
     ]);

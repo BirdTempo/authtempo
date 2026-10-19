@@ -67,8 +67,8 @@ export async function listGrants(
 }
 
 /**
- * Ends the grant of one client: deletes the consent and every refresh token
- * of the user and the client. `{ ok: true }` also when nothing existed, so
+ * Ends the grant of one client: deletes the consent, every refresh token,
+ * and every decided device row of the user and the client. `{ ok: true }` also when nothing existed, so
  * the answer tells no caller which clients a user has. A code exchange
  * re-checks the consent (`exchangeCode`). A refresh in flight can still
  * see its spent row until the commit on Postgres, and write a new row. So
@@ -97,16 +97,22 @@ export async function revokeGrant(
       ],
       ends,
     );
+    // A device row that the user decided is a code in another table (plan 12e).
+    await tx.delete("oauthDevice", [
+      { field: "userId", op: "eq", value: input.userId },
+      { field: "clientId", op: "eq", value: input.clientId },
+    ]);
   });
   await endFamilies(config, ends);
   return ok({ ok: true });
 }
 
 /**
- * Deletes every refresh token and every `oauth-code` row of the user, in
- * the caller's transaction: a reset of either kind and a password change
- * (spec 8.7, the plan 9g final fix wave). A code from before the reset then
- * gives nothing. The consents stay, so the next authorize asks for no
+ * Deletes every refresh token, every `oauth-code` row, and every decided
+ * device row of the user, in the caller's transaction: a reset of either
+ * kind and a password change (spec 8.7, the plan 9g final fix wave). A code
+ * from before the reset then gives nothing. A device code that the user
+ * approved is such a code (plan 12e). The consents stay, so the next authorize asks for no
  * consent, but each client must send the person through the authorize step again.
  * The caller ends `ends` after its commit (`endFamilies`, ruling 43 of plan 12e).
  */
@@ -120,4 +126,6 @@ export async function deleteOAuthTokens(
     { field: "purpose", op: "eq", value: "oauth-code" },
     { field: "identifier", op: "eq", value: userId },
   ]);
+  // A pending device row names no user yet, so it stays for the person who types its code.
+  await tx.delete("oauthDevice", [{ field: "userId", op: "eq", value: userId }]);
 }

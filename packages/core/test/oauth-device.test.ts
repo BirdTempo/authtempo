@@ -3,13 +3,26 @@ import type { AuthConfig } from "../src/config.js";
 import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { DEVICE_GRANT, findUserCode, normalizeUserCode } from "../src/engine/oauth-device.js";
+import { revokeGrant } from "../src/engine/oauth-grants.js";
+import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
+import { resolveSession } from "../src/engine/sessions.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import type { LimiterPort } from "../src/limiter/port.js";
 import { fromBase64Url } from "../src/primitives/crypto.js";
 import type { SecretVersion } from "../src/primitives/keyring.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
-import { type Handle, REDIRECT, RESOURCE, SCOPES, signedIn, tokenPost } from "./oauth-helpers.js";
+import {
+  approvedDevice,
+  type Handle,
+  REDIRECT,
+  RESOURCE,
+  SCOPES,
+  signedIn,
+  tokenPost,
+} from "./oauth-helpers.js";
+import { FAST, pwHandle } from "./password-helpers.js";
 import { dpopKey } from "./support/dpop-key.js";
 
 /**
@@ -757,5 +770,92 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
     }
     expect([...seen].every((c) => ALPHABET.includes(c))).toBe(true);
     expect(seen.size).toBeGreaterThan(10);
+  });
+});
+
+describe("the end of a decided device code (plan 12e Task 14, ruling 44 S4)", () => {
+  const OAUTH = {
+    resources: [RESOURCE],
+    scopes: SCOPES,
+    registration: { cimd: false, dynamic: true },
+    device: {},
+  };
+
+  /** A user who approved a device code of a device client, and the poll request of the code. */
+  async function approved() {
+    const h = pwHandle({ hash: FAST }, { oauth: OAUTH });
+    const clientId = await deviceClient(h);
+    const s = await signedIn(h);
+    const deviceCode = await approvedDevice(h, clientId, s.cookie, "mcp:read offline_access");
+    // A second code that nobody decided: a pending row names no user, so it stays.
+    const pending = await start(h, clientId, "mcp:read");
+    return { h, clientId, s, deviceCode, pending };
+  }
+
+  async function resetByLink(h: ReturnType<typeof pwHandle>, email: string) {
+    await requestPasswordReset(h.config, { email, ip: null });
+    const r = await resetPassword(h.config, {
+      token: h.mails.at(-1)?.token ?? "",
+      password: "a new long password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!r.ok) throw new Error(r.code);
+  }
+
+  const rowsOf = async (h: ReturnType<typeof pwHandle>, userId: string | null) =>
+    h.storage.findMany("oauthDevice", [{ field: "userId", op: "eq", value: userId }]);
+
+  it("deletes the user's decided device rows at a reset, a change, and a grant revoke", async () => {
+    const ends = [
+      async (a: Awaited<ReturnType<typeof approved>>) => resetByLink(a.h, a.s.user.email),
+      async (a: Awaited<ReturnType<typeof approved>>) => {
+        const session = await resolveSession(a.h.config, a.s.token);
+        if (!session) throw new Error("no session");
+        const r = await changePassword(a.h.config, { session, newPassword: "a new long password" });
+        if (!r.ok) throw new Error(r.code);
+      },
+      async (a: Awaited<ReturnType<typeof approved>>) => {
+        const r = await revokeGrant(a.h.config, { userId: a.s.user.id, clientId: a.clientId });
+        if (!r.ok) throw new Error(r.code);
+      },
+    ];
+    for (const end of ends) {
+      const a = await approved();
+      expect((await rowsOf(a.h, a.s.user.id)).map((r) => r.status)).toEqual(["approved"]);
+      await end(a);
+      expect(await rowsOf(a.h, a.s.user.id)).toEqual([]);
+      expect((await rowsOf(a.h, null)).map((r) => r.status)).toEqual(["pending"]);
+      a.h.clock.advance(5_000);
+      expect(await answer(await a.h.auth.handle(poll(a.clientId, a.deviceCode)))).toEqual({
+        status: 400,
+        body: { error: "invalid_grant" },
+      });
+      expect(await a.h.storage.findMany("oauthToken", [])).toEqual([]);
+    }
+  });
+
+  it("refuses the tokens of a poll when a reset runs between its spend and its token write", async () => {
+    const a = await approved();
+    const store = a.h.storage as StorageAdapter;
+    const create = store.create.bind(store);
+    let gate = true;
+    // The reset commits, and ends the families it sees, before the poll writes its refresh row.
+    (store as { create: StorageAdapter["create"] }).create = (async (model, data) => {
+      if (model === "oauthToken" && gate) {
+        gate = false;
+        await resetByLink(a.h, a.s.user.email);
+      }
+      return create(model, data);
+    }) as StorageAdapter["create"];
+    a.h.clock.advance(5_000);
+    expect(await answer(await a.h.auth.handle(poll(a.clientId, a.deviceCode)))).toEqual({
+      status: 400,
+      body: { error: "invalid_grant" },
+    });
+    expect(gate).toBe(false);
+    // The consent stays after a reset, so only the read of the device row refuses the grant.
+    expect(await a.h.storage.findMany("oauthConsent", [])).toHaveLength(1);
+    expect(await a.h.storage.findMany("oauthToken", [])).toEqual([]);
   });
 });
