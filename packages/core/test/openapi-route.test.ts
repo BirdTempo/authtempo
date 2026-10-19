@@ -86,10 +86,20 @@ describe("GET /openapi.json (plan 11g)", () => {
     expect(vi.mocked(openApiDocument)).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a value that is not a boolean", () => {
+  it.each(["yes", null])("refuses the value %j, which is not a boolean", (value) => {
     // A JS caller can pass any value; the type allows a boolean only.
-    const input = { ...base, openapi: "yes" } as unknown as Parameters<typeof resolveConfig>[0];
+    const input = { ...base, openapi: value } as unknown as Parameters<typeof resolveConfig>[0];
     expect(() => resolveConfig(input)).toThrow(ConfigError);
     expect(() => resolveConfig(input)).toThrow("openapi must be true or false");
+  });
+
+  it.each([
+    "https://ops:hunter2pw@api.example.com",
+    "https://ops@api.example.com",
+    "https://:hunter2pw@api.example.com",
+  ])("refuses the baseURL %s, so no password reaches servers", (baseURL) => {
+    const input = { ...base, baseURL, openapi: true };
+    expect(() => createAuth(input)).toThrow(ConfigError);
+    expect(() => createAuth(input)).toThrow("baseURL must have no user name and no password");
   });
 });

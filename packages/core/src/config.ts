@@ -775,6 +775,9 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   if (origin.pathname !== "/" || input.baseURL.endsWith("/") || origin.search || origin.hash) {
     throw new ConfigError("baseURL must be an origin with no path and no trailing slash");
   }
+  // The public document of `GET /openapi.json` names this origin, so a password here would leak.
+  if (origin.username || origin.password)
+    throw new ConfigError("baseURL must have no user name and no password");
   const appName = input.appName ?? origin.host;
   // The name goes into a mail subject, so a CR or LF would inject a header.
   if (appName.length < 1 || appName.length > APP_NAME_MAX || hasControlChar(appName))
@@ -972,8 +975,9 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   // One source for the session cookie names: the trust cookie check of `totp` reads them too.
   const { cookieName, legacyCookieName } = sessionCookieNames(input.cookieName);
   const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
+  if (input.openapi !== undefined && typeof input.openapi !== "boolean")
+    throw new ConfigError("openapi must be true or false");
   const openapi = input.openapi ?? false;
-  if (typeof openapi !== "boolean") throw new ConfigError("openapi must be true or false");
   return {
     basePath,
     baseURL: input.baseURL,
