@@ -61,7 +61,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 ## If it fails
 
 - The sweep answers no error code. A storage error throws, and the scheduled run fails in the Worker's logs.
-- A storage error in one of the two back-channel steps does not throw. The step writes one log line, `authtempo: the sweep link step stopped` or `authtempo: the sweep outbox step stopped`, and counts 0. The counts above it stay, and the next sweep goes on. On Workers Free this is what a run past 50 queries shows. A stop loses no message: each link becomes a message in its own write, and a message that a stop holds before its post loses no attempt. Each sweep then sends a few messages, so they come later.
+- A storage error in one of the two back-channel steps does not throw. The step writes one log line, `authtempo: the sweep link step stopped` or `authtempo: the sweep outbox step stopped`, and counts 0. The counts above it stay, and the next sweep goes on. On Workers Free this is what a run past 50 queries shows. A stop loses no message. Each link becomes a message in its own write. A message that a stop holds before its post loses no attempt. Each sweep then sends a few messages, so they come later.
 - A `limits` count of 0 with the memory limiter is normal: the memory limiter deletes ended windows at each check.
 
 ## Next
