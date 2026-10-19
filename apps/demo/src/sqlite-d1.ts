@@ -24,8 +24,11 @@ function changes(sql: SqlStorage, cursor: SqlStorageCursor<Row>): number {
 
 function check(values: unknown[]): Value[] {
   for (const v of values) {
-    // SqlStorageValue holds no boolean and no undefined (workers-types
-    // 5.20261007.1), so a wrong value fails here, at the bind, with its type.
+    // D1 binds a boolean as 1 or 0, and an ArrayBuffer, a typed array, or an
+    // array of bytes as bytes (D1PreparedStatement.bind, workerd 1.20261006.1).
+    // The shim is stricter. Core's encodeValue writes a boolean as 1 or 0 for
+    // SQLite, so a boolean here comes from a path outside core. It fails loudly
+    // at the bind. SqlStorageValue also holds no boolean (workers-types 5.20261007.1).
     const ok =
       v === null || typeof v === "string" || typeof v === "number" || v instanceof ArrayBuffer;
     if (!ok) throw new TypeError(`D1_TYPE_ERROR: type '${typeof v}' is not supported`);
@@ -76,8 +79,9 @@ class Statement {
     const row = this.exec().results[0];
     if (row === undefined) return null;
     if (column === undefined) return row;
-    if (!(column in row))
-      throw new Error(`D1_COLUMN_NOTFOUND: column '${column}' is not in the row`);
+    // The rule and the text of D1 first() for a column not in the row (workerd 1.20261006.1).
+    if (row[column] === undefined)
+      throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${column})`);
     return row[column];
   }
 }

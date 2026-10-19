@@ -50,6 +50,23 @@ describe("the D1 shim over ctx.storage.sql", () => {
     expect(counts.changes).toBe(1);
   });
 
+  it("answers 0 changes for a read after a write", async () => {
+    const changes = await inSandbox(async (db) => {
+      const ins = st.insert("user", user("u1", "a@example.com"));
+      await db
+        .prepare(ins.sql)
+        .bind(...ins.params)
+        .run();
+      await db
+        .prepare("UPDATE ta_user SET email = ? WHERE id = ?")
+        .bind("b@example.com", "u1")
+        .run();
+      const read = await db.prepare("SELECT id FROM ta_user").run();
+      return read.meta.changes;
+    });
+    expect(changes).toBe(0);
+  });
+
   it("runs a batch as one unit", async () => {
     const left = await inSandbox(async (db) => {
       const a = st.insert("user", user("u1", "a@example.com"));
@@ -97,6 +114,15 @@ describe("the D1 shim over ctx.storage.sql", () => {
         row: await db.prepare(q).bind("u1").first(),
         none: await db.prepare(q).bind("nobody").first(),
         noneColumn: await db.prepare(q).bind("nobody").first<string>("email"),
+        // D1 throws this text for a column that is not in the row (workerd 1.20261006.1).
+        missing: await db
+          .prepare(q)
+          .bind("u1")
+          .first("name")
+          .then(
+            () => "no throw",
+            (e: unknown) => (e instanceof Error ? e.message : String(e)),
+          ),
       };
     });
     expect(got).toEqual({
@@ -104,6 +130,7 @@ describe("the D1 shim over ctx.storage.sql", () => {
       row: { id: "u1", email: "a@example.com" },
       none: null,
       noneColumn: null,
+      missing: "D1_COLUMN_NOTFOUND: Column not found (name)",
     });
   });
 });
