@@ -127,10 +127,11 @@ export const LOGOUT_MAX_ATTEMPTS = 6;
  * rest. The cap fits the D1 limit of Workers Paid: 1000 queries per
  * invocation, 100 bound parameters per query (D1 limits page updated 21
  * April 2026, read 2026-10-20). One sweep with more links to end and more
- * failing rows than each cap made 317 storage calls for a public client and 367 for a
- * pairwise one (a test, 2026-10-20). Each row costs about 5 calls. The
- * Free plan has 50 queries per invocation, which no useful cap fits. There
- * the step stops at the limit with one log line, and the next sweep goes on.
+ * failing rows than each cap made 775 storage calls for a public client and
+ * 825 for a pairwise one (a test, 2026-10-20). Each row costs about 6 calls.
+ * The Free plan has 50 queries per invocation, which no useful cap fits.
+ * There the step stops at the limit with one log line. A row that the limit
+ * stops before its post loses no attempt, so the next sweeps go on.
  */
 export const LOGOUT_SWEEP_MAX = 50;
 
@@ -262,10 +263,12 @@ async function postLogoutToken(
 type Delivery = "sent" | "dropped" | "failed" | "skipped";
 
 /**
- * One attempt of one row. First the claim: a conditional update counts the
- * attempt and moves `nextAttemptAt`. So of two deliveries of one row, one
- * posts, and a crash during the post still counts. Then the post: 200 or
- * 204 deletes the row.
+ * One attempt of one row. First the claim: a conditional update moves
+ * `nextAttemptAt` from the value that this call read. So of two deliveries
+ * of one row, one posts. The claim counts no attempt (ruling 50). A throw
+ * before the post, at the signing read or at a storage limit, leaves
+ * `attempts` as it was: the row waits and comes again. Only a post that went
+ * out and failed adds one attempt. Then 200 or 204 deletes the row.
  */
 async function deliverRow(
   config: ResolvedConfig,
@@ -290,8 +293,8 @@ async function deliverRow(
   const attempts = row.attempts + 1;
   const claimed = await storage.update(
     "oauthLogout",
-    [...byId, { field: "attempts", op: "eq", value: row.attempts }],
-    { attempts, nextAttemptAt: new Date(now.getTime() + backoffMs(attempts)), updatedAt: now },
+    [...byId, { field: "nextAttemptAt", op: "eq", value: row.nextAttemptAt }],
+    { nextAttemptAt: new Date(now.getTime() + backoffMs(attempts)), updatedAt: now },
   );
   if (claimed !== 1) return "skipped";
   const token = await logoutToken(config, row, client);
@@ -301,7 +304,11 @@ async function deliverRow(
     token,
     deadline,
   );
-  if (posted.kind === "retry") return "failed";
+  if (posted.kind === "retry") {
+    // The post went out, or could not (no fetch), and failed: one attempt.
+    await storage.update("oauthLogout", byId, { attempts, updatedAt: now });
+    return "failed";
+  }
   await storage.delete("oauthLogout", byId);
   if (posted.kind === "sent") return "sent";
   // The client id and the status only: never the token, the user, or the session.
