@@ -1,3 +1,4 @@
+import { ipKey } from "@authtempo/core";
 import { DEMO_LIMITS } from "@authtempo/demo/facts";
 
 /**
@@ -41,6 +42,31 @@ export const DEMO_OFF: readonly { name: string; reason: string }[] = [
   },
 ];
 
+/**
+ * The end of the page: a link to the host once the owner sets DEMO_PUBLISHED,
+ * else the local command (plan 11b, deviation 11). A test reads both values.
+ */
+export function demoEnd(
+  published: boolean,
+):
+  | { kind: "open"; href: string; text: string }
+  | { kind: "closed"; text: string; command: string } {
+  return published
+    ? { kind: "open", href: DEMO_PAGE.host, text: DEMO_PAGE.open }
+    : { kind: "closed", text: DEMO_PAGE.notOpen, command: DEMO_PAGE.command };
+}
+
+/**
+ * The IPv6 prefix length that one per-IP count of core covers. Core ipKey
+ * writes it at the end of the key of an IPv6 address ("2001:db8:1:2::/64"),
+ * so the page reads it from core at build time and types no number.
+ */
+export function ipv6Prefix(key: (ip: string) => string = ipKey): number {
+  const m = /\/(\d+)$/.exec(key("2001:db8:1:2:3:4:5:6"));
+  if (m === null) throw new Error("demo.ts: core ipKey gives no prefix for an IPv6 address");
+  return Number(m[1]);
+}
+
 /** The minutes of a span in milliseconds. */
 function minutes(ms: number): number {
   return ms / 60_000;
@@ -57,7 +83,7 @@ function windowWords(ms: number): string {
  */
 export const LIMIT_WORDS: { readonly [K in keyof typeof DEMO_LIMITS]: (n: number) => string } = {
   sandboxesPerIp: (n) =>
-    `${n} new sandboxes per address per ${windowWords(DEMO_LIMITS.windowMs)}. An IPv6 address counts by its /64.`,
+    `${n} new sandboxes per address per ${windowWords(DEMO_LIMITS.windowMs)}. An IPv6 address counts by its /${ipv6Prefix()}.`,
   sandboxesTotal: (n) => `${n} new sandboxes in total per ${windowWords(DEMO_LIMITS.windowMs)}.`,
   windowMs: (n) => `The gate deletes each address ${minutes(n)} minutes after its visit.`,
   sandboxLifeMs: (n) => `The demo deletes each sandbox ${minutes(n)} minutes after it starts.`,

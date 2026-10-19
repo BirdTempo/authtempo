@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { STACK_INFO, STACKS } from "@authtempo/cli/stacks";
+import { ipKey } from "@authtempo/core";
 import { ROUTES } from "@authtempo/core/routes";
 import { DEMO_EXEMPT, DEMO_FEATURES, DEMO_LIMITS, DEMO_PUBLISHED } from "@authtempo/demo/facts";
 import { describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import { DIST, SITE } from "../scripts/lib/paths.ts";
 import { parseTokens } from "../scripts/lib/tokens.ts";
 import { COMPARE_ROWS } from "../src/data/compare.ts";
 import { PLATFORM_COSTS } from "../src/data/costs.ts";
+import { demoEnd, ipv6Prefix } from "../src/data/demo.ts";
 import { FEATURES, featureOrder, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
 import { readRepoText } from "../src/data/repo.ts";
@@ -808,11 +810,10 @@ describe("the demo page (plan 11b Task 12)", () => {
     const life = DEMO_LIMITS.sandboxLifeMs / 60_000;
     const entry = readFileSync(`${SITE}src/content/site/demo.md`, "utf8");
     const said = [...entry.matchAll(/(\d+) minutes/g)].map((m) => Number(m[1]));
-    expect(said).toHaveLength(2);
-    expect(said).toEqual([life, life]);
-    expect(textOf(main())).toContain(
-      `The demo deletes each sandbox ${life} minutes after it starts.`,
-    );
+    // The description says it; the body leaves it to the limit row (one sentence, once).
+    expect(said).toEqual([life]);
+    const sentence = `The demo deletes each sandbox ${life} minutes after it starts.`;
+    expect(textOf(main()).split(sentence)).toHaveLength(2);
   });
 
   it("states each limit of DEMO_LIMITS in words, with its number", () => {
@@ -837,12 +838,12 @@ describe("the demo page (plan 11b Task 12)", () => {
     for (const [, key = "", body = ""] of rows) {
       const k = key as keyof typeof DEMO_LIMITS;
       // The IPv6 note names a prefix length, not a limit.
-      const words = textOf(body).replace("An IPv6 address counts by its /64.", "");
+      const words = textOf(body).replace(`An IPv6 address counts by its /${ipv6Prefix()}.`, "");
       const numbers = (words.match(/\d+/g) ?? []).map(Number);
       expect({ k, numbers }).toEqual({ k, numbers: [shown(k)] });
     }
     expect(textOf(rows[0]?.[2] ?? "")).toBe(
-      `${DEMO_LIMITS.sandboxesPerIp} new sandboxes per address per hour. An IPv6 address counts by its /64.`,
+      `${DEMO_LIMITS.sandboxesPerIp} new sandboxes per address per hour. An IPv6 address counts by its /${ipv6Prefix()}.`,
     );
   });
 
@@ -858,5 +859,27 @@ describe("the demo page (plan 11b Task 12)", () => {
     expect(end).toMatch(/<code\b[^>]*>pnpm --filter @authtempo\/demo dev<\/code>/);
     // No page claims a host that does not answer (deviation 11).
     expect(main()).not.toContain("demo.authtempo.com");
+  });
+});
+
+describe("the data of the demo page (plan 11b Task 12, ruling 40)", () => {
+  it("reads the IPv6 prefix from the key that core ipKey writes", () => {
+    // Core keys an IPv6 address by its prefix; a change of core changes the page.
+    expect(ipv6Prefix()).toBe(Number(/\/(\d+)$/.exec(ipKey("2001:db8::1"))?.[1]));
+    expect(ipv6Prefix(() => "2001:db8::/48")).toBe(48);
+    expect(() => ipv6Prefix(() => "2001:db8:1:2:3:4:5:6")).toThrow(/no prefix/);
+  });
+
+  it("ends with a link to the host when published, else with the local command", () => {
+    expect(demoEnd(true)).toEqual({
+      kind: "open",
+      href: "https://demo.authtempo.com/",
+      text: "Open the demo",
+    });
+    expect(demoEnd(false)).toEqual({
+      kind: "closed",
+      text: "The hosted demo is not open yet. Run it on your machine:",
+      command: "pnpm --filter @authtempo/demo dev",
+    });
   });
 });

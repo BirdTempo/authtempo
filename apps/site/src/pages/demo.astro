@@ -9,7 +9,7 @@
 import { getEntry } from "astro:content";
 import { DEMO_EXEMPT, DEMO_FEATURES, DEMO_PUBLISHED } from "@authtempo/demo/facts";
 import PageHero from "../components/PageHero.astro";
-import { DEMO_OFF, DEMO_PAGE, limitRows } from "../data/demo.ts";
+import { DEMO_OFF, demoEnd, limitRows } from "../data/demo.ts";
 import { entryParts, sectionOf } from "../data/entry.ts";
 import { FEATURES } from "../data/features.ts";
 import { renderMarkdown } from "../data/markdown.ts";
@@ -22,6 +22,7 @@ const where = "src/content/site/demo.md";
 const shows = sectionOf(parts, "What the demo shows", where);
 const off = sectionOf(parts, "What the demo does not show", where);
 const limits = sectionOf(parts, "The limits", where);
+const end = demoEnd(DEMO_PUBLISHED);
 const exempt = (Object.entries(DEMO_EXEMPT) as [keyof typeof DEMO_EXEMPT, string][]).map(
   ([feature, reason]) => ({ id: `off-${feature}`, name: FEATURES[feature].title, reason }),
 );
@@ -47,9 +48,9 @@ const exempt = (Object.entries(DEMO_EXEMPT) as [keyof typeof DEMO_EXEMPT, string
     <ul class="limits">
       {limitRows().map((row) => <li id={`limit-${row.key}`}>{row.text}</li>)}
     </ul>
-    {DEMO_PUBLISHED
-      ? <p class="end"><a href={DEMO_PAGE.host}>{DEMO_PAGE.open}</a></p>
-      : <p class="end">{DEMO_PAGE.notOpen} <code>{DEMO_PAGE.command}</code></p>}
+    {end.kind === "open"
+      ? <p class="end"><a href={end.href}>{end.text}</a></p>
+      : <p class="end">{end.text} <code>{end.command}</code></p>}
   </section>
 </Site>
 <style>
