@@ -3,12 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
 import { FIXTURE_EXPORTS } from "@authtempo/import/testing";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { Stop } from "../src/errors.js";
+import { importGate } from "../src/schema-version.js";
 import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
 import { applyOneVersionBelow, freshDatabase } from "./support/pg.js";
 
-// The version gate of `authtempo import` (plan 11f Task 3; spec 23 item 4):
-// an import writes only into a database at the CLI's own version. The gate
+// The version gate of `authtempo import` (plan 11f Task 3; spec 23 item 4).
+// An import writes only into a database at the CLI's own version. The gate
 // runs at the open of the storage, before the first row read or write, so a
 // stop writes nothing. Each run is a child process on a fresh docker compose
 // Postgres. The version literals are typed, not read from the constant.
@@ -134,6 +136,20 @@ it("names --tables compat in the stop of a compat import", async () => {
   expect(await rowCounts()).toEqual(before);
 });
 
+it("stops a compat import before any write on a core schema with no compat tables", async () => {
+  await applyPostgresMigrations(db.sql);
+  const before = await rowCounts();
+  for (const extra of [[], ["--dry-run"]]) {
+    const r = run(["--tables", "compat", ...extra]);
+    expect(r.status, extra.join(" ")).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(linesOf(r.stderr).at(-1)).toBe(
+      "stopped: the database has no compat tables of authtempo; run authtempo migrate --target postgres --tables compat first; nothing was written",
+    );
+  }
+  expect(await rowCounts()).toEqual(before);
+});
+
 it("stops a dry run too", async () => {
   await applyOneVersionBelow(db.sql);
   const r = run(["--dry-run"]);
@@ -142,6 +158,38 @@ it("stops a dry run too", async () => {
   expect(linesOf(r.stderr).at(-1)).toBe(
     `stopped: the database is at version 9; this CLI writes version 10; ${MIGRATE_FIRST}`,
   );
+});
+
+/** The line of the Stop that `importGate` throws, or null when it passes. */
+function stopOf(version: number | null, tables: "core" | "compat", compat: number): string | null {
+  try {
+    importGate(version, tables, compat);
+    return null;
+  } catch (e) {
+    if (e instanceof Stop) return e.message;
+    throw e;
+  }
+}
+
+describe("importGate and the compat version", () => {
+  const FIX = "run authtempo migrate --target postgres --tables compat first; nothing was written";
+
+  it("stops a compat import on compat tables below or above the package's version", () => {
+    expect(stopOf(10, "compat", 6)).toBe(
+      `the compat tables are at version 6; this CLI writes version 7; ${FIX}`,
+    );
+    expect(stopOf(10, "compat", 8)).toBe(
+      "the compat tables are at version 8; this CLI knows version 7; use a newer CLI; nothing was written",
+    );
+    expect(stopOf(10, "compat", 7)).toBeNull();
+  });
+
+  it("reads the core version first, and no compat version for a core import", () => {
+    expect(stopOf(9, "compat", 0)).toBe(
+      `the database is at version 9; this CLI writes version 10; ${FIX}`,
+    );
+    expect(stopOf(10, "core", 0)).toBeNull();
+  });
 });
 
 it("imports into a database at the CLI's version", async () => {

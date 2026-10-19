@@ -7,16 +7,22 @@ import type { ImportRecord } from "../src/types.js";
 import { BCRYPT, listSource, user } from "./source.js";
 
 // The hash format counts of the report (plan 11f Task 3; spec 23 items 5 and
-// 14): one count per user record of the export, by the format of its hash,
-// the reader's refused tag, or `none`. The operator checks the line against
-// `--formats` before the real run. The summary prints tags and counts only.
+// 14). The report holds one count per user record of the export. The key is
+// the format of its hash, the reader's refused tag, or `none`. The operator
+// checks the line against `--formats` before the real run. The summary
+// prints tags and counts only.
 
-/** Four users: a bcrypt hash, an argon2id hash, a reader refusal, and no password. */
-const four = (): ImportRecord[] => [
+/**
+ * Five users: a bcrypt hash, an argon2id hash, a reader refusal, no password,
+ * and a deleted user with a bcrypt hash. The count runs before any skip rule,
+ * so the deleted user counts too (review of plan 11f Task 3).
+ */
+const five = (): ImportRecord[] => [
   user("u1", { password: { hash: BCRYPT } }),
   user("u2", { password: { hash: VECTORS.argon2id.stored } }),
   user("u3", { password: { refused: "md5" } }),
   user("u4"),
+  user("u5", { password: { hash: BCRYPT }, skip: "deleted" }),
 ];
 
 const run = (records: ImportRecord[], legacyVerify = false) =>
@@ -26,10 +32,11 @@ const run = (records: ImportRecord[], legacyVerify = false) =>
   });
 
 describe("ImportReport.hashFormats", () => {
-  it("counts the hash format of each user", async () => {
-    const report = await run(four());
+  it("counts the hash format of each user, a skipped user too", async () => {
+    const report = await run(five());
+    expect(report.skipped).toEqual([{ kind: "user", sourceId: "u5", reason: "deleted" }]);
     expect(Object.entries(report.hashFormats)).toEqual([
-      ["bcrypt", 1],
+      ["bcrypt", 2],
       ["argon2id", 1],
       ["md5", 1],
       ["none", 1],
@@ -37,9 +44,9 @@ describe("ImportReport.hashFormats", () => {
   });
 
   it("prints the hash line after the refusals line", async () => {
-    const lines = summary(await run(four()));
+    const lines = summary(await run(five()));
     expect(lines[3]).toBe("refusals: 0");
-    expect(lines[4]).toBe("hashes: bcrypt 1, argon2id 1, md5 1, none 1");
+    expect(lines[4]).toBe("hashes: bcrypt 2, argon2id 1, md5 1, none 1");
   });
 
   it("counts the Cognito marker by its name", async () => {

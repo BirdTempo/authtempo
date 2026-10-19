@@ -6,7 +6,7 @@ import { Stop, UsageError } from "../errors.js";
 import { MIGRATE_HELP } from "../help/migrate.js";
 import type { MigrateJson } from "../json.js";
 import { type Ctx, describeUrl, printJson, sayer } from "../output.js";
-import { readableVersion, readD1Version } from "../schema-version.js";
+import { gate, readableVersion, readD1Version } from "../schema-version.js";
 import {
   adapterD1Dir,
   applyD1,
@@ -59,18 +59,6 @@ export interface MigratePlan {
   tables: "core" | "compat";
   dryRun: boolean;
   note(line: string): void;
-}
-
-/**
- * The version gate (spec 19): a database newer than the core of this CLI
- * stops the run before any write. An older set never runs over a newer
- * database.
- */
-export function gate(version: number | null): void {
-  if (version !== null && version > SCHEMA_VERSION)
-    throw new Stop(
-      `the database is at version ${version}; this CLI knows version ${SCHEMA_VERSION}; use a newer CLI`,
-    );
 }
 
 async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {

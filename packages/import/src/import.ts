@@ -169,8 +169,8 @@ function hashKey(r: ImportUser): string {
 
 /**
  * Adds one to `counts[key]` as an own key. A reader's refused tag can come
- * from the export (the Clerk hasher name), and a plain assignment of
- * `__proto__` would set the prototype and count nothing.
+ * from the export (the Clerk hasher name). A plain assignment of `__proto__`
+ * would set the prototype and count nothing.
  */
 function addOne(counts: Record<string, number>, key: string): void {
   const n = (Object.hasOwn(counts, key) ? (counts[key] ?? 0) : 0) + 1;

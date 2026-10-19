@@ -41,9 +41,9 @@ export async function freshDatabase(): Promise<{ url: string; sql: Sql; drop(): 
 
 /**
  * The schema one version below the CLI's (plan 11f Task 3): every core
- * migration but the last, by the steps of `applyPostgresMigrations` of
- * `@authtempo/adapter-postgres` (the table `ta_migrations`, then each
- * migration's `sql` and its name row). No lock: one test owns the database.
+ * migration but the last. It repeats the steps of `applyPostgresMigrations`
+ * of `@authtempo/adapter-postgres`: the table `ta_migrations`, then each
+ * migration's `sql` and its name row. No lock: one test owns the database.
  */
 export async function applyOneVersionBelow(sql: Sql): Promise<void> {
   await sql.unsafe(

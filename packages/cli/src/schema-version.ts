@@ -1,4 +1,4 @@
-import { gate } from "./commands/migrate.js";
+import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { Stop } from "./errors.js";
 import type { Ctx } from "./output.js";
 import {
@@ -41,13 +41,36 @@ export function readableVersion(
 }
 
 /**
- * The gate of `authtempo import` (spec 23 item 4): an import writes only into
- * a database at the CLI's own version, because an adapter of another version
- * lacks a table or a column. `gate` of migrate stops only a newer database;
- * this one also stops an older one and names the fix. The higher line comes
- * from `gate` itself, so that text keeps one source.
+ * The version gate of `migrate` and `check` (spec 19): a database newer than
+ * the core of this CLI stops the run before any write. An older set never
+ * runs over a newer database. Here beside `readableVersion`, so the migrate
+ * command and the import gate read one rule (review of plan 11f Task 3).
  */
-export function importGate(version: number | null, tables: "core" | "compat"): void {
+export function gate(version: number | null): void {
+  if (version !== null && version > SCHEMA_VERSION)
+    throw new Stop(
+      `the database is at version ${version}; this CLI knows version ${SCHEMA_VERSION}; use a newer CLI`,
+    );
+}
+
+/** The mapping version of the compatibility package: one per compat migration. */
+const COMPAT_VERSION = COMPAT_MIGRATION_NAMES.length;
+
+/**
+ * The gate of `authtempo import` (spec 23 item 4). An import writes only into
+ * a database at the CLI's own version. An adapter of another version lacks a
+ * table or a column. `gate` of migrate stops only a newer database; this one
+ * also stops an older one and names the fix. The higher line comes from
+ * `gate` itself, so that text keeps one source. A compat import also reads
+ * `compatVersion`, the mapping version of the compat tables (0 when the
+ * database has none; ruling 6 of plan 11f): the compat storage of another
+ * mapping version lacks a table too. A core import does not read it.
+ */
+export function importGate(
+  version: number | null,
+  tables: "core" | "compat",
+  compatVersion: number,
+): void {
   const fix = `run authtempo migrate --target postgres${tables === "compat" ? " --tables compat" : ""} first`;
   if (version === null)
     throw new Stop(`the database has no schema of authtempo; ${fix}; nothing was written`);
@@ -61,6 +84,17 @@ export function importGate(version: number | null, tables: "core" | "compat"): v
     if (e instanceof Stop) throw new Stop(`${e.message}; nothing was written`);
     throw e;
   }
+  if (tables !== "compat") return;
+  if (compatVersion === 0)
+    throw new Stop(`the database has no compat tables of authtempo; ${fix}; nothing was written`);
+  if (compatVersion < COMPAT_VERSION)
+    throw new Stop(
+      `the compat tables are at version ${compatVersion}; this CLI writes version ${COMPAT_VERSION}; ${fix}; nothing was written`,
+    );
+  if (compatVersion > COMPAT_VERSION)
+    throw new Stop(
+      `the compat tables are at version ${compatVersion}; this CLI knows version ${COMPAT_VERSION}; use a newer CLI; nothing was written`,
+    );
 }
 
 /** The name of a migration file without its number and `.sql`: `0003_schema_v3.sql` gives `schema_v3`. */

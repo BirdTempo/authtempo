@@ -177,6 +177,7 @@ export const importCommand: Command = {
           importGate(
             readableVersion(await pg.schemaVersionText(), (await pg.appliedCore()).length),
             betterAuth ? "compat" : "core",
+            betterAuth ? await pg.compatVersion() : 0,
           );
         } catch (e) {
           await pg.close();
