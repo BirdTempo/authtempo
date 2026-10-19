@@ -107,14 +107,17 @@ const REF = {
 };
 
 /**
- * The responses of a route (spec 25 item 7): one success answer per answer
- * kind, and one error answer per status of its codes with an `enum` of them.
- * Each code links its anchor on the errors page.
+ * The responses of a route (spec 25 item 7). Each answer kind gives one
+ * success answer. Each status of its codes gives one error answer with an
+ * `enum` of them.
+ * Each code links its anchor on the errors page. `pageCodes` are the codes
+ * that a form post gets in `error=` on its own page, not in the redirect parameter.
  */
 export function responsesOf(
   entry: RouteEntry,
   contract: RouteContract,
   schemaOf: SchemaOf,
+  pageCodes: ReadonlySet<string> = new Set(),
 ): Record<string, OpenApiResponse> {
   const out: Record<string, OpenApiResponse> = {};
   for (const kind of contract.alt === undefined
@@ -147,12 +150,18 @@ export function responsesOf(
           `[\`${code}\`](${DOCS_ORIGIN}/docs/reference/errors/#${errorAnchor(code, table)})`,
       )
       .join(", ");
-    const note =
-      redirect?.kind === "redirect" &&
-      redirect.param !== undefined &&
-      codes.some((c) => !(ROUTER_CODES as readonly string[]).includes(c.code))
-        ? ` A browser flow can get the code in the \`${redirect.param}\` query parameter of a 302 in place of this answer.`
-        : "";
+    const own = codes.filter((c) => !(ROUTER_CODES as readonly string[]).includes(c.code));
+    const onPage = own.filter((c) => pageCodes.has(c.code));
+    const inParam = own.filter((c) => !pageCodes.has(c.code));
+    const listed = (list: { code: string }[]) => list.map((c) => `\`${c.code}\``).join(", ");
+    let note = "";
+    if (onPage.length > 0)
+      note += ` A form post gets ${listed(onPage)} in the \`error\` query parameter of a 302 back to its own page.`;
+    if (redirect?.kind === "redirect" && redirect.param !== undefined && inParam.length > 0)
+      note +=
+        onPage.length > 0
+          ? ` A browser flow can get ${listed(inParam)} in the \`${redirect.param}\` query parameter of a 302 in place of this answer.`
+          : ` A browser flow can get the code in the \`${redirect.param}\` query parameter of a 302 in place of this answer.`;
     const response: OpenApiResponse = {
       description: `The codes: ${links}.${note}`,
       content: {
@@ -161,17 +170,26 @@ export function responsesOf(
         },
       },
     };
-    const challenge =
-      (status === 401 && entry.auth.includes("accessToken")) ||
-      (status === 403 && codes.some((c) => c.table === "oauth" && c.code === "insufficient_scope"));
-    if (challenge)
+    // RFC 6750 section 3: the bearer route writes the challenge with these two codes.
+    // A router code of the same status (origin_not_trusted on a POST) has no challenge.
+    const challenged = entry.auth.includes("accessToken")
+      ? codes.filter(
+          (c) =>
+            c.table === "oauth" && (c.code === "invalid_token" || c.code === "insufficient_scope"),
+        )
+      : [];
+    if (challenged.length > 0) {
+      const every = challenged.length === codes.length;
       response.headers = {
         "WWW-Authenticate": {
-          required: true,
-          description: "The bearer challenge of RFC 6750 section 3, with the error code.",
+          required: every,
+          description: every
+            ? "The bearer challenge of RFC 6750 section 3, with the error code."
+            : `The bearer challenge of RFC 6750 section 3, with the error code. Only ${listed(challenged)} carries it.`,
           schema: { type: "string" },
         },
       };
+    }
     out[String(status)] = response;
   }
   return out;

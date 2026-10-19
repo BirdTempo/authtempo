@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { resolveConfig } from "../src/config.js";
 import { ERRORS, OAUTH_ERRORS } from "../src/errors.js";
 import { DOCS_ORIGIN, routeAnchor } from "../src/http/anchors.js";
+import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
+import type { RouteContract } from "../src/http/contract/types.js";
 import { routeKeyOf } from "../src/http/route-key.js";
 import { ROUTE_FEATURES, ROUTES, type RouteEntry, type RouteKey } from "../src/http/route-list.js";
 import { coreRoutes } from "../src/http/routes/index.js";
@@ -16,16 +19,30 @@ import {
 } from "../src/openapi/index.js";
 import { base } from "./every-feature.js";
 
+interface Parameter {
+  name: string;
+  in: string;
+  required: boolean;
+  description?: string;
+  schema: { pattern?: string };
+}
+
 interface Operation {
   tags: string[];
   description?: string;
+  parameters?: Parameter[];
+  requestBody?: { content: Record<string, { schema: unknown }> };
   operationId: string;
   externalDocs: { url: string };
   "x-authtempo-feature": string;
   "x-authtempo-default": string;
   responses: Record<
     string,
-    { content?: Record<string, { schema: { properties?: { error?: { enum: string[] } } } }> }
+    {
+      description: string;
+      headers?: Record<string, { required: boolean; description: string }>;
+      content?: Record<string, { schema: { properties?: { error?: { enum: string[] } } } }>;
+    }
   >;
   security: Record<string, string[]>[];
 }
@@ -35,7 +52,10 @@ interface Doc {
   info: { version: string };
   tags: { name: string; "x-authtempo-feature": string; "x-authtempo-default": string }[];
   paths: Record<string, Record<string, Operation>>;
-  components: { securitySchemes: Record<string, Record<string, unknown>> };
+  components: {
+    schemas: Record<string, unknown>;
+    securitySchemes: Record<string, Record<string, unknown>>;
+  };
 }
 
 const reference = () => openApiDocument(openApiReferenceOptions()) as unknown as Doc;
@@ -219,5 +239,117 @@ describe("openApiDocument (plan 11g)", () => {
     const doc = reference();
     expect(doc.openapi).toBe("3.1.2");
     expect(doc.info.version).toBe(VERSION);
+  });
+
+  it("holds each schema to its contract", () => {
+    const doc = reference();
+    /** A schema with each `components.schemas` reference put back in place. */
+    const inline = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(inline);
+      if (node === null || typeof node !== "object") return node;
+      const ref = (node as { $ref?: unknown }).$ref;
+      if (typeof ref === "string" && Object.keys(node).length === 1)
+        return inline(doc.components.schemas[ref.replace("#/components/schemas/", "")]);
+      return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, inline(v)]));
+    };
+    /** The conversion of a contract schema, with no shared shape. */
+    const own = (schema: z.ZodType, io: "input" | "output") => {
+      const { $schema: _dialect, ...json } = z.toJSONSchema(schema, {
+        target: "draft-2020-12",
+        io,
+        unrepresentable: "throw",
+        reused: "inline",
+      }) as Record<string, unknown>;
+      return json;
+    };
+    const contracts: Record<string, RouteContract> = ROUTE_CONTRACT;
+    let answers = 0;
+    let bodies = 0;
+    let queries = 0;
+    for (const { key, op } of operations(doc)) {
+      const contract = contracts[key];
+      if (contract === undefined) throw new Error(`no contract ${key}`);
+      for (const kind of [contract.answer, contract.alt]) {
+        if (kind?.kind !== "json") continue;
+        const schema =
+          op.responses[String(kind.status ?? 200)]?.content?.["application/json"]?.schema;
+        expect(inline(schema), key).toEqual(own(kind.schema, "output"));
+        answers++;
+      }
+      if (contract.body) {
+        const content = op.requestBody?.content ?? {};
+        const media = contract.body.media.map((m) =>
+          m === "json" ? "application/json" : "application/x-www-form-urlencoded",
+        );
+        expect(Object.keys(content), key).toEqual(media);
+        for (const m of media)
+          expect(inline(content[m]?.schema), key).toEqual(own(contract.body.schema, "input"));
+        bodies++;
+      }
+      const params = (op.parameters ?? []).filter((p) => p.in === "query");
+      if (contract.query) {
+        const json = own(contract.query.schema, "input") as {
+          properties: Record<string, unknown>;
+          required?: string[];
+        };
+        expect(
+          params.map((p) => p.name),
+          key,
+        ).toEqual(Object.keys(json.properties));
+        for (const p of params) {
+          expect(inline(p.schema), `${key} ${p.name}`).toEqual(json.properties[p.name]);
+          // The authorize query has a second form, request_id alone, so no key of it is required.
+          const required = key !== "GET /oauth/authorize" && (json.required ?? []).includes(p.name);
+          expect(p.required, `${key} ${p.name}`).toBe(required);
+        }
+        queries++;
+      } else expect(params, key).toEqual([]);
+    }
+    expect([answers, bodies, queries]).toEqual([79, 59, 14]);
+  });
+
+  it("takes the request_id form of the authorize query", () => {
+    const params = reference().paths["/oauth/authorize"]?.get?.parameters ?? [];
+    // The return step after the sign-in sends request_id alone (oauth-authorize.ts, authorizeStep).
+    const query = new URLSearchParams({ request_id: "held" });
+    const missing = params.filter((p) => p.required && !query.has(p.name)).map((p) => p.name);
+    expect(missing).toEqual([]);
+    expect(params.find((p) => p.name === "request_id")?.description).toContain("alone");
+    expect(params.find((p) => p.name === "client_id")?.description).toBe(
+      "Required unless `request_id` comes alone.",
+    );
+  });
+
+  it("writes the bearer challenge where the route writes it", () => {
+    const doc = reference();
+    const header = (path: string, method: string, status: string) =>
+      doc.paths[path]?.[method]?.responses[status]?.headers?.["WWW-Authenticate"];
+    expect(header("/oauth/userinfo", "get", "401")?.required).toBe(true);
+    expect(header("/oauth/userinfo", "post", "401")?.required).toBe(true);
+    expect(header("/oauth/userinfo", "get", "403")?.required).toBe(true);
+    // The 403 of the POST also holds origin_not_trusted, which the router answers with no challenge.
+    expect(header("/oauth/userinfo", "post", "403")?.required).toBe(false);
+    expect(header("/oauth/userinfo", "post", "403")?.description).toContain("`insufficient_scope`");
+    expect(header("/oauth/token", "post", "401")).toBeUndefined();
+  });
+
+  it("holds each provider path to the name rule", () => {
+    const paths = Object.entries(reference().paths).filter(([p]) => p.includes("{provider}"));
+    expect(paths.length).toBe(3);
+    for (const [path, item] of paths)
+      for (const op of Object.values(item)) {
+        const param = op.parameters?.find((p) => p.in === "path");
+        expect(param, path).toMatchObject({ name: "provider", required: true });
+        expect(param?.schema.pattern, path).toBe("^[a-z][a-z0-9-]{0,31}$");
+      }
+  });
+
+  it("names the page form of the codes of a form post", () => {
+    const reset = reference().paths["/password/reset"]?.post?.responses["400"]?.description;
+    expect(reset).toContain(
+      "A form post gets `password_policy`, `password_breached` in the `error` query parameter",
+    );
+    const totp = reference().paths["/totp/challenge"]?.post?.responses["400"]?.description;
+    expect(totp).toContain("A form post gets `invalid_code` in the `error` query parameter");
   });
 });

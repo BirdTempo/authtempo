@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DOCS_ORIGIN, routeAnchor } from "../http/anchors.js";
 import { ROUTE_CONTRACT } from "../http/contract/index.js";
+import { RESET_PAGE_ERRORS } from "../http/contract/password.js";
 import * as shapes from "../http/contract/shapes.js";
 import type { RouteContract } from "../http/contract/types.js";
 import { ROUTE_FEATURES, ROUTES, type RouteEntry, type RouteKey } from "../http/route-list.js";
@@ -29,7 +30,7 @@ const RULES = [
   "The authtempo API: every route that core can serve under `basePath`. A deployment serves the operations of its features only.",
   "",
   "- A route that a config key turns off answers 404 `not_found`.",
-  "- A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Apple's form post callback is the one exception.",
+  "- A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
   '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`.',
   "- An unhandled error answers 500 `internal` and writes one log line.",
   "- An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.",
@@ -39,23 +40,35 @@ const RULES = [
 /** The text of an operation that its schemas cannot state. */
 const NOTES: Partial<Record<RouteKey, string>> = {
   "GET /oauth/authorize":
-    "With no session, the route redirects to the sign-in step, `GET /oauth/sign-in`, and core holds the request. After the sign-in, the browser comes back with `request_id` alone, which names the held request. With a session, the route answers the consent page, or redirects to the client with the code or the `error`.",
+    "The query has two forms. The first form is the authorization request, with each key that the parameters mark as required unless `request_id` comes alone. With no session, the route holds the request and redirects to the sign-in step, `GET /oauth/sign-in`. With `prompt=none` and no session, it redirects to the client with `error=login_required`. After the sign-in, the browser comes back with the second form: `request_id` alone, which names the held request. With a session, the route answers the consent page, or redirects to the client with the code or the `error`.",
   "POST /oauth/authorize":
     "The consent form. `request_id` names the request that core holds; it works once. A `decision` other than `allow` is a deny.",
   "POST /oauth/token":
-    "The token endpoint. Each client is public, so the request has no client secret and no credential: the code grant proves the client with PKCE (S256), through `code_verifier`.",
+    "The token endpoint. Each client is public, so the request has no client secret and no credential: the code grant proves the client with PKCE (S256), through `code_verifier`. A POST from a foreign origin reaches the route. The route admits it when the origin is the origin of a redirect URI of the client that the form names. The answer then carries `access-control-allow-origin` with no credentials. Its preflight names the client in `?client_id=`.",
   "POST /totp/challenge":
     "A wrong code redirects back to the second factor page with `error=<code>`. A failure of the sign-in redirects with `auth_error`.",
   "POST /password/reset":
-    "A refused password redirects back to the reset page with `error=<code>`. A failure of the token redirects with `auth_error`.",
+    "A JSON caller gets each failure as JSON with the status of its code. A form post with a refused password redirects back to the reset page with `error=<code>`. Any other failure of a form post redirects with `auth_error`.",
 };
+
+/** The codes that a form post gets in `error=` on its own page (`routes/totp.ts`, `routes/password.ts`). */
+const PAGE_CODES: Partial<Record<RouteKey, ReadonlySet<string>>> = {
+  "POST /totp/challenge": new Set(["invalid_code"]),
+  "POST /password/reset": new Set(RESET_PAGE_ERRORS),
+};
+
+/**
+ * The key of a query that comes alone in a second form of the query. Each key
+ * that the schema requires is then required in the first form only.
+ */
+const ALONE: Partial<Record<RouteKey, string>> = { "GET /oauth/authorize": "request_id" };
 
 const MEDIA = { json: "application/json", form: "application/x-www-form-urlencoded" } as const;
 
 /**
- * The OpenAPI 3.1 document of a deployment (plan 11g, spec 25): one operation
- * per entry of `ROUTES` whose feature is in `options.features`, in the order
- * of `ROUTES`. The same input gives the same bytes. The six keys of `options`
+ * The OpenAPI 3.1 document of a deployment (plan 11g, spec 25). It has one
+ * operation per entry of `ROUTES` whose feature is in `options.features`, in
+ * the order of `ROUTES`. The same input gives the same bytes. The six keys of `options`
  * are the whole input: no config, so no secret, reaches the document.
  */
 export function openApiDocument(options: OpenApiOptions): OpenApiDoc {
@@ -102,7 +115,9 @@ export function openApiDocument(options: OpenApiOptions): OpenApiDoc {
             },
           ]
         : []),
-      ...(contract.query ? queryParameters(schemaOf(contract.query.schema, "input")) : []),
+      ...(contract.query
+        ? queryParameters(schemaOf(contract.query.schema, "input"), ALONE[key])
+        : []),
     ];
     const info = FEATURE_INFO[entry.feature];
     const note = NOTES[key];
@@ -123,7 +138,7 @@ export function openApiDocument(options: OpenApiOptions): OpenApiDoc {
         content: Object.fromEntries(contract.body.media.map((m) => [MEDIA[m], { schema }])),
       };
     }
-    operation.responses = responsesOf(entry, contract, schemaOf);
+    operation.responses = responsesOf(entry, contract, schemaOf, PAGE_CODES[key]);
     operation.security = security;
     paths[path] ??= {};
     const item = paths[path];
@@ -186,17 +201,32 @@ function toComponents<T>(node: T): T {
   return out as T;
 }
 
-/** One `in: query` parameter per top-level property of a query schema, with `required` from the schema. */
-function queryParameters(schema: object): object[] {
+/**
+ * One `in: query` parameter per top-level property of a query schema, with
+ * `required` from the schema. With an `alone` key, no key is required: the
+ * description of each key says which form requires it.
+ */
+function queryParameters(schema: object, alone?: string): object[] {
   const { properties, required } = schema as {
     properties?: Record<string, object>;
     required?: string[];
   };
   if (properties === undefined) throw new Error("authtempo: a query schema is not an object");
-  return Object.entries(properties).map(([name, property]) => ({
-    name,
-    in: "query",
-    required: required?.includes(name) ?? false,
-    schema: property,
-  }));
+  return Object.entries(properties).map(([name, property]) => {
+    const needed = required?.includes(name) ?? false;
+    if (alone === undefined) return { name, in: "query", required: needed, schema: property };
+    const description =
+      name === alone
+        ? `The second form of the query: \`${alone}\` comes alone, with no other key.`
+        : needed
+          ? `Required unless \`${alone}\` comes alone.`
+          : undefined;
+    return {
+      name,
+      in: "query",
+      ...(description === undefined ? {} : { description }),
+      required: false,
+      schema: property,
+    };
+  });
 }
