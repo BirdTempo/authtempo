@@ -9,8 +9,9 @@ export interface Feature {
 }
 
 /**
- * One row per member of RouteFeature (17 at 0ef9665). A Record over the union
- * fails the site's typecheck when core adds a member, so a new feature cannot
+ * One row per member of RouteFeature (17 at 0ef9665; plan 11g adds `openapi`,
+ * the 18th). A Record over the union fails the site's typecheck when core
+ * adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
@@ -107,6 +108,11 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     title: "Client registration",
     line: "An MCP client registers itself when you turn the option on.",
     icon: "oauth",
+  },
+  openapi: {
+    title: "OpenAPI document",
+    line: "An OpenAPI 3.1 document of the routes, with their schemes and errors.",
+    icon: "routes",
   },
 };
 

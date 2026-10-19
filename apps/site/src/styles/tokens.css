@@ -313,6 +313,9 @@
 .at-draw-list > :nth-child(17) .at-draw {
   animation-delay: 1.6s;
 }
+.at-draw-list > :nth-child(18) .at-draw {
+  animation-delay: 1.7s;
+}
 /* The hover lift of a card or a button. */
 .at-lift {
   transition:
