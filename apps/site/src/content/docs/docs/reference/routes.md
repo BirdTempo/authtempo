@@ -869,7 +869,7 @@ These routes exist when the config sets `operator`. `POST /operator/keys/rotate`
 | Field | Value |
 | --- | --- |
 | Needs | `Authorization: Operator <secret>`, as `POST /operator/keys/rotate` |
-| Input | `{ limit?, after? }`: `limit` a whole number from 1 to 1000, default 100; `after` the `next` of the last answer, so a pass reads each row once. An empty body is `{}`. Another key, a limit of another form, or a cursor that `rewrap` did not answer, answers `invalid_body` |
+| Input | `{ limit?, after? }`: `limit` a whole number from 1 to 1000, default 100; `after` the `next` of the last answer, so a pass reads each row once. An empty body is `{}`. Another key, a limit of another form, or a cursor that is not `totp:<id>` or `jwk:<id>`, answers `invalid_body` |
 | Answer | `{ resealed, failed, skipped, more, next }`, the answer of `api.secrets.rewrap({ limit, after })`: the rows this call moved to the current version, the rows that did not open or did not write, the live setups it left, whether a row under a configured old version remains, and the cursor. It counts on `operator-secrets:ip:<ip>` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 

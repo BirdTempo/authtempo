@@ -191,12 +191,14 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 
 ## The operator secret entry
 
-`@authtempo/core/operator-secret` holds the one rule of the operator secret. The operator route and `authtempo keys rotate` read it.
+`@authtempo/core/operator-secret` holds the one rule of the operator secret and the limits of the operator routes. Core and the CLI read each of them.
 
 | Export | What it is |
 | --- | --- |
 | `OPERATOR_SECRET` | The form of the operator secret: 32 to 512 visible ASCII characters. |
 | `isOperatorSecret` | True when a value has the form of an operator secret. |
+| `OPERATOR_PER_IP` | The limit of `POST /operator/keys/rotate`: 5 calls per IP per hour. |
+| `OPERATOR_SECRETS_PER_IP` | The shared limit of the secret routes and the info route: 120 calls per IP per hour. |
 
 ## The secrets entry
 

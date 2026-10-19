@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { isOperatorSecret } from "@authtempo/core/operator-secret";
+import { isOperatorSecret, OPERATOR_PER_IP } from "@authtempo/core/operator-secret";
 import { COMMON_OPTIONS, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
 import { Stop, UsageError } from "../errors.js";
@@ -105,7 +105,9 @@ export const keysCommand: Command = {
       );
     if (res.status === 401) throw new Stop("the deployment refused the operator secret");
     if (res.status === 429)
-      throw new Stop("the operator route allows 5 calls per IP per hour; wait, then run it again");
+      throw new Stop(
+        `the operator route allows ${OPERATOR_PER_IP.max} calls per IP per hour; wait, then run it again`,
+      );
     const body = (await res.json().catch(() => null)) as { kid?: unknown } | null;
     if (res.status !== 200 || typeof body?.kid !== "string")
       throw new Stop(`the operator route answered ${res.status} with no kid`);

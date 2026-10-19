@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { COMMANDS, PROVIDERS } from "@authtempo/cli/program";
 import { beforeAll, describe, expect, it } from "vitest";
 import { checkSentences } from "../../../apps/site/scripts/check-sentences.ts";
@@ -287,5 +288,17 @@ describe("the skill pack", () => {
     expect(cognito).toMatch(
       /^\d+\. .*Sign in once more with a user whose Cognito address has capital letters\./m,
     );
+  });
+
+  it("links each check code of the CLI once in the check skill, and no other code", () => {
+    // ALL_CHECK_CODES is the one list of the codes. The skill is a hand list,
+    // so this test ties it to the list both ways (ruling 16 of plan 11c2).
+    const f = files.find((x) => x.folder === "authtempo-check-deployment");
+    expect(f).toBeDefined();
+    const links = [
+      ...(f?.body ?? "").matchAll(/\(\/docs\/reference\/cli\/check\/#([a-z_]+)\)/g),
+    ].map((m) => m[1]);
+    expect(new Set(links).size, "a code linked twice").toBe(links.length);
+    expect([...links].sort()).toEqual([...ALL_CHECK_CODES].sort());
   });
 });

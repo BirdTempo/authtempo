@@ -26,7 +26,7 @@ sidebar:
 - Access to the secret store of the API. On Workers that is `pnpm --filter my-app exec wrangler secret put`. On Node and Bun it is the process environment. [Deploy](/docs/operations/deploy/) sets the first value.
 - Core at schema version 9 on every instance. An instance at version 8 writes each value under version 1. [Upgrades](/docs/operations/upgrades/) gives the steps.
 - A way to run code in the API's process, for the [in-process API](/docs/reference/api/#the-in-process-api). Or the operator routes on, for the commands of [the CLI](/docs/reference/cli/).
-- For the operator routes: run `authtempo secret --operator --out operator-secret.txt`. It writes the operator secret to the file and prints its `secretHash`. [authtempo secret](/docs/reference/cli/secret/) gives the flags. Set `operator: { secretHash }` in the config, and deploy before step 5. Give the command the secret in `AUTHTEMPO_OPERATOR_SECRET`. Without the routes, steps 5 and 9 stop with exit 2 and "the operator route is off".
+- For the operator routes: run `authtempo secret --operator --out operator-secret.txt`. It writes the operator secret to the file and prints its `secretHash`. Store the operator secret in your secret store, then delete `operator-secret.txt`. [authtempo secret](/docs/reference/cli/secret/) gives the flags. Set `operator: { secretHash }` in the config, and deploy before step 5. Give the command the secret in `AUTHTEMPO_OPERATOR_SECRET`. Without the routes, steps 5 and 9 stop with exit 2 and "the operator route is off". A Better Auth compat app has no `operator` option, so the CLI forms of steps 5 and 9 do not apply. It calls the in-process API of the line before as `auth.tempo.api.secrets`.
 
 ## What the secret protects
 

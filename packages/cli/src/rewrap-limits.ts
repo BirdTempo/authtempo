@@ -1,6 +1,8 @@
+import { OPERATOR_SECRETS_PER_IP } from "@authtempo/core/operator-secret";
+
 /**
- * The call limits of `authtempo secret rewrap` (plan 11c2). One module with
- * no import, so the help and the command read the same numbers.
+ * The call limits of `authtempo secret rewrap` (plan 11c2). One module, so
+ * the help and the command read the same numbers.
  */
 
 /**
@@ -14,9 +16,10 @@ export const DEFAULT_MAX_CALLS = 100;
 export const MAX_CALLS_MAX = 10_000;
 
 /**
- * The limit of the three routes of plan 11c2: 120 calls per IP per hour. A
- * copy of `OPERATOR_SECRETS_PER_IP.max` in core's `src/http/routes/operator.ts`
- * (read 2026-10-19), because no entry of core that the CLI reads exports it.
+ * The limit of the three routes of plan 11c2: 120 calls per IP per hour.
+ * Core's limiter reads the same `OPERATOR_SECRETS_PER_IP`, which moved into
+ * `@authtempo/core/operator-secret` on 2026-10-19 (ruling 16). Before that
+ * date this was a copy of the value in core's `src/http/routes/operator.ts`.
  * The number is in a stop text and in the rewrap help only.
  */
-export const CALLS_PER_HOUR = 120;
+export const CALLS_PER_HOUR = OPERATOR_SECRETS_PER_IP.max;

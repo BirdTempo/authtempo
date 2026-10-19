@@ -18,7 +18,12 @@ import {
   readD1Shape,
   wranglerOf,
 } from "../seams/d1.js";
-import { openPostgres, readPostgresLiveShape, storageFailure } from "../seams/postgres.js";
+import {
+  openPostgres,
+  type PostgresSeam,
+  readPostgresLiveShape,
+  storageFailure,
+} from "../seams/postgres.js";
 import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
@@ -84,11 +89,13 @@ export const checkCommand: Command = {
       });
       readSchema = async () => {
         ctx.err(`connecting to ${describeUrl(url)}`);
-        const pg = openPostgres(url, 1);
+        // The open is inside the try: a string that is no URL throws there (ERR_INVALID_URL).
+        let pg: PostgresSeam | undefined;
         try {
           let applied: string[];
           let text: string | null;
           try {
+            pg = openPostgres(url, 1);
             await pg.ping();
             applied = await pg.appliedCore();
             text = await pg.schemaVersionText();
@@ -99,7 +106,7 @@ export const checkCommand: Command = {
           // applied migrations, stops the run (exit 2), because this CLI cannot place the database.
           return readableVersion(text, applied.length);
         } finally {
-          await pg.close();
+          await pg?.close();
         }
       };
       shape = {

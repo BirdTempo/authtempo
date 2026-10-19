@@ -221,7 +221,7 @@ function rewrapAnswer(body: unknown): RewrapAnswer | null {
  * that fails or is skipped at the head of a pass blocks no row behind it.
  * The loop ends when `more` is false, when `next` is null, or when the
  * calls reach `--max-calls`. A null `next` means the pass read every row
- * that was left. A call that reseals 0 rows does not end the loop: a page
+ * that was left. A call that reseals 0 rows does not end the loop. A page
  * of skipped setups is not the end (spec 19 item 17 predates the cursor).
  * It exits 1 when a row did not open or rows remain. A stop in the middle
  * keeps the sums of the calls before it in the stop document.

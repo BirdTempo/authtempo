@@ -167,7 +167,7 @@ async function readD1MetaText(ctx: Ctx, t: D1Target, key: string): Promise<strin
 /**
  * The text of `ta_meta.schema_version` in the D1 database, or null when the
  * table or the row is missing. The command reads it through
- * `readableVersion`, the one rule of both targets: this seam converts no
+ * `readableVersion`, the one rule of both targets. This seam converts no
  * number, so a value such as `9x` never becomes NaN here.
  */
 export function readD1VersionText(ctx: Ctx, t: D1Target): Promise<string | null> {

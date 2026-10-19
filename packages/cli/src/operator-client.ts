@@ -1,5 +1,5 @@
 import { isOperatorSecret } from "@authtempo/core/operator-secret";
-import { textOf } from "./checks.js";
+import { BODY_CAP_BYTES, textOf } from "./checks.js";
 import { Stop, UsageError } from "./errors.js";
 import { fetchWithin, HostError } from "./net.js";
 import type { Ctx } from "./output.js";
@@ -21,7 +21,7 @@ export interface OperatorCall {
   secret: string;
   /** The time limit of the request in milliseconds. */
   ms: number;
-  /** The largest body that the call reads, in bytes. A larger body is a stop. Without it, no limit. */
+  /** The largest body that the call reads, in bytes. A larger body is a stop. Without it, `BODY_CAP_BYTES`. */
   maxBytes?: number;
 }
 
@@ -109,12 +109,13 @@ export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknow
   }
   // The capped reader of the checks: it cancels the stream at the cap, so a
   // deployment cannot push bytes into memory until the time limit ends.
+  const cap = call.maxBytes ?? BODY_CAP_BYTES;
   let text: string;
   try {
-    text = await textOf(res, `${call.method} ${url}`, call.maxBytes ?? Number.POSITIVE_INFINITY);
+    text = await textOf(res, `${call.method} ${url}`, cap);
   } catch (e) {
-    if (!(e instanceof HostError) || call.maxBytes === undefined) throw e;
-    throw new OperatorStop(res.status, `the answer is larger than ${call.maxBytes / 1024} KiB`);
+    if (!(e instanceof HostError)) throw e;
+    throw new OperatorStop(res.status, `the answer is larger than ${cap / 1024} KiB`);
   }
   let body: unknown;
   try {

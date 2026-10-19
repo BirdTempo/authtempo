@@ -3,28 +3,16 @@ import type { ResolvedConfig } from "../../config.js";
 import { rotateKey } from "../../engine/jwt.js";
 import { rewrapSecrets, secretsStatus } from "../../engine/secrets.js";
 import { ipKey } from "../../limiter/ip-key.js";
-import { isOperatorSecret } from "../../operator-secret.js";
+import {
+  isOperatorSecret,
+  OPERATOR_PER_IP,
+  OPERATOR_SECRETS_PER_IP,
+} from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { SCHEMA_VERSION } from "../../schema.js";
 import { VERSION } from "../../version.js";
 import { json, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
-
-/**
- * The limit of the key rotation (plan 11c): 5 calls per IP per hour,
- * right or wrong secret, in the app's limiter. A rotation is rare, so the
- * sixth call of an hour waits, and a guess costs one count of five.
- */
-export const OPERATOR_PER_IP = { seconds: 3600, max: 5 };
-
-/**
- * The limit of the secret routes and the info route (plan 11c2). 120 per IP
- * per hour for status, rewrap, and info, with a right or a wrong secret. A
- * rewrap of 100 000 rows at 1000 rows per call needs 100 calls; the 5 per
- * hour of keys/rotate would take 20 hours. A guess costs one count of 120,
- * and the secret has at least 32 visible characters.
- */
-export const OPERATOR_SECRETS_PER_IP = { seconds: 3600, max: 120 };
 
 /**
  * `Operator <secret>`. The scheme is case-insensitive (RFC 9110 section
@@ -35,8 +23,8 @@ const OPERATOR_AUTH = /^Operator (\S+)$/i;
 
 /**
  * The body of a rewrap: `limit`, a whole number, and `after`, the cursor of
- * the last answer. An empty body is `{}`. The engine refuses a cursor it did
- * not answer.
+ * the last answer. An empty body is `{}`. The engine refuses a cursor that
+ * is not `totp:<id>` or `jwk:<id>`.
  */
 const rewrapBody = z.strictObject({
   limit: z.number().int().optional(),

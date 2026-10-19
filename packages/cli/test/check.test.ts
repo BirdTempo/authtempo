@@ -439,6 +439,15 @@ describe("authtempo check (spec 19)", () => {
     for (const l of [...io.stdout, ...io.stderr]) expect(l).not.toContain("canary");
   });
 
+  it("names a connection string that is no URL by its storage code, and exits 2", async () => {
+    // Port 99999 is out of range, so the URL does not parse.
+    const url = "postgres://tempo:no-url-canary@127.0.0.1:99999/tempo_auth";
+    const io = fakeIo({ env: { DATABASE_URL: url }, fetch: deployment(healthy()) });
+    expect(await main(["check", BASE, "--target", "postgres"], io)).toBe(2);
+    expect(io.stderr.at(-1)).toBe("stopped: storage: ERR_INVALID_URL at the database");
+    for (const l of [...io.stdout, ...io.stderr]) expect(l).not.toContain("canary");
+  });
+
   it("needs --target for the inputs of a database", async () => {
     const io = fakeIo({ fetch: deployment(healthy()) });
     expect(await main(["check", BASE, "--url-env", "DATABASE_URL"], io)).toBe(2);

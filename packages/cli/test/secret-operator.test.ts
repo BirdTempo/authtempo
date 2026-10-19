@@ -447,6 +447,46 @@ describe("the operator client of secret status and secret rewrap (plan 11c2)", (
     }
   });
 
+  it("names the limit of core in the rewrap help", () => {
+    // The help reads OPERATOR_SECRETS_PER_IP of core (ruling 16 of plan 11c2).
+    expect(SECRET_REWRAP_HELP.exits.find((x) => x.code === 2)?.says).toContain(
+      "the limit of 120 calls an hour",
+    );
+  });
+
+  it("stops the read of an answer over 64 KiB at the cap, for status and for rewrap", async () => {
+    const f = await fixture();
+    const auth = f.on(ONE);
+    const chunk = new Uint8Array(16 * 1024).fill(0x61);
+    for (const args of [
+      ["status", BASE],
+      ["rewrap", BASE, "--yes"],
+    ]) {
+      let sent = 0;
+      // One MiB in all: the whole body is a proof that the reader read past the cap.
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= 1024 * 1024) controller.close();
+          else {
+            controller.enqueue(chunk);
+            sent += chunk.byteLength;
+          }
+        },
+      });
+      const { code, io } = await run(args, f, auth, {
+        fetch: async () =>
+          new Response(stream, { status: 200, headers: { "content-type": "application/json" } }),
+      });
+      expect(code, args.join(" ")).toBe(2);
+      expect(io.stdout).toEqual([]);
+      expect(io.stderr.at(-1), args.join(" ")).toBe("stopped: the answer is larger than 64 KiB");
+      // The reader cancels the stream on the chunk that passes 64 KiB. The
+      // stream queues one chunk ahead of the reader, so two chunks at most.
+      expect(sent, args.join(" ")).toBeGreaterThan(64 * 1024);
+      expect(sent, args.join(" ")).toBeLessThanOrEqual(64 * 1024 + 2 * chunk.byteLength);
+    }
+  });
+
   it("stops on another status or a body that is not JSON, and follows no redirect", async () => {
     const f = await fixture();
     const auth = f.on(ONE);

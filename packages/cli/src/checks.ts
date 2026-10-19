@@ -138,8 +138,8 @@ export const BODY_CAP_BYTES = 64 * 1024;
 /**
  * The body of an answer as text, read to its end, so no stream stays open.
  * A read fault gives "". A body over `cap` bytes cancels the stream at the
- * cap and throws a HostError with a fixed text that names the request and
- * the cap, never the body. `operatorCall` reads with it too (plan 11c2).
+ * cap and throws a HostError. Its fixed text names the request and the cap,
+ * never the body. `operatorCall` reads with it too (plan 11c2).
  */
 export async function textOf(
   res: Response,

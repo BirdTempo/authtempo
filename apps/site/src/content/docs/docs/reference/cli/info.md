@@ -55,7 +55,7 @@ The command judges no value. [authtempo check](/docs/reference/cli/check/) judge
 
 ## The four parts
 
-1. **The tools.** The CLI version, its schema version, the Node version with the platform and the architecture, and the package manager. The package manager comes from `npm_config_user_agent`, else from the `packageManager` field of the nearest `package.json`. The command runs no child process.
+1. **The tools.** The CLI version, its schema version, the Node version with the platform and the architecture, and the package manager. The package manager comes from `npm_config_user_agent`, else from the `packageManager` field of the nearest `package.json`. The tools part runs no child process.
 2. **The project.** The nearest `package.json` upward from the folder. Each `@authtempo` package that it names, with the installed version or `not installed`, and the adapters among them. With a `wrangler.jsonc` or `wrangler.json` beside it, the `database_name` of each D1 binding.
 3. **The database.** With `--target`: the kind, the schema version, the count of applied migrations, and the compat version. The compat version is read on Postgres only. The command reads the database through the inputs of `authtempo check`.
 4. **The deployment.** With a base URL: the version of core, its schema version, and the key paths of its config. A key path is a name such as `operator.secretHash`. The command calls `GET /operator/info` with the operator secret. The route answers key names, never a value.

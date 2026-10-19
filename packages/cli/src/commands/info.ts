@@ -121,7 +121,7 @@ function tool(
  * The package manager: the first word of npm_config_user_agent
  * (`pnpm/12.8.1 npm/? node/v26.10.0 …`), else the packageManager field of
  * the package.json (`pnpm@12.8.1` or `pnpm@12.8.1+sha512…`, without the
- * hash), else null. `info` runs no child process.
+ * hash), else null. The tools part runs no child process.
  */
 function packageManagerOf(
   ctx: Ctx,
