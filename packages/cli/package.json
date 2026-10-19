@@ -16,6 +16,10 @@
     "./program": {
       "types": "./dist/program.d.ts",
       "default": "./dist/program.js"
+    },
+    "./stacks": {
+      "types": "./dist/stacks.d.ts",
+      "default": "./dist/stacks.js"
     }
   },
   "files": [

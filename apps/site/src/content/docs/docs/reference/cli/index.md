@@ -8,6 +8,7 @@ sources:
   - packages/cli/README.md "Install"
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 9"
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
+  - packages/cli/src/stacks.ts
 sidebar:
   order: 1
 ---
@@ -100,6 +101,17 @@ Warning: a value on the command line goes into the shell history and the process
 - `authtempo --help`, `authtempo help <command>`, and `authtempo <command> --help` print the complete help, with the link to the page of the command.
 - A flag one edit from a known flag gets "Did you mean", and the command does not run.
 - With no command, `authtempo` prints the short help on stderr and exits 2.
+
+## The stacks entry
+
+`@authtempo/cli/stacks` holds the stacks of `authtempo init`, for a tool that lists them. It imports nothing.
+
+| Export | What it is |
+| --- | --- |
+| `STACKS` | The stack names of `authtempo init --stack`, in order. |
+| `Stack` | One member of `STACKS`. |
+| `STACK_INFO` | The facts of each stack: its example, its label, its tutorial page, its secrets file, and its steps. |
+| `StackInfo` | One row of `STACK_INFO`. |
 
 ## Next
 

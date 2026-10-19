@@ -243,6 +243,16 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     page: "/docs/reference/tanstack-start/",
     headings: ["Exports"],
   },
+  // The stacks of `authtempo init`, an entry with no import, so the site
+  // build bundles it (plan 11b Task 5, ruling 20 of its lane).
+  {
+    label: "cli-stacks",
+    pkg: "@authtempo/cli",
+    entry: "./stacks",
+    source: "packages/cli/src/stacks.ts",
+    page: "/docs/reference/cli/",
+    headings: ["The stacks entry"],
+  },
 ];
 
 /** The entries that have no page of their own, each with the reason. */
