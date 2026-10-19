@@ -37,7 +37,7 @@ function twin(server: Server, extra: { audience?: string[]; basePath?: string })
     mail: { send: async () => {} },
     clock: server.clock,
     jwtMint: { audience: extra.audience ?? [FILES] },
-    oauth: { resources: [MCP], registration: { cimd: false } },
+    oauth: { resources: [MCP], registration: { cimd: false, dynamic: true } },
   });
 }
 

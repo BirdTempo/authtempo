@@ -42,7 +42,7 @@ it("exchanges one code once of two parallel posts from the client's origin on Po
         sent.push(m);
       },
     },
-    oauth: { resources: [RESOURCE], registration: { cimd: false } },
+    oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true } },
   });
   const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     auth.handle(

@@ -49,7 +49,11 @@ function setup() {
   const db = failingStorage();
   const server = makeServer({
     storage: db.storage,
-    oauth: { resources: [MCP, FILES_API], scopes: SCOPES, registration: { cimd: false } },
+    oauth: {
+      resources: [MCP, FILES_API],
+      scopes: SCOPES,
+      registration: { cimd: false, dynamic: true },
+    },
   });
   return { server, down: db.down, storage: db.storage };
 }

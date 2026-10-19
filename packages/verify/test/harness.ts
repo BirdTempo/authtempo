@@ -51,7 +51,7 @@ export function makeServer(extra: Partial<AuthConfig> = {}) {
     },
     clock,
     jwtMint: { audience: [FILES] },
-    oauth: { resources: [MCP], registration: { cimd: false } },
+    oauth: { resources: [MCP], registration: { cimd: false, dynamic: true } },
     ...extra,
   });
   const counts = new Map<string, number>();

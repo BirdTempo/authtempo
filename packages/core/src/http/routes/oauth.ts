@@ -84,9 +84,15 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       path: "/oauth/register",
       key: "POST /oauth/register",
       async handler(ctx) {
+        // The bearer is the initial access token while its hash is set (RFC 7591 section 3).
+        const bearer = readBearer(ctx.request);
         const metadata = await readObject(ctx.request);
-        if (!metadata) return json({ error: "invalid_client_metadata" }, 400);
-        return oauthJson(await registerClient(config, { metadata, ip: ctx.ip }), 201);
+        const r = await registerClient(config, { metadata, ip: ctx.ip, bearer });
+        if (!r.ok && r.error === "invalid_token")
+          return json({ error: "invalid_token" }, 401, {
+            "www-authenticate": 'Bearer error="invalid_token"',
+          });
+        return oauthJson(r, 201);
       },
     });
   const stepResponse = (step: AuthorizeStep): Response => {

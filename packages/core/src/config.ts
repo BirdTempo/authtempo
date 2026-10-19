@@ -573,8 +573,15 @@ export interface OAuthConfig {
   resources: string[];
   /** The app's scopes, name to the consent page's text. `openid`, `profile`, `email`, and `offline_access` are built in. */
   scopes?: Record<string, string>;
-  /** `dynamic`: RFC 7591 at `POST /oauth/register`. `cimd`: a client id that is the URL of its metadata document. Both default true. */
-  registration?: { dynamic?: boolean; cimd?: boolean };
+  /**
+   * `dynamic`: RFC 7591 at `POST /oauth/register`, default false (plan 12e).
+   * `cimd`: a client id that is the URL of its metadata document, default
+   * true. Both may be off: `api.oauth.clients.create` is then the way in.
+   * `initialAccessTokenHash`: the SHA-256 of an initial access token, as 64
+   * lowercase hex characters. While it is set, the register route needs the
+   * token as `Authorization: Bearer <token>` (RFC 7591 section 3).
+   */
+  registration?: { dynamic?: boolean; cimd?: boolean; initialAccessTokenHash?: string };
   /**
    * The fetch for a client metadata document: the app's own guarded fetch,
    * which refuses private addresses (SSRF). Required while `cimd` is on.
@@ -597,6 +604,8 @@ export interface ResolvedOAuth {
   scopes: ReadonlyMap<string, string>;
   dynamic: boolean;
   cimd: boolean;
+  /** The SHA-256 hex of the initial access token of the register route, or null: no token (plan 12e). */
+  initialAccessTokenHash: string | null;
   fetch: typeof fetch | null;
   consentPage: (input: ConsentPageInput) => string;
   accessTtlMinutes: number;
@@ -1605,19 +1614,26 @@ function resolveOAuth(
   if (!isPlainObject(registration)) throw new ConfigError("oauth.registration must be an object");
   for (const [key, value] of Object.entries(registration)) {
     if (value === undefined) continue;
-    if (key !== "dynamic" && key !== "cimd")
+    if (key !== "dynamic" && key !== "cimd" && key !== "initialAccessTokenHash")
       throw new ConfigError(
-        `oauth.registration.${key} is not an option; core has dynamic and cimd`,
+        `oauth.registration.${key} is not an option; core has dynamic, cimd, and initialAccessTokenHash`,
       );
-    if (typeof value !== "boolean")
+    if (key === "initialAccessTokenHash") {
+      // Like operator.secretHash: core stores the hash and never the token.
+      if (typeof value !== "string" || !SHA256_HEX.test(value))
+        throw new ConfigError(
+          "oauth.registration.initialAccessTokenHash must be the SHA-256 of the token as 64 lowercase hex characters",
+        );
+    } else if (typeof value !== "boolean")
       throw new ConfigError(`oauth.registration.${key} must be a boolean`);
   }
-  const dynamic = registration.dynamic !== false;
+  // MCP 2026-07-28 calls dynamic registration deprecated (read 2026-10-14); an app turns it on (plan 12e).
+  const dynamic = registration.dynamic === true;
   const cimd = registration.cimd !== false;
-  if (!dynamic && !cimd)
-    throw new ConfigError(
-      "oauth.registration must leave dynamic or cimd on, or no client can register",
-    );
+  const initialAccessTokenHash =
+    typeof registration.initialAccessTokenHash === "string"
+      ? registration.initialAccessTokenHash
+      : null;
   if (input.fetch !== undefined && typeof input.fetch !== "function")
     throw new ConfigError("oauth.fetch must be a function");
   if (cimd && input.fetch === undefined)
@@ -1631,6 +1647,7 @@ function resolveOAuth(
     scopes,
     dynamic,
     cimd,
+    initialAccessTokenHash,
     fetch: input.fetch ?? null,
     consentPage: input.consentPage ?? defaultConsentPage,
     accessTtlMinutes: integerIn(

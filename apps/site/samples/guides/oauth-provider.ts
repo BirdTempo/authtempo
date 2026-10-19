@@ -20,7 +20,8 @@ export function createProviderAuth(deps: {
       scopes: { "mcp:tools": "Use your tools" },
       // A client id may be the https URL of its metadata document. That needs
       // your own fetch, which refuses private addresses. This sample turns it off.
-      registration: { cimd: false },
+      // RFC 7591 registration is off by default. This sample turns it on.
+      registration: { cimd: false, dynamic: true },
     },
   });
 }

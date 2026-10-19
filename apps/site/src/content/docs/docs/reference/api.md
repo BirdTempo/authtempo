@@ -58,7 +58,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `api.emailOtp` | `request`, `verify`, `requestReset`, `reset`; present unless `emailOtp` is `false` |
 | `api.totp` | `setup`, `enable`, `verify`, `disable`, `disableWithCode`, `regenerateBackupCodes`, `regenerateBackupCodesWithCode`, `status`, `uri`, `revokeTrustedDevices`; present when the second factor is on. `disable` turns every method off |
 | `api.jwt` | `mint`, `verify`, `rotate`, `jwks`, `sessionLive`; present unless `jwtMint` is `false` |
-| `api.oauth` | `grants`, `revoke`; present when `oauth` is set |
+| `api.oauth` | `grants`, `revoke`, and `clients` (`create`, `get`, `list`, `update`, `delete`, `rotateSecret`); present when `oauth` is set |
 | `api.secrets` | `status`, `rewrap`; present in every deployment, in process only. `status()` answers, for each version of the app secret, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. `status` reads every row of the TOTP, second factor, signing key, and code tables: one query per 1000 rows of each table. `rewrap({ limit, after })` reseals up to `limit` (1 to 1000, default 100) TOTP secrets and signing keys under the current version, and answers `{ resealed, failed, skipped, more, next }`. Pass `next` as `after` until `next` is `null` |
 
 ## Functions
@@ -139,7 +139,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary` |
 | Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest`, `IdentityEntry`, `IdentityList`, `IdentityUnlink`, `SocialLinked`, `SocialLinkStart`, `AccountDelete` |
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
-| JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthAccess`, `OAuthGrantSummary` |
+| JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthClientsApi`, `OAuthAccess`, `OAuthGrantSummary`, `OAuthResult`, `ClientInput`, `ClientSummary`, `ClientFields`, `RegisteredClient`, `CLIENT_SECRET_PREFIX` |
 | Organizations | `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
 | Captcha | `CaptchaPort`, `CaptchaPage`, `CaptchaFlow` |
 | Hooks | `OrganizationHooks`, `OrganizationHookEvent`, `SessionHooks`, `SessionDraft`, `SessionPatch`, `SessionVia`, `SessionEndReason`, `MemberVia`, `RemoveVia`, `UserHooks`, `UserCreatePatch`, `UserPatch`, `UserCreateVia`, `UserUpdateVia`, `UserVerifyVia`, `IdentityHooks`, `IdentitySummary`, `IdentityLinkVia` |
@@ -168,7 +168,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `RouteEntry` | One row of `ROUTES`: `method`, `path`, `feature`, `auth`, `codes`, `oauthCodes`, and `crossSiteForm` on the one cross-site form post. |
 | `RouteFeature` | The config part that turns a route on. |
 | `ROUTE_FEATURES` | Every feature once, as a tuple. `RouteFeature` is one of its members. |
-| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `sessionJwt`, `accessToken`, or `operator`. |
+| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `sessionJwt`, `accessToken`, `operator`, or `initialAccessToken`. |
 | `RouteMethod` | `GET` or `POST`. |
 | `RouteLiteral` | One row of `ROUTES` with its literal method and path. |
 | `RoutePath` | A path that `ROUTES` holds for a method. An SDK types its paths with it, so a path that core does not serve fails the compile. |

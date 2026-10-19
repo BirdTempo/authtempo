@@ -24,6 +24,7 @@ export const AUTH_WORDS: Record<AuthForm, string> = {
   sessionJwt: "A session JWT as the bearer",
   accessToken: "An access token of the OAuth provider as the bearer",
   operator: "The operator secret",
+  initialAccessToken: "The initial access token as the bearer",
 };
 
 /** The media word of an Input part, by the media types of the request body. */

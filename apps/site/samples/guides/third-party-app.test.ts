@@ -12,7 +12,7 @@ describe("sign in from a third-party app", () => {
       secret: h.secret,
       storage: h.storage,
       mail: h.mail,
-      oauth: { resources: [`${API}/mcp`], registration: { cimd: false } },
+      oauth: { resources: [`${API}/mcp`], registration: { cimd: false, dynamic: true } },
     });
     const fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
       auth.handle(new Request(input, init))) as typeof globalThis.fetch;

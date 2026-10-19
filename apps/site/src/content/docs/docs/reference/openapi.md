@@ -47,6 +47,7 @@ Each operation has one security requirement for each credential form that the ro
 | `sessionJwt` | `http` | A session JWT as the bearer |
 | `oauth` | `oauth2` | An access token of the OAuth provider, from the authorization code flow with PKCE (S256). Each client is public |
 | `operatorSecret` | `apiKey` | The operator secret in the `Authorization` header, as `Operator <secret>`. `Operator` is not a registered HTTP authentication scheme |
+| `initialAccessToken` | `http` | The initial access token of RFC 7591 as the bearer, for `POST /oauth/register` while `oauth.registration.initialAccessTokenHash` is set |
 
 ## Tags
 

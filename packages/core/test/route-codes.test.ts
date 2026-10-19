@@ -266,7 +266,7 @@ function world(extra: Partial<AuthConfig> = {}) {
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     organizations: {},
-    oauth: { resources: [`${BASE_URL}/mcp`], registration: { cimd: false } },
+    oauth: { resources: [`${BASE_URL}/mcp`], registration: { cimd: false, dynamic: true } },
     operator: { secretHash: "0".repeat(64) },
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.

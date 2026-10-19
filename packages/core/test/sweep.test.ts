@@ -188,6 +188,7 @@ describe("sweepExpired", () => {
       oauthDevices: 0,
       oauthSessionLinks: 0,
       oauthLogouts: 0,
+      oauthClientSecrets: 0,
     });
 
     const ids = (await storage.findMany("verification", [])).map((r) => r.id).sort();
@@ -222,6 +223,7 @@ describe("sweepExpired", () => {
       oauthDevices: 0,
       oauthSessionLinks: 0,
       oauthLogouts: 0,
+      oauthClientSecrets: 0,
     });
   });
 

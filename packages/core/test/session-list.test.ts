@@ -425,7 +425,11 @@ describe("the revoke limit (plan 12a)", () => {
   });
 });
 
-const OAUTH = { resources: [RESOURCE], scopes: SCOPES, registration: { cimd: false } };
+const OAUTH = {
+  resources: [RESOURCE],
+  scopes: SCOPES,
+  registration: { cimd: false, dynamic: true },
+};
 
 /**
  * A user with every kind of access, each made through the product's own

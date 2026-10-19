@@ -196,6 +196,7 @@ describe("openApiDocument (plan 11g)", () => {
       sessionJwt: ["sessionJwt"],
       accessToken: ["oauth"],
       operator: ["operatorSecret"],
+      initialAccessToken: ["initialAccessToken"],
     };
     for (const { key, op } of operations(reference())) {
       const auth = entryOf(key).auth;
@@ -211,6 +212,11 @@ describe("openApiDocument (plan 11g)", () => {
     const token = reference().paths["/oauth/token"]?.post;
     expect(token?.security).toEqual([]);
     expect(token?.description).toContain("PKCE");
+    // Plan 12e: the register route takes no credential, or the initial access token.
+    expect(reference().paths["/oauth/register"]?.post?.security).toEqual([
+      {},
+      { initialAccessToken: [] },
+    ]);
   });
 
   it("writes the same bytes twice", () => {

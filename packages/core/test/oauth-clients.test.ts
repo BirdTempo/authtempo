@@ -8,6 +8,13 @@ import {
 import type { OAuthClientRow } from "../src/schema.js";
 import { StorageError } from "../src/storage/port.js";
 import { BASE_URL, makeAuth, post } from "./helpers.js";
+
+/** The SHA-256 hex of a text, computed here, apart from core's own helper. */
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 import { oauthHandle, REDIRECT, RESOURCE } from "./oauth-helpers.js";
 
 const DOC_URL = "https://client.example.com/oauth/metadata.json";
@@ -36,7 +43,8 @@ function docFetch(answer: () => Response) {
 
 const cimdAuth = (fetch: typeof globalThis.fetch) =>
   makeAuth({ oauth: { resources: [RESOURCE], fetch } });
-const dynAuth = () => makeAuth({ oauth: { resources: [RESOURCE], registration: { cimd: false } } });
+const dynAuth = () =>
+  makeAuth({ oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true } } });
 let ipN = 0;
 /** Each call from its own IP unless the test names one, so the register limit counts only where a test asks. */
 const meta = (metadata: Record<string, unknown>, ip = `10.0.0.${++ipN}`) => ({ metadata, ip });
@@ -62,6 +70,10 @@ describe("client registration, RFC 7591 (plan 9g)", () => {
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
+      // Plan 12e: every registered field, in its metadata name.
+      subject_type: "public",
+      id_token_signed_response_alg: "EdDSA",
+      dpop_bound_access_tokens: false,
     });
     expect(
       await auth.storage.findOne("oauthClient", [
@@ -121,7 +133,8 @@ describe("client registration, RFC 7591 (plan 9g)", () => {
       });
     const good = { redirect_uris: ["https://a.example.com/cb"] };
     for (const m of [
-      { ...good, token_endpoint_auth_method: "client_secret_basic" },
+      // Plan 12e takes the secret methods; an unknown method is still refused.
+      { ...good, token_endpoint_auth_method: "client_secret_jwt" },
       { ...good, grant_types: ["implicit"] },
       { ...good, response_types: ["token"] },
       { ...good, client_name: "" },
@@ -203,6 +216,121 @@ describe("client registration, RFC 7591 (plan 9g)", () => {
     expect(
       (await none.auth.handle(post("/auth/oauth/register", { redirect_uris: [REDIRECT] }))).status,
     ).toBe(404);
+  });
+});
+
+describe("registration of plan 12e", () => {
+  const good = { redirect_uris: [REDIRECT] };
+
+  it("registers a client_secret_basic client and answers its secret once (plan 12e)", async () => {
+    const h = oauthHandle();
+    const res = await h.auth.handle(
+      post("/auth/oauth/register", { ...good, token_endpoint_auth_method: "client_secret_basic" }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      token_endpoint_auth_method: "client_secret_basic",
+      client_secret: expect.stringMatching(/^cs_[A-Za-z0-9_-]{43}$/),
+      client_secret_expires_at: 0,
+    });
+    const got = await h.auth.api.oauth?.clients.get({ clientId: String(body.client_id) });
+    expect(JSON.stringify(got)).not.toContain(String(body.client_secret));
+  });
+
+  it("keeps none for an omitted token_endpoint_auth_method (decision 4, a departure from RFC 7591)", async () => {
+    const h = oauthHandle();
+    const res = await h.auth.handle(post("/auth/oauth/register", good));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.token_endpoint_auth_method).toBe("none");
+    expect(body).not.toHaveProperty("client_secret");
+    expect(body).not.toHaveProperty("client_secret_expires_at");
+  });
+
+  it("refuses client_credentials in grant_types at registration", async () => {
+    const h = oauthHandle();
+    const res = await h.auth.handle(
+      post("/auth/oauth/register", {
+        ...good,
+        token_endpoint_auth_method: "client_secret_basic",
+        grant_types: ["client_credentials"],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_client_metadata" });
+  });
+
+  it("refuses the device grant while oauth.device is off (plan 12e Task 14 adds oauth.device)", async () => {
+    const h = oauthHandle();
+    const device = "urn:ietf:params:oauth:grant-type:device_code";
+    const res = await h.auth.handle(
+      post("/auth/oauth/register", { ...good, grant_types: ["authorization_code", device] }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_client_metadata" });
+    expect(
+      await h.auth.api.oauth?.clients.create({
+        redirectUris: [REDIRECT],
+        grantTypes: ["authorization_code", device],
+      }),
+    ).toEqual({ ok: false, error: "invalid_client_metadata", status: 400 });
+  });
+
+  it("needs the initial access token while its hash is set", async () => {
+    const token = "iat-0123456789abcdef0123456789abcdef";
+    const hash = await sha256(token);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const h = oauthHandle({
+      oauth: {
+        resources: [RESOURCE],
+        registration: { cimd: false, dynamic: true, initialAccessTokenHash: hash },
+      },
+    });
+    const send = (headers: Record<string, string>) =>
+      h.auth.handle(
+        new Request(`${BASE_URL}/auth/oauth/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify(good),
+        }),
+      );
+    for (const headers of [{}, { authorization: "Bearer iat-wrong" }, { authorization: token }]) {
+      const res = await send(headers);
+      expect(res.status).toBe(401);
+      expect(res.headers.get("www-authenticate")).toBe('Bearer error="invalid_token"');
+      const text = await res.text();
+      expect(JSON.parse(text)).toEqual({ error: "invalid_token" });
+      expect(text).not.toContain(token);
+    }
+    expect(await h.storage.findMany("oauthClient", [])).toEqual([]);
+    const ok = await send({ authorization: `Bearer ${token}` });
+    expect(ok.status).toBe(201);
+    expect(await ok.text()).not.toContain(token);
+    expect(logged.mock.calls.flat().join("\n")).not.toContain(token);
+  });
+
+  it("refuses id_token_signed_response_alg other than jwtMint.alg (decision 1)", async () => {
+    const h = oauthHandle();
+    const answer = async (alg: string) =>
+      h.auth.handle(post("/auth/oauth/register", { ...good, id_token_signed_response_alg: alg }));
+    for (const alg of ["RS256", "ES256", "none"]) {
+      const res = await answer(alg);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_client_metadata" });
+    }
+    const res = await answer("EdDSA");
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ id_token_signed_response_alg: "EdDSA" });
+  });
+
+  it("serves no register route by default", async () => {
+    const h = oauthHandle({ oauth: { resources: [RESOURCE], registration: { cimd: false } } });
+    expect((await h.auth.handle(post("/auth/oauth/register", good))).status).toBe(404);
+    const none = oauthHandle({
+      oauth: { resources: [RESOURCE], fetch: async () => new Response() },
+    });
+    expect((await none.auth.handle(post("/auth/oauth/register", good))).status).toBe(404);
   });
 });
 

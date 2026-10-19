@@ -228,13 +228,14 @@ Another key of `oauth` is refused.
 | --- | --- | --- | --- |
 | `oauth.resources` | string list | required | 1 to 20 distinct absolute `http` or `https` URLs with no query, fragment, or credentials. |
 | `oauth.scopes` | map of scope to text | the built-in scopes `openid`, `profile`, `email`, and `offline_access` | A built-in name is refused. A scope is 1 to 64 printable ASCII characters with no space, quote, or backslash. Its text is 1 to 200 characters. |
-| `oauth.registration` | object | `{ dynamic: true, cimd: true }` | See the two registration keys. |
+| `oauth.registration` | object | `{ dynamic: false, cimd: true }` | See the three registration keys. Both `dynamic` and `cimd` may be off: `api.oauth.clients.create` is then the way in. |
 | `oauth.fetch` | fetch | none | Required while `registration.cimd` is on. It must refuse private addresses. |
 | `oauth.consentPage` | function of `ConsentPageInput` | `defaultConsentPage` | Answers the markup of the consent page. |
 | `oauth.accessTtlMinutes` | number | `jwtMint.ttlMinutes` | An integer from 1 to 60. |
 | `oauth.refreshTtlDays` | number | 30 | An integer from 1 to 365. |
 | `oauth.codeTtlMinutes` | number | 5 | An integer from 1 to 10. |
-| `oauth.registration.dynamic` | boolean | true | Serves `POST /oauth/register` of RFC 7591. |
+| `oauth.registration.dynamic` | boolean | false | Serves `POST /oauth/register` of RFC 7591. Off by default since plan 12e: MCP 2026-07-28 calls dynamic registration deprecated. |
+| `oauth.registration.initialAccessTokenHash` | string | none | The SHA-256 of an initial access token, as 64 lowercase hex characters. While it is set, `POST /oauth/register` needs `Authorization: Bearer <token>`, and a miss answers 401 `invalid_token`. Core stores the hash and never the token. |
 | `oauth.registration.cimd` | boolean | true | Accepts a client id that is the https URL of its metadata document. |
 
 ## Operator

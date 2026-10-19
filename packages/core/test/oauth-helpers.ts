@@ -28,7 +28,12 @@ export function oauthHandle(extra: Partial<AuthConfig> = {}) {
     mail: { send: async () => {} },
     clock: base.clock,
     limiter: createMemoryLimiter(base.clock),
-    oauth: { resources: [RESOURCE, OTHER_RESOURCE], scopes: SCOPES, registration: { cimd: false } },
+    oauth: {
+      resources: [RESOURCE, OTHER_RESOURCE],
+      scopes: SCOPES,
+      // dynamic is off by default since plan 12e
+      registration: { cimd: false, dynamic: true },
+    },
     ...extra,
   };
   return {

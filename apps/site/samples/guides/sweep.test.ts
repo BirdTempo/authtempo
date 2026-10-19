@@ -15,6 +15,7 @@ describe("delete expired rows", () => {
       "invitations",
       "jwks",
       "limits",
+      "oauthClientSecrets",
       "oauthClients",
       "oauthDevices",
       "oauthLogouts",

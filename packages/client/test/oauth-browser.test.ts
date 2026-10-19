@@ -29,7 +29,9 @@ function memoryStorage() {
 
 describe("the OAuth client in a browser on its own origin (plan 11d, Task 3)", () => {
   it("finishes PKCE with a safelisted request that the browser may read, and keeps the pending sign-in in sessionStorage", async () => {
-    const server = makeServer({ oauth: { resources: [RESOURCE], registration: { cimd: false } } });
+    const server = makeServer({
+      oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true } },
+    });
     const person = inProcessFetch(server.auth);
     const c = createClient({ baseURL: BASE_URL, fetch: person.fetch });
     await c.magicLink.request({ email: "ada@example.com" });

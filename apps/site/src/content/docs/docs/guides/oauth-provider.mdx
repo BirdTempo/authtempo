@@ -29,6 +29,7 @@ import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
 2. Set `oauth.scopes` to the scopes of your app, each with the text of the consent page.
 3. Keep `registration.cimd` off.
    - To turn it on, pass `oauth.fetch`, your own fetch that refuses private addresses.
+   - Set `registration.dynamic: true` to serve `POST /auth/oauth/register`. It is off by default.
 4. Mount `auth.wellKnown(request)` for every path that starts with `/.well-known/` at the origin root.
 5. In each resource route, read the caller with `auth.caller(request)`.
    - Answer 401 to a caller that is not `kind: "oauth"`.
@@ -42,8 +43,8 @@ import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
 
 ## How it behaves
 
-- Every client is public: no secret, and PKCE S256 on every code. A redirect URI must match exactly.
-- A client registers at `POST /auth/oauth/register`, or its client id is the https URL of its metadata document.
+- A client of the registration is public unless it names a secret method: no secret, and PKCE S256 on every code. A redirect URI must match exactly.
+- A client registers at `POST /auth/oauth/register` while `registration.dynamic` is on, or its client id is the https URL of its metadata document. `api.oauth.clients.create` makes a client in your own code.
 - A browser with no session goes to core's sign-in page and comes back. An unverified user is refused.
 - The sign-in page and the consent page carry `request_id`, the id of a request that core holds for 10 minutes. The consent decides on the held request, not on the form.
 - A consent covers its scopes for every resource. A new scope asks again.

@@ -42,7 +42,8 @@ export type AuthForm =
   | "apiToken" // a tk_ bearer
   | "sessionJwt" // a session JWT as the bearer (POST /token/live, plan 11d)
   | "accessToken" // an OAuth access token of the provider (userinfo)
-  | "operator"; // Authorization: Operator <secret>
+  | "operator" // Authorization: Operator <secret>
+  | "initialAccessToken"; // the initial access token of RFC 7591 as the bearer (plan 12e)
 
 export interface RouteEntry {
   readonly method: "GET" | "POST";
@@ -1184,9 +1185,14 @@ export const ROUTES = Object.freeze([
     method: "POST",
     path: "/oauth/register",
     feature: "oauthRegistration",
-    auth: ["none"],
+    auth: ["none", "initialAccessToken"],
     codes: [],
-    oauthCodes: ["invalid_client_metadata", "invalid_redirect_uri", "rate_limited"],
+    oauthCodes: [
+      "invalid_client_metadata",
+      "invalid_redirect_uri",
+      "rate_limited",
+      "invalid_token",
+    ],
   },
   {
     method: "GET",

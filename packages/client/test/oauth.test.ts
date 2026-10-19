@@ -3,7 +3,7 @@ import { createClient } from "../src/client.js";
 import { BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.js";
 
 const RESOURCE = `${BASE_URL}/mcp`;
-const OAUTH = { resources: [RESOURCE], registration: { cimd: false } };
+const OAUTH = { resources: [RESOURCE], registration: { cimd: false, dynamic: true } };
 
 /** A signed-in browser, and the rows an allow and a code exchange write for one client. */
 async function grantedBrowser() {

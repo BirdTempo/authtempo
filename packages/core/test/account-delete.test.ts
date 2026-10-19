@@ -54,7 +54,11 @@ const PASSKEY = {
   rpName: "Example",
   origins: ["https://api.example.com"],
 };
-const OAUTH = { resources: [RESOURCE], scopes: SCOPES, registration: { cimd: false } };
+const OAUTH = {
+  resources: [RESOURCE],
+  scopes: SCOPES,
+  registration: { cimd: false, dynamic: true },
+};
 const NOTICE = "Security notice for your api.example.com account";
 
 afterEach(() => {

@@ -57,7 +57,18 @@ import {
   requestMagicLink,
   verifyMagicLink,
 } from "./engine/magic-link.js";
+import {
+  type ClientInput,
+  type ClientSummary,
+  createClient,
+  deleteClient,
+  getClient,
+  listClients,
+  rotateClientSecret,
+  updateClient,
+} from "./engine/oauth-client-store.js";
 import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
+import type { OAuthResult } from "./engine/oauth-result.js";
 import {
   addMember,
   createOrganization,
@@ -260,6 +271,37 @@ export interface JwtApi {
 export interface OAuthApi {
   grants(input: { userId: string }): Promise<Result<OAuthGrantSummary[]>>;
   revoke(input: { userId: string; clientId: string }): Promise<Result<{ ok: true }>>;
+  /** The clients of the provider (plan 12e). In process only: no route answers them. */
+  clients: OAuthClientsApi;
+}
+
+/**
+ * The client API of the provider (plan 12e). Each call answers an OAuth
+ * result: `{ ok: false, error, status }` with a code of `OAUTH_ERRORS`. An
+ * unknown client id answers `invalid_client`. A secret leaves core once: in
+ * the answer of `create` or `rotateSecret`.
+ */
+export interface OAuthClientsApi {
+  create(
+    input: ClientInput,
+  ): Promise<OAuthResult<{ client: ClientSummary; clientSecret?: string }>>;
+  get(input: { clientId: string }): Promise<OAuthResult<ClientSummary>>;
+  /** Newest first. `limit` 1 to 100, default 100. Pass `next` as `cursor` for the next page. */
+  list(input?: {
+    cursor?: string;
+    limit?: number;
+  }): Promise<OAuthResult<{ clients: ClientSummary[]; next: string | null }>>;
+  /** Every field but the id, the method, and the secret. */
+  update(
+    input: { clientId: string } & Omit<ClientInput, "authMethod">,
+  ): Promise<OAuthResult<ClientSummary>>;
+  /** Deletes the client and its consents, refresh tokens, device grants, session links, and logouts. */
+  delete(input: { clientId: string }): Promise<OAuthResult<{ ok: true }>>;
+  /** A new secret. The old one passes for `keepOldHours` more: 0 to 168, default 24. */
+  rotateSecret(input: {
+    clientId: string;
+    keepOldHours?: number;
+  }): Promise<OAuthResult<{ client: ClientSummary; clientSecret: string }>>;
 }
 
 /** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
@@ -709,6 +751,14 @@ export function createAuth(input: AuthConfig): Auth {
             oauth: {
               grants: (i) => listGrants(config, i),
               revoke: (i) => revokeGrant(config, i),
+              clients: {
+                create: (i) => createClient(config, i),
+                get: (i) => getClient(config, i),
+                list: (i) => listClients(config, i),
+                update: (i) => updateClient(config, i),
+                delete: (i) => deleteClient(config, i),
+                rotateSecret: (i) => rotateClientSecret(config, i),
+              },
             } satisfies OAuthApi,
           }
         : {}),

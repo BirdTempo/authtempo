@@ -10,6 +10,7 @@ export const SCHEME_NAMES = [
   "sessionJwt",
   "oauth",
   "operatorSecret",
+  "initialAccessToken",
 ] as const;
 export type SchemeName = (typeof SCHEME_NAMES)[number];
 
@@ -21,10 +22,12 @@ const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
   sessionJwt: ["sessionJwt"],
   accessToken: ["oauth"],
   operator: ["operatorSecret"],
+  initialAccessToken: ["initialAccessToken"],
 };
 
 /**
- * The six security schemes of spec 25 item 8. The OAuth flow URLs are
+ * The six security schemes of spec 25 item 8, and the initial access token
+ * of the register route (plan 12e). The OAuth flow URLs are
  * absolute with a `serverUrl`; with none, they are absolute paths, which
  * resolve against the server of the document. A token prefix is in a
  * description only, never a value.
@@ -73,6 +76,12 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
       name: "Authorization",
       description:
         "The operator secret, as `Operator <secret>`. `Operator` is not a registered HTTP authentication scheme, so the scheme is an API key in the header.",
+    },
+    initialAccessToken: {
+      type: "http",
+      scheme: "bearer",
+      description:
+        "The initial access token of RFC 7591 as the bearer. The register route needs it while `oauth.registration.initialAccessTokenHash` is set.",
     },
   };
 }

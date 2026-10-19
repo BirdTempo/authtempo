@@ -543,12 +543,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_token"><code>invalid_token</code> 401</h3>
 
-- **Meaning:** The bearer of the userinfo route is not a live access token of this instance.
-- **Do:** Refresh the access token.
+- **Meaning:** The bearer of the userinfo route is not a live access token of this instance. At the register route, the bearer is not the initial access token.
+- **Do:** Refresh the access token. At the register route, send the initial access token that the app gave you.
 
 | Routes |
 | --- |
-| [`GET /oauth/userinfo`](/docs/reference/routes/#get-oauth-userinfo), [`POST /oauth/userinfo`](/docs/reference/routes/#post-oauth-userinfo). |
+| [`POST /oauth/register`](/docs/reference/routes/#post-oauth-register), [`GET /oauth/userinfo`](/docs/reference/routes/#get-oauth-userinfo), [`POST /oauth/userinfo`](/docs/reference/routes/#post-oauth-userinfo). |
 
 <h3 id="oauth-insufficient_scope"><code>insufficient_scope</code> 403</h3>
 

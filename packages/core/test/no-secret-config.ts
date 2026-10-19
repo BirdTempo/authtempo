@@ -44,7 +44,7 @@ export function noSecretInput(): AuthConfig {
     passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE, SECRETS.origin] },
     password: {},
     organizations: {},
-    oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false } },
+    oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false, dynamic: true } },
     operator: { secretHash: SECRETS.secretHash },
   };
 }

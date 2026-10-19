@@ -49,6 +49,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `oauthDevices` | Device grants past their expiry. Always 0 until the device grant of plan 12e. |
 | `oauthSessionLinks` | Links of a session to a client whose session is gone. Always 0 until the back-channel sign-out of plan 12e. |
 | `oauthLogouts` | Back-channel sign-out messages that are delivered or given up. Always 0 until the back-channel sign-out of plan 12e. |
+| `oauthClientSecrets` | Old OAuth client secrets past the overlap of a rotation. The sweep clears them from the client. |
 
 ## How it behaves
 

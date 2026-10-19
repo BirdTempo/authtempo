@@ -15,7 +15,9 @@ const REDIRECT = "http://127.0.0.1:8123/callback";
 
 /** A server with the provider on, a signed-in browser, and a native client registered through the route. */
 async function setup(scopes: readonly string[] = ["openid", "offline_access"]) {
-  const server = makeServer({ oauth: { resources: [RESOURCE], registration: { cimd: false } } });
+  const server = makeServer({
+    oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true } },
+  });
   const browser = inProcessFetch(server.auth);
   const person = createClient({ baseURL: BASE_URL, fetch: browser.fetch });
   await person.magicLink.request({ email: "ada@example.com" });

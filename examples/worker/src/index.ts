@@ -91,8 +91,9 @@ function getAuth(env: Env): Auth {
     // 10 minutes, 5 guesses), and `emailOtp: false` turns them off.
     emailOtp: {},
     // The OAuth 2.1 and OIDC provider (plan 9g) for one MCP resource on this Worker, and the
-    // JWTs it signs (`jwtMint` is on by default). Dynamic registration only: a client ID
-    // metadata document needs the app's own SSRF-guarded fetch, and the example has none.
+    // JWTs it signs (`jwtMint` is on by default). Dynamic registration only: it is off by
+    // default since plan 12e, so the config turns it on. A client ID metadata document needs
+    // the app's own SSRF-guarded fetch, and the example has none.
     // In TEST_MODE only, a second resource with no route: the end-to-end test proves that its
     // tokens answer 401 at /mcp.
     oauth: {
@@ -100,7 +101,7 @@ function getAuth(env: Env): Auth {
         `${env.BASE_URL}/mcp`,
         ...(env.TEST_MODE === "1" ? [`${env.BASE_URL}/files`] : []),
       ],
-      registration: { cimd: false },
+      registration: { cimd: false, dynamic: true },
       scopes: { "mcp:tools": "Use the example tools" },
     },
     // The operator route (plan 11c) for `authtempo keys rotate`: on only when the var

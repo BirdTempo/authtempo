@@ -43,6 +43,7 @@ export {
   type IdentitiesApi,
   type JwtApi,
   type OAuthApi,
+  type OAuthClientsApi,
   type PasswordApi,
   type SecretsApi,
   type SessionApi,
@@ -98,7 +99,14 @@ export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export { defaultNoticeMail, type NoticeEvent, type NoticeMailInput } from "./engine/notices.js";
+export {
+  CLIENT_SECRET_PREFIX,
+  type ClientInput,
+  type ClientSummary,
+} from "./engine/oauth-client-store.js";
+export type { ClientFields, RegisteredClient } from "./engine/oauth-clients.js";
 export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
+export type { OAuthResult } from "./engine/oauth-result.js";
 export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";

@@ -77,7 +77,7 @@ async function probe(): Promise<Map<string, { status: number; error: string | un
     handoff: { schemes: ["example://"] },
     organizations: {},
     password: {},
-    oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false } },
+    oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false, dynamic: true } },
     operator: { secretHash: "0".repeat(64) },
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));

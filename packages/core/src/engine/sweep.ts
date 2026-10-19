@@ -29,6 +29,8 @@ export interface SweepResult {
   oauthSessionLinks: number;
   /** Back-channel logouts delivered or given up (plan 12e). Always 0 until plan 12e Task 16. */
   oauthLogouts: number;
+  /** Client secrets of a rotation past their overlap, cleared from the client row (plan 12e). */
+  oauthClientSecrets: number;
 }
 
 // The first delete removes every verification row past `expiresAt`,
@@ -134,6 +136,13 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   ]);
   // After the refresh tokens, so a client whose last token just expired can go.
   const oauthClients = await sweepClients(storage, now);
+  // The check of a client secret refuses an old secret past its time
+  // (`secretMatches`). This clear keeps no dead hash in the row.
+  const oauthClientSecrets = await storage.update(
+    "oauthClient",
+    [{ field: "previousSecretUntil", op: "lt", value: now }],
+    { previousSecretHash: null, previousSecretUntil: null, updatedAt: now },
+  );
   // A setup that no enable confirmed stays until the user's next setup.
   // After 15 minutes the enable refuses it, so it holds a sealed secret that
   // no flow uses. `createdAt` is the setup time: a new setup rewrites it.
@@ -160,5 +169,6 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     oauthDevices: 0,
     oauthSessionLinks: 0,
     oauthLogouts: 0,
+    oauthClientSecrets,
   };
 }

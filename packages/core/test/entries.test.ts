@@ -83,7 +83,7 @@ describe("the SDK entries of core (plan 11d)", () => {
       appURL: APP_ORIGIN,
       storage: h.storage,
       mail: { send: async () => {} },
-      oauth: { resources: [`${BASE_URL}/mcp`], registration: { cimd: false } },
+      oauth: { resources: [`${BASE_URL}/mcp`], registration: { cimd: false, dynamic: true } },
     });
     // A sign-in step whose next is not an authorize URL fails to the app with the code.
     const res = await auth.handle(new Request(`${BASE_URL}/auth/oauth/sign-in?next=/elsewhere`));

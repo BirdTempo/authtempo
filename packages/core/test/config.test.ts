@@ -746,8 +746,10 @@ describe("oauth (plan 9g)", () => {
     const on = resolveConfig({ ...base, oauth: { resources: [R], fetch } }).oauth;
     expect(on).toMatchObject({
       resources: [R],
-      dynamic: true,
+      // Off by default since plan 12e: MCP 2026-07-28 calls dynamic registration deprecated.
+      dynamic: false,
       cimd: true,
+      initialAccessTokenHash: null,
       fetch,
       accessTtlMinutes: 15,
       refreshTtlDays: 30,
@@ -766,7 +768,7 @@ describe("oauth (plan 9g)", () => {
       oauth: {
         resources: [R, "http://localhost:8787/mcp"],
         scopes: { "mcp:read": "Read" },
-        registration: { cimd: false },
+        registration: { cimd: false, dynamic: true },
         refreshTtlDays: 365,
         codeTtlMinutes: 10,
       },
@@ -802,10 +804,6 @@ describe("oauth (plan 9g)", () => {
         { resources: [R], fetch, scopes: { a: "" } },
         "oauth.scopes.a must be 1 to 200 characters with no control character",
       ],
-      [
-        { resources: [R], registration: { dynamic: false, cimd: false } },
-        "oauth.registration must leave dynamic or cimd on, or no client can register",
-      ],
       [{ resources: [R], fetch, registration: null }, "oauth.registration must be an object"],
       [
         { resources: [R], fetch, registration: { cimd: "yes" } },
@@ -813,7 +811,7 @@ describe("oauth (plan 9g)", () => {
       ],
       [
         { resources: [R], fetch, registration: { open: true } },
-        "oauth.registration.open is not an option; core has dynamic and cimd",
+        "oauth.registration.open is not an option; core has dynamic, cimd, and initialAccessTokenHash",
       ],
       [
         { resources: [R] },
@@ -844,6 +842,47 @@ describe("oauth (plan 9g)", () => {
     expect(() =>
       resolveConfig({ ...base, jwtMint: false, oauth: { resources: [R], fetch } }),
     ).toThrowError("oauth needs jwtMint: an access token is a JWT that core signs");
+  });
+
+  it("accepts dynamic and cimd both off: api.oauth.clients.create is the way in (plan 12e)", () => {
+    expect(
+      resolveConfig({
+        ...base,
+        oauth: { resources: [R], registration: { dynamic: false, cimd: false } },
+      }).oauth,
+    ).toMatchObject({ dynamic: false, cimd: false });
+  });
+
+  it("refuses an initialAccessTokenHash that is not 64 lowercase hex characters", () => {
+    const message =
+      "oauth.registration.initialAccessTokenHash must be the SHA-256 of the token as 64 lowercase hex characters";
+    for (const hash of [
+      "a".repeat(63),
+      "A".repeat(64),
+      "g".repeat(64),
+      "a".repeat(65),
+      "",
+      7,
+      null,
+    ])
+      expect(() =>
+        resolveConfig({
+          ...base,
+          oauth: {
+            resources: [R],
+            registration: { dynamic: true, cimd: false, initialAccessTokenHash: hash as never },
+          },
+        }),
+      ).toThrowError(message);
+    expect(
+      resolveConfig({
+        ...base,
+        oauth: {
+          resources: [R],
+          registration: { dynamic: true, cimd: false, initialAccessTokenHash: "0a".repeat(32) },
+        },
+      }).oauth?.initialAccessTokenHash,
+    ).toBe("0a".repeat(32));
   });
 
   it("refuses a jwtMint.audience entry that is also an oauth.resources entry, by either form of audience (final fix wave, review I-2)", () => {

@@ -208,6 +208,7 @@ export const CONFIG_KEYS = {
   "oauth.registration": {
     dynamic: true,
     cimd: true,
+    initialAccessTokenHash: true,
   } satisfies Keys<NonNullable<OAuthConfig["registration"]>>,
   operator: { secretHash: true } satisfies Keys<OperatorConfig>,
   hooks: {

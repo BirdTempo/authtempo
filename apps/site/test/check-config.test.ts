@@ -6,9 +6,11 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 154 keys, the nested ones by their path", () => {
+  it("lists 155 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
-    expect(keys.length).toBe(154);
+    // Plan 12e adds oauth.registration.initialAccessTokenHash.
+    expect(keys.length).toBe(155);
+    expect(keys).toContain("oauth.registration.initialAccessTokenHash");
     expect(keys).toContain("account.deleteConfirm.ttlMinutes");
     expect(keys).toContain("account.notices.mail");
     expect(keys).toContain("password.minLength");

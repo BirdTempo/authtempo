@@ -76,8 +76,9 @@ describe("ROUTES (plan 11a)", () => {
   /**
    * Each row is the smallest config change for a feature, and the features whose routes it turns
    * on. `password` also turns on `totp`, and `emailOtpReset` with the default `emailOtp`. `oauth`
-   * with the default `registration.dynamic` also turns on `oauthRegistration`. A row with `off`
-   * is a feature that is on by default: the change turns it off, and the routes go. `start` is
+   * with `registration.dynamic: true` also turns on `oauthRegistration`, which is off by default
+   * since plan 12e. A row with `off` is a feature that is on by default: the change turns it off,
+   * and the routes go. `start` is
    * the config that the change applies to, on top of `base`. With `start`, a row can isolate one
    * feature of a group: a row that turns on only a group cannot see a route tagged with the
    * wrong feature of that group.
@@ -120,7 +121,9 @@ describe("ROUTES (plan 11a)", () => {
     { name: "organizations", delta: { organizations: {} }, features: ["organizations"] },
     {
       name: "oauth with dynamic registration",
-      delta: { oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false } } },
+      delta: {
+        oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false, dynamic: true } },
+      },
       features: ["oauth", "oauthRegistration"],
     },
     {

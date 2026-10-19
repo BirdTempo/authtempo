@@ -108,7 +108,7 @@ function world(secretHash = "0".repeat(64)) {
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     organizations: {},
-    oauth: { resources: [RESOURCE], registration: { cimd: false } },
+    oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true } },
     operator: { secretHash },
     account: { deleteConfirm: { ttlMinutes: 60 } },
   });

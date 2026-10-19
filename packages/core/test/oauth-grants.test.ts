@@ -31,7 +31,7 @@ import { FAST, pwHandle, recordNextTransaction } from "./password-helpers.js";
 const OAUTH = {
   resources: [RESOURCE, OTHER_RESOURCE],
   scopes: SCOPES,
-  registration: { cimd: false },
+  registration: { cimd: false, dynamic: true },
 };
 const GRANT = { status: 400, body: { error: "invalid_grant" } };
 const answer = async (res: Response) => ({ status: res.status, body: await res.json() });
