@@ -189,8 +189,9 @@ export async function startDevice(
 /**
  * The live pending row of a user code in its `XXXX-XXXX` form, or null. The
  * code is hashed under each version that the keyring holds, so a code from
- * before a new secret version still matches. A row counts only under the
- * version that it names.
+ * before a new secret version still matches. The keyring holds distinct
+ * values, so the hash under one value finds only a row of that value. A
+ * check of `secretVersion` would decide nothing (ruling 48 of plan 12e).
  */
 export async function findUserCode(
   config: ResolvedConfig,
@@ -203,13 +204,7 @@ export async function findUserCode(
     const row = await config.storage.findOne("oauthDevice", [
       { field: "userCodeHash", op: "eq", value: await userCodeHash(secret, userCode) },
     ]);
-    if (
-      row &&
-      row.secretVersion === version &&
-      row.status === "pending" &&
-      row.expiresAt.getTime() > now
-    )
-      return row;
+    if (row && row.status === "pending" && row.expiresAt.getTime() > now) return row;
   }
   return null;
 }

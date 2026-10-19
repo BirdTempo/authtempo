@@ -468,7 +468,7 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
     const fresh = (await deviceRows(h)).find((r) => r.id !== row?.id);
     expect(fresh?.secretVersion).toBe(2);
     expect(fresh?.userCodeHash).toBe(await hmacHex(SECRET_2, next.user_code.replace("-", "")));
-    // A row counts only under the version it names: the version 1 hash of the new code finds nothing.
+    // The keyed hash differs by secret value: an instance with version 1 only finds no row of version 2.
     expect(await findUserCode(h.config, next.user_code)).toBeNull();
   });
 
@@ -789,6 +789,48 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
     ).toEqual(["authorization_code"]);
   });
 
+  it("refuses a poll from a client that lost the device grant, and keeps the row", async () => {
+    const h = instance();
+    const clientId = await deviceClient(h);
+    const s = await signedIn(h);
+    const deviceCode = await approvedDevice(h, clientId, s.cookie);
+    const clients = h.auth.api.oauth?.clients;
+    if (!clients) throw new Error("oauth is off");
+    const lost = await clients.update({ clientId, grantTypes: ["authorization_code"] });
+    if (!lost.ok) throw new Error(lost.error);
+    h.clock.advance(5_000);
+    expect(await answer(await h.auth.handle(poll(clientId, deviceCode)))).toEqual({
+      status: 400,
+      body: { error: "unauthorized_client" },
+    });
+    expect((await deviceRows(h)).map((r) => r.status)).toEqual(["approved"]);
+    // A metadata document that drops the grant refuses the poll too.
+    const docs = new Map<string, Record<string, unknown>>();
+    const fetchFn = (async (input: RequestInfo | URL) =>
+      new Response(JSON.stringify(docs.get(String(input))), {
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    const cimd = { registration: { cimd: true, dynamic: true }, fetch: fetchFn };
+    const url = "https://client.example.com/device.json";
+    const doc = (grants: string[]) => ({
+      client_id: url,
+      client_name: "Doc client",
+      redirect_uris: [REDIRECT],
+      grant_types: grants,
+    });
+    docs.set(url, doc(["authorization_code", DEVICE_GRANT]));
+    const a = instance(undefined, cimd);
+    const docCode = await approvedDevice(a, url, (await signedIn(a)).cookie);
+    docs.set(url, doc(["authorization_code"]));
+    const b = instance(a, cimd);
+    a.clock.advance(5_000);
+    expect(await answer(await b.auth.handle(poll(url, docCode)))).toEqual({
+      status: 400,
+      body: { error: "unauthorized_client" },
+    });
+    expect((await deviceRows(a)).map((r) => r.status)).toEqual(["approved"]);
+  });
+
   it("deletes expired device rows at the sweep", async () => {
     const h = instance();
     const clientId = await deviceClient(h);
@@ -888,6 +930,19 @@ describe("the end of a decided device code (plan 12e Task 14, ruling 44 S4)", ()
       });
       expect(await a.h.storage.findMany("oauthToken", [])).toEqual([]);
     }
+  });
+
+  it("keeps the device rows of another client at a grant revoke", async () => {
+    const a = await approved();
+    const other = await deviceClient(a.h);
+    const kept = await approvedDevice(a.h, other, a.s.cookie, "mcp:read");
+    const r = await revokeGrant(a.h.config, { userId: a.s.user.id, clientId: a.clientId });
+    if (!r.ok) throw new Error(r.code);
+    expect((await rowsOf(a.h, a.s.user.id)).map((row) => [row.clientId, row.status])).toEqual([
+      [other, "approved"],
+    ]);
+    a.h.clock.advance(5_000);
+    expect((await a.h.auth.handle(poll(other, kept))).status).toBe(200);
   });
 
   it("refuses the tokens of a poll when a reset runs between its spend and its token write", async () => {
