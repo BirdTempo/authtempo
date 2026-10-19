@@ -8,14 +8,13 @@ import {
 import type { OAuthClientRow } from "../src/schema.js";
 import { StorageError } from "../src/storage/port.js";
 import { BASE_URL, makeAuth, post } from "./helpers.js";
+import { oauthHandle, REDIRECT, RESOURCE } from "./oauth-helpers.js";
 
 /** The SHA-256 hex of a text, computed here, apart from core's own helper. */
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
-
-import { oauthHandle, REDIRECT, RESOURCE } from "./oauth-helpers.js";
 
 const DOC_URL = "https://client.example.com/oauth/metadata.json";
 const doc = (over: Record<string, unknown> = {}) => ({
@@ -308,6 +307,30 @@ describe("registration of plan 12e", () => {
     expect(ok.status).toBe(201);
     expect(await ok.text()).not.toContain(token);
     expect(logged.mock.calls.flat().join("\n")).not.toContain(token);
+  });
+
+  it("counts a wrong initial access token against the register limit, so the right one after 10 guesses answers 429", async () => {
+    const token = "iat-0123456789abcdef0123456789abcdef";
+    const h = oauthHandle({
+      oauth: {
+        resources: [RESOURCE],
+        registration: { cimd: false, dynamic: true, initialAccessTokenHash: await sha256(token) },
+      },
+    });
+    const send = (bearer: string) =>
+      h.auth.handle(
+        new Request(`${BASE_URL}/auth/oauth/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+          body: JSON.stringify(good),
+        }),
+      );
+    // One IP: the limit is 10 per IP per hour, and each guess spends one.
+    for (let i = 0; i < 10; i++) expect((await send(`iat-wrong-${i}`)).status).toBe(401);
+    const late = await send(token);
+    expect(late.status).toBe(429);
+    expect(await late.json()).toEqual({ error: "rate_limited" });
+    expect(await h.storage.findMany("oauthClient", [])).toEqual([]);
   });
 
   it("refuses id_token_signed_response_alg other than jwtMint.alg (decision 1)", async () => {
