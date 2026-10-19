@@ -2,6 +2,19 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
+    // The site build reads the root package.json, SECURITY.md, and LICENSE
+    // (apps/site/src/data/repo.ts). Without these inputs, a cache hit serves a
+    // stale license or a stale empty state (ruling 21 of the plan 11b lane).
+    "@authtempo/site#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/SECURITY.md",
+        "$TURBO_ROOT$/LICENSE"
+      ]
+    },
     "typecheck": { "dependsOn": ["^build"] },
     "test": { "dependsOn": ["^build"], "cache": false },
     "//#typecheck:configs": { "cache": false }
