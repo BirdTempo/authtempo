@@ -2,7 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { STACK_INFO, STACKS } from "@authtempo/cli/stacks";
 import { ipKey } from "@authtempo/core";
 import { ROUTES } from "@authtempo/core/routes";
-import { DEMO_EXEMPT, DEMO_FEATURES, DEMO_LIMITS, DEMO_PUBLISHED } from "@authtempo/demo/facts";
+import {
+  DEMO_EXEMPT,
+  DEMO_FEATURES,
+  DEMO_LIMITS,
+  DEMO_PUBLISHED,
+  DOCS_BASE,
+} from "@authtempo/demo/facts";
 import { describe, expect, it } from "vitest";
 import { walk } from "../scripts/lib/files.ts";
 import { pageCss } from "../scripts/lib/html.ts";
@@ -16,6 +22,7 @@ import { HOME } from "../src/data/home.ts";
 import { readRepoText } from "../src/data/repo.ts";
 import { renderPolicy } from "../src/data/security.ts";
 import { SIDEBAR_ICONS } from "../src/data/sidebar-icons.ts";
+import { SITE as SITE_NAMES } from "../src/data/site.ts";
 
 // `pnpm test` runs `astro build` before vitest, so dist is newer than the change.
 const html = walk(DIST, (p) => p.endsWith(".html")).map((p) => p.slice(DIST.length));
@@ -868,6 +875,12 @@ describe("the data of the demo page (plan 11b Task 12, ruling 40)", () => {
     expect(ipv6Prefix()).toBe(Number(/\/(\d+)$/.exec(ipKey("2001:db8::1"))?.[1]));
     expect(ipv6Prefix(() => "2001:db8::/48")).toBe(48);
     expect(() => ipv6Prefix(() => "2001:db8:1:2:3:4:5:6")).toThrow(/no prefix/);
+  });
+
+  it("links each demo guide under the docs of this site", () => {
+    // The demo types no docs host: DOCS_BASE of its facts is the site origin and the docs path.
+    expect(DOCS_BASE).toBe(`${SITE_NAMES.origin}${SITE_NAMES.docs.replace(/\/$/, "")}`);
+    expect(DOCS_BASE).toBe("https://authtempo.com/docs");
   });
 
   it("ends with a link to the host when published, else with the local command", () => {

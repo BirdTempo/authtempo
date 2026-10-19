@@ -1,5 +1,5 @@
 import { ipKey } from "@authtempo/core";
-import { DEMO_LIMITS } from "@authtempo/demo/facts";
+import { DEMO_LIMITS, DEMO_PLANNED_ORIGIN } from "@authtempo/demo/facts";
 
 /**
  * The parts of /demo/ outside its entry (plan 11b Task 12). Every number comes
@@ -13,8 +13,8 @@ export const DEMO_PAGE = {
   command: "pnpm --filter @authtempo/demo dev",
   /** The end of the page once the owner sets DEMO_PUBLISHED to true. */
   open: "Open the demo",
-  /** The planned host of the demo (decision 2 of 2026-10-14). */
-  host: "https://demo.authtempo.com/",
+  /** The planned host of the demo, from the demo facts (decision 2 of 2026-10-14). */
+  host: `${DEMO_PLANNED_ORIGIN}/`,
 } as const;
 
 /**

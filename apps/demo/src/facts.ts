@@ -32,6 +32,18 @@ export const DEMO_EXEMPT = {
 export const DEMO_PUBLISHED = false;
 
 /**
+ * The planned origin of the hosted demo (decision 2 of 2026-10-14). The var
+ * DEMO_ORIGIN of wrangler.jsonc has this value, and a Node test holds the two equal.
+ */
+export const DEMO_PLANNED_ORIGIN = "https://demo.authtempo.com";
+
+/**
+ * The docs base of the site. Each demo page links its guide under it. A site
+ * test holds it to the origin of the site, so the two cannot drift.
+ */
+export const DOCS_BASE = "https://authtempo.com/docs";
+
+/**
  * Every limit of the demo, in one place, each with its reason. Code of the
  * demo enforces each one, and no Cloudflare setting holds a limit alone.
  * gate.ts checks the gate limits, and limits.ts checks the sandbox limits.

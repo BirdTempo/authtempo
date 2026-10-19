@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_TOKEN_PREFIX, SESSION_TOKEN_PREFIX } from "@authtempo/core/credentials";
 import { describe, expect, it } from "vitest";
+import { DEMO_PLANNED_ORIGIN } from "../../src/facts.ts";
 
 // The demo holds no secret (plan 11b, Global Constraints). These tests read
 // wrangler.jsonc, the bundle that scripts/dry-run.mjs writes to dist/bundle/,
@@ -112,6 +113,8 @@ describe("no secret in the demo", () => {
     };
     expect(Object.keys(config.vars ?? {})).toEqual(["DEMO_ORIGIN"]);
     expect(config.vars?.DEMO_ORIGIN).toBe("https://demo.authtempo.com");
+    // The site reads the planned host from the facts, so the var and the facts are one value.
+    expect(config.vars?.DEMO_ORIGIN).toBe(DEMO_PLANNED_ORIGIN);
   });
 
   it("holds no credential in the bundle", () => {

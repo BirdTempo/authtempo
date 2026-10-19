@@ -1,4 +1,5 @@
 import type { RouteFeature } from "@authtempo/core/routes";
+import { DOCS_BASE } from "../facts.js";
 import { type Html, html } from "../html.js";
 import type { DemoMail } from "../mail.js";
 
@@ -21,40 +22,58 @@ export interface DemoPage {
   guide: string;
 }
 
-const DOCS = "https://authtempo.com/docs";
-
 /** The pages of the demo, in the order of the header list. */
 export const DEMO_PAGES = [
-  { path: "/", title: "authtempo demo", feature: null, guide: `${DOCS}/start/` },
-  { path: "/password", title: "Password", feature: "password", guide: `${DOCS}/guides/password/` },
+  { path: "/", title: "authtempo demo", feature: null, guide: `${DOCS_BASE}/start/` },
+  {
+    path: "/password",
+    title: "Password",
+    feature: "password",
+    guide: `${DOCS_BASE}/guides/password/`,
+  },
   {
     path: "/magic-link",
     title: "Magic link",
     feature: "magicLink",
-    guide: `${DOCS}/guides/magic-link/`,
+    guide: `${DOCS_BASE}/guides/magic-link/`,
   },
   {
     path: "/email-code",
     title: "Email code",
     feature: "emailOtp",
-    guide: `${DOCS}/guides/email-code/`,
+    guide: `${DOCS_BASE}/guides/email-code/`,
   },
-  { path: "/passkey", title: "Passkey", feature: "passkey", guide: `${DOCS}/guides/passkeys/` },
-  { path: "/social", title: "Social sign-in", feature: "social", guide: `${DOCS}/guides/social/` },
+  {
+    path: "/passkey",
+    title: "Passkey",
+    feature: "passkey",
+    guide: `${DOCS_BASE}/guides/passkeys/`,
+  },
+  {
+    path: "/social",
+    title: "Social sign-in",
+    feature: "social",
+    guide: `${DOCS_BASE}/guides/social/`,
+  },
   {
     path: "/second-factor",
     title: "Second factor",
     feature: "totp",
-    guide: `${DOCS}/guides/second-factor/`,
+    guide: `${DOCS_BASE}/guides/second-factor/`,
   },
-  { path: "/tokens", title: "API tokens", feature: "tokens", guide: `${DOCS}/guides/api-tokens/` },
+  {
+    path: "/tokens",
+    title: "API tokens",
+    feature: "tokens",
+    guide: `${DOCS_BASE}/guides/api-tokens/`,
+  },
   {
     path: "/organizations",
     title: "Organizations",
     feature: "organizations",
-    guide: `${DOCS}/guides/organizations/`,
+    guide: `${DOCS_BASE}/guides/organizations/`,
   },
-  { path: "/mailbox", title: "Mailbox", feature: null, guide: `${DOCS}/reference/config/` },
+  { path: "/mailbox", title: "Mailbox", feature: null, guide: `${DOCS_BASE}/reference/config/` },
 ] as const satisfies readonly DemoPage[];
 
 export type DemoPath = (typeof DEMO_PAGES)[number]["path"];
