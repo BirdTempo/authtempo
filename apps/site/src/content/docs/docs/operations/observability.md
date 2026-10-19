@@ -48,6 +48,7 @@ Each line starts with `authtempo:` or `authtempo compat:`. It holds an event nam
 | `authtempo: jwtMint.claims threw`, `jwtMint.claims answered a value that is not an object` | The claims function of the app failed. | Act. |
 | `authtempo: client metadata document refused <why>` | Core refused an OAuth client's metadata document. The reason names the member or the fetch guard, never a value. | Watch. |
 | `authtempo: client metadata member dropped <member>` | A metadata document names a value that core does not serve, such as the device grant. Core drops the member and keeps the client. | Watch. |
+| `authtempo: client metadata document dropped its client auth; refresh tokens revoked <client id> <old method> none` | A metadata document changed from a key method to `none`. Core revoked every refresh token of that client. | Watch. The person signs in to the client again. |
 | `authtempo: the delete of a refresh row in a revoked grant failed <row id>` | A cleanup failed. The sweep deletes the row. | Watch. |
 | `authtempo: cognito legacy verify failed <reason>` | Cognito refused an imported user, or did not answer. | Act when it is every user. |
 | `authtempo compat: <note>` | An option of the compatibility package changes no promise. | Read once at start. |

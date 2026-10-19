@@ -516,3 +516,103 @@ describe("the members of a document that core does not serve (ruling 24 of plan 
     }
   });
 });
+
+describe("a document that changes its method (ruling 25 of plan 12e)", () => {
+  const DROP_LOG =
+    "authtempo: client metadata document dropped its client auth; refresh tokens revoked";
+
+  /** The -02 fixture with its key inline, and the same document as a public client. */
+  async function docs() {
+    const fixed = await fixture("draft-02");
+    const url = String(fixed.client_id);
+    const key = await keyOf("k-1");
+    const { jwks_uri: _uri, ...inline } = fixed;
+    const keyDoc = { ...inline, jwks: { keys: [key.jwk] } };
+    const publicDoc = { ...inline, token_endpoint_auth_method: "none" };
+    return { url, key, keyDoc, publicDoc };
+  }
+
+  /** Instance A reads `first`; instance B, on the same storage, reads `then`. */
+  function pair(url: string, first: unknown, then: unknown) {
+    const base = makeAuth();
+    const fa = fakeFetch();
+    fa.answers.set(url, () => json(first));
+    const fb = fakeFetch();
+    fb.answers.set(url, () => json(then));
+    return { a: instance(fa.fn, base), b: instance(fb.fn, base), fb };
+  }
+
+  /** A refresh token of `url` from instance `h`, with an assertion of `key` when it is given. */
+  async function refreshTokenOf(h: Handle, url: string, key: Key | null) {
+    const s = await signedIn(h);
+    const p = await pkce();
+    const { code } = await authorized(h, s.cookie, { clientId: url, challenge: p.challenge });
+    const auth: Record<string, string> = key
+      ? { client_assertion_type: ASSERTION_TYPE, client_assertion: await assertion(h, key, url) }
+      : { client_id: url };
+    const res = await h.auth.handle(
+      tokenPost({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: p.verifier,
+        redirect_uri: "https://client.example.com/callback",
+        resource: RESOURCE,
+        ...auth,
+      }),
+    );
+    if (res.status !== 200) throw new Error(`exchange answered ${res.status}`);
+    return ((await res.json()) as { refresh_token: string }).refresh_token;
+  }
+
+  const refresh = (token: string, auth: Record<string, string>) =>
+    tokenPost({ grant_type: "refresh_token", refresh_token: token, ...auth });
+
+  it("revokes the refresh tokens of a document that drops from private_key_jwt to none", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { url, key, keyDoc, publicDoc } = await docs();
+    const { a, b } = pair(url, keyDoc, publicDoc);
+    const token = await refreshTokenOf(a, url, key);
+    expect(await a.storage.findMany("oauthToken", [])).toHaveLength(1);
+    // Instance B reads the public document at this refresh, and the revoke runs in that write.
+    const res = await b.auth.handle(refresh(token, { client_id: url }));
+    expect(await answer(res)).toEqual({ status: 400, body: { error: "invalid_grant" } });
+    expect(await b.storage.findMany("oauthToken", [])).toEqual([]);
+    expect(
+      await b.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: url }]),
+    ).toMatchObject({ authMethod: "none" });
+    expect(log.mock.calls).toEqual([[DROP_LOG, url, "private_key_jwt", "none"]]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(token);
+  });
+
+  it("keeps the refresh tokens of a document that keeps its method", async () => {
+    const { url, key, keyDoc } = await docs();
+    const { a, b, fb } = pair(url, keyDoc, keyDoc);
+    const token = await refreshTokenOf(a, url, key);
+    const bare = await b.auth.handle(refresh(token, { client_id: url }));
+    expect(await answer(bare)).toEqual({ status: 400, body: { error: "invalid_client" } });
+    expect(fb.calls).toEqual([url]);
+    const res = await b.auth.handle(
+      refresh(token, {
+        client_assertion_type: ASSERTION_TYPE,
+        client_assertion: await assertion(b, key, url),
+      }),
+    );
+    expect(await answer(res)).toEqual({ status: 200, body: null });
+  });
+
+  it("keeps the refresh tokens of a document that rises from none to private_key_jwt, and the refresh needs the assertion", async () => {
+    const { url, key, keyDoc, publicDoc } = await docs();
+    const { a, b } = pair(url, publicDoc, keyDoc);
+    const token = await refreshTokenOf(a, url, null);
+    const bare = await b.auth.handle(refresh(token, { client_id: url }));
+    expect(await answer(bare)).toEqual({ status: 400, body: { error: "invalid_client" } });
+    expect(await b.storage.findMany("oauthToken", [])).toHaveLength(1);
+    const res = await b.auth.handle(
+      refresh(token, {
+        client_assertion_type: ASSERTION_TYPE,
+        client_assertion: await assertion(b, key, url),
+      }),
+    );
+    expect(await answer(res)).toEqual({ status: 200, body: null });
+  });
+});

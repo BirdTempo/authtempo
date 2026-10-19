@@ -827,10 +827,9 @@ async function writeCimdRow(
     lastSeenAt: now,
     updatedAt: now,
   };
-  const where = [{ field: "id" as const, op: "eq" as const, value: url }];
   if (row) {
-    await config.storage.update("oauthClient", where, data);
-    return { ...row, ...data };
+    const refreshed = await refreshCimdRow(config, url, data);
+    if (refreshed) return refreshed;
   }
   try {
     return await config.storage.create("oauthClient", {
@@ -843,11 +842,43 @@ async function writeCimdRow(
     if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
     // A parallel request wrote the row first: this document's values win, and
     // the row comes back from storage, with the winner's `createdAt`.
-    await config.storage.update("oauthClient", where, data);
-    const winner = await config.storage.findOne("oauthClient", where);
+    const winner = await refreshCimdRow(config, url, data);
     if (!winner) throw e;
     return winner;
   }
+}
+
+/**
+ * Updates the row of a document in one transaction, or answers null when
+ * no row is there. Ruling 25 of plan 12e: a document that drops from a
+ * confidential method to `none` revokes every refresh family of the client.
+ * The revoke runs in the same write. A refresh token of that client was
+ * issued after a client auth. Without the revoke, the client id alone would
+ * refresh it (-02 section 8.2). The log names the client and the two
+ * methods, never a token.
+ */
+async function refreshCimdRow(
+  config: ResolvedConfig,
+  url: string,
+  data: Partial<Omit<OAuthClientRow, "id">> & Pick<OAuthClientRow, "authMethod">,
+): Promise<OAuthClientRow | null> {
+  const where = [{ field: "id" as const, op: "eq" as const, value: url }];
+  const done = await config.storage.transaction(async (tx) => {
+    const current = await tx.findOne("oauthClient", where);
+    if (!current) return null;
+    await tx.update("oauthClient", where, data);
+    const drops = current.authMethod !== "none" && data.authMethod === "none";
+    if (drops) await tx.delete("oauthToken", [{ field: "clientId", op: "eq", value: url }]);
+    return { row: { ...current, ...data }, from: drops ? current.authMethod : null };
+  });
+  if (done?.from)
+    console.error(
+      "authtempo: client metadata document dropped its client auth; refresh tokens revoked",
+      url,
+      done.from,
+      "none",
+    );
+  return done?.row ?? null;
 }
 
 async function cimdClient(
