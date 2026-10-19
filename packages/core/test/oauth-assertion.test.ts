@@ -379,7 +379,7 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
     expect(await answer(right)).toEqual(PASSED);
   });
 
-  it("refuses an exp more than 300 seconds out, a past exp, and an iat more than 300 seconds old", async () => {
+  it("refuses an exp more than 300 seconds out, a past exp, and an iat more than 300 seconds old or ahead", async () => {
     const key = await keyOf("ES256", "k1");
     const { h, s, clientId } = await inline(key);
     const now = nowS(h);
@@ -390,6 +390,8 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
       [{ exp: now - 30 }, REFUSED],
       [{ iat: now - 330 }, PASSED],
       [{ iat: now - 331 }, REFUSED],
+      [{ iat: now + 30 }, PASSED],
+      [{ iat: now + 31 }, REFUSED],
       [{ iat: null }, PASSED],
       [{ exp: null }, REFUSED],
     ] as const) {

@@ -159,8 +159,12 @@ function claimsHold(p: Record<string, unknown>, clientId: string, issuer: string
     return false;
   if (!isTime(p.exp) || p.exp <= now - CLOCK_SKEW_S) return false;
   if (p.exp > now + ASSERTION_MAX_LIFE_S + CLOCK_SKEW_S) return false;
-  if (p.iat !== undefined && (!isTime(p.iat) || p.iat < now - ASSERTION_MAX_LIFE_S - CLOCK_SKEW_S))
-    return false;
+  // An iat ahead of the clock names a time that has not come: the skew allows no more.
+  const iat = p.iat;
+  if (iat !== undefined) {
+    if (!isTime(iat) || iat < now - ASSERTION_MAX_LIFE_S - CLOCK_SKEW_S) return false;
+    if (iat > now + CLOCK_SKEW_S) return false;
+  }
   // RFC 7523 section 3 item 5: never before nbf (ruling 21).
   if (p.nbf !== undefined && (!isTime(p.nbf) || p.nbf > now + CLOCK_SKEW_S)) return false;
   return typeof p.jti === "string" && p.jti.length >= 1 && p.jti.length <= JTI_MAX;
