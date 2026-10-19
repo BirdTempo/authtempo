@@ -102,6 +102,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/totp/setup",
+      key: "POST /totp/setup",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -118,6 +119,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/totp/enable",
+      key: "POST /totp/enable",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -130,6 +132,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/totp/disable",
+      key: "POST /totp/disable",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -151,6 +154,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/totp/backup-codes",
+      key: "POST /totp/backup-codes",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -170,6 +174,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/totp",
+      key: "GET /totp",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -179,6 +184,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/totp/devices/revoke",
+      key: "POST /totp/devices/revoke",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -189,6 +195,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/totp/verify",
+      key: "POST /totp/verify",
       async handler(ctx) {
         const body = await readJson(ctx.request, verifyBody);
         if (!body.ok) return respond(body);
@@ -215,6 +222,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       // no cookie.
       method: "GET",
       path: "/totp/challenge",
+      key: "GET /totp/challenge",
       async handler(ctx) {
         const challenge = ctx.url.searchParams.get("challenge") ?? "";
         if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed("invalid_token");
@@ -257,6 +265,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/totp/challenge",
+      key: "POST /totp/challenge",
       async handler(ctx) {
         const body = await readBody(ctx.request, pageBody);
         if (!body.ok) return failed("invalid_token");

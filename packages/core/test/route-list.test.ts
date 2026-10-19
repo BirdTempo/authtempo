@@ -1,17 +1,41 @@
 import { describe, expect, it } from "vitest";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
-import { ROUTES, type RouteFeature } from "../src/http/route-list.js";
-import { coreRoutes } from "../src/http/routes/index.js";
+import { routeKeyOf } from "../src/http/route-key.js";
+import {
+  ROUTE_FEATURES,
+  ROUTER_CODES,
+  ROUTES,
+  type RouteEntry,
+  type RouteFeature,
+} from "../src/http/route-list.js";
+import { coreRouteModules, coreRoutes, type RouteModule } from "../src/http/routes/index.js";
 import { BASE, base, everyFeature, SOCIAL } from "./every-feature.js";
 
-/** A provider route as ROUTES writes it: one template for every provider, except Apple's POST callback. */
+/** The key of a mounted route as `ROUTES` writes it (plan 11g: `routeKeyOf`). */
 function templated(r: { method: string; path: string }): string {
-  const social = /^\/social\/([a-z][a-z0-9-]*)\/(start|callback|link)$/.exec(r.path);
-  // Apple's POST callback is its own entry; its link is not.
-  if (social && !(r.method === "POST" && social[1] === "apple" && social[2] === "callback"))
-    return `${r.method} /social/:provider/${social[2]}`;
-  return `${r.method} ${r.path}`;
+  return routeKeyOf(r.method, r.path);
 }
+
+/** The features that each route module serves (plan 11g). A route's entry must have one of them. */
+const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
+  sessions: ["session", "account"],
+  reauth: ["account", "passkey", "emailOtp"],
+  user: ["account", "emailOtp", "accountDelete"],
+  identities: ["account"],
+  "magic-link": ["magicLink"],
+  social: ["social"],
+  passkeys: ["passkey"],
+  password: ["password"],
+  totp: ["totp"],
+  "second-factor": ["totp"],
+  "email-otp": ["emailOtp", "emailOtpReset"],
+  handoff: ["handoff"],
+  organizations: ["organizations"],
+  tokens: ["tokens"],
+  jwt: ["jwtMint"],
+  operator: ["operator"],
+  oauth: ["oauth", "oauthRegistration"],
+};
 
 describe("ROUTES (plan 11a)", () => {
   it("the router serves exactly ROUTES when every feature is on", () => {
@@ -149,4 +173,78 @@ describe("ROUTES (plan 11a)", () => {
       expect([...from].filter((k) => !to.has(k))).toEqual([]);
     },
   );
+});
+
+describe("the entry fields and the module tie (plan 11g)", () => {
+  const entries = new Map(ROUTES.map((r) => [`${r.method} ${r.path}`, r]));
+
+  it("ties each mounted route to its entry by key", () => {
+    const modules = coreRouteModules(everyFeature());
+    expect(modules.length).toBe(Object.keys(MODULE_FEATURES).length);
+    const mounted = new Map<string, number>();
+    for (const { module, routes } of modules)
+      for (const route of routes) {
+        const where = `${module} ${route.method} ${route.path}`;
+        const key: string = routeKeyOf(route.method, route.path);
+        // A core route with no key is a failure, never a skip (ruling 3).
+        expect(route.key, `${where} has no key`).toBeDefined();
+        expect(route.key, `${where} has the key ${route.key}, not ${key}`).toBe(key);
+        expect(entries.has(key), `${where}: ROUTES has no entry ${key}`).toBe(true);
+        mounted.set(key, (mounted.get(key) ?? 0) + 1);
+      }
+    // Both ways: each entry is the key of exactly one route, or of one route per configured
+    // provider for a `:provider` template. Apple's callback is the POST entry, not the GET template.
+    const providers = everyFeature().social.providers.length;
+    for (const key of entries.keys()) {
+      const template = key.includes("/:provider/");
+      const want = !template ? 1 : key.endsWith("/callback") ? providers - 1 : providers;
+      const got = mounted.get(key) ?? 0;
+      expect(got, `${key} is the key of ${got} routes, not ${want}`).toBe(want);
+    }
+  });
+
+  it("tags each route with a feature of its module", () => {
+    for (const { module, routes } of coreRouteModules(everyFeature()))
+      for (const route of routes) {
+        const feature = route.key === undefined ? undefined : entries.get(route.key)?.feature;
+        expect(
+          feature !== undefined && MODULE_FEATURES[module].includes(feature),
+          `${route.key} has the feature ${feature}, not one of the module ${module}`,
+        ).toBe(true);
+      }
+  });
+
+  it("marks the cross-site form posts both ways", () => {
+    const crossSite = coreRoutes(everyFeature())
+      .filter((r) => r.allowCrossSiteForm === true)
+      .map((r) => routeKeyOf(r.method, r.path))
+      .sort();
+    const marked = ROUTES.filter((r) => "crossSiteForm" in r && r.crossSiteForm === true)
+      .map((r) => `${r.method} ${r.path}`)
+      .sort();
+    expect(crossSite).toEqual(marked);
+    expect(marked).toEqual(["POST /social/apple/callback"]);
+  });
+
+  it("names each code once and no router code", () => {
+    const router: readonly string[] = ROUTER_CODES;
+    // The entry type, not the literal tuple: a literal `codes` of `[]` has no member to read.
+    const listed: readonly RouteEntry[] = ROUTES;
+    for (const r of listed) {
+      const key = `${r.method} ${r.path}`;
+      expect(new Set(r.codes).size, key).toBe(r.codes.length);
+      expect(new Set(r.oauthCodes).size, key).toBe(r.oauthCodes.length);
+      expect(
+        r.codes.filter((c) => router.includes(c)),
+        key,
+      ).toEqual([]);
+      if (r.auth.length === 1 && r.auth[0] === "none")
+        expect(r.codes.includes("unauthorized"), key).toBe(false);
+    }
+  });
+
+  it("lists every feature once in ROUTE_FEATURES", () => {
+    expect(new Set(ROUTE_FEATURES).size).toBe(ROUTE_FEATURES.length);
+    expect(new Set(ROUTES.map((r) => r.feature))).toEqual(new Set(ROUTE_FEATURES));
+  });
 });

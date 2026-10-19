@@ -41,6 +41,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/otp/request",
+      key: "POST /otp/request",
       async handler(ctx) {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
@@ -56,6 +57,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/otp/verify",
+      key: "POST /otp/verify",
       async handler(ctx) {
         const body = await readJson(ctx.request, verifyBody);
         if (!body.ok) return respond(body);
@@ -78,6 +80,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/otp/reset/request",
+      key: "POST /otp/reset/request",
       async handler(ctx) {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
@@ -93,6 +96,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/otp/reset",
+      key: "POST /otp/reset",
       async handler(ctx) {
         const body = await readJson(ctx.request, resetBody);
         if (!body.ok) return respond(body);

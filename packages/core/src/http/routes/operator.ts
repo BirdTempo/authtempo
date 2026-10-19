@@ -85,6 +85,7 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
         {
           method: "POST",
           path: "/operator/keys/rotate",
+          key: "POST /operator/keys/rotate",
           async handler(ctx) {
             if (!(await config.limiter.allow(`operator:ip:${ipKey(ctx.ip)}`, OPERATOR_PER_IP)))
               return json({ error: "rate_limited" }, 429);

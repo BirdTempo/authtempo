@@ -21,6 +21,7 @@ import {
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail, type Result } from "../../result.js";
 import { json, readJson, respond } from "../json.js";
+import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 
 const id = z.string().min(1).max(64);
@@ -80,8 +81,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
   const unauthorized = () => json({ error: "unauthorized" }, 401);
 
   /** A POST route: session, a checked body, one engine call, the answer under `key` (or the value itself when `key` is null). */
-  const post = <T, V>(
-    path: string,
+  const post = <T, V, P extends RoutePath<"POST">>(
+    path: P,
     schema: z.ZodType<T>,
     key: string | null,
     run: (
@@ -92,6 +93,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
   ): Route => ({
     method: "POST",
     path,
+    key: `POST ${path}`,
     async handler(ctx) {
       const s = await withSession(ctx);
       if (!s) return unauthorized();
@@ -104,8 +106,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
   });
 
   /** A GET route that reads `?organizationId=`. */
-  const getByOrg = <V>(
-    path: string,
+  const getByOrg = <V, P extends RoutePath<"GET">>(
+    path: P,
     key: string,
     run: (
       user: NonNullable<Awaited<ReturnType<typeof withSession>>>["user"],
@@ -114,6 +116,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
   ): Route => ({
     method: "GET",
     path,
+    key: `GET ${path}`,
     async handler(ctx) {
       const s = await withSession(ctx);
       if (!s) return unauthorized();
@@ -130,6 +133,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       // The create answer carries two keys, so it builds its own body.
       method: "POST",
       path: "/organizations/create",
+      key: "POST /organizations/create",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -147,6 +151,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/organizations",
+      key: "GET /organizations",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -196,6 +201,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       // The link in the mail is the credential, so decline needs no session.
       method: "POST",
       path: "/organizations/invitations/decline",
+      key: "POST /organizations/invitations/decline",
       async handler(ctx) {
         const body = await readJson(ctx.request, tokenBody);
         if (!body.ok) return respond(body);

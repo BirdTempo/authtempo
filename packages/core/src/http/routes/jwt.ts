@@ -17,6 +17,7 @@ export function jwtRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/jwks",
+      key: "GET /jwks",
       async handler() {
         // A resource server caches it. Five minutes bound the wait for a key after a rotation;
         // a retired key stays in the set for 24 hours, so no token fails in that wait.
@@ -26,6 +27,7 @@ export function jwtRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/token",
+      key: "GET /token",
       async handler(ctx) {
         const s = await sessionFromRequest(config, ctx.request);
         if (!s) return json({ error: "unauthorized" }, 401);
@@ -41,6 +43,7 @@ export function jwtRoutes(config: ResolvedConfig): Route[] {
       // cookie: a resource server forwards the token it holds. No body.
       method: "POST",
       path: "/token/live",
+      key: "POST /token/live",
       async handler(ctx) {
         return respond(await checkSessionLive(config, readBearer(ctx.request)));
       },

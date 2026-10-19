@@ -51,6 +51,7 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/tokens",
+      key: "POST /tokens",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -75,6 +76,7 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/tokens",
+      key: "GET /tokens",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -85,6 +87,7 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/tokens/revoke",
+      key: "POST /tokens/revoke",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -101,6 +104,7 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
       // bearer is a person, and this route answers 401 to it.
       method: "GET",
       path: "/tokens/current",
+      key: "GET /tokens/current",
       async handler(ctx) {
         const bearer = readBearer(ctx.request);
         const t = bearer?.startsWith(API_TOKEN_PREFIX)

@@ -52,6 +52,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/second-factor/passkey/enable",
+      key: "POST /second-factor/passkey/enable",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -68,6 +69,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/second-factor/passkey/options",
+      key: "POST /second-factor/passkey/options",
       async handler(ctx) {
         const body = await readJson(ctx.request, challengeBody);
         if (!body.ok) return respond(body);
@@ -79,6 +81,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/second-factor/disable",
+      key: "POST /second-factor/disable",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -107,6 +110,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/second-factor/email/enable",
+      key: "POST /second-factor/email/enable",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -122,6 +126,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/second-factor/email/send",
+      key: "POST /second-factor/email/send",
       async handler(ctx) {
         const body = await readJson(ctx.request, challengeBody);
         if (!body.ok) return respond(body);

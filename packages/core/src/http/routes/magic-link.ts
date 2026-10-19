@@ -35,6 +35,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/magic-link/request",
+      key: "POST /magic-link/request",
       async handler(ctx) {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
@@ -54,6 +55,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
       // button, and the browser posts the token to the route below.
       method: "GET",
       path: "/magic-link/verify",
+      key: "GET /magic-link/verify",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!MAGIC_LINK_TOKEN_RE.test(token)) return failed("invalid_token");
@@ -71,6 +73,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/magic-link/verify",
+      key: "POST /magic-link/verify",
       async handler(ctx) {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, verifyBody);

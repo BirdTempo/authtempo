@@ -97,6 +97,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/password/sign-up",
+      key: "POST /password/sign-up",
       async handler(ctx) {
         const body = await readJson(ctx.request, signUpBody);
         if (!body.ok) return respond(body);
@@ -120,6 +121,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/password/sign-in",
+      key: "POST /password/sign-in",
       async handler(ctx) {
         const body = await readJson(ctx.request, signInBody);
         if (!body.ok) return respond(body);
@@ -143,6 +145,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       // read, no limiter call, no cookie. The person presses the button.
       method: "GET",
       path: "/password/verify",
+      key: "GET /password/verify",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!PASSWORD_VERIFY_TOKEN_RE.test(token)) return failed("invalid_token");
@@ -154,6 +157,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/password/verify",
+      key: "POST /password/verify",
       async handler(ctx) {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, tokenBody);
@@ -174,6 +178,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       // A new verify link (plan 8b). No session: the person may have none.
       method: "POST",
       path: "/password/verify/resend",
+      key: "POST /password/verify/resend",
       async handler(ctx) {
         const body = await readJson(ctx.request, resendBody);
         if (!body.ok) return respond(body);
@@ -185,6 +190,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/password/reset/request",
+      key: "POST /password/reset/request",
       async handler(ctx) {
         const body = await readJson(ctx.request, resetRequestBody);
         if (!body.ok) return respond(body);
@@ -202,6 +208,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       // A mail scanner fetches this too. No storage read, no cookie.
       method: "GET",
       path: "/password/reset",
+      key: "GET /password/reset",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed("invalid_token");
@@ -222,6 +229,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/password/reset",
+      key: "POST /password/reset",
       async handler(ctx) {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, resetBody);
@@ -258,6 +266,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/password/change",
+      key: "POST /password/change",
       async handler(ctx) {
         const resolved = await sessionFromRequest(config, ctx.request);
         if (!resolved) return json({ error: "unauthorized" }, 401);

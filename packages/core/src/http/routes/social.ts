@@ -56,6 +56,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: `/social/${provider.name}/start`,
+      key: "GET /social/:provider/start",
       async handler(ctx) {
         const r = await startSocial(config, {
           provider: provider.name,
@@ -75,6 +76,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
       // A POST, so the router's Origin rule applies: a link changes the account (plan 12a).
       method: "POST",
       path: `/social/${provider.name}/link`,
+      key: "POST /social/:provider/link",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -107,6 +109,11 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
     {
       method: provider.callbackMethod,
       path: `/social/${provider.name}/callback`,
+      // Apple's POST callback is its own entry of ROUTES (plan 11a).
+      key:
+        provider.callbackMethod === "POST"
+          ? "POST /social/apple/callback"
+          : "GET /social/:provider/callback",
       // Apple posts from appleid.apple.com. The state row and the binding
       // cookie tie that post to the browser that started the flow.
       allowCrossSiteForm: provider.callbackMethod === "POST",

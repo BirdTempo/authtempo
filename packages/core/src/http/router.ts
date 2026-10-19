@@ -5,7 +5,7 @@ import { ERRORS } from "../errors.js";
 import { appErrorName } from "../primitives/app-error.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { json } from "./json.js";
-import type { RouterCode } from "./route-list.js";
+import type { RouteKey, RouterCode } from "./route-list.js";
 
 export interface RouteContext {
   request: Request;
@@ -27,6 +27,13 @@ export interface PreflightContext {
 export interface Route {
   method: "GET" | "POST";
   path: string;
+  /**
+   * The entry of ROUTES that this route serves (plan 11g). The route list
+   * test holds it to the method and the path. Optional on the type, so a
+   * test stub with a path outside ROUTES needs none (ruling 3); every core
+   * route sets it, and the route list test refuses a core route without it.
+   */
+  key?: RouteKey;
   /**
    * Skip the Origin check on this POST. Only for a callback that a provider
    * posts cross-site, such as Apple's `response_mode=form_post`. The route

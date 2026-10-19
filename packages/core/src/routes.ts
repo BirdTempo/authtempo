@@ -7,11 +7,16 @@
 
 export { AUTH_ERROR_PARAM } from "./http/redirect.js";
 export {
+  type AuthForm,
+  ROUTE_FEATURES,
+  ROUTER_CODES,
   ROUTES,
   type RouteEntry,
   type RouteFeature,
+  type RouteKey,
   type RouteLiteral,
   type RouteMethod,
   type RoutePath,
+  type RouterCode,
 } from "./http/route-list.js";
 export { PROVIDER_NAME_RE } from "./social/provider.js";

@@ -58,6 +58,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/passkey/register/options",
+      key: "POST /passkey/register/options",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -71,6 +72,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/passkey/register/verify",
+      key: "POST /passkey/register/verify",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -87,6 +89,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/passkey/authenticate/options",
+      key: "POST /passkey/authenticate/options",
       async handler(ctx) {
         return respond(await passkeyAuthenticationOptions(config, { ip: ctx.ip }));
       },
@@ -94,6 +97,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/passkey/authenticate/verify",
+      key: "POST /passkey/authenticate/verify",
       async handler(ctx) {
         const body = await readJson(ctx.request, authenticateVerifyBody);
         if (!body.ok) return respond(body);
@@ -121,6 +125,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/passkeys",
+      key: "GET /passkeys",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -131,6 +136,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/passkeys/delete",
+      key: "POST /passkeys/delete",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
@@ -149,6 +155,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/passkeys/rename",
+      key: "POST /passkeys/rename",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();

@@ -11,6 +11,7 @@ sources:
   - packages/core/src/operator-secret.ts
   - packages/core/src/secrets-entry.ts
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
+  - docs/superpowers/plans/2026-10-14-11g-openapi.md
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.
@@ -163,11 +164,15 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | Export | What it is |
 | --- | --- |
 | `ROUTES` | Every route that core can serve, with literal types. [Routes](/docs/reference/routes/) holds each route. |
-| `RouteEntry` | One row of `ROUTES`: `method`, `path`, and `feature`. |
+| `RouteEntry` | One row of `ROUTES`: `method`, `path`, `feature`, `auth`, `codes`, `oauthCodes`, and `crossSiteForm` on the one cross-site form post. |
 | `RouteFeature` | The config part that turns a route on. |
+| `ROUTE_FEATURES` | Every feature once, as a tuple. `RouteFeature` is one of its members. |
+| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `sessionJwt`, `accessToken`, or `operator`. |
 | `RouteMethod` | `GET` or `POST`. |
 | `RouteLiteral` | One row of `ROUTES` with its literal method and path. |
 | `RoutePath` | A path that `ROUTES` holds for a method. An SDK types its paths with it, so a path that core does not serve fails the compile. |
+| `RouteKey` | `"<METHOD> <path>"` of one row of `ROUTES`. A key that `ROUTES` does not hold fails the compile. |
+| `ROUTER_CODES`, `RouterCode` | The codes that the router answers for every route: `not_found`, `origin_not_trusted`, and `internal`. An entry's `codes` never repeats them. |
 | `PROVIDER_NAME_RE` | The name rule of `:provider`. |
 | `AUTH_ERROR_PARAM` | The query parameter of a browser flow failure, `auth_error`. |
 

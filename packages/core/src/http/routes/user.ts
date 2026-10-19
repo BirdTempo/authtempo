@@ -52,6 +52,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/user/update",
+      key: "POST /user/update",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -66,6 +67,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/user/change-email",
+      key: "POST /user/change-email",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -82,6 +84,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
       // nothing: no storage read, no limiter call, no cookie.
       method: "GET",
       path: "/user/change-email/confirm",
+      key: "GET /user/change-email/confirm",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!EMAIL_CHANGE_TOKEN_RE.test(token)) return failed("invalid_token");
@@ -99,6 +102,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/user/change-email/confirm",
+      key: "POST /user/change-email/confirm",
       async handler(ctx) {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, confirmBody);
@@ -119,6 +123,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
     routes.push({
       method: "POST",
       path: "/user/change-email/verify",
+      key: "POST /user/change-email/verify",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -143,6 +148,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
       {
         method: "POST",
         path: "/user/delete",
+        key: "POST /user/delete",
         async handler(ctx) {
           const s = await withSession(config, ctx.request);
           if (!s) return unauthorized();
@@ -165,6 +171,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
         // nothing: no storage read, no limiter call, no cookie.
         method: "GET",
         path: "/user/delete/confirm",
+        key: "GET /user/delete/confirm",
         async handler(ctx) {
           const token = ctx.url.searchParams.get("token") ?? "";
           if (!DELETE_TOKEN_RE.test(token)) return failed("invalid_token");
@@ -182,6 +189,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
       {
         method: "POST",
         path: "/user/delete/confirm",
+        key: "POST /user/delete/confirm",
         async handler(ctx) {
           const jsonCaller = isJsonRequest(ctx.request);
           const s = await withSession(config, ctx.request);

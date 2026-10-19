@@ -85,6 +85,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     routes.push({
       method: "POST",
       path: "/oauth/register",
+      key: "POST /oauth/register",
       async handler(ctx) {
         const metadata = await readObject(ctx.request);
         if (!metadata) return json({ error: "invalid_client_metadata" }, 400);
@@ -121,6 +122,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/oauth/authorize",
+      key: "GET /oauth/authorize",
       async handler(ctx) {
         const session = await sessionFromRequest(config, ctx.request);
         return stepResponse(
@@ -131,6 +133,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/oauth/authorize",
+      key: "POST /oauth/authorize",
       async handler(ctx) {
         // The consent form posts from this origin only. The router admits a
         // POST with no Origin, as from a script; a consent never comes from one.
@@ -154,6 +157,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       // The login step of the authorize request: core's sign-in page, landing back on it.
       method: "GET",
       path: "/oauth/sign-in",
+      key: "GET /oauth/sign-in",
       async handler(ctx) {
         const next = ctx.url.searchParams.get("next") ?? "";
         if (!next.startsWith(`${config.basePath}/oauth/authorize?`) || safeNext(next) !== next)
@@ -233,6 +237,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/oauth/token",
+      key: "POST /oauth/token",
       // A foreign origin reaches the handler, which admits only the named client's own origins (plan 11d).
       clientOrigin: true,
       async preflight({ url, origin, request, ip }) {
@@ -278,6 +283,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/oauth/revoke",
+      key: "POST /oauth/revoke",
       async handler(ctx) {
         const form = await formParams(ctx.request);
         if (!form) return oauthJson(oauthFail("invalid_request"));
@@ -289,8 +295,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         return r.ok ? json({}) : oauthJson(r);
       },
     },
-    { method: "GET", path: "/oauth/userinfo", handler: userinfo },
-    { method: "POST", path: "/oauth/userinfo", handler: userinfo },
+    { method: "GET", path: "/oauth/userinfo", key: "GET /oauth/userinfo", handler: userinfo },
+    { method: "POST", path: "/oauth/userinfo", key: "POST /oauth/userinfo", handler: userinfo },
   );
   // The grants of the signed-in person (plan 9g final fix wave, review I-1).
   // A session only, through `sessionFromRequest`: a `tk_` bearer and an
@@ -309,6 +315,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/oauth/grants",
+      key: "GET /oauth/grants",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return json({ error: "unauthorized" }, 401);
@@ -319,6 +326,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/oauth/grants/revoke",
+      key: "POST /oauth/grants/revoke",
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return json({ error: "unauthorized" }, 401);
@@ -337,8 +345,18 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   const metadata = async (): Promise<Response> =>
     json(authorizationServerMetadata(config), 200, PUBLIC_METADATA_HEADERS);
   routes.push(
-    { method: "GET", path: "/.well-known/oauth-authorization-server", handler: metadata },
-    { method: "GET", path: "/.well-known/openid-configuration", handler: metadata },
+    {
+      method: "GET",
+      path: "/.well-known/oauth-authorization-server",
+      key: "GET /.well-known/oauth-authorization-server",
+      handler: metadata,
+    },
+    {
+      method: "GET",
+      path: "/.well-known/openid-configuration",
+      key: "GET /.well-known/openid-configuration",
+      handler: metadata,
+    },
   );
   return routes;
 }

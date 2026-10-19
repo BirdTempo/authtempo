@@ -37,6 +37,7 @@ export function reauthRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/reauth",
+      key: "POST /reauth",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -56,6 +57,7 @@ export function reauthRoutes(config: ResolvedConfig): Route[] {
     routes.push({
       method: "POST",
       path: "/reauth/passkey/options",
+      key: "POST /reauth/passkey/options",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -69,6 +71,7 @@ export function reauthRoutes(config: ResolvedConfig): Route[] {
     routes.push({
       method: "POST",
       path: "/reauth/email",
+      key: "POST /reauth/email",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();

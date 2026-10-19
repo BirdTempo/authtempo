@@ -14,6 +14,7 @@ export function identityRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/identities",
+      key: "GET /identities",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -26,6 +27,7 @@ export function identityRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/identities/unlink",
+      key: "POST /identities/unlink",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();

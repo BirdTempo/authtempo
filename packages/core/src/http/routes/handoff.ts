@@ -40,6 +40,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/handoff/start",
+      key: "GET /handoff/start",
       async handler(ctx) {
         const r = await startHandoff(config, {
           challenge: ctx.url.searchParams.get("challenge") ?? "",
@@ -56,6 +57,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/handoff/continue",
+      key: "GET /handoff/continue",
       async handler(ctx) {
         const handoffId = ctx.url.searchParams.get("h") ?? "";
         // Never render a page for an id that is spent, expired, or unknown.
@@ -71,6 +73,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/handoff/continue",
+      key: "POST /handoff/continue",
       async handler(ctx) {
         // Stricter than the router: the confirm page posts from baseURL only. A trusted app origin, or a sibling subdomain, must not be able to post this form, even with a SameSite=None cookie.
         const origin = ctx.request.headers.get("origin");
@@ -98,6 +101,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/handoff/redeem",
+      key: "POST /handoff/redeem",
       async handler(ctx) {
         const body = await readJson(ctx.request, redeemBody);
         if (!body.ok) return respond(body);

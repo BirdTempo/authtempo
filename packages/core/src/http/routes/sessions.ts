@@ -75,17 +75,20 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/session",
+      key: "GET /session",
       handler: (ctx) => sessionAnswer(config, ctx.request),
     },
     {
       // On with the key on or off (plan 12a): a client may post it in any deployment.
       method: "POST",
       path: "/session/refresh",
+      key: "POST /session/refresh",
       handler: (ctx) => sessionAnswer(config, ctx.request),
     },
     {
       method: "POST",
       path: "/sign-out",
+      key: "POST /sign-out",
       async handler(ctx) {
         const token = readSessionToken(config, ctx.request);
         if (token) await destroySession(config, token);
@@ -95,6 +98,7 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
     {
       method: "GET",
       path: "/sessions",
+      key: "GET /sessions",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -105,6 +109,7 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/sessions/revoke",
+      key: "POST /sessions/revoke",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
@@ -127,6 +132,7 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
     {
       method: "POST",
       path: "/sessions/revoke-others",
+      key: "POST /sessions/revoke-others",
       async handler(ctx) {
         const s = await withSession(config, ctx.request);
         if (!s) return unauthorized();
