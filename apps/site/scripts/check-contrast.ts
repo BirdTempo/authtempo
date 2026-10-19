@@ -27,7 +27,9 @@ export function contrastRatio(a: string, b: string): number {
  * block. Spec 4 names the accent for the focus ring, and spec 14 puts the
  * ring on every interactive element. A card sits on the surface, and the
  * copy button of a code block sits on the code color. So the accent is a
- * non-text pair on the paper, on the surface, and on the code color.
+ * non-text pair on the paper, on the surface, and on the code color. The
+ * scroll thumb of a code block is the mute, and its hover is the code ink.
+ * So the mute is a non-text pair on the code color.
  */
 export const CONTRAST_PAIRS: readonly {
   fg: ColorToken;
@@ -44,6 +46,7 @@ export const CONTRAST_PAIRS: readonly {
   { fg: "--at-accent", bg: "--at-surface", kind: "non-text" },
   { fg: "--at-code-ink", bg: "--at-code", kind: "text" },
   { fg: "--at-accent", bg: "--at-code", kind: "non-text" },
+  { fg: "--at-mute", bg: "--at-code", kind: "non-text" },
 ];
 /** WCAG 2.1 SC 1.4.3 (text, 4.5:1) and SC 1.4.11 (non-text, 3:1). */
 export const FLOOR = { text: 4.5, "non-text": 3 } as const;

@@ -49,10 +49,40 @@ describe("checkTokens", () => {
   });
 
   it("fails tokens.css without the focus ring", () => {
-    const broken = css.replace("outline-offset: 2px;", "");
+    const broken = css.replace("outline-offset: var(--at-ring-offset);", "");
+    expect(broken).not.toBe(css);
     expect(checkTokens({ css: broken, sources: [page], favicon: null }).failures).toEqual([
-      "tokens.css lacks :focus-visible { outline: 2px solid var(--at-accent); outline-offset: 2px; }",
+      "tokens.css lacks :focus-visible { outline: var(--at-ring); outline-offset: var(--at-ring-offset); }",
     ]);
+  });
+
+  it("fails a ring token that is not the ring of brand spec 14", () => {
+    const broken = css.replace("--at-ring-offset: 2px;", "--at-ring-offset: 3px;");
+    expect(broken).not.toBe(css);
+    expect(checkTokens({ css: broken, sources: [page], favicon: null }).failures).toEqual([
+      "tokens.css lacks :root { --at-ring: 2px solid var(--at-accent); --at-ring-offset: 2px; }",
+    ]);
+  });
+
+  it.each([
+    [
+      "outline: 2px solid var(--at-accent)",
+      "outline to 2px solid var(--at-accent); the focus ring reads var(--at-ring)",
+    ],
+    ["outline-offset: 2px", "outline-offset to 2px; the focus ring reads var(--at-ring-offset)"],
+  ])("fails a source ring that does not read the ring tokens: %s", (decl, message) => {
+    const source = { path: "src/x.astro", text: `<style>a:focus-visible { ${decl}; }</style>` };
+    expect(checkTokens({ css, sources: [source], favicon: null }).failures).toEqual([
+      `src/x.astro sets ${message}`,
+    ]);
+  });
+
+  it("passes a source ring that reads the ring tokens", () => {
+    const source = {
+      path: "src/x.astro",
+      text: "<style>a:focus-visible { outline: var(--at-ring); outline-offset: var(--at-ring-offset); }</style>",
+    };
+    expect(checkTokens({ css, sources: [source], favicon: null }).failures).toEqual([]);
   });
 
   it("fails a token that tokens.css does not define", () => {
@@ -215,6 +245,18 @@ describe("checkTokens", () => {
     expect(broken).not.toBe(favicon);
     expect(checkTokens({ css, sources: [page], favicon: broken }).failures).toEqual([
       "public/favicon.svg lacks @media (prefers-color-scheme: dark) { rect { fill: #e8e6e1; } }",
+    ]);
+  });
+
+  it("fails a second dark rect rule of the favicon that is not the dark ink", () => {
+    const favicon = readFileSync(`${SITE}public/favicon.svg`, "utf8");
+    const broken = favicon.replace(
+      "</style>",
+      "  @media (prefers-color-scheme: dark) { rect { fill: #15161a; } }\n  </style>",
+    );
+    expect(broken).not.toBe(favicon);
+    expect(checkTokens({ css, sources: [page], favicon: broken }).failures).toEqual([
+      "public/favicon.svg sets a dark rect fill to #15161a; each one is #e8e6e1",
     ]);
   });
 });

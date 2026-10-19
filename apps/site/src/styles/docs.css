@@ -1,7 +1,7 @@
 /*
  * Rules for Starlight's own elements in the brand theme (brand spec 11). The
  * colors come from tokens.css only. The selectors are the custom elements
- * and classes of Starlight 0.42.6 (TableOfContents, PageFrame).
+ * and classes of Starlight 0.42.6 (TableOfContents).
  */
 
 /* The table of contents marks the active heading with the 2 px accent rail. */

@@ -17,7 +17,7 @@ describe("checkContrast", () => {
   it("passes every pair of the site's tokens in both schemes", () => {
     const r = checkContrast(css);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ pairs: 20, lowest_text: 4.61, lowest_non_text: 3.68 });
+    expect(r.counts).toEqual({ pairs: 22, lowest_text: 4.61, lowest_non_text: 3.59 });
   });
 
   it("holds the accent on the surface and on the code color as focus-ring pairs", () => {
@@ -27,6 +27,10 @@ describe("checkContrast", () => {
       kind: "non-text",
     });
     expect(CONTRAST_PAIRS).toContainEqual({ fg: "--at-accent", bg: "--at-code", kind: "non-text" });
+  });
+
+  it("holds the mute on the code color as the pair of the code scroll thumb", () => {
+    expect(CONTRAST_PAIRS).toContainEqual({ fg: "--at-mute", bg: "--at-code", kind: "non-text" });
   });
 
   it("names an absent token as no value", () => {

@@ -8,13 +8,13 @@ export const HOME_PROSE_PATH =
   "site/home (src/data/home.ts, src/data/features.ts, src/data/site.ts)";
 
 /** The two values of SITE that are a URL or a path, not prose. */
-const SITE_ADDRESSES: readonly string[] = ["origin", "docs"];
+const SITE_ADDRESSES: readonly (keyof typeof SITE)[] = ["origin", "docs"];
 
 /** Every other value of SITE: the labels of the root layout, so a new label joins the page. */
 export function siteLabels(): string[] {
-  return Object.entries(SITE)
-    .filter(([key]) => !SITE_ADDRESSES.includes(key))
-    .map(([, value]) => value);
+  return (Object.keys(SITE) as (keyof typeof SITE)[])
+    .filter((key) => !SITE_ADDRESSES.includes(key))
+    .map((key) => SITE[key]);
 }
 
 /**

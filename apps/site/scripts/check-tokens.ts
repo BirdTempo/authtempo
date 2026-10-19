@@ -34,6 +34,14 @@ const LITERAL = new RegExp(`(?<=[:"'\`(,=]\\s*)${HEX}(?!\\s*\\{)|${COLOR_FUNCTIO
 const FAVICON_PAINT = /\b(fill|stroke)\s*(?::\s*|=\s*")([^;"}]+)/g;
 /** A declaration that removes the focus ring, in any of its forms (brand spec 14). */
 const NO_OUTLINE = /outline(?:-style|-width|-color)?\s*:\s*(?:none|0(?:px)?|transparent)\b/;
+/** An outline or an outline offset declaration with its value. */
+const OUTLINE = /\boutline(-offset)?\s*:\s*([^;}]+)/g;
+/**
+ * The focus ring of brand spec 14, as the two tokens of tokens.css. Every
+ * ring of the site reads them, so a change in tokens.css reaches each ring.
+ */
+const RING = "2px solid var(--at-accent)";
+const RING_OFFSET = "2px";
 
 /**
  * The text that can hold a color. It is the whole text of a .css, .ts, .js,
@@ -54,7 +62,8 @@ function colorText(f: SourceFile): string {
  * Brand spec 4 and 14. One token file holds every color. The light block
  * and the two dark blocks define the same color tokens. Each Starlight color
  * of the list maps to a token, and the map sets no other Starlight color.
- * The focus ring is in tokens.css, and no source removes it. No source
+ * The focus ring is two tokens of tokens.css. :focus-visible and each
+ * outline of a source read them, and no source removes the ring. No source
  * outside tokens.css holds a literal color. No source uses a token that
  * tokens.css does not define. The favicon is a standalone file: its colors
  * must be the ink and the accent.
@@ -92,8 +101,8 @@ export function checkTokens(input: {
     for (const name of block.keys())
       if (!COLORS.includes(name))
         r.failures.push(`the ${label} block sets ${name}, which is not a color token`);
-  // The light block also holds the scheme-free tokens of later tasks, so the
-  // rule reads the value's shape: a color value names a color token, or
+  // The light block also holds the scheme-free tokens of later tasks. So the
+  // rule reads the shape of the value. A color value names a color token, or
   // it is a shadow of the list above.
   for (const [name, value] of t.light) {
     if (!name.startsWith("--at-") || COLORS.includes(name) || !COLOR_VALUE.test(value)) continue;
@@ -115,11 +124,18 @@ export function checkTokens(input: {
       r.failures.push(`${name} is ${value}; a Starlight color maps to var(<a color token>)`);
     else r.counts.starlight = (r.counts.starlight ?? 0) + 1;
   }
+  if (t.light.get("--at-ring") !== RING || t.light.get("--at-ring-offset") !== RING_OFFSET)
+    r.failures.push(
+      `tokens.css lacks :root { --at-ring: ${RING}; --at-ring-offset: ${RING_OFFSET}; }`,
+    );
   const focus = cssRules(input.css).find((x) => x.at === "" && x.selector === ":focus-visible");
   const fd = focus ? declarations(focus.body) : new Map<string, string>();
-  if (fd.get("outline") !== "2px solid var(--at-accent)" || fd.get("outline-offset") !== "2px")
+  if (
+    fd.get("outline") !== "var(--at-ring)" ||
+    fd.get("outline-offset") !== "var(--at-ring-offset)"
+  )
     r.failures.push(
-      "tokens.css lacks :focus-visible { outline: 2px solid var(--at-accent); outline-offset: 2px; }",
+      "tokens.css lacks :focus-visible { outline: var(--at-ring); outline-offset: var(--at-ring-offset); }",
     );
   if (NO_OUTLINE.test(input.css)) r.failures.push("tokens.css removes the focus outline");
   for (const f of input.sources) {
@@ -128,6 +144,14 @@ export function checkTokens(input: {
     if (literal)
       r.failures.push(`${f.path} holds the literal color ${literal[0]}; use a token of tokens.css`);
     if (NO_OUTLINE.test(text)) r.failures.push(`${f.path} removes the focus outline`);
+    for (const m of text.matchAll(OUTLINE)) {
+      const value = (m[2] ?? "").trim();
+      const want = m[1] ? "var(--at-ring-offset)" : "var(--at-ring)";
+      if (NO_OUTLINE.test(m[0]) || value === want) continue;
+      r.failures.push(
+        `${f.path} sets outline${m[1] ?? ""} to ${value}; the focus ring reads ${want}`,
+      );
+    }
   }
   for (const f of [{ path: "src/styles/tokens.css", text: input.css }, ...input.sources])
     for (const name of new Set([...f.text.matchAll(/var\((--at-[a-z0-9-]+)/g)].map((m) => m[1])))
@@ -158,18 +182,21 @@ export function checkTokens(input: {
         r.failures.push(
           `public/favicon.svg holds ${m[0]}, which is not the ink or the accent of tokens.css`,
         );
-    // Brand spec 3: a dark-scheme rule gives the bars the dark ink.
+    // Brand spec 3: a dark-scheme rule gives the bars the dark ink. Every
+    // rect rule of the dark block holds it, because a later rule wins in CSS.
     const style = [...input.favicon.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)]
       .map((m) => m[1] ?? "")
       .join("\n");
-    const dark = cssRules(style).some(
-      (x) =>
-        x.at === DARK_MEDIA &&
-        x.selector === "rect" &&
-        declarations(x.body).get("fill") === darkInk,
-    );
-    if (!dark)
+    const dark = cssRules(style).filter((x) => x.at === DARK_MEDIA && x.selector === "rect");
+    if (dark.length === 0)
       r.failures.push(`public/favicon.svg lacks ${DARK_MEDIA} { rect { fill: ${darkInk}; } }`);
+    for (const x of dark) {
+      const fill = declarations(x.body).get("fill");
+      if (fill !== darkInk)
+        r.failures.push(
+          `public/favicon.svg sets a dark rect fill to ${fill ?? "no value"}; each one is ${darkInk}`,
+        );
+    }
   }
   return requireCounts(r, ["colors", "starlight", "sources"]);
 }

@@ -3,12 +3,11 @@ import { ROUTES } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
 import { walk } from "../scripts/lib/files.ts";
 import { pageCss } from "../scripts/lib/html.ts";
-import { DIST, REPO, SITE } from "../scripts/lib/paths.ts";
+import { DIST, SITE } from "../scripts/lib/paths.ts";
 import { parseTokens } from "../scripts/lib/tokens.ts";
 import { FEATURES, featureOrder } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
 import { SIDEBAR_ICONS } from "../src/data/sidebar-icons.ts";
-import { vendorHosts } from "../src/data/vendors.ts";
 
 // `pnpm test` runs `astro build` before vitest, so dist is newer than the change.
 const html = walk(DIST, (p) => p.endsWith(".html")).map((p) => p.slice(DIST.length));
@@ -220,16 +219,12 @@ describe("the home page (brand spec 9)", () => {
   });
 
   it("shows the route count and the vendor count from code", () => {
-    const core = new Map(
-      walk(`${REPO}packages/core/src/`, (p) => p.endsWith(".ts")).map((p) => [
-        p.slice(REPO.length),
-        readFileSync(p, "utf8"),
-      ]),
-    );
     const numbers = [...page("index.html").matchAll(/<dd\b[^>]*>(\d+)<\/dd>/g)].map((m) =>
       Number(m[1]),
     );
-    expect(numbers).toEqual([ROUTES.length, vendorHosts(core).length]);
+    // The vendor count is typed here. home-data.test.ts holds the scan of core to the same list.
+    const vendors: readonly string[] = [];
+    expect(numbers).toEqual([ROUTES.length, vendors.length]);
   });
 
   it("shows the one-call code block of the tested sample", () => {
@@ -297,7 +292,7 @@ describe("the docs theme (brand spec 11)", () => {
 
   it("rings the theme select when its select has focus", () => {
     expect(css("docs/index.html")).toMatch(
-      /\.at-theme-select[^{]*:has\(select:focus-visible\)\{outline:2pxsolidvar\(--at-accent\)/,
+      /\.at-theme-select[^{]*:has\(select:focus-visible\)\{outline:var\(--at-ring\);outline-offset:var\(--at-ring-offset\)[;}]/,
     );
   });
 
@@ -357,7 +352,21 @@ describe("the docs theme (brand spec 11)", () => {
       ["--ec-frm-edTabBarBrdBtmCol", "var(--at-line)"],
       ["--ec-brdWd", "0px"],
       ["--ec-frm-frameBoxShdCssVal", "none"],
+      ["--ec-sbThumbCol", "var(--at-mute)"],
+      ["--ec-sbThumbHoverCol", "var(--at-code-ink)"],
+      ["--ec-focusBrd", "var(--at-accent)"],
+      ["--ec-codeSelBg", "var(--at-accent)"],
+      ["--ec-uiSelBg", "var(--at-code-ink)"],
+      ["--ec-uiSelFg", "var(--at-code)"],
+      ["--ec-frm-edActTabFg", "var(--at-code-ink)"],
+      ["--ec-frm-trmTtbFg", "var(--at-code-ink)"],
+      ["--ec-frm-trmTtbDotsFg", "var(--at-code-ink)"],
+      ["--ec-frm-tooltipSuccessBg", "var(--at-code-ink)"],
+      ["--ec-frm-tooltipSuccessFg", "var(--at-code)"],
     ] as const)
       expect({ name, values: value(name) }).toEqual({ name, values: [want] });
+    // No rule reads the selection colors. A rule that does needs a contrast check first.
+    for (const name of ["--ec-codeSelBg", "--ec-uiSelBg", "--ec-uiSelFg"])
+      expect({ name, read: codeCss.includes(`var(${name})`) }).toEqual({ name, read: false });
   });
 });

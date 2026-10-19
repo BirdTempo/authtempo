@@ -24,5 +24,5 @@ import Icon from "../Icon.astro";
   .at-theme-select :global(select) { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; margin: 0; opacity: 0; cursor: pointer; }
   .at-theme-select :global(svg.label-icon), .at-theme-select :global(svg.caret) { display: none; }
   /* The select is not seen, so the ring goes on the control (brand spec 14). */
-  .at-theme-select:has(select:focus-visible) { outline: 2px solid var(--at-accent); outline-offset: 2px; }
+  .at-theme-select:has(select:focus-visible) { outline: var(--at-ring); outline-offset: var(--at-ring-offset); }
 </style>

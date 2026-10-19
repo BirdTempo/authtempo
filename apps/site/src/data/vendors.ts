@@ -1,3 +1,5 @@
+import { SITE } from "./site.ts";
+
 /** The reserved names of RFC 2606 and RFC 6761. No party serves them. */
 const RESERVED = /(^|\.)example\.(com|net|org)$|\.(example|invalid|localhost|test)$|^localhost$/;
 
@@ -7,7 +9,8 @@ const RESERVED = /(^|\.)example\.(com|net|org)$|\.(example|invalid|localhost|tes
  * an operator, an open bracket, a comma, or a keyword. The keywords are return,
  * typeof, case, in, of, throw, yield, await, and void. Two limits remain. A regex literal
  * after a close bracket reads as a division. A backtick inside a placeholder of
- * a template literal ends the literal early.
+ * a template literal ends the literal early. Either one can make a URL look like
+ * a comment, so stripComments throws on a comment that starts right after a scheme.
  */
 const TOKEN =
   /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\[\s\S]|[^`\\])*`|(?<=(?:^|[=([,:;!&|?{}+\-*%<>~^]|\b(?:return|typeof|case|in|of|throw|yield|await|void))[ \t]*)\/(?![*/])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n[])+\/[dgimsuyv]*)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/gm;
@@ -23,12 +26,23 @@ const HOST = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.?$/;
 
 const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 
-/** Removes the comments of a TypeScript source and keeps its string literals. */
-export function stripComments(text: string): string {
-  return text.replace(
-    TOKEN,
-    (all, literal: string | undefined) => literal ?? (all.startsWith("/*") ? " " : ""),
-  );
+/** A scheme and its colon at the end of a text, where a line comment cannot start. */
+const SCHEME_END = /\b(?:https?|wss?):$/i;
+
+/**
+ * Removes the comments of a TypeScript source and keeps its string literals.
+ * A line comment right after a scheme is a URL that the tokenizer misread.
+ * The scan then fails closed: it throws with the path and the line.
+ */
+export function stripComments(text: string, path: string): string {
+  return text.replace(TOKEN, (all, literal: string | undefined, offset: number) => {
+    if (literal !== undefined) return literal;
+    if (all.startsWith("//") && SCHEME_END.test(text.slice(Math.max(0, offset - 8), offset)))
+      throw new Error(
+        `${path}:${text.slice(0, offset).split("\n").length}: the vendor scan cannot read this line; a URL reads as a comment`,
+      );
+    return all.startsWith("/*") ? " " : "";
+  });
 }
 
 /**
@@ -54,18 +68,43 @@ export function urlHost(authority: string, path: string): string | null {
   return IPV4.test(host) ? null : host;
 }
 
+/** A host that core names only in a documentation link, with the reason it is not a vendor. */
+export interface DocumentationHost {
+  host: string;
+  reason: string;
+}
+
 /**
- * The hosts of other parties that core's own code names: the "vendors in the
- * path" of brand spec 9 (decision 2 of 2026-10-15). A host counts when an
- * http, https, ws, or wss URL in the code of a .ts file under packages/core/src/
- * names it. A URL in a comment does not count. These do not count either:
+ * The hosts that core names in a documentation link only. No request of a
+ * deployment goes to them, so they are not vendors in the path. Each entry
+ * states its reason. The list is empty at this commit. A link such as the
+ * OpenAPI specification on spec.openapis.org (lane 11g) goes here, with its
+ * reason.
+ * unusedDocumentationHosts fails an entry that no core file names.
+ */
+export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [];
+
+/** The site's own host. A URL on our own domain names no other party. */
+const OWN_HOST = new URL(SITE.origin).hostname;
+
+/** True when the host is our own domain or a subdomain of it. */
+function ownHost(host: string): boolean {
+  return host === OWN_HOST || host.endsWith(`.${OWN_HOST}`);
+}
+
+/**
+ * Every host that the URLs in core's code name, before the documentation
+ * list applies. A host counts when an http, https, ws, or wss URL in the code
+ * of a .ts file under packages/core/src/ names it. These do not count:
+ * - a URL in a comment.
  * - src/social/: the provider presets. An app turns each one on in its own
  *   config, and the sign-in goes to the provider that the app chose.
  * - src/testing/, src/storage/conformance.ts, and .test.ts files: test
  *   helpers that no deployment runs.
  * - the reserved names of RESERVED, and an IP literal.
+ * - the host of SITE.origin and its subdomains: our own domain.
  */
-export function vendorHosts(files: ReadonlyMap<string, string>): string[] {
+export function coreUrlHosts(files: ReadonlyMap<string, string>): string[] {
   const hosts = new Set<string>();
   for (const [path, text] of files) {
     if (!path.includes("packages/core/src/") || !path.endsWith(".ts")) continue;
@@ -76,12 +115,34 @@ export function vendorHosts(files: ReadonlyMap<string, string>): string[] {
       path.endsWith(".test.ts")
     )
       continue;
-    const code = stripComments(text);
+    const code = stripComments(text, path);
     for (const m of code.matchAll(SCHEME)) {
       const rest = code.slice((m.index ?? 0) + m[0].length);
       const host = urlHost(AUTHORITY.exec(rest)?.[0] ?? "", path);
-      if (host && !RESERVED.test(host)) hosts.add(host);
+      if (host && !RESERVED.test(host) && !ownHost(host)) hosts.add(host);
     }
   }
   return [...hosts].sort();
+}
+
+/**
+ * The hosts of other parties that core's own code names: the "vendors in the
+ * path" of brand spec 9 (decision 2 of 2026-10-15). They are the hosts of
+ * coreUrlHosts, less the hosts of the documentation list.
+ */
+export function vendorHosts(
+  files: ReadonlyMap<string, string>,
+  documentation: readonly DocumentationHost[] = DOCUMENTATION_HOSTS,
+): string[] {
+  const skip = new Set(documentation.map((d) => d.host));
+  return coreUrlHosts(files).filter((host) => !skip.has(host));
+}
+
+/** The hosts of the documentation list that no core file names. Each one is a stale entry. */
+export function unusedDocumentationHosts(
+  files: ReadonlyMap<string, string>,
+  documentation: readonly DocumentationHost[] = DOCUMENTATION_HOSTS,
+): string[] {
+  const named = new Set(coreUrlHosts(files));
+  return documentation.map((d) => d.host).filter((host) => !named.has(host));
 }

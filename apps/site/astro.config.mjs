@@ -80,7 +80,8 @@ export default defineConfig({
       // same ink in light and dark. The background is the code token, and the
       // frame has no border and no shadow. The frames plugin takes its editor
       // background from codeBackground. It takes the terminal, the title bar,
-      // and the tab colors from the theme, so each one is set here.
+      // and the tab colors from the theme, so each one is set here. Each color
+      // below is a token of brand spec 4; the frame test holds each built value.
       expressiveCode: {
         themes: ["starlight-dark"],
         useStarlightDarkModeSwitch: false,
@@ -91,6 +92,17 @@ export default defineConfig({
           codeForeground: "var(--at-code-ink)",
           codeFontFamily: "var(--at-font-mono)",
           borderWidth: "0px",
+          // A non-text pair: check-contrast holds the mute and the ink on the code color.
+          scrollbarThumbColor: "var(--at-mute)",
+          scrollbarThumbHoverColor: "var(--at-code-ink)",
+          // The focus ring of brand spec 14 on a code block that has focus.
+          focusBorder: "var(--at-accent)",
+          // No built rule reads the selection colors while useThemedSelectionColors
+          // is off (the default of Expressive Code 0.44.2, read 2026-10-19). The
+          // frame test holds that. They are tokens all the same.
+          codeSelectionBackground: "var(--at-accent)",
+          uiSelectionBackground: "var(--at-code-ink)",
+          uiSelectionForeground: "var(--at-code)",
           frames: {
             frameBoxShadowCssValue: "none",
             terminalBackground: "var(--at-code)",
@@ -99,6 +111,13 @@ export default defineConfig({
             editorTabBarBackground: "var(--at-code)",
             editorTabBarBorderBottomColor: "var(--at-line)",
             editorActiveTabBackground: "var(--at-code)",
+            // The text of the tab, the terminal title, and its dots: the code ink on the code color.
+            editorActiveTabForeground: "var(--at-code-ink)",
+            terminalTitlebarForeground: "var(--at-code-ink)",
+            terminalTitlebarDotsForeground: "var(--at-code-ink)",
+            // The "Copied!" tooltip turns the code pair round: the code color on the code ink.
+            tooltipSuccessBackground: "var(--at-code-ink)",
+            tooltipSuccessForeground: "var(--at-code)",
           },
         },
       },

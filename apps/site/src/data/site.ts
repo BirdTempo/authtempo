@@ -1,6 +1,6 @@
 /**
- * The site's own names (brand spec 9 and 13): the origin of the canonical
- * and Open Graph URLs, the docs path, and the two labels of the header.
+ * The site's own names (brand spec 9 and 13). They are the origin of the
+ * canonical and Open Graph URLs, the docs path, and the two header labels.
  * One source for each: no template holds a copy.
  */
 export const SITE = {

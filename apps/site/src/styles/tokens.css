@@ -88,10 +88,18 @@
   --sl-color-hairline-shade: var(--at-line);
 }
 
-/* Focus (brand spec 14): a 2 px accent outline with a 2 px offset on every interactive element. */
+/*
+ * Focus (brand spec 14): a 2 px accent outline with a 2 px offset on every
+ * interactive element. Each ring of the site reads these two tokens, and
+ * check-tokens fails an outline that does not.
+ */
+:root {
+  --at-ring: 2px solid var(--at-accent);
+  --at-ring-offset: 2px;
+}
 :focus-visible {
-  outline: 2px solid var(--at-accent);
-  outline-offset: 2px;
+  outline: var(--at-ring);
+  outline-offset: var(--at-ring-offset);
 }
 
 /* Fonts (brand spec 5): Latin subsets of the upstream releases. src/assets/fonts.json records each file. */

@@ -12,7 +12,7 @@ import { FEATURES, featureOrder } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { NAV_LINKS, SITE } from "../src/data/site.ts";
-import { vendorHosts } from "../src/data/vendors.ts";
+import { DOCUMENTATION_HOSTS, unusedDocumentationHosts, vendorHosts } from "../src/data/vendors.ts";
 
 /** Every string inside a value, at any depth. */
 function leaves(v: unknown): string[] {
@@ -29,6 +29,27 @@ const OPEN = "\u0024{";
 function core(text: string): Map<string, string> {
   return new Map([["packages/core/src/a.ts", text]]);
 }
+
+/** The .ts files of the real core source, by their path from the repository root. */
+function realCore(): Map<string, string> {
+  return new Map(
+    walk(`${REPO}packages/core/src/`, (p) => p.endsWith(".ts")).map((p) => [
+      p.slice(REPO.length),
+      readFileSync(p, "utf8"),
+    ]),
+  );
+}
+
+/**
+ * The vendors in the path of the real core, typed here and never read from
+ * the scan. A new host in core fails this file. The lane that adds it then
+ * decides: a vendor joins this list, and a documentation link joins
+ * DOCUMENTATION_HOSTS with its reason.
+ */
+const CORE_VENDORS: readonly string[] = [];
+
+/** The keys of SITE that are a URL or a path, typed as keys so a renamed key fails the typecheck. */
+const ADDRESSES: readonly (keyof typeof SITE)[] = ["origin", "docs"];
 
 describe("the data of the home page (plan 11b1)", () => {
   it("has one feature row per RouteFeature member", () => {
@@ -123,15 +144,51 @@ describe("the data of the home page (plan 11b1)", () => {
     expect(vendorHosts(new Map([[path, lines.join("\n")]]))).toEqual(["api.flip.dev"]);
   });
 
-  it("finds no vendor host in the source of core", () => {
-    const files = new Map(
-      walk(`${REPO}packages/core/src/`, (p) => p.endsWith(".ts")).map((p) => [
-        p.slice(REPO.length),
-        readFileSync(p, "utf8"),
-      ]),
-    );
+  it("finds the typed list of vendor hosts in the source of core", () => {
+    const files = realCore();
     expect(files.size).toBeGreaterThan(0);
-    expect(vendorHosts(files)).toEqual([]);
+    expect(vendorHosts(files)).toEqual(CORE_VENDORS);
+  });
+
+  it("does not count our own domain or its subdomains", () => {
+    const text = [
+      'const a = "https://authtempo.com/docs/";',
+      'const b = "https://docs.authtempo.com/x";',
+      'const c = "https://authtempo.com.vendor.dev/x";',
+      'const d = "https://notauthtempo.com/x";',
+    ].join("\n");
+    expect(vendorHosts(core(text))).toEqual(["authtempo.com.vendor.dev", "notauthtempo.com"]);
+  });
+
+  it("does not count a host of the documentation list", () => {
+    const text = 'const SPEC = "https://spec.openapis.org/oas/v3.1.0";';
+    const list = [{ host: "spec.openapis.org", reason: "a link in a description" }];
+    expect(vendorHosts(core(text), [])).toEqual(["spec.openapis.org"]);
+    expect(vendorHosts(core(text), list)).toEqual([]);
+    expect(unusedDocumentationHosts(core(text), list)).toEqual([]);
+  });
+
+  it("names a host of the documentation list that no core file names", () => {
+    const list = [{ host: "spec.openapis.org", reason: "a link in a description" }];
+    expect(unusedDocumentationHosts(core('"https://api.vendor.dev/x"'), list)).toEqual([
+      "spec.openapis.org",
+    ]);
+  });
+
+  it("finds each host of the documentation list in the source of core, with a reason", () => {
+    expect(unusedDocumentationHosts(realCore())).toEqual([]);
+    for (const d of DOCUMENTATION_HOSTS)
+      expect({ host: d.host, reason: d.reason.trim() !== "" }).toEqual({
+        host: d.host,
+        reason: true,
+      });
+  });
+
+  it("fails closed on a URL that the tokenizer reads as a comment", () => {
+    const text = 'const s = "";\nif (ok) /"/.test(s) && go("https://vendor.io/a");';
+    expect(() => vendorHosts(core(text))).toThrow(
+      "packages/core/src/a.ts:2: the vendor scan cannot read this line; a URL reads as a comment",
+    );
   });
 
   it("keeps the home prose inside the term and sentence rules", () => {
@@ -150,9 +207,9 @@ describe("the data of the home page (plan 11b1)", () => {
       ...leaves(HOME),
       ...Object.values(FEATURES).flatMap((f) => [f.title, f.line]),
       ...NAV_LINKS.map((l) => l.label),
-      ...Object.entries(SITE)
-        .filter(([key]) => key !== "origin" && key !== "docs")
-        .map(([, value]) => value),
+      ...(Object.keys(SITE) as (keyof typeof SITE)[])
+        .filter((key) => !ADDRESSES.includes(key))
+        .map((key) => SITE[key]),
     ];
     expect(paragraphs.sort()).toEqual(strings.sort());
   });
