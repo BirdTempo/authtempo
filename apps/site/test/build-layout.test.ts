@@ -5,7 +5,7 @@ import { walk } from "../scripts/lib/files.ts";
 import { pageCss } from "../scripts/lib/html.ts";
 import { DIST, SITE } from "../scripts/lib/paths.ts";
 import { parseTokens } from "../scripts/lib/tokens.ts";
-import { FEATURES, featureOrder } from "../src/data/features.ts";
+import { FEATURES, featureOrder, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
 import { SIDEBAR_ICONS } from "../src/data/sidebar-icons.ts";
 
@@ -31,7 +31,11 @@ const hasTag = (html: string, tag: string, attrs: Record<string, string>) =>
 describe("the build layout (plan 11a)", () => {
   it("puts every docs page under /docs/ and the 404 page at the root", () => {
     expect(docsPages).toContain("docs/index.html");
-    expect(html.filter((p) => !p.startsWith("docs/")).sort()).toEqual(["404.html", "index.html"]);
+    expect(html.filter((p) => !p.startsWith("docs/")).sort()).toEqual([
+      "404.html",
+      "features/index.html",
+      "index.html",
+    ]);
     expect(html.some((p) => p.startsWith("docs/docs/"))).toBe(false);
   });
 
@@ -173,6 +177,46 @@ describe("the root layout (plan 11b)", () => {
   it("links the changelog in the footer", () => {
     const footer = page("index.html").split('class="site-footer')[1] ?? "";
     expect(footer).toMatch(/<a\b[^>]* href="\/docs\/changelog\/"[^>]*>Changelog<\/a>/);
+  });
+
+  it("links the features page in the footer", () => {
+    const footer = page("index.html").split('class="site-footer')[1] ?? "";
+    expect(footer).toMatch(/<a\b[^>]* href="\/features\/"[^>]*>Features<\/a>/);
+  });
+
+  it("marks the link of the current page, and no other link, in the header and the footer", () => {
+    // The path prop of Site.astro names the page; the lockup of the header is not a nav link.
+    const current = (path: string) =>
+      tags(page(path), "a")
+        .filter((t) => t.includes(' aria-current="page"'))
+        .map((t) => / href="([^"]*)"/.exec(t)?.[1]);
+    expect(current("features/index.html")).toEqual(["/features/"]);
+    expect(current("index.html")).toEqual([]);
+  });
+});
+
+describe("the features page (plan 11b)", () => {
+  it("lists one section per feature in route order, then one per package folder", () => {
+    const ids = [...page("features/index.html").matchAll(/<section\b[^>]* id="([^"]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(ids).toEqual([
+      ...featureOrder(ROUTES),
+      ...Object.keys(PACKAGE_FEATURES).map((folder) => `pkg-${folder}`),
+    ]);
+  });
+
+  it("links each feature title to its guide", () => {
+    const html = page("features/index.html");
+    for (const f of featureOrder(ROUTES)) {
+      const section = html.split(` id="${f}"`)[1]?.split("</section>")[0] ?? "";
+      const linked = tags(section, "a").some((t) => t.includes(` href="${FEATURES[f].guide}"`));
+      expect({ f, linked, line: section.includes(FEATURES[f].line) }).toEqual({
+        f,
+        linked: true,
+        line: true,
+      });
+    }
   });
 });
 

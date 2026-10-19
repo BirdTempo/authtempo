@@ -3,11 +3,12 @@ import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /**
  * The least count of entries in the collection `site` (ruling 9 of the plan
- * 11b lane). The home has no entry (ruling 5), so the count is 0 at Task 2.
- * Each task that adds an entry raises this number in the same commit, so a
- * lost entry fails here. Task 13 holds it to the root pages that plan 11b lists.
+ * 11b lane). The home has no entry (ruling 5). The count was 0 at Task 2, and
+ * Task 4 adds features.md. Each task that adds an entry raises this number in
+ * the same commit, so a lost entry fails here. Task 13 holds it to the root
+ * pages that plan 11b lists.
  */
-export const MINIMUM_ENTRIES = 0;
+export const MINIMUM_ENTRIES = 1;
 
 /**
  * The root pages that need no entry, by built file, each with its reason.

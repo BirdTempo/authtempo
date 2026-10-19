@@ -1,0 +1,66 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// The feature table of plan 11b (spec 24). The order and each route count come
+// from ROUTES at build time, so the page states no number by hand. The prose
+// is the entry features.md and the rows of src/data/features.ts; check-terms
+// and check-sentences read both. check-features holds the sections.
+import { getEntry, render } from "astro:content";
+import { ROUTES } from "@authtempo/core/routes";
+import Icon from "../components/Icon.astro";
+import {
+  FEATURES,
+  FEATURES_PAGE,
+  featureOrder,
+  PACKAGE_FEATURES,
+  routeCount,
+  routeLabel,
+} from "../data/features.ts";
+import Site from "../layouts/Site.astro";
+
+const entry = await getEntry("site", "features");
+if (entry === undefined) throw new Error("features.astro: src/content/site/features.md is missing");
+const { Content } = await render(entry);
+const features = featureOrder(ROUTES);
+---
+<Site title={entry.data.title} description={entry.data.description} path={entry.data.page}>
+  <div class="intro">
+    <h1>{entry.data.title}</h1>
+    <div class="lede"><Content /></div>
+  </div>
+  <h2 id="route-features">{FEATURES_PAGE.routes}</h2>
+  <div class="cards">
+    {features.map((f) => (
+      <section id={f} class="card">
+        <Icon name={FEATURES[f].icon} />
+        <h3><a href={FEATURES[f].guide}>{FEATURES[f].title}</a></h3>
+        <p class="line">{FEATURES[f].line}</p>
+        <p class="count mono">{routeLabel(routeCount(f))}</p>
+      </section>
+    ))}
+  </div>
+  <h2 id="packages">{FEATURES_PAGE.packages}</h2>
+  <div class="cards">
+    {Object.entries(PACKAGE_FEATURES).map(([folder, row]) => (
+      <section id={`pkg-${folder}`} class="card">
+        <h3><a href={row.guide}>{row.title}</a></h3>
+        <p class="line">{row.line}</p>
+      </section>
+    ))}
+  </div>
+</Site>
+<style>
+  .intro { padding-block: calc(var(--at-rhythm) * 2) var(--at-rhythm); }
+  h1 { margin: 0; font-size: var(--at-text-h1); line-height: var(--at-leading-h1); letter-spacing: var(--at-tracking-h1); font-weight: 600; }
+  .lede { max-width: var(--at-measure); color: var(--at-mute); }
+  .lede :global(p) { margin: var(--at-rhythm) 0 0; }
+  h2 { margin: calc(var(--at-rhythm) * 2) 0 var(--at-rhythm); font-size: var(--at-text-h2); line-height: var(--at-leading-h2); letter-spacing: var(--at-tracking-h2); font-weight: 600; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: calc(var(--at-unit) * 2); margin-bottom: calc(var(--at-rhythm) * 2); }
+  .card { display: flex; flex-direction: column; gap: var(--at-unit); padding: calc(var(--at-unit) * 3); border: 1px solid var(--at-line); border-radius: 0.75rem; background: var(--at-surface); }
+  .card :global(.at-icon) { width: 1.5rem; height: 1.5rem; color: var(--at-ink); }
+  h3 { margin: 0; font-size: var(--at-text-h3); line-height: var(--at-leading-h3); letter-spacing: var(--at-tracking-h3); font-weight: 600; }
+  h3 a { color: var(--at-ink); text-decoration: none; }
+  h3 a:hover, h3 a:focus-visible { color: var(--at-accent-text); text-decoration: underline; }
+  .line { flex: 1; margin: 0; color: var(--at-mute); font-size: var(--at-text-small); line-height: var(--at-leading-small); }
+  .count { margin: 0; color: var(--at-ink); font-size: var(--at-text-small); }
+</style>

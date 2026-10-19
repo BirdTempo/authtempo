@@ -46,6 +46,18 @@ export function rootPages(pages: Map<string, string> = distPages()): Map<string,
   );
 }
 
+/**
+ * The folders of packages/ that hold a package.json: each package of the
+ * repository. check-features gives each one a row or an exemption (plan 11b).
+ */
+export function packageFolders(): string[] {
+  const dir = `${REPO}packages/`;
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(`${dir}${e.name}/package.json`))
+    .map((e) => e.name)
+    .sort();
+}
+
 /** Each .svg file of dist by its path, so the link check reads the symbol ids of the sprite. */
 export function distSvgs(): Map<string, string> {
   return new Map(

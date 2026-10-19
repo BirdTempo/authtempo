@@ -10,6 +10,7 @@ import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
 import { ROUTES } from "@authtempo/core/routes";
 import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
+import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
@@ -22,6 +23,7 @@ import { checkErrors } from "./check-errors.ts";
 import { checkExports, readExports } from "./check-exports.ts";
 import { checkExternal } from "./check-external.ts";
 import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
+import { checkFeatures } from "./check-features.ts";
 import { checkFences } from "./check-fences.ts";
 import { checkFonts } from "./check-fonts.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
@@ -54,6 +56,7 @@ import {
   distTexts,
   docsPages,
   fontDir,
+  packageFolders,
   readFontManifest,
   readRepoFile,
   readSiteFile,
@@ -312,6 +315,21 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   // The CSP that write-headers.ts wrote, held to the inline scripts of this build.
   { name: "check-csp", run: () => checkCsp(distPages(), distHeaders(), distFiles()) },
   { name: "check-weight", run: () => checkWeight(rootPages(), distBytes) },
+  // Plan 11b Task 4: each route feature and each package folder has its section on /features/.
+  {
+    name: "check-features",
+    run: () =>
+      checkFeatures({
+        folders: packageFolders(),
+        built: distPageOrEmpty("/features/"),
+        files: distFiles(),
+        read: (file) => distText(file) || null,
+        features: FEATURES,
+        routes: ROUTES,
+        packages: PACKAGE_FEATURES,
+        exempt: PACKAGE_EXEMPT,
+      }),
+  },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },
 ];

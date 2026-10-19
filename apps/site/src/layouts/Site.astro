@@ -23,6 +23,10 @@ interface Props {
 }
 const tokens = parseTokens(tokensCss);
 const canonical = new URL(Astro.props.path, SITE.origin).href;
+// A nav link to the page itself carries aria-current="page" (plan 11b). Astro
+// writes no attribute for undefined, so every other link has none.
+const current = (href: string): "page" | undefined =>
+  href === Astro.props.path ? "page" : undefined;
 // One source per fact (design spec 24 item 3): the license of the root
 // package.json, or the stated empty state until plan 12j sets it.
 const license: string =
@@ -57,7 +61,7 @@ const license: string =
     <header class="site-header">
       <Lockup href="/" beat />
       <nav aria-label={SITE.nav}>
-        {NAV_LINKS.map((link) => <a href={link.href}>{link.label}</a>)}
+        {NAV_LINKS.map((link) => <a href={link.href} aria-current={current(link.href)}>{link.label}</a>)}
         {REPO_URL !== null && <a class="mono" href={REPO_URL}>{SITE.repo}</a>}
       </nav>
       <button type="button" class="at-toggle" data-theme-toggle aria-label="Use the light theme">
@@ -70,7 +74,7 @@ const license: string =
     <footer class="site-footer">
       <span>{HOME.title} · {license}</span>
       <nav aria-label={SITE.footerNav}>
-        {FOOTER_LINKS.map((link) => <a href={link.href}>{link.label}</a>)}
+        {FOOTER_LINKS.map((link) => <a href={link.href} aria-current={current(link.href)}>{link.label}</a>)}
       </nav>
       <span class="mono">{corePackage.version}</span>
     </footer>
