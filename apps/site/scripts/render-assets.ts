@@ -1,9 +1,10 @@
-// Draws the three PNG files of brand spec 3 once, from mark.svg, wordmark.svg,
-// the paper, ink, and accent of tokens.css, the headline of HOME, and the
-// Inter 600 file, with the Chrome of the machine that runs it. The site's
-// build never runs this script, so the build has no image dependency. Run it
-// by hand after a change of one of those inputs, and commit the PNG files
-// with src/assets/assets.json, which records each SHA-256 for the test.
+// Draws the three PNG files of brand spec 3 once, with the Chrome of the
+// machine that runs it. The inputs are mark.svg, wordmark.svg, the paper,
+// ink, and accent of tokens.css, the headline of HOME, and the Inter 600
+// file. The site's build never runs this script, so the build has no image
+// dependency. Run it by hand after a change of one of those inputs. Then
+// commit the PNG files with src/assets/assets.json, which records each
+// SHA-256 for the test.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -34,9 +35,9 @@ const base = [
 const sized = (svg: string, w: number, h: number) =>
   svg.replace("<svg ", `<svg width="${w}" height="${h}" `);
 // Chrome 155 headless lays the page out at least 500 px wide, whatever the
-// window size, and the shot crops the window size from the top left (read
-// 2026-10-19). So the pad of an icon is an eighth of the icon in pixels, not
-// a percent of the page, and the mark fills the three quarters inside it.
+// window size (read 2026-10-19). The shot crops the window size from the top
+// left. So the pad of an icon is an eighth of the icon in pixels, not a
+// percent of the page. The mark fills the three quarters inside the pad.
 const icon = (size: number) =>
   `<div style="padding:${size / 8}px">${sized(mark, size * 0.75, size * 0.75)}</div>`;
 const PAGES = [

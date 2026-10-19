@@ -1,6 +1,6 @@
 import { cssRules, declarations } from "./lib/css.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
-import { COLOR_TOKENS, parseTokens, STARLIGHT_COLORS } from "./lib/tokens.ts";
+import { COLOR_TOKENS, DARK_MEDIA, parseTokens, STARLIGHT_COLORS } from "./lib/tokens.ts";
 
 /** A source file of the site, by its path from apps/site/. */
 export interface SourceFile {
@@ -30,6 +30,8 @@ const COLOR_VALUE = new RegExp(`${HEX}|${COLOR_FUNCTION}`, "i");
  * such prefix and a brace after it, so it is not a color.
  */
 const LITERAL = new RegExp(`(?<=[:"'\`(,=]\\s*)${HEX}(?!\\s*\\{)|${COLOR_FUNCTION}`, "i");
+/** A fill or a stroke of the favicon: `fill="value"` or `fill: value;` with its value. */
+const FAVICON_PAINT = /\b(fill|stroke)\s*(?::\s*|=\s*")([^;"}]+)/g;
 /** A declaration that removes the focus ring, in any of its forms (brand spec 14). */
 const NO_OUTLINE = /outline(?:-style|-width|-color)?\s*:\s*(?:none|0(?:px)?|transparent)\b/;
 
@@ -132,16 +134,42 @@ export function checkTokens(input: {
       if (name !== undefined && !t.light.has(name))
         r.failures.push(`${f.path} uses ${name}, which tokens.css does not define`);
   if (input.favicon !== null) {
+    const darkInk = t.darkAttr.get("--at-ink") ?? "";
     const allowed = new Set(
-      [t.light.get("--at-ink"), t.darkAttr.get("--at-ink"), t.light.get("--at-accent")]
-        .filter((v): v is string => v !== undefined)
+      [t.light.get("--at-ink"), darkInk, t.light.get("--at-accent")]
+        .filter((v): v is string => v !== "" && v !== undefined)
         .map((v) => v.toLowerCase()),
     );
-    for (const m of input.favicon.matchAll(/#[0-9a-f]{3,8}\b/gi))
+    // Each fill and stroke of the favicon, as an attribute or as a style
+    // declaration, is one of the allowed values. A color function or a
+    // named color is then a named failure, not a pass.
+    const paints = [...input.favicon.matchAll(FAVICON_PAINT)];
+    for (const m of paints) {
+      const value = (m[2] ?? "").trim();
+      if (!allowed.has(value.toLowerCase()))
+        r.failures.push(
+          `public/favicon.svg sets ${m[1]} to ${value}, which is not the ink or the accent of tokens.css`,
+        );
+    }
+    // Any other hex color of the file, outside a fill or a stroke.
+    const rest = input.favicon.replace(FAVICON_PAINT, "");
+    for (const m of rest.matchAll(/#[0-9a-f]{3,8}\b/gi))
       if (!allowed.has(m[0].toLowerCase()))
         r.failures.push(
           `public/favicon.svg holds ${m[0]}, which is not the ink or the accent of tokens.css`,
         );
+    // Brand spec 3: a dark-scheme rule gives the bars the dark ink.
+    const style = [...input.favicon.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)]
+      .map((m) => m[1] ?? "")
+      .join("\n");
+    const dark = cssRules(style).some(
+      (x) =>
+        x.at === DARK_MEDIA &&
+        x.selector === "rect" &&
+        declarations(x.body).get("fill") === darkInk,
+    );
+    if (!dark)
+      r.failures.push(`public/favicon.svg lacks ${DARK_MEDIA} { rect { fill: ${darkInk}; } }`);
   }
   return requireCounts(r, ["colors", "starlight", "sources"]);
 }

@@ -185,4 +185,36 @@ describe("checkTokens", () => {
     };
     expect(checkTokens({ css, sources: [source], favicon: null }).failures).toEqual([]);
   });
+
+  it("passes the favicon of the site", () => {
+    const favicon = readFileSync(`${SITE}public/favicon.svg`, "utf8");
+    expect(checkTokens({ css, sources: [page], favicon }).failures).toEqual([]);
+  });
+
+  it("fails a favicon fill that is a color function", () => {
+    const favicon = readFileSync(`${SITE}public/favicon.svg`, "utf8");
+    const broken = favicon.replace("rect { fill: #15161a; }", "rect { fill: rgb(31, 78, 140); }");
+    expect(broken).not.toBe(favicon);
+    expect(checkTokens({ css, sources: [page], favicon: broken }).failures).toEqual([
+      "public/favicon.svg sets fill to rgb(31, 78, 140), which is not the ink or the accent of tokens.css",
+    ]);
+  });
+
+  it("fails a favicon stroke attribute that is not the ink or the accent", () => {
+    const favicon = readFileSync(`${SITE}public/favicon.svg`, "utf8");
+    const broken = favicon.replace('<rect x="3"', '<rect stroke="red" x="3"');
+    expect(broken).not.toBe(favicon);
+    expect(checkTokens({ css, sources: [page], favicon: broken }).failures).toEqual([
+      "public/favicon.svg sets stroke to red, which is not the ink or the accent of tokens.css",
+    ]);
+  });
+
+  it("fails a favicon without the dark-scheme rule of brand spec 3", () => {
+    const favicon = readFileSync(`${SITE}public/favicon.svg`, "utf8");
+    const broken = favicon.replace(/^\s*@media \(prefers-color-scheme: dark\).*\n/m, "");
+    expect(broken).not.toBe(favicon);
+    expect(checkTokens({ css, sources: [page], favicon: broken }).failures).toEqual([
+      "public/favicon.svg lacks @media (prefers-color-scheme: dark) { rect { fill: #e8e6e1; } }",
+    ]);
+  });
 });
