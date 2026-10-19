@@ -19,7 +19,10 @@ import {
 } from "./oauth-helpers.js";
 
 const CLIENT_ORIGIN = new URL(REDIRECT).origin;
+/** A failed client auth after an Authorization header. */
 const CLIENT = { status: 401, body: { error: "invalid_client" } };
+/** A failed client auth with no Authorization header (ruling 19): 400, so no browser dialog. */
+const BARE_CLIENT = { status: 400, body: { error: "invalid_client" } };
 const GRANT = { status: 400, body: { error: "invalid_grant" } };
 const answer = async (res: Response) => ({ status: res.status, body: await res.json() });
 
@@ -143,7 +146,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     expect(await answer(raw)).toEqual(CLIENT);
   });
 
-  it("answers each invalid_client 401 with a Basic challenge (RFC 6749 5.2, RFC 7235 3.1)", async () => {
+  it("answers invalid_client 401 with a Basic challenge after an Authorization header, and 400 with none without one (RFC 6749 5.2)", async () => {
     const h = oauthHandle();
     const s = await signedIn(h);
     const basic = await confidential(h, "client_secret_basic");
@@ -172,8 +175,21 @@ describe("client auth at the token endpoint (plan 12e)", () => {
         client_secret: wrong,
       }),
     );
-    expect(viaForm.headers.get("www-authenticate")).toBe(`Basic realm="${ISSUER}"`);
-    expect(await answer(viaForm)).toEqual(CLIENT);
+    expect(viaForm.headers.get("www-authenticate")).toBeNull();
+    expect(await answer(viaForm)).toEqual(BARE_CLIENT);
+    // Any Authorization header counts: a Bearer beside a wrong form secret gets the 401.
+    const withBearer = await h.auth.handle(
+      tokenPost(
+        {
+          ...codeBody(await codeOf(h, s.cookie, form.clientId)),
+          client_id: form.clientId,
+          client_secret: wrong,
+        },
+        { authorization: "Bearer x" },
+      ),
+    );
+    expect(withBearer.headers.get("www-authenticate")).toBe(`Basic realm="${ISSUER}"`);
+    expect(await answer(withBearer)).toEqual(CLIENT);
   });
 
   it("refuses two methods in one request", async () => {
@@ -239,13 +255,13 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     const secret = `cs_${"A".repeat(43)}`;
     for (const clientId of [open, keyed]) {
       const c = await codeOf(h, s.cookie, clientId);
-      for (const req of [
-        tokenPost({ ...codeBody(c), client_id: clientId, client_secret: secret }),
-        withBasic(codeBody(c), clientId, secret),
-      ])
+      for (const [req, refused] of [
+        [tokenPost({ ...codeBody(c), client_id: clientId, client_secret: secret }), BARE_CLIENT],
+        [withBasic(codeBody(c), clientId, secret), CLIENT],
+      ] as const)
         expect({ clientId, answer: await answer(await h.auth.handle(req)) }).toEqual({
           clientId,
-          answer: CLIENT,
+          answer: refused,
         });
     }
   });
@@ -281,7 +297,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
         ...empty,
       }),
     );
-    expect(await answer(bare)).toEqual(CLIENT);
+    expect(await answer(bare)).toEqual(BARE_CLIENT);
   });
 
   it("refuses a confidential client with no auth and a public client with a secret, and spends nothing", async () => {
@@ -290,7 +306,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     const basic = await confidential(h, "client_secret_basic");
     const c = await codeOf(h, s.cookie, basic.clientId);
     const bare = await h.auth.handle(tokenPost({ ...codeBody(c), client_id: basic.clientId }));
-    expect(await answer(bare)).toEqual(CLIENT);
+    expect(await answer(bare)).toEqual(BARE_CLIENT);
     expect((await h.auth.handle(withBasic(codeBody(c), basic.clientId, basic.secret))).status).toBe(
       200,
     );
@@ -300,7 +316,7 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     const inForm = await h.auth.handle(
       tokenPost({ ...codeBody(p), client_id: open, client_secret: secret }),
     );
-    expect(await answer(inForm)).toEqual(CLIENT);
+    expect(await answer(inForm)).toEqual(BARE_CLIENT);
     expect(await answer(await h.auth.handle(withBasic(codeBody(p), open, secret)))).toEqual(CLIENT);
     expect((await h.auth.handle(tokenPost({ ...codeBody(p), client_id: open }))).status).toBe(200);
   });
@@ -407,9 +423,9 @@ describe("client auth at the token endpoint (plan 12e)", () => {
       const res = await h.auth.handle(revoke(body));
       expect({ body, challenge: res.headers.get("www-authenticate") }).toEqual({
         body,
-        challenge: `Basic realm="${ISSUER}"`,
+        challenge: null,
       });
-      expect({ body, answer: await answer(res) }).toEqual({ body, answer: CLIENT });
+      expect({ body, answer: await answer(res) }).toEqual({ body, answer: BARE_CLIENT });
     }
     const wrong = await h.auth.handle(
       revoke({ token: refresh_token }, { authorization: basicHeader(basic.clientId, "cs_x") }),

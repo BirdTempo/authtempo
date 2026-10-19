@@ -30,7 +30,7 @@ import {
   userinfoClaims,
 } from "../../engine/oauth-token.js";
 import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
-import { OAUTH_ERRORS, type OAuthErrorCode } from "../../errors.js";
+import { INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, type OAuthErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import type { OAuthClientRow } from "../../schema.js";
 import { revokeGrantBody } from "../contract/oauth.js";
@@ -199,18 +199,22 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   const originChecked = async (ip: string | null) =>
     config.limiter.allow(`oauth-token-origin:ip:${ipKey(ip)}`, ORIGIN_CHECK_PER_IP);
   /**
-   * A refusal of the token or the revoke route. Each `invalid_client` 401
-   * carries the Basic challenge: RFC 7235 section 3.1 asks a challenge of
-   * every 401, and RFC 6749 section 5.2 names Basic.
+   * A refusal of the token or the revoke route. RFC 6749 section 5.2: after
+   * an `Authorization` header, `invalid_client` is 401 with the Basic
+   * challenge, which RFC 7235 section 3.1 asks of every 401. With no header
+   * it is 400 with no challenge, so no browser shows a sign-in dialog.
    */
-  const clientRefused = (r: { ok: false; error: OAuthErrorCode; status: number }) =>
-    json(
-      { error: r.error },
-      r.status,
-      r.error === "invalid_client"
-        ? { "www-authenticate": `Basic realm="${issuerOf(config)}"` }
-        : {},
-    );
+  const clientRefused = (
+    request: Request,
+    r: { ok: false; error: OAuthErrorCode; status: number },
+  ) => {
+    if (r.error !== "invalid_client") return json({ error: r.error }, r.status);
+    if (request.headers.has("authorization"))
+      return json({ error: r.error }, r.status, {
+        "www-authenticate": `Basic realm="${issuerOf(config)}"`,
+      });
+    return json({ error: r.error }, INVALID_CLIENT_NO_HEADER);
+  };
   const GRANTS = new Set(["authorization_code", "refresh_token"]);
   /**
    * The grant of a form; the answer of the endpoint before any CORS header.
@@ -231,7 +235,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     const authed = await authenticateClient(config, request, form, client);
     if (!authed.ok) {
       // The token route's pragma of RFC 6749 section 5.1, as tokenAnswer sets it.
-      const refused = clientRefused(authed);
+      const refused = clientRefused(request, authed);
       refused.headers.set("pragma", "no-cache");
       return refused;
     }
@@ -329,11 +333,11 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         let client: AuthedClient | null = null;
         if (namesClient(ctx.request, form)) {
           const authed = await authenticateClient(config, ctx.request, form);
-          if (!authed.ok) return clientRefused(authed);
+          if (!authed.ok) return clientRefused(ctx.request, authed);
           client = authed.value;
         }
         const r = await revokeToken(config, { token: form.get("token") ?? "", client });
-        return r.ok ? json({}) : clientRefused(r);
+        return r.ok ? json({}) : clientRefused(ctx.request, r);
       },
     },
     { method: "GET", path: "/oauth/userinfo", key: "GET /oauth/userinfo", handler: userinfo },

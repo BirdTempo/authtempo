@@ -104,3 +104,11 @@ export const OAUTH_ERRORS = {
 } as const;
 
 export type OAuthErrorCode = keyof typeof OAUTH_ERRORS;
+
+/**
+ * The status of `invalid_client` at a route that takes client auth, for a
+ * request with no `Authorization` header (plan 12e, ruling 19). RFC 6749
+ * section 5.2 allows 400 there. A 400 needs no challenge (RFC 7235), so no
+ * browser shows a sign-in dialog. With a header the status stays 401.
+ */
+export const INVALID_CLIENT_NO_HEADER = 400;

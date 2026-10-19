@@ -23,15 +23,15 @@ const FS_MODULE = "node:fs";
  * 2. A 2xx JSON body parses under the strict answer schema of the contract.
  * 3. The content type fits a kind of the contract: JSON for `json` and
  *    `metadata`, HTML for `html`, a 302 with `Location` for `redirect`.
- * 4. A route that takes `clientSecretBasic` answers each `invalid_client`
- *    with a Basic challenge (RFC 7235 section 3.1; plan 12e).
+ * 4. A route that takes `clientSecretBasic` answers `invalid_client` as a
+ *    401 with a Basic challenge, or as a 400 with none (plan 12e, ruling 19).
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
 vi.mock("../../src/http/router.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/http/router.js")>();
   const { appendFileSync }: AppendFs = await import(/* @vite-ignore */ FS_MODULE);
   const { shapeVerdict } = await import("./answer-shape.js");
-  const { ERRORS, OAUTH_ERRORS } = await import("../../src/errors.js");
+  const { ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS } = await import("../../src/errors.js");
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { AUTH_ERROR_PARAM } = await import("../../src/http/redirect.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
@@ -105,6 +105,9 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       statuses.push(ERRORS[code as keyof typeof ERRORS]);
     if ((entry.oauthCodes as readonly string[]).includes(code))
       statuses.push(OAUTH_ERRORS[code as keyof typeof OAUTH_ERRORS]);
+    // Rule 4: with no Authorization header, invalid_client is a 400 at a route of client auth.
+    if (code === "invalid_client" && entry.auth.includes("clientSecretBasic"))
+      statuses.push(INVALID_CLIENT_NO_HEADER);
     if (ROUTER.has(code)) statuses.push(ERRORS[code as keyof typeof ERRORS]);
     if (statuses.length === 0) return `the code ${code} is not declared`;
     if (redirected) return "ok";
@@ -156,12 +159,13 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       if (code === null) return { ...base, verdict: "ok" };
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, true) };
     }
-    if (
-      code === "invalid_client" &&
-      ENTRIES.get(key)?.auth.includes("clientSecretBasic") &&
-      !(res.headers.get("www-authenticate") ?? "").startsWith("Basic realm=")
-    )
-      return { ...base, verdict: "an invalid_client answer carries no Basic challenge" };
+    if (code === "invalid_client" && ENTRIES.get(key)?.auth.includes("clientSecretBasic")) {
+      const challenged = (res.headers.get("www-authenticate") ?? "").startsWith("Basic realm=");
+      if (status === OAUTH_ERRORS.invalid_client && !challenged)
+        return { ...base, verdict: "an invalid_client 401 carries no Basic challenge" };
+      if (status === INVALID_CLIENT_NO_HEADER && res.headers.has("www-authenticate"))
+        return { ...base, verdict: "an invalid_client 400 carries a challenge" };
+    }
     if (code !== null)
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, false) };
     if (status >= 400) return { ...base, verdict: `a ${status} ${type} answer carries no code` };

@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { ERRORS, OAUTH_ERRORS } from "../errors.js";
+import { ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS } from "../errors.js";
 import { DOCS_ORIGIN, type ErrorTable, errorAnchor } from "../http/anchors.js";
 import type { AnswerKind, RouteContract } from "../http/contract/types.js";
 import { ROUTER_CODES, type RouteEntry } from "../http/route-list.js";
@@ -101,6 +101,10 @@ export function codesOf(entry: RouteEntry): { code: string; table: ErrorTable; s
       table: "oauth" as const,
       status: OAUTH_ERRORS[code],
     })),
+    // Plan 12e, ruling 19: a route of client auth answers invalid_client 400 with no Authorization header.
+    ...(entry.auth.includes("clientSecretBasic") && entry.oauthCodes.includes("invalid_client")
+      ? [{ code: "invalid_client", table: "oauth" as const, status: INVALID_CLIENT_NO_HEADER }]
+      : []),
   ];
 }
 
@@ -193,17 +197,18 @@ export function responsesOf(
         },
       };
     }
-    // RFC 7235 section 3.1 and RFC 6749 section 5.2: each invalid_client carries the Basic challenge (plan 12e).
-    const basic = entry.auth.includes("clientSecretBasic")
-      ? codes.filter((c) => c.table === "oauth" && c.code === "invalid_client")
-      : [];
+    // RFC 7235 section 3.1 and RFC 6749 section 5.2: each invalid_client 401 carries the Basic challenge (plan 12e).
+    const basic =
+      entry.auth.includes("clientSecretBasic") && status === OAUTH_ERRORS.invalid_client
+        ? codes.filter((c) => c.table === "oauth" && c.code === "invalid_client")
+        : [];
     if (basic.length > 0) {
       const every = basic.length === codes.length;
       response.headers = {
         "WWW-Authenticate": {
           required: every,
           description: every
-            ? "The Basic challenge of RFC 6749 section 5.2, with the issuer as the realm."
+            ? "The Basic challenge of RFC 6749 section 5.2, with the issuer as the realm. A request with no `Authorization` header gets `invalid_client` as a 400 with no challenge."
             : "The Basic challenge of RFC 6749 section 5.2, with the issuer as the realm. Only `invalid_client` carries it.",
           schema: { type: "string" },
         },

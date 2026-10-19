@@ -112,8 +112,13 @@ describe("openApiDocument (plan 11g)", () => {
         for (const code of codes) {
           const core = (ERRORS as Record<string, number>)[code];
           const oauth = (OAUTH_ERRORS as Record<string, number>)[code];
+          // Ruling 19 of plan 12e: a route of client auth also answers invalid_client as a 400.
+          const bare =
+            code === "invalid_client" &&
+            status === "400" &&
+            entry.auth.includes("clientSecretBasic");
           expect(
-            core === Number(status) || oauth === Number(status),
+            core === Number(status) || oauth === Number(status) || bare,
             `${key} ${status} ${code}`,
           ).toBe(true);
           answered.push(code);
@@ -365,6 +370,10 @@ describe("openApiDocument (plan 11g)", () => {
     for (const path of ["/oauth/token", "/oauth/revoke"]) {
       expect(header(path, "post", "401")?.required, path).toBe(true);
       expect(header(path, "post", "401")?.description, path).toContain("Basic challenge");
+      // Ruling 19: with no Authorization header, invalid_client is a 400 with no challenge.
+      expect(header(path, "post", "400"), path).toBeUndefined();
+      const bad = reference().paths[path]?.post?.responses["400"]?.content?.["application/json"];
+      expect(JSON.stringify(bad?.schema), path).toContain('"invalid_client"');
     }
   });
 

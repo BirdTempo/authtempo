@@ -197,7 +197,7 @@ describe("the code exchange (plan 9g)", () => {
     const c = await codeFor(h);
     expect(
       await answer(await h.auth.handle(exchange(c.code, `cl_${"B".repeat(43)}`, c.verifier))),
-    ).toEqual({ status: 401, body: { error: "invalid_client" } });
+    ).toEqual({ status: 400, body: { error: "invalid_client" } });
     expect(
       await answer(
         await h.auth.handle(exchange(c.code, c.clientId, c.verifier, { resource: OTHER_RESOURCE })),
@@ -336,7 +336,7 @@ describe("the refresh token (plan 9g)", () => {
     ).toEqual(GRANT);
   });
 
-  it("revoke deletes the family; another client's id answers 400 and an unknown id 401, and neither revokes (RFC 7009 section 2.1, Review Focus 4)", async () => {
+  it("revoke deletes the family; another client's id answers unauthorized_client and an unknown id invalid_client, and neither revokes (RFC 7009 section 2.1, Review Focus 4)", async () => {
     const h = oauthHandle();
     const c = await codeFor(h);
     const other = await registered(h);
@@ -358,7 +358,8 @@ describe("the refresh token (plan 9g)", () => {
     const byOther = await revoke({ token: t.refresh_token ?? "", client_id: other });
     expect(await answer(byOther)).toEqual({ status: 400, body: { error: "unauthorized_client" } });
     const byUnknown = await revoke({ token: t.refresh_token ?? "", client_id: "cl_other" });
-    expect(await answer(byUnknown)).toEqual({ status: 401, body: { error: "invalid_client" } });
+    // No Authorization header: invalid_client is a 400 (plan 12e, ruling 19).
+    expect(await answer(byUnknown)).toEqual({ status: 400, body: { error: "invalid_client" } });
     expect(await h.storage.findMany("oauthToken", [])).toHaveLength(1);
     expect((await revoke({ token: t.refresh_token ?? "", client_id: c.clientId })).status).toBe(
       200,
@@ -460,7 +461,7 @@ describe("userinfo and the endpoint's edges (plan 9g)", () => {
       );
     // A failed client auth counts too: the limit comes first (plan 12e).
     for (let i = 0; i < 30; i++) expect((await call()).status).toBe(400);
-    for (let i = 0; i < 30; i++) expect((await call("cl_x")).status).toBe(401);
+    for (let i = 0; i < 30; i++) expect((await call("cl_x")).status).toBe(400);
     expect(await answer(await call())).toEqual({ status: 429, body: { error: "rate_limited" } });
   });
 
