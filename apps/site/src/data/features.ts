@@ -95,7 +95,7 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
   },
   operator: {
     title: "Operator routes",
-    line: "Rotate the signing keys with a hashed operator secret.",
+    line: "Rotate the signing key and reseal the app secrets with a hashed operator secret.",
     icon: "cli",
   },
   oauth: {
