@@ -1,4 +1,4 @@
-import { type Page, parseFrontmatter, proseUnits } from "./lib/markdown.ts";
+import { type Page, pageBody, proseUnits } from "./lib/markdown.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /**
@@ -82,7 +82,7 @@ export function checkTerms(pages: readonly Page[]): CheckReport {
         r.failures.push(`the glossary forbids \`${word}\`, which FORBIDDEN_TERMS lacks`);
   }
   for (const p of pages) {
-    const fm = parseFrontmatter(p.source);
+    const fm = pageBody(p);
     if (!fm) continue;
     const sourceLines = p.source.split("\n");
     const units: { text: string; line: number }[] = proseUnits(fm.body, fm.bodyLine);

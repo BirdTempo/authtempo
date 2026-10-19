@@ -42,7 +42,7 @@ describe("SECURITY.md on /security/ (plan 11b)", () => {
     const broken = policyProsePages(`${FIXTURE}\nLog in to the portal to see a report.\n`);
     // checkTerms also asks for the glossary page, which this list does not hold.
     expect(checkTerms(broken).failures.filter((f) => f.startsWith("SECURITY.md"))).toEqual([
-      `${POLICY_PROSE_PATH}:16: "Log in" is forbidden; write "sign in"`,
+      `${POLICY_PROSE_PATH}:14: "Log in" is forbidden; write "sign in"`,
     ]);
   });
 });

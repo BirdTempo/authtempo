@@ -26,8 +26,8 @@ export function rootProsePage(): Page {
   };
 }
 
-/** The path that a failure names for SECURITY.md. Its page adds two frontmatter lines first. */
-export const POLICY_PROSE_PATH = "SECURITY.md (a line number counts 2 frontmatter lines first)";
+/** The path that a failure names for SECURITY.md: a plain page, so each line number is real. */
+export const POLICY_PROSE_PATH = "SECURITY.md";
 
 /**
  * SECURITY.md of the repository root as a prose page, or no page while the
@@ -35,5 +35,5 @@ export const POLICY_PROSE_PATH = "SECURITY.md (a line number counts 2 frontmatte
  * check-sentences read it (ruling 21 of the plan 11b lane).
  */
 export function policyProsePages(text: string | null = readRepoText("SECURITY.md")): Page[] {
-  return text === null ? [] : [{ path: POLICY_PROSE_PATH, source: `---\n---\n${text}` }];
+  return text === null ? [] : [{ path: POLICY_PROSE_PATH, source: text, plain: true }];
 }

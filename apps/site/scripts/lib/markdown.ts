@@ -2,6 +2,11 @@
 export interface Page {
   path: string;
   source: string;
+  /**
+   * True for a file with no frontmatter, such as SECURITY.md: the whole source
+   * is the body, from line 1, so a failure names the real line (plan 11b).
+   */
+  plain?: true;
 }
 
 export interface Frontmatter {
@@ -17,6 +22,12 @@ export interface Frontmatter {
 function unquote(v: string): string {
   const q = v[0];
   return (q === '"' || q === "'") && v.length > 1 && v.endsWith(q) ? v.slice(1, -1) : v;
+}
+
+/** The frontmatter and body of a page. A plain page has no fields, and its body starts at line 1. */
+export function pageBody(p: Page): Frontmatter | null {
+  if (p.plain === true) return { fields: {}, lists: {}, body: p.source, bodyLine: 1 };
+  return parseFrontmatter(p.source);
 }
 
 /**

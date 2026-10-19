@@ -1,6 +1,6 @@
 import {
   type Page,
-  parseFrontmatter,
+  pageBody,
   plainText,
   proseUnits,
   sentences,
@@ -24,7 +24,7 @@ export function checkSentences(pages: readonly Page[]): CheckReport {
     failures: [],
   };
   for (const p of pages) {
-    const fm = parseFrontmatter(p.source);
+    const fm = pageBody(p);
     if (!fm) continue;
     for (const unit of proseUnits(fm.body, fm.bodyLine)) {
       const max = unit.kind === "step" ? STEP_MAX : TEXT_MAX;
