@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
-import { CIMD_REVISION, findClient } from "../src/engine/oauth-clients.js";
+import { CIMD_REVISION, DEVICE_GRANT, findClient } from "../src/engine/oauth-clients.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { randomBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
@@ -92,7 +92,11 @@ function fakeFetch() {
 }
 
 /** One instance with CIMD on over `base`: each call has its own document cache. */
-function instance(fetchFn: typeof fetch, base = makeAuth()): Handle {
+function instance(
+  fetchFn: typeof fetch,
+  base = makeAuth(),
+  device?: Record<string, never>,
+): Handle {
   const input: AuthConfig = {
     baseURL: BASE_URL,
     secret: "0123456789abcdef0123456789abcdef",
@@ -101,7 +105,7 @@ function instance(fetchFn: typeof fetch, base = makeAuth()): Handle {
     mail: { send: async () => {} },
     clock: base.clock,
     limiter: createMemoryLimiter(base.clock),
-    oauth: { resources: [RESOURCE], scopes: SCOPES, fetch: fetchFn },
+    oauth: { resources: [RESOURCE], scopes: SCOPES, fetch: fetchFn, ...(device ? { device } : {}) },
   };
   return {
     auth: createAuth(input),
@@ -542,7 +546,7 @@ describe("the members of a document that core does not serve (ruling 24 of plan 
 
 describe("a document that changes its method (ruling 25 of plan 12e)", () => {
   const DROP_LOG =
-    "authtempo: client metadata document dropped its client auth; refresh tokens revoked";
+    "authtempo: client metadata document dropped its client auth; refresh tokens and device codes revoked";
 
   /** The -02 fixture with its key inline, and the same document as a public client. */
   async function docs() {
@@ -614,6 +618,64 @@ describe("a document that changes its method (ruling 25 of plan 12e)", () => {
     ).toMatchObject({ authMethod: "none" });
     expect(log.mock.calls).toEqual([[DROP_LOG, url, "private_key_jwt", "none"]]);
     expect(JSON.stringify(log.mock.calls)).not.toContain(token);
+  });
+
+  it("deletes the device codes of a document that drops from private_key_jwt to none (ruling 48)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { url, key, keyDoc, publicDoc } = await docs();
+    const grants = { grant_types: ["authorization_code", DEVICE_GRANT] };
+    const base = makeAuth();
+    const on = (doc: unknown) => {
+      const f = fakeFetch();
+      f.answers.set(url, () => json(doc));
+      return instance(f.fn, base, {});
+    };
+    const a = on({ ...keyDoc, ...grants });
+    const b = on({ ...publicDoc, ...grants });
+    const form = (path: string, body: Record<string, string>, headers = {}) =>
+      new Request(`${BASE_URL}/auth${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+        body: new URLSearchParams(body).toString(),
+      });
+    const startOn = async () => {
+      const res = await a.auth.handle(
+        form("/oauth/device_authorization", {
+          client_assertion_type: ASSERTION_TYPE,
+          client_assertion: await assertion(a, key, url),
+          scope: "mcp:read",
+          resource: RESOURCE,
+        }),
+      );
+      expect(res.status).toBe(200);
+      return (await res.json()) as { device_code: string; user_code: string };
+    };
+    const approved = await startOn();
+    await startOn();
+    const s = await signedIn(a);
+    const done = await a.auth.handle(
+      form(
+        "/oauth/device",
+        { user_code: approved.user_code, decision: "allow" },
+        { cookie: s.cookie, origin: BASE_URL },
+      ),
+    );
+    expect(await done.text()).toContain("The device is connected.");
+    const poll = { grant_type: DEVICE_GRANT, device_code: approved.device_code, client_id: url };
+    // Under the key document, the client id alone is no client auth.
+    expect(await answer(await a.auth.handle(tokenPost(poll)))).toEqual({
+      status: 400,
+      body: { error: "invalid_client" },
+    });
+    expect((await base.storage.findMany("oauthDevice", [])).length).toBe(2);
+    // Instance B reads the public document at this poll, and the drop deletes both device rows.
+    a.clock.advance(5_000);
+    expect(await answer(await b.auth.handle(tokenPost(poll)))).toEqual({
+      status: 400,
+      body: { error: "invalid_grant" },
+    });
+    expect(await base.storage.findMany("oauthDevice", [])).toEqual([]);
+    expect(await base.storage.findMany("oauthToken", [])).toEqual([]);
   });
 
   it("keeps the refresh tokens of a document that keeps its method", async () => {

@@ -881,14 +881,18 @@ async function refreshCimdRow(
     // The delete comes first. Memory and D1 do not isolate a transaction, so
     // another request sees each write at once. A row of none beside a live
     // token would let a client id alone refresh it (ruling 26 of plan 12e).
-    if (drops) await deleteFamilies(tx, [{ field: "clientId", op: "eq", value: url }], ends);
+    if (drops) {
+      await deleteFamilies(tx, [{ field: "clientId", op: "eq", value: url }], ends);
+      // Each device row began under the client auth, decided or not (ruling 48 of plan 12e).
+      await tx.delete("oauthDevice", [{ field: "clientId", op: "eq", value: url }]);
+    }
     await tx.update("oauthClient", where, data);
     return { row: { ...current, ...data }, from: drops ? current.authMethod : null };
   });
   await endFamilies(config, ends);
   if (done?.from)
     console.error(
-      "authtempo: client metadata document dropped its client auth; refresh tokens revoked",
+      "authtempo: client metadata document dropped its client auth; refresh tokens and device codes revoked",
       url,
       done.from,
       "none",
