@@ -36,7 +36,10 @@ const KINDS: readonly CallerKind[] = [
   "session-token",
 ];
 
-/** The caller of a request, by the credential it carried (plan 11d). Mirrors `auth.caller` of core. */
+/**
+ * The caller of a request, by the credential it carried (plan 11d). Mirrors `auth.caller` of
+ * core. The `userId` of an `oauth` caller is the `subject` of core's caller.
+ */
 export type Caller =
   | {
       kind: "session-jwt";
@@ -52,6 +55,11 @@ export type Caller =
     }
   | {
       kind: "oauth";
+      /**
+       * The token's `sub`: the user id for a public client, the pairwise
+       * subject for a pairwise client (ruling 34 of plan 12e). Core's
+       * `auth.caller` names it `subject`, beside the user.
+       */
       userId: string;
       clientId: string;
       scopes: string[];

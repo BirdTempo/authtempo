@@ -17,6 +17,11 @@ import type { Verifier } from "./verifier.js";
 
 /** The caller of an MCP request: an OAuth access token for the resource of the route. */
 export interface McpCaller {
+  /**
+   * The token's subject: the user id for a public client, the pairwise
+   * subject for a pairwise client (ruling 34 of plan 12e). Both sources
+   * answer this one value, so data that a server keys by it stays its own.
+   */
   userId: string;
   clientId: string;
   scopes: string[];
@@ -72,7 +77,8 @@ function fromCore(c: unknown): McpCaller | null {
   // It stays so that a future core caller with these fields is never taken for an OAuth caller.
   if (!isObject(c) || c.kind !== "oauth" || !isObject(c.user)) return null;
   const { clientId, scopes, resource, tokenId, expiresAt } = c;
-  const userId = c.user.id;
+  // The token subject, the value that the Verifier answers. A pairwise client never learns `user.id`.
+  const userId = c.subject;
   if (
     typeof userId !== "string" ||
     typeof clientId !== "string" ||

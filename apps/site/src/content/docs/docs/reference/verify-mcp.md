@@ -54,7 +54,9 @@ The 401 and the 403 come from `unauthorizedResponse` and `insufficientScopeRespo
 ## The two sources
 
 - A `Verifier` of `createVerifier`, for a server that is not the auth app. The wrapper uses it when the source has `verifyRequest`. A failure of `network` or `unexpected` gives 503.
-- The `auth` of core, for an MCP route in the same Worker or process as the auth app. The wrapper calls `auth.caller` and maps `user.id` to `userId`. A throw of `caller` gives 503.
+- The `auth` of core, for an MCP route in the same Worker or process as the auth app. The wrapper calls `auth.caller` and maps its `subject` to `userId`. A throw of `caller` gives 503.
+
+`userId` is the token's subject at both sources: the user id for a public client, the pairwise subject for a pairwise client. So a server that moves from one source to the other keeps its data keys.
 
 The second source fetches no key set. So a Worker does not fetch its own JWKS on its own host.
 

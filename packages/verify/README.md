@@ -37,6 +37,11 @@ if (r.value === null) return verifier.unauthorized({ request });
 | `api-token` | A `tk_` bearer | One `GET <basePath>/tokens/current`; `cache.apiTokenSeconds` (0 to 60, default 0) keeps the answer |
 | `session-token` | A `ts_` bearer | One `GET <basePath>/session`. Off by default: it sends the person's session token to the auth app. Each check can extend the person's session, as a visit does |
 
+The `userId` of an `oauth` caller is the token's `sub`. That is the user id
+for a public client, and the pairwise subject (`ps_…`) for a pairwise
+client. Core's `auth.caller` names the same value `subject`, beside the
+user.
+
 `accept` lists the kinds to accept; the default is `["session-jwt"]`. A kind
 that `accept` does not list answers null with no network call.
 
@@ -219,6 +224,10 @@ The source is one of two:
 - Core's `auth`, for an MCP route in the same Worker or process as the auth
   app. The wrapper calls `auth.caller`. This source fetches no key set, so no
   Worker must fetch its own JWKS on its own host.
+
+`caller.userId` is the token's subject at both sources: the user id for a
+public client, the pairwise subject for a pairwise client. So a server that
+moves from one source to the other keeps its data keys.
 
 The rules:
 

@@ -123,20 +123,23 @@ export async function accessToken(
   resource = MCP,
   /** More headers of the token request, such as a `dpop` proof. */
   tokenHeaders: Record<string, string> = {},
+  /** More registration fields, such as `subject_type`, and the redirect URI of the client. */
+  client: { redirect?: string; metadata?: Record<string, unknown> } = {},
 ): Promise<string> {
+  const redirect = client.redirect ?? REDIRECT;
   const post = (path: string, headers: Record<string, string>, body: string) =>
     server.auth.handle(new Request(`${ISSUER}${path}`, { method: "POST", headers, body }));
   const reg = await post(
     "/oauth/register",
     { "content-type": "application/json" },
-    JSON.stringify({ client_name: "Agent", redirect_uris: [REDIRECT] }),
+    JSON.stringify({ client_name: "Agent", redirect_uris: [redirect], ...client.metadata }),
   );
   const { client_id: clientId } = (await reg.json()) as { client_id: string };
   const verifier = "v".repeat(43);
   const query = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
-    redirect_uri: REDIRECT,
+    redirect_uri: redirect,
     code_challenge: await s256(verifier),
     code_challenge_method: "S256",
     scope,
@@ -161,7 +164,7 @@ export async function accessToken(
       code,
       code_verifier: verifier,
       client_id: clientId,
-      redirect_uri: REDIRECT,
+      redirect_uri: redirect,
       resource,
     }).toString(),
   );

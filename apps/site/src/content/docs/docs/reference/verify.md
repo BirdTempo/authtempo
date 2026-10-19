@@ -58,6 +58,8 @@ sources:
 | `api-token` | A `tk_` bearer token | One call to `GET /tokens/current` | `user`, `apiToken` |
 | `session-token` | A `ts_` bearer token | One call to `GET /session`. Each check can extend the session, as a visit does. | `user`, `session` |
 
+The `userId` of an `oauth` caller is the token's `sub`. That is the user id for a public client, and the pairwise subject (`ps_…`) for a pairwise client. Core's `auth.caller` names the same value `subject`, beside the user.
+
 A kind that `accept` does not list answers `null` with no call.
 
 The verifier reads the `Authorization` header only. It never reads the session cookie, whose default name is `__Host-tempo_session`. A request with only the cookie answers `null` with no call.
